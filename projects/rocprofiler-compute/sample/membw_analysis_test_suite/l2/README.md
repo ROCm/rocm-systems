@@ -102,7 +102,7 @@ rocprof-compute profile -n fabric_write --experimental --membw-analysis --no-roo
 ## Analyzing
 
 ```bash
-rocprof-compute analyze -p <path to profiled result> --experimental --membw-analysis
+rocprof-compute analyze -p <path to profiled result>
 ```
 
 ## Hardware Requirements

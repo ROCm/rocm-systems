@@ -615,9 +615,36 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_signal_nbi_wave(
     uint64_t signal, int sig_op, int pe);
 
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_signal_add(
+    rocshmem_ctx_t ctx, uint64_t *sig_addr, uint64_t signal, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_signal_add(
+    uint64_t *sig_addr, uint64_t signal, int pe);
+
 __device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch(const uint64_t *sig_addr);
+
+/**
+ * @brief Atomically fetch a signal value collectively at work-group scope.
+ *
+ * @deprecated Use rocshmem_signal_fetch() instead.
+ */
+[[deprecated("Use rocshmem_signal_fetch() instead")]]
 __device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch_wg(const uint64_t *sig_addr);
+
+/**
+ * @brief Atomically fetch a signal value collectively at wave scope.
+ *
+ * @deprecated Use rocshmem_signal_fetch() instead.
+ */
+[[deprecated("Use rocshmem_signal_fetch() instead")]]
 __device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch_wave(const uint64_t *sig_addr);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_signal_set(
+    rocshmem_ctx_t ctx, uint64_t *sig_addr, uint64_t signal, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_signal_set(
+    uint64_t *sig_addr, uint64_t signal, int pe);
+
+__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_wait_until(
+    uint64_t *sig_addr, int cmp, uint64_t cmp_value);
 
 /**
  * @brief Kernel wrapper for putmem_signal operation on stream
@@ -636,6 +663,32 @@ __device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch_wave(const uint64_t *si
 __global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe);
+
+/**
+ * @brief Kernel wrapper for signal_add operation on stream
+ *
+ * @param[in] sig_addr  Address of signal variable on remote PE
+ * @param[in] signal    Value to add to the signal variable
+ * @param[in] pe        PE of the remote process
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_signal_add_kernel(uint64_t *sig_addr,
+                                                          uint64_t signal,
+                                                          int pe);
+
+/**
+ * @brief Kernel wrapper for signal_set operation on stream
+ *
+ * @param[in] sig_addr  Address of signal variable on remote PE
+ * @param[in] signal    Value to store in the signal variable
+ * @param[in] pe        PE of the remote process
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_signal_set_kernel(uint64_t *sig_addr,
+                                                          uint64_t signal,
+                                                          int pe);
 
 /**
  * @brief Kernel wrapper for signal_wait_until operation on stream

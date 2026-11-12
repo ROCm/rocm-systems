@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
-#include "util/except.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -13,15 +14,19 @@
 #include <limits>
 #include <optional>
 #include <span>
-#include <string_view>
 
 namespace rocjitsu {
 namespace amdgpu {
 
+std::optional<GpuVmAccess> L2Cache::snapshot_atomic_access(uint32_t vmid) const {
+  if (!backing_memory_ || vmid == 0 || !gpu_vm_)
+    return std::nullopt;
+  return gpu_vm_->snapshot_vmid(vmid);
+}
+
 L2Cache::L2Cache(std::string name, std::shared_ptr<DeviceCacheCoherence> coherence)
     : simdojo::Component(std::move(name)), coherence_(std::move(coherence)) {
-  if (!coherence_)
-    throw util::ConfigError("L2 cache requires a coherence domain");
+  assert(coherence_ && "L2 cache requires a coherence domain");
   req_port_ = add_port(std::make_unique<simdojo::Port>("req", 0, this, simdojo::PortDirection::OUT,
                                                        simdojo::PortProtocol::MEMORY));
   coherence_epoch_ = coherence_->current_epoch();
@@ -30,11 +35,12 @@ L2Cache::L2Cache(std::string name, std::shared_ptr<DeviceCacheCoherence> coheren
 
 L2Cache::~L2Cache() { coherence_->unregister_l2_cache(this); }
 
-void L2Cache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence) {
+util::Result L2Cache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                           util::DiagnosticEmitter emit_error) {
   if (!coherence)
-    throw util::ConfigError("L2 cache requires a coherence domain");
+    return emit_error.emit() << "L2 cache requires a coherence domain";
   if (coherence == coherence_)
-    return;
+    return util::Result::success();
   coherence_->unregister_l2_cache(this);
   {
     std::unique_lock maintenance_lock(maintenance_mutex_);
@@ -44,11 +50,20 @@ void L2Cache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coheren
   coherence_ = std::move(coherence);
   coherence_epoch_ = coherence_->current_epoch();
   coherence_->register_l2_cache(this);
+  return util::Result::success();
 }
 
-std::shared_lock<std::shared_mutex> L2Cache::acquire_cache_access() {
+std::shared_lock<L2Cache::MaintenanceMutex> L2Cache::acquire_cache_access() {
+  std::shared_lock access_lock(maintenance_mutex_);
+  if (coherence_epoch_ == coherence_->current_epoch())
+    return access_lock;
+
+  access_lock.unlock();
+  // Only stale readers serialize here. Recheck under shared admission so peers
+  // reuse completed reconciliation instead of each closing the reader gate.
+  std::lock_guard reconcile_lock(epoch_reconcile_mutex_);
   for (;;) {
-    std::shared_lock access_lock(maintenance_mutex_);
+    access_lock.lock();
     if (coherence_epoch_ == coherence_->current_epoch())
       return access_lock;
 
@@ -58,7 +73,7 @@ std::shared_lock<std::shared_mutex> L2Cache::acquire_cache_access() {
   }
 }
 
-std::unique_lock<std::shared_mutex> L2Cache::acquire_cache_maintenance() {
+std::unique_lock<L2Cache::MaintenanceMutex> L2Cache::acquire_cache_maintenance() {
   std::unique_lock maintenance_lock(maintenance_mutex_);
   synchronize_epoch_locked();
   return maintenance_lock;
@@ -84,6 +99,10 @@ void L2Cache::mark_dirty_bytes(uint64_t line_addr, uint32_t offset, uint32_t siz
 
 bool L2Cache::clear_dirty_bytes(uint64_t line_addr, uint32_t offset, uint32_t size, uint32_t vmid) {
   assert(offset < LINE_SIZE && size != 0 && size <= LINE_SIZE - offset);
+  // The caller holds the set lock, which orders any earlier dirty mask for
+  // this line. Concurrent changes in other sets cannot make this line dirty.
+  if (!has_dirty_lines_.load(std::memory_order_relaxed))
+    return false;
   std::lock_guard lock(dirty_bytes_mutex_);
   const std::pair<uint32_t, uint64_t> key{vmid, line_addr};
   const std::map<std::pair<uint32_t, uint64_t>, DirtyMask>::iterator position =
@@ -139,8 +158,7 @@ VmAccessOutcome L2Cache::publish_dirty_bytes(uint64_t line_addr, const uint8_t *
 
 VmAccessOutcome L2Cache::publish_dirty_bytes_to_legacy_backing(uint64_t line_addr,
                                                                const uint8_t *data, uint32_t vmid) {
-  if (legacy_maintenance_memory_ == nullptr || legacy_maintenance_vm_ == nullptr)
-    throw util::ConfigError("L2 cache has no legacy maintenance backing");
+  assert(legacy_maintenance_memory_ != nullptr && legacy_maintenance_vm_ != nullptr);
 
   std::optional<GpuVmAccess> vm_access;
   if (vmid != 0) {
@@ -187,7 +205,7 @@ VmAccessOutcome L2Cache::publish_dirty_bytes_to_legacy_backing(uint64_t line_add
         clear_dirty_bytes(line_addr, start, static_cast<uint32_t>(completed_bytes), vmid);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
-      backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
+      diagnostics(line_addr + start).backing_writes.fetch_add(1, std::memory_order_relaxed);
     }
   }
   return VmAccessOutcome::Complete;
@@ -216,17 +234,18 @@ VmAccessOutcome L2Cache::access_outcome(simdojo::MessageStatus status) {
 bool L2Cache::can_fetch_range(uint64_t addr, uint32_t size, uint32_t vmid) const {
   if (vmid == 0 || gpu_vm_ == nullptr)
     return true;
-  const std::optional<GpuVmAccess> vm_access = gpu_vm_->snapshot_vmid(vmid);
-  return vm_access &&
-         vm_access->query_access(addr, size, VmAccessKind::Read) == VmAccessOutcome::Complete;
+  return gpu_vm_->with_vmid_snapshot(vmid, [&](const GpuVmAccess *vm_access) {
+    return vm_access &&
+           vm_access->query_access(addr, size, VmAccessKind::Read) == VmAccessOutcome::Complete;
+  });
 }
 
 VmAccessOutcome L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size,
                                       simdojo::MessageOp op, uint32_t vmid) {
   if (op == simdojo::MessageOp::WRITE)
-    backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
+    diagnostics(addr).backing_writes.fetch_add(1, std::memory_order_relaxed);
   else
-    backing_read_transactions_.fetch_add(1, std::memory_order_relaxed);
+    diagnostics(addr).backing_reads.fetch_add(1, std::memory_order_relaxed);
   if (backing_memory_) {
     if (vmid == 0 && op == simdojo::MessageOp::WRITE) {
       thread_local uint64_t wb_count = 0;
@@ -242,14 +261,13 @@ VmAccessOutcome L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t siz
     }
     if (gpu_vm_ == nullptr)
       return VmAccessOutcome::Unavailable;
-    std::optional<GpuVmAccess> vm_access = gpu_vm_->snapshot_vmid(vmid);
-    if (!vm_access)
-      return VmAccessOutcome::Faulted;
-    const VmAccessOutcome outcome =
-        op == simdojo::MessageOp::WRITE
-            ? vm_access->write(addr, std::as_bytes(std::span<const uint8_t>(data, size)))
-            : vm_access->read(addr, std::as_writable_bytes(std::span<uint8_t>(data, size)));
-    return outcome;
+    return gpu_vm_->with_vmid_snapshot(vmid, [&](const GpuVmAccess *vm_access) {
+      if (!vm_access)
+        return VmAccessOutcome::Faulted;
+      return op == simdojo::MessageOp::WRITE
+                 ? vm_access->write(addr, std::as_bytes(std::span<const uint8_t>(data, size)))
+                 : vm_access->read(addr, std::as_writable_bytes(std::span<uint8_t>(data, size)));
+    });
   }
   assert(req_port_ != nullptr && "L2Cache: req_port_ not set");
   if (req_port_->link() == nullptr ||
@@ -271,8 +289,8 @@ VmAccessOutcome L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t siz
 VmAccessOutcome L2Cache::send_atomic_backing(uint64_t addr, uint32_t size,
                                              const simdojo::MemoryAtomicMutation &mutation,
                                              uint32_t vmid) {
-  backing_read_transactions_.fetch_add(1, std::memory_order_relaxed);
-  backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
+  diagnostics(addr).backing_reads.fetch_add(1, std::memory_order_relaxed);
+  diagnostics(addr).backing_writes.fetch_add(1, std::memory_order_relaxed);
   assert(req_port_ != nullptr && "L2Cache: req_port_ not set");
   if (req_port_->link() == nullptr ||
       req_port_->link()->exec_mode() != simdojo::ExecMode::FUNCTIONAL)
@@ -392,9 +410,33 @@ VmAccessOutcome L2Cache::cache_partial_bytes(uint64_t addr, const uint8_t *src, 
   return VmAccessOutcome::Complete;
 }
 
+bool L2Cache::try_read_scalar_ram(uint64_t addr, uint32_t *dst, uint32_t num_dwords,
+                                  uint32_t vmid) {
+  if (!backing_memory_ || !gpu_vm_ || vmid == 0 || num_dwords < 2 || num_dwords > 16 ||
+      (addr & 3) || num_dwords * 4 > 64 - (addr & 63))
+    return false;
+  // Discover the snapshot before cache admission: a cold quantum snapshot may
+  // allocate its retained entry. The optional copy itself cannot allocate.
+  return gpu_vm_->with_vmid_snapshot(vmid, [&](const GpuVmAccess *access) {
+    if (!access)
+      return false;
+    auto maintenance_lock = acquire_cache_access();
+    std::lock_guard set_lock(set_mutex(addr));
+    // Resident lines retain the existing flush/fault path. A miss neither
+    // updates replacement state nor publishes or invalidates cached bytes.
+    if (cache_.peek(addr, vmid))
+      return false;
+    const bool copied =
+        access->try_read_uncached_ram(addr, std::as_writable_bytes(std::span(dst, num_dwords)));
+    if (copied)
+      diagnostics(addr).backing_reads.fetch_add(1, std::memory_order_relaxed);
+    return copied;
+  });
+}
+
 VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype,
                               uint32_t vmid) {
-  std::shared_lock<std::shared_mutex> maintenance_lock = acquire_cache_access();
+  auto maintenance_lock = acquire_cache_access();
   uint32_t copied = 0;
   if (mtype == Mtype::UC) {
     while (copied < size) {
@@ -447,22 +489,64 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
       const VmAccessOutcome cache_outcome = cache_partial_bytes(ea, dst + copied, chunk, vmid);
       if (cache_outcome != VmAccessOutcome::Complete)
         return cache_outcome;
-      copied += chunk;
-      continue;
+    } else {
+      const VmAccessOutcome outcome = ensure_line(ea, vmid);
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+      cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
     }
-
-    const VmAccessOutcome outcome = ensure_line(ea, vmid);
-    if (outcome != VmAccessOutcome::Complete)
-      return outcome;
-    cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+    if (mtype == Mtype::CC) {
+      // A coherent read refilled from backing, leaving a clean coherent copy.
+      const bool resident_after_fill = cache_.lookup(ea, &resident, vmid);
+      assert(resident_after_fill && resident);
+      (void)resident_after_fill;
+      resident->coherence = simdojo::CoherenceState::SHARED;
+    }
     copied += chunk;
   }
   return VmAccessOutcome::Complete;
 }
 
+bool L2Cache::try_write_private_dwords(std::span<const VmRamDwordStore> stores,
+                                       Mtype instruction_mtype, Mtype mtype, uint32_t vmid) {
+  if (!backing_memory_ || !gpu_vm_ || !vmid || stores.size() < 2 ||
+      stores.size() > VmRamDwordStore::kMaxBatch)
+    return false;
+  const uint64_t address = stores.front().address;
+  for (const auto &store : stores)
+    if ((store.address & 3) ||
+        CacheStore::line_address(store.address) != CacheStore::line_address(address))
+      return false;
+  // A cold snapshot can allocate retained storage; prepare it before cache admission.
+  return gpu_vm_->with_vmid_snapshot(vmid, [&](const GpuVmAccess *access) {
+    if (!access)
+      return false;
+    auto maintenance_lock = acquire_cache_access();
+    std::lock_guard set_lock(set_mutex(address));
+    const auto *resident = cache_.peek(address, vmid);
+    if (mtype == Mtype::UC ? resident != nullptr : !resident || resident->dirty)
+      return false;
+    if (!access->try_write_private_dwords(stores, instruction_mtype, mtype))
+      return false;
+    diagnostics(address).backing_writes.fetch_add(stores.size(), std::memory_order_relaxed);
+    if (mtype != Mtype::UC) {
+      for (const auto &store : stores) {
+        simdojo::CacheTag *tag = nullptr;
+        cache_.lookup(store.address, &tag, vmid);
+        cache_.write_line(store.address, store.source, CacheStore::line_offset(store.address),
+                          sizeof(uint32_t), vmid);
+        tag->coherence = mtype == Mtype::CC ? simdojo::CoherenceState::SHARED
+                                            : simdojo::CoherenceState::EXCLUSIVE;
+      }
+      diagnostics(address).writes.fetch_add(stores.size(), std::memory_order_relaxed);
+    }
+    return true;
+  });
+}
+
 VmAccessOutcome L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype,
                                uint32_t vmid) {
-  std::shared_lock<std::shared_mutex> maintenance_lock = acquire_cache_access();
+  auto maintenance_lock = acquire_cache_access();
   uint32_t copied = 0;
   if (mtype == Mtype::UC) {
     while (copied < size) {
@@ -514,14 +598,14 @@ VmAccessOutcome L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size,
                                 : (mtype == Mtype::CC ? simdojo::CoherenceState::SHARED
                                                       : simdojo::CoherenceState::EXCLUSIVE);
 
-    write_count_.fetch_add(1, std::memory_order_relaxed);
+    diagnostics(ea).writes.fetch_add(1, std::memory_order_relaxed);
     copied += chunk;
   }
   return VmAccessOutcome::Complete;
 }
 
 VmAccessOutcome L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
-  std::shared_lock<std::shared_mutex> maintenance_lock = acquire_cache_access();
+  auto maintenance_lock = acquire_cache_access();
   std::lock_guard set_lock(set_mutex(addr));
   uint64_t line_addr = CacheStore::line_address(addr);
   const VmAccessOutcome outcome = ensure_line(line_addr, vmid);
@@ -542,7 +626,7 @@ VmAccessOutcome L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data,
   assert(CacheStore::line_address(line_addr) == line_addr && "writeback address must be aligned");
   assert(dirty_offset < LINE_SIZE && dirty_size != 0 && dirty_size <= LINE_SIZE - dirty_offset &&
          "dirty range must fit in one L2 line");
-  std::shared_lock<std::shared_mutex> maintenance_lock = acquire_cache_access();
+  auto maintenance_lock = acquire_cache_access();
   std::lock_guard set_lock(set_mutex(line_addr));
   const VmAccessOutcome fill_outcome = ensure_line(line_addr, vmid, /*fetch_on_miss=*/false);
   if (fill_outcome != VmAccessOutcome::Complete)
@@ -588,14 +672,32 @@ VmAccessOutcome L2Cache::flush_line_locked(uint64_t addr, uint32_t vmid) {
 }
 
 VmAccessOutcome L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
-  std::shared_lock<std::shared_mutex> maintenance_lock = acquire_cache_access();
+  auto maintenance_lock = acquire_cache_access();
   std::lock_guard set_lock(set_mutex(addr));
   return flush_line_locked(addr, vmid);
 }
 
+VmAccessOutcome L2Cache::invalidate_buffer_scope(bool system_scope) {
+  // Consult the device before taking an L2 lock, matching the lock order used
+  // by device-wide atomics. Only the issuing XCD's L2 performs the invalidation.
+  if (!system_scope && !coherence_->has_multiple_l2_caches())
+    return VmAccessOutcome::Complete;
+
+  auto maintenance_lock = acquire_cache_maintenance();
+  // Coherent accesses write through. Publish outstanding write-back bytes
+  // before evicting their noncoherent lines and retain dirty state on failure.
+  const auto outcome = flush_dirty_locked();
+  if (outcome != VmAccessOutcome::Complete)
+    return outcome;
+  cache_.invalidate_clean_if([](const simdojo::CacheTag &tag) {
+    return tag.coherence != simdojo::CoherenceState::SHARED;
+  });
+  return VmAccessOutcome::Complete;
+}
+
 VmAccessOutcome L2Cache::flush_all(uint32_t vmid) {
   (void)vmid;
-  std::unique_lock<std::shared_mutex> maintenance_lock = acquire_cache_maintenance();
+  auto maintenance_lock = acquire_cache_maintenance();
   const VmAccessOutcome outcome = flush_dirty_locked();
   if (outcome != VmAccessOutcome::Complete)
     return outcome;
@@ -604,16 +706,28 @@ VmAccessOutcome L2Cache::flush_all(uint32_t vmid) {
   return VmAccessOutcome::Complete;
 }
 
-VmAccessOutcome L2Cache::flush_dirty_locked() {
+VmAccessOutcome L2Cache::flush_address_space(uint32_t vmid) {
+  auto maintenance_lock = acquire_cache_maintenance();
+  const VmAccessOutcome outcome = flush_dirty_locked(vmid);
+  if (outcome == VmAccessOutcome::Complete)
+    cache_.invalidate_all(vmid);
+  return outcome;
+}
+
+VmAccessOutcome L2Cache::flush_dirty_locked(std::optional<uint32_t> vmid) {
   if (!has_dirty_lines_.load(std::memory_order_relaxed))
     return VmAccessOutcome::Complete;
+
+  // Atomic boundaries can reach dirty state logically discarded by an earlier
+  // invalidate without an intervening ordinary access to reconcile the epoch.
+  synchronize_epoch_locked();
 
   uint32_t dirty_count = 0;
   uint64_t min_addr = std::numeric_limits<uint64_t>::max(), max_addr = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
-  cache_.for_each_dirty([this, &dirty_count, &min_addr, &max_addr,
+  cache_.for_each_dirty([this, &dirty_count, &min_addr, &max_addr, vmid,
                          &outcome](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
-    if (outcome != VmAccessOutcome::Complete)
+    if ((vmid && tag.vmid != *vmid) || outcome != VmAccessOutcome::Complete)
       return;
     // Each dirty line is written back under its own owning vmid.
     outcome = publish_dirty_bytes(line_addr, data, tag.vmid);
@@ -628,16 +742,17 @@ VmAccessOutcome L2Cache::flush_dirty_locked() {
   });
   if (dirty_count != 0)
     util::Logger::vm("L2 flush: ", dirty_count, " dirty lines [0x", std::hex, min_addr, "-0x",
-                     max_addr, "]", std::dec,
-                     " total_writes=", write_count_.load(std::memory_order_relaxed));
+                     max_addr, "]", std::dec, " total_writes=", write_count());
   return outcome;
 }
 
 VmAccessOutcome L2Cache::flush_dirty_to_legacy_backing_locked() {
   if (!has_dirty_lines_.load(std::memory_order_relaxed))
     return VmAccessOutcome::Complete;
-  if (legacy_maintenance_memory_ == nullptr || legacy_maintenance_vm_ == nullptr)
-    throw util::ConfigError("L2 cache has no legacy maintenance backing");
+  // Earlier invalidate-only maintenance may have logically discarded dirty
+  // bytes without an intervening cache access to reconcile the epoch.
+  synchronize_epoch_locked();
+  assert(legacy_maintenance_memory_ != nullptr && legacy_maintenance_vm_ != nullptr);
 
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   cache_.for_each_dirty(
@@ -662,12 +777,12 @@ VmAccessOutcome L2Cache::invalidate_range(uint64_t addr, uint32_t size, uint32_t
   const uint64_t line_count = std::min(requested_lines, addressable_lines);
 
   if (line_count <= MAX_INVALIDATE_RANGE_SET_LOCKS) {
-    std::shared_lock<std::shared_mutex> maintenance_lock = acquire_cache_access();
+    auto maintenance_lock = acquire_cache_access();
     SetRangeLocks locks = lock_sets_for_range(line_start, line_count);
     return invalidate_range_locked(addr, size, vmid, line_start, line_count);
   }
 
-  std::unique_lock<std::shared_mutex> maintenance_lock = acquire_cache_maintenance();
+  auto maintenance_lock = acquire_cache_maintenance();
   return invalidate_range_locked(addr, size, vmid, line_start, line_count);
 }
 

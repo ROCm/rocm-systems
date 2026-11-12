@@ -63,6 +63,20 @@ union ibv_gid {
 	} global;
 };
 
+enum ibv_gid_type {
+	IBV_GID_TYPE_IB,
+	IBV_GID_TYPE_ROCE_V1,
+	IBV_GID_TYPE_ROCE_V2,
+};
+
+struct ibv_gid_entry {
+	union ibv_gid gid;
+	uint32_t gid_index;
+	uint32_t port_num;
+	uint32_t gid_type; /* enum ibv_gid_type */
+	uint32_t ndev_ifindex;
+};
+
 #ifndef container_of
 /**
   * container_of - cast a member of a structure out to the containing structure
@@ -368,6 +382,7 @@ enum ibv_access_flags {
 	IBV_ACCESS_REMOTE_READ		= (1<<2),
 	IBV_ACCESS_REMOTE_ATOMIC	= (1<<3),
 	IBV_ACCESS_MW_BIND		= (1<<4),
+	IBV_ACCESS_ZERO_BASED		= (1<<5),
 	IBV_ACCESS_RELAXED_ORDERING     = (1<<20),
 };
 
@@ -455,7 +470,13 @@ enum ibv_rate {
 	IBV_RATE_25_GBPS  = 15,
 	IBV_RATE_100_GBPS = 16,
 	IBV_RATE_200_GBPS = 17,
-	IBV_RATE_300_GBPS = 18
+	IBV_RATE_300_GBPS = 18,
+	IBV_RATE_28_GBPS   = 19,
+	IBV_RATE_50_GBPS   = 20,
+	IBV_RATE_400_GBPS  = 21,
+	IBV_RATE_600_GBPS  = 22,
+	IBV_RATE_800_GBPS  = 23,
+	IBV_RATE_1200_GBPS = 24
 };
 
 /**
@@ -850,6 +871,26 @@ struct ibv_cq {
 	uint32_t		async_events_completed;
 };
 
+/* Extended CQ. Shares its leading members with struct ibv_cq so that
+ * ibv_cq_ex_to_cq() is a plain pointer cast. The trailing poll/read
+ * function pointers are managed by libibverbs and left opaque here —
+ * GIN only passes the pointer back to cq_ex_to_cq(), never dereferences
+ * the extended fields. */
+struct ibv_cq_ex {
+	struct ibv_context     *context;
+	struct ibv_comp_channel *channel;
+	void		       *cq_context;
+	uint32_t		handle;
+	int			cqe;
+
+	pthread_mutex_t		mutex;
+	pthread_cond_t		cond;
+	uint32_t		comp_events_completed;
+	uint32_t		async_events_completed;
+
+	uint32_t		comp_mask;
+};
+
 struct ibv_ah {
 	struct ibv_context     *context;
 	struct ibv_pd	       *pd;
@@ -1060,6 +1101,58 @@ struct ibv_context {
 	void		       *abi_compat;
 };
 
+enum ibv_cq_init_attr_mask {
+	IBV_CQ_INIT_ATTR_MASK_FLAGS	= 1 << 0,
+	IBV_CQ_INIT_ATTR_MASK_PD	= 1 << 1,
+};
+
+enum ibv_create_cq_attr_flags {
+	IBV_CREATE_CQ_ATTR_SINGLE_THREADED = 1 << 0,
+	IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN  = 1 << 1,
+};
+
+struct ibv_cq_init_attr_ex {
+	/* Minimum number of entries required for CQ */
+	uint32_t			cqe;
+	/* Consumer-supplied context returned for completion events */
+	void			*cq_context;
+	/* Completion channel where completion events will be queued.
+	 * May be NULL if completion events will not be used.
+	 */
+	struct ibv_comp_channel *channel;
+	/* Completion vector used to signal completion events.
+	 *  Must be < context->num_comp_vectors.
+	 */
+	uint32_t			comp_vector;
+	 /* Or'ed bit of enum ibv_create_cq_wc_flags. */
+	uint64_t		wc_flags;
+	/* compatibility mask (extended verb). Or'd flags of
+	 * enum ibv_cq_init_attr_mask
+	 */
+	uint32_t		comp_mask;
+	/* create cq attr flags - one or more flags from
+	 * enum ibv_create_cq_attr_flags
+	 */
+	uint32_t		flags;
+	struct ibv_pd		*parent_domain;
+};
+
+enum ibv_parent_domain_init_attr_mask {
+	IBV_PARENT_DOMAIN_INIT_ATTR_ALLOCATORS = 1 << 0,
+	IBV_PARENT_DOMAIN_INIT_ATTR_PD_CONTEXT = 1 << 1,
+};
+
+struct ibv_parent_domain_init_attr {
+	struct ibv_pd *pd; /* reference to a protection domain object, can't be NULL */
+	struct ibv_td *td; /* reference to a thread domain object, or NULL */
+	uint32_t comp_mask;
+	void *(*alloc)(struct ibv_pd *pd, void *pd_context, size_t size,
+		       size_t alignment, uint64_t resource_type);
+	void (*free)(struct ibv_pd *pd, void *pd_context, void *ptr,
+		     uint64_t resource_type);
+	void *pd_context;
+};
+
 enum verbs_context_mask {
 	VERBS_CONTEXT_XRCD         = (uint64_t)1 << 0,
 	VERBS_CONTEXT_SRQ          = (uint64_t)1 << 1,
@@ -1073,7 +1166,39 @@ struct verbs_context {
 	int (*query_port)(struct ibv_context *context, uint8_t port_num,
 			  struct ibv_port_attr *port_attr,
 			  size_t port_attr_len);
-	int (*_reserved[25]) (void);
+	/* All 25 verbs_context slots between query_port and priv (upstream layout).
+	 * Every slot is present and in exact upstream order so verbs_get_ctx_op()
+	 * resolves the right offset. The two rccl calls (alloc_parent_domain,
+	 * create_cq_ex) carry real signatures; the other 23 are opaque 8-byte
+	 * void(*)(void) placeholders that hold the ABI offset without vendoring
+	 * their argument types. */
+	void (*advise_mr)(void);
+	void (*alloc_null_mr)(void);
+	void (*read_counters)(void);
+	void (*attach_counters_point_flow)(void);
+	void (*create_counters)(void);
+	void (*destroy_counters)(void);
+	void (*reg_dm_mr)(void);
+	void (*alloc_dm)(void);
+	void (*free_dm)(void);
+	void (*modify_flow_action_esp)(void);
+	void (*destroy_flow_action)(void);
+	void (*create_flow_action_esp)(void);
+	void (*modify_qp_rate_limit)(void);
+	struct ibv_pd *(*alloc_parent_domain)(struct ibv_context *context,
+					      struct ibv_parent_domain_init_attr *attr);
+	void (*dealloc_td)(void);
+	void (*alloc_td)(void);
+	void (*modify_cq)(void);
+	void (*post_srq_ops)(void);
+	void (*destroy_rwq_ind_table)(void);
+	void (*create_rwq_ind_table)(void);
+	void (*destroy_wq)(void);
+	void (*modify_wq)(void);
+	void (*create_wq)(void);
+	void (*query_rt_values)(void);
+	struct ibv_cq_ex *(*create_cq_ex)(struct ibv_context *context,
+					  struct ibv_cq_init_attr_ex *init_attr);
 	struct verbs_ex_private *priv;
 	int (*query_device_ex)(struct ibv_context *context,
 			       const struct ibv_query_device_ex_input *input,

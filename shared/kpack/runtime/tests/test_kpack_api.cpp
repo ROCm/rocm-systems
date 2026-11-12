@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <msgpack.hpp>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -72,6 +73,150 @@ class TempFile {
  private:
   std::filesystem::path path_;
 };
+
+static std::string make_kpack_with_toc(const char* toc_data, size_t toc_size) {
+  std::string archive(16, '\0');
+  std::memcpy(archive.data(), KPACK_MAGIC, KPACK_MAGIC_SIZE);
+  const uint32_t version = KPACK_CURRENT_VERSION;
+  const uint64_t toc_offset = 16;
+  std::memcpy(archive.data() + KPACK_MAGIC_SIZE, &version, sizeof(version));
+  std::memcpy(archive.data() + KPACK_MAGIC_SIZE + sizeof(version), &toc_offset,
+              sizeof(toc_offset));
+  archive.append(toc_data, toc_size);
+  return archive;
+}
+
+enum class NumericTocField {
+  Offset,
+  Size,
+  ZstdOffset,
+  ZstdSize,
+  Ordinal,
+  OriginalSize,
+};
+
+static void pack_numeric(msgpack::packer<msgpack::sbuffer>& packer,
+                         NumericTocField field, NumericTocField invalid_field,
+                         uint64_t value) {
+  if (field == invalid_field) {
+    packer.pack("not-an-integer");
+  } else {
+    packer.pack(value);
+  }
+}
+
+static std::string make_kpack_with_invalid_field(
+    NumericTocField invalid_field) {
+  msgpack::sbuffer toc;
+  msgpack::packer<msgpack::sbuffer> packer(&toc);
+  bool is_zstd = invalid_field == NumericTocField::ZstdOffset ||
+                 invalid_field == NumericTocField::ZstdSize;
+
+  packer.pack_map(is_zstd ? 4 : 3);
+  packer.pack("compression_scheme");
+  packer.pack(is_zstd ? "zstd-per-kernel" : "none");
+
+  if (is_zstd) {
+    packer.pack("zstd_offset");
+    pack_numeric(packer, NumericTocField::ZstdOffset, invalid_field, 16);
+    packer.pack("zstd_size");
+    pack_numeric(packer, NumericTocField::ZstdSize, invalid_field, 0);
+  } else {
+    packer.pack("blobs");
+    packer.pack_array(1);
+    packer.pack_map(2);
+    packer.pack("offset");
+    pack_numeric(packer, NumericTocField::Offset, invalid_field, 16);
+    packer.pack("size");
+    pack_numeric(packer, NumericTocField::Size, invalid_field, 0);
+  }
+
+  packer.pack("toc");
+  packer.pack_map(1);
+  packer.pack("kernel.co");
+  packer.pack_map(1);
+  packer.pack("gfx942");
+  packer.pack_map(3);
+  packer.pack("ordinal");
+  pack_numeric(packer, NumericTocField::Ordinal, invalid_field, 0);
+  packer.pack("original_size");
+  pack_numeric(packer, NumericTocField::OriginalSize, invalid_field, 0);
+  packer.pack("type");
+  packer.pack("hsaco");
+
+  return make_kpack_with_toc(toc.data(), toc.size());
+}
+
+class InvalidNumericTocFieldTest
+    : public testing::TestWithParam<NumericTocField> {};
+
+TEST_P(InvalidNumericTocFieldTest, ReturnsParseError) {
+  TempFile file(make_kpack_with_invalid_field(GetParam()));
+  kpack_archive_t archive = nullptr;
+
+  EXPECT_EQ(kpack_open(file.str().c_str(), &archive),
+            KPACK_ERROR_MSGPACK_PARSE_FAILED);
+  EXPECT_EQ(archive, nullptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    InvalidType, InvalidNumericTocFieldTest,
+    testing::Values(NumericTocField::Offset, NumericTocField::Size,
+                    NumericTocField::ZstdOffset, NumericTocField::ZstdSize,
+                    NumericTocField::Ordinal, NumericTocField::OriginalSize));
+
+enum class OversizedTocDeclaration {
+  Array,
+  Map,
+  String,
+  Binary,
+  Extension,
+};
+
+static std::string make_oversized_toc_declaration(
+    OversizedTocDeclaration declaration) {
+  char type = '\0';
+  switch (declaration) {
+    case OversizedTocDeclaration::Array:
+      type = static_cast<char>(0xdd);  // array32
+      break;
+    case OversizedTocDeclaration::Map:
+      type = static_cast<char>(0xdf);  // map32
+      break;
+    case OversizedTocDeclaration::String:
+      type = static_cast<char>(0xdb);  // str32
+      break;
+    case OversizedTocDeclaration::Binary:
+      type = static_cast<char>(0xc6);  // bin32
+      break;
+    case OversizedTocDeclaration::Extension:
+      type = static_cast<char>(0xc9);  // ext32
+      break;
+  }
+  // MessagePack's 32-bit declarations encode their count or length as a
+  // four-byte big-endian value. Four 0xff bytes declare UINT32_MAX.
+  return std::string{type, '\xff', '\xff', '\xff', '\xff'};
+}
+
+class OversizedTocDeclarationTest
+    : public testing::TestWithParam<OversizedTocDeclaration> {};
+
+TEST_P(OversizedTocDeclarationTest, ReturnsParseError) {
+  std::string toc = make_oversized_toc_declaration(GetParam());
+  TempFile file(make_kpack_with_toc(toc.data(), toc.size()));
+  kpack_archive_t archive = nullptr;
+
+  EXPECT_EQ(kpack_open(file.str().c_str(), &archive),
+            KPACK_ERROR_MSGPACK_PARSE_FAILED);
+  EXPECT_EQ(archive, nullptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(OversizedSize, OversizedTocDeclarationTest,
+                         testing::Values(OversizedTocDeclaration::Array,
+                                         OversizedTocDeclaration::Map,
+                                         OversizedTocDeclaration::String,
+                                         OversizedTocDeclaration::Binary,
+                                         OversizedTocDeclaration::Extension));
 
 // Test that library links and basic error handling works
 TEST(KpackAPITest, NullArguments) {

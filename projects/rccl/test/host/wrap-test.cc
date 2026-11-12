@@ -50,7 +50,9 @@
 #include "../common/LogCapture.hpp"                 // RcclUnitTesting::CaptureLog
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
 #include "ScopedHook.h"                              // RAII install/restore for g_loadParam et al.
+#include "fakes/dev_runtime_micro_fakes.h"           // g_devrBootstrapAllGather
 #include "fakes/env_fakes.h"                         // SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv
+#include "fakes/hip_fakes.h"                         // g_hipGetLastError
 #include "fakes/wrap_fakes.h"                        // rccl_wrap.cc's dependency seams
 #include "graph/topo.h"                              // ncclTopoSystem/ncclTopoNode (MakeCommWithArch)
 
@@ -63,20 +65,13 @@
 // binary -- declaring a second copy here would be a duplicate-symbol error.
 #include "fakes/nccl_fakes.h"    // extern g_loadParam
 #include "fakes/param_redirect.h"  // NCCL_PARAM/RCCL_PARAM -> g_loadParam
+#include "fakes/rccl_arch_thresholds_fakes.h"  // g_archThresholdsTable (DPX vs SPX)
 
 // WRAP_CC_PATH is defined by test/host/CMakeLists.txt as the hipified copy of
 // src/rccl_wrap.cc, e.g. ${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc.
 #include WRAP_CC_PATH
 
 #include "dev_runtime_internal.h"
-
-// Private layout consumed by the real ncclDevrFindWindow implementation in
-// dev_runtime.cc, which is compiled by dev-runtime-test.cc in this binary.
-struct ncclDevrWindowSorted {
-  uintptr_t userAddr;
-  size_t size;
-  struct ncclDevrWindow* win;
-};
 
 namespace {
 
@@ -147,18 +142,79 @@ struct TestDevrWindows {
   ncclDevrWindowSorted sorted[2]{};
 };
 
+// Symmetric windows over [a, a + aSize) and [b, b + bSize), found by the real ncclDevrFindWindow.
+struct SymmetricTestWindows {
+  SymmetricTestWindows(ncclComm* comm, char* a, size_t aSize, char* b, size_t bSize) {
+    char* bases[2] = {a, b};
+    size_t sizes[2] = {aSize, bSize};
+    for (int i = 0; i < 2; i++) {
+      windows[i].userPtr = bases[i];
+      windows[i].size = sizes[i];
+      windows[i].winFlags = NCCL_WIN_COLL_SYMMETRIC;
+      sorted[i] = {reinterpret_cast<uintptr_t>(bases[i]), sizes[i], &windows[i]};
+    }
+    if (sorted[1].userAddr < sorted[0].userAddr) std::swap(sorted[0], sorted[1]);
+    comm->devrState.winSorted = sorted;
+    comm->devrState.winSortedCount = 2;
+  }
+
+  ncclDevrWindow windows[2]{};
+  ncclDevrWindowSorted sorted[2]{};
+};
+
 auto ForceParam(const char* name, int64_t value) {
   return [name = std::string(name), value](const char* env, int64_t defaultValue) {
     return std::strcmp(env, name.c_str()) == 0 ? value : defaultValue;
   };
 }
 
-auto SelectSymkTuning(ncclSymkKernelId id, int maxChannels) {
-  return [id, maxChannels](struct ncclTuningInput_t*, struct ncclTuningResult_t* result) {
+// g_tuningCompute stub: picks id, and expects the symmetric query to be for func.
+auto SelectSymkTuning(ncclFunc_t func, ncclSymkKernelId id, int maxChannels) {
+  return [func, id, maxChannels](struct ncclTuningInput_t* in, struct ncclTuningResult_t* result) {
+    EXPECT_EQ(func, in->func);
     result->symKernelId = id;
     result->maxChannels = maxChannels;
     return ncclSuccess;
   };
+}
+
+// g_tuningCompute stub: picks id, and records each query's symAligned16B in *aligned and counts it in *calls.
+auto RecordAlignedTuning(ncclSymkKernelId id, int maxChannels, bool* aligned, int* calls = nullptr) {
+  return [id, maxChannels, aligned, calls](struct ncclTuningInput_t* in, struct ncclTuningResult_t* result) {
+    *aligned = in->symAligned16B;
+    if (calls != nullptr) ++*calls;
+    result->symKernelId = id;
+    result->maxChannels = maxChannels;
+    return ncclSuccess;
+  };
+}
+
+// g_symkKernelIdIsTma stub: only `id` is a TDM kernel, so asking about any other id reads as non-TDM.
+auto OnlyKernelIsTma(ncclSymkKernelId id) {
+  return [id](int kernelId) { return kernelId == (int)id; };
+}
+
+// The hook pair every TDM-window test installs: symk is requested and available.
+struct SymkRequestedHooks {
+  ScopedHook<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*, bool)> requested{
+      g_isSymmetricKernelRequested,
+      [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*, bool) { return true; }};
+  ScopedHook<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> available{
+      g_symkAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; }};
+};
+
+// gfx1250 4-rank comm in one UALink domain, every tray fully linked; spansTrays puts it on more than one tray.
+// Caller must DeleteCommWithArch.
+ncclComm* MakeGfx1250TdmComm(const rcclArchThresholds* table, bool spansTrays) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->archThresholds = table;
+  comm->symmetricSupport = 1;
+  comm->isAllDirectNvlink = true;
+  comm->spansTrays = spansTrays;
+  comm->MNNVL = 1;
+  comm->nRanks = 4;
+  comm->nvlDomainSize = 4;
+  return comm;
 }
 
 }  // namespace
@@ -314,12 +370,9 @@ ncclTaskColl MakeTask(int protocol, bool hasAcc) {
 }
 }  // namespace
 
-// ENABLE_LL128's state depends on the build configuration; both arms are
-// written so whichever compiles in is exercised. The OCI cluster build has
-// ENABLE_LL128 defined, so *_LL128_AccGatesOutGfx90a and its siblings are the
-// ones that compile and run there; a local ROCm-7.0.0 build does not define
-// it, which is what compiles and runs *_LL128_DisabledAtCompileTime instead --
-// both arms are now verified, one per build.
+// rccl-UnitTestsMicro always compiles this file with ENABLE_LL128
+// (test/host/CMakeLists.txt), matching production librccl. The
+// *_LL128_DisabledAtCompileTime arms are not part of that binary.
 #if defined(ENABLE_LL128)
 TEST(WrapMicrotest, IsArchSupportedForFunc_LL128_AccGatesOutGfx90a) {
   // With acc set, gfx90a is EXCLUDED from the LL128+acc allow-list (only
@@ -443,6 +496,9 @@ TEST(WrapMicrotest, GetAlgoName_AddonValues_DistinctStrings) {
 
   ASSERT_EQ(ncclSuccess, rcclGetAlgoName(rcclAddonAlgos_t::RCCL_SYMMETRIC, &name));
   EXPECT_STREQ("SYM", name);
+
+  ASSERT_EQ(ncclSuccess, rcclGetAlgoName(rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, &name));
+  EXPECT_STREQ("SymTDM", name);
 
   ASSERT_EQ(ncclSuccess, rcclGetAlgoName(rcclAddonAlgos_t::RCCL_CE_2SHOT, &name));
   EXPECT_STREQ("CE2", name);
@@ -1274,6 +1330,807 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_MultiNodeUsesTunedLLRange) 
       });
 }
 
+// ===========================================================================
+// rcclUpdateRemoteFlushAlgoProto: with every rank on RCCL_IB_GDR_FLUSH_FLAG
+// (comm->ibGdrFlushFlag), gfx950 on 2-8 nodes of 8 GPUs. all_reduce goes
+// Ring/LL128 from 16 MB per node, Tree/Simple from 32 MB per node and
+// Ring/Simple from 64 MB per node;
+// reduce_scatter LL128 switches to Simple above 6 MB per rank.
+// RCCL_IB_GDR_FLUSH_FLAG_TUNE=1 adds the 4x collective LL128 buffer and moves
+// these switch points (see rccl_wrap.cc). Its NCCL_ALGO/NCCL_PROTO check is
+// cached in a static, so every test runs isolated.
+// ===========================================================================
+
+namespace {
+ncclComm* MakeRemoteFlushComm(const char* arch, int nNodes, int nRanks, bool gdrFlushFlag = true) {
+  ncclComm* comm = MakeCommWithArch(arch);
+  comm->nNodes = nNodes;
+  comm->nRanks = nRanks;
+  comm->ibGdrFlushFlag = gdrFlushFlag;
+  return comm;
+}
+
+const std::pair<int, int> kRingLL{NCCL_ALGO_RING, NCCL_PROTO_LL};
+const std::pair<int, int> kRingLL128{NCCL_ALGO_RING, NCCL_PROTO_LL128};
+const std::pair<int, int> kTreeSimple{NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE};
+const std::pair<int, int> kRingSimple{NCCL_ALGO_RING, NCCL_PROTO_SIMPLE};
+
+// Returns {algorithm, protocol} after the rule, starting from `start`. Every
+// table entry is available except `unavailable`, if given.
+std::pair<int, int> ApplyRemoteFlushRule(ncclComm* comm, size_t nBytes, ncclFunc_t func = ncclFuncAllReduce,
+                                         std::pair<int, int> start = kRingLL,
+                                         std::pair<int, int> unavailable = {-1, -1}) {
+  float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+  for (auto& row : table)
+    for (float& t : row) t = 1.0f;
+  if (unavailable.first >= 0) table[unavailable.first][unavailable.second] = NCCL_ALGO_PROTO_IGNORE;
+  ncclTaskColl info{};
+  info.func = func;
+  info.algorithm = start.first;
+  info.protocol = start.second;
+  rcclUpdateRemoteFlushAlgoProto(comm, nBytes, &info, table);
+  return {(int)info.algorithm, (int)info.protocol};
+}
+}  // namespace
+
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_AllReduceSizeBandsScaleWithNodes) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateRemoteFlushAlgoProto_AllReduceSizeBandsScaleWithNodes",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        for (int nNodes : {2, 4, 8}) {
+          ncclComm* comm = MakeRemoteFlushComm("gfx950", nNodes, nNodes * 8);
+          const size_t perNode = (size_t)nNodes << 20;  // 1 MB per node
+          EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, 16 * perNode - 1)) << nNodes << " nodes";
+          EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 16 * perNode)) << nNodes << " nodes";
+          EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 32 * perNode - 1)) << nNodes << " nodes";
+          EXPECT_EQ(kTreeSimple, ApplyRemoteFlushRule(comm, 32 * perNode)) << nNodes << " nodes";
+          EXPECT_EQ(kTreeSimple, ApplyRemoteFlushRule(comm, 64 * perNode - 1)) << nNodes << " nodes";
+          EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, 64 * perNode)) << nNodes << " nodes";
+          EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, 64 * perNode, ncclFuncAllReduce,
+                                                      {NCCL_ALGO_TREE, NCCL_PROTO_LL}))
+              << nNodes << " nodes, starting from Tree";
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_ReduceScatterLL128StopsAt6MBPerRank) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateRemoteFlushAlgoProto_ReduceScatterLL128StopsAt6MBPerRank",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const size_t kLimit = (size_t)6 << 20;
+        {
+          ncclComm* comm = MakeRemoteFlushComm("gfx950", 2, 16, /*gdrFlushFlag=*/false);
+          EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 16 * (kLimit + 1), ncclFuncReduceScatter, kRingLL128))
+              << "flag off";
+          DeleteCommWithArch(comm);
+        }
+        for (int nNodes : {2, 4, 8}) {
+          const int nRanks = nNodes * 8;
+          ncclComm* comm = MakeRemoteFlushComm("gfx950", nNodes, nRanks);
+          EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, nRanks * kLimit, ncclFuncReduceScatter, kRingLL128))
+              << nNodes << " nodes";
+          EXPECT_EQ(kRingSimple,
+                    ApplyRemoteFlushRule(comm, nRanks * (kLimit + 1), ncclFuncReduceScatter, kRingLL128))
+              << nNodes << " nodes";
+          DeleteCommWithArch(comm);
+        }
+        ncclComm* comm = MakeRemoteFlushComm("gfx950", 2, 16);
+        const size_t kBytes = 16 * (kLimit + 1);
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, kBytes, ncclFuncReduceScatter, kRingLL))
+            << "only LL128 is moved";
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, kBytes, ncclFuncReduceScatter, kRingLL128, kRingSimple))
+            << "Ring/Simple unavailable";
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, kBytes, ncclFuncAllGather, kRingLL128)) << "all_gather";
+        DeleteCommWithArch(comm);
+        comm = MakeRemoteFlushComm("gfx942", 2, 16);
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, kBytes, ncclFuncReduceScatter, kRingLL128)) << "gfx942";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_GatesLeaveChoiceUntouched) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateRemoteFlushAlgoProto_GatesLeaveChoiceUntouched",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const size_t kBytes = (size_t)64 << 20;  // Tree/Simple on 2 nodes when every gate passes
+        {
+          ncclComm* comm = MakeRemoteFlushComm("gfx950", 2, 16, /*gdrFlushFlag=*/false);
+          EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, kBytes)) << "flag off";
+          DeleteCommWithArch(comm);
+        }
+        struct Case {
+          const char* what;
+          const char* arch;
+          int nNodes, nRanks;
+        };
+        for (const Case& c : {Case{"single node", "gfx950", 1, 8}, Case{"9 nodes", "gfx950", 9, 72},
+                              Case{"4 GPUs per node", "gfx950", 2, 8}, Case{"gfx942", "gfx942", 2, 16}}) {
+          ncclComm* comm = MakeRemoteFlushComm(c.arch, c.nNodes, c.nRanks);
+          EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, (size_t)c.nNodes * (32 << 20))) << c.what;
+          EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, (size_t)c.nRanks * (8 << 20), ncclFuncReduceScatter,
+                                                     kRingLL128))
+              << c.what << ", reduce_scatter";
+          DeleteCommWithArch(comm);
+        }
+        ncclComm* comm = MakeRemoteFlushComm("gfx950", 2, 16);
+        EXPECT_EQ(std::make_pair((int)NCCL_ALGO_COLLNET_DIRECT, (int)NCCL_PROTO_LL),
+                  ApplyRemoteFlushRule(comm, kBytes, ncclFuncAllReduce, {NCCL_ALGO_COLLNET_DIRECT, NCCL_PROTO_LL}))
+            << "algorithm other than Ring or Tree";
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, kBytes, ncclFuncAllReduce, kRingLL, kTreeSimple))
+            << "Tree/Simple unavailable";
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, (size_t)32 << 20, ncclFuncAllReduce, kRingLL, kRingLL128))
+            << "Ring/LL128 unavailable";
+        EXPECT_EQ(kTreeSimple, ApplyRemoteFlushRule(comm, kBytes, ncclFuncAllReduce, kRingLL, kRingSimple))
+            << "an unrelated entry unavailable";
+        DeleteCommWithArch(comm);
+      });
+}
+
+namespace {
+// gfx950 LL128: 448 KiB buffer, 8-word lines with 7 data words, so one Ring/LL128 loop moves
+// 49 KiB per channel per rank: 24.5 MiB per node on 64 channels with the default buffer.
+constexpr int kLl128BuffSize = 448 << 10;
+constexpr size_t kOneLoopPerNode = (size_t)49 << 10 << 9;  // 49 KiB x 64 channels x 8 ranks
+
+ncclComm* MakeRemoteFlushTuneComm(int nNodes, int nRanks, bool gdrFlushFlag = true) {
+  ncclComm* comm = MakeRemoteFlushComm("gfx950", nNodes, nRanks, gdrFlushFlag);
+  comm->buffSizes[NCCL_PROTO_LL128] = kLl128BuffSize;
+  comm->p2pLl128BuffSize = kLl128BuffSize;
+  comm->ll128LineElems = 8;
+  comm->ll128DataElems = 7;
+  comm->nChannels = 64;
+  comm->topo->ll128Enabled = true;
+  return comm;
+}
+
+int RemoteFlushChannels(ncclComm* comm, size_t nBytes) {
+  float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+  for (auto& row : table)
+    for (float& t : row) t = 1.0f;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.algorithm = NCCL_ALGO_RING;
+  info.protocol = NCCL_PROTO_LL;
+  return rcclUpdateRemoteFlushAlgoProto(comm, nBytes, &info, table);
+}
+}  // namespace
+
+namespace {
+auto ForceFlagTune() { return ForceParam("RCCL_IB_GDR_FLUSH_FLAG_TUNE", int64_t(1)); }
+}  // namespace
+
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_FlagTuneAllReduce) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateRemoteFlushAlgoProto_FlagTuneAllReduce",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ScopedHook loadParam(g_loadParam, ForceFlagTune());
+        for (int nNodes : {2, 4, 8}) {
+          ncclComm* comm = MakeRemoteFlushTuneComm(nNodes, nNodes * 8);
+          const size_t perNode = (size_t)nNodes << 20;  // 1 MB per node
+          EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, 12 * perNode - nNodes)) << nNodes << " nodes";
+          EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 12 * perNode)) << nNodes << " nodes";
+          EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, nNodes * kOneLoopPerNode)) << nNodes << " nodes";
+          EXPECT_EQ(kTreeSimple, ApplyRemoteFlushRule(comm, nNodes * (kOneLoopPerNode + 1))) << nNodes << " nodes";
+          EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, 64 * perNode)) << nNodes << " nodes";
+          EXPECT_EQ(48, RemoteFlushChannels(comm, 64 * perNode)) << nNodes << " nodes";
+          EXPECT_EQ(48, RemoteFlushChannels(comm, 128 * perNode - nNodes)) << nNodes << " nodes";
+          EXPECT_EQ(0, RemoteFlushChannels(comm, 128 * perNode)) << nNodes << " nodes";
+          EXPECT_EQ(0, RemoteFlushChannels(comm, 32 * perNode)) << nNodes << " nodes, Tree/Simple";
+          DeleteCommWithArch(comm);
+        }
+        ncclComm* comm = MakeRemoteFlushTuneComm(16, 128);
+        const size_t perNode = (size_t)16 << 20;
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, 8 * perNode - 16)) << "16 nodes";
+        EXPECT_EQ(kTreeSimple, ApplyRemoteFlushRule(comm, 8 * perNode)) << "16 nodes";
+        EXPECT_EQ(kTreeSimple, ApplyRemoteFlushRule(comm, 64 * perNode)) << "16 nodes";
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, 64 * perNode + 16)) << "16 nodes";
+        DeleteCommWithArch(comm);
+        for (int nNodes : {9, 32}) {
+          comm = MakeRemoteFlushTuneComm(nNodes, nNodes * 8);
+          EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, (size_t)nNodes * (32 << 20))) << nNodes << " nodes";
+          DeleteCommWithArch(comm);
+        }
+        comm = MakeRemoteFlushTuneComm(2, 16, /*gdrFlushFlag=*/false);
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, (size_t)2 * (12 << 20))) << "flag off";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_FlagTuneUserChannelCountWins) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateRemoteFlushAlgoProto_FlagTuneUserChannelCountWins",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ScopedHook loadParam(g_loadParam, ForceFlagTune());
+        ncclComm* comm = MakeRemoteFlushTuneComm(2, 16);
+        const size_t nBytes = (size_t)2 * (64 << 20);
+        for (int64_t* param : {&g_paramMinNchannels, &g_paramMaxNchannels}) {
+          const int64_t saved = *param;
+          *param = 64;
+          EXPECT_EQ(0, RemoteFlushChannels(comm, nBytes)) << "NCCL_MIN/MAX_NCHANNELS keeps the user's count";
+          EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, nBytes)) << "the algorithm and protocol still apply";
+          *param = saved;
+        }
+        EXPECT_EQ(48, RemoteFlushChannels(comm, nBytes));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_FlagTuneOffKeepsDefaultRule) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateRemoteFlushAlgoProto_FlagTuneOffKeepsDefaultRule",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeRemoteFlushTuneComm(2, 16);
+        rcclScaleCollLl128BuffSize(comm);
+        EXPECT_EQ(kLl128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << "no scaled buffer";
+        const size_t perNode = (size_t)2 << 20;
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, 12 * perNode)) << "Ring/LL128 starts at 16 MB per node";
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 16 * perNode));
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 32 * perNode - 2)) << "fixed 32 MB limit, not one loop";
+        EXPECT_EQ(kTreeSimple, ApplyRemoteFlushRule(comm, 32 * perNode));
+        EXPECT_EQ(0, RemoteFlushChannels(comm, 64 * perNode)) << "no channel override";
+        EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, (size_t)16 * (6 << 20) + 16, ncclFuncReduceScatter, kRingLL128))
+            << "reduce_scatter keeps the 6 MiB limit";
+        DeleteCommWithArch(comm);
+        comm = MakeRemoteFlushTuneComm(16, 128);
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, (size_t)16 * (32 << 20))) << "16 nodes untouched";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_FlagTuneScalesLl128Buffer) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateRemoteFlushAlgoProto_FlagTuneScalesLl128Buffer",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ScopedHook loadParam(g_loadParam, ForceFlagTune());
+        for (int nNodes : {2, 4, 8, 16}) {
+          ncclComm* comm = MakeRemoteFlushTuneComm(nNodes, nNodes * 8);
+          rcclScaleCollLl128BuffSize(comm);
+          EXPECT_EQ(4 * kLl128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << nNodes << " nodes";
+          EXPECT_EQ(kLl128BuffSize, comm->p2pLl128BuffSize) << nNodes << " nodes, send/recv keeps the default";
+          DeleteCommWithArch(comm);
+        }
+        struct Case {
+          const char* what;
+          const char* arch;
+          int nNodes, nRanks;
+          bool gdrFlushFlag, ll128Enabled;
+        };
+        for (const Case& c : {Case{"flag off", "gfx950", 2, 16, false, true},
+                              Case{"LL128 disabled", "gfx950", 2, 16, true, false},
+                              Case{"single node", "gfx950", 1, 8, true, true},
+                              Case{"4 GPUs per node", "gfx950", 2, 8, true, true},
+                              Case{"9 nodes", "gfx950", 9, 72, true, true},
+                              Case{"gfx942", "gfx942", 2, 16, true, true}}) {
+          ncclComm* comm = MakeRemoteFlushComm(c.arch, c.nNodes, c.nRanks, c.gdrFlushFlag);
+          comm->buffSizes[NCCL_PROTO_LL128] = kLl128BuffSize;
+          comm->p2pLl128BuffSize = kLl128BuffSize;
+          comm->topo->ll128Enabled = c.ll128Enabled;
+          rcclScaleCollLl128BuffSize(comm);
+          EXPECT_EQ(kLl128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << c.what;
+          DeleteCommWithArch(comm);
+        }
+        // x4 lifts the Ring/LL128 one-loop limit to 98 MiB per node; Ring/Simple still takes over at 64 MB.
+        ncclComm* comm = MakeRemoteFlushTuneComm(2, 16);
+        rcclScaleCollLl128BuffSize(comm);
+        const size_t perNode = (size_t)2 << 20;
+        EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, 12 * perNode - 2));
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 48 * perNode));
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 64 * perNode - 2));
+        EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, 64 * perNode));
+        EXPECT_EQ(48, RemoteFlushChannels(comm, 64 * perNode));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_ScaledBufferRaisesReduceScatterLimit) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateRemoteFlushAlgoProto_ScaledBufferRaisesReduceScatterLimit",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const size_t k6M = (size_t)6 << 20, k7M = (size_t)7 << 20;
+        ncclComm* comm = MakeRemoteFlushTuneComm(2, 16);
+        EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, 16 * (k6M + 1), ncclFuncReduceScatter, kRingLL128))
+            << "default buffer keeps the 6 MiB limit";
+        comm->buffSizes[NCCL_PROTO_LL128] = 4 * kLl128BuffSize;
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 16 * k7M, ncclFuncReduceScatter, kRingLL128));
+        EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, 16 * (k7M + 1), ncclFuncReduceScatter, kRingLL128));
+        DeleteCommWithArch(comm);
+
+        comm = MakeRemoteFlushTuneComm(16, 128);
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 128 * (k7M + 1), ncclFuncReduceScatter, kRingLL128))
+            << "16 nodes with the default buffer keep the tuning model's limit";
+        comm->buffSizes[NCCL_PROTO_LL128] = 4 * kLl128BuffSize;
+        EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, 128 * k7M, ncclFuncReduceScatter, kRingLL128))
+            << "16 nodes";
+        EXPECT_EQ(kRingSimple, ApplyRemoteFlushRule(comm, 128 * (8 << 20), ncclFuncReduceScatter, kRingLL128))
+            << "16 nodes, 8 MiB per rank";
+        DeleteCommWithArch(comm);
+      });
+}
+
+#if defined(ENABLE_LL128)
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_ScaledLl128BufferReduceScatterTo7MiB) {
+  // rcclUpdateCollectiveProtocol picks LL128 up to 7 MiB per rank once the collective LL128 buffer is scaled,
+  // on any node count (here 16).
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_ScaledLl128BufferReduceScatterTo7MiB",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeRemoteFlushTuneComm(16, 128);
+        comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+        comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 0;
+        comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 0;
+        comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 6 << 20;
+        auto protocolAt = [&](size_t perRank) {
+          ncclTaskColl info{};
+          info.func = ncclFuncReduceScatter;
+          info.algorithm = NCCL_ALGO_RING;
+          info.protocol = NCCL_PROTO_SIMPLE;
+          rcclUpdateCollectiveProtocol(comm, perRank * comm->nRanks, &info);
+          return info.protocol;
+        };
+        const size_t k7M = (size_t)7 << 20;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, protocolAt(k7M)) << "default buffer: tuning model limit";
+        comm->buffSizes[NCCL_PROTO_LL128] = 4 * kLl128BuffSize;
+        EXPECT_EQ(NCCL_PROTO_LL128, protocolAt(k7M));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, protocolAt(k7M + 1));
+        DeleteCommWithArch(comm);
+
+        // Only measured on gfx950 with 8 GPUs per node: a scaled buffer elsewhere (for example a child comm that
+        // took its parent's sizes) keeps the tuning model's limit.
+        struct Case {
+          const char* what;
+          const char* arch;
+          int nNodes, nRanks;
+          bool gdrFlushFlag;
+        };
+        for (const Case& c : {Case{"4 GPUs per node", "gfx950", 16, 64, true},
+                              Case{"flag off", "gfx950", 16, 128, false},
+                              Case{"gfx942", "gfx942", 16, 128, true}}) {
+          comm = MakeRemoteFlushTuneComm(c.nNodes, c.nRanks, c.gdrFlushFlag);
+          if (strcmp(c.arch, "gfx950") != 0) {
+            DeleteCommWithArch(comm);
+            comm = MakeRemoteFlushComm(c.arch, c.nNodes, c.nRanks, c.gdrFlushFlag);
+            comm->ll128LineElems = 8;
+            comm->ll128DataElems = 7;
+            comm->topo->ll128Enabled = true;
+          }
+          comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+          comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 0;
+          comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 0;
+          comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 6 << 20;
+          comm->p2pLl128BuffSize = kLl128BuffSize;
+          comm->buffSizes[NCCL_PROTO_LL128] = 4 * kLl128BuffSize;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, protocolAt(k7M)) << c.what;
+          EXPECT_EQ(NCCL_PROTO_LL128, protocolAt(6 << 20)) << c.what << ": the tuning model's limit still applies";
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+#endif  // ENABLE_LL128
+
+namespace {
+// Any value counts: presence alone is the gate.
+void ExpectUserSettingLeavesChoiceUntouched(const char* var) {
+  SetMicroEnvAbsent("NCCL_ALGO");
+  SetMicroEnvAbsent("NCCL_PROTO");
+  SetMicroEnv(var, "Ring");
+  ncclComm* comm = MakeRemoteFlushComm("gfx950", 2, 16);
+  EXPECT_EQ(kRingLL, ApplyRemoteFlushRule(comm, (size_t)64 << 20)) << var << " set";
+  EXPECT_EQ(kRingLL128, ApplyRemoteFlushRule(comm, (size_t)16 * (8 << 20), ncclFuncReduceScatter, kRingLL128))
+      << var << " set, reduce_scatter";
+  DeleteCommWithArch(comm);
+}
+}  // namespace
+
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_UserAlgoLeavesChoiceUntouched) {
+  RUN_ISOLATED_TEST("Wrap_UpdateRemoteFlushAlgoProto_UserAlgoLeavesChoiceUntouched",
+                    []() { ExpectUserSettingLeavesChoiceUntouched("NCCL_ALGO"); });
+}
+
+TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_UserProtoLeavesChoiceUntouched) {
+  RUN_ISOLATED_TEST("Wrap_UpdateRemoteFlushAlgoProto_UserProtoLeavesChoiceUntouched",
+                    []() { ExpectUserSettingLeavesChoiceUntouched("NCCL_PROTO"); });
+}
+
+namespace {
+constexpr size_t kKiB = 1024, kMiB = 1024 * 1024;
+
+// The gfx1250 arch-table entries this change reads (rccl_arch_thresholds.cc).
+// rccl-UnitTestsMicro links no real tables (the fake rcclGetArchThresholds returns
+// null), so tests hand this copy to the comm; RcclDdaTierThresholds.* (GPU) checks
+// that the real table resolves to the same caps.
+rcclArchThresholds MakeRankScaledTable() {
+  rcclArchThresholds t{};
+  t.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
+  t.ddaLLMax[ncclFuncAllGather] = 128 * kKiB;
+  t.ddaLLMax[ncclFuncReduceScatter] = 4 * kMiB;
+  t.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
+  t.ddaLL128Max[ncclFuncAllGather] = 128 * kMiB;
+  t.ddaLL128Max[ncclFuncReduceScatter] = 224 * kMiB;
+  t.ddaVmmMax[ncclFuncAllReduce] = 16 * kMiB;
+  t.ddaLLMaxPerRank[ncclFuncAllReduce] = 1 * kMiB;
+  t.ddaLLMaxPerRank[ncclFuncAllGather] = 16 * kKiB;
+  t.ddaLLMaxPerRank[ncclFuncReduceScatter] = 1 * kMiB;
+  t.ddaLL128MaxPerRank[ncclFuncAllGather] = 16 * kMiB;
+  t.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 15 * kMiB / 2;
+  t.ddaVmmMaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
+  t.rankScaledMinRanks = 8;
+  t.rankScaledMaxBytes = 256 * kMiB;
+  t.ddaArVmmFirstMinRanks = 32;
+  t.ddaArVmmFirstMinBytes = 2 * kMiB;
+  t.ddaArVmmFirstMaxPerRank = 512 * kKiB;
+  t.ddaArRegCaptureMinBytes = 32 * kMiB;
+  t.ddaArRegCapturePerRankBytes = 2 * kMiB;
+  t.ddaArRegEagerMinShardBytes = 512 * kKiB;
+  t.ddaArRegEagerMaxShardBytes = 1 * kMiB;
+  t.ddaVmmBlockBudget = 2048;
+  t.ddaVmmMinBlocks = 32;
+  t.ddaVmmMaxBlocks = 128;
+  t.arRingLL128MaxPerRank = 32 * kMiB;
+  t.arTreeLL128Unlimited = true;
+  t.arTreeMaxPerRank = 1 * kMiB;
+  t.arTreeLLMaxPerRank = 32 * kKiB;
+  t.agRingLL128MaxPerRank = 64 * kMiB;
+  t.rsRingLL128MinPerRank = 512 * kKiB;
+  t.rsRingLL128MaxPerRank = 8 * kMiB;
+  t.rsRingLL128MaxPerRank1B = 32 * kMiB;
+  t.rsRingSimpleCappedMaxPerRank = 32 * kMiB;
+  t.rsRingSimpleCappedChannels = 128;
+  t.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
+  t.symTdmMaxR2[ncclFuncAllGather] = 128 * kMiB;
+  t.symTdmMaxR2Graph[ncclFuncAllGather] = 4096 * kMiB;
+  t.symTdmCrossTrayMaxR2[ncclFuncAllGather] = 512 * kMiB;
+  return t;
+}
+
+const rcclArchThresholds* Gfx1250Table() {
+  static const rcclArchThresholds table = MakeRankScaledTable();
+  return &table;
+}
+
+// gfx1250 single-node comm carrying the arch table and tuning_model_11's AllReduce,
+// AllGather and ReduceScatter LL / LL128 ranges.
+constexpr uint64_t kGfx1250ArLL128Max = 16777216;
+ncclComm* MakeGfx1250ProtocolComm(int nRanks) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->nNodes = 1;
+  comm->nRanks = nRanks;
+  comm->archThresholds = Gfx1250Table();
+  comm->topo->ll128Enabled = true;
+  comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+  comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 131072;
+  comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 131072;
+  comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = kGfx1250ArLL128Max;
+  for (int t : {RCCL_AG_TUNABLE, RCCL_RS_TUNABLE}) {
+    comm->minMaxLLRange[t][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+    comm->minMaxLLRange[t][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 1048576;
+    comm->minMaxLLRange[t][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 1048576;
+  }
+  comm->minMaxLLRange[RCCL_AG_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 16777216;
+  comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 4194304;
+  return comm;
+}
+
+// Protocol rcclUpdateCollectiveProtocol picks for `func` / `algorithm`. AllReduce
+// passes the whole message; AllGather and ReduceScatter pass the per-rank share
+// (nBytes is nRanks x that), matching rcclGetSizePerRank().
+int ProtocolAfterUpdate(ncclComm* comm, ncclFunc_t func, int algorithm, size_t bytes,
+                        ncclDataType_t dt = ncclFloat32) {
+  ncclTaskColl info{};
+  info.func = func;
+  info.algorithm = algorithm;
+  info.protocol = NCCL_PROTO_SIMPLE;
+  info.datatype = dt;
+  const size_t nBytes = func == ncclFuncAllReduce ? bytes : bytes * (size_t)comm->nRanks;
+  rcclUpdateCollectiveProtocol(comm, nBytes, &info);
+  return info.protocol;
+}
+int ArProtocol(ncclComm* comm, int algorithm, size_t nBytes) {
+  return ProtocolAfterUpdate(comm, ncclFuncAllReduce, algorithm, nBytes);
+}
+int RingProtocol(ncclComm* comm, ncclFunc_t func, size_t perRank, ncclDataType_t dt = ncclFloat32) {
+  return ProtocolAfterUpdate(comm, func, NCCL_ALGO_RING, perRank, dt);
+}
+}  // namespace
+
+// AICOMRCCL-1756: on 8+ rank single-node gfx1250 comms Tree AllReduce stays on LL up to
+// nRanks x 32 KiB and leaves it one byte later. 4 ranks, two nodes, or no arch table
+// keep the model's 128 KiB LL range. Holds with or without ENABLE_LL128.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250TreeAllReduceLLScalesWithRanks) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250TreeAllReduceLLScalesWithRanks",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        for (int nRanks : {8, 64}) {
+          ncclComm* comm = MakeGfx1250ProtocolComm(nRanks);
+          const size_t cap = size_t(nRanks) * 32 * kKiB;
+          EXPECT_EQ(NCCL_PROTO_LL, ArProtocol(comm, NCCL_ALGO_TREE, cap)) << nRanks;
+          EXPECT_NE(NCCL_PROTO_LL, ArProtocol(comm, NCCL_ALGO_TREE, cap + 1)) << nRanks;
+          EXPECT_NE(NCCL_PROTO_LL, ArProtocol(comm, NCCL_ALGO_RING, cap)) << "Ring keeps the model range, " << nRanks;
+          DeleteCommWithArch(comm);
+        }
+        ncclComm* comm = MakeGfx1250ProtocolComm(4);
+        EXPECT_EQ(NCCL_PROTO_LL, ArProtocol(comm, NCCL_ALGO_TREE, 131072));
+        EXPECT_NE(NCCL_PROTO_LL, ArProtocol(comm, NCCL_ALGO_TREE, 131073));
+        comm->nRanks = 8;
+        comm->nNodes = 2;
+        EXPECT_NE(NCCL_PROTO_LL, ArProtocol(comm, NCCL_ALGO_TREE, 131073)) << "two nodes";
+        comm->nNodes = 1;
+        comm->archThresholds = nullptr;
+        EXPECT_NE(NCCL_PROTO_LL, ArProtocol(comm, NCCL_ALGO_TREE, 131073)) << "no arch table";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The LL128 overrides sit inside rcclUpdateCollectiveProtocol's ENABLE_LL128 arm, so
+// these only compile where that arm does (see the IsArchSupportedForFunc_LL128_* pair
+// above for the same split).
+#if defined(ENABLE_LL128)
+// AICOMRCCL-2874: on gfx1250 Tree LL128 beats Tree Simple at every size, so a Tree
+// AllReduce far past the model's LL128 ceiling stays on LL128. Ring at the same size,
+// and Tree on a two-node comm, are the controls: they still drop to Simple.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250TreeAllReduceKeepsLL128) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250TreeAllReduceKeepsLL128",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeGfx1250ProtocolComm(16);
+        const size_t big = size_t(16) << 30;
+        EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_TREE, big));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, big));
+        EXPECT_EQ(NCCL_PROTO_LL, ArProtocol(comm, NCCL_ALGO_TREE, 1024)) << "LL range still wins small sizes";
+        comm->nNodes = 2;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_TREE, big)) << "two nodes";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// AICOMRCCL-2875: Ring AllReduce keeps LL128 up to nRanks x 32 MiB (inclusive), past the
+// model's 16 MiB ceiling, and returns to Simple one byte later.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ScalesWithRanks) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ScalesWithRanks",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        // Not a rank-scaled entry: it applies below rankScaledMinRanks too.
+        for (int nRanks : {4, 8, 16, 64}) {
+          ncclComm* comm = MakeGfx1250ProtocolComm(nRanks);
+          const size_t cap = size_t(nRanks) * 32 * kMiB;
+          EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_RING, cap)) << nRanks;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, cap + 1)) << nRanks;
+          DeleteCommWithArch(comm);
+        }
+        // Two ranks with a 128 MiB model ceiling: nRanks x 32 MiB (64 MiB) sits below it,
+        // so the model ceiling is the one that applies.
+        constexpr uint64_t kModelCeiling = 128ULL << 20;
+        ncclComm* comm = MakeGfx1250ProtocolComm(2);
+        comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = kModelCeiling;
+        EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_RING, kModelCeiling));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, kModelCeiling + 1));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Other arches keep the model ceiling for both algorithms.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_NonGfx1250AllReduceKeepsTableLL128Ceiling) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_NonGfx1250AllReduceKeepsTableLL128Ceiling",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        // gfx1250's ranges and rank count on another arch, which reaches the same arm via nNodes >= 2.
+        ncclComm* comm = MakeCommWithArch("gfx90a");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->topo->ll128Enabled = true;
+        comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 131072;
+        comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 131072;
+        comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = kGfx1250ArLL128Max;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_TREE, kGfx1250ArLL128Max + 1));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, kGfx1250ArLL128Max + 1));
+        EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_RING, kGfx1250ArLL128Max));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Tree AllReduce takes LL128 right above the scaled LL range.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250TreeAllReduceLL128AboveLLRange) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250TreeAllReduceLL128AboveLLRange",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeGfx1250ProtocolComm(8);
+        EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_TREE, 8 * 32 * kKiB + 1));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// AllGather Ring keeps LL128 to 64 MiB per rank on 8+ rank single-node gfx1250 comms
+// (model: 16 MiB); two-node and 4-rank comms keep the model.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250AllGatherRingLL128To64MiBPerRank) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250AllGatherRingLL128To64MiBPerRank",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeGfx1250ProtocolComm(16);
+        EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncAllGather, 64 * kMiB));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncAllGather, 64 * kMiB + 16));
+        comm->nNodes = 2;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncAllGather, 16 * kMiB + 16)) << "two nodes";
+        comm->nNodes = 1;
+        comm->nRanks = 4;
+        EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncAllGather, 16 * kMiB));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncAllGather, 16 * kMiB + 16));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ReduceScatter Ring on 8+ rank single-node gfx1250 comms: LL to 512 KiB per rank, LL128
+// to 8 MiB per rank (32 MiB for 1-byte types), Simple above. Two-node and 4-rank comms
+// keep the model ranges.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250ReduceScatterRingRanges) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250ReduceScatterRingRanges",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeGfx1250ProtocolComm(8);
+        EXPECT_EQ(NCCL_PROTO_LL, RingProtocol(comm, ncclFuncReduceScatter, 512 * kKiB));
+        EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncReduceScatter, 512 * kKiB + 16));
+        EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncReduceScatter, 8 * kMiB));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncReduceScatter, 8 * kMiB + 16));
+        EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncReduceScatter, 32 * kMiB, ncclFloat8e4m3));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncReduceScatter, 32 * kMiB + 16, ncclFloat8e4m3));
+        comm->nNodes = 2;
+        EXPECT_EQ(NCCL_PROTO_LL, RingProtocol(comm, ncclFuncReduceScatter, 1 * kMiB)) << "two nodes";
+        comm->nNodes = 1;
+        comm->nRanks = 4;
+        EXPECT_EQ(NCCL_PROTO_LL, RingProtocol(comm, ncclFuncReduceScatter, 1 * kMiB));
+        EXPECT_EQ(NCCL_PROTO_LL128, RingProtocol(comm, ncclFuncReduceScatter, 4 * kMiB));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, RingProtocol(comm, ncclFuncReduceScatter, 4 * kMiB + 16));
+        DeleteCommWithArch(comm);
+      });
+}
+#else
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250AllReduceLL128_DisabledAtCompileTime) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250AllReduceLL128_DisabledAtCompileTime",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeGfx1250ProtocolComm(16);
+        for (int algorithm : {NCCL_ALGO_TREE, NCCL_ALGO_RING}) {
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, algorithm, 64 * kMiB)) << "algorithm=" << algorithm;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+#endif  // ENABLE_LL128
+
+namespace {
+// DPX broadcast ceilings. Gfx1250Table() leaves both at 0, which is the SPX case.
+rcclArchThresholds MakeDpxBroadcastTable() {
+  rcclArchThresholds t{};
+  t.bcRingLLMaxBytes = 16 * kKiB;
+  t.bcRingLL128MaxBytes = 512 * kMiB;
+  return t;
+}
+
+// tuning_model_11 broadcast ranges. AllReduce / AllGather / ReduceScatter come
+// from MakeGfx1250ProtocolComm.
+void SetModelBroadcastRanges(ncclComm* comm) {
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 2048;
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 2048;
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 16 * kMiB;
+}
+
+int ProtocolOf(ncclComm* comm, ncclFunc_t func, size_t nBytes) {
+  ncclTaskColl info{};
+  info.func = func;
+  info.algorithm = NCCL_ALGO_RING;
+  info.protocol = NCCL_PROTO_UNDEF;
+  rcclUpdateCollectiveProtocol(comm, nBytes, &info);
+  return info.protocol;
+}
+}  // namespace
+
+// gfx1250 DPX broadcast uses the arch table's total-byte ceilings at every node
+// count, including 12. SPX is Gfx1250Table(), whose ceilings are 0, so it keeps
+// tuning_model_11's per-rank ranges.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250DpxBroadcastUsesTotalBytes) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250DpxBroadcastUsesTotalBytes",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        const size_t llMax = 16 * kKiB;
+        const size_t ll128Max = 512 * kMiB;
+        const struct {
+          int nNodes;
+          int nRanks;
+        } scales[] = {{1, 8}, {2, 16}, {4, 32}, {8, 64}, {12, 96}};
+        for (const auto& scale : scales) {
+          ncclComm* comm = MakeGfx1250ProtocolComm(scale.nRanks);
+          comm->nNodes = scale.nNodes;
+          comm->archThresholds = &dpx;
+          SetModelBroadcastRanges(comm);
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 0)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, llMax)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, llMax + 1)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, ll128Max)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, ll128Max + 1)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, (size_t)16 << 30)) << scale.nNodes;
+          // The broadcast ceilings must not move AllReduce off its per-rank model.
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncAllReduce, 100 * kKiB)) << scale.nNodes;
+          DeleteCommWithArch(comm);
+        }
+
+        // SPX table is installed, with a zero LL128 ceiling, so the guard in
+        // rcclBroadcastTotalByteTable is what keeps the per-rank model. 16 KiB + 1
+        // on 8 ranks is still 2048 B/rank (LL). 256 MiB is 32 MiB/rank, past the
+        // model's 16 MiB LL128 ceiling (Simple).
+        ncclComm* spx = MakeGfx1250ProtocolComm(8);
+        SetModelBroadcastRanges(spx);
+        ASSERT_NE(spx->archThresholds, nullptr);
+        EXPECT_EQ((size_t)0, spx->archThresholds->bcRingLLMaxBytes);
+        EXPECT_EQ((size_t)0, spx->archThresholds->bcRingLL128MaxBytes);
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(spx, ncclFuncBroadcast, llMax + 1));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(spx, ncclFuncBroadcast, 256 * kMiB));
+        DeleteCommWithArch(spx);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250DpxBroadcastHonorsUserProto) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250DpxBroadcastHonorsUserProto",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "LL128");
+        const rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        ncclComm* comm = MakeGfx1250ProtocolComm(8);
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.func = ncclFuncBroadcast;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        rcclUpdateCollectiveProtocol(comm, 1024, &info);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol);
+        DeleteCommWithArch(comm);
+      });
+}
+
+#if defined(ENABLE_LL128)
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250DpxBroadcastWithoutLl128FallsToSimple) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250DpxBroadcastWithoutLl128FallsToSimple",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        ncclComm* comm = MakeGfx1250ProtocolComm(64);
+        comm->nNodes = 8;
+        comm->archThresholds = &dpx;
+        comm->topo->ll128Enabled = false;
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 16 * kKiB));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 16 * kKiB + 1));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 512 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+#endif
+
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_UndefinedTuningWarnsOnceForSupportedArch) {
   RUN_ISOLATED_TEST(
       "Wrap_UpdateCollectiveProtocol_UndefinedTuningWarnsOnceForSupportedArch",
@@ -1929,6 +2786,18 @@ TEST(WrapMicrotest, UseHierarchicalAllGather_AboveThresholdReturnsFalse) {
   DeleteCommWithArch(comm);
 }
 
+// The default floor is 16 bytes per rank at any rank count.
+TEST(WrapMicrotest, UseHierarchicalAllGather_MinBytesIsPerRank) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 32;
+  comm->nRanks = 256;
+  comm->hierarchicalCommsInitialized = true;
+  EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/8 * 256));
+  EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/16 * 256 - 1));
+  EXPECT_TRUE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/16 * 256));
+  DeleteCommWithArch(comm);
+}
+
 TEST(WrapMicrotestIsolated, UseHierarchicalAllGather_ParamDisabledReturnsFalse) {
   RUN_ISOLATED_TEST(
       "Wrap_UseHierarchicalAllGather_ParamDisabledReturnsFalse",
@@ -2143,6 +3012,20 @@ TEST(WrapMicrotestIsolated, UseReduceScatterDirect_TwoNodesInRangeReturnsTrue) {
       });
 }
 
+// rawTaskAppend posts a useDirect ReduceScatter as a plain collective, so no per-peer transfer fills tempBuff.
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_EnqueueRearchEnabledReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_EnqueueRearchEnabledReturnsFalse",
+      []() {
+        g_loadParam = ForceParam("ENQUEUE_REARCH_ENABLE", int64_t(1));
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        size_t msgSize = 1048576; // the TwoNodesInRangeReturnsTrue case
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, UseReduceScatterDirect_TwoNodesAtUpperBoundReturnsTrue) {
   RUN_ISOLATED_TEST(
       "Wrap_UseReduceScatterDirect_TwoNodesAtUpperBoundReturnsTrue",
@@ -2254,41 +3137,46 @@ TEST(WrapMicrotestIsolated, UseReduceScatterDirect_UnsupportedNodeCountReturnsFa
       });
 }
 
-// *** CONFIRMED REAL BUG, EMPIRICALLY VERIFIED *** in rcclUseReduceScatterDirect
-// (rccl_wrap.cc): `size_t threshold = ...; if (threshold > -1)` -- comparing an
-// unsigned size_t against the literal -1 promotes -1 to SIZE_MAX, so this
-// condition is ALWAYS FALSE regardless of what RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD
-// is set to. Execution always falls to the `else` branch, hardcoding
-// threshold=8388608 no matter what the user configures. This test proves it
-// directly: override the threshold to 100 via g_loadParam, use a msgSize
-// (1024) that's within the (buggy) 8MiB default but ABOVE the requested
-// 100-byte override -- if the override worked, this should return false; it
-// doesn't.
+// RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD=100 must reject a 1024-byte message; the
+// old `threshold > -1` guard ignored the override and always used 8 MiB.
 //
-// This also explains why the bug was never caught by any test above: every
-// other test in this section relies on the real default (8388608) rather
-// than overriding it, so they all pass regardless of whether the override
-// path works. This is the only test in the whole file that actually
-// exercises RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD's override path.
-//
-// The assertion below (EXPECT_TRUE) PINS the current, buggy behavior -- not
-// the intended one -- so this test passes today. If/when the production
-// `threshold > -1` bug gets fixed to `threshold != (size_t)-1` (matching the
-// working pattern used by rcclUseAllGatherDirect's equivalent check), this
-// assertion must flip to EXPECT_FALSE. Left failing-if-fixed deliberately,
-// so fixing the bug forces a conscious update here rather than silently
-// leaving a stale, wrong-direction test behind.
-TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdOverride_PinsConfirmedBug) {
+// These two tests are the only coverage of the override path -- every other
+// case in this section leaves the default in place, which is why that bug
+// survived. Keep both: this one pins the override, the next pins the clamp.
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdOverrideIsHonoured) {
   RUN_ISOLATED_TEST(
-      "Wrap_UseReduceScatterDirect_ThresholdOverride_PinsConfirmedBug",
+      "Wrap_UseReduceScatterDirect_ThresholdOverrideIsHonoured",
       []() {
         g_loadParam = ForceParam("RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD", int64_t(100));
         ncclComm* comm = MakeCommWithArch("gfx950");
         comm->nNodes = 8;
-        size_t msgSize = 1024; // > the requested 100-byte override, but within the buggy 8MiB fallback
-        EXPECT_TRUE(rcclUseReduceScatterDirect(comm, msgSize))
-            << "This pins CURRENT (buggy) behavior -- see the comment above. If this now "
-               "fails, the production threshold bug was fixed; flip this to EXPECT_FALSE.";
+        size_t msgSize = 1024; // > the requested 100-byte override, < the 8MiB hard limit
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize))
+            << "RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD=100 must exclude a 1024-byte message. "
+               "Seeing true here means the threshold is being ignored and the hardcoded "
+               "8MiB fallback is back -- see the sign-conversion note above.";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The 8MiB hard limit, which the std::min above applies. Before the
+// sign-conversion fix that clamp was unreachable -- the guard was always false,
+// so the else branch hardcoded 8MiB and std::min never ran. It executes for the
+// first time now, and it is what keeps enabled message sizes inside the
+// TEMP_BUFF_SIZE headroom noted at the clamp. 8 nodes accepts anything up to
+// the threshold, so raising the override past 8MiB isolates the clamp: without
+// it, threshold stays 16MiB and this message is accepted.
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdAboveHardLimitIsClamped) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_ThresholdAboveHardLimitIsClamped",
+      []() {
+        g_loadParam = ForceParam("RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD", int64_t(16777216));
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 8;
+        size_t msgSize = 8388609; // 8MiB + 1: under the 16MiB override, over the clamp
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize))
+            << "A threshold above 8MiB must be clamped to 8388608. Seeing true here means "
+               "the hard limit is gone and messages can exceed the TEMP_BUFF_SIZE headroom.";
         DeleteCommWithArch(comm);
       });
 }
@@ -2371,6 +3259,21 @@ TEST(WrapMicrotestIsolated, UseHierarchicalReduceScatter_NotInitializedReturnsFa
         comm->nNodes = 16;
         comm->hierarchicalCommsInitialized = false;
         EXPECT_FALSE(rcclUseHierarchicalReduceScatter(comm, /*msgSize=*/1024));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseHierarchicalReduceScatter_MinBytesIsPerRank) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseHierarchicalReduceScatter_MinBytesIsPerRank",
+      []() {
+        g_loadParam = ForceParam("RCCL_HIERARCHICAL_REDUCE_SCATTER", int64_t(1));
+        ncclComm* comm = MakeZeroedComm();
+        comm->nNodes = 32;
+        comm->nRanks = 256;
+        comm->hierarchicalCommsInitialized = true;
+        EXPECT_FALSE(rcclUseHierarchicalReduceScatter(comm, /*msgSize=*/16 * 256 - 1));
+        EXPECT_TRUE(rcclUseHierarchicalReduceScatter(comm, /*msgSize=*/16 * 256));
         DeleteCommWithArch(comm);
       });
 }
@@ -2521,6 +3424,157 @@ TEST(WrapMicrotestIsolated, OptThreadBlockSize_SingleNodeUsesHalfThreads) {
         int nThreads = -1;
         rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
         EXPECT_EQ(RCCL_SINGLE_NODE_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 DPX caps a 256-thread request at 192. Single-node would otherwise
+// force RCCL_SINGLE_NODE_MAX_NTHREADS, and multi-node LL would force
+// RCCL_LL_MAX_NTHREADS. nThreads is seeded with 256, the value the caller
+// passes from maxThreads when NCCL_NTHREADS is unset.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250DpxDefaultIs192) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250DpxDefaultIs192",
+      []() {
+        static rcclArchThresholds spx{};
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = &spx;
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        int nThreads = 256;
+        comm->nNodes = 1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_GFX1250_DEFAULT_NTHREADS, nThreads);
+        comm->nNodes = 2;
+        info.protocol = NCCL_PROTO_LL;
+        nThreads = 256;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(RCCL_GFX1250_DEFAULT_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A lower NCCL_NTHREADS / NCCL_LL128_NTHREADS is already in nThreads. DPX must
+// not raise it to 192.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250DpxKeepsLowerNthreads) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250DpxKeepsLowerNthreads",
+      []() {
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->nNodes = 2;
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        int nThreads = 128;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(128, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// SPX is unmeasured, so gfx1250 SPX keeps the 256-thread single-node default.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250SpxStays256) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250SpxStays256",
+      []() {
+        static rcclArchThresholds spx{};
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = &spx;
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->nNodes = 1;
+        comm->archThresholds = &spx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        int nThreads = 256;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_SINGLE_NODE_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// PAT's maxThreads slot is never filled on HIP, so the caller passes 0. The
+// DPX cap must not turn that into a short block: the PAT compute thread is
+// NCCL_MAX_NTHREADS-1. Multi-node so the single-node arm is not what sets it.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250DpxPatStaysFullBlock) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250DpxPatStaysFullBlock",
+      []() {
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->nNodes = 2;
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_PAT;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncAllGather;
+        int nThreads = 0;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_DEFAULT_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx950 and gfx942 return the same arch table for DPX and SPX. The gfx1250
+// arch check is what keeps that shared table from taking the 192 cap.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx950SharedTableStays256) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx950SharedTableStays256",
+      []() {
+        static rcclArchThresholds shared{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = &shared;
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &shared;
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->WarpSize = 64;
+        comm->nNodes = 1;
+        comm->archThresholds = &shared;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncAllReduce;
+        int nThreads = 256;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_SINGLE_NODE_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_THREADS_PER_BLOCK wins over the DPX 192 cap. The comm is DPX so this
+// fails if the override is moved below that cap.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250UserOverrideKeeps256) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250UserOverrideKeeps256",
+      []() {
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        g_loadParam = ForceParam("RCCL_THREADS_PER_BLOCK", int64_t(256));
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->nNodes = 1;
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        int nThreads = 192;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(256, nThreads);
         DeleteCommWithArch(comm);
       });
 }
@@ -3010,7 +4064,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_DisabledByDefaultWarnsOnce) {
   RUN_ISOLATED_TEST(
       "Wrap_UseCeAllReduce_DisabledByDefaultWarnsOnce",
       []() {
-        // "CE AllReduce not enabled" is an INFO log, gated on ncclDebugLevel
+        // "CE AllReduce not enabled" is an INFO log, gated on ncclDebugLevelMask
         // (defaults to suppressed) unlike this file's WARN-based messages.
         RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_ALL);
         ncclComm* comm = MakeZeroedComm();
@@ -3081,24 +4135,6 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_CountNotDivisibleByNRanksReturnsFalse
       });
 }
 
-TEST(WrapMicrotestIsolated, UseCeAllReduce_MsgTooLargeReturnsFalse) {
-  RUN_ISOLATED_TEST(
-      "Wrap_UseCeAllReduce_MsgTooLargeReturnsFalse",
-      []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
-        ncclComm* comm = MakeZeroedComm();
-        comm->symmetricSupport = 1;
-        comm->nNodes = 1;
-        comm->nRanks = 1;
-        // count * sizeof(float) must exceed NCCL_CE_AR_MAX_MSG_BYTES (256MiB).
-        size_t count = (256ull * 1024 * 1024 / 4) + 1;
-        std::string log = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, count, ncclFloat32, ncclSum, nullptr)); });
-        EXPECT_NE(std::string::npos, log.find("msgBytes"));
-        DeleteCommWithArch(comm);
-      });
-}
-
 TEST(WrapMicrotestIsolated, UseCeAllReduce_NonZeroCtaPolicyWithoutForceReturnsFalse) {
   RUN_ISOLATED_TEST(
       "Wrap_UseCeAllReduce_NonZeroCtaPolicyWithoutForceReturnsFalse",
@@ -3155,6 +4191,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_ForceBypassesCtaPolicyAndAllValidRetu
           if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
           return deft;
         };
+        g_ceImplemented = true;
         ncclComm* comm = MakeZeroedComm();
         comm->symmetricSupport = 1;
         comm->nNodes = 1;
@@ -3165,11 +4202,118 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_ForceBypassesCtaPolicyAndAllValidRetu
       });
 }
 
+// Every other guard passes; only the CE driver gate says no.
+TEST(WrapMicrotestIsolated, UseCeAllReduce_CeNotImplementedReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_CeNotImplementedReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          return deft;
+        };
+        g_ceImplemented = false;
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// One node, LSA team of 2 in a comm of 4: staged CE is not usable; with a
+// spanning team it is.
+TEST(WrapMicrotestIsolated, UseCeAllReduce_SplitLsaTeamReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_SplitLsaTeamReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          return deft;
+        };
+        g_ceImplemented = true;
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 4;
+        comm->devrState.bigSize = 1; // take computeLsaSize's cached path
+        comm->devrState.lsaSize = 2;
+        EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr));
+        comm->devrState.lsaSize = 4;
+        EXPECT_TRUE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Runs from ncclPrepareTasks for every comm, so cross-clique comms that skip
+// ncclMakeSymmetricTaskList still get the bit.
+TEST(WrapMicrotest, SetCeAllReduceFastPath_RangeInSymmetricWindowSetsBit) {
+  ncclComm* comm = MakeZeroedComm();
+  alignas(16) uint8_t storage[128];
+  ncclDevrWindow recvWin{};
+  recvWin.userPtr = storage;
+  recvWin.size = sizeof(storage);
+  recvWin.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+  ncclTaskColl a{}, b{};
+  for (ncclTaskColl* t : {&a, &b}) {
+    t->func = ncclFuncAllReduce;
+    t->datatype = ncclInt8;
+    t->recvWin = &recvWin;
+    ncclIntruQueueEnqueue(&comm->planner.collCeTaskQueue, t);
+  }
+  a.count = 16;
+  a.recvbuff = storage + 32;
+  b.count = sizeof(storage);  // exactly the whole window
+  b.recvbuff = storage;
+  comm->p2pCrossClique = true;
+
+  rcclSetCeAllReduceFastPath(comm);
+  EXPECT_TRUE(a.ceAllReduceFastPath);
+  EXPECT_TRUE(b.ceAllReduceFastPath);
+  delete comm;
+}
+
+TEST(WrapMicrotest, SetCeAllReduceFastPath_IneligibleTasksClearBit) {
+  ncclComm* comm = MakeZeroedComm();
+  alignas(16) uint8_t storage[128];
+  ncclDevrWindow symWin{};
+  symWin.userPtr = storage;
+  symWin.size = sizeof(storage);
+  symWin.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+  ncclDevrWindow plainWin = symWin;
+  plainWin.winFlags = 0;
+
+  ncclTaskColl pastEnd{}, notSym{}, noWin{}, notAr{};
+  for (ncclTaskColl* t : {&pastEnd, &notSym, &noWin, &notAr}) {
+    t->func = ncclFuncAllReduce;
+    t->datatype = ncclInt8;
+    t->count = 16;
+    t->recvbuff = storage;
+    t->recvWin = &symWin;
+    t->ceAllReduceFastPath = true;  // stale value from an earlier launch
+    ncclIntruQueueEnqueue(&comm->planner.collCeTaskQueue, t);
+  }
+  pastEnd.count = 64;
+  pastEnd.recvbuff = storage + 96;
+  notSym.recvWin = &plainWin;
+  noWin.recvWin = nullptr;
+  notAr.func = ncclFuncAllGather;
+
+  rcclSetCeAllReduceFastPath(comm);
+  EXPECT_FALSE(pastEnd.ceAllReduceFastPath);
+  EXPECT_FALSE(notSym.ceAllReduceFastPath);
+  EXPECT_FALSE(noWin.ceAllReduceFastPath);
+  EXPECT_FALSE(notAr.ceAllReduceFastPath);
+  delete comm;
+}
+
 // Documents/pins a real production gap (does not change production code):
-// of this function's ten early-return guards, eight emit a WARN with NO
-// log-once protection. The other two are the exception that shows the intent:
-// the disabled-by-default guard latches its message behind a
-// `static bool warnedDisabled`, and the `acc != nullptr` guard is silent.
+// of this function's twelve early-return guards, seven emit a WARN with NO
+// log-once protection. The disabled-by-default guard latches behind
+// `static bool warnedDisabled`, the `acc` and zero 2-shot cap guards are
+// silent, and the CE-driver and LSA-span guards log at INFO.
 // Every other test in this
 // section is single-call-per-process (RUN_ISOLATED_TEST), so none of them
 // can reveal this -- this test deliberately calls the SAME non-qualifying
@@ -3263,6 +4407,43 @@ TEST(WrapMicrotest, DdaEnabled_UnsupportedArchReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx90a");
   comm->nRanks = 8;
   EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_UnsetLaunchOrderDoesNotDisable) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 8;
+  // Init leaves launchOrderImplicit at NCCL_CONFIG_UNDEF_INT unless the env or comm config sets it.
+  comm->config.launchOrderImplicit = NCCL_CONFIG_UNDEF_INT;
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx950AtRankFloorReturnsTrue) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nRanks = 8;
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx950BelowRankFloorReturnsFalse) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nRanks = 7;
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx1250HasNoRankFloor) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->nRanks = 2;
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_ZeroThresholdReturnsFalseEvenForZeroBytes) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 8;
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/0, /*threshold=*/0));
   DeleteCommWithArch(comm);
 }
 
@@ -3449,7 +4630,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricEligibleChoosesSymmetric) {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST,
+                                                  /*maxChannels=*/6));
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         rcclCollDecision decision{};
@@ -3463,37 +4645,217 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricEligibleChoosesSymmetric) {
       });
 }
 
-// CE registered wins over symmetric when both are eligible, per the
-// production comment's documented precedence -- distinct from the test
-// above, which only proves symmetric wins when CE ISN'T eligible.
-TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothEligible) {
+// A Tensor Data Mover pick is reported as SymTDM in query mode, while the live
+// decision stays RCCL_SYMMETRIC: enqueue's symkExtract gate and the dispatch
+// switches compare against that value.
+TEST(WrapMicrotestIsolated, SelectAllReduce_TdmKernelReportsSymmetricTdmOnlyInQuery) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothEligible",
+      "Wrap_SelectAllReduce_TdmKernelReportsSymmetricTdmOnlyInQuery",
       []() {
-        g_loadParam = [](const char* env, int64_t def) -> int64_t {
-          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
-          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
-          return def;
-        };
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                   size_t, const void*, void*, bool) { return true; });
-        ScopedHook ceAvailable(
-            g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
-               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST,
+                                                  /*maxChannels=*/64));
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
-        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(64, decision.nMaxChannels);
+
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/false,
+                                                    /*graphCapturingHint=*/false, &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, live.algo);
         DeleteCommWithArch(comm);
+      });
+}
+
+namespace {
+// gfx950-shaped AllReduce row: symk never withdrawn, registered CE capped at 256 MiB.
+constexpr size_t kCeVsSymkRegCapBytes = 256ull * 1024 * 1024;
+constexpr size_t kCeVsSymkOverCapCount = 2 * kCeVsSymkRegCapBytes / sizeof(float);
+
+rcclArchThresholds MakeCeVsSymkTable() {
+  rcclArchThresholds table{};
+  for (size_t f = 0; f < RCCL_DDA_FUNC_COUNT; ++f) {
+    table.symMaxR2[f] = kThreshUnlimited;
+    table.symMaxR2Graph[f] = kThreshUnlimited;
+  }
+  table.ceRegMax[ncclFuncAllReduce] = kCeVsSymkRegCapBytes;
+  return table;
+}
+
+const rcclArchThresholds kCeVsSymkTable = MakeCeVsSymkTable();
+
+// Selects a sum AllReduce of `count` floats with registered CE available; symk is requested only when asked.
+int SelectCeVsSymk(int ctaPolicy, size_t count, bool symkRequested, const rcclArchThresholds* table = &kCeVsSymkTable,
+                   const char* arch = "gfx950") {
+  ScopedHook symRequested(g_isSymmetricKernelRequested,
+                          [symkRequested](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*,
+                                          void*, bool) { return symkRequested; });
+  ScopedHook ceAvailable(
+      g_ceAvailable,
+      [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+         struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+  ScopedHook tuningCompute(g_tuningCompute,
+                           SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST,
+                                            /*maxChannels=*/6));
+  ncclComm* comm = MakeCommWithArch(arch);
+  comm->archThresholds = table;
+  comm->symmetricSupport = 1;
+  comm->config.CTAPolicy = ctaPolicy;
+  rcclCollDecision decision{};
+  EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, count, ncclFloat32, ncclSum,
+                                              /*stream=*/nullptr, /*query=*/true,
+                                              /*graphCapturingHint=*/false, &decision));
+  DeleteCommWithArch(comm);
+  return decision.algo;
+}
+}  // namespace
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyNullTableTakesCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroPolicyNullTableTakesCeRegistered",
+      []() {
+        // null table -> rcclCeRegMaxTab returns kThreshUnlimited -> ceRegInWindow=true,
+        // ceArRegMax != 0 -> ceRegZero fires under ZERO policy.
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_ZERO, /*count=*/8, /*symkRequested=*/false,
+                                 /*table=*/nullptr, "gfx90a"));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeNotEnabledSkipsCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeNotEnabledSkipsCeRegistered",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)       return int64_t(0);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          return def;
+        };
+        // RCCL_CE_ALLREDUCE=0 is a hard override: CE must not fire regardless of force or CTA policy.
+        // Under DEFAULT policy preferred=ALL so no WARN; under ZERO policy preferred=CE so WARN fires.
+        for (int policy : {NCCL_CTA_POLICY_DEFAULT, NCCL_CTA_POLICY_ZERO}) {
+          int algo;
+          std::string warn = RcclUnitTesting::CaptureLog([&]() {
+            algo = SelectCeVsSymk(policy, /*count=*/8, /*symkRequested=*/false);
+          });
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, algo);
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT,      algo);
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH,    algo);
+          if (policy == NCCL_CTA_POLICY_ZERO) {
+            EXPECT_NE(std::string::npos, warn.find("preferred backend"))
+                << "WARN must fire when CE is preferred (ZERO policy) but disabled by RCCL_CE_ALLREDUCE=0";
+          }
+        }
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceWithoutZeroAboveTableCapSkipsCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceWithoutZeroAboveTableCapSkipsCeRegistered",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
+          return def;
+        };
+        EXPECT_EQ(NCCL_ALGO_RING,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_DEFAULT, kCeVsSymkOverCapCount, /*symkRequested=*/false));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceWithoutZeroTakesCeRegisteredWhenSymkIneligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceWithoutZeroTakesCeRegisteredWhenSymkIneligible",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
+          return def;
+        };
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_DEFAULT, /*count=*/8, /*symkRequested=*/false));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyCeRegisteredBeatsEligibleSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroPolicyCeRegisteredBeatsEligibleSymmetric",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_ZERO, /*count=*/8, /*symkRequested=*/true));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyCeRegisteredIgnoresTableCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroPolicyCeRegisteredIgnoresTableCap",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_ZERO, kCeVsSymkOverCapCount, /*symkRequested=*/true));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyHonorsEnvRegisteredCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroPolicyHonorsEnvRegisteredCap",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return int64_t(kCeVsSymkRegCapBytes);
+          return def;
+        };
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_ZERO, kCeVsSymkOverCapCount, /*symkRequested=*/true));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_DefaultPolicyKeepsSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_DefaultPolicyKeepsSymmetric",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_DEFAULT, /*count=*/8, /*symkRequested=*/true));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceWithoutZeroYieldsToEligibleSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceWithoutZeroYieldsToEligibleSymmetric",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
+          return def;
+        };
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_DEFAULT, /*count=*/8, /*symkRequested=*/true));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeAllReduceUnsetKeepsSymmetricOnArchWithoutCeDefault) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeAllReduceUnsetKeepsSymmetricOnArchWithoutCeDefault",
+      []() {
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_ZERO, /*count=*/8, /*symkRequested=*/true));
       });
 }
 
@@ -3610,6 +4972,31 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredChosenWhenAvailableAndPo
       });
 }
 
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroRegMaxDisablesRegisteredCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroRegMaxDisablesRegisteredCe",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return 0;
+          return def;
+        };
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclProd,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredForwardsBlockCalculatorArguments) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_CeRegisteredForwardsBlockCalculatorArguments",
@@ -3648,12 +5035,21 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SysmemSegmentBlocksCeRegistered) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_SysmemSegmentBlocksCeRegistered",
       []() {
+        // DDA IPC is the non-preferred fallback that makes bestFallbackFound=true,
+        // ensuring the EXPECT_NE proves the hasSysmemSegment gate rejected CE-registered
+        // rather than trivially passing because no candidate was ever evaluated.
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ncclComm* comm = MakeSelectComm();
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+        ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx942"); // gfx942: ddaVmmMax[AR]=8MiB, ceEnabledByArch=true
+        comm->nRanks = 1;
+        comm->nNodes = 1;
         int sendBuffer = 0, recvBuffer = 0;
         TestDevrWindows registered(comm, &sendBuffer, true, &recvBuffer, false);
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -3678,7 +5074,13 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegister
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ncclComm* comm = MakeSelectComm();
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+        ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx942"); // gfx942: ddaVmmMax[AR]=8MiB, ceEnabledByArch=true
+        comm->nRanks = 1;
+        comm->nNodes = 1;
         TestDevrWindows registered(comm, &sendSentinel, false, &recvSentinel, true);
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
@@ -3708,6 +5110,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagin
           EXPECT_EQ(8u, chunkElems); // count(8) / nRanks(1)
           return 19;
         });
+        g_ceImplemented = true;
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         // force bypasses this, matching rcclUseCeAr2Shot's precedent
@@ -3725,20 +5128,48 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagin
       });
 }
 
-// ceAllReduceAllowed's final conjunct is `force || symReg`; every prior
-// test drove it true via one side or the other, but never both false at
-// once. Same setup as above (staging buffer ready, rcclUseCeAr2Shot
-// otherwise eligible), but neither RCCL_FORCE_CE_ALLREDUCE nor a CE-
-// available seam is set -- CE 2-shot must not fire despite the buffer
-// being ready.
-TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenNeitherForceNorSymRegEligible) {
+// symReg is this rank's window. Skipping 2-shot on it would enqueue REGISTERED
+// and allgather while an unregistered peer stays on 2-shot and never posts.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotStaysWhenLocalSymReg) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenNeitherForceNorSymRegEligible",
+      "Wrap_SelectAllReduce_CeTwoShotStaysWhenLocalSymReg",
       []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return deft;
+        };
+        g_ceImplemented = true;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
-        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO; // rcclUseCeAr2Shot itself still eligible
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ceAllReduceAllowed requires (ctaZero || force). rcclUseCeAr2Shot enforces
+// the same gate, so neither CTAPolicy=ZERO nor FORCE leaves 2-shot unselected.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenNeitherCtaZeroNorForce) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenNeitherCtaZeroNorForce",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        g_ceImplemented = true;
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // not ZERO, not force -> rcclUseCeAr2Shot returns false
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
         rcclCollDecision decision{};
@@ -3750,19 +5181,18 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenNeitherForceNo
       });
 }
 
-// Complementary proof: ceAllReduceAllowed is true (force set), but
-// ceARTmpBuf is left null -- the "staging buffer initialized" conjunct's
-// own false side had never fired (every prior test either set the buffer
-// or made ceAllReduceAllowed false first).
-TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenStagingBufferNotInitialized) {
+// First FORCE-unregistered AllReduce enqueues CE so ncclCeInit can allocate
+// staging. Eager 2-shot waits for ceARTmpBuf.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredEnqueuesCeWhenStagingBufferNotInitialized) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenStagingBufferNotInitialized",
+      "Wrap_SelectAllReduce_ForceUnregisteredEnqueuesCeWhenStagingBufferNotInitialized",
       []() {
         g_loadParam = [](const char* env, int64_t deft) {
           if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
           if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
           return deft;
         };
+        g_ceImplemented = true;
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
@@ -3771,9 +5201,309 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenStagingBufferN
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
+}
+
+// Forced CE on unregistered buffers needs a spanning LSA team on both CE arms
+// (enqueued and eager 2-shot); a split team falls back.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredNeedsSpanningLsaTeam) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceUnregisteredNeedsSpanningLsaTeam",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          return deft;
+        };
+        g_ceImplemented = true;
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 2;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        comm->devrState.bigSize = 1; // take computeLsaSize's cached path
+        uint8_t stagingBuf[16];
+        for (uint8_t* staging : {static_cast<uint8_t*>(nullptr), stagingBuf}) {
+          SCOPED_TRACE(staging ? "staging ready" : "staging not initialized");
+          comm->ceColl.ceARTmpBuf = staging;
+          comm->devrState.lsaSize = 2;
+          rcclCollDecision spanning{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                      /*stream=*/nullptr, /*query=*/true,
+                                                      /*graphCapturingHint=*/false, &spanning));
+          EXPECT_EQ((int)(staging ? rcclAddonAlgos_t::RCCL_CE_2SHOT : rcclAddonAlgos_t::RCCL_CE_REGISTERED),
+                    spanning.algo);
+
+          comm->devrState.lsaSize = 1;
+          rcclCollDecision split{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                      /*stream=*/nullptr, /*query=*/true,
+                                                      /*graphCapturingHint=*/false, &split));
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, split.algo);
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, split.algo);
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Spanning LSA team but no CE driver support: forced CE on unregistered
+// buffers falls back on both CE arms.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredNeedsCeDriver) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceUnregisteredNeedsCeDriver",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          return deft;
+        };
+        g_ceImplemented = false;
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        uint8_t stagingBuf[16];
+        for (uint8_t* staging : {static_cast<uint8_t*>(nullptr), stagingBuf}) {
+          SCOPED_TRACE(staging ? "staging ready" : "staging not initialized");
+          comm->ceColl.ceARTmpBuf = staging;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                      /*stream=*/nullptr, /*query=*/true,
+                                                      /*graphCapturingHint=*/false, &decision));
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// CE 2-shot is suppressed when the message exceeds the env-injected cap.
+// gfx942 is used because it has ceNonRegMax[AR]=256MiB in the table so
+// rcclCeAllReduceEnabled accepts RCCL_CE_ALLREDUCE=1, and the 1KiB env
+// override via g_loadParam wins over the table. RCCL_FORCE_CE_ALLREDUCE
+// bypasses CTAPolicy so that is not a confounding gate. The only false
+// conjunct in ceAllReduceAllowed is twoShotWindow.
+// twoShotWindow tests: verify rcclSelectAllReduce enforces the [min, max] size window.
+// gfx950 has ceNonRegMax[AllReduce]=256MiB and ceNonRegMin[AllReduce]=0 in its arch table.
+// Env params RCCL_CE_AR_2SHOT_MAX_BYTES / RCCL_CE_AR_2SHOT_MIN_BYTES override the table.
+// RCCL_CE_ALLREDUCE=1, FORCE, and g_ceImplemented pass the driver gate. bigSize caches a spanning LSA team.
+// Only the size window should determine whether RCCL_CE_2SHOT is selected.
+
+// (a) Table-driven max: message exceeds gfx950 table max (256 MiB). No env override.
+//     count = 256*1024*1024/4 + 8 floats => totalBytes = 256 MiB + 32 bytes > 256 MiB.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveTableMax) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenAboveTableMax",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)       return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
+          return deft;  // no size env override -- local table value is used
+        };
+        g_ceImplemented = true;
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                               [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                  size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks           = 8;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // Supply a local table so rcclCeNonRegMaxTab reads a real entry rather
+        // than the null-table fallback (NCCL_CE_AR_TMPBUF_DEFAULT_BYTES).
+        // MakeCommWithArch sets archName but not archThresholds; the fake
+        // rcclGetArchThresholds always returns nullptr.
+        rcclArchThresholds archTab{};
+        constexpr size_t kTableCap = 256ULL * 1024 * 1024;
+        archTab.ceNonRegMax[ncclFuncAllReduce] = kTableCap;
+        comm->archThresholds = &archTab;
+        // kTableCap + 32 bytes: just past the table ceiling, divisible by nRanks=8.
+        constexpr size_t kCount = (kTableCap / sizeof(float)) + 8;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/kCount, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// (b) Env-override max: RCCL_CE_AR_2SHOT_MAX_BYTES=1024. Message is 2048 bytes > 1 KiB.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveEnvMax) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenAboveEnvMax",
+      []() {
+        constexpr int64_t kCap = 1024;
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)          return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0)    return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MAX_BYTES") == 0) return kCap;
+          return deft;
+        };
+        g_ceImplemented = true;
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                               [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                  size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks           = 8;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // 512 * 4 = 2048 bytes > kCap (1024).
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/512, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// (c) Env-override min: RCCL_CE_AR_2SHOT_MIN_BYTES=8192. Message is 4 bytes < 8 KiB.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMin) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMin",
+      []() {
+        constexpr int64_t kMin = 8192;
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)          return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0)    return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MIN_BYTES") == 0) return kMin;
+          return deft;
+        };
+        g_ceImplemented = true;
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                               [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                  size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks           = 8;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // 8 * 4 = 32 bytes < kMin (8192), divisible by nRanks=8.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// (d) Within env window: min=4 bytes, max=1 MiB. Message is 32 bytes -- must pick CE 2-shot.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenWithinEnvWindow) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotChosenWhenWithinEnvWindow",
+      []() {
+        constexpr int64_t kMin = 4;
+        constexpr int64_t kMax = 1048576;  // 1 MiB
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)          return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0)    return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MIN_BYTES") == 0) return kMin;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MAX_BYTES") == 0) return kMax;
+          return deft;
+        };
+        g_ceImplemented = true;
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                               [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                  size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks           = 8;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
+        // RCCL_FORCE_CE_ALLREDUCE=1 (above) stands in for symReg=true since null
+        // send/recv pointers mean ncclCeAvailable returns false in unit test context.
+        // CTAPolicy=ZERO satisfies rcclUseCeAr2Shot; force satisfies ceAllReduceAllowed.
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // 8 * 4 = 32 bytes: inside [4, 1 MiB] window, divisible by nRanks=8.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+namespace {
+// FORCE with staging not yet allocated, on symmetric-window Sum operands (symkRequested).
+void SelectForcedRegisteredSum(int64_t ceArRegMax, const rcclArchThresholds* table, rcclCollDecision* decision) {
+  static int64_t s_ceArRegMax;
+  s_ceArRegMax = ceArRegMax;
+  g_loadParam = [](const char* env, int64_t deft) {
+    if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+    if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+    if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return s_ceArRegMax;
+    return deft;
+  };
+  g_ceImplemented = true;
+  ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                            size_t, const void*, void*, bool) { return true; });
+  ScopedHook ceAvailable(g_ceAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                                           struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+  ScopedHook tuningCompute(g_tuningCompute,
+                           SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST,
+                                            /*maxChannels=*/6));
+  ncclComm* comm = MakeSelectComm();
+  comm->symmetricSupport = 1;
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+  comm->archThresholds = table;
+  EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                              /*stream=*/nullptr, /*query=*/true,
+                                              /*graphCapturingHint=*/false, decision));
+  DeleteCommWithArch(comm);
+}
+}  // namespace
+
+// The first-call staged CE arm is for unregistered operands only; symk still wins under FORCE.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceKeepsSymmetricForSymmetricWindowSum) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_ForceKeepsSymmetricForSymmetricWindowSum", []() {
+    rcclCollDecision decision{};
+    SelectForcedRegisteredSum(INT64_MAX, nullptr, &decision);
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+  });
+}
+
+// symMaxR2 = 0 withdraws symk; registered CE then takes the call within its cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceSymmetricWindowSumAboveSymMaxUsesRegisteredCe) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_ForceSymmetricWindowSumAboveSymMaxUsesRegisteredCe", []() {
+    rcclArchThresholds table{};
+    table.ceNonRegMax[ncclFuncAllReduce] = SIZE_MAX;
+    rcclCollDecision decision{};
+    SelectForcedRegisteredSum(INT64_MAX, &table, &decision);
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+  });
+}
+
+// RCCL_CE_AR_REG_MAX_MSG_BYTES=0 disables registered CE even under FORCE with 2-shot enabled.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceZeroRegMaxDisablesCeForSymmetricWindowSum) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_ForceZeroRegMaxDisablesCeForSymmetricWindowSum", []() {
+    rcclArchThresholds table{};
+    table.ceNonRegMax[ncclFuncAllReduce] = SIZE_MAX;
+    rcclCollDecision decision{};
+    SelectForcedRegisteredSum(0, &table, &decision);
+    EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+    EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+  });
 }
 
 // DDA fabric LL: gfx1250 arch, rcclAllReduceShouldTakeDdaPath eligible
@@ -3783,7 +5513,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLLChosenOnGfx1250) {
       "Wrap_SelectAllReduce_DdaFabricLLChosenOnGfx1250",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx1250");
@@ -3801,6 +5531,127 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLLChosenOnGfx1250) {
       });
 }
 
+
+// Under CTA_POLICY_ZERO the preferred mask is RCCL_BACKEND_CE only. When both
+// DDA (gfx1250 fabric LL) and CE 2-shot are simultaneously eligible, CE 2-shot
+// records as bestPreferred while DDA records as bestFallback, so CE wins.
+// This pins the precedence the PR exists to introduce; a regression where the
+// preferred mask stops being consulted would let DDA return first instead.
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyCeTwoShotBeatsEligibleDdaOnGfx1250) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroPolicyCeTwoShotBeatsEligibleDdaOnGfx1250",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)       return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
+          return deft;
+        };
+        g_ceImplemented = true;
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+        ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                                [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                   size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks           = 8;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // Inject a table so extAlgoArchTable returns non-null for twoShotWindow.
+        // ceNonRegMax[AR] = 256 MiB opens the 2-shot window for an 8-float message.
+        rcclArchThresholds archTab{};
+        archTab.ceNonRegMax[ncclFuncAllReduce] = 256ULL * 1024 * 1024;
+        comm->archThresholds = &archTab;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        // CE 2-shot wins over DDA: preferred mask is RCCL_BACKEND_CE under ZERO.
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// (e) Env-override min: RCCL_CE_AR_2SHOT_MIN_BYTES=1024. Message is below min.
+//     252 floats * sizeof(float) = 1008 bytes < 1024 -- must not pick CE 2-shot.
+//     (rcclUseCeAr2Shot has no min-bound check; the bound lives in twoShotWindow
+//     inside rcclSelectAllReduce, so the test must call rcclSelectAllReduce.)
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMinBound) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMinBound",
+      []() {
+        constexpr int64_t kMin = 1024;
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)          return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0)    return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MIN_BYTES") == 0) return kMin;
+          return deft;
+        };
+        g_ceImplemented = true;
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                               [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                  size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks           = 4;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // 252 * sizeof(float) = 1008 bytes < kMin(1024), divisible by nRanks=4.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/252, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/false,
+                                                    /*graphCapturingHint=*/false, &decision));
+EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// (f) Env-override min: RCCL_CE_AR_2SHOT_MIN_BYTES=1024. Message is at the min.
+//     256 floats * sizeof(float) = 1024 bytes == min -- must pick CE 2-shot.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenAtEnvMinBound) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotChosenWhenAtEnvMinBound",
+      []() {
+        constexpr int64_t kMin = 1024;
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)          return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0)    return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MIN_BYTES") == 0) return kMin;
+          return deft;
+        };
+        g_ceImplemented = true;
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                               [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                  size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks           = 4;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // 256 * sizeof(float) = 1024 bytes == kMin, divisible by nRanks=4.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/256, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // DDA fabric LL128: LL not eligible, LL128 is, and RCCL_DDA_LL128 is on --
 // distinct from the LL test above, proving the LL arm's own eligibility
 // check (not just DDA-path-taken) gates which fabric tier is chosen.
@@ -3814,7 +5665,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenWhenLLNotEligibl
           return def;
         };
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
@@ -3847,7 +5698,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenAboveLegacyThres
           return def;
         };
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
@@ -3876,7 +5727,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricVmmChosenWhenNeitherLLNorLL
       "Wrap_SelectAllReduce_DdaFabricVmmChosenWhenNeitherLLNorLL128Eligible",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook vmmEligible(g_allReduceDdaFabricEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         // g_allReduceDdaFabricLLEligible / LL128Eligible left at their default (false).
@@ -3901,7 +5752,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaIpcChosenOnNonGfx1250Arch) {
       "Wrap_SelectAllReduce_DdaIpcChosenOnNonGfx1250Arch",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942"); // not gfx1250
@@ -4073,6 +5924,956 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_LiveModeProbesCapturingGraph) {
 }
 
 // ===========================================================================
+// rcclCandSearch / rcclCandSearchRecord -- rccl_decision.h.
+//
+// Header-only inline; plain (non-isolated) microtests exercise the tracking
+// logic directly without going through rcclSelectAllReduce.
+// ===========================================================================
+
+TEST(WrapMicrotest, CandSearchRecord_FirstEligibleSetsFallback) {
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_TREE; cand.nMaxChannels = 3;
+  rcclCandSearch s{RCCL_BACKEND_ALL, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_CE, cand);
+  EXPECT_TRUE(s.bestFallbackFound);
+  EXPECT_EQ(NCCL_ALGO_TREE, s.bestFallback.algo);
+  EXPECT_EQ(3, s.bestFallback.nMaxChannels);
+}
+
+TEST(WrapMicrotest, CandSearchRecord_AllMaskMatchesAnythingAndSetsDecision) {
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_RING; cand.nMaxChannels = 7;
+  rcclCandSearch s{RCCL_BACKEND_ALL, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_SYMMETRIC, cand);
+  EXPECT_TRUE(s.bestPreferredFound);
+  EXPECT_EQ(NCCL_ALGO_RING, out.algo);
+  EXPECT_EQ(7, out.nMaxChannels);
+}
+
+TEST(WrapMicrotest, CandSearchRecord_MismatchedFamilySkipsDecision) {
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_TREE;
+  rcclCandSearch s{RCCL_BACKEND_CE, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_SYMMETRIC, cand);
+  EXPECT_TRUE(s.bestFallbackFound)  << "fallback must still be recorded on mask miss";
+  EXPECT_FALSE(s.bestPreferredFound) << "preferred must NOT be set on mask miss";
+}
+
+TEST(WrapMicrotest, CandSearchRecord_MatchingFamilySetsDecision) {
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_TREE; cand.nMaxChannels = 5;
+  rcclCandSearch s{RCCL_BACKEND_DDA, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_DDA, cand);
+  EXPECT_TRUE(s.bestPreferredFound);
+  EXPECT_EQ(NCCL_ALGO_TREE, out.algo);
+  EXPECT_EQ(5, out.nMaxChannels);
+}
+
+TEST(WrapMicrotest, CandSearchRecord_SubsequentCallsIgnoredAfterPreferredFound) {
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision first{}; first.algo = NCCL_ALGO_RING; first.nMaxChannels = 2;
+  rcclCollDecision second{}; second.algo = NCCL_ALGO_TREE; second.nMaxChannels = 9;
+  rcclCandSearch s{RCCL_BACKEND_CE, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_CE, first);
+  rcclCandSearchRecord(s, RCCL_BACKEND_CE, second);
+  EXPECT_EQ(NCCL_ALGO_RING, out.algo) << "first preferred match must not be overwritten";
+  EXPECT_EQ(2, out.nMaxChannels);
+}
+
+TEST(WrapMicrotest, CandSearchRecord_FallbackNotOverwrittenByLaterEligible) {
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision first{}; first.algo = NCCL_ALGO_RING; first.nMaxChannels = 1;
+  rcclCollDecision second{}; second.algo = NCCL_ALGO_TREE; second.nMaxChannels = 8;
+  rcclCandSearch s{RCCL_BACKEND_SYMMETRIC, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_CE, first);
+  rcclCandSearchRecord(s, RCCL_BACKEND_CE, second);
+  EXPECT_EQ(NCCL_ALGO_RING, s.bestFallback.algo) << "first eligible candidate wins fallback";
+  EXPECT_EQ(1, s.bestFallback.nMaxChannels);
+  EXPECT_FALSE(s.bestPreferredFound) << "SYMMETRIC was never offered so preferred must not be set";
+}
+
+TEST(WrapMicrotest, CandSearchRecord_OutOfWindowWithAllMaskFillsNeither) {
+  // inWindow=false + preferred=ALL: the (preferred != ALL || inWindow) guard
+  // blocks preferred, and the inWindow guard blocks fallback -- neither slot fills.
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_TREE; cand.nMaxChannels = 4;
+  rcclCandSearch s{RCCL_BACKEND_ALL, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_CE, cand, /*inWindow=*/false);
+  EXPECT_FALSE(s.bestFallbackFound)  << "out-of-window candidate must not fill fallback";
+  EXPECT_FALSE(s.bestPreferredFound) << "out-of-window candidate must not fill preferred when preferred=ALL";
+}
+
+TEST(WrapMicrotest, CandSearchRecord_OutOfWindowWithExplicitMaskSetsPreferred) {
+  // inWindow=false + explicit preferred mask: preferred fires (explicit policy
+  // beats the window guard) but fallback does not (inWindow still gates it).
+  rcclCollDecision out{}, fb{};
+  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_RING; cand.nMaxChannels = 6;
+  rcclCandSearch s{RCCL_BACKEND_DDA, &out, fb, false, false};
+  rcclCandSearchRecord(s, RCCL_BACKEND_DDA, cand, /*inWindow=*/false);
+  EXPECT_TRUE(s.bestPreferredFound)  << "explicit preferred mask must set preferred regardless of inWindow";
+  EXPECT_EQ(NCCL_ALGO_RING, out.algo);
+  EXPECT_FALSE(s.bestFallbackFound)  << "out-of-window candidate must not fill fallback";
+}
+
+// ===========================================================================
+// rcclAllReducePreferredBackends -- rccl_wrap.cc.
+//
+// Unit tests for the flag->mask translation. Plain (non-isolated) microtests;
+// g_loadParam controls RCCL_PARAM values. MakeSelectComm() gives a zeroed
+// comm with default CTAPolicy (NCCL_CTA_POLICY_DEFAULT = 0).
+// ===========================================================================
+
+TEST(WrapMicrotest, AllReducePreferredBackends_DefaultReturnsAll) {
+  ncclComm* comm = MakeSelectComm();
+  EXPECT_EQ(RCCL_BACKEND_ALL, rcclAllReducePreferredBackends(comm));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, AllReducePreferredBackends_CTAPolicyZeroReturnsCe) {
+  ncclComm* comm = MakeSelectComm();
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  EXPECT_EQ(rcclBackendMask_t(RCCL_BACKEND_CE),
+            rcclAllReducePreferredBackends(comm));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, AllReducePreferredBackends_ForceSymmetricReturnsSymmetric) {
+  ScopedHook loadParam(g_loadParam, ForceParam("RCCL_FORCE_SYMMETRIC", int64_t(1)));
+  ncclComm* comm = MakeSelectComm();
+  EXPECT_EQ(RCCL_BACKEND_SYMMETRIC, rcclAllReducePreferredBackends(comm));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, AllReducePreferredBackends_ForceDdaReturnsDda) {
+  ScopedHook loadParam(g_loadParam, ForceParam("RCCL_FORCE_DDA", int64_t(1)));
+  ncclComm* comm = MakeSelectComm();
+  EXPECT_EQ(RCCL_BACKEND_DDA, rcclAllReducePreferredBackends(comm));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, AllReducePreferredBackends_ForceSymmetricTakesPriorityOverCTAZero) {
+  ScopedHook loadParam(g_loadParam, ForceParam("RCCL_FORCE_SYMMETRIC", int64_t(1)));
+  ncclComm* comm = MakeSelectComm();
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  EXPECT_EQ(RCCL_BACKEND_SYMMETRIC, rcclAllReducePreferredBackends(comm))
+      << "FORCE_SYMMETRIC check precedes CTAPolicy_ZERO check";
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, AllReducePreferredBackends_ForceDdaTakesPriorityOverCTAZero) {
+  ScopedHook loadParam(g_loadParam, ForceParam("RCCL_FORCE_DDA", int64_t(1)));
+  ncclComm* comm = MakeSelectComm();
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  EXPECT_EQ(RCCL_BACKEND_DDA, rcclAllReducePreferredBackends(comm))
+      << "FORCE_DDA check precedes CTAPolicy_ZERO check";
+  DeleteCommWithArch(comm);
+}
+
+
+namespace {
+int SelectAllReduceDdaAlgo(ncclComm* comm, size_t bytes) {
+  rcclCollDecision decision{};
+  EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, bytes / sizeof(float), ncclFloat32, ncclSum,
+                                              /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                              &decision));
+  return decision.algo;
+}
+
+template <typename F>
+struct HookSig;
+template <typename Sig>
+struct HookSig<std::function<Sig>> {
+  using type = Sig;
+};
+template <typename Slot>
+using HookFor = ScopedHook<typename HookSig<Slot>::type>;
+
+// AllReduce DDA path taken and its LL tier eligible; ArVmmEligible adds the VMM tier.
+struct ArDdaHooks {
+  HookFor<decltype(g_allReduceShouldTakeDdaPath)> shouldTakeDda{
+      g_allReduceShouldTakeDdaPath, [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; }};
+  HookFor<decltype(g_allReduceDdaFabricLLEligible)> llEligible{
+      g_allReduceDdaFabricLLEligible, [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; }};
+};
+struct ArVmmEligible {
+  HookFor<decltype(g_allReduceDdaFabricEligible)> vmmEligible{
+      g_allReduceDdaFabricEligible, [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; }};
+};
+ncclComm* MakeArDdaComm(int nRanks) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->nRanks = nRanks;
+  comm->archThresholds = Gfx1250Table();
+  return comm;
+}
+
+// Registered AllReduce (gfx1250 unless `arch` says otherwise) with symk withdrawn by symMaxR2: CE-registered runs
+// eager, Ring in capture. DDA tiers take sums only, as in production.
+class RegisteredAr {
+ public:
+  explicit RegisteredAr(int nRanks, const char* arch = "gfx1250") {
+    table_ = MakeCeVsSymkTable();
+    table_.symMaxR2[ncclFuncAllReduce] = 0;
+    table_.symMaxR2Graph[ncclFuncAllReduce] = 0;
+    table_.symMinR2[ncclFuncAllReduce] = 8 * kMiB;
+    table_.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
+    table_.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
+    table_.ddaVmmMaxGraph[ncclFuncAllReduce] = 64 * kMiB;
+    table_.ddaArRegCaptureMinBytes = 32 * kMiB;
+    table_.ddaArRegCapturePerRankBytes = 2 * kMiB;
+    table_.ddaArRegEagerMinShardBytes = 512 * kKiB;
+    table_.ddaArRegEagerMaxShardBytes = 1 * kMiB;
+    g_ceImplemented = true;
+    comm_ = MakeCommWithArch(arch);
+    comm_->WarpSize = 32;
+    comm_->archThresholds = &table_;
+    comm_->symmetricSupport = 1;
+    SetRanks(nRanks);
+  }
+  ~RegisteredAr() {
+    g_ceImplemented = false;
+    comm_->nRanks = 1;
+    comm_->rankToNode = nullptr;
+    DeleteCommWithArch(comm_);
+  }
+
+  // The CE 2-shot gate sizes the LSA team from rankToNode: all ranks on one node.
+  void SetRanks(int nRanks) {
+    comm_->nRanks = nRanks;
+    rankToNode_.assign(nRanks, 0);
+    comm_->rankToNode = rankToNode_.data();
+  }
+
+  rcclCollDecision Select(size_t bytes, bool capturing, bool query = true, ncclRedOp_t op = ncclSum) {
+    capturing_ = capturing;
+    rcclCollDecision decision{};
+    EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm_, nullptr, nullptr, bytes / sizeof(float), ncclFloat32, op,
+                                                /*stream=*/nullptr, query, /*graphCapturingHint=*/capturing,
+                                                &decision));
+    return decision;
+  }
+
+  ncclComm* comm_;
+  rcclArchThresholds table_;
+  std::vector<int> rankToNode_;
+  // A capped reporter fake: records the cap and reports `fixed` blocks, at most cap.blocks.
+  DdaCappedBlocksHook CappedReport(uint32_t fixed) {
+    return [this, fixed](ncclComm*, size_t, ncclDataType_t, rcclDdaLaunchCap cap) {
+      reportedCap_ = cap;
+      return cap.blocks > 0 ? std::min(fixed, cap.blocks) : fixed;
+    };
+  }
+
+  // Expects the choice the re-route leaves alone: `algo` with no grid cap.
+  void ExpectUnchanged(size_t bytes, bool capturing, int algo, const char* why = "", bool query = true) {
+    SCOPED_TRACE(testing::Message() << why << " bytes=" << bytes << " capturing=" << capturing << " query=" << query);
+    const rcclCollDecision d = Select(bytes, capturing, query);
+    EXPECT_EQ(algo, d.algo);
+    EXPECT_EQ(0u, d.ddaCap.blocks);
+    EXPECT_EQ(0u, d.ddaCap.threads);
+  }
+
+  bool capturing_ = false;
+  bool symkRequested_ = true;
+  bool ceAvailable_ = true;
+  bool llEligible_ = false;
+  bool ll128Eligible_ = true;
+  bool vmmEligible_ = false;
+  bool mustEnqueue_ = false;
+  int ringAlgo_ = NCCL_ALGO_RING;
+  int ringChannels_ = 96;
+  int ringWarps_ = 8;
+  std::vector<size_t> ceChunkElems_;
+  rcclDdaLaunchCap reportedCap_{};
+
+  HookFor<decltype(g_isSymmetricKernelRequested)> symRequested_{
+      g_isSymmetricKernelRequested,
+      [this](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*, bool) {
+        return symkRequested_;
+      }};
+  HookFor<decltype(g_symkAvailable)> symkAvailable_{
+      g_symkAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; }};
+  HookFor<decltype(g_tuningCompute)> tuningCompute_{
+      g_tuningCompute, SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6)};
+  HookFor<decltype(g_ceAvailable)> ceAvailableHook_{
+      g_ceAvailable, [this](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                            struct ncclDevrWindow*, struct ncclDevrWindow*) { return ceAvailable_; }};
+  HookFor<decltype(g_ceLocalReduceBlocks)> ceBlocks_{g_ceLocalReduceBlocks, [this](ncclDataType_t, size_t chunkElems) {
+                                                        ceChunkElems_.push_back(chunkElems);
+                                                        return 46;
+                                                      }};
+  HookFor<decltype(g_collectiveMustUseEnqueuePath)> enqueuePath_{g_collectiveMustUseEnqueuePath, [this](ncclComm* c) {
+                                                                   EXPECT_EQ(comm_, c);
+                                                                   return mustEnqueue_;
+                                                                 }};
+  HookFor<decltype(g_allReduceShouldTakeDdaPath)> shouldTakeDda_{
+      g_allReduceShouldTakeDdaPath,
+      [](const struct ncclComm*, size_t, ncclDataType_t, bool symEligible, bool) { return !symEligible; }};
+  HookFor<decltype(g_allReduceDdaFabricLL128Eligible)> ll128EligibleHook_{
+      g_allReduceDdaFabricLL128Eligible,
+      [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t op) {
+        return ll128Eligible_ && op == ncclSum;
+      }};
+  HookFor<decltype(g_allReduceDdaFabricLLEligible)> llEligibleHook_{
+      g_allReduceDdaFabricLLEligible,
+      [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t op) {
+        return llEligible_ && op == ncclSum;
+      }};
+  HookFor<decltype(g_allReduceDdaFabricEligible)> vmmEligibleHook_{
+      g_allReduceDdaFabricEligible,
+      [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t op) {
+        return vmmEligible_ && op == ncclSum;
+      }};
+  HookFor<decltype(g_allReduceDdaFabricLL128Blocks)> ll128Blocks_{g_allReduceDdaFabricLL128Blocks, CappedReport(114u)};
+  HookFor<decltype(g_allReduceDdaFabricLLBlocks)> llBlocks_{g_allReduceDdaFabricLLBlocks, CappedReport(113u)};
+  HookFor<decltype(g_allReduceDdaFabricBlocks)> vmmBlocks_{g_allReduceDdaFabricBlocks, CappedReport(112u)};
+  HookFor<decltype(g_getAlgoInfo)> ringInfo_{
+      g_getAlgoInfo, [this](struct ncclComm*, struct ncclTaskColl* task, int, int, int, ncclSimInfo_t*) {
+        task->algorithm = ringAlgo_;
+        task->protocol = NCCL_PROTO_LL128;
+        task->nMaxChannels = ringChannels_;
+        task->nWarps = ringWarps_;
+        return ncclSuccess;
+      }};
+  HookFor<decltype(g_cudaGetCapturingGraph)> graphProbe_{
+      g_cudaGetCapturingGraph, [this](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+        *graph = ncclCudaGraphNone(mode);
+#if ROCM_VERSION >= 60100
+        graph->graphId = capturing_ ? 1 : graph->graphId;
+#endif
+        return ncclSuccess;
+      }};
+};
+}  // namespace
+
+// Eager calls CE-registered would run take the DDA LL128 two-shot for 512K..1M shards, within CE's blocks and threads.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerShardsTakeLL128WithinCeGrid) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredEagerShardsTakeLL128WithinCeGrid",
+      []() {
+        RegisteredAr ar(8);
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe and CE latch tick");
+          ar.ceChunkElems_.clear();
+          const rcclCollDecision on = ar.Select(8 * kMiB, /*capturing=*/false, query);
+          EXPECT_FALSE(on.ceCapturing);
+          EXPECT_EQ(ll128, on.algo) << "1M shards at symMinR2";
+          EXPECT_EQ(std::vector<size_t>{kMiB / sizeof(float)}, ar.ceChunkElems_) << "CE reduces one shard per launch";
+          EXPECT_EQ(46u, on.ddaCap.blocks);
+          EXPECT_EQ(256u, on.ddaCap.threads) << "the CE reduce kernel's block";
+          EXPECT_EQ(46u, ar.reportedCap_.blocks) << "the reporter sizes the capped grid";
+          EXPECT_EQ(46u, on.nMaxChannels);
+        }
+        EXPECT_EQ(ceReg, ar.Select(16 * kMiB, false).algo) << "2M shards";
+        const rcclCollDecision below = ar.Select(4 * kMiB, false);
+        EXPECT_EQ(ll128, below.algo) << "below symMinR2 DDA already runs, uncapped";
+        EXPECT_EQ(0u, below.ddaCap.blocks);
+        EXPECT_EQ(0u, below.ddaCap.threads);
+        ar.SetRanks(16);
+        EXPECT_EQ(ll128, ar.Select(8 * kMiB, false).algo) << "512K shards";
+        EXPECT_EQ(ll128, ar.Select(16 * kMiB, false).algo) << "1M shards";
+        EXPECT_EQ(ceReg, ar.Select(32 * kMiB, false).algo) << "2M shards";
+        ar.SetRanks(2);
+        EXPECT_EQ(ceReg, ar.Select(16 * kMiB, false).algo) << "two ranks, 8M shards";
+        ar.SetRanks(32);
+        EXPECT_EQ(ll128, ar.Select(32 * kMiB, false).algo) << "1M shards";
+        EXPECT_EQ(ceReg, ar.Select(64 * kMiB, false).algo) << "2M shards";
+      });
+}
+
+// The eager re-route replaces only a CE-registered that runs, in window, with LL128 on and eligible, launched directly.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerKeepsEveryOtherChoice) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredEagerKeepsEveryOtherChoice",
+      []() {
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(8);
+        ar.ceAvailable_ = false;
+        ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, "CE unavailable for the buffers");
+        ar.ceAvailable_ = true;
+        ar.comm_->ceColl.graphModeSeen = true;
+        ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, "a captured graph holds the CE latch");
+        ar.comm_->ceColl.graphModeSeen = false;
+        ar.table_.ceRegMax[ncclFuncAllReduce] = 4 * kMiB;
+        ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, "CE-registered outside its window does not run");
+        ar.table_.ceRegMax[ncclFuncAllReduce] = kCeVsSymkRegCapBytes;
+        ar.mustEnqueue_ = true;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "enqueue runs CE for a CE decision");
+        ar.mustEnqueue_ = false;
+        ar.ll128Eligible_ = false;
+        ar.llEligible_ = true;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "LL eligible, LL128 not");
+        ar.llEligible_ = false;
+        ar.vmmEligible_ = true;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "VMM eligible, LL128 not");
+        ar.ll128Eligible_ = true;
+        ar.table_.ddaLL128Max[ncclFuncAllReduce] = 0;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "LL128 tier off");
+      });
+}
+
+// A user-set RCCL_DDA_LL128_THRESHOLD bounds the eager re-route: past it CE-registered keeps the call.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerStaysWithinUserLL128Cap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredEagerStaysWithinUserLL128Cap",
+      []() {
+        int64_t ll128Cap = 4 * kMiB;
+        g_loadParam = [&ll128Cap](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0 ? ll128Cap : def;
+        };
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(8);
+        ar.ExpectUnchanged(8 * kMiB, /*capturing=*/false, ceReg, "1M shards past a 4M cap");
+        ll128Cap = 8 * kMiB - 1;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "one byte past the cap");
+        for (size_t cap : {8 * kMiB, 16 * kMiB}) {
+          SCOPED_TRACE(testing::Message() << "cap=" << cap);
+          ll128Cap = (int64_t)cap;
+          const rcclCollDecision d = ar.Select(8 * kMiB, false);
+          EXPECT_EQ(ll128, d.algo);
+          EXPECT_EQ(46u, d.ddaCap.blocks) << "CE's reduce blocks";
+          EXPECT_EQ(256u, d.ddaCap.threads);
+        }
+        ar.SetRanks(16);
+        ll128Cap = 8 * kMiB;
+        EXPECT_EQ(ll128, ar.Select(8 * kMiB, false).algo) << "512K shards at the cap";
+        ar.ExpectUnchanged(16 * kMiB, false, ceReg, "1M shards past the cap");
+      });
+}
+
+// In graph capture Ring runs instead; DDA takes registered calls up to max(32M, n x 2M), within Ring's grid.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureTakesDdaWithinRingGrid) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureTakesDdaWithinRingGrid",
+      []() {
+        RegisteredAr ar(8);
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        for (bool query : {false, true}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          const rcclCollDecision d = ar.Select(16 * kMiB, /*capturing=*/true, query);
+          EXPECT_EQ(query ? 2 : 1, ar.ringInfo_.calls.load()) << "Ring is planned once per call, for the cap";
+          EXPECT_TRUE(d.ceCapturing);
+          EXPECT_EQ(ll128, d.algo);
+          EXPECT_EQ(96u, d.ddaCap.blocks) << "Ring's channels";
+          EXPECT_EQ(256u, d.ddaCap.threads) << "Ring's single-node block";
+          EXPECT_EQ(96u, d.nMaxChannels);
+        }
+        EXPECT_EQ(ll128, ar.Select(32 * kMiB, true).algo);
+        EXPECT_EQ(NCCL_ALGO_RING, ar.Select(64 * kMiB, true).algo);
+        ar.SetRanks(32);
+        EXPECT_EQ(ll128, ar.Select(64 * kMiB, true).algo);
+        EXPECT_EQ(NCCL_ALGO_RING, ar.Select(128 * kMiB, true).algo);
+      });
+}
+
+// In capture every DDA tier and its reporter carry Ring's grid; threads are Ring's block width (nWarps x WarpSize).
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapsEveryDdaTierAtRingsGrid) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureCapsEveryDdaTierAtRingsGrid",
+      []() {
+        RegisteredAr ar(8);
+        ar.ll128Eligible_ = false;
+        ar.llEligible_ = true;
+        rcclCollDecision d = ar.Select(16 * kMiB, /*capturing=*/true);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+        EXPECT_EQ(96u, d.ddaCap.blocks);
+        EXPECT_EQ(256u, d.ddaCap.threads);
+        EXPECT_EQ(96u, ar.reportedCap_.blocks) << "the LL reporter sizes the capped grid";
+        EXPECT_EQ(256u, ar.reportedCap_.threads);
+        EXPECT_EQ(96u, d.nMaxChannels);
+        ar.llEligible_ = false;
+        ar.vmmEligible_ = true;
+        ar.ringWarps_ = 4;
+        d = ar.Select(16 * kMiB, true);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, d.algo);
+        EXPECT_EQ(96u, d.ddaCap.blocks);
+        EXPECT_EQ(128u, d.ddaCap.threads) << "Ring at 4 warps of 32";
+        EXPECT_EQ(96u, ar.reportedCap_.blocks) << "the VMM reporter sizes the capped grid";
+        EXPECT_EQ(128u, ar.reportedCap_.threads);
+        EXPECT_EQ(96u, d.nMaxChannels);
+        ar.ringWarps_ = 1;
+        EXPECT_EQ(96u, ar.Select(16 * kMiB, true).ddaCap.threads) << "Ring blocks hold at least 3 warps";
+      });
+}
+
+// Every call outside the re-route keeps its choice and no grid cap: other arches (CE AllReduce and DDA IPC on),
+// a symk that runs, and unregistered buffers (which already run on uncapped DDA from symMinR2 up).
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteLeavesOtherCallsUnchanged) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredRerouteLeavesOtherCallsUnchanged",
+      []() {
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? 1 : def;
+        };
+        ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        for (const char* arch : {"gfx942", "gfx950"}) {
+          SCOPED_TRACE(arch);
+          RegisteredAr ar(8, arch);
+          ar.ExpectUnchanged(8 * kMiB, /*capturing=*/false, (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED);
+          ar.ExpectUnchanged(16 * kMiB, /*capturing=*/true, NCCL_ALGO_RING);
+        }
+        {
+          SCOPED_TRACE("symk runs");
+          RegisteredAr ar(8);
+          ar.table_.symMaxR2[ncclFuncAllReduce] = kThreshUnlimited;
+          ar.table_.symMaxR2Graph[ncclFuncAllReduce] = kThreshUnlimited;
+          ar.ExpectUnchanged(8 * kMiB, /*capturing=*/false, (int)rcclAddonAlgos_t::RCCL_SYMMETRIC);
+          ar.ExpectUnchanged(16 * kMiB, /*capturing=*/true, (int)rcclAddonAlgos_t::RCCL_SYMMETRIC);
+        }
+        {
+          SCOPED_TRACE("unregistered");
+          RegisteredAr ar(8);
+          ar.symkRequested_ = false;
+          ar.ExpectUnchanged(8 * kMiB, /*capturing=*/false, ll128);
+          ar.ExpectUnchanged(16 * kMiB, /*capturing=*/true, ll128);
+        }
+      });
+}
+
+// The CE cap counts CE's reduce launch on the chunk ncclCeAllReduce picks, smaller than the shard when the staging
+// slot is (a resolved staging size, or before ncclCeInit, RCCL_CE_AR_STAGING_BYTES).
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerCeCapFollowsCeChunk) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredEagerCeCapFollowsCeChunk",
+      []() {
+        int64_t stagingParam = -1;
+        g_loadParam = [&stagingParam](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_CE_AR_STAGING_BYTES") == 0 ? stagingParam : def;
+        };
+        RegisteredAr ar(8);
+        constexpr size_t kShardElems = kMiB / sizeof(float);
+        constexpr size_t kSlotElems = 512 * 1024 / sizeof(float);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, ar.Select(8 * kMiB, false).algo);
+        EXPECT_EQ(std::vector<size_t>{kShardElems}, ar.ceChunkElems_) << "the default staging holds the shard";
+        ar.ceChunkElems_.clear();
+        ar.comm_->ceColl.ceArStagingBytes = 4 * kMiB;
+        ar.Select(8 * kMiB, false);
+        EXPECT_EQ(std::vector<size_t>{kSlotElems}, ar.ceChunkElems_) << "a 512K slot";
+        ar.ceChunkElems_.clear();
+        ar.comm_->ceColl.ceArStagingBytes = 0;
+        stagingParam = 4 * kMiB;
+        ar.Select(8 * kMiB, false);
+        EXPECT_EQ(std::vector<size_t>{kSlotElems}, ar.ceChunkElems_) << "the env var ncclCeInit will apply";
+      });
+}
+
+// Capture re-routes only where the planner runs Ring (fp8 plans Tree); the cap is Ring's packed channels and
+// max(nWarps, 3) warps.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlannedKernel) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureCapFollowsThePlannedKernel",
+      []() {
+        RegisteredAr ar(8);
+        ar.ringAlgo_ = NCCL_ALGO_TREE;
+        ar.ringChannels_ = 40;
+        ar.ringWarps_ = 6;
+        ar.ExpectUnchanged(16 * kMiB, /*capturing=*/true, NCCL_ALGO_TREE, "planner picks Tree");
+        ar.ringAlgo_ = NCCL_ALGO_RING;
+        rcclCollDecision d = ar.Select(16 * kMiB, /*capturing=*/true);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+        EXPECT_EQ(40u, d.ddaCap.blocks);
+        EXPECT_EQ(192u, d.ddaCap.threads) << "6 warps of 32";
+        ScopedHook packed(g_kernelPackedChannels,
+                          [](struct ncclComm*, ncclFunc_t, size_t, ncclDataType_t, int, int) { return 24; });
+        d = ar.Select(16 * kMiB, true);
+        EXPECT_EQ(24u, d.ddaCap.blocks) << "the channels the packed plan launches";
+        EXPECT_EQ(24u, d.nMaxChannels);
+      });
+}
+
+// Check-mode, suspended and revoked comms divert to enqueue, which plans Ring itself, so capture keeps Ring for them.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureKeepsRingOnEnqueueComms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureKeepsRingOnEnqueueComms",
+      []() {
+        RegisteredAr ar(8);
+        ar.mustEnqueue_ = true;
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          const rcclCollDecision d = ar.Select(16 * kMiB, /*capturing=*/true, query);
+          EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+          if (query) {
+            EXPECT_EQ(NCCL_PROTO_LL128, d.protocol) << "the planner's Ring";
+          }
+          EXPECT_EQ(0u, d.ddaCap.blocks);
+          EXPECT_EQ(0u, d.ddaCap.threads);
+          EXPECT_EQ(0u, ar.reportedCap_.blocks) << "no DDA reporter ran";
+          EXPECT_EQ(0u, ar.reportedCap_.threads);
+        }
+        ar.mustEnqueue_ = false;
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, ar.Select(16 * kMiB, true).algo) << "a ready comm";
+      });
+}
+
+// CTA_POLICY_ZERO prefers CE: eager keeps CE-registered; capture falls back, with the warning, to DDA in Ring's grid.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteUnderZeroPolicy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredRerouteUnderZeroPolicy",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(8);
+        ar.comm_->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        std::string log = RcclUnitTesting::CaptureLog([&]() {
+          for (bool query : {true, false}) {
+            ar.SetRanks(8);
+            ar.ExpectUnchanged(8 * kMiB, /*capturing=*/false, ceReg, "1M shards", query);
+            ar.SetRanks(16);
+            ar.ExpectUnchanged(16 * kMiB, false, ceReg, "1M shards", query);
+          }
+        });
+        EXPECT_FALSE(RcclUnitTesting::LogHas(log, "preferred backend")) << "CE-registered is the preferred backend";
+        ar.SetRanks(8);
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          rcclCollDecision d{};
+          log = RcclUnitTesting::CaptureLog([&]() { d = ar.Select(16 * kMiB, /*capturing=*/true, query); });
+          EXPECT_EQ(ll128, d.algo) << "CE cannot run in capture, so the first in-window candidate runs";
+          EXPECT_EQ(NCCL_PROTO_LL128, d.protocol);
+          EXPECT_EQ(96u, d.nMaxChannels) << "the reporter sizes Ring's grid";
+          EXPECT_EQ(96u, d.ddaCap.blocks) << "Ring's channels";
+          EXPECT_EQ(256u, d.ddaCap.threads) << "Ring's block width";
+          EXPECT_TRUE(RcclUnitTesting::LogHas(log, "preferred backend")) << "the fallback warning fires";
+        }
+      });
+}
+
+// Below symMinR2 symk is not withdrawn, so a captured registered sum already runs on DDA, with no Ring cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureBelowSymMinKeepsUncappedDda) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureBelowSymMinKeepsUncappedDda",
+      []() {
+        RegisteredAr ar(8);
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          for (size_t bytes : {4 * kMiB, 8 * kMiB - sizeof(float)}) {
+            SCOPED_TRACE(testing::Message() << "bytes=" << bytes);
+            ar.ringInfo_.calls = 0;
+            ar.reportedCap_ = {};
+            const rcclCollDecision d = ar.Select(bytes, /*capturing=*/true, query);
+            EXPECT_TRUE(d.ceCapturing);
+            EXPECT_EQ(ll128, d.algo);
+            EXPECT_EQ(0u, d.ddaCap.blocks);
+            EXPECT_EQ(0u, d.ddaCap.threads);
+            EXPECT_EQ(114u, d.nMaxChannels) << "the LL128 reporter's own grid";
+            EXPECT_EQ(0u, ar.reportedCap_.blocks);
+            EXPECT_EQ(0, ar.ringInfo_.calls.load()) << "Ring is not planned for a cap";
+          }
+          const rcclCollDecision atMin = ar.Select(8 * kMiB, true, query);
+          EXPECT_EQ(ll128, atMin.algo);
+          EXPECT_EQ(96u, atMin.ddaCap.blocks) << "from symMinR2 up the re-route caps at Ring's grid";
+        }
+      });
+}
+
+// In capture DDA LL takes registered sums up to its cap (32M here), LL128 just past it; both within Ring's grid.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureTierFollowsTheLLCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredCaptureTierFollowsTheLLCap",
+      []() {
+        RegisteredAr ar(32);  // The capture bound max(32M, 32 x 2M) = 64M lies past the 32M LL cap.
+        ar.llEligible_ = true;
+        const int ll = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        for (bool query : {true, false}) {
+          SCOPED_TRACE(query ? "query" : "live: stream probe");
+          for (size_t bytes : {32 * kMiB, 32 * kMiB + sizeof(float)}) {
+            SCOPED_TRACE(testing::Message() << "bytes=" << bytes);
+            ar.reportedCap_ = {};
+            const rcclCollDecision d = ar.Select(bytes, /*capturing=*/true, query);
+            EXPECT_EQ(bytes <= 32 * kMiB ? ll : ll128, d.algo);
+            EXPECT_EQ(96u, d.ddaCap.blocks) << "Ring's channels";
+            EXPECT_EQ(256u, d.ddaCap.threads) << "Ring's single-node block";
+            EXPECT_EQ(96u, ar.reportedCap_.blocks) << "the chosen tier's reporter sizes the capped grid";
+            EXPECT_EQ(96u, d.nMaxChannels);
+          }
+        }
+      });
+}
+
+// A user-set NCCL_ALGO skips every RCCL backend, so registered sums reach the planner with no re-route and no cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredNcclAlgoEnvKeepsThePlannersChoice) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredNcclAlgoEnvKeepsThePlannersChoice",
+      []() {
+        SetMicroEnv("NCCL_ALGO", "Ring");
+        RegisteredAr ar(8);
+        for (bool query : {true, false}) {
+          for (bool capturing : {false, true}) {
+            SCOPED_TRACE(testing::Message() << "query=" << query << " capturing=" << capturing);
+            ar.ceChunkElems_.clear();
+            const rcclCollDecision d = ar.Select(capturing ? 16 * kMiB : 8 * kMiB, capturing, query);
+            EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+            EXPECT_EQ(query ? NCCL_PROTO_LL128 : NCCL_PROTO_SIMPLE, d.protocol) << "live: enqueue plans it";
+            EXPECT_EQ(query ? 96u : 0u, d.nMaxChannels);
+            EXPECT_EQ(0u, d.ddaCap.blocks);
+            EXPECT_EQ(0u, d.ddaCap.threads);
+            EXPECT_TRUE(ar.ceChunkElems_.empty()) << "no CE cap is sized";
+          }
+        }
+      });
+}
+
+// Only a sum requests symk, so another op is never re-routed: eager keeps CE-registered, capture keeps Ring.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredNonSumKeepsCeAndRing) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredNonSumKeepsCeAndRing",
+      []() {
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        for (ncclRedOp_t op : {ncclProd, ncclMax}) {
+          RegisteredAr ar(8);  // Fresh per op: a live capture latches CE off for later eager calls.
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, ar.Select(8 * kMiB, false).algo) << "a sum re-routes";
+          for (bool query : {true, false}) {
+            SCOPED_TRACE(testing::Message() << "op=" << (int)op << " query=" << query);
+            ar.ceChunkElems_.clear();
+            rcclCollDecision d = ar.Select(8 * kMiB, /*capturing=*/false, query, op);
+            EXPECT_EQ(ceReg, d.algo);
+            EXPECT_EQ(46u, d.nMaxChannels) << "CE's reduce blocks";
+            EXPECT_EQ(0u, d.ddaCap.blocks);
+            EXPECT_EQ(0u, d.ddaCap.threads);
+            EXPECT_EQ(std::vector<size_t>{kMiB / sizeof(float)}, ar.ceChunkElems_) << "only CE's own launch is sized";
+            ar.ringInfo_.calls = 0;
+            d = ar.Select(16 * kMiB, /*capturing=*/true, query, op);
+            EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+            EXPECT_EQ(0u, d.ddaCap.blocks);
+            EXPECT_EQ(0u, d.ddaCap.threads);
+            EXPECT_EQ(query ? 1 : 0, ar.ringInfo_.calls.load()) << "Ring is planned only for the report, not for a cap";
+          }
+        }
+      });
+}
+
+// Eager shard band 512K..1M of a whole per-rank shard; capture keeps DDA up to max(32M, n x 2M); no table, neither.
+TEST(WrapMicrotest, DdaArRegisteredWindowBounds) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->nRanks = 8;
+  EXPECT_EQ(0u, rcclDdaArRegCaptureMaxBytes(comm)) << "this binary's rcclGetArchThresholds has no table";
+  EXPECT_FALSE(rcclDdaArRegEagerShardFits(comm, 8 * kMiB));
+  comm->archThresholds = Gfx1250Table();
+  EXPECT_TRUE(rcclDdaArRegEagerShardFits(comm, 4 * kMiB));
+  EXPECT_FALSE(rcclDdaArRegEagerShardFits(comm, 4 * kMiB - 8));
+  EXPECT_TRUE(rcclDdaArRegEagerShardFits(comm, 8 * kMiB));
+  EXPECT_FALSE(rcclDdaArRegEagerShardFits(comm, 8 * kMiB + 8));
+  EXPECT_FALSE(rcclDdaArRegEagerShardFits(comm, 8 * kMiB - 4)) << "its floor shard is in the band, but not whole";
+  EXPECT_FALSE(rcclDdaArRegEagerShardFits(nullptr, 16 * kMiB));
+  EXPECT_EQ(32 * kMiB, rcclDdaArRegCaptureMaxBytes(comm));
+  comm->nRanks = 32;
+  EXPECT_EQ(64 * kMiB, rcclDdaArRegCaptureMaxBytes(comm));
+  DeleteCommWithArch(comm);
+}
+
+// ===========================================================================
+// rcclSelectAllReduce -- preferred-backend mask integration tests.
+//
+// Drive rcclCandSearch / rcclAllReducePreferredBackends end-to-end: force
+// flags control which mask is returned; the scan selects the preferred
+// backend when eligible, or warns and falls back otherwise.
+//
+// All use WrapMicrotestIsolated because RCCL_PARAM statics are process-global.
+// Fallback tests capture stderr to verify the WARN fires.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceSymmetricChoosesSymkWhenEligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceSymmetricChoosesSymkWhenEligible",
+      []() {
+        // CE-registered (section 5) is a competing candidate: without the flag it
+        // would win over symk (section 6). RCCL_FORCE_SYMMETRIC raises preferred
+        // to RCCL_BACKEND_SYMMETRIC so symk wins as the preferred candidate.
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_FORCE_SYMMETRIC") == 0)      return 1;
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)         return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/4));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                      /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceSymmetricFallsBackWhenSymkIneligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceSymmetricFallsBackWhenSymkIneligible",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+        g_loadParam = ForceParam("RCCL_FORCE_SYMMETRIC", int64_t(1));
+        // g_isSymmetricKernelRequested defaults false -> symk ineligible
+        // g_ceAvailable defaults false -> CE ineligible -> plain-kernel fallback
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          task->algorithm = NCCL_ALGO_RING;
+          task->protocol  = NCCL_PROTO_SIMPLE;
+          task->nMaxChannels = 1;
+          return ncclSuccess;
+        });
+        ScopedHook packed(g_kernelPackedChannels,
+                          [](struct ncclComm*, ncclFunc_t, size_t, ncclDataType_t, int, int) { return 1; });
+        ncclComm* comm = MakeSelectComm();
+        rcclCollDecision decision{};
+        std::string warn = RcclUnitTesting::CaptureLog([&]() {
+          EXPECT_EQ(ncclSuccess,
+                    rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                        /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        });
+        EXPECT_NE(std::string::npos, warn.find("preferred backend"))
+            << "WARN must fire when preferred mask cannot be satisfied";
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo) << "plain-kernel fallback must be used";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaChoosesDdaWhenEligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceDdaChoosesDdaWhenEligible",
+      []() {
+        // CE 2-shot (section 3) is a competing candidate: without the flag it would
+        // win over DDA (section 4). RCCL_FORCE_DDA raises preferred to
+        // RCCL_BACKEND_DDA so DDA wins as the preferred candidate.
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_FORCE_DDA") == 0)            return 1;
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)         return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0)   return 1;
+          return def;
+        };
+        g_ceImplemented = true;
+        ArDdaHooks hooks;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        comm->symmetricSupport = 1;
+        // Query mode never dereferences ceARTmpBuf; a non-null sentinel is enough
+        // to satisfy the selector's ceARTmpBuf != NULL gate for CE 2-shot.
+        uint8_t stagingBuf[1];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        std::string warn = RcclUnitTesting::CaptureLog([&]() {
+          EXPECT_EQ(ncclSuccess,
+                    rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                        /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        });
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, decision.algo);
+        EXPECT_EQ(std::string::npos, warn.find("preferred backend"))
+            << "no fallback warn expected when preferred is found";
+        DeleteCommWithArch(comm);
+      });
+}
+
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaWithLLDisabledChoosesVmm) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceDdaWithLLDisabledChoosesVmm",
+      []() {
+        // RCCL_DDA_LL=0 makes arDdaLLMax=0 so the LL candidate block is skipped
+        // even though LL is structurally eligible.  RCCL_FORCE_DDA=1 sets
+        // preferred=RCCL_BACKEND_DDA, so VMM must win as the next DDA tier.
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_FORCE_DDA") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL")  == 0)  return 0;
+          return def;
+        };
+        ArDdaHooks hooks;
+        // LL is eligible — proves arDdaLLMax > 0 guard, not eligibility, skips it.
+        ArVmmEligible vmm;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                      /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, decision.algo)
+            << "LL disabled via RCCL_DDA_LL=0 must not block VMM under FORCE_DDA";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaFallsBackWhenDdaIneligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceDdaFallsBackWhenDdaIneligible",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_FORCE_DDA") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
+        // g_allReduceShouldTakeDdaPath defaults false -> DDA ineligible
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        std::string warn = RcclUnitTesting::CaptureLog([&]() {
+          EXPECT_EQ(ncclSuccess,
+                    rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                        /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        });
+        EXPECT_NE(std::string::npos, warn.find("preferred backend"))
+            << "WARN must fire when FORCE_DDA preferred mask cannot be satisfied";
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo)
+            << "CE_REGISTERED must be chosen as fallback";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_CTAPolicyZeroFallsBackWhenNoCeOrGinSdmaEligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CTAPolicyZeroFallsBackWhenNoCeOrGinSdmaEligible",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+        // CE disabled (RCCL_CE_ALLREDUCE not set, g_ceAvailable defaults false)
+        // GIN_SDMA not reachable -> no preferred candidate -> warn + plain-kernel fallback
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          task->algorithm = NCCL_ALGO_RING;
+          task->protocol  = NCCL_PROTO_SIMPLE;
+          task->nMaxChannels = 1;
+          return ncclSuccess;
+        });
+        ScopedHook packed(g_kernelPackedChannels,
+                          [](struct ncclComm*, ncclFunc_t, size_t, ncclDataType_t, int, int) { return 1; });
+        ncclComm* comm = MakeSelectComm();
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        std::string warn = RcclUnitTesting::CaptureLog([&]() {
+          EXPECT_EQ(ncclSuccess,
+                    rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                        /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        });
+        EXPECT_NE(std::string::npos, warn.find("preferred backend"))
+            << "WARN must fire when CTAPolicy_ZERO mask cannot be satisfied";
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo) << "plain-kernel fallback must be used";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
 // rcclSelectAllGather -- rccl_wrap.cc:1031-1202. Same overall shape as
 // rcclSelectAllReduce, different priority order: DDA -> Hierarchical -> CE
 // (force-scratch + registered) -> symmetric (reported) -> Direct -> plain
@@ -4151,6 +6952,34 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricVmmChosenWhenNeitherLLNorLL
       });
 }
 
+TEST(WrapMicrotestIsolated, SelectAllGather_ForceDdaWithLLDisabledChoosesVmm) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_ForceDdaWithLLDisabledChoosesVmm",
+      []() {
+        // RCCL_DDA_LL=0 makes agDdaLLMax=0 so the LL candidate block is skipped
+        // even though LL is structurally eligible.  VMM must win as the next DDA tier.
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL") == 0) return 0;
+          return def;
+        };
+        // LL is eligible — proves agDdaLLMax > 0 guard, not eligibility, skips it.
+        ScopedHook llEligible(g_allGatherDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ScopedHook vmmEligible(g_allGatherDdaFabricEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, decision.algo)
+            << "LL disabled via RCCL_DDA_LL=0 must not block VMM";
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, SelectAllGather_DdaIpcChosenOnNonGfx1250Arch) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_DdaIpcChosenOnNonGfx1250Arch",
@@ -4203,6 +7032,214 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaGatedOnNotSymEligible) {
       });
 }
 
+namespace {
+// Runs the AllGather selector on a gfx1250 TDM comm with the model picking modelPick.
+rcclCollDecision Gfx1250AllGatherDecision(const rcclArchThresholds* table, size_t totalBytes,
+                                          ncclSymkKernelId modelPick, bool spansTrays, bool graph) {
+  ScopedHook tuningCompute(g_tuningCompute, SelectSymkTuning(ncclFuncAllGather, modelPick, /*maxChannels=*/64));
+  ncclComm* comm = MakeGfx1250TdmComm(table, spansTrays);
+  rcclCollDecision decision{};
+  EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, totalBytes / comm->nRanks / sizeof(float),
+                                             ncclFloat32, /*stream=*/nullptr, /*query=*/graph,
+                                             /*graphCapturingHint=*/graph, &decision));
+  DeleteCommWithArch(comm);
+  return decision;
+}
+
+// True when the selector takes symk. A query reports the TDM kernel as RCCL_SYMMETRIC_TDM.
+bool Gfx1250AllGatherPicksSymk(const rcclArchThresholds* table, size_t totalBytes, ncclSymkKernelId modelPick,
+                               bool spansTrays, bool graph) {
+  const int algo = Gfx1250AllGatherDecision(table, totalBytes, modelPick, spansTrays, graph).algo;
+  return algo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC || algo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM;
+}
+}  // namespace
+
+// The TDM window admits symk past symMaxR2, but only when the model picks a TDM kernel.
+TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel",
+      []() {
+        SymkRequestedHooks symk;
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        rcclArchThresholds table{};
+        table.symMinR2[ncclFuncAllGather] = 128 * kKiB;
+        table.symMaxR2[ncclFuncAllGather] = 2 * kMiB;
+        table.symMaxR2Graph[ncclFuncAllGather] = 2 * kMiB;
+        table.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
+        table.symTdmMaxR2[ncclFuncAllGather] = 1024 * kMiB;
+        table.symTdmMaxR2Graph[ncclFuncAllGather] = 2048 * kMiB;
+        table.symTdmCrossTrayMaxR2[ncclFuncAllGather] = 512 * kMiB;
+        auto picksSymk = [&table](size_t totalBytes, ncclSymkKernelId modelPick, bool spansTrays = false,
+                                  bool graph = false) {
+          return Gfx1250AllGatherPicksSymk(&table, totalBytes, modelPick, spansTrays, graph);
+        };
+        const ncclSymkKernelId tdm = ncclSymkKernelId_AllGather_TmaST, st = ncclSymkKernelId_AllGather_ST;
+        EXPECT_TRUE(picksSymk(1 * kMiB, st)) << "symMinR2..symMaxR2 window";
+        EXPECT_FALSE(picksSymk(32 * kMiB, tdm)) << "between the two windows";
+        EXPECT_FALSE(picksSymk(64 * kMiB - 64, tdm)) << "just below the TDM window";
+        EXPECT_TRUE(picksSymk(64 * kMiB, tdm)) << "TDM window floor";
+        EXPECT_TRUE(picksSymk(1024 * kMiB, tdm)) << "TDM window ceiling";
+        EXPECT_FALSE(picksSymk(1024 * kMiB + 64, tdm)) << "just past the TDM window";
+        EXPECT_FALSE(picksSymk(128 * kMiB, st)) << "model picks the non-TDM kernel";
+        EXPECT_FALSE(picksSymk(1 * kMiB, st, /*spansTrays=*/true)) << "cross-tray, symMinR2..symMaxR2 window";
+        EXPECT_TRUE(picksSymk(128 * kMiB, tdm, /*spansTrays=*/true)) << "cross-tray, TDM window";
+        EXPECT_TRUE(picksSymk(512 * kMiB, tdm, /*spansTrays=*/true)) << "cross-tray TDM window ceiling";
+        EXPECT_FALSE(picksSymk(512 * kMiB + 64, tdm, /*spansTrays=*/true)) << "cross-tray, just past it";
+        table.symTdmCrossTrayMaxR2[ncclFuncAllGather] = 2048 * kMiB;
+        EXPECT_FALSE(picksSymk(1024 * kMiB + 64, tdm, /*spansTrays=*/true)) << "a cross-tray cap only lowers";
+        table.symTdmCrossTrayMaxR2[ncclFuncAllGather] = 0;
+        EXPECT_TRUE(picksSymk(1024 * kMiB, tdm, /*spansTrays=*/true)) << "no cross-tray cap";
+        table.symTdmCrossTrayMaxR2[ncclFuncAllGather] = 512 * kMiB;
+        EXPECT_TRUE(picksSymk(1 * kMiB, st)) << "within one tray the symMinR2..symMaxR2 window stays";
+        EXPECT_TRUE(picksSymk(2048 * kMiB, tdm, false, /*graph=*/true)) << "graph ceiling";
+        EXPECT_FALSE(picksSymk(2048 * kMiB + 64, tdm, false, /*graph=*/true)) << "past the graph ceiling";
+        EXPECT_FALSE(picksSymk(512 * kMiB + 64, tdm, /*spansTrays=*/true, /*graph=*/true))
+          << "the cross-tray cap holds under capture";
+      });
+}
+
+// RCCL_SYM_K_MIN_BYTES / RCCL_SYM_K_MAX_BYTES narrow the TDM window (64 MiB..1 GiB here). The comm spans
+// trays, so only the window can admit symk. Returns whether each size goes to symk with param set to value.
+namespace {
+std::vector<bool> TdmWindowWith(const char* param, int64_t value, std::initializer_list<size_t> totalBytes) {
+  g_loadParam = ForceParam(param, value);
+  SymkRequestedHooks symk;
+  ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+  rcclArchThresholds table{};
+  table.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
+  table.symTdmMaxR2[ncclFuncAllGather] = 1024 * kMiB;
+  std::vector<bool> picks;
+  for (size_t bytes : totalBytes) {
+    picks.push_back(Gfx1250AllGatherPicksSymk(&table, bytes, ncclSymkKernelId_AllGather_TmaST,
+                                              /*spansTrays=*/true, /*graph=*/false));
+  }
+  return picks;
+}
+}  // namespace
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SymKMaxBytesLowersTheTdmWindowCeiling) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMaxBytesLowersTheTdmWindowCeiling", []() {
+    EXPECT_EQ(TdmWindowWith("RCCL_SYM_K_MAX_BYTES", 96 * kMiB, {64 * kMiB, 96 * kMiB, 96 * kMiB + 64}),
+              (std::vector<bool>{true, true, false}));
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SymKMaxBytesAboveTheTableKeepsTheCeiling) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMaxBytesAboveTheTableKeepsTheCeiling", []() {
+    EXPECT_EQ(TdmWindowWith("RCCL_SYM_K_MAX_BYTES", 2048 * kMiB, {1024 * kMiB, 1024 * kMiB + 64}),
+              (std::vector<bool>{true, false}));
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SymKMaxBytesZeroClosesTheTdmWindow) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMaxBytesZeroClosesTheTdmWindow", []() {
+    EXPECT_EQ(TdmWindowWith("RCCL_SYM_K_MAX_BYTES", 0, {64 * kMiB, 128 * kMiB}), (std::vector<bool>{false, false}));
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SymKMinBytesRaisesTheTdmWindowFloor) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMinBytesRaisesTheTdmWindowFloor", []() {
+    EXPECT_EQ(TdmWindowWith("RCCL_SYM_K_MIN_BYTES", 96 * kMiB, {96 * kMiB - 64, 96 * kMiB, 1024 * kMiB}),
+              (std::vector<bool>{false, true, true}));
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SymKMinBytesBelowTheTableKeepsTheFloor) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMinBytesBelowTheTableKeepsTheFloor", []() {
+    EXPECT_EQ(TdmWindowWith("RCCL_SYM_K_MIN_BYTES", 32 * kMiB, {48 * kMiB, 64 * kMiB}),
+              (std::vector<bool>{false, true}));
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SymKMinBytesZeroKeepsTheTdmWindow) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMinBytesZeroKeepsTheTdmWindow", []() {
+    EXPECT_EQ(TdmWindowWith("RCCL_SYM_K_MIN_BYTES", 0, {64 * kMiB - 64, 64 * kMiB, 1024 * kMiB}),
+              (std::vector<bool>{false, true, true}));
+  });
+}
+
+// The decision says when symk came in through the TDM window, so extraction keeps a TDM kernel.
+TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowMarksTheDecisionTdmOnly) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TdmWindowMarksTheDecisionTdmOnly",
+      []() {
+        SymkRequestedHooks symk;
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        rcclArchThresholds table{};
+        table.symMinR2[ncclFuncAllGather] = 128 * kKiB;
+        table.symMaxR2[ncclFuncAllGather] = 2 * kMiB;
+        table.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
+        table.symTdmMaxR2[ncclFuncAllGather] = 1024 * kMiB;
+        auto decide = [&table](size_t totalBytes, ncclSymkKernelId modelPick) {
+          return Gfx1250AllGatherDecision(&table, totalBytes, modelPick, /*spansTrays=*/false, /*graph=*/false);
+        };
+        const rcclCollDecision inWindow = decide(128 * kMiB, ncclSymkKernelId_AllGather_TmaST);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, inWindow.algo);
+        EXPECT_TRUE(inWindow.symkTdmOnly);
+        const rcclCollDecision small = decide(1 * kMiB, ncclSymkKernelId_AllGather_ST);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, small.algo);
+        EXPECT_FALSE(small.symkTdmOnly) << "symMinR2..symMaxR2 takes any symk kernel";
+      });
+}
+
+// The window query passes the operands' alignment to the cost model.
+TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowQueryPassesAlignment) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TdmWindowQueryPassesAlignment",
+      []() {
+        SymkRequestedHooks symk;
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        bool aligned = false;
+        int calls = 0;
+        ScopedHook tuningCompute(g_tuningCompute, RecordAlignedTuning(ncclSymkKernelId_AllGather_TmaST,
+                                                                      /*maxChannels=*/64, &aligned, &calls));
+        rcclArchThresholds table{};
+        table.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
+        table.symTdmMaxR2[ncclFuncAllGather] = 1024 * kMiB;
+        ncclComm* comm = MakeGfx1250TdmComm(&table, /*spansTrays=*/false);
+        static char send[64], recv[64];
+        SymmetricTestWindows windows(comm, send, size_t{1} << 40, recv, size_t{1} << 40);
+        for (int offset : {0, 8}) {
+          calls = 0;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, send + offset, recv, 128 * kMiB / 4 / sizeof(float),
+                                                     ncclFloat32, /*stream=*/nullptr, /*query=*/false,
+                                                     /*graphCapturingHint=*/false, &decision));
+          EXPECT_GT(calls, 0) << "offset " << offset;
+          EXPECT_EQ(aligned, offset == 0) << "offset " << offset;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The selector at the gfx1250 table's TDM-window edges, just inside and just outside each one.
+TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAtGfx1250Edges) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TdmWindowAtGfx1250Edges",
+      []() {
+        SymkRequestedHooks symk;
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        auto picksSymk = [](size_t totalBytes, bool spansTrays, bool graph) {
+          return Gfx1250AllGatherPicksSymk(Gfx1250Table(), totalBytes, ncclSymkKernelId_AllGather_TmaST, spansTrays,
+                                           graph);
+        };
+        EXPECT_FALSE(picksSymk(64 * kMiB - 64, false, false)) << "just below symTdmMinR2";
+        EXPECT_TRUE(picksSymk(64 * kMiB, false, false)) << "symTdmMinR2";
+        EXPECT_TRUE(picksSymk(128 * kMiB, false, false)) << "symTdmMaxR2";
+        EXPECT_FALSE(picksSymk(128 * kMiB + 64, false, false)) << "just past symTdmMaxR2";
+        EXPECT_FALSE(picksSymk(64 * kMiB - 64, true, false)) << "cross-tray, just below symTdmMinR2";
+        EXPECT_TRUE(picksSymk(64 * kMiB, true, false)) << "cross-tray, symTdmMinR2";
+        EXPECT_TRUE(picksSymk(128 * kMiB, true, false)) << "cross-tray, symTdmMaxR2";
+        EXPECT_FALSE(picksSymk(128 * kMiB + 64, true, false)) << "cross-tray, just past symTdmMaxR2";
+        EXPECT_FALSE(picksSymk(64 * kMiB - 64, false, true)) << "graph, just below symTdmMinR2";
+        EXPECT_TRUE(picksSymk(64 * kMiB, false, true)) << "graph, symTdmMinR2";
+        EXPECT_TRUE(picksSymk(4096 * kMiB, false, true)) << "graph, symTdmMaxR2Graph";
+        EXPECT_FALSE(picksSymk(4096 * kMiB + 64, false, true)) << "graph, just past symTdmMaxR2Graph";
+        EXPECT_TRUE(picksSymk(512 * kMiB, true, true)) << "graph cross-tray, symTdmCrossTrayMaxR2";
+        EXPECT_FALSE(picksSymk(512 * kMiB + 64, true, true)) << "graph cross-tray, just past symTdmCrossTrayMaxR2";
+      });
+}
+
 // Hierarchical, live mode: the inner (query-only) inter/intra-comm
 // dereferencing never runs, so no sub-comms need to be set up here --
 // just the eligibility gates (outside a group, 8+ nodes, param enabled,
@@ -4219,6 +7256,268 @@ TEST(WrapMicrotestIsolated, SelectAllGather_HierarchicalChosenLiveMode) {
         EXPECT_EQ(ncclSuccess,
                   rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32, /*stream=*/nullptr,
                                       /*query=*/false, /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+namespace {
+// ncclCudaGraphNone() leaves graphId at the not-capturing sentinel; any other
+// id makes ncclCudaGraphValid() report an active capture.
+ncclResult_t CapturingGraphProbe(struct ncclCudaGraph* graph, hipStream_t, int mode) {
+  *graph = ncclCudaGraphNone(mode);
+#if ROCM_VERSION >= 60100
+  graph->graphId = 1;
+#endif
+  return ncclSuccess;
+}
+
+// Rank 5 of an 8-node comm whose sub-communicators RCCL_HIERARCHICAL_LAZY_INIT deferred.
+ncclComm* MakeDeferredHierarchyComm() {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 8;
+  comm->nRanks = 8;
+  comm->rank = 5;
+  comm->bootstrap = reinterpret_cast<void*>(0x1);
+  comm->hierarchicalEligible = true;
+  return comm;
+}
+
+ncclResult_t MarkHierarchyInitialized(ncclComm* comm) {
+  comm->hierarchicalCommsInitialized = true;
+  return ncclSuccess;
+}
+
+// A readiness handshake in which every peer votes ready. *ownVote receives the
+// vote this rank published.
+auto PeersVoteReady(const ncclComm* comm, int* ownVote) {
+  return [comm, ownVote](void* bootstrap, void* data, int bytes) {
+    EXPECT_EQ(comm->bootstrap, bootstrap);
+    EXPECT_EQ(1, bytes);
+    auto* votes = static_cast<uint8_t*>(data);
+    *ownVote = votes[comm->rank];
+    for (int r = 0; r < comm->nRanks; ++r) {
+      if (r != comm->rank) votes[r] = 1;
+    }
+    return ncclSuccess;
+  };
+}
+
+ncclResult_t SelectLiveAllGather(ncclComm* comm, size_t sendcount, ncclDataType_t type, rcclCollDecision* decision) {
+  return rcclSelectAllGather(comm, nullptr, nullptr, sendcount, type, /*stream=*/nullptr, /*query=*/false,
+                             /*graphCapturingHint=*/false, decision);
+}
+}  // namespace
+
+// Every rank votes ready, so the first eligible live AllGather builds the
+// hierarchy and selects it.
+TEST(WrapMicrotestIsolated, SelectAllGather_AllRanksAgreeInitializesHierarchy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_AllRanksAgreeInitializesHierarchy",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(1, agreement.calls);
+        EXPECT_EQ(1, ownVote);
+        EXPECT_EQ(1, ensure.calls);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The floor is per rank: over 256 ranks, PyTorch DDP's startup AllGather of one
+// int64 neither builds nor selects the hierarchy, while two int64s do both.
+TEST(WrapMicrotestIsolated, SelectAllGather_HierarchicalFloorIsPerRank) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_HierarchicalFloorIsPerRank",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        comm->nNodes = 32;
+        comm->nRanks = 256;
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/1, ncclInt64, &decision));
+        EXPECT_EQ(0, agreement.calls);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/2, ncclInt64, &decision));
+        EXPECT_EQ(1, ensure.calls);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_QueryDoesNotInitializeHierarchy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_QueryDoesNotInitializeHierarchy",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32, /*stream=*/nullptr,
+                                      /*query=*/true, /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(0, agreement.calls);
+        EXPECT_EQ(0, ensure.calls);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A capturing rank votes not ready, so no rank builds the hierarchy during capture.
+TEST(WrapMicrotestIsolated, SelectAllGather_CaptureDoesNotInitializeHierarchy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_CaptureDoesNotInitializeHierarchy",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        ScopedHook reserve(g_reserveHierarchicalTempBuffer, [](ncclComm*) { return ncclSuccess; });
+        ScopedHook graphProbe(g_cudaGetCapturingGraph, CapturingGraphProbe);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(1, graphProbe.calls);
+        EXPECT_EQ(1, agreement.calls);
+        EXPECT_EQ(0, ownVote);
+        EXPECT_EQ(0, reserve.calls);
+        EXPECT_EQ(0, ensure.calls);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A rank that cannot allocate the temp buffer votes not ready, so no rank splits,
+// and clears the HIP error it tolerated. The next handshake retries the allocation.
+TEST(WrapMicrotestIsolated, SelectAllGather_TempBufferFailureDefersSetup) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TempBufferFailureDefersSetup",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        int ownVote = -1;
+        bool allocationFails = true;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook reserve(g_reserveHierarchicalTempBuffer, [&](ncclComm*) {
+          return allocationFails ? ncclUnhandledCudaError : ncclSuccess;
+        });
+        ScopedHook lastError(g_hipGetLastError, []() { return hipErrorOutOfMemory; });
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(0, ownVote);
+        EXPECT_EQ(1, lastError.calls);
+        EXPECT_EQ(0, ensure.calls);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+
+        allocationFails = false;
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(2, reserve.calls);
+        EXPECT_EQ(1, ownVote);
+        EXPECT_EQ(1, ensure.calls);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Once the sub-communicators exist, live and captured AllGathers select them
+// without another handshake.
+TEST(WrapMicrotestIsolated, SelectAllGather_InitializedHierarchySkipsHandshake) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_InitializedHierarchySkipsHandshake",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        comm->hierarchicalCommsInitialized = true;
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+
+        ScopedHook graphProbe(g_cudaGetCapturingGraph, CapturingGraphProbe);
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(1, graphProbe.calls);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        EXPECT_EQ(0, agreement.calls);
+        EXPECT_EQ(0, ensure.calls);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A split child, a grown comm, or a non-uniform or non-compact layout never
+// builds the hierarchy, so it never pays for the handshake either.
+TEST(WrapMicrotestIsolated, SelectAllGather_IneligibleTopologyNeverHandshakes) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_IneligibleTopologyNeverHandshakes",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        comm->hierarchicalEligible = false;
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(0, agreement.calls);
+        EXPECT_EQ(0, ensure.calls);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SetupFailureIsReturned) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_SetupFailureIsReturned",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        int ownVote = -1;
+        ScopedHook agreement(g_devrBootstrapAllGather, PeersVoteReady(comm, &ownVote));
+        ScopedHook ensure(g_ensureHierarchicalComms, [](ncclComm*) { return ncclSystemError; });
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSystemError, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        EXPECT_EQ(1, ensure.calls);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// While a peer keeps capturing, the handshake backs off to the 1st, 2nd, 4th,
+// 8th... eligible call, and the setup runs on the first of those after every
+// rank is ready.
+TEST(WrapMicrotestIsolated, SelectAllGather_DeferredSetupBacksOff) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_DeferredSetupBacksOff",
+      []() {
+        ncclComm* comm = MakeDeferredHierarchyComm();
+        bool peerCapturing = true;
+        ScopedHook agreement(g_devrBootstrapAllGather, [&](void*, void* data, int) {
+          auto* votes = static_cast<uint8_t*>(data);
+          std::fill(votes, votes + comm->nRanks, uint8_t{1});
+          if (peerCapturing) votes[1] = 0;
+          return ncclSuccess;
+        });
+        ScopedHook ensure(g_ensureHierarchicalComms, MarkHierarchyInitialized);
+        rcclCollDecision decision{};
+        auto allGather = [&]() {
+          EXPECT_EQ(ncclSuccess, SelectLiveAllGather(comm, /*sendcount=*/8, ncclFloat32, &decision));
+        };
+        for (int call = 1; call <= 8; ++call) allGather();
+        EXPECT_EQ(4, agreement.calls) << "calls 1, 2, 4 and 8";
+        EXPECT_EQ(0, ensure.calls);
+
+        peerCapturing = false;
+        for (int call = 9; call <= 15; ++call) allGather();
+        EXPECT_EQ(4, agreement.calls) << "calls 9 to 15 skip the handshake";
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+
+        allGather();  // call 16
+        EXPECT_EQ(5, agreement.calls);
+        EXPECT_EQ(1, ensure.calls);
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4256,6 +7555,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchChosen) {
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
         comm->nNodes = 1;
+        // gfx942 has ceNonRegMax[AG]=0; CE-scratch fires via CTAPolicy_ZERO.
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t scratch[64];
         comm->ddaScratch = scratch;
         comm->ddaScratchBytes = sizeof(scratch);
@@ -4401,11 +7702,13 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchAcceptsExactCapacity) 
         ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                        ncclSymRegType_t) { return true; });
         ncclComm* comm = MakeSelectComm();
+        // null table -> ceNonRegMax[AG]=0; CE-scratch fires via CTAPolicy_ZERO.
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t scratch[64];
         comm->ddaScratch = scratch;
         comm->ddaScratchBytes = sizeof(scratch);
         rcclCollDecision decision{};
-        // nRanks(1) * sendcount(16) * sizeof(float32)(4) == 64 bytes.
+        // nRanks(1) * sendcount(16) * sizeof(float32)(4) == 64 bytes == ddaScratchBytes exactly.
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, 16, ncclFloat32, /*stream=*/nullptr, true,
                                                    false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
@@ -4442,6 +7745,670 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchNotChosenWhenProbeSays
       });
 }
 
+namespace {
+// rccl-UnitTestsMicro links no real arch tables (the host fake rcclGetArchThresholds
+// returns null), so each case hands the comm the table it wants to exercise.
+// Every other CE-Scratch gate is armed: scratch probe true, unregistered windows,
+// no sysmem, receive fits ddaScratch, and ceNonRegMax[AG] = 0 so the window
+// cannot fire on its own.
+rcclArchThresholds MakeCeScratchTable(bool forceCeScratch) {
+  rcclArchThresholds table{};
+  table.forceCeScratch = forceCeScratch;
+  return table;
+}
+
+ncclComm* MakeCeScratchComm(const char* arch, const rcclArchThresholds* table, uint8_t* scratch, size_t bytes) {
+  ncclComm* comm = MakeCommWithArch(arch);
+  comm->nRanks = 1;
+  comm->nNodes = 1;
+  comm->archThresholds = table;
+  comm->ddaScratch = scratch;
+  comm->ddaScratchBytes = bytes;
+  return comm;
+}
+
+int SelectAllGatherAlgo(ncclComm* comm) {
+  rcclCollDecision decision{};
+  EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                             /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                             &decision));
+  return decision.algo;
+}
+
+// Distinct send and receive buffers, so the out-of-place path is the one selected.
+int SelectAlltoAllAlgo(ncclComm* comm) {
+  alignas(256) static char send[256];
+  alignas(256) static char recv[256];
+  rcclCollDecision decision{};
+  EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, send, recv, /*count=*/8, ncclFloat32, /*stream=*/nullptr,
+                                            /*query=*/true, /*graphCapturingHint=*/false, &decision));
+  return decision.algo;
+}
+}  // namespace
+
+// AICOMRCCL-2876: forceCeScratch in the arch table is a prerequisite gate, not a
+// sufficient trigger. The size window (ceNonRegMax[AG]) must also be open. Here
+// ceNonRegMax[AG]=64 keeps the window armed; flipping only forceCeScratch is the
+// control variable proving the gate alone controls CE-Scratch selection.
+TEST(WrapMicrotestIsolated, SelectAllGather_TableWithoutForceCeScratchDoesNotForce) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TableWithoutForceCeScratchDoesNotForce",
+      []() {
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
+        // Arm ceNonRegMax[AG] so the size window is open; only forceCeScratch varies.
+        table.ceNonRegMax[ncclFuncAllGather] = 64;
+        uint8_t scratch[64];
+        ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
+        // Gate fails (forceCeScratch=false) even though window is open.
+        EXPECT_EQ(NCCL_ALGO_RING, SelectAllGatherAlgo(comm));
+        // Gate passes (forceCeScratch=true) and window is open -> CE-Scratch.
+        table.forceCeScratch = true;
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// CE-Scratch is the one zero-CU path for unregistered buffers, so a comm-level
+// NCCL_CTA_POLICY_ZERO keeps it forced even when the table does not. An explicit
+// FORCE_CE=0 still wins.
+TEST(WrapMicrotestIsolated, SelectAllGather_CtaZeroKeepsCeScratch) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_CtaZeroKeepsCeScratch",
+      []() {
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        const rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
+        uint8_t scratch[64];
+        ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm));
+        {
+          ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm));
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// With a table having forceCeScratch=true and ceNonRegMax[AG]>0, CE-Scratch fires on
+// gfx942/gfx950. With no table the prereq gate is open but ceNonRegMax[AG]=0, so
+// CTAPolicy_ZERO is needed to bypass the window. FORCE_CE=0 disables both.
+TEST(WrapMicrotestIsolated, SelectAllGather_ForceCeScratchTableOrNoTableForces) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_ForceCeScratchTableOrNoTableForces",
+      []() {
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        // Table case: forceCeScratch=true + ceNonRegMax[AG]=64 (>= totalBytes=32).
+        rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/true);
+        table.ceNonRegMax[ncclFuncAllGather] = 64;
+        for (const char* arch : {"gfx942", "gfx950"}) {
+          uint8_t scratch[64];
+          ncclComm* comm = MakeCeScratchComm(arch, &table, scratch, sizeof(scratch));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm)) << arch;
+          {
+            ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+            EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm)) << arch;
+          }
+          DeleteCommWithArch(comm);
+        }
+        // Null-table case: prereq gate open; ceNonRegMax[AG]=0 so CTAPolicy_ZERO bypasses window.
+        for (const char* arch : {"gfx942", "gfx950"}) {
+          uint8_t scratch[64];
+          ncclComm* comm = MakeCeScratchComm(arch, nullptr, scratch, sizeof(scratch));
+          comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm)) << arch << " no table";
+          {
+            ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+            EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm)) << arch << " no table";
+          }
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// The AlltoAll selector reads the same resolver.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_CeScratchFollowsForceCeScratchResolver) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_CeScratchFollowsForceCeScratchResolver",
+      []() {
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
+        uint8_t scratch[64];
+        ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAlltoAllAlgo(comm));
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAlltoAllAlgo(comm));
+        comm->config.CTAPolicy = 0;
+        // forceCeScratch=true is the prereq; ceNonRegMax[A2A]=64 arms the window.
+        table.forceCeScratch = true;
+        table.ceNonRegMax[ncclFuncAlltoAll] = 64;
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAlltoAllAlgo(comm));
+        {
+          ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAlltoAllAlgo(comm));
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The LL128 two-shot AllReduce ceiling (AICOMRCCL-2875) follows the AllReduce LL128
+// tier cap where the arch table runs that tier; a table without it, or no table,
+// keeps RCCL_DDA_LL128_TWOSHOT_THRESHOLD's 64 MiB default.
+TEST(WrapMicrotestIsolated, DdaLL128TwoShotThreshold_FollowsLL128TierElseEnvDefault) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128TwoShotThreshold_FollowsLL128TierElseEnvDefault",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL128_TWOSHOT_THRESHOLD");
+        rcclArchThresholds table = MakeRankScaledTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        comm->nRanks = 8;
+        EXPECT_EQ(256 * kMiB, rcclDdaLL128TwoShotThreshold(comm));
+        table.ddaLL128Max[ncclFuncAllReduce] = 0;
+        EXPECT_EQ(64 * kMiB, rcclDdaLL128TwoShotThreshold(comm));
+        comm->archThresholds = nullptr;
+        EXPECT_EQ(64 * kMiB, rcclDdaLL128TwoShotThreshold(comm)) << "no table";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A user-set RCCL_DDA_LL128_TWOSHOT_THRESHOLD overrides the tier cap.
+TEST(WrapMicrotestIsolated, DdaLL128TwoShotThreshold_EnvOverridesTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128TwoShotThreshold_EnvOverridesTable",
+      []() {
+        SetMicroEnv("RCCL_DDA_LL128_TWOSHOT_THRESHOLD", "33554432");
+        g_loadParam = ForceParam("RCCL_DDA_LL128_TWOSHOT_THRESHOLD", int64_t(32) << 20);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        comm->nRanks = 8;
+        EXPECT_EQ(32 * kMiB, rcclDdaLL128TwoShotThreshold(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// An empty value is not a setting: the param loader reads it as unset, so the
+// resolver must too, and the tier cap stays in force.
+TEST(WrapMicrotestIsolated, DdaLL128TwoShotThreshold_EmptyEnvIsUnset) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128TwoShotThreshold_EmptyEnvIsUnset",
+      []() {
+        SetMicroEnv("RCCL_DDA_LL128_TWOSHOT_THRESHOLD", "");
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        comm->nRanks = 8;
+        EXPECT_EQ(256 * kMiB, rcclDdaLL128TwoShotThreshold(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
+// AICOMRCCL-1756: rank-scaled gfx1250 DDA tiers, Tree for small AllReduce,
+// Ring protocol ranges and the ReduceScatter channel cap.
+// ===========================================================================
+
+// Below rankScaledMinRanks the totals apply; from it, nRanks x the per-rank entry,
+// clipped to rankScaledMaxBytes. Tiers without a per-rank entry keep their totals.
+TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaTierCaps_RankScaledFromMinRanks",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        comm->nRanks = 4;
+        EXPECT_EQ(4 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        comm->nRanks = 7;
+        EXPECT_EQ(32 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
+        EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
+        EXPECT_EQ(4 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(224 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(0u, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
+        comm->nRanks = 8;
+        EXPECT_EQ(8 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
+        EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
+        EXPECT_EQ(8 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(128 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather));
+        EXPECT_EQ(60 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
+        EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
+        comm->nRanks = 16;
+        EXPECT_EQ(16 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(120 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        comm->nRanks = 32;
+        EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather)) << "clipped";
+        EXPECT_EQ(64 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
+        // The entry gate admits the widest tier, so it scales too.
+        EXPECT_EQ(240 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(240 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter));
+        comm->nRanks = 64;
+        EXPECT_EQ(64 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "clipped";
+        EXPECT_EQ(128 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_DDA_LL_THRESHOLD still wins over the rank-scaled cap.
+TEST(WrapMicrotestIsolated, DdaTierCaps_EnvWinsOverRankScaling) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaTierCaps_EnvWinsOverRankScaling",
+      []() {
+        g_loadParam = ForceParam("RCCL_DDA_LL_THRESHOLD", int64_t(65536));
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        comm->nRanks = 16;
+        EXPECT_EQ(65536u, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
+        EXPECT_EQ(65536u, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// On rank-scaled comms the AllReduce LL two-shot runs to the LL tier cap; smaller
+// comms, and tables that do not scale the AllReduce LL tier, keep the 2 MiB default.
+TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_FollowsRankScaledLLTier) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLTwoShotThreshold_FollowsRankScaledLLTier",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL_TWOSHOT_THRESHOLD");
+        rcclArchThresholds table = MakeRankScaledTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        comm->nRanks = 16;
+        EXPECT_EQ(16 * kMiB, rcclDdaLLTwoShotThreshold(comm));
+        comm->nRanks = 4;
+        EXPECT_EQ(2 * kMiB, rcclDdaLLTwoShotThreshold(comm));
+        comm->nRanks = 16;
+        table.ddaLLMaxPerRank[ncclFuncAllReduce] = 0;
+        EXPECT_EQ(2 * kMiB, rcclDdaLLTwoShotThreshold(comm));
+        comm->archThresholds = nullptr;
+        EXPECT_EQ(2 * kMiB, rcclDdaLLTwoShotThreshold(comm)) << "no table";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLTwoShotThreshold_EnvOverridesRankScaling",
+      []() {
+        SetMicroEnv("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "4194304");
+        g_loadParam = ForceParam("RCCL_DDA_LL_TWOSHOT_THRESHOLD", int64_t(4) << 20);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        comm->nRanks = 16;
+        EXPECT_EQ(4 * kMiB, rcclDdaLLTwoShotThreshold(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// VMM blocks: clamp(2048 / nRanks, 32, 128), never above the init cap; small comms,
+// no budget or no table keep the init cap.
+TEST(WrapMicrotestIsolated, DdaFabricVmmBlocks_BudgetPerRank) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricVmmBlocks_BudgetPerRank",
+      []() {
+        rcclArchThresholds table = MakeRankScaledTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        comm->ddaFabricMaxBlocks = 192;
+        const std::pair<int, int> cases[] = {{4, 192}, {8, 128}, {16, 128}, {32, 64}, {64, 32}, {128, 32}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(c.second, rcclDdaFabricVmmBlocks(comm)) << c.first;
+        }
+        comm->nRanks = 8;
+        comm->ddaFabricMaxBlocks = 48;
+        EXPECT_EQ(48, rcclDdaFabricVmmBlocks(comm)) << "init cap still bounds it";
+        comm->ddaFabricMaxBlocks = 192;
+        table.ddaVmmBlockBudget = 0;
+        EXPECT_EQ(192, rcclDdaFabricVmmBlocks(comm));
+        comm->archThresholds = nullptr;
+        EXPECT_EQ(192, rcclDdaFabricVmmBlocks(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
+
+// From 32 ranks, DDA VMM claims (2 MiB, nRanks x 512 KiB] ahead of LL; at and below
+// 2 MiB, past the window, or on a 16-rank comm, LL keeps it.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstWindow) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250VmmFirstWindow",
+      []() {
+        ArDdaHooks hooks;
+        ArVmmEligible vmmHook;
+        ncclComm* comm = MakeArDdaComm(32);
+        const int vmm = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM;
+        const int ll = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
+        EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 2 * kMiB));
+        EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 2 * kMiB + 16));
+        EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 16 * kMiB));
+        EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 16 * kMiB + 16));
+        comm->nRanks = 64;
+        EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 24 * kMiB)) << "past ddaVmmMax (16 MiB) inside the window";
+        comm->nRanks = 16;
+        EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 4 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Registered receive windows keep the normal tier order (the window was measured on
+// unregistered buffers).
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstUnregisteredOnly) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250VmmFirstUnregisteredOnly",
+      []() {
+        ArDdaHooks hooks;
+        ArVmmEligible vmmHook;
+        ScopedHook regType(g_getSymRegType, [](struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t* out) {
+          *out = ncclSymSendNonregRecvReg;
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeArDdaComm(32);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The window steps aside when the user sets RCCL_DDA_LL_THRESHOLD ...
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToLLThresholdEnv) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250VmmFirstYieldsToLLThresholdEnv",
+      []() {
+        g_loadParam = ForceParam("RCCL_DDA_LL_THRESHOLD", int64_t(64) << 20);
+        ArDdaHooks hooks;
+        ArVmmEligible vmmHook;
+        ncclComm* comm = MakeArDdaComm(64);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ... or RCCL_DDA_THRESHOLD.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToVmmThresholdEnv) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250VmmFirstYieldsToVmmThresholdEnv",
+      []() {
+        g_loadParam = ForceParam("RCCL_DDA_THRESHOLD", int64_t(64) << 20);
+        ArDdaHooks hooks;
+        ArVmmEligible vmmHook;
+        ncclComm* comm = MakeArDdaComm(64);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstNeedsVmmEligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250VmmFirstNeedsVmmEligible",
+      []() {
+        ArDdaHooks hooks;  // g_allReduceDdaFabricEligible left at its default (false)
+        ncclComm* comm = MakeArDdaComm(64);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Under CTA_POLICY_ZERO the preferred backend is RCCL_BACKEND_CE. The vmmFirst
+// block used to return early, silently bypassing the preferred/fallback warning
+// when CE 2-shot is unavailable (ceARTmpBuf==NULL). After the fix it records via
+// rcclCandSearchRecord so the search arbitrates: VMM becomes the bestFallback, the
+// preferred mask is not satisfied, and the "preferred backend" warning fires.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstFallsBackUnderZeroPolicy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250VmmFirstFallsBackUnderZeroPolicy",
+      []() {
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+        ArDdaHooks hooks;
+        ArVmmEligible vmmHook;
+        ncclComm* comm = MakeArDdaComm(32);
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        // ceARTmpBuf stays null → CE 2-shot not available → vmmFirst VMM is the
+        // only candidate, but CE is preferred → fallback is used with a warning.
+        std::string warn = RcclUnitTesting::CaptureLog([&]() {
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
+        });
+        EXPECT_NE(std::string::npos, warn.find("preferred backend"))
+            << "warn must fire when CE is preferred but CE 2-shot is unavailable";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The ReduceScatter selector passes nRanks to the VMM cap: VMM, newly on for gfx1250,
+// runs to nRanks x 2 MiB on a 16-rank comm and not past it; 4 ranks keep it off.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250RankScaledVmm) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_Gfx1250RankScaledVmm",
+      []() {
+        ScopedHook vmmEligible(g_reduceScatterDdaFabricEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ncclComm* comm = MakeArDdaComm(16);
+        auto algo = [&](size_t totalBytes) {
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr,
+                                                          totalBytes / sizeof(float) / (size_t)comm->nRanks,
+                                                          ncclFloat32, ncclSum, /*query=*/true, &decision));
+          return decision.algo;
+        };
+        const int vmm = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM;
+        EXPECT_EQ(vmm, algo(32 * kMiB));
+        EXPECT_NE(vmm, algo(32 * kMiB + 16 * 16 * 4));
+        comm->nRanks = 4;
+        EXPECT_NE(vmm, algo(1 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The AllGather selector passes nRanks to the LL128 cap: 256 MiB on a 16-rank comm,
+// 128 MiB (the total) on a 4-rank one.
+TEST(WrapMicrotestIsolated, SelectAllGather_Gfx1250RankScaledLL128) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_Gfx1250RankScaledLL128",
+      []() {
+        ScopedHook ll128Eligible(g_allGatherDdaFabricLL128Eligible,
+                                 [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ncclComm* comm = MakeArDdaComm(16);
+        auto algo = [&](size_t totalBytes) {
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr,
+                                                      totalBytes / sizeof(float) / (size_t)comm->nRanks, ncclFloat32,
+                                                      /*stream=*/nullptr, /*query=*/true,
+                                                      /*graphCapturingHint=*/false, &decision));
+          return decision.algo;
+        };
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        EXPECT_EQ(ll128, algo(256 * kMiB));
+        EXPECT_NE(ll128, algo(256 * kMiB + 16 * 16));
+        comm->nRanks = 4;
+        EXPECT_EQ(ll128, algo(128 * kMiB));
+        EXPECT_NE(ll128, algo(128 * kMiB + 4 * 16));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// An explicit RCCL_FORCE_CE=1 still forces CE-Scratch where the table does not.
+TEST(WrapMicrotestIsolated, SelectAllGather_ExplicitForceCeForcesCeScratch) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_ExplicitForceCeForcesCeScratch",
+      []() {
+        SetMicroEnv("RCCL_FORCE_CE", "1");
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        // RCCL_FORCE_CE=1 satisfies the prereq gate; also need ceNonRegMax[AG]>0 for the window.
+        rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
+        table.ceNonRegMax[ncclFuncAllGather] = 64;
+        uint8_t scratch[64];
+        ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
+namespace {
+// Cost table offering every algorithm/protocol (Ring cheapest), as topoGetAlgoInfo sees it.
+struct CostTable {
+  float t[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+  CostTable() {
+    for (auto& row : t)
+      for (float& v : row) v = 2.0f;
+  }
+};
+
+int AlgoAfterUpdate(ncclComm* comm, ncclFunc_t func, size_t nBytes, CostTable& table) {
+  ncclTaskColl info{};
+  info.func = func;
+  info.algorithm = NCCL_ALGO_RING;
+  info.protocol = NCCL_PROTO_LL128;
+  rcclUpdateCollectiveAlgorithm(comm, nBytes, &info, table.t);
+  return info.algorithm;
+}
+
+// Single-node comm on `arch`; gfx1250 gets the arch table.
+ncclComm* MakeTuningComm(int nRanks, const char* arch = "gfx1250") {
+  ncclComm* comm = MakeCommWithArch(arch);
+  comm->nRanks = nRanks;
+  comm->nNodes = 1;
+  if (std::strcmp(arch, "gfx1250") == 0) comm->archThresholds = Gfx1250Table();
+  return comm;
+}
+}  // namespace
+
+// AICOMRCCL-1756: gfx1250 AllReduce on 8+ ranks runs Tree up to nRanks x 1 MiB.
+TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithm_Gfx1250SmallAllReduceTakesTree) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveAlgorithm_Gfx1250SmallAllReduceTakesTree",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        CostTable table;
+        for (int nRanks : {8, 32}) {
+          ncclComm* comm = MakeTuningComm(nRanks);
+          const size_t cap = (size_t)nRanks * kMiB;
+          EXPECT_EQ(NCCL_ALGO_TREE, AlgoAfterUpdate(comm, ncclFuncAllReduce, cap, table)) << nRanks;
+          EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, cap + 1, table)) << nRanks;
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// Each guard on its own: below 8 ranks, more than one node, no arch table, another
+// arch, another collective, or Tree LL / LL128 missing from the cost table all keep Ring.
+TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithm_TreeOnlyWhenEveryGuardHolds) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveAlgorithm_TreeOnlyWhenEveryGuardHolds",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        CostTable table;
+        ncclComm* comm = MakeTuningComm(4);
+        EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table)) << "4 ranks";
+        comm->nRanks = 8;
+        EXPECT_EQ(NCCL_ALGO_TREE, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table)) << "control";
+        comm->nNodes = 2;
+        EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table)) << "2 nodes";
+        comm->nNodes = 1;
+        comm->archThresholds = nullptr;
+        EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table)) << "no arch table";
+        comm->archThresholds = Gfx1250Table();
+        EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllGather, 1024, table)) << "AllGather";
+        table.t[NCCL_ALGO_TREE][NCCL_PROTO_LL] = NCCL_ALGO_PROTO_IGNORE;
+        EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table)) << "no Tree LL";
+        table.t[NCCL_ALGO_TREE][NCCL_PROTO_LL] = 2.0f;
+        table.t[NCCL_ALGO_TREE][NCCL_PROTO_LL128] = NCCL_ALGO_PROTO_IGNORE;
+        EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table)) << "no Tree LL128";
+        DeleteCommWithArch(comm);
+        CostTable full;
+        comm = MakeTuningComm(8, "gfx950");
+        EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, full)) << "gfx950";
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithm_NcclAlgoEnvKeepsRing) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveAlgorithm_NcclAlgoEnvKeepsRing",
+      []() {
+        SetMicroEnv("NCCL_ALGO", "Ring");
+        CostTable table;
+        ncclComm* comm = MakeTuningComm(8);
+        EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// With NCCL_PROTO set the protocol hook leaves Ring's protocol in place, so the
+// switch to Tree must not happen either.
+TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithm_NcclProtoEnvKeepsRing) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveAlgorithm_NcclProtoEnvKeepsRing",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnv("NCCL_PROTO", "Simple,LL,LL128");
+        CostTable table;
+        ncclComm* comm = MakeTuningComm(8);
+        EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table));
+        DeleteCommWithArch(comm);
+      });
+}
+
+namespace {
+int CappedChannels(ncclComm* comm, ncclFunc_t func, int proto, size_t perRank) {
+  ncclTaskColl info{};
+  info.func = func;
+  info.algorithm = NCCL_ALGO_RING;
+  info.protocol = proto;
+  int nc = 192;
+  rcclUpdateCollectiveChannels(comm, perRank * (size_t)comm->nRanks, &info, nc);
+  return nc;
+}
+}  // namespace
+
+// Ring Simple ReduceScatter between 8 and 32 MiB per rank runs on 128 channels on
+// 8+ rank single-node gfx1250 comms.
+TEST(WrapMicrotestIsolated, UpdateCollectiveChannels_ReduceScatterSimpleBand) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveChannels_ReduceScatterSimpleBand",
+      []() {
+        ncclComm* comm = MakeTuningComm(16);
+        EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 8 * kMiB));
+        EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 8 * kMiB + 16));
+        EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 32 * kMiB));
+        EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 32 * kMiB + 16));
+        EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_LL128, 16 * kMiB)) << "LL128";
+        EXPECT_EQ(192, CappedChannels(comm, ncclFuncAllGather, NCCL_PROTO_SIMPLE, 16 * kMiB)) << "AllGather";
+        comm->nNodes = 2;
+        EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB)) << "2 nodes";
+        comm->nNodes = 1;
+        comm->nRanks = 4;
+        EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB)) << "4 ranks";
+        DeleteCommWithArch(comm);
+        comm = MakeTuningComm(16, "gfx950");
+        EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB)) << "gfx950";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A user channel count (NCCL_MAX_NCHANNELS or NCCL_MIN_NCHANNELS) turns the cap off.
+TEST(WrapMicrotestIsolated, UpdateCollectiveChannels_UserChannelCountTurnsItOff) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveChannels_UserChannelCountTurnsItOff",
+      []() {
+        ncclComm* comm = MakeTuningComm(16);
+        g_paramMaxNchannels = 192;
+        EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB));
+        g_paramMaxNchannels = -2;
+        g_paramMinNchannels = 64;
+        EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB));
+        g_paramMinNchannels = -2;
+        EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB)) << "control";
+        DeleteCommWithArch(comm);
+      });
+}
+
 // CE registered via symmetric windows (branch #3): distinct from the
 // force-scratch test above by leaving ceScratch/ddaScratch at their
 // defaults (unset) so branch #2 can't fire, and instead making ceAvailable
@@ -4454,11 +8421,32 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeRegisteredViaSymmetricWindowsChose
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ncclComm* comm = MakeCommWithArch("gfx942");
+        // nullptr buffers yield ncclSymSendNonregRecvNonreg by default; override to
+        // ncclSymSendNonregRecvReg so rcclAllGatherCeRegisteredWindowTab passes the
+        // recv-registered check (Branch #3 now requires both CTAPolicy=ZERO and a
+        // registered recv window after the OR->AND change in this PR).
+        ScopedHook regType(g_getSymRegType,
+            [](struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t* out) {
+              *out = ncclSymSendNonregRecvReg;
+              return ncclSuccess;
+            });
+        ncclComm* comm = MakeCommWithArch("gfx950");
         comm->nRanks = 1;
         comm->nNodes = 1;
-        // Branch #3 requires CTA_POLICY_ZERO as of #11389, matching the
-        // AllReduce CE-registered gate.
+        // rccl_arch_thresholds_fakes.cc returns nullptr from rcclGetArchThresholds
+        // (the real .cc is not linked into rccl-UnitTestsMicro).  When the table is
+        // nullptr rcclCeRegMaxTab() returns 0, which makes rcclAllGatherCeRegisteredWindowTab
+        // return false and prevents Branch #3 from firing.  Supply a minimal table
+        // directly so extAlgoArchTable() short-circuits to comm->archThresholds.
+        rcclArchThresholds archTab{};
+        // Cap below the 32-byte message (1 rank * 8 * sizeof(float32)) so that
+        // !symEligible && window is false in both halves; only ctaZero distinguishes
+        // them. kThreshUnlimited would let the !symEligible path fire even at
+        // CTAPolicy=0 and break the EXPECT_NE below.
+        archTab.ceRegMax[ncclFuncAllGather] = 16;
+        // ceRegMin stays 0: no lower bound
+        comm->archThresholds = &archTab;
+        // Branch #3 requires both CTAPolicy=ZERO and a registered recv window.
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
@@ -4476,6 +8464,125 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeRegisteredViaSymmetricWindowsChose
                                                    &noPolicy));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, noPolicy.algo)
             << "CE via symmetric windows must require CTA_POLICY_ZERO";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Hierarchical CE (branch #3.5) needs none of the hierarchical AllGather
+// sub-communicators, which are only built on 8+ nodes. A 2-node comm has none,
+// and both the report and the live decision must still name CE without touching
+// them. The control proves the decision came from the hierarchical CE branch.
+TEST(WrapMicrotestIsolated, SelectAllGather_HierCeWithoutHierarchicalSubComms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_HierCeWithoutHierarchicalSubComms",
+      []() {
+        g_hierCeAvailableValue = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        ASSERT_EQ(nullptr, comm->hierarchicalInterComm);
+        ASSERT_EQ(nullptr, comm->hierarchicalIntraComm);
+        for (bool query : {true, false}) {
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
+                                                     /*stream=*/nullptr, query, /*graphCapturingHint=*/false,
+                                                     &decision));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo) << "query=" << query;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol) << "query=" << query;
+          EXPECT_EQ(0, decision.nMaxChannels) << "query=" << query;
+        }
+
+        g_hierCeAvailableValue = false;
+        rcclCollDecision control{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &control));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, control.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The AlltoAll twin of the test above, for rcclSelectAlltoAll branch (5).
+TEST(WrapMicrotestIsolated, SelectAlltoAll_HierCeWithoutHierarchicalSubComms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_HierCeWithoutHierarchicalSubComms",
+      []() {
+        g_hierCeAvailableValue = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        ASSERT_EQ(nullptr, comm->hierarchicalInterComm);
+        ASSERT_EQ(nullptr, comm->hierarchicalIntraComm);
+        for (bool query : {true, false}) {
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
+                                                    /*stream=*/nullptr, query, /*graphCapturingHint=*/false,
+                                                    &decision));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo) << "query=" << query;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol) << "query=" << query;
+          EXPECT_EQ(0, decision.nMaxChannels) << "query=" << query;
+        }
+
+        g_hierCeAvailableValue = false;
+        rcclCollDecision control{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                  &control));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, control.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL skips hierarchical CE entirely while capturing (rccl_wrap.cc
+// !ceCapturing && ncclHierCeAvailable). NCCL instead keeps hier CE selected
+// and forces numCtx=1. This pins the skip so a later policy change is
+// deliberate.
+TEST(WrapMicrotestIsolated, SelectAllGather_CaptureExcludesHierarchicalCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_CaptureExcludesHierarchicalCe",
+      []() {
+        g_hierCeAvailableValue = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision captured{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/true,
+                                                   &captured));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, captured.algo);
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, live.algo);
+        g_hierCeAvailableValue = false;
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_CaptureExcludesHierarchicalCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_CaptureExcludesHierarchicalCe",
+      []() {
+        g_hierCeAvailableValue = true;
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision captured{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/true,
+                                                  &captured));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, captured.algo);
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                  &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, live.algo);
+        g_hierCeAvailableValue = false;
         DeleteCommWithArch(comm);
       });
 }
@@ -4589,7 +8696,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_SymmetricReportedWhenQueryAndEligibl
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllGather_LL, /*maxChannels=*/4));
+                                 SelectSymkTuning(ncclFuncAllGather, ncclSymkKernelId_AllGather_LL, /*maxChannels=*/4));
         ScopedHook kernelIsLL(g_symkKernelIdIsLL, [](int) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
@@ -4685,12 +8792,15 @@ TEST(WrapMicrotestIsolated, SelectAllGather_PlainKernelFallbackReportsGetAlgoInf
 }
 
 // ===========================================================================
-// rcclSelectReduceScatter -- rccl_wrap.cc:1206-1317. Own priority order:
-// symmetric (op sum OR avg -- distinct from AllReduce's sum-only) -> DDA
-// (gfx1250 fabric may preempt symmetric eligibility, IPC stays strictly
-// gated on !symEligible) -> Hierarchical -> Direct -> symmetric (reported)
-// -> plain kernel. NO CE step anywhere -- confirmed empirically below, not
-// just by absence of a CE call in the source.
+// rcclSelectReduceScatter in rccl_wrap.cc. Own priority order: symmetric
+// eligibility (op sum OR avg -- distinct from AllReduce's sum-only) -> CE
+// 2-shot once staging exists -> CE registered while staging is still null, so
+// enqueue allocates it -> DDA (gfx1250 fabric may preempt symmetric
+// eligibility, IPC stays strictly gated on !symEligible) -> Hierarchical ->
+// Direct -> CE registered -> symmetric (reported) -> plain kernel. The CE
+// steps have their own section further down this file; every test below
+// leaves RCCL_CE_REDUCESCATTER at its 0 default, which is what keeps them out
+// of these cases.
 // ===========================================================================
 
 TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricGatedOnSumOrAvgOpOnly) {
@@ -4733,6 +8843,220 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricAcceptsSumOrAvg) {
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                         ncclAvg, /*query=*/false, &avgDecision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, avgDecision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+namespace real_arch_thresholds {
+// The real tables, namespaced so they do not collide with fakes/rccl_arch_thresholds_fakes.cc.
+#include "rccl_arch_thresholds.cc"
+}  // namespace real_arch_thresholds
+
+// The registered AllReduce re-route reads its bounds from the arch table: the gfx1250 SPX table re-routes, while the
+// DPX table, no table and RCCL_IGNORE_ARCH_TABLE=1 keep the choice symk's withdrawal leaves, with no grid cap.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteFollowsTheArchTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredRerouteFollowsTheArchTable",
+      []() {
+        int64_t ignoreTable = 0;
+        g_loadParam = [&ignoreTable](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_IGNORE_ARCH_TABLE") == 0) {
+            return ignoreTable;
+          }
+          // symk withdraws, and CE AllReduce and LL128 stay on, with no table too: the re-route's table check decides.
+          if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) {
+            return 256 * kMiB;
+          }
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) {
+            return 1;
+          }
+          return std::strcmp(env, "RCCL_SYM_K_MAX_BYTES") == 0 ? 0 : def;
+        };
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(8);
+        ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, ar.comm_->archThresholds);
+        rcclCollDecision d = ar.Select(8 * kMiB, /*capturing=*/false);
+        EXPECT_EQ(ll128, d.algo) << "SPX eager";
+        EXPECT_EQ(256u, d.ddaCap.threads);
+        d = ar.Select(16 * kMiB, /*capturing=*/true);
+        EXPECT_EQ(ll128, d.algo) << "SPX capture";
+        EXPECT_EQ(96u, d.ddaCap.blocks);
+        ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, ar.comm_->archThresholds);
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "DPX eager");
+        ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "DPX capture");
+        ar.comm_->archThresholds = nullptr;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "no table, eager");
+        ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "no table, capture");
+        ar.comm_->archThresholds = &ar.table_;
+        EXPECT_EQ(ll128, ar.Select(8 * kMiB, false).algo) << "the fixture's table re-routes";
+        ignoreTable = 1;
+        ar.ExpectUnchanged(8 * kMiB, false, ceReg, "RCCL_IGNORE_ARCH_TABLE=1, eager");
+        ar.ExpectUnchanged(16 * kMiB, true, NCCL_ALGO_RING, "RCCL_IGNORE_ARCH_TABLE=1, capture");
+      });
+}
+
+// Only the DPX table sets the AllGather LL128 block size and block cap.
+TEST(WrapMicrotestIsolated, DdaFabricAgLL128Shape_FromDpxTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricAgLL128Shape_FromDpxTable",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->ddaFabricMaxBlocks = 96;
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        const std::pair<size_t, int> threads[] = {
+            {4 * kMiB - 1, 0}, {4 * kMiB, 256}, {32 * kMiB, 256}, {32 * kMiB + 1, 0}};
+        for (const auto& c : threads) {
+          EXPECT_EQ(c.second, rcclDdaFabricAgLL128Threads(comm, c.first)) << c.first;
+        }
+        const std::pair<size_t, int> blocks[] = {{kMiB - 1, 96}, {kMiB, 75}, {32 * kMiB, 75}, {32 * kMiB + 1, 96}};
+        for (const auto& c : blocks) {
+          EXPECT_EQ(c.second, rcclDdaFabricAgLL128Blocks(comm, c.first)) << c.first;
+        }
+        comm->ddaFabricMaxBlocks = 48;
+        EXPECT_EQ(48, rcclDdaFabricAgLL128Blocks(comm, 8 * kMiB)) << "init cap still bounds it";
+        comm->ddaFabricMaxBlocks = 96;
+        for (const rcclArchThresholds* table :
+             {real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX),
+              static_cast<const rcclArchThresholds*>(nullptr)}) {
+          comm->archThresholds = table;
+          EXPECT_EQ(0, rcclDdaFabricAgLL128Threads(comm, 8 * kMiB));
+          EXPECT_EQ(96, rcclDdaFabricAgLL128Blocks(comm, 8 * kMiB));
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// DDA LL128 AlltoAll reads its own ddaA2aLL128* window, inclusive at both ends; a synthetic table pins
+// the accessors. The real tables and no table keep 0 threads; SPX and no table keep the init cap, and DPX
+// caps the grid at 72 blocks from 256 KiB to 16 MiB, where DPX runs LL128 (LL stops at 128 KiB).
+TEST(WrapMicrotestIsolated, DdaFabricA2aLL128Shape_FromTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricA2aLL128Shape_FromTable",
+      []() {
+        rcclArchThresholds tbl = *real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        tbl.ddaA2aLL128Threads = 512;
+        tbl.ddaA2aLL128ThreadsMinBytes = 4 * kMiB;
+        tbl.ddaA2aLL128ThreadsMaxBytes = 16 * kMiB;
+        tbl.ddaA2aLL128MaxBlocks = 64;
+        tbl.ddaA2aLL128MaxBlocksMinBytes = 2 * kMiB;
+        tbl.ddaA2aLL128MaxBlocksMaxBytes = 8 * kMiB;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->ddaFabricMaxBlocks = 96;
+        comm->archThresholds = &tbl;
+        const std::pair<size_t, int> threads[] = {
+            {4 * kMiB - 1, 0}, {4 * kMiB, 512}, {16 * kMiB, 512}, {16 * kMiB + 1, 0}};
+        for (const auto& c : threads) {
+          EXPECT_EQ(c.second, rcclDdaFabricA2aLL128Threads(comm, c.first)) << c.first;
+        }
+        const std::pair<size_t, int> blocks[] = {
+            {2 * kMiB - 1, 96}, {2 * kMiB, 64}, {8 * kMiB, 64}, {8 * kMiB + 1, 96}};
+        for (const auto& c : blocks) {
+          EXPECT_EQ(c.second, rcclDdaFabricA2aLL128Blocks(comm, c.first)) << c.first;
+        }
+        comm->ddaFabricMaxBlocks = 48;
+        EXPECT_EQ(48, rcclDdaFabricA2aLL128Blocks(comm, 4 * kMiB)) << "init cap still bounds it";
+        comm->ddaFabricMaxBlocks = 96;
+        for (const rcclArchThresholds* table :
+             {real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX),
+              real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX),
+              static_cast<const rcclArchThresholds*>(nullptr)}) {
+          comm->archThresholds = table;
+          EXPECT_EQ(0, rcclDdaFabricA2aLL128Threads(comm, 8 * kMiB));
+        }
+        for (const rcclArchThresholds* table :
+             {real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX),
+              static_cast<const rcclArchThresholds*>(nullptr)}) {
+          comm->archThresholds = table;
+          EXPECT_EQ(96, rcclDdaFabricA2aLL128Blocks(comm, 8 * kMiB));
+        }
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        const std::pair<size_t, int> dpxBlocks[] = {
+            {256 * kKiB - 1, 96}, {256 * kKiB, 72}, {2 * kMiB + 1, 72}, {16 * kMiB, 72}, {16 * kMiB + 1, 96}};
+        for (const auto& c : dpxBlocks) {
+          EXPECT_EQ(c.second, rcclDdaFabricA2aLL128Blocks(comm, c.first)) << c.first;
+        }
+        comm->ddaFabricMaxBlocks = 48;
+        EXPECT_EQ(48, rcclDdaFabricA2aLL128Blocks(comm, 8 * kMiB)) << "DPX cap never widens the init cap";
+        for (int n : {8, 16, 32, 64}) {
+          comm->nRanks = n;
+          EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAlltoAll)) << n;
+          EXPECT_EQ(16 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAlltoAll)) << n;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 SPX symMaxR2[ReduceScatter] is 0: at and above symMinR2 (2 MiB) symk stays withdrawn even when requested.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_Gfx1250NeverPicksSymmetric",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        comm->nNodes = 1;
+        comm->symmetricSupport = 1;
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        for (size_t totalBytes : {size_t{2} << 20, size_t{256} << 20}) {
+          for (ncclRedOp_t op : {ncclSum, ncclAvg}) {
+            rcclCollDecision decision{};
+            EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, totalBytes / sizeof(float),
+                                                            ncclFloat32, op, /*query=*/false, &decision));
+            EXPECT_NE((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo) << totalBytes << " op " << op;
+            EXPECT_EQ(NCCL_ALGO_RING, decision.algo) << totalBytes << " op " << op;
+          }
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 SPX ReduceScatter: DDA LL to its cap, LL128 to 224M below 8 ranks, nRanks x 7.5M to 256M, then Ring.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_Gfx1250SpxLL128Caps",
+      []() {
+        ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                return true;
+                              });
+        ScopedHook ll128Eligible(g_reduceScatterDdaFabricLL128Eligible,
+                                 [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                   return true;
+                                 });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nNodes = 1;
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        auto algo = [&](size_t totalBytes) {
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr,
+                                                          totalBytes / sizeof(float) / (size_t)comm->nRanks,
+                                                          ncclFloat32, ncclSum, /*query=*/false, &decision));
+          return decision.algo;
+        };
+        const int ll = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const std::pair<int, size_t> llCases[] = {{4, 4 * kMiB}, {8, 8 * kMiB}, {16, 16 * kMiB}};
+        for (const auto& c : llCases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(ll, algo(c.second)) << c.first;
+          EXPECT_EQ(ll128, algo(c.second + (size_t)c.first * sizeof(float))) << c.first;
+        }
+        const std::pair<int, size_t> cases[] = {
+            {4, 224 * kMiB}, {8, 60 * kMiB}, {16, 120 * kMiB}, {32, 240 * kMiB}, {64, 256 * kMiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(ll128, algo(c.second)) << c.first;
+          EXPECT_EQ(NCCL_ALGO_RING, algo(c.second + (size_t)c.first * sizeof(float))) << c.first;
+        }
         DeleteCommWithArch(comm);
       });
 }
@@ -5024,6 +9348,633 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_AvgOpIsExcludedFromDirect) {
 }
 
 // ===========================================================================
+// rcclSelectReduceScatter's CE returns: eager CE (RCCL_CE_2SHOT algo id) once
+// staging exists, RCCL_CE_REGISTERED while it is still null so enqueue allocates
+// it, and the late arm when early arms are skipped (e.g. symEligible). All off
+// by default (SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff); every
+// case here turns RCCL_CE_REDUCESCATTER on, and runs isolated so its params do
+// not leak. User-buffer registration is not required: CE RS always stages
+// through ceARTmpBuf and has no message-size cap. symSuppressedByMin/Max cannot
+// fire: rccl_arch_thresholds_fakes.cc leaves the table null, so symEligible is
+// exactly what the g_isSymmetricKernelRequested seam says.
+// ===========================================================================
+
+namespace {
+int64_t EnabledCeReduceScatterParams(const char* env, int64_t deft) {
+  if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return int64_t(1);
+  return deft;
+}
+
+// rcclUseCeReduceScatter requires ncclCeImplemented. Opt-in CE RS select tests
+// must flip the driver seam or every arm declines before CTA/staging checks run.
+void EnableCeReduceScatterForSelectTest() {
+  g_loadParam = EnabledCeReduceScatterParams;
+  g_ceImplemented = true;
+}
+
+// UnitTestsMicro links real computeLsaSize (dev_runtime.cc via
+// #include in dev-runtime-test.cc). Without a cached spanning team,
+// ncclDevrIsOneLsaTeam walks null rankToNode when nRanks > 1 (SIGSEGV).
+// Call after the final nRanks assignment, matching the AllReduce CE select tests.
+void ArmSpanningLsaTeam(ncclComm* comm) {
+  comm->devrState.bigSize = 1;
+  comm->devrState.lsaSize = comm->nRanks;
+}
+
+constexpr int kCeRsRegisteredArmRanks = 4;
+}  // namespace
+
+// Staging ready + CTA ZERO + opt-in: eager CE path (RCCL_CE_2SHOT). User buffers
+// need not be symmetrically registered.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeChosenWhenEnabledAndStagingBufferReady) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeChosenWhenEnabledAndStagingBufferReady",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t, size_t) { return 19; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(19, decision.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// CTA_POLICY_ZERO is required; without it CE must not be selected.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeDeclinedWithoutCtaPolicyZero) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeDeclinedWithoutCtaPolicyZero",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The block calculator gets recvcount itself, not recvcount/nRanks (AllReduce's argument) nor
+// recvcount*nRanks. nRanks 4 / recvcount 16 keeps all three distinct so the assertion can fail.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CePassesShardCountToBlockCalculator) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CePassesShardCountToBlockCalculator",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t type, size_t chunkElems) {
+          EXPECT_EQ(ncclFloat32, type);
+          EXPECT_EQ(16u, chunkElems); // recvcount, not recvcount/nRanks (4) or recvcount*nRanks (64)
+          return 23;
+        });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 4;
+        ArmSpanningLsaTeam(comm);
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/16, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ(23, decision.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The arm's `ceARTmpBuf != NULL` conjunct is driven from both sides by
+// SelectReduceScatter_CeOptInSelectsRegisteredThenEager further down.
+
+// CE ReduceScatter has no message-size cap (unlike CE AllReduce 2-shot). A
+// former AllReduce cap value must not reject a larger ReduceScatter.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeAcceptsMessagePastAllReduceCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeAcceptsMessagePastAllReduceCap",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return int64_t(4096);
+          return EnabledCeReduceScatterParams(env, deft);
+        };
+        g_ceImplemented = true;
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 4;
+        ArmSpanningLsaTeam(comm);
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // One element past what the AllReduce 2-shot cap would have allowed.
+        const size_t pastFormerArCap = 4096 / (sizeof(float) * 4) + 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, pastFormerArCap, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Eager CE beats a DDA IPC candidate: SelectReduceScatter_DdaIpcChosenOnNonGfx1250Arch reaches
+// RCCL_DDA_IPC from this same comm, but the CE arm sits ahead of the DDA block.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CePreemptsDdaIpc) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CePreemptsDdaIpc",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                 return true;
+                               });
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nRanks = 8; // rcclDdaEnabled needs >=8 for gfx942
+        ArmSpanningLsaTeam(comm);
+        comm->nNodes = 1;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// CE now outranks DDA even on the fabric arch, where DDA used to win. The DDA
+// block no longer ORs in ddaFabricArch: both CE arms return before it, so a
+// call that reaches DDA has already declined CE.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredPreemptsDdaFabricOnGfx1250) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeRegisteredPreemptsDdaFabricOnGfx1250",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_DDA_LL") == 0) return int64_t(1);
+          return deft;
+        };
+        g_ceImplemented = true;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                return true;
+                              });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 1;
+        ArmSpanningLsaTeam(comm);
+        comm->nNodes = 1;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        // comm->ceColl.ceARTmpBuf left null, which is the arm under test.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Same preemption for the IPC tier without user-buffer registration (staging still
+// null, so the enqueue-init arm is the one in play).
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredPreemptsDdaIpcOnNonGfx1250) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeRegisteredPreemptsDdaIpcOnNonGfx1250",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                 return true;
+                               });
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nRanks = 8;
+        ArmSpanningLsaTeam(comm);
+        comm->nNodes = 1;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        // comm->ceColl.ceARTmpBuf left null, which is the arm under test.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Late arm: symEligible skips the eager CE arms; the late arm still selects CE
+// over symk. User-buffer registration is not required.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredChosenWhenAvailableAndPolicyZero) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeRegisteredChosenWhenAvailableAndPolicyZero",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t type, size_t chunkElems) {
+          EXPECT_EQ(ncclFloat32, type);
+          EXPECT_EQ(8u, chunkElems);
+          return 31;
+        });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(31, decision.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Late arm requires CTA_POLICY_ZERO.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredDeclinedWithoutPolicyZero) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeRegisteredDeclinedWithoutPolicyZero",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        // CTA DEFAULT blocks CE; symEligible still selects the symmetric kernel.
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Late-arm op gate (Sum||Prod||Min||Max). symEligible needs Sum or Avg, so Prod/Min/Max
+// reach the late arm without the early CE arms claiming them first when staging is null
+// and size is under the cap -- early arms still run for those ops; use staging-null under
+// cap without symEligible so the enqueue-init arm exercises the same op list.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeRegisteredChosenWithNonSumOps) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeRegisteredChosenWithNonSumOps",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        for (ncclRedOp_t op : {ncclProd, ncclMin, ncclMax}) {
+          SCOPED_TRACE("op=" + std::to_string((int)op));
+          ncclComm* comm = MakeSelectComm();
+          comm->nRanks = kCeRsRegisteredArmRanks;
+          ArmSpanningLsaTeam(comm);
+          comm->symmetricSupport = 1;
+          comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+          // staging null -> enqueue-init CE arm (same op/datatype gates as the late arm).
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                         op, /*query=*/false, &decision));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// The second copy of that chain, rcclUseCeReduceScatter's rejecting `op != ...` gate, which the
+// test above cannot reach past its size guard. Staging ready, so eager CE returns first.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeChosenWithNonSumOps) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeChosenWithNonSumOps",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t, size_t) { return 19; });
+        for (ncclRedOp_t op : {ncclProd, ncclMin, ncclMax}) {
+          SCOPED_TRACE("op=" + std::to_string((int)op));
+          ncclComm* comm = MakeSelectComm();
+          comm->symmetricSupport = 1;
+          comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+          uint8_t stagingBuf[16];
+          comm->ceColl.ceARTmpBuf = stagingBuf;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                         op, /*query=*/false, &decision));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+          EXPECT_EQ(19, decision.nMaxChannels);
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// The chain's "none match" case: ncclAvg is rejected by every CE disjunct.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeNotChosenWithUnsupportedOp) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeNotChosenWithUnsupportedOp",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclAvg, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Late arm must also reject ncclAvg. symEligible skips early CE; Avg fails the late op gate.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredRejectsAvg) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_LateCeRegisteredRejectsAvg",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclAvg, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Late arm's `!hasSysmemSegment`, send-window side. symEligible skips early CE so the late
+// arm is the CE candidate; sysmem on the send window must keep it from selecting CE.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_SysmemSegmentBlocksCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_SysmemSegmentBlocksCeRegistered",
+      []() {
+        int sendSentinel = 0, recvSentinel = 0;
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        TestDevrWindows registered(comm, &sendSentinel, true, &recvSentinel, false);
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, &sendSentinel, &recvSentinel, /*recvcount=*/8,
+                                                       ncclFloat32, ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The recv-window side of that `||`.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_RecvWinSysmemSegmentBlocksCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_RecvWinSysmemSegmentBlocksCeRegistered",
+      []() {
+        int sendSentinel = 0, recvSentinel = 0;
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        TestDevrWindows registered(comm, &sendSentinel, false, &recvSentinel, true);
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, &sendSentinel, &recvSentinel, /*recvcount=*/8,
+                                                       ncclFloat32, ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Early eager-CE arm's `!symEligible`. Symmetric seam says requested, so early CE is
+// skipped; the late arm (no symEligible gate) still selects CE over symk.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricEligibleExcludesEagerCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_SymmetricEligibleExcludesEagerCe",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Staging-null sibling: early enqueue-init CE arm is also behind `!symEligible`;
+// the late arm still selects CE_REGISTERED over symk.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricEligibleDefersToLateCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_SymmetricEligibleDefersToLateCe",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        // comm->ceColl.ceARTmpBuf left null, so the staging-allocation arm is skipped by symEligible.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Late arm takes priority over symk when CE is enabled.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredPreemptsSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_LateCeRegisteredPreemptsSymmetric",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Late arm must reuse ceReduceScatterAllowed (incl. nNodes==1). On a multi-node
+// CTA-ZERO comm where DDA/hier/Direct decline, CE must not be selected.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredDeclinedOnMultiNode) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_LateCeRegisteredDeclinedOnMultiNode",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
+        comm->nNodes = 2;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Late arm shares rcclUseCeReduceScatter, which rejects Float8 (no CE reduce kernel).
+TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredRejectsFloat8) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_LateCeRegisteredRejectsFloat8",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        ArmSpanningLsaTeam(comm);
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/16,
+                                                       ncclFloat8e4m3, ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        // Float8 is not a symk Sum/Avg path either when the seam forces requested;
+        // still must not select CE.
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Both CE arms require ncclGroupDepth == 0.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_InsideGroupExcludesCe",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        ncclGroupDepth = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The graph latch feeds ceArGraphAllowed, which gates every CE arm, so one latched comm shuts out
+// all of them. The latch is ticked by ncclReduceScatter_impl, so the EXPECT_TRUE pins that the
+// selector leaves it alone.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_LatchedGraphModeExcludesBothCeArms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_LatchedGraphModeExcludesBothCeArms",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        comm->ceColl.graphModeSeen = true;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_TRUE(comm->ceColl.graphModeSeen); // the selector must not tick the latch
+        EXPECT_FALSE(decision.ceArGraphAllowed);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The other way into ceArGraphAllowed=false, `if (query && graphCapturingHint)`, which the test
+// above reaches through graphModeSeen instead. Run twice with the hint as the only difference, so
+// the second half cannot pass for a reason the first rules out. The selector never probes the
+// stream in either mode, so the probe counter must stay at 0.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_QueryModeCapturingHintExcludesBothCeArms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_QueryModeCapturingHintExcludesBothCeArms",
+      []() {
+        EnableCeReduceScatterForSelectTest();
+        ScopedHook graphProbe(g_cudaGetCapturingGraph,
+                              [](struct ncclCudaGraph*, hipStream_t, int) { return ncclSuccess; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+
+        rcclCollDecision allowed{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/true, &allowed,
+                                                       /*graphCapturingHint=*/false));
+        EXPECT_TRUE(allowed.ceArGraphAllowed);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, allowed.algo);
+
+        rcclCollDecision capturing{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/true, &capturing,
+                                                       /*graphCapturingHint=*/true));
+        EXPECT_FALSE(capturing.ceArGraphAllowed);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, capturing.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, capturing.algo);
+
+        EXPECT_EQ(0, graphProbe.calls);            // the selector never probes the stream
+        EXPECT_FALSE(comm->ceColl.graphModeSeen);  // and never ticks the latch
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
 // rcclHierarchicalAlgoInfo -- rccl_wrap.cc:394-445. Unconditionally
 // dereferences comm->hierarchicalInterComm/IntraComm (no query gate, unlike
 // the rcclSelectXxx callers' own inner Hierarchical branches) -- every test
@@ -5173,20 +10124,18 @@ TEST(WrapMicrotestIsolated, HierarchicalAlgoInfo_ReduceScatterIntraNeverUsesDire
 }
 
 // ===========================================================================
-// Back to rcclSelectReduceScatter (rccl_wrap.cc:1206-1317) for three cases
-// that need the sub-comm helpers defined in the section above, which is why
-// they sit here rather than with the rest of that function's tests.
+// Back to rcclSelectReduceScatter for three cases that need the sub-comm
+// helpers defined in the section above, which is why they sit here rather
+// than with the rest of that function's tests.
 // ===========================================================================
 
-// No CE step anywhere in rcclSelectReduceScatter: confirmed empirically, not
-// just by absence of a call in the source. Forces every CE-related seam true
-// (the exact combination that WOULD produce CE_REGISTERED in
-// rcclSelectAllReduce/AllGather) and confirms the outcome is still
-// something else entirely -- that function simply never calls
-// ncclCeAvailable/ncclCeScratchAvailable at all.
-TEST(WrapMicrotestIsolated, SelectReduceScatter_NeverChoosesCeRegardlessOfCeSeams) {
+// RCCL_CE_REDUCESCATTER at 0 keeps every CE arm out even with every CE seam forced true, the exact
+// combination that WOULD give CE_REGISTERED in rcclSelectAllReduce/AllGather. The param does it,
+// not an absent call: rcclUseCeReduceScatter returns on its first guard, so
+// ceReduceScatterAllowed is false for both the early and late CE arms.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_NeverChoosesCeRegardlessOfCeSeams",
+      "Wrap_SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff",
       []() {
         ScopedHook ceAvailable(
             g_ceAvailable,
@@ -5205,6 +10154,41 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_NeverChoosesCeRegardlessOfCeSeam
       });
 }
 
+// Opt-in path. Staging is allocated by the CE launch, so the first selection
+// (buffer still null) is RCCL_CE_REGISTERED, which enqueue can initialize.
+// Once ceARTmpBuf exists, the same call selects eager CE (RCCL_CE_2SHOT algo id).
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeOptInSelectsRegisteredThenEager) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeOptInSelectsRegisteredThenEager",
+      []() {
+        g_loadParam = [](const char* env, int64_t defaultValue) {
+          if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return (int64_t)1;
+          if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return (int64_t)268435456;
+          return defaultValue;
+        };
+        g_ceImplemented = true;
+        alignas(16) static uint8_t staging;
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 4;
+        ArmSpanningLsaTeam(comm);
+        comm->nNodes = 1;
+        comm->symmetricSupport = true;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        comm->ceColl.graphModeSeen = false;
+        comm->ceColl.ceARTmpBuf = nullptr;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                        ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+
+        comm->ceColl.ceARTmpBuf = &staging;
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                        ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // symEligible's own query-mode reporting block (`if (query) { ... }` inside
 // `if (symEligible)`) had never been entered for ReduceScatter -- only
 // AllReduce/AllGather had a symmetric-reported query test. rcclSymkQuery
@@ -5219,7 +10203,8 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_SymmetricReportedWhenQueryAndEli
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_ReduceScatter_LL, /*maxChannels=*/7));
+                                 SelectSymkTuning(ncclFuncReduceScatter, ncclSymkKernelId_ReduceScatter_LL,
+                                                  /*maxChannels=*/7));
         ScopedHook kernelIsLL(g_symkKernelIdIsLL, [](int) { return true; });
         ncclComm* comm = MakeSelectComm(); // not DDA/Direct/Hierarchical eligible
         comm->symmetricSupport = 1;
@@ -5486,6 +10471,410 @@ TEST(WrapMicrotestIsolated, GetAlgoInfo_FallsBackToPlainGetAlgoInfoForAllReduce)
 }
 
 // ===========================================================================
+// rcclSelectBroadcast: DDA LL -> LL128 on gfx1250, else the ring placeholder.
+// ===========================================================================
+
+namespace {
+// Broadcast's gfx1250 table caps are 0, so the tests opt in and set the tier caps by env.
+// ddaBc < 0 leaves RCCL_DDA_BC unset; vmmMax < 0 leaves RCCL_DDA_THRESHOLD unset.
+auto BroadcastDdaParams(int64_t llMax, int64_t ll128Max, int64_t ddaEnable = 1, int64_t ddaBc = 1,
+                        int64_t vmmMax = -1) {
+  return [=](const char* env, int64_t def) -> int64_t {
+    if (std::strcmp(env, "RCCL_DDA_THRESHOLD") == 0) return vmmMax < 0 ? def : vmmMax;
+    if (std::strcmp(env, "RCCL_DDA_LL_THRESHOLD") == 0) return llMax;
+    if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return ll128Max;
+    if (std::strcmp(env, "RCCL_DDA_ENABLE") == 0) return ddaEnable;
+    if (std::strcmp(env, "RCCL_DDA_BC") == 0) return ddaBc < 0 ? def : ddaBc;
+    return def;
+  };
+}
+
+ncclComm* MakeBroadcastComm(const char* arch = "gfx1250") {
+  ncclComm* comm = MakeCommWithArch(arch);
+  comm->nRanks = 8;
+  return comm;
+}
+
+rcclCollDecision PoisonedDecision() {
+  rcclCollDecision d{};
+  d.algo = -7;
+  d.protocol = -7;
+  d.nMaxChannels = 999;
+  return d;
+}
+}  // namespace
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_LLEligible_PicksDdaLL) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_LLEligible_PicksDdaLL", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, /*root=*/0, /*query=*/false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    EXPECT_EQ(NCCL_PROTO_LL, d.protocol);
+    EXPECT_EQ(151u, d.nMaxChannels);  // ncclBroadcastDdaFabricLLBlocks
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_LLIneligible_PicksDdaLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_LLIneligible_PicksDdaLL128", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+    EXPECT_EQ(NCCL_PROTO_LL128, d.protocol);
+    EXPECT_EQ(152u, d.nMaxChannels);  // ncclBroadcastDdaFabricLL128Blocks
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_NoTierEligible_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_NoTierEligible_ReturnsRingPlaceholder", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(NCCL_PROTO_SIMPLE, d.protocol);
+    EXPECT_EQ(0u, d.nMaxChannels);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_LiveOutOfRangeRoot_SkipsDdaWithoutCheckingTiers) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_LiveOutOfRangeRoot_SkipsDdaWithoutCheckingTiers", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    int calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ncclComm* comm = MakeBroadcastComm();
+    for (int root : {-1, 8}) {
+      SCOPED_TRACE(root);
+      rcclCollDecision d = PoisonedDecision();
+      EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, root, /*query=*/false, &d));
+      EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    }
+    EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_QueryIgnoresRoot) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_QueryIgnoresRoot", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, /*root=*/-1, /*query=*/true, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_NonGfx1250_NeverChecksTiers) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_NonGfx1250_NeverChecksTiers", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    int calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ncclComm* comm = MakeBroadcastComm("gfx950");
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_IpcAllowed_PicksLLAndNeverChecksLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_IpcAllowed_PicksLLAndNeverChecksLL128", []() {
+    auto base = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    g_loadParam = [base](const char* env, int64_t def) -> int64_t {
+      return std::strcmp(env, "RCCL_DDA_BC_ALLOW_IPC") == 0 ? 1 : base(env, def);
+    };
+    int ll128Calls = 0;
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++ll128Calls > 0; });
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm("gfx950");
+    comm->ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+
+    ScopedHook llOff(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return false; });
+    d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, ll128Calls);
+    comm->ddaIpcMemHandler = nullptr;
+    DeleteCommWithArch(comm);
+  });
+}
+
+// RCCL_DDA_BC_ALLOW_IPC=1 alone is not enough off gfx1250: the comm must have the IPC DDA state.
+TEST(WrapMicrotestIsolated, SelectBroadcast_IpcAllowedNoIpcHandler_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_IpcAllowedNoIpcHandler_ReturnsRingPlaceholder", []() {
+    auto base = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    g_loadParam = [base](const char* env, int64_t def) -> int64_t {
+      return std::strcmp(env, "RCCL_DDA_BC_ALLOW_IPC") == 0 ? 1 : base(env, def);
+    };
+    int calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ncclComm* comm = MakeBroadcastComm("gfx950");
+    ASSERT_EQ(nullptr, comm->ddaIpcMemHandler);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/0);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// A global DDA threshold alone must not turn Broadcast on: the gfx1250 table has no Broadcast tier.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPlaceholder", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    int calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    ASSERT_EQ(0u, comm->archThresholds->ddaLLMax[ncclFuncBroadcast]);
+    ASSERT_EQ(0u, comm->archThresholds->ddaLL128Max[ncclFuncBroadcast]);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// RCCL_DDA_BC=1 without tier thresholds: the table's Broadcast caps are 0, so the entry gate rejects.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcOnAndNoTableTier_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcOnAndNoTableTier_ReturnsRingPlaceholder", []() {
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/1);
+    int calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// With RCCL_DDA_BC unset, a non-zero Broadcast tier in the table turns Broadcast DDA on.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndTableTier_PicksDdaLL) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetAndTableTier_PicksDdaLL", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    const rcclArchThresholds* real =
+      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, real);
+    rcclArchThresholds table = *real;
+    table.ddaLLMax[ncclFuncBroadcast] = 64;
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = &table;
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// A tier written only as a per-rank share counts on a rank-scaled comm.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndPerRankTableTier_PicksDdaLL) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetAndPerRankTableTier_PicksDdaLL", []() {
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    const rcclArchThresholds* real =
+      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, real);
+    rcclArchThresholds table = *real;
+    table.ddaLLMax[ncclFuncBroadcast] = 0;
+    table.ddaLLMaxPerRank[ncclFuncBroadcast] = 4;  // 8 ranks x 4 B = 32 B cap
+    table.rankScaledMinRanks = 8;
+    table.rankScaledMaxBytes = 256ULL * 1024 * 1024;
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = &table;
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_NullComm_ReturnsInvalidArgument) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_NullComm_ReturnsInvalidArgument", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclInvalidArgument, rcclSelectBroadcast(nullptr, 8, ncclFloat32, 0, /*query=*/true, &d));
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcZero_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcZero_ReturnsRingPlaceholder", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/1, /*ddaBc=*/0);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_NcclAlgoSet_ReturnsRingWithoutCheckingTiers) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_NcclAlgoSet_ReturnsRingWithoutCheckingTiers", []() {
+    SetMicroEnv("NCCL_ALGO", "Ring");
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    int calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// 8 floats = 32 bytes. Each tier is taken only while bytes <= its cap and the cap is non-zero.
+// RCCL_PARAM caches per process, so one isolated test per pair of caps.
+static void ExpectBroadcastTierForCaps(int64_t llMax, int64_t ll128Max, int algo, int64_t vmmMax = -1) {
+  g_loadParam = BroadcastDdaParams(llMax, ll128Max, /*ddaEnable=*/1, /*ddaBc=*/1, vmmMax);
+  ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+  ScopedHook ll128(g_broadcastDdaFabricLL128Eligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+  ncclComm* comm = MakeBroadcastComm();
+  rcclCollDecision d = PoisonedDecision();
+  EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+  EXPECT_EQ(algo, d.algo);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_AtLLCap_PicksDdaLL) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_AtLLCap_PicksDdaLL",
+                    []() { ExpectBroadcastTierForCaps(32, 32, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL); });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_ZeroLLCap_PicksDdaLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_ZeroLLCap_PicksDdaLL128",
+                    []() { ExpectBroadcastTierForCaps(0, 32, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128); });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_AboveLLCap_PicksDdaLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_AboveLLCap_PicksDdaLL128",
+                    []() { ExpectBroadcastTierForCaps(31, INT64_MAX, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128); });
+}
+
+// The VMM cap keeps the entry gate open, so the LL128 bound is what rejects.
+TEST(WrapMicrotestIsolated, SelectBroadcast_AboveLL128Cap_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_AboveLL128Cap_ReturnsRingPlaceholder",
+                    []() { ExpectBroadcastTierForCaps(31, 31, NCCL_ALGO_RING, /*vmmMax=*/INT64_MAX); });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_LiveLastRoot_PicksDda) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_LiveLastRoot_PicksDda", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, /*root=*/7, /*query=*/false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, GetCollImplInfo_BroadcastReportsDdaWhenSelected) {
+  RUN_ISOLATED_TEST("Wrap_GetCollImplInfo_BroadcastReportsDdaWhenSelected", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    int algo = -7, protocol = -7, maxChannels = -7;
+    EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncBroadcast, 8, ncclFloat32, ncclSum, nullptr, nullptr,
+                                                /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo);
+    EXPECT_EQ(NCCL_PROTO_LL, protocol);
+    EXPECT_EQ(151, maxChannels);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, GetCollImplInfo_BroadcastMustEnqueue_FallsBackToGetAlgoInfo) {
+  RUN_ISOLATED_TEST("Wrap_GetCollImplInfo_BroadcastMustEnqueue_FallsBackToGetAlgoInfo", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ScopedHook enqueue(g_collectiveMustUseEnqueuePath, [](ncclComm*) { return true; });
+    ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                          ncclSimInfo_t*) {
+      task->algorithm = NCCL_ALGO_TREE;
+      task->protocol = NCCL_PROTO_LL;
+      task->nMaxChannels = 6;
+      return ncclSuccess;
+    });
+    ncclComm* comm = MakeBroadcastComm();
+    int algo = -7, protocol = -7, maxChannels = -7;
+    EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncBroadcast, 8, ncclFloat32, ncclSum, nullptr, nullptr,
+                                                /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+    EXPECT_EQ(NCCL_ALGO_TREE, algo);
+    EXPECT_EQ(NCCL_PROTO_LL, protocol);
+    EXPECT_EQ(6, maxChannels);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, GetCollImplInfo_BroadcastFallsBackWhenSelectorReturnsRing) {
+  RUN_ISOLATED_TEST("Wrap_GetCollImplInfo_BroadcastFallsBackWhenSelectorReturnsRing", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                          ncclSimInfo_t*) {
+      task->algorithm = NCCL_ALGO_TREE;
+      task->protocol = NCCL_PROTO_LL;
+      task->nMaxChannels = 6;
+      return ncclSuccess;
+    });
+    ncclComm* comm = MakeBroadcastComm();
+    int algo = -7, protocol = -7, maxChannels = -7;
+    EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncBroadcast, 8, ncclFloat32, ncclSum, nullptr, nullptr,
+                                                /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+    EXPECT_EQ(NCCL_ALGO_TREE, algo);
+    EXPECT_EQ(NCCL_PROTO_LL, protocol);
+    EXPECT_EQ(6, maxChannels);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// ===========================================================================
 // rcclGetCollImplInfo -- rccl_wrap.cc:480-525. Dispatches AllReduce/
 // AllGather/ReduceScatter to their respective rcclSelectXxx(query=true);
 // everything else falls back to rcclGetAlgoInfo. This section proves the
@@ -5530,7 +10919,8 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllReduceDelegatesToSelectAllReduce)
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST,
+                                                  /*maxChannels=*/6));
         // Must have a real archName, not a zeroed comm: symEligible=true skips
         // rcclSelectAllReduce's CE-2-shot early return, so execution reaches its
         // unconditional IsArchMatch(comm->archName, "gfx1250") a few lines later --
@@ -5580,15 +10970,31 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherReachesCeRegisteredUnlikeGe
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ncclComm* comm = MakeCommWithArch("gfx942");
-        comm->nRanks = 1;
-        comm->nNodes = 1;
-        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;  // required by branch #3 as of #11389
-        int algo, protocol, maxChannels;
-        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
-                                                    nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, algo);
-        DeleteCommWithArch(comm);
+        // nullptr buffers yield ncclSymSendNonregRecvNonreg; override to
+        // ncclSymSendNonregRecvReg so rcclAllGatherCeRegisteredWindowTab
+        // reaches the regMax check instead of returning false at the recv-reg gate.
+        ScopedHook regType(g_getSymRegType,
+            [](struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t* out) {
+              *out = ncclSymSendNonregRecvReg;
+              return ncclSuccess;
+            });
+        // Use the env seam to set a known 256 MiB upper bound for test determinism;
+        // table values may change with tuning.  The loop confirms all three arch
+        // families route AllGather to RCCL_CE_REGISTERED when a registered window
+        // is open and the message fits.
+        g_loadParam = ForceParam("RCCL_CE_COLL_MAX_BYTES", int64_t(268435456));
+        for (const char* arch : {"gfx942", "gfx950", "gfx1250"}) {
+          ncclComm* comm = MakeCommWithArch(arch);
+          comm->nRanks = 1;
+          comm->nNodes = 1;
+          comm->config.CTAPolicy = 0;  // window decides; CTAPolicy=ZERO would short-circuit it
+          int algo, protocol, maxChannels;
+          EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
+                                                      nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels))
+              << "arch=" << arch;
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, algo) << "arch=" << arch;
+          DeleteCommWithArch(comm);
+        }
       });
 }
 
@@ -5628,7 +11034,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_OtherCollFallsBackToGetAlgoInfo) {
         ncclComm* comm = MakeZeroedComm();
         comm->nRanks = 1;
         int algo, protocol, maxChannels;
-        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncBroadcast, 8, ncclFloat32, ncclSum, nullptr,
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncReduce, 8, ncclFloat32, ncclSum, nullptr,
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
         EXPECT_EQ(NCCL_ALGO_TREE, algo);
         EXPECT_EQ(NCCL_PROTO_LL, protocol);
@@ -5708,7 +11114,7 @@ TEST(WrapMicrotestIsolated, SymkQuery_KernelIdCountReturnsFalse) {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_Count, /*maxChannels=*/0));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_Count, /*maxChannels=*/0));
         ncclComm* comm = MakeZeroedComm();
         comm->symmetricSupport = 1;
         int algo, protocol, maxChannels;
@@ -5725,7 +11131,8 @@ TEST(WrapMicrotestIsolated, SymkQuery_SuccessWithLLKernelReportsLLProtocol) {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_ReduceScatter_LL, /*maxChannels=*/9));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_ReduceScatter_LL,
+                                                  /*maxChannels=*/9));
         ScopedHook kernelIsLL(g_symkKernelIdIsLL, [](int kernelId) {
           EXPECT_EQ((int)ncclSymkKernelId_ReduceScatter_LL, kernelId);
           return true;
@@ -5751,7 +11158,8 @@ TEST(WrapMicrotestIsolated, SymkQuery_SuccessWithNonLLKernelReportsSimpleProtoco
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/12));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST,
+                                                  /*maxChannels=*/12));
         // g_symkKernelIdIsLL left at its default (false).
         ncclComm* comm = MakeZeroedComm();
         comm->symmetricSupport = 1;
@@ -5760,6 +11168,242 @@ TEST(WrapMicrotestIsolated, SymkQuery_SuccessWithNonLLKernelReportsSimpleProtoco
             rcclSymkQuery(comm, ncclFuncAllReduce, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
         EXPECT_EQ(NCCL_PROTO_SIMPLE, protocol);
         EXPECT_EQ(12, maxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A Tensor Data Mover kernel pick reports RCCL_SYMMETRIC_TDM ("SymTDM") so -A 1
+// in rccl-tests can tell it apart from the vector symmetric kernels.
+TEST(WrapMicrotestIsolated, SymkQuery_TmaKernelReportsSymmetricTdm) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_TmaKernelReportsSymmetricTdm",
+      []() {
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclFuncReduceScatter, ncclSymkKernelId_ReduceScatter_TmaLD,
+                                                  /*maxChannels=*/64));
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_ReduceScatter_TmaLD));
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        EXPECT_TRUE(
+            rcclSymkQuery(comm, ncclFuncReduceScatter, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, protocol);
+        EXPECT_EQ(64, maxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// rcclSymKGetInfo has no operands, so the query defaults symAligned16B to true.
+TEST(WrapMicrotestIsolated, SymkQuery_DefaultsToAligned16BWithoutOperands) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_DefaultsToAligned16BWithoutOperands",
+      []() {
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        bool aligned = false;
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 RecordAlignedTuning(ncclSymkKernelId_AllGather_TmaST, /*maxChannels=*/64, &aligned));
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        EXPECT_TRUE(
+            rcclSymkQuery(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
+        EXPECT_TRUE(aligned);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The caller's alignment bit reaches the tuner, or the mask keeps the TDM kernels
+// that the live path would drop and the report disagrees with what runs.
+TEST(WrapMicrotestIsolated, SymkQuery_PassesCallerAligned16BToTuner) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_PassesCallerAligned16BToTuner",
+      []() {
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        bool aligned = true;
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 RecordAlignedTuning(ncclSymkKernelId_AllGather_ST, /*maxChannels=*/8, &aligned));
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        EXPECT_TRUE(rcclSymkQuery(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels,
+                                  /*symAligned16B=*/false));
+        EXPECT_FALSE(aligned);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// In-place ReduceScatter whose per-rank slice is 24 B, on rank 2: the input and output
+// offsets differ by 48 B, which passes the plain modulo-16 check, but rank 1's differ by
+// 24 B, so only the in-place slice rule (which needs the real rank) keeps the ranks in
+// agreement. Out-of-place with the same slice stays aligned.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_InPlaceUnalignedSliceQueriesUnaligned) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_InPlaceUnalignedSliceQueriesUnaligned",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        int calls = 0;
+        bool aligned = false;
+        ScopedHook tuningCompute(g_tuningCompute, RecordAlignedTuning(ncclSymkKernelId_ReduceScatter_LD,
+                                                                      /*maxChannels=*/8, &aligned, &calls));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->nRanks = 4;
+        comm->rank = 2;
+        alignas(16) static char sendbuf[256];
+        alignas(16) static char otherbuf[256];
+        SymmetricTestWindows windows(comm, sendbuf, sizeof(sendbuf), otherbuf, sizeof(otherbuf));
+        constexpr size_t kRecvcount = 6;  // 24 B per rank in float32
+        rcclCollDecision decision{};
+
+        aligned = true;
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, sendbuf + 2 * 24, kRecvcount, ncclFloat32,
+                                                        ncclSum, /*query=*/true, &decision));
+        ASSERT_EQ(1, calls);
+        EXPECT_FALSE(aligned);
+
+        aligned = false;
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, otherbuf, kRecvcount, ncclFloat32, ncclSum,
+                                                        /*query=*/true, &decision));
+        ASSERT_EQ(2, calls);
+        EXPECT_TRUE(aligned);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The AllGather counterpart: in place, rank 2's input sits 48 B into the output, so the
+// plain modulo-16 check passes and only the in-place slice rule reports it unaligned.
+TEST(WrapMicrotestIsolated, SelectAllGather_InPlaceUnalignedSliceQueriesUnaligned) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_InPlaceUnalignedSliceQueriesUnaligned",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        int calls = 0;
+        bool aligned = false;
+        ScopedHook tuningCompute(g_tuningCompute, RecordAlignedTuning(ncclSymkKernelId_AllGather_ST,
+                                                                      /*maxChannels=*/8, &aligned, &calls));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->nRanks = 4;
+        comm->rank = 2;
+        alignas(16) static char recvbuf[256];
+        alignas(16) static char otherbuf[256];
+        SymmetricTestWindows windows(comm, recvbuf, sizeof(recvbuf), otherbuf, sizeof(otherbuf));
+        constexpr size_t kSendcount = 6;  // 24 B per rank in float32
+        rcclCollDecision decision{};
+
+        aligned = true;
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, recvbuf + 2 * 24, recvbuf, kSendcount, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        ASSERT_EQ(1, calls);
+        EXPECT_FALSE(aligned);
+
+        aligned = false;
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, otherbuf, recvbuf, kSendcount, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        ASSERT_EQ(2, calls);
+        EXPECT_TRUE(aligned);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// AllGather and ReduceScatter report a TDM pick as SymTDM in query mode, like AllReduce; live stays RCCL_SYMMETRIC.
+TEST(WrapMicrotestIsolated, SelectAllGather_TdmKernelReportsSymmetricTdmOnlyInQuery) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TdmKernelReportsSymmetricTdmOnlyInQuery",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclFuncAllGather, ncclSymkKernelId_AllGather_TmaST,
+                                                  /*maxChannels=*/64));
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->nRanks = 4;
+        alignas(16) static char sendbuf[256];
+        alignas(16) static char recvbuf[1024];
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, sendbuf, recvbuf, /*sendcount=*/8, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(64, decision.nMaxChannels);
+
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, sendbuf, recvbuf, /*sendcount=*/8, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/false,
+                                                    /*graphCapturingHint=*/false, &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, live.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectReduceScatter_TdmKernelReportsSymmetricTdmOnlyInQuery) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_TdmKernelReportsSymmetricTdmOnlyInQuery",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclFuncReduceScatter, ncclSymkKernelId_ReduceScatter_TmaLD,
+                                                  /*maxChannels=*/64));
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_ReduceScatter_TmaLD));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->nRanks = 4;
+        alignas(16) static char sendbuf[1024];
+        alignas(16) static char recvbuf[256];
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, recvbuf, /*recvcount=*/8, ncclFloat32, ncclSum,
+                                                        /*query=*/true, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(64, decision.nMaxChannels);
+
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, recvbuf, /*recvcount=*/8, ncclFloat32, ncclSum,
+                                                        /*query=*/false, &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, live.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// rcclSymKGetInfo (the -R 2 reporter) surfaces the same TDM tag as rcclGetCollImplInfo.
+TEST(WrapMicrotestIsolated, SymKGetInfo_TmaKernelReportsSymmetricTdm) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymKGetInfo_TmaKernelReportsSymmetricTdm",
+      []() {
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclFuncAllGather, ncclSymkKernelId_AllGather_TmaST,
+                                                  /*maxChannels=*/64));
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        EXPECT_EQ(ncclSuccess,
+                  rcclSymKGetInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, algo);
+        EXPECT_EQ(64, maxChannels);
         DeleteCommWithArch(comm);
       });
 }
@@ -5788,6 +11432,40 @@ TEST(WrapMicrotestIsolated, SymKGetInfo_FallsThroughToGetCollImplInfoWhenSymkNot
       });
 }
 
+// Across trays rcclSymKGetInfo reports AllGather symk only for a TDM pick inside the eager TDM window, and
+// otherwise falls back to the selector. Other collectives are unchanged.
+TEST(WrapMicrotestIsolated, SymKGetInfo_CrossTrayAllGatherReportsSymkOnlyInTheTdmWindow) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymKGetInfo_CrossTrayAllGatherReportsSymkOnlyInTheTdmWindow",
+      []() {
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        ncclComm* comm = MakeGfx1250TdmComm(Gfx1250Table(), /*spansTrays=*/true);
+        int algo, protocol, maxChannels;
+        auto report = [&](ncclFunc_t func, ncclSymkKernelId pick, size_t totalBytes) {
+          ScopedHook tuningCompute(g_tuningCompute, SelectSymkTuning(func, pick, /*maxChannels=*/6));
+          EXPECT_EQ(ncclSuccess, rcclSymKGetInfo(comm, func, totalBytes / comm->nRanks / sizeof(float), ncclFloat32,
+                                                 ncclSum, &algo, &protocol, &maxChannels));
+          return algo;
+        };
+        const int sym = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC, tdm = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM;
+        auto notSymk = [&](int a) { return a != sym && a != tdm; };
+        const ncclSymkKernelId tma = ncclSymkKernelId_AllGather_TmaST, st = ncclSymkKernelId_AllGather_ST;
+        EXPECT_EQ(tdm, report(ncclFuncAllGather, tma, 64 * kMiB)) << "window floor";
+        EXPECT_EQ(tdm, report(ncclFuncAllGather, tma, 128 * kMiB)) << "eager window ceiling";
+        EXPECT_TRUE(notSymk(report(ncclFuncAllGather, tma, 64 * kMiB - 64))) << "just below the window";
+        EXPECT_TRUE(notSymk(report(ncclFuncAllGather, tma, 128 * kMiB + 64))) << "just past the eager window";
+        EXPECT_TRUE(notSymk(report(ncclFuncAllGather, st, 96 * kMiB))) << "a non-TDM pick inside the window";
+        EXPECT_TRUE(notSymk(report(ncclFuncAllGather, st, 1 * kMiB))) << "below the window";
+        EXPECT_EQ(sym, report(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST, 1 * kMiB))
+          << "AllReduce unchanged";
+        comm->spansTrays = false;
+        EXPECT_EQ(sym, report(ncclFuncAllGather, st, 1 * kMiB)) << "one tray reports the pick";
+        DeleteCommWithArch(comm);
+      });
+}
+
 // Complementary proof: when symk DOES apply, rcclSymKGetInfo returns its
 // result directly and does NOT fall through to rcclGetCollImplInfo at all
 // -- proven by overriding getAlgoInfo (which rcclGetCollImplInfo's fallback
@@ -5800,7 +11478,8 @@ TEST(WrapMicrotestIsolated, SymKGetInfo_ReturnsSymkResultWithoutFallingThrough) 
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_AGxLL_R, /*maxChannels=*/15));
+                                 SelectSymkTuning(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_AGxLL_R,
+                                                  /*maxChannels=*/15));
         ScopedHook kernelIsLL(g_symkKernelIdIsLL, [](int) { return true; });
         // If this wrongly gets called (fall-through bug), it would report 999 --
         // a value that never appears if rcclSymKGetInfo correctly short-circuits.
@@ -6446,4 +12125,349 @@ TEST(WrapMicrotestIsolated, InfoMacroSweep_CtaDirectCallSiteForcedOpenByNegative
         std::string log = RcclUnitTesting::CaptureLog([]() { ExerciseInfoCallSites(/*seedDirectDisabled=*/false); });
         ExpectInfoCallSiteLogs(log, /*seedDirectDisabled=*/false);
       });
+}
+
+// ===========================================================================
+// rcclSelectAlltoAll on gfx1250: the fabric LL / LL128 choice and its check-mode skip, against a
+// synthetic table with both LL rules (64 KiB total, or 8 KiB per peer from 8 ranks) and LL128 to
+// 16 MiB, so the selector logic is pinned independently of the shipped tables.
+// ===========================================================================
+namespace {
+
+rcclArchThresholds Gfx1250A2aTable() {
+  rcclArchThresholds t;
+  std::memset(&t, 0, sizeof(t));
+  t.ddaLLMax[ncclFuncAlltoAll] = 64u << 10;
+  t.ddaLL128Max[ncclFuncAlltoAll] = 16u << 20;
+  t.ddaLLMaxPerRank[ncclFuncAlltoAll] = 8u << 10;
+  t.rankScaledMinRanks = 8;
+  t.rankScaledMaxBytes = 256u << 20;
+  return t;
+}
+
+bool A2aPerPeer16(size_t count, ncclDataType_t t) { return (count * ncclTypeSize(t)) % 16 == 0; }
+
+void InstallA2aFabricFakes() {
+  g_allToAllDdaFabricLLEligible = [](ncclComm*, const void*, void*, size_t c, ncclDataType_t t) {
+    return A2aPerPeer16(c, t);
+  };
+  g_allToAllDdaFabricLL128Eligible = [](ncclComm*, const void*, void*, size_t c, ncclDataType_t t) {
+    return A2aPerPeer16(c, t);
+  };
+}
+
+const void* const kA2aSend = reinterpret_cast<const void*>(0x10000000);
+void* const kA2aRecv = reinterpret_cast<void*>(0x20000000);
+
+// An 8-rank gfx1250 comm on Gfx1250A2aTable with the A2A fabric fakes installed; tests override hooks after
+// constructing it. The comm is deleted on every exit, ASSERT returns included.
+struct A2aGfx1250Comm {
+  rcclArchThresholds tbl = Gfx1250A2aTable();
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+
+  A2aGfx1250Comm() {
+    InstallA2aFabricFakes();
+    comm->archThresholds = &tbl;
+    comm->nRanks = 8;
+  }
+  ~A2aGfx1250Comm() { DeleteCommWithArch(comm); }
+  A2aGfx1250Comm(const A2aGfx1250Comm&) = delete;
+  A2aGfx1250Comm& operator=(const A2aGfx1250Comm&) = delete;
+};
+
+// Decision for nRanks ranks, totalBytes = nRanks * perPeer (int8 count == per-peer bytes).
+ncclResult_t SelectA2aGfx1250(ncclComm* comm, size_t perPeer, const void* send, void* recv, bool query,
+                              rcclCollDecision* out) {
+  *out = rcclCollDecision{};
+  return rcclSelectAlltoAll(comm, send, recv, perPeer, ncclInt8, /*stream=*/nullptr, query,
+                            /*graphCapturingHint=*/false, out);
+}
+
+}  // namespace
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250FabricTableOutOfPlace) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250FabricTableOutOfPlace",
+      []() {
+        A2aGfx1250Comm a2a;
+        ncclComm* const comm = a2a.comm;
+        struct Case {
+          int n;
+          size_t perPeer;
+          int algo;
+        } cases[] = {
+            {8, 512, RCCL_DDA_FABRIC_LL},                  // T = 4 KiB
+            {8, 8u << 10, RCCL_DDA_FABRIC_LL},             // T = 64 KiB (total rule)
+            {16, 8u << 10, RCCL_DDA_FABRIC_LL},            // T = 128 KiB, P = 8 KiB (per-peer rule)
+            {8, 16u << 10, RCCL_DDA_FABRIC_LL128},         // T = 128 KiB, P = 16 KiB
+            {8, 1u << 20, RCCL_DDA_FABRIC_LL128},          // T = 8 MiB
+            {8, 2u << 20, RCCL_DDA_FABRIC_LL128},          // T = 16 MiB == ddaLL128Max
+            {16, 1u << 20, RCCL_DDA_FABRIC_LL128},         // T = 16 MiB
+            {16, 3u << 19, RCCL_DIRECT_ALLTOALL},          // T = 24 MiB > ddaLL128Max: p2p
+            {4, 2u << 20, RCCL_DDA_FABRIC_LL128},          // T = 8 MiB
+            {8, 256u << 20, RCCL_DIRECT_ALLTOALL},         // T = 2 GiB: p2p
+            {32, 1u << 20, RCCL_DIRECT_ALLTOALL},          // T = 32 MiB: p2p
+        };
+        for (const Case& c : cases) {
+          comm->nRanks = c.n;
+          for (bool query : {true, false}) {
+            rcclCollDecision d{};
+            ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, c.perPeer, kA2aSend, kA2aRecv, query, &d));
+            EXPECT_EQ(c.algo, d.algo) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
+          }
+        }
+        // Block counts come from the chosen path's own geometry function.
+        rcclCollDecision d{};
+        comm->nRanks = 8;
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 1u << 20, kA2aSend, kA2aRecv, true, &d));
+        EXPECT_EQ(144u, d.nMaxChannels);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250FabricTableInPlace) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250FabricTableInPlace",
+      []() {
+        A2aGfx1250Comm a2a;
+        ncclComm* const comm = a2a.comm;
+        struct Case {
+          int n;
+          size_t perPeer;
+          int algo;
+        } cases[] = {
+            {8, 512, RCCL_DDA_FABRIC_LL},
+            {8, 1u << 20, RCCL_DDA_FABRIC_LL128},
+            {8, 2u << 20, RCCL_DDA_FABRIC_LL128},        // T = 16 MiB
+            {16, 1u << 20, RCCL_DDA_FABRIC_LL128},
+        };
+        for (const Case& c : cases) {
+          comm->nRanks = c.n;
+          for (bool query : {true, false}) {
+            rcclCollDecision d{};
+            ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, c.perPeer, kA2aRecv, kA2aRecv, query, &d));
+            EXPECT_EQ(c.algo, d.algo) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
+          }
+        }
+      });
+}
+
+// Check mode diverts to ncclEnqueueCheck, which cannot run the fabric paths, so the selector skips
+// them without probing eligibility and takes the next arm (p2p here), in place as well.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250CheckModeSkipsFabricPaths) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250CheckModeSkipsFabricPaths",
+      []() {
+        A2aGfx1250Comm a2a;
+        ncclComm* const comm = a2a.comm;
+        int ll128Calls = 0;
+        g_allToAllDdaFabricLL128Eligible = [&ll128Calls](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+          ++ll128Calls;
+          return true;
+        };
+        rcclCollDecision d{};
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 1u << 20, kA2aSend, kA2aRecv, false, &d));
+        EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+        EXPECT_EQ(1, ll128Calls);
+        ScopedHook enqueuePath(g_collectiveMustUseEnqueuePath,
+                               [](ncclComm* c) { return c->checkMode != ncclCheckModeDefault; });
+        comm->checkMode = ncclCheckModeDebugLocal;
+        for (size_t perPeer : {size_t(512), size_t(1u << 20), size_t(4u << 20)}) {
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, kA2aRecv, false, &d));
+          EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo) << perPeer;
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, false, &d));
+          EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo) << perPeer;
+        }
+        EXPECT_EQ(1, ll128Calls);
+      });
+}
+
+// A revoked communicator also diverts to ncclEnqueueCheck, in live dispatch and in query mode.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250RevokedCommSkipsFabricPaths) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250RevokedCommSkipsFabricPaths",
+      []() {
+        A2aGfx1250Comm a2a;
+        ncclComm* const comm = a2a.comm;
+        int fabricCalls = 0;
+        g_allToAllDdaFabricLLEligible = [&fabricCalls](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+          ++fabricCalls;
+          return true;
+        };
+        g_allToAllDdaFabricLL128Eligible = [&fabricCalls](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+          ++fabricCalls;
+          return true;
+        };
+        __atomic_store_n(&comm->revokedFlag, 1u, __ATOMIC_RELEASE);
+        ScopedHook enqueuePath(g_collectiveMustUseEnqueuePath,
+                               [](ncclComm* c) { return __atomic_load_n(&c->revokedFlag, __ATOMIC_ACQUIRE) != 0; });
+        for (size_t perPeer : {size_t(512), size_t(1u << 20)}) {
+          for (bool query : {true, false}) {
+            rcclCollDecision d{};
+            ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, kA2aRecv, query, &d));
+            EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo) << perPeer << " query=" << query;
+            ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, query, &d));
+            EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo) << perPeer << " query=" << query;
+          }
+        }
+        EXPECT_EQ(0, fabricCalls);
+        __atomic_store_n(&comm->revokedFlag, 0u, __ATOMIC_RELEASE);
+        rcclCollDecision d{};
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 512, kA2aSend, kA2aRecv, false, &d));
+        EXPECT_EQ((int)RCCL_DDA_FABRIC_LL, d.algo);
+      });
+}
+
+// RCCL_DDA_LL gates only the LL tier: with it off, LL-sized calls go to LL128.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DdaLLOffFallsToLL128) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250DdaLLOffFallsToLL128",
+      []() {
+        g_loadParam = ForceParam("RCCL_DDA_LL", int64_t(0));
+        A2aGfx1250Comm a2a;
+        ncclComm* const comm = a2a.comm;
+        for (size_t perPeer : {size_t(512), size_t(8u << 10), size_t(1u << 20)}) {
+          rcclCollDecision d{};
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, kA2aRecv, false, &d));
+          EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo) << perPeer;
+        }
+      });
+}
+
+// Buffer alignment does not move a call off LL128, in or out of place, so ranks whose buffers differ
+// in alignment pick the same kernel. Live dispatch and the query report the same decision.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250AnyAlignmentTakesLL128) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250AnyAlignmentTakesLL128",
+      []() {
+        A2aGfx1250Comm a2a;
+        ncclComm* const comm = a2a.comm;
+        ScopedHook ll128Blocks(g_allToAllDdaFabricLL128Blocks,
+                               [](ncclComm*, size_t, ncclDataType_t) { return 132u; });
+        void* const inPlace4 = static_cast<char*>(kA2aRecv) + 4;
+        void* const inPlace2 = static_cast<char*>(kA2aRecv) + 2;
+        const void* const send4 = static_cast<const char*>(kA2aSend) + 4;
+        const void* const send2 = static_cast<const char*>(kA2aSend) + 2;
+        void* const recv1 = static_cast<char*>(kA2aRecv) + 1;
+        for (bool query : {false, true}) {
+          for (int n : {8, 16}) {
+            comm->nRanks = n;
+            for (size_t perPeer : {size_t(16u << 10), size_t(64u << 10), size_t(1u << 20)}) {
+              SCOPED_TRACE(testing::Message() << "query=" << query << " n=" << n << " P=" << perPeer);
+              rcclCollDecision d{};
+              ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, inPlace4, inPlace4, query, &d));
+              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+              EXPECT_EQ(NCCL_PROTO_LL128, d.protocol);
+              EXPECT_EQ(132u, d.nMaxChannels);
+              ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, send4, kA2aRecv, query, &d));
+              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+              ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, send2, kA2aRecv, query, &d));
+              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+              ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, recv1, query, &d));
+              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+              ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, inPlace2, inPlace2, query, &d));
+              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+            }
+          }
+        }
+      });
+}
+
+// A suspended communicator diverts to ncclEnqueueCheck like check mode and revoke, so the fabric
+// paths are skipped without probing eligibility, in live dispatch and in query mode.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250SuspendedCommSkipsFabricPaths) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250SuspendedCommSkipsFabricPaths",
+      []() {
+        A2aGfx1250Comm a2a;
+        ncclComm* const comm = a2a.comm;
+        int fabricCalls = 0;
+        g_allToAllDdaFabricLLEligible = [&fabricCalls](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+          ++fabricCalls;
+          return true;
+        };
+        g_allToAllDdaFabricLL128Eligible = [&fabricCalls](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+          ++fabricCalls;
+          return true;
+        };
+        ScopedHook suspended(g_collectiveMustUseEnqueuePath, [](ncclComm*) { return true; });
+        for (size_t perPeer : {size_t(512), size_t(1u << 20)}) {
+          for (bool query : {true, false}) {
+            rcclCollDecision d{};
+            ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, kA2aRecv, query, &d));
+            EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo) << perPeer << " query=" << query;
+          }
+        }
+        EXPECT_EQ(0, fabricCalls);
+      });
+}
+
+namespace {
+
+enum class A2aGate { Open, DdaDisabled, InGroup, DisabledAfterAbort, SymmetricWindow };
+
+// Selects 512 B and 16 KiB per peer at 8 ranks with one fabric-gate precondition failed (or none for Open).
+void CheckA2aFabricGate(A2aGate gate) {
+  if (gate == A2aGate::DdaDisabled) g_loadParam = ForceParam("RCCL_DDA_ENABLE", int64_t(0));
+  A2aGfx1250Comm a2a;
+  ncclComm* const comm = a2a.comm;
+  int fabricCalls = 0;
+  g_allToAllDdaFabricLLEligible = [&fabricCalls](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+    ++fabricCalls;
+    return true;
+  };
+  g_allToAllDdaFabricLL128Eligible = [&fabricCalls](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+    ++fabricCalls;
+    return true;
+  };
+  if (gate == A2aGate::InGroup) ncclGroupDepth = 1;
+  if (gate == A2aGate::DisabledAfterAbort) comm->ddaDisabledAfterAbort = true;
+  if (gate == A2aGate::SymmetricWindow) {
+    a2a.tbl.symMaxR2[ncclFuncAlltoAll] = 256u << 20;
+    g_isSymmetricKernelRequested = [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*,
+                                      bool) { return true; };
+  }
+  // 512 B and 16 KiB per peer at 8 ranks: DDA LL and LL128 when the gate is open.
+  const std::pair<size_t, int> cases[] = {{512, RCCL_DDA_FABRIC_LL}, {16u << 10, RCCL_DDA_FABRIC_LL128}};
+  for (const auto& c : cases) {
+    rcclCollDecision d{};
+    const ncclResult_t rc = SelectA2aGfx1250(comm, c.first, kA2aSend, kA2aRecv, /*query=*/true, &d);
+    EXPECT_EQ(ncclSuccess, rc) << c.first;
+    if (gate == A2aGate::Open) {
+      EXPECT_EQ(c.second, d.algo) << c.first;
+    } else {
+      EXPECT_NE((int)RCCL_DDA_FABRIC_LL, d.algo) << c.first;
+      EXPECT_NE((int)RCCL_DDA_FABRIC_LL128, d.algo) << c.first;
+    }
+  }
+  ncclGroupDepth = 0;
+  EXPECT_EQ(gate == A2aGate::Open ? 2 : 0, fabricCalls);
+}
+
+}  // namespace
+
+// Each precondition of the fabric gate, on its own, sends a call that takes DDA LL or LL128 with the
+// gate open to another path without probing fabric eligibility: RCCL_DDA_ENABLE=0, an open group, a
+// comm shrunk with NCCL_SHRINK_ABORT, and symmetric windows (symk is picked instead).
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250FabricGateOpen) {
+  RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_Gfx1250FabricGateOpen", []() { CheckA2aFabricGate(A2aGate::Open); });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DdaDisabledSkipsFabricPaths) {
+  RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_Gfx1250DdaDisabledSkipsFabricPaths",
+                    []() { CheckA2aFabricGate(A2aGate::DdaDisabled); });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InGroupSkipsFabricPaths) {
+  RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_Gfx1250InGroupSkipsFabricPaths",
+                    []() { CheckA2aFabricGate(A2aGate::InGroup); });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DisabledAfterAbortSkipsFabricPaths) {
+  RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_Gfx1250DisabledAfterAbortSkipsFabricPaths",
+                    []() { CheckA2aFabricGate(A2aGate::DisabledAfterAbort); });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250SymmetricWindowSkipsFabricPaths) {
+  RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_Gfx1250SymmetricWindowSkipsFabricPaths",
+                    []() { CheckA2aFabricGate(A2aGate::SymmetricWindow); });
 }

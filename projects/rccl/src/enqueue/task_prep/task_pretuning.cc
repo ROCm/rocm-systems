@@ -35,6 +35,8 @@ static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTas
   in->comm = comm;
   // disable ce temporarily
   in->tuningMask = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
+  // [RCCL] Across trays AllGather symk runs only through the TDM window, which this path skips.
+  if (raw->func == ncclFuncAllGather && comm->spansTrays) in->tuningMask &= ~NCCL_TUNING_MASK_SYM_KERNELS;
   in->func = raw->func;
   in->redOp = raw->opHost;
   in->devRedOp = raw->opDev.op;
@@ -44,6 +46,9 @@ static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTas
   in->nWorks = 1;
   in->numPipeOps = 1;
   elementSize = ncclTypeSize(in->datatype);
+  // Treat an AllGather as in-place when each rank sends from its own receive slice.
+  in->inPlace = in->func == ncclFuncAllGather &&
+                ncclAllGatherIsInPlace(raw->sendbuff, raw->recvbuff, comm->rank, raw->count * elementSize);
   if (in->func == ncclFuncAllGather || in->func == ncclFuncBroadcast) {
     in->count *= elementSize;
     in->datatype = ncclInt8;
@@ -57,13 +62,10 @@ static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTas
   if (sendWin != nullptr || recvWin != nullptr) {
     NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &in->winRegType));
   }
-  in->nvlsSupport =
-    comm->nvlsSupport && (ncclNvlsSupported(raw->opDev.op, raw->datatype) || raw->func == ncclFuncAllGather);
-  {
-    size_t inputOff = sendWin ? (uintptr_t)raw->sendbuff - (uintptr_t)sendWin->userPtr : (uintptr_t)raw->sendbuff;
-    size_t outputOff = recvWin ? (uintptr_t)raw->recvbuff - (uintptr_t)recvWin->userPtr : (uintptr_t)raw->recvbuff;
-    in->symAligned16B = (uint32_t(inputOff - outputOff) % 16 == 0);
-  }
+  in->nvlsSupport = ncclNvlsTransportEnabled(comm) &&
+                    (ncclNvlsSupported(raw->opDev.op, raw->datatype) || raw->func == ncclFuncAllGather);
+  in->symAligned16B = ncclSymAligned16B(raw->func, comm->rank, raw->sendbuff, raw->recvbuff, sendWin, recvWin,
+                                        raw->count * ncclTypeSize(raw->datatype));
 
   sendbuffSize = elementSize * ncclFuncSendCount(raw->func, comm->nRanks, raw->count);
   recvbuffSize = elementSize * ncclFuncRecvCount(raw->func, comm->nRanks, raw->count);

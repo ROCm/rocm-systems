@@ -163,14 +163,14 @@ jobs:
               cmake \
                 -DCMAKE_BUILD_TYPE=Debug \
                 -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
-                -DAIS_CXX_STANDARD="${{ env.AIS_INPUT_CXX_STANDARD }}" \
+                -DHIPFILE_CXX_STANDARD="${{ env.AIS_INPUT_CXX_STANDARD }}" \
                 -DCMAKE_CXX_FLAGS="-Werror" \
                 -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
                 -DCMAKE_HIP_PLATFORM=amd \
-                -DAIS_BUILD_DOCS=ON \
-                -DAIS_USE_CODE_COVERAGE=${{ env.AIS_USE_CODE_COVERAGE == 'true' && 'ON' || 'OFF' }} \
+                -DHIPFILE_BUILD_DOCS=ON \
+                -DHIPFILE_USE_CODE_COVERAGE=${{ env.AIS_USE_CODE_COVERAGE == 'true' && 'ON' || 'OFF' }} \
                 -DROCM_VERSION="${ROCM_VERSION}" \
-                -DAIS_CAPABLE_DIR=/mnt/ais-fs \
+                -DHIPFILE_CAPABLE_DIR=/mnt/ais-fs \
                 ../../rocm-systems/projects/hipfile
             '
       - name: Build hipFile for the AMD platform (${{ inputs.cxx_compiler }})
@@ -206,12 +206,12 @@ jobs:
               cmake \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
-                -DAIS_CXX_STANDARD="${{ env.AIS_INPUT_CXX_STANDARD }}" \
+                -DHIPFILE_CXX_STANDARD="${{ env.AIS_INPUT_CXX_STANDARD }}" \
                 -DCMAKE_CXX_FLAGS="-Werror" \
                 -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
                 -DCMAKE_HIP_PLATFORM=amd \
                 -DROCM_VERSION="${ROCM_VERSION}" \
-                -DAIS_CAPABLE_DIR=/mnt/ais-fs \
+                -DHIPFILE_CAPABLE_DIR=/mnt/ais-fs \
                 ../../rocm-systems/projects/hipfile
             '
       - name: Build hipFile Release for the AMD platform (${{ inputs.cxx_compiler }})

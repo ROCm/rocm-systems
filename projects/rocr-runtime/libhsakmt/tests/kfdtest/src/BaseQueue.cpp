@@ -50,9 +50,16 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
     m_KFDContext = g_baseTest->m_hsakmt_current_ctx;
     memset(&m_Resources, 0, sizeof(m_Resources));
 
+    /* Paged memory is SVM-backed on stall-on-fault nodes, but queue buffers
+     * need a BO. Use GTT there; elsewhere keep the paged (userptr) ring.
+     */
+    HsaNodeProperties props = {};
+    bool stall = !HSAKMT_CALL(hsaKmtGetNodeProperties, m_KFDContext, NodeId, &props) &&
+                 props.Capability2.ui32.StallOnRetryFault;
+
     m_QueueBuf = new HsaMemoryBuffer(size, NodeId, true/*zero*/, false/*local*/, true/*exec*/,
                         /*isScratch */ false, /* isReadOnly */false, /* isUncached */true,
-                        /* NonPaged */ true);
+                        /* NonPaged */ stall);
 
     if (type == HSA_QUEUE_COMPUTE_AQL) {
         m_Resources.Queue_read_ptr_aql = &pointers[0];
@@ -82,6 +89,9 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
                              &m_Resources);
 
     if (status != HSAKMT_STATUS_SUCCESS) {
+        /* No queue exists: PlacePacket() and Destroy() rely on a NULL m_QueueBuf */
+        delete m_QueueBuf;
+        m_QueueBuf = NULL;
         return status;
     }
 
@@ -142,6 +152,7 @@ void BaseQueue::PlaceAndSubmitPacket(const BasePacket &packet) {
 
 void BaseQueue::Wait4PacketConsumption(HsaEvent *event, unsigned int timeOut) {
     ASSERT_TRUE(!event) << "Not supported!" << std::endl;
+    ASSERT_NOTNULL(m_QueueBuf);
 
     const unsigned int expectedRptr = RptrWhenConsumed();
     ASSERT_TRUE(WaitOnValue(m_Resources.Queue_read_ptr, expectedRptr, timeOut))

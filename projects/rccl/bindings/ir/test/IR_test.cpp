@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <nccl.h>
@@ -69,6 +70,29 @@ static_assert(sizeof(ncclBarrierSession_C) > 0,
               "ncclBarrierSession_C must have non-zero size");
 static_assert(alignof(ncclBarrierSession_C) >= 1,
               "ncclBarrierSession_C must have valid alignment");
+
+/* [C] ABI pin: the barrier-session Init thunks take the ncclGin_C by pointer.
+ * NCCL 2.31.2 (NVIDIA/nccl#2243, issue #2242) switched them from by-value
+ * because frontends that emit their own IR (CuTeDSL) spilled the by-value
+ * struct to an under-aligned stack slot, and the C++ side's 8-byte load of
+ * the leading `ncclDevComm const&` faulted. A C++ caller always aligns the
+ * argument correctly, so no runtime test here can reproduce that fault;
+ * pinning the exported signature is what catches a regression to by-value.
+ * decltype() is unevaluated, so naming these __device__ thunks from host
+ * scope is fine. */
+static_assert(
+    std::is_same<decltype(&ncclGinBarrierSessionInit),
+                 void (*)(ncclGinBarrierSession_C*, ncclCoopAny,
+                          ncclGin_C const*, ncclTeam, ncclGinBarrierHandle,
+                          uint32_t)>::value,
+    "ncclGinBarrierSessionInit must take ncclGin_C by pointer (IR ABI)");
+static_assert(
+    std::is_same<decltype(&ncclBarrierSessionInit),
+                 void (*)(ncclBarrierSession_C*, ncclCoopAny, ncclTeam,
+                          ncclTeam, ncclGin_C const*, ncclLsaBarrierHandle,
+                          ncclGinBarrierHandle, uint32_t, bool,
+                          ncclMultimemHandle)>::value,
+    "ncclBarrierSessionInit must take ncclGin_C by pointer (IR ABI)");
 
 /* -----------------------------------------------------------------------
  * Error checking — fail the current GTest assertion rather than exit(),
@@ -387,6 +411,41 @@ TEST_F(IRDeviceTest, B3d_CoopInitLanes_UpperLaneMask) {
   check_coop(h,
              [](int)  { return 1; },
              [](int t){ return (t == 63) ? 0 : -1; });
+}
+
+TEST_F(IRDeviceTest, B3e_CoopInitLanes_IgnoresNonexistentLanes) {
+  const uint64_t mask = 0xffffffff00000000ull;
+  const int      sz   = warpSize_ > 32 ? 32 : 0;
+  auto h = launch_coop_r(k_coop_lanes_r, warpSize_, mask);
+  check_coop(h,
+             [sz](int) { return sz; },
+             [](int)   { return -1; });
+}
+
+/* ncclCoopTile::laneMask() is not reached by the ncclCoopAny tests above.
+ * AMD shims discard the mask today; this pins the value the tile returns. */
+__global__ void k_coop_tile4_lane_mask(uint64_t* out) {
+  ncclCoopTile<4> tile;
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  out[tid] = static_cast<uint64_t>(tile.laneMask());
+}
+
+TEST_F(IRDeviceTest, B3f_CoopTileLaneMask_AlignedGroupOfFour) {
+  const int n = warpSize_;
+  uint64_t* d = nullptr;
+  HIP_ASSERT(hipMalloc(&d, sizeof(uint64_t) * n));
+  k_coop_tile4_lane_mask<<<1, n>>>(d);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  std::vector<uint64_t> got(n);
+  HIP_ASSERT(hipMemcpy(got.data(), d, sizeof(uint64_t) * n, hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(d));
+
+  const uint64_t window = ~uint64_t(0) >> (64 - n);
+  for (int lane = 0; lane < n; ++lane) {
+    const uint64_t expect = (window >> (n - 4)) << (lane & -4);
+    EXPECT_EQ(got[lane], expect) << "lane " << lane;
+  }
 }
 
 /* =====================================================================

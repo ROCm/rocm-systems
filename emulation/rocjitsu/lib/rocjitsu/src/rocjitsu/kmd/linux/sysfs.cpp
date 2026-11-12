@@ -5,17 +5,23 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
+#include "util/log.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_sysfs.h"
+#include "uapi/linux/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
+#include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <csignal>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -28,9 +34,30 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
+uint32_t Sysfs::GpuInfo::clock_frequency_mhz() const {
+  switch (gfx_target_version) {
+  case 90008:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA1);
+  case 90010:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA2);
+  case 90400:
+  case 90401:
+  case 90402:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA3);
+  case 90500:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA4);
+  default:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_INVALID);
+  }
+}
+
 namespace fs = std::filesystem;
 
 namespace {
+
+// HSA_HEAPTYPE_FRAME_BUFFER_{PUBLIC,PRIVATE} in libhsakmt's public types.
+constexpr uint32_t kFramebufferPublicHeap = 1;
+constexpr uint32_t kFramebufferPrivateHeap = 2;
 
 /// @brief Create a process-tagged scratch directory under the XDG runtime root.
 /// @details Replaces raw mkdtemp("/tmp/...") so synthetic sysfs trees live under
@@ -126,11 +153,12 @@ using kmd::DebugTopology;
 Sysfs::~Sysfs() { cleanup(); }
 
 Sysfs::Sysfs(Sysfs &&other) noexcept
-    : topology_dir_(std::move(other.topology_dir_)), drm_dir_(std::move(other.drm_dir_)) {
-  // Clear both owned-tree paths in the moved-from object so its cleanup() cannot
-  // remove_all a tree this object now owns.
+    : topology_dir_(std::move(other.topology_dir_)), drm_dir_(std::move(other.drm_dir_)),
+      pending_files_(std::move(other.pending_files_)) {
+  // Leave the moved-from object with no tree to remove in cleanup().
   other.topology_dir_.clear();
   other.drm_dir_.clear();
+  other.pending_files_.clear();
 }
 
 Sysfs &Sysfs::operator=(Sysfs &&other) noexcept {
@@ -138,20 +166,22 @@ Sysfs &Sysfs::operator=(Sysfs &&other) noexcept {
     cleanup();
     topology_dir_ = std::move(other.topology_dir_);
     drm_dir_ = std::move(other.drm_dir_);
+    pending_files_ = std::move(other.pending_files_);
     other.topology_dir_.clear();
     other.drm_dir_.clear();
+    other.pending_files_.clear();
   }
   return *this;
 }
 
-void Sysfs::write_file(const std::string &path, const std::string &content) {
-  std::ofstream f(path);
-  f << content;
+void Sysfs::queue_file(const std::string &path, const std::string &content) {
+  pending_files_.push_back({path, content});
 }
 
 void Sysfs::make_dir(const std::string &path) { fs::create_directories(path); }
 
 void Sysfs::cleanup() {
+  pending_files_.clear();
   if (!topology_dir_.empty()) {
     std::error_code ec;
     fs::remove_all(topology_dir_, ec);
@@ -166,7 +196,7 @@ void Sysfs::cleanup() {
 
 void Sysfs::setup_environment() {}
 
-void Sysfs::write_generation_id() { write_file(topology_dir_ + "/generation_id", "1\n"); }
+void Sysfs::write_generation_id() { queue_file(topology_dir_ + "/generation_id", "1\n"); }
 
 void Sysfs::write_system_properties(uint32_t num_devices) {
   std::ostringstream ss;
@@ -174,7 +204,7 @@ void Sysfs::write_system_properties(uint32_t num_devices) {
         "platform_id 0\n"
         "platform_rev 0\n"
      << "num_devices " << num_devices << "\n";
-  write_file(topology_dir_ + "/system_properties", ss.str());
+  queue_file(topology_dir_ + "/system_properties", ss.str());
 }
 
 void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links) {
@@ -185,9 +215,9 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links)
   for (uint32_t i = 0; i < num_gpu_links; ++i)
     make_dir(node_dir + "/io_links/" + std::to_string(i));
 
-  write_file(node_dir + "/gpu_id", "0\n");
+  queue_file(node_dir + "/gpu_id", "0\n");
   // KFD publishes a name file for every topology node.
-  write_file(node_dir + "/name", "\n");
+  queue_file(node_dir + "/name", "\n");
 
   long nproc = sysconf(_SC_NPROCESSORS_ONLN);
   if (nproc < 1)
@@ -234,7 +264,7 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links)
         << "sdma_fw_version 0\n"
         << "vram_public 0\n"
         << "vram_size 0\n";
-  write_file(node_dir + "/properties", props.str());
+  queue_file(node_dir + "/properties", props.str());
 
   std::ostringstream mem;
   mem << "heap_type 0\n"
@@ -242,7 +272,7 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links)
       << "flags 0\n"
       << "width 0\n"
       << "mem_clk_max 0\n";
-  write_file(node_dir + "/mem_banks/0/properties", mem.str());
+  queue_file(node_dir + "/mem_banks/0/properties", mem.str());
 
   for (uint32_t i = 0; i < num_gpu_links; ++i) {
     std::ostringstream link;
@@ -259,32 +289,34 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links)
          << "recommended_transfer_size 0\n"
          << "num_hops 1\n"
          << "flags 1\n";
-    write_file(node_dir + "/io_links/" + std::to_string(i) + "/properties", link.str());
+    queue_file(node_dir + "/io_links/" + std::to_string(i) + "/properties", link.str());
   }
 }
 
 void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, const GpuInfo &gpu,
-                           uint32_t total_gpus) {
+                           uint32_t total_gpus, bool publish_peer_links) {
   std::string node_dir = nodes_dir + "/" + std::to_string(node_idx);
   make_dir(node_dir);
   make_dir(node_dir + "/mem_banks/0");
+  const uint64_t visible_vram = std::min(gpu.visible_vram_size, gpu.local_mem_size);
+  const bool fully_visible = visible_vram == gpu.local_mem_size && visible_vram != 0;
   make_dir(node_dir + "/caches/0");
   make_dir(node_dir + "/caches/1");
 
-  // IO links: link 0 = to CPU, links 1..N-1 = XGMI to peer GPUs
-  uint32_t num_io_links = 1 + (total_gpus > 1 ? total_gpus - 1 : 0);
+  // IO link 0 reaches the CPU. Peer links require an executable route.
+  uint32_t num_io_links = publish_peer_links ? total_gpus : 1;
   for (uint32_t i = 0; i < num_io_links; ++i)
     make_dir(node_dir + "/io_links/" + std::to_string(i));
 
   std::ostringstream gpu_id;
   gpu_id << gpu.gpu_id << "\n";
-  write_file(node_dir + "/gpu_id", gpu_id.str());
-  write_file(node_dir + "/name", gpu.marketing_name + "\n");
+  queue_file(node_dir + "/gpu_id", gpu_id.str());
+  queue_file(node_dir + "/name", gpu.marketing_name + "\n");
 
   const DebugTopology topology = kmd::effective_topology_for(
       gpu.gfx_target_version, gpu.capability, gpu.capability2, gpu.debug_prop, gpu.revision_id);
 
-  uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
+  uint32_t p2p_links = publish_peer_links ? total_gpus - 1 : 0;
 
   // array_count is the one geometry property KFD reports per node rather than
   // per XCC: node_show() emits node_props.array_count * NUM_XCC, while
@@ -326,6 +358,8 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "num_sdma_xgmi_engines " << gpu.num_sdma_xgmi_engines << "\n"
         << "num_sdma_queues_per_engine " << gpu.num_sdma_queues_per_engine << "\n"
         << "num_cp_queues " << gpu.num_cp_queues << "\n"
+        << "cwsr_size " << gpu.context_save_size << "\n"
+        << "ctl_stack_size " << gpu.control_stack_size << "\n"
         << "max_engine_clk_fcompute " << gpu.max_engine_clk_fcompute << "\n"
         << "max_engine_clk_ccompute 0\n"
         << "local_mem_size " << gpu.local_mem_size << "\n"
@@ -336,22 +370,29 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "sdma_fw_version " << gpu.sdma_fw_version << "\n"
         << "unique_id " << gpu.unique_id << "\n"
         << "num_xcc " << num_xcc << "\n"
-        << "vram_public 1\n"
+        << "vram_public " << fully_visible << "\n"
         << "vram_size " << gpu.local_mem_size << "\n";
 
   if (gpu.family_id > 0)
     props << "family_id " << gpu.family_id << "\n";
 
-  write_file(node_dir + "/properties", props.str());
+  queue_file(node_dir + "/properties", props.str());
 
-  std::ostringstream mem;
-  mem << "heap_type 1\n"
-      << "size_in_bytes " << gpu.local_mem_size << "\n"
-      << "flags 0\n"
-      << "width " << gpu.mem_width << "\n"
-      << "mem_clk_max " << gpu.mem_clk_max << "\n";
-  write_file(node_dir + "/mem_banks/0/properties", mem.str());
-  write_file(node_dir + "/mem_banks/0/used_memory", "0\n");
+  const auto write_bank = [&](uint32_t index, uint32_t heap_type, uint64_t size) {
+    const std::string bank_dir = node_dir + "/mem_banks/" + std::to_string(index);
+    std::ostringstream mem;
+    mem << "heap_type " << heap_type << "\n"
+        << "size_in_bytes " << size << "\n"
+        << "flags 0\n"
+        << "width " << gpu.mem_width << "\n"
+        << "mem_clk_max " << gpu.mem_clk_max << "\n";
+    queue_file(bank_dir + "/properties", mem.str());
+    queue_file(bank_dir + "/used_memory", "0\n");
+  };
+  // KFD publishes one framebuffer bank for the entire allocation pool.
+  // The separate DRM attribute reports the CPU-visible byte count.
+  write_bank(0, fully_visible ? kFramebufferPublicHeap : kFramebufferPrivateHeap,
+             gpu.local_mem_size);
 
   std::ostringstream l1;
   l1 << "processor_id_low 0\n"
@@ -363,7 +404,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
      << "latency 0\n"
      << "type 9\n"
      << "sibling_map 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0\n";
-  write_file(node_dir + "/caches/0/properties", l1.str());
+  queue_file(node_dir + "/caches/0/properties", l1.str());
 
   std::ostringstream l2;
   l2 << "processor_id_low 0\n"
@@ -375,7 +416,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
      << "latency 0\n"
      << "type 9\n"
      << "sibling_map 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0\n";
-  write_file(node_dir + "/caches/1/properties", l2.str());
+  queue_file(node_dir + "/caches/1/properties", l2.str());
 
   // IO link 0: GPU → CPU (PCIe, type 2)
   {
@@ -393,11 +434,11 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
          << "recommended_transfer_size 0\n"
          << "num_hops 1\n"
          << "flags 1\n";
-    write_file(node_dir + "/io_links/0/properties", link.str());
+    queue_file(node_dir + "/io_links/0/properties", link.str());
   }
 
   // IO links 1..N-1: XGMI to peer GPUs (type 11)
-  if (total_gpus > 1) {
+  if (publish_peer_links && total_gpus > 1) {
     uint32_t link_idx = 1;
     for (uint32_t peer = 1; peer <= total_gpus; ++peer) {
       if (peer == node_idx)
@@ -416,7 +457,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
            << "recommended_transfer_size 0\n"
            << "num_hops 1\n"
            << "flags 1\n";
-      write_file(node_dir + "/io_links/" + std::to_string(link_idx++) + "/properties", link.str());
+      queue_file(node_dir + "/io_links/" + std::to_string(link_idx++) + "/properties", link.str());
     }
 
     uint32_t p2p_idx = 0;
@@ -438,7 +479,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
             << "recommended_transfer_size 0\n"
             << "num_hops 1\n"
             << "flags 1\n";
-      write_file(node_dir + "/p2p_links/" + std::to_string(p2p_idx) + "/properties", plink.str());
+      queue_file(node_dir + "/p2p_links/" + std::to_string(p2p_idx) + "/properties", plink.str());
       ++p2p_idx;
     }
   }
@@ -476,31 +517,45 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
       std::string device_dir = drm_dir_ + "/" + entry_name + "/device";
       make_dir(device_dir + "/drm/" + card_name);
       make_dir(device_dir + "/drm/" + render_name);
-      write_file(device_dir + "/vendor", vendor_hex.str());
-      write_file(device_dir + "/device", device_hex.str());
-      write_file(device_dir + "/uevent", uevent.str());
+      queue_file(device_dir + "/vendor", vendor_hex.str());
+      queue_file(device_dir + "/device", device_hex.str());
+      queue_file(device_dir + "/uevent", uevent.str());
       // drmParseSubsystemType does readlink("subsystem") then strncmp for "/pci"
       std::filesystem::create_symlink("../../../bus/pci", device_dir + "/subsystem");
       // drmParsePciDeviceInfo reads all five files; missing any causes -ENODEV
-      write_file(device_dir + "/revision", revision_hex.str());
-      write_file(device_dir + "/subsystem_vendor", vendor_hex.str());
-      write_file(device_dir + "/subsystem_device", device_hex.str());
+      queue_file(device_dir + "/revision", revision_hex.str());
+      queue_file(device_dir + "/subsystem_vendor", vendor_hex.str());
+      queue_file(device_dir + "/subsystem_device", device_hex.str());
+      // Match DRM's memory-size attributes so runtime topology readers can
+      // discover local and CPU-visible VRAM through the sysfs overlay.
+      queue_file(device_dir + "/mem_info_vram_total", std::to_string(gpu.local_mem_size) + "\n");
+      queue_file(device_dir + "/mem_info_vis_vram_total",
+                 std::to_string(gpu.visible_vram_size) + "\n");
+      for (const auto &block : gpu.ip_versions) {
+        std::string instance_dir =
+            device_dir + "/ip_discovery/die/0/" + std::to_string(block.hardware_id) + "/0";
+        make_dir(instance_dir);
+        queue_file(instance_dir + "/major", std::to_string(block.major) + "\n");
+        queue_file(instance_dir + "/minor", std::to_string(block.minor) + "\n");
+        queue_file(instance_dir + "/revision", std::to_string(block.revision) + "\n");
+      }
     }
   }
+
+  // Queue version before the empty dev_dri nodes so all nonempty files share one keeper connection.
+  queue_file(drm_dir_ + "/version", "drm 1.1.0\n");
 
   make_dir(drm_dir_ + "/dev_dri");
   for (size_t i = 0; i < gpus.size(); ++i) {
     auto &gpu = gpus[i];
-    write_file(drm_dir_ + "/dev_dri/card" + std::to_string(i), "");
-    write_file(drm_dir_ + "/dev_dri/renderD" + std::to_string(gpu.drm_render_minor), "");
+    queue_file(drm_dir_ + "/dev_dri/card" + std::to_string(i), "");
+    queue_file(drm_dir_ + "/dev_dri/renderD" + std::to_string(gpu.drm_render_minor), "");
   }
-
-  write_file(drm_dir_ + "/version", "drm 1.1.0\n");
 }
 
 std::string Sysfs::generate(const GpuInfo &gpu) { return generate(std::vector<GpuInfo>{gpu}); }
 
-std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
+std::string Sysfs::generate(const std::vector<GpuInfo> &gpus, bool publish_peer_links) {
   cleanup();
 
   static std::once_flag reap_once;
@@ -523,14 +578,24 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
 
   write_cpu_node(nodes_dir, num_gpus);
   for (uint32_t i = 0; i < num_gpus; ++i)
-    write_gpu_node(nodes_dir, i + 1, gpus[i], num_gpus);
+    write_gpu_node(nodes_dir, i + 1, gpus[i], num_gpus, publish_peer_links);
 
   write_drm_tree(gpus);
+
+  // Publish only after all files have been populated. Reuse a temporary helper
+  // connection for the tree without retaining application file descriptors.
+  create_backing_files(pending_files_);
+  for (const BackingFile &file : pending_files_)
+    if (file.error)
+      util::Logger::warn("Cannot generate topology file '", file.path,
+                         "': ", std::strerror(file.error));
+  pending_files_.clear();
 
   return topology_dir_;
 }
 
-Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc) {
+Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
+                                    const config::PciDeviceConfig &pci) {
   Sysfs::GpuInfo gpu{};
   gpu.gpu_id = dev.gpu_id;
   gpu.gfx_target_version = dev.gfx_target_version;
@@ -546,6 +611,7 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.debug_prop = dev.debug_prop;
   gpu.drm_render_minor = dev.drm_render_minor;
   gpu.marketing_name = dev.marketing_name;
+  gpu.ip_versions = dev.ip_versions;
   gpu.revision_id = dev.revision_id;
   gpu.pci_revision_id = dev.pci_revision_id;
   gpu.simd_count = dev.simd_count;
@@ -557,6 +623,13 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.wave_front_size = dev.wave_front_size;
   gpu.max_slots_scratch_cu = dev.max_slots_scratch_cu;
   gpu.local_mem_size = dev.local_mem_size;
+  // The KFD, DRM, RPC, and C API views share one clamped visible extent.
+  // The PCI front end still resolves its own default BAR independently.
+  gpu.visible_vram_size = std::min(
+      pci.vram_aperture_bytes ? pci.vram_aperture_bytes : dev.local_mem_size, dev.local_mem_size);
+  const auto context = kmd::cwsr_capacity_for_device(dev, num_xcc);
+  gpu.control_stack_size = context.control_stack_size;
+  gpu.context_save_size = context.context_save_size;
   gpu.vram_type = dev.vram_type;
   gpu.lds_size_kb = dev.lds_size_kb;
   gpu.mem_width = dev.mem_width;

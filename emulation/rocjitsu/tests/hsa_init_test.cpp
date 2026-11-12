@@ -79,7 +79,7 @@ TEST_F(HsaTest, SdmaPublishesCompletePackets) {
     const uint64_t address = reinterpret_cast<uint64_t>(&values[destination]);
     auto *packet = reinterpret_cast<uint32_t *>(static_cast<uint8_t *>(queue->base_address) +
                                                 cursor % queue->size);
-    std::fill_n(packet, 8, 0u); // Pad each submission to 32 bytes with NOPs.
+    std::ranges::fill_n(packet, 8, 0u); // Pad each submission to 32 bytes with NOPs.
     packet[0] = iteration % 2 ? kSdmaOpFence : kSdmaOpWrite;
     packet[1] = static_cast<uint32_t>(address);
     packet[2] = static_cast<uint32_t>(address >> 32);
@@ -99,6 +99,89 @@ TEST_F(HsaTest, SdmaPublishesCompletePackets) {
   }
 #else
   GTEST_SKIP() << "ROCr headers do not expose direct SDMA queue creation";
+#endif
+}
+
+TEST_F(HsaTest, SdmaSwapExchangesBuffersAndCompletes) {
+#if defined(HSA_AMD_MEMORY_COPY_OP_VERSION)
+  hsa_agent_t gpu{};
+  ASSERT_EQ(hsa_iterate_agents(
+                [](hsa_agent_t agent, void *data) -> hsa_status_t {
+                  hsa_device_type_t type;
+                  const hsa_status_t status =
+                      hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
+                  if (status == HSA_STATUS_SUCCESS && type == HSA_DEVICE_TYPE_GPU)
+                    *static_cast<hsa_agent_t *>(data) = agent;
+                  return status;
+                },
+                &gpu),
+            HSA_STATUS_SUCCESS);
+  ASSERT_NE(gpu.handle, 0u);
+  hsa_amd_memory_pool_t pool{};
+  ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(
+                gpu,
+                [](hsa_amd_memory_pool_t candidate, void *data) -> hsa_status_t {
+                  hsa_amd_segment_t segment;
+                  hsa_status_t status = hsa_amd_memory_pool_get_info(
+                      candidate, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
+                  if (status != HSA_STATUS_SUCCESS || segment != HSA_AMD_SEGMENT_GLOBAL)
+                    return status;
+                  bool allocatable = false;
+                  status = hsa_amd_memory_pool_get_info(
+                      candidate, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &allocatable);
+                  if (status == HSA_STATUS_SUCCESS && allocatable)
+                    *static_cast<hsa_amd_memory_pool_t *>(data) = candidate;
+                  return status;
+                },
+                &pool),
+            HSA_STATUS_SUCCESS);
+  ASSERT_NE(pool.handle, 0u);
+
+  // Cross two 4096-byte exchange chunks and include a short final chunk.
+  // Distinct bytes in each chunk detect reuse of an earlier chunk's contents.
+  constexpr size_t kBytes = 8256;
+  std::array<uint8_t, kBytes> original_a;
+  std::array<uint8_t, kBytes> original_b;
+  for (size_t index = 0; index < kBytes; ++index) {
+    original_a[index] = static_cast<uint8_t>((index * 3 + 1) ^ (index >> 8));
+    original_b[index] = static_cast<uint8_t>((index * 7 + 5) ^ (index >> 8));
+  }
+  void *allocation = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(pool, kBytes, 0, &allocation), HSA_STATUS_SUCCESS);
+  std::unique_ptr<void, decltype(&hsa_amd_memory_pool_free)> buffer_a(allocation,
+                                                                      hsa_amd_memory_pool_free);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(pool, kBytes, 0, &allocation), HSA_STATUS_SUCCESS);
+  std::unique_ptr<void, decltype(&hsa_amd_memory_pool_free)> buffer_b(allocation,
+                                                                      hsa_amd_memory_pool_free);
+  ASSERT_EQ(hsa_memory_copy(buffer_a.get(), original_a.data(), kBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_memory_copy(buffer_b.get(), original_b.data(), kBytes), HSA_STATUS_SUCCESS);
+  hsa_signal_t completion{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &completion), HSA_STATUS_SUCCESS);
+  hsa_amd_memory_copy_op_t operation{};
+  operation.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+  operation.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
+  operation.src = buffer_a.get();
+  operation.dst = buffer_b.get();
+  operation.src_agent = gpu;
+  operation.dst_agent = gpu;
+  operation.src_size = kBytes;
+  operation.dst_size = kBytes;
+  operation.completion_signal = completion;
+  ASSERT_EQ(hsa_amd_memory_async_batch_copy(&operation, 1, 0, nullptr), HSA_STATUS_SUCCESS);
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (hsa_signal_load_scacquire(completion) != 0 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  ASSERT_EQ(hsa_signal_load_scacquire(completion), 0) << "SDMA swap completion remains pending";
+  std::array<uint8_t, kBytes> actual_a;
+  std::array<uint8_t, kBytes> actual_b;
+  ASSERT_EQ(hsa_memory_copy(actual_a.data(), buffer_a.get(), kBytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_memory_copy(actual_b.data(), buffer_b.get(), kBytes), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(actual_a, original_b);
+  EXPECT_EQ(actual_b, original_a);
+  EXPECT_EQ(hsa_signal_destroy(completion), HSA_STATUS_SUCCESS);
+#else
+  GTEST_SKIP() << "ROCr headers do not expose batch memory copies";
 #endif
 }
 

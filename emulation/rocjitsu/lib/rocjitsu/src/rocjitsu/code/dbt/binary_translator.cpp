@@ -85,7 +85,7 @@ public:
       return decoder_->decode(inst, emit_error);
 
     std::array<rj_code_binary_inst_t, kLookaheadWords> canonical{};
-    std::copy_n(inst, kLookaheadWords, canonical.begin());
+    std::ranges::copy_n(inst, kLookaheadWords, canonical.begin());
     constexpr uint32_t kSrc2Mask = 0x1ffu << 18;
     canonical[1] = (canonical[1] & ~kSrc2Mask) | (0x100u << 18);
     return decoder_->decode(canonical.data(), emit_error);
@@ -154,12 +154,30 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
                                               uint64_t call_offset, rj_code_arch_t arch) {
   if (recovery_end > call_offset || (call_offset - recovery_end) % sizeof(uint32_t) != 0)
     return false;
-  const uint32_t nop = build_s_nop(0, arch);
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
+  if (maybe_nop.failed())
+    return false;
+  const uint32_t nop = maybe_nop.value();
   for (uint64_t offset = recovery_end; offset < call_offset; offset += sizeof(uint32_t)) {
     if (text_word_at(text, offset) != nop)
       return false;
   }
   return true;
+}
+
+/// @brief The guest wave size every kernel in @p translations shares.
+///
+/// @details An object-wide analysis cannot apply each kernel's own wave size, so kernels that
+/// disagree get 64: wave-mask operands keep the pair width they decode with.
+[[nodiscard]] uint8_t common_guest_wavefront_size(std::span<const KdTranslation> translations) {
+  if (translations.empty())
+    return 64;
+  const uint8_t wave_size = translations.front().guest_wavefront_size;
+  for (const KdTranslation &translation : translations) {
+    if (translation.guest_wavefront_size != wave_size)
+      return 64;
+  }
+  return wave_size;
 }
 
 /// @brief Indirect transfers in one scope whose target pair was loaded from the kernarg segment.
@@ -228,7 +246,7 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
   const auto kill_defs = [&](const Instruction &inst, PairState &state) {
     if (state.pointer.empty() && state.loaded.empty())
       return;
-    const InstDefUse def_use(inst);
+    const InstDefUse def_use(inst, kd.guest_wavefront_size);
     // Only the pairs actually being tracked can be killed, and there are a handful at most.
     // Sweeping the whole SGPR file instead cost two RegisterSet::contains() calls per register per
     // instruction per sweep, which profiled as half of all translation time.
@@ -375,9 +393,15 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
     return offsets;
   std::vector<uint32_t> slot_words(lookahead_words, 0);
 
-  const uint32_t marker = build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch);
-  const uint32_t skip_pool =
+  util::FailureOr<uint32_t> maybe_marker = build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch);
+  if (maybe_marker.failed())
+    return offsets;
+  const uint32_t marker = maybe_marker.value();
+  util::FailureOr<uint32_t> maybe_skip =
       build_s_branch(static_cast<int16_t>(kDirectBranchIslandPoolSlots), arch);
+  if (maybe_skip.failed())
+    return offsets;
+  const uint32_t skip_pool = maybe_skip.value();
   constexpr uint64_t kPoolBytes = (kGeneratedIslandPoolHeaderWords + kDirectBranchIslandPoolSlots) *
                                   static_cast<uint64_t>(sizeof(uint32_t));
   for (uint64_t offset = 0;
@@ -1468,8 +1492,16 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     bool require_every_text_symbol_mapped,
     const std::unordered_map<uint64_t, uint64_t> &canonical_code_pointer_placement,
     std::vector<TranslationDiagnostic> &diagnostics) {
-  if (translated_text.size() < original_text_size)
-    append_nop_padding(translated_text, original_text_size - translated_text.size(), host_arch);
+  auto record_builder_error = [&](std::string_view message) {
+    append_error(diagnostics, DiagnosticKind::Legalization, std::string(message));
+  };
+  const util::DiagnosticEmitter builder_error(record_builder_error);
+  if (translated_text.size() < original_text_size &&
+      append_nop_padding(translated_text, original_text_size - translated_text.size(), host_arch,
+                         &builder_error)
+          .failed()) {
+    return std::nullopt;
+  }
 
   std::unordered_set<uint64_t> applied_descriptors;
   for (const KdTranslation &translation : translations) {
@@ -2029,217 +2061,207 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     return;
   }
 
-  try {
-    AmdGpuCodeObject output(result.elf_bytes.data(), result.elf_bytes.size());
-    if (!output.is_valid()) {
-      append_rewrite_discharge_error(
-          result.diagnostics,
-          "rewrite-discharge verification could not parse the final code object");
-      return;
-    }
-    if (!has_supported_executable_section_layout(output)) {
-      append_rewrite_discharge_error(
-          result.diagnostics,
-          "rewrite-discharge verification requires exactly one allocated executable section "
-          "named .text");
-      return;
-    }
-    if (output.allocated_executable_sections().empty()) {
-      result.rewrite_discharge_verified = true;
-      return;
+  AmdGpuCodeObject output(result.elf_bytes.data(), result.elf_bytes.size());
+  if (!output.is_valid()) {
+    append_rewrite_discharge_error(
+        result.diagnostics, "rewrite-discharge verification could not parse the final code object");
+    return;
+  }
+  if (!has_supported_executable_section_layout(output)) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification requires exactly one allocated executable section "
+        "named .text");
+    return;
+  }
+  if (output.allocated_executable_sections().empty()) {
+    result.rewrite_discharge_verified = true;
+    return;
+  }
+
+  const IsaGpuTargetDescription *host_target =
+      default_isa_target_registry().find_gpu_target_by_elf_machine(target_mach_ & EF_AMDGPU_MACH);
+  auto decoder = host_target == nullptr
+                     ? Decoder::create(host_arch_)
+                     : Decoder::create(default_isa_target_registry(), host_target->public_id);
+  if (!decoder) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification has no decoder for the final architecture");
+    return;
+  }
+
+  const Section *text = output.text_sections().front();
+  if (text->size() == 0) {
+    result.rewrite_discharge_verified = true;
+    return;
+  }
+  const auto image = std::span<const uint8_t>(result.elf_bytes);
+  const auto text_bytes =
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
+  if (text_bytes.size() % sizeof(uint32_t) != 0) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification found a partial instruction word in final output",
+        text_bytes.size() - text_bytes.size() % sizeof(uint32_t));
+    return;
+  }
+
+  KernelDescriptorTranslator descriptor_parser(host_arch_, host_arch_);
+  const auto descriptor_translations = descriptor_parser.translate_image(
+      image, text->sectionOffset(), text->size(), KernelDescriptorTranslationOptions{},
+      text->sectionHeaderIndex());
+  auto block_leaders = kernel_block_leaders(descriptor_translations, text_bytes);
+
+  for (const RelocationFunctionTable &table : discover_relocation_function_tables(output)) {
+    for (const RelocationFunctionPointer &entry : table.entries)
+      block_leaders.push_back(entry.target_text_offset);
+  }
+
+  const auto relocation_leaders = text_relocation_block_leaders(image, *text);
+  if (!relocation_leaders) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification could not recover final executable entries");
+    return;
+  }
+  block_leaders.insert(block_leaders.end(), relocation_leaders->begin(), relocation_leaders->end());
+  std::ranges::sort(block_leaders);
+  block_leaders.erase(std::ranges::unique(block_leaders).begin(), block_leaders.end());
+
+  // Most residual predicates inspect only one decoded instruction. Scan those
+  // with constant live memory and retain the full CFG path only when a rule
+  // explicitly requires basic-block neighbors. Besides reducing peak RSS,
+  // delaying CFG construction preserves the existing contextual behavior for
+  // tensor, cluster-load, and IU8-WMMA sequence checks.
+  std::vector<TranslationDiagnostic> streaming_diagnostics;
+  const size_t instruction_word_count = text->size() / sizeof(uint32_t);
+  internal::RewriteDischargeInstructionDecoder instruction_decoder(*decoder);
+  if (!instruction_decoder.has_valid_lookahead_bound()) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification decoder reported an invalid lookahead bound");
+    return;
+  }
+  size_t instruction_word_index = 0;
+  uint64_t instruction_offset = 0;
+  size_t next_block_leader = 0;
+  bool invalid_block_leader = false;
+  bool needs_basic_block = false;
+  while (instruction_word_index < instruction_word_count) {
+    if (next_block_leader < block_leaders.size() &&
+        block_leaders[next_block_leader] < instruction_offset) {
+      invalid_block_leader = true;
+      break;
     }
 
-    const IsaGpuTargetDescription *host_target =
-        default_isa_target_registry().find_gpu_target_by_elf_machine(target_mach_ & EF_AMDGPU_MACH);
-    auto decoder = host_target == nullptr
-                       ? Decoder::create(host_arch_)
-                       : Decoder::create(default_isa_target_registry(), host_target->public_id);
-    if (!decoder) {
-      append_rewrite_discharge_error(
-          result.diagnostics,
-          "rewrite-discharge verification has no decoder for the final architecture");
-      return;
+    uint32_t first_word = 0;
+    std::memcpy(&first_word, text_bytes.data() + instruction_offset, sizeof(first_word));
+    if (host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && first_word == 0) {
+      ++instruction_word_index;
+      instruction_offset += sizeof(uint32_t);
+      continue;
     }
 
-    const Section *text = output.text_sections().front();
-    if (text->size() == 0) {
-      result.rewrite_discharge_verified = true;
-      return;
-    }
-    const auto image = std::span<const uint8_t>(result.elf_bytes);
-    const auto text_bytes =
-        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
-    if (text_bytes.size() % sizeof(uint32_t) != 0) {
-      append_rewrite_discharge_error(
-          result.diagnostics,
-          "rewrite-discharge verification found a partial instruction word in final output",
-          text_bytes.size() - text_bytes.size() % sizeof(uint32_t));
-      return;
+    if (next_block_leader < block_leaders.size() &&
+        block_leaders[next_block_leader] == instruction_offset) {
+      ++next_block_leader;
     }
 
-    KernelDescriptorTranslator descriptor_parser(host_arch_, host_arch_);
-    const auto descriptor_translations = descriptor_parser.translate_image(
-        image, text->sectionOffset(), text->size(), KernelDescriptorTranslationOptions{},
-        text->sectionHeaderIndex());
-    auto block_leaders = kernel_block_leaders(descriptor_translations, text_bytes);
-
-    for (const RelocationFunctionTable &table : discover_relocation_function_tables(output)) {
-      for (const RelocationFunctionPointer &entry : table.entries)
-        block_leaders.push_back(entry.target_text_offset);
-    }
-
-    const auto relocation_leaders = text_relocation_block_leaders(image, *text);
-    if (!relocation_leaders) {
-      append_rewrite_discharge_error(
-          result.diagnostics,
-          "rewrite-discharge verification could not recover final executable entries");
-      return;
-    }
-    block_leaders.insert(block_leaders.end(), relocation_leaders->begin(),
-                         relocation_leaders->end());
-    std::ranges::sort(block_leaders);
-    block_leaders.erase(std::ranges::unique(block_leaders).begin(), block_leaders.end());
-
-    // Most residual predicates inspect only one decoded instruction. Scan those
-    // with constant live memory and retain the full CFG path only when a rule
-    // explicitly requires basic-block neighbors. Besides reducing peak RSS,
-    // delaying CFG construction preserves the existing contextual behavior for
-    // tensor, cluster-load, and IU8-WMMA sequence checks.
-    std::vector<TranslationDiagnostic> streaming_diagnostics;
-    const size_t instruction_word_count = text->size() / sizeof(uint32_t);
-    internal::RewriteDischargeInstructionDecoder instruction_decoder(*decoder);
-    if (!instruction_decoder.has_valid_lookahead_bound()) {
+    std::unique_ptr<Instruction> inst;
+    util::StringDiagnostic decode_error;
+    const auto decode_status = instruction_decoder.decode(
+        text_bytes.subspan(instruction_offset), instruction_offset, inst, decode_error.emitter());
+    if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidLookaheadBound) {
       append_rewrite_discharge_error(
           result.diagnostics,
           "rewrite-discharge verification decoder reported an invalid lookahead bound");
       return;
     }
-    size_t instruction_word_index = 0;
-    uint64_t instruction_offset = 0;
-    size_t next_block_leader = 0;
-    bool invalid_block_leader = false;
-    bool needs_basic_block = false;
-    while (instruction_word_index < instruction_word_count) {
-      if (next_block_leader < block_leaders.size() &&
-          block_leaders[next_block_leader] < instruction_offset) {
-        invalid_block_leader = true;
-        break;
-      }
-
-      uint32_t first_word = 0;
-      std::memcpy(&first_word, text_bytes.data() + instruction_offset, sizeof(first_word));
-      if (host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && first_word == 0) {
-        ++instruction_word_index;
-        instruction_offset += sizeof(uint32_t);
-        continue;
-      }
-
-      if (next_block_leader < block_leaders.size() &&
-          block_leaders[next_block_leader] == instruction_offset) {
-        ++next_block_leader;
-      }
-
-      std::unique_ptr<Instruction> inst;
-      util::StringDiagnostic decode_error;
-      const auto decode_status = instruction_decoder.decode(
-          text_bytes.subspan(instruction_offset), instruction_offset, inst, decode_error.emitter());
-      if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidLookaheadBound) {
-        append_rewrite_discharge_error(
-            result.diagnostics,
-            "rewrite-discharge verification decoder reported an invalid lookahead bound");
-        return;
-      }
-      if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidEncoding) {
-        append_rewrite_discharge_error(
-            result.diagnostics,
-            "rewrite-discharge verification failed to decode final output: " +
-                decode_error.message(),
-            instruction_offset);
-        return;
-      }
-      if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidInstructionSize) {
-        append_rewrite_discharge_error(
-            result.diagnostics,
-            "rewrite-discharge verification decoded an invalid instruction size in final output",
-            instruction_offset);
-        return;
-      }
-      const size_t instruction_size = static_cast<size_t>(inst->size());
-      const size_t decoded_words = instruction_size / sizeof(uint32_t);
-      if (decode_status == internal::RewriteDischargeDecodeStatus::TruncatedInstruction) {
-        append_rewrite_discharge_error(
-            result.diagnostics,
-            "rewrite-discharge verification found a truncated instruction in final output",
-            instruction_offset, std::string(inst->mnemonic()));
-        return;
-      }
-      if (semantic_translator_->residual_rewrite_needs_basic_block(*inst))
-        needs_basic_block = true;
-      if (semantic_translator_->instruction_local_residual_rewrite_applies(*inst)) {
-        append_rewrite_discharge_error(streaming_diagnostics,
-                                       "registered rewrite remains actionable in final output",
-                                       inst->src_loc(), std::string(inst->mnemonic()));
-      }
-      instruction_word_index += decoded_words;
-      instruction_offset += instruction_size;
-    }
-
-    invalid_block_leader |= next_block_leader != block_leaders.size();
-    invalid_block_leader |= instruction_offset != text_bytes.size();
-    if (invalid_block_leader) {
+    if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidEncoding) {
       append_rewrite_discharge_error(
           result.diagnostics,
-          "rewrite-discharge verification found an invalid final executable entry");
+          "rewrite-discharge verification failed to decode final output: " + decode_error.message(),
+          instruction_offset);
       return;
     }
-
-    if (!needs_basic_block) {
-      const bool found_residual = !streaming_diagnostics.empty();
-      result.diagnostics.insert(result.diagnostics.end(),
-                                std::make_move_iterator(streaming_diagnostics.begin()),
-                                std::make_move_iterator(streaming_diagnostics.end()));
-      result.rewrite_discharge_verified = !found_residual;
-      return;
-    }
-
-    util::StringDiagnostic decode_error;
-    FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result = BasicBlock::build_cfg(
-        output, *decoder, host_arch_,
-        {.decode_policy = BasicBlock::DecodePolicy::FullSection, .entries = block_leaders},
-        decode_error.emitter());
-    if (block_result.failed()) {
-      append_rewrite_discharge_error(
-          result.diagnostics, "rewrite-discharge verification failed to decode final output: " +
-                                  decode_error.message());
-      return;
-    }
-    std::vector<std::unique_ptr<BasicBlock>> blocks = std::move(block_result).value();
-    if (has_invalid_block_leader(blocks, block_leaders, text->size())) {
+    if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidInstructionSize) {
       append_rewrite_discharge_error(
           result.diagnostics,
-          "rewrite-discharge verification found an invalid final executable entry");
+          "rewrite-discharge verification decoded an invalid instruction size in final output",
+          instruction_offset);
       return;
     }
-
-    bool found_residual = false;
-    for (const auto &block : blocks) {
-      for (const Instruction &inst : block->instructions()) {
-        if (!semantic_translator_->residual_rewrite_applies(inst))
-          continue;
-        found_residual = true;
-        append_rewrite_discharge_error(result.diagnostics,
-                                       "registered rewrite remains actionable in final output",
-                                       inst.src_loc(), std::string(inst.mnemonic()));
-      }
+    const size_t instruction_size = static_cast<size_t>(inst->size());
+    const size_t decoded_words = instruction_size / sizeof(uint32_t);
+    if (decode_status == internal::RewriteDischargeDecodeStatus::TruncatedInstruction) {
+      append_rewrite_discharge_error(
+          result.diagnostics,
+          "rewrite-discharge verification found a truncated instruction in final output",
+          instruction_offset, std::string(inst->mnemonic()));
+      return;
     }
+    if (semantic_translator_->residual_rewrite_needs_basic_block(*inst))
+      needs_basic_block = true;
+    if (semantic_translator_->instruction_local_residual_rewrite_applies(*inst)) {
+      append_rewrite_discharge_error(streaming_diagnostics,
+                                     "registered rewrite remains actionable in final output",
+                                     inst->src_loc(), std::string(inst->mnemonic()));
+    }
+    instruction_word_index += decoded_words;
+    instruction_offset += instruction_size;
+  }
 
-    result.rewrite_discharge_verified = !found_residual;
-  } catch (const std::exception &error) {
+  invalid_block_leader |= next_block_leader != block_leaders.size();
+  invalid_block_leader |= instruction_offset != text_bytes.size();
+  if (invalid_block_leader) {
     append_rewrite_discharge_error(
         result.diagnostics,
-        std::string("rewrite-discharge verification failed to decode final output: ") +
-            error.what());
+        "rewrite-discharge verification found an invalid final executable entry");
+    return;
   }
+
+  if (!needs_basic_block) {
+    const bool found_residual = !streaming_diagnostics.empty();
+    result.diagnostics.insert(result.diagnostics.end(),
+                              std::make_move_iterator(streaming_diagnostics.begin()),
+                              std::make_move_iterator(streaming_diagnostics.end()));
+    result.rewrite_discharge_verified = !found_residual;
+    return;
+  }
+
+  util::StringDiagnostic decode_error;
+  FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result = BasicBlock::build_cfg(
+      output, *decoder, host_arch_,
+      {.decode_policy = BasicBlock::DecodePolicy::FullSection, .entries = block_leaders},
+      decode_error.emitter());
+  if (block_result.failed()) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification failed to decode final output: " + decode_error.message());
+    return;
+  }
+  std::vector<std::unique_ptr<BasicBlock>> blocks = std::move(block_result).value();
+  if (has_invalid_block_leader(blocks, block_leaders, text->size())) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification found an invalid final executable entry");
+    return;
+  }
+
+  bool found_residual = false;
+  for (const auto &block : blocks) {
+    for (const Instruction &inst : block->instructions()) {
+      if (!semantic_translator_->residual_rewrite_applies(inst))
+        continue;
+      found_residual = true;
+      append_rewrite_discharge_error(result.diagnostics,
+                                     "registered rewrite remains actionable in final output",
+                                     inst.src_loc(), std::string(inst.mnemonic()));
+    }
+  }
+
+  result.rewrite_discharge_verified = !found_residual;
 }
 
 TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
@@ -2291,6 +2313,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
             registry.find_default_gpu_target(*guest_descriptor))
       effective_guest_target = default_target->public_id;
   }
+  const IsaGpuTargetDescription *effective_guest_gpu_target =
+      registry.find_gpu_target(effective_guest_target);
+  const bool effective_setreg_vgpr_msb_fixup =
+      effective_guest_gpu_target != nullptr &&
+      effective_guest_gpu_target->capabilities.setreg_vgpr_msb_fixup;
 
   // A same-target gfx1250 translation is direction-specific: A0 and B0 share
   // an ELF machine ID, so both revisions must be given. Do not apply this
@@ -2374,6 +2401,36 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                  "unsupported guest_arch: no decoder available");
     return leave_unchanged();
   }
+  auto record_builder_error = [&](std::string_view message) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization, std::string(message));
+  };
+  const util::DiagnosticEmitter builder_error(record_builder_error);
+  util::FailureOr<uint32_t> guest_pool_marker =
+      build_s_nop(kBranchIslandPoolMarkerNopImmediate, guest_arch_, &builder_error);
+  if (guest_pool_marker.failed())
+    return leave_unchanged();
+  util::FailureOr<uint32_t> guest_pool_skip = build_s_branch(
+      static_cast<int16_t>(kDirectBranchIslandPoolSlots), guest_arch_, &builder_error);
+  if (guest_pool_skip.failed())
+    return leave_unchanged();
+  util::FailureOr<uint32_t> guest_long_marker =
+      build_s_nop(kLongDirectBranchMarkerNopImmediate, guest_arch_, &builder_error);
+  if (guest_long_marker.failed())
+    return leave_unchanged();
+  auto record_host_builder_error = [&](std::string_view message) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "unsupported host_arch: " + std::string(message));
+  };
+  const util::DiagnosticEmitter host_builder_error(record_host_builder_error);
+  util::FailureOr<uint32_t> host_endpgm = build_s_endpgm(host_arch_, &host_builder_error);
+  if (host_endpgm.failed())
+    return leave_unchanged();
+  if (guest_arch_ != host_arch_ && (!encoding_translate_ || !legalization_lookup_)) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "no instruction translator for this guest and host architecture pair");
+    return leave_unchanged();
+  }
+
   if (is_gfx1250_b0_to_a0())
     decoder = std::make_unique<Gfx1250B0ToA0CanonicalizingDecoder>(std::move(decoder));
 
@@ -2511,7 +2568,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   const uint64_t text_vaddr = obj.text_sections().front()->vaddr();
   const auto relocation_pair_analysis =
-      analyze_relocation_pairs(blocks, relocation_function_tables, text_vaddr);
+      analyze_relocation_pairs(blocks, relocation_function_tables, text_vaddr,
+                               common_guest_wavefront_size(descriptor_translations));
   const auto &relocation_table_dispatches = relocation_pair_analysis.dispatches;
   const auto relocation_table_calls = attach_relocation_table_call_edges(
       block_index, relocation_function_tables, relocation_table_dispatches);
@@ -3299,6 +3357,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     liveness_options.max_free_vgpr =
         static_cast<uint16_t>(isa_properties(host_arch_).max_addressable_vgprs_per_wf);
     liveness_options.arch = guest_arch_;
+    liveness_options.target = effective_guest_target;
     liveness_options.entry_block = scope.entry;
     liveness_options.additional_entry_blocks = scope_adopted_entry_blocks;
     liveness_options.text = text;
@@ -3326,6 +3385,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       liveness_options.live_before_instructions = std::span<const Instruction *const>(
           live_before_instructions.data(), live_before_instructions.size());
     }
+    // Model rules that query liveness without declaring that requirement.
+    if (force_unavailable_liveness_)
+      scope_requires_liveness = false;
     LivenessAnalysis liveness = LivenessAnalysis::unavailable();
     std::vector<ScopedCfgEdge> scope_analysis_edges;
     if (scope_requires_liveness) {
@@ -3340,8 +3402,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       // entry at +256, which hardware enters with unknown EXEC) and pass it to
       // LivenessAnalysis so EXEC-masked vector defs can be promoted to kills where
       // EXEC is provably full, freeing more scratch registers. Reference issue #9733.
-      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), /*exec=*/nullptr,
-                                  liveness_options, scope_analysis_edges);
+      liveness =
+          LivenessAnalysis(KernelBlockScope(scope.blocks), scope.translation->guest_wavefront_size,
+                           /*exec=*/nullptr, liveness_options, scope_analysis_edges);
     }
 
     std::unique_ptr<Gfx1250VgprMsbAnalysis> wmma_completion_wait_vgpr_msb;
@@ -3360,7 +3423,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           }
           wmma_completion_wait_vgpr_msb = std::make_unique<Gfx1250VgprMsbAnalysis>(
               KernelBlockScope(scope.blocks), scope.entry, scope_analysis_edges, text,
-              scope_adopted_entry_blocks);
+              scope_adopted_entry_blocks, effective_setreg_vgpr_msb_fixup);
         }
         vgpr_msb = wmma_completion_wait_vgpr_msb.get();
       }
@@ -3393,20 +3456,16 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           const Instruction *marker = marker_it->second;
           const Instruction *skip = skip_it->second;
           const auto skip_delta = skip->branch_offset_bytes();
-          reachable_header =
-              marker->size() == static_cast<int>(sizeof(uint32_t)) &&
-              marker->raw_encoding() != nullptr &&
-              marker->raw_encoding()[0] ==
-                  build_s_nop(kBranchIslandPoolMarkerNopImmediate, guest_arch_) &&
-              marker->next_instruction() == skip &&
-              skip->size() == static_cast<int>(sizeof(uint32_t)) &&
-              skip->raw_encoding() != nullptr &&
-              skip->raw_encoding()[0] ==
-                  build_s_branch(static_cast<int16_t>(kDirectBranchIslandPoolSlots), guest_arch_) &&
-              skip_delta &&
-              pool_offset + kGeneratedIslandPoolHeaderWords * sizeof(uint32_t) +
-                      static_cast<uint64_t>(*skip_delta) ==
-                  pool_offset + kGeneratedIslandPoolBytes;
+          reachable_header = marker->size() == static_cast<int>(sizeof(uint32_t)) &&
+                             marker->raw_encoding() != nullptr &&
+                             marker->raw_encoding()[0] == guest_pool_marker.value() &&
+                             marker->next_instruction() == skip &&
+                             skip->size() == static_cast<int>(sizeof(uint32_t)) &&
+                             skip->raw_encoding() != nullptr &&
+                             skip->raw_encoding()[0] == guest_pool_skip.value() && skip_delta &&
+                             pool_offset + kGeneratedIslandPoolHeaderWords * sizeof(uint32_t) +
+                                     static_cast<uint64_t>(*skip_delta) ==
+                                 pool_offset + kGeneratedIslandPoolBytes;
         }
 
         bool reachable_slot = false;
@@ -3654,10 +3713,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
             marker->size() == static_cast<int>(sizeof(uint32_t)) &&
             marker->src_loc() + sizeof(uint32_t) == first.source_getpc_offset &&
             marker->raw_encoding() != nullptr &&
-            marker->raw_encoding()[0] ==
-                build_s_nop(kLongDirectBranchMarkerNopImmediate, guest_arch_) &&
-            call != nullptr && call->size() == static_cast<int>(sizeof(uint32_t)) &&
-            !has_interior_block_entry && !has_external_call_entry;
+            marker->raw_encoding()[0] == guest_long_marker.value() && call != nullptr &&
+            call->size() == static_cast<int>(sizeof(uint32_t)) && !has_interior_block_entry &&
+            !has_external_call_entry;
         if (canonical_marked_window) {
           consumer.preserve_marked_long_transfer = true;
           consumer.marked_window_begin = marker->src_loc();
@@ -3897,7 +3955,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                .return_sreg = source_fixup.source_return_sreg,
                .is_call = source_fixup.source_is_call,
                .preserve_marked_long_transfer = true});
-          append_nop_padding(kernel_text, window_bytes, host_arch_);
+          if (append_nop_padding(kernel_text, window_bytes, host_arch_, &builder_error).failed()) {
+            return leave_unchanged();
+          }
           active_marked_long_transfer = {
               .source_end = consumer.marked_window_end,
               .source_begin = consumer.marked_window_begin,
@@ -3947,6 +4007,28 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         const bool target_is_relocated_by_construction =
             (object_produces_code_addresses && code_addresses_fully_accounted) ||
             kernarg_supplied_targets().contains(offset);
+        // A join keeps its fallthrough edge, but its SGPR-held resume edge to the waiting side
+        // is unknown. G_FORK also has an unknown SGPR-held target. Liveness can miss registers
+        // needed on those paths, allowing scratch allocation to clobber them.
+        // Refuse before the relocated-by-construction permission can admit the join verbatim.
+        if ((inst.flags() & BRANCH_STACK) != 0) {
+          auto failure = make_kernel_failure(
+              DiagnosticKind::Legalization,
+              "conditional branch stack (fork/join) is not supported for relocated kernel text",
+              offset, std::string(inst.mnemonic()));
+          if (continue_after_failure && !skip_failed_kernels) {
+            append_error(result.diagnostics, failure.kind, failure.message, failure.guest_offset,
+                         failure.mnemonic, failure.required_work);
+            if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces)) {
+              continue;
+            }
+          }
+          if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
+            skip_scope = true;
+            break;
+          }
+          return leave_unchanged();
+        }
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
             !has_recovered_indirect_call && !has_relocation_table_call &&
             !recovered_indirect_return && !direct_branch_delta &&
@@ -4037,7 +4119,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                .target_inst_offset = target_offset,
                .target_window_bytes = branch_window_bytes,
                .translated_words = target_words});
-          append_nop_padding(kernel_text, branch_window_bytes - inst.size(), host_arch_);
+          if (append_nop_padding(kernel_text, branch_window_bytes - inst.size(), host_arch_,
+                                 &builder_error)
+                  .failed()) {
+            return leave_unchanged();
+          }
           queue_trace(pending_traces, inst, offset, branch_leg, copied_original, false, changed,
                       target_offset, std::move(target_words));
           continue;
@@ -4053,7 +4139,10 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                .return_sreg = source_fixup.source_return_sreg,
                .is_call = source_fixup.source_is_call,
                .keep_dynamic_when_long = recovered_it->second.builder_is_contiguous});
-          append_nop_padding(kernel_text, sizeof(uint32_t), host_arch_);
+          if (append_nop_padding(kernel_text, sizeof(uint32_t), host_arch_, &builder_error)
+                  .failed()) {
+            return leave_unchanged();
+          }
           continue;
         }
 
@@ -4091,6 +4180,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           auto expansion =
               semantic_translator_->try_lower_expand(inst, offset, text, liveness, kernel_context);
           if (expansion.status == ExpandStatus::Failed) {
+            if (expansion.internal_error) {
+              append_error(result.diagnostics, DiagnosticKind::InternalError, expansion.message,
+                           offset, std::string(inst.mnemonic()));
+              return leave_unchanged();
+            }
             auto failure = make_kernel_failure(
                 DiagnosticKind::ExpandFailed,
                 expansion.message.empty()
@@ -4162,6 +4256,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           auto registered_expansion = semantic_translator_->try_lower_instruction_rewrite(
               inst, offset, text, liveness, kernel_context);
           if (registered_expansion.status == ExpandStatus::Failed) {
+            if (registered_expansion.internal_error) {
+              append_error(result.diagnostics, DiagnosticKind::InternalError,
+                           registered_expansion.message, offset, std::string(inst.mnemonic()));
+              return leave_unchanged();
+            }
             auto failure = make_kernel_failure(
                 DiagnosticKind::ExpandFailed, registered_expansion.message, offset,
                 std::string(inst.mnemonic()), std::move(registered_expansion.required_work));
@@ -4277,7 +4376,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         // any other target-side expansion, the terminator belongs in relocated
         // function extents. Without an architectural terminator, ordinary text
         // materialization can turn this unreachable stub into a fallthrough.
-        const uint32_t endpgm = build_s_endpgm(host_arch_);
+        const uint32_t endpgm = host_endpgm.value();
         append_words(kernel_text, std::span<const uint32_t>(&endpgm, 1));
         // The boundary is inferred from what follows the block, not from anything the block itself
         // says, so a body that really did run on past here is cut short instead of translated.
@@ -4317,7 +4416,10 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       target_offset_by_source_offset.emplace(block->end_offset(), placement.target_end);
       if (!can_use_long_direct_branches && !preserve_generated_branch_island_pools &&
           block != scope.blocks.back() && kernel_text.size() >= next_branch_island_pool_offset) {
-        append_direct_branch_island_pool(kernel_text, layout, host_arch_);
+        if (append_direct_branch_island_pool(kernel_text, layout, host_arch_, &builder_error)
+                .failed()) {
+          return leave_unchanged();
+        }
         next_branch_island_pool_offset = next_direct_branch_island_pool_offset(kernel_text.size());
       }
     }
@@ -4486,15 +4588,20 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           break;
         }
 
+        util::StringDiagnostic growth_diagnostic;
+        const util::DiagnosticEmitter growth_error = growth_diagnostic.emitter();
         const auto insertions = grow_control_flow_windows(
-            kernel_text, layout, patched_control_flow.required_windows, host_arch_);
+            kernel_text, layout, patched_control_flow.required_windows, host_arch_, &growth_error);
         if (!insertions) {
           patched_control_flow = {
               .ok = false,
               .failure = TextLayoutFailureCategory::InvalidLayout,
               .source_offset = patched_control_flow.source_offset,
               .required_windows = {},
-              .message = "control-flow layout returned an invalid growth request",
+              .message =
+                  growth_diagnostic.message().empty()
+                      ? "control-flow layout returned an invalid growth request"
+                      : "control-flow layout growth: " + std::string(growth_diagnostic.message()),
               .compact_builder_fallbacks = {},
           };
           break;

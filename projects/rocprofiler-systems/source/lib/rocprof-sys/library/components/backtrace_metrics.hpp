@@ -10,6 +10,7 @@
 #include "library/components/backtrace.hpp"
 #include "library/thread_data.hpp"
 
+#include <timemory/backends/papi.hpp>
 #include <timemory/components/base.hpp>
 #include <timemory/components/papi/papi_array.hpp>
 #include <timemory/components/papi/types.hpp>
@@ -17,11 +18,15 @@
 #include <timemory/utility/type_list.hpp>
 #include <timemory/variadic/types.hpp>
 
+#include <fmt/format.h>
+
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <set>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace rocprofsys
@@ -35,12 +40,11 @@ struct backtrace_metrics : comp::empty_base
 {
     static constexpr size_t num_hw_counters = TIMEMORY_PAPI_ARRAY_SIZE;
 
-    using clock_type        = std::chrono::steady_clock;
     using value_type        = void;
     using hw_counters       = tim::component::papi_array<num_hw_counters>;
-    using hw_counter_data_t = typename hw_counters::value_type;
+    using hw_counter_data_t = hw_counters::value_type;
     using system_clock      = std::chrono::system_clock;
-    using system_time_point = typename system_clock::time_point;
+    using system_time_point = system_clock::time_point;
 
     using categories_t =
         type_list<category::thread_cpu_time, category::thread_peak_memory,
@@ -61,8 +65,6 @@ struct backtrace_metrics : comp::empty_base
     backtrace_metrics& operator=(backtrace_metrics&&) noexcept = default;
 
     static void configure(bool, std::int64_t _tid = threading::get_id());
-    static void init_perfetto(std::int64_t _tid, valid_array_t);
-    static void fini_perfetto(std::int64_t _tid, valid_array_t);
     static void init_cache(std::int64_t _tid, valid_array_t);
     static std::vector<std::string> get_hw_counter_labels(std::int64_t);
 
@@ -87,14 +89,13 @@ struct backtrace_metrics : comp::empty_base
         requires(!concepts::is_type_listing<Tp>::value)
     bool operator()(type_list<Tp>) const;
 
-    auto        get_valid() const { return m_valid; }
-    auto        get_cpu_timestamp() const { return m_cpu; }
-    auto        get_peak_memory() const { return m_mem_peak; }
-    auto        get_context_switches() const { return m_ctx_swch; }
-    auto        get_page_faults() const { return m_page_flt; }
-    const auto& get_hw_counters() const { return m_hw_counter; }
+    [[nodiscard]] auto        get_valid() const { return m_valid; }
+    [[nodiscard]] auto        get_cpu_time() const { return m_cpu_time; }
+    [[nodiscard]] auto        get_peak_memory() const { return m_mem_peak; }
+    [[nodiscard]] auto        get_context_switches() const { return m_ctx_swch; }
+    [[nodiscard]] auto        get_page_faults() const { return m_page_flt; }
+    [[nodiscard]] const auto& get_hw_counters() const { return m_hw_counter; }
 
-    void post_process_perfetto(std::int64_t _tid, std::uint64_t _ts) const;
     void cache_backtrace_data(std::int64_t _tid, std::uint64_t _ts) const;
 
     backtrace_metrics& operator-=(const backtrace_metrics&);
@@ -106,12 +107,12 @@ struct backtrace_metrics : comp::empty_base
     }
 
 private:
-    valid_array_t     m_valid      = {};
-    std::int64_t      m_cpu        = 0;
-    std::int64_t      m_mem_peak   = 0;
-    std::int64_t      m_ctx_swch   = 0;
-    std::int64_t      m_page_flt   = 0;
-    hw_counter_data_t m_hw_counter = {};
+    valid_array_t            m_valid;
+    std::chrono::nanoseconds m_cpu_time   = {};
+    std::int64_t             m_mem_peak   = 0;
+    std::int64_t             m_ctx_swch   = 0;
+    std::int64_t             m_page_flt   = 0;
+    hw_counter_data_t        m_hw_counter = {};
 };
 
 template <typename Tp>
@@ -143,6 +144,25 @@ bool
 backtrace_metrics::operator()(Tp) const
 {
     return (*this)(type_list<Tp>{});
+}
+
+// Perfetto title for one sampled hardware counter. get_event_info() returns the
+// PAPI short description when the component map is filled, and an empty string
+// when it is not. The empty case keeps the configured symbol.
+inline std::string
+hardware_counter_track_name(const std::string& label, std::int64_t tid)
+{
+    std::string descr = tim::papi::get_event_info(label).short_descr;
+    if(descr.empty())
+    {
+        if(label.empty())
+        {
+            throw std::runtime_error("Empty description for tid: " + std::to_string(tid));
+        }
+        descr = label;
+    }
+
+    return fmt::format("Thread {} [{}] (S)", descr, tid);
 }
 }  // namespace component
 }  // namespace rocprofsys

@@ -65,6 +65,8 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <dirent.h>
+#include <cstdio>
 #if defined(__i386__) || defined(__x86_64__)
 #include <cpuid.h>
 #endif
@@ -89,6 +91,65 @@ void* __stdcall ThreadTrampoline(void* arg) {
   void* Data = ar->entry_args;
   CallMe(Data);
   return nullptr;
+}
+
+// Parses a sysfs CPU list such as "0-55,112-167" into cpus.
+static bool ReadCpuList(const std::string& path, cpu_set_t* cpus, size_t cpus_size) {
+  FILE* file = fopen(path.c_str(), "r");
+  if (file == nullptr) return false;
+  MAKE_SCOPE_GUARD([&]() { fclose(file); });
+
+  CPU_ZERO_S(cpus_size, cpus);
+  unsigned first_cpu, last_cpu;
+  int num_matched;
+  while ((num_matched = fscanf(file, "%u-%u", &first_cpu, &last_cpu)) >= 1) {
+    if (num_matched == 1) last_cpu = first_cpu;
+    for (unsigned cpu = first_cpu; cpu <= last_cpu; cpu++) CPU_SET_S(cpu, cpus_size, cpus);
+    if (fgetc(file) != ',') break;
+  }
+  return true;
+}
+
+// Adds to cpuset every CPU of each NUMA node the calling thread is allowed to run on, so helper
+// threads stay in the NUMA domain(s) the application bound itself to. A caller that may run on
+// every node therefore yields every CPU. Returns false if no CPU could be added, e.g. when the
+// kernel has no NUMA support or the node topology in sysfs is unreadable.
+static bool FillCpuSetFromCallerNumaNodes(cpu_set_t* cpuset, int cores) {
+  // sched_getaffinity rejects masks smaller than the kernel's possible-CPU count, which can
+  // exceed get_nprocs_conf().
+  const int num_mask_cpus = Max(cores, CPU_SETSIZE);
+  const size_t mask_size = CPU_ALLOC_SIZE(num_mask_cpus);
+  cpu_set_t* caller_cpus = CPU_ALLOC(num_mask_cpus);
+  cpu_set_t* node_cpus = CPU_ALLOC(num_mask_cpus);
+  cpu_set_t* caller_node_cpus = CPU_ALLOC(num_mask_cpus);
+  MAKE_SCOPE_GUARD([&]() {
+    CPU_FREE(caller_cpus);
+    CPU_FREE(node_cpus);
+    CPU_FREE(caller_node_cpus);
+  });
+  if (caller_cpus == nullptr || node_cpus == nullptr || caller_node_cpus == nullptr) return false;
+
+  if (sched_getaffinity(0, mask_size, caller_cpus) != 0) return false;
+
+  const std::string node_root = "/sys/devices/system/node/";
+  DIR* node_dir = opendir(node_root.c_str());
+  if (node_dir == nullptr) return false;
+  MAKE_SCOPE_GUARD([&]() { closedir(node_dir); });
+
+  const size_t cpuset_size = CPU_ALLOC_SIZE(cores);
+  while (dirent* entry = readdir(node_dir)) {
+    unsigned node_id;
+    if (sscanf(entry->d_name, "node%u", &node_id) != 1) continue;
+    if (!ReadCpuList(node_root + entry->d_name + "/cpulist", node_cpus, mask_size)) continue;
+
+    CPU_AND_S(mask_size, caller_node_cpus, node_cpus, caller_cpus);
+    if (CPU_COUNT_S(mask_size, caller_node_cpus) == 0) continue;
+
+    for (int cpu = 0; cpu < cores; cpu++) {
+      if (CPU_ISSET_S(cpu, mask_size, node_cpus)) CPU_SET_S(cpu, cpuset_size, cpuset);
+    }
+  }
+  return CPU_COUNT_S(cpuset_size, cpuset) != 0;
 }
 
 // Thread container allows multiple waits and separate close (destroy).
@@ -139,8 +200,10 @@ class os_thread {
         return;
       }
       CPU_ZERO_S(CPU_ALLOC_SIZE(cores), cpuset);
-      for (int i = 0; i < cores; i++) {
-        CPU_SET_S(i, CPU_ALLOC_SIZE(cores), cpuset);
+      if (!FillCpuSetFromCallerNumaNodes(cpuset, cores)) {
+        for (int i = 0; i < cores; i++) {
+          CPU_SET_S(i, CPU_ALLOC_SIZE(cores), cpuset);
+        }
       }
 #ifdef HAVE_PTHREAD_ATTR_SETAFFINITY_NP
       err = pthread_attr_setaffinity_np(&attrib, CPU_ALLOC_SIZE(cores), cpuset);
@@ -755,9 +818,9 @@ uint64_t SystemClockFrequency() {
 }
 
 bool ParseCpuID(cpuid_t* cpuinfo) {
+  memset(cpuinfo, 0, sizeof(*cpuinfo));
 #if defined(__i386__) || defined(__x86_64__)
   uint32_t eax, ebx, ecx, edx, max_eax = 0;
-  memset(cpuinfo, 0, sizeof(*cpuinfo));
 
   /* Make sure current CPU supports at least EAX 4 */
   if (!__get_cpuid_max(0x80000004, NULL)) return false;

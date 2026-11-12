@@ -13,8 +13,10 @@
 #include "debug.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -28,14 +30,18 @@ using nccl_dda_detail::DdaFabricBarrierState;
 constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
 
 // Single source of the launch geometry: grid/block for `count` elements of
-// `typeSize` bytes, capped at the init-time block count.
-static inline std::pair<dim3, dim3> ddaAllReduceFabricGeom(ncclComm* comm, size_t count, int typeSize) {
-  return dda::common::getGridAndBlockDims(count, typeSize, comm->ddaFabricMaxBlocks);
+// `typeSize` bytes, capped at rcclDdaFabricVmmBlocks() (at most the init-time block count) and at `cap`.
+static inline std::pair<dim3, dim3> ddaAllReduceFabricGeom(ncclComm* comm, size_t count, int typeSize,
+                                                           rcclDdaLaunchCap cap) {
+  const size_t blocks = dda::common::ddaCapBlocks((size_t)rcclDdaFabricVmmBlocks(comm), cap.blocks);
+  auto geom = dda::common::getGridAndBlockDims(count, typeSize, blocks);
+  geom.second.x = dda::common::ddaCapThreads(geom.second.x, cap.threads);
+  return geom;
 }
 
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
-                                                cudaStream_t stream) {
+                                                cudaStream_t stream, rcclDdaLaunchCap cap) {
   if (comm->ddaFabricMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
       comm->ddaFabricBarrierState == nullptr) {
     return ncclInvalidUsage;
@@ -56,8 +62,8 @@ static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recv
          count, nRanks);
   }
 
-  // Block cap chosen at init (barrier flag buffer is sized for it).
-  auto gridBlock = ddaAllReduceFabricGeom(comm, count, sizeof(T));
+  // At most the block cap chosen at init (barrier flag buffer is sized for it).
+  auto gridBlock = ddaAllReduceFabricGeom(comm, count, sizeof(T), cap);
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
@@ -74,48 +80,49 @@ static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recv
        treeOk ? "tree (two-shot)" : "flat (one-shot)", nRanks, count, sizeBytes, grid.x, block.x,
        (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
     // NRANKS_CT 4/8: unrolled CollCommon reduce; 0: runtime fallback.
     switch (nRanks) {
     case 4:
       INFO(NCCL_COLL, "DDA fabric AllReduce: tree path, NRANKS_CT=4 (unrolled)");
-      dda::common::ddaAllReduceTreeFabric<T, 4, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeFabric<T, 4, false>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
       break;
     case 8:
       INFO(NCCL_COLL, "DDA fabric AllReduce: tree path, NRANKS_CT=8 (unrolled)");
-      dda::common::ddaAllReduceTreeFabric<T, 8, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeFabric<T, 8, false>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
       break;
     default:
       INFO(NCCL_COLL, "DDA fabric AllReduce: tree path, NRANKS_CT=0 (runtime, nRanks=%d)", nRanks);
-      dda::common::ddaAllReduceTreeFabric<T, 0, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeFabric<T, 0, false>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
       break;
     }
   } else {
     switch (nRanks) {
     case 4:
       INFO(NCCL_COLL, "DDA fabric AllReduce: flat path, NRANKS_CT=4 (unrolled)");
-      dda::common::ddaAllReduceFlatFabric<T, 4, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatFabric<T, 4, false>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
       break;
     case 8:
       INFO(NCCL_COLL, "DDA fabric AllReduce: flat path, NRANKS_CT=8 (unrolled)");
-      dda::common::ddaAllReduceFlatFabric<T, 8, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatFabric<T, 8, false>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
       break;
     default:
       INFO(NCCL_COLL, "DDA fabric AllReduce: flat path, NRANKS_CT=0 (runtime, nRanks=%d)", nRanks);
-      dda::common::ddaAllReduceFlatFabric<T, 0, false>
-        <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff),
-                                     comm->rank, nRanks, barrierHost, nullptr);
+      hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatFabric<T, 0, false>), grid, block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
       break;
     }
   }
@@ -155,7 +162,7 @@ bool ncclAllReduceDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
   if (op != ncclSum) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
   const size_t bytes = count * ncclTypeSize(datatype);
@@ -176,21 +183,25 @@ bool ncclAllReduceDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
   return true;
 }
 
-uint32_t ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
-  const auto grid = ddaAllReduceFabricGeom(comm, count, ncclTypeSize(datatype)).first;
+uint32_t ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype, rcclDdaLaunchCap cap) {
+  const auto grid = ddaAllReduceFabricGeom(comm, count, ncclTypeSize(datatype), cap).first;
   return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                    ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+                                    ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, rcclDdaLaunchCap cap) {
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclAllReduceDdaFabricTyped<float>(sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaFabricTyped<float>(sendbuff, recvbuff, count, comm, stream, cap);
   case ncclFloat16:
-    return ncclAllReduceDdaFabricTyped<half>(sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaFabricTyped<half>(sendbuff, recvbuff, count, comm, stream, cap);
   case ncclBfloat16:
-    return ncclAllReduceDdaFabricTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
+    return ncclAllReduceDdaFabricTyped<bf16>(sendbuff, recvbuff, count, comm, stream, cap);
+  case ncclFloat8e4m3:
+    return ncclAllReduceDdaFabricTyped<dda::common::fp8e4m3>(sendbuff, recvbuff, count, comm, stream, cap);
+  case ncclFloat8e5m2:
+    return ncclAllReduceDdaFabricTyped<dda::common::fp8e5m2>(sendbuff, recvbuff, count, comm, stream, cap);
   default:
     return ncclInvalidArgument;
   }

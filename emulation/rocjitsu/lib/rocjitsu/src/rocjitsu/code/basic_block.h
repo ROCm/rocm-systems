@@ -53,6 +53,14 @@ public:
     /// @details FullSection avoids repeated recovery on workloads that inspect all text anyway.
     DecodePolicy decode_policy = DecodePolicy::Reachable;
 
+    /// @brief Caller-selected concrete GPU target, or INVALID to derive it from the object.
+    ///
+    /// @details The selected target controls target-specific analysis semantics independently of
+    /// instruction legality enforced by the decoder. A concrete caller selection is authoritative;
+    /// only an absent selection permits construction to use the code-object target and then the
+    /// architecture default.
+    rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
+
     /// @brief Section-relative external entry offsets, matching build_reachable's entry_offsets.
     ///
     /// @details These establish external states, unlike seeds and split points. They correspond
@@ -255,12 +263,15 @@ public:
   /// entries. Function-entry symbols and stored-pointer targets belong here: they are genuine
   /// boundaries, yet most are ordinary helpers whose callers reach them by a decoded edge, and
   /// calling them external would throw those caller facts away.
+  /// @param[in] target Caller-selected concrete target, or INVALID to use the object/default
+  /// target.
   /// @returns Ordered basic blocks with their decoded instructions, or failure.
   static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
   build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
         DecodeErrorEmitter emit_error = {}, std::span<const uint64_t> extra_leaders = {},
         ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
-        std::span<const uint64_t> extra_split_points = {});
+        std::span<const uint64_t> extra_split_points = {},
+        rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID);
 
   /// @brief Decode reachable text, extending direct control flow with discovered indirect targets.
   ///
@@ -288,13 +299,16 @@ public:
   /// instructions or padding are ignored; consumers must validate any seed they later use as an
   /// actual entry.
   /// @param[in] extra_split_points Block boundaries that do not seed decoding or external states.
+  /// @param[in] target Caller-selected concrete target, or INVALID to use the object/default
+  /// target.
   /// @returns Blocks ordered by text offset, or failure with a diagnostic.
   static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
   build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
                   std::span<const uint64_t> entry_offsets, DecodeErrorEmitter emit_error = {},
                   std::span<const CodeRange> permitted_ranges = {},
                   std::span<const uint64_t> decode_seeds = {},
-                  std::span<const uint64_t> extra_split_points = {});
+                  std::span<const uint64_t> extra_split_points = {},
+                  rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID);
 
 private:
   struct DecodedSection;
@@ -304,7 +318,8 @@ private:
   build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
              DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
              ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points,
-             DecodedSection *prepared, std::span<const CodeRange> permitted_ranges);
+             DecodedSection *prepared, std::span<const CodeRange> permitted_ranges,
+             rj_code_target_id_t target);
 
   void note_successor_issue(SuccessorIssue issue) {
     if (successor_issue_ == SuccessorIssue::None)

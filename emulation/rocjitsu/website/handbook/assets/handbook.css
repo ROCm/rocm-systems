@@ -1,0 +1,182 @@
+/* Presentation for canonical documentation and site navigation. */
+:root {
+  --md-text-font: "Segoe UI", Arial, sans-serif;
+  --md-code-font: "SFMono-Regular", Consolas, monospace;
+  --md-primary-fg-color: #234b66;
+  --md-primary-fg-color--dark: #1b3b50;
+}
+[data-md-color-scheme="default"] {
+  --handbook-heading: #213c50;
+  --handbook-link: #21639b;
+  --handbook-teal: #087c78;
+  --handbook-border: #d9e4eb;
+  --handbook-surface: #f0f6f9;
+  --handbook-active: #e4f1f7;
+  --handbook-muted: #586f80;
+}
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #18232e;
+  --md-primary-fg-color: #203f54;
+  --md-primary-fg-color--dark: #162e40;
+  --handbook-heading: #e0edf6;
+  --handbook-link: #86c9ff;
+  --handbook-teal: #63d5c7;
+  --handbook-border: #364957;
+  --handbook-surface: #223340;
+  --handbook-active: #284557;
+  --handbook-muted: #a9bdcb;
+}
+.md-grid { max-width: 1320px; }
+.md-header { box-shadow: none; border-bottom: 2px solid #248e99; }
+.md-header__inner { height: 52px; }
+.md-header__title { font-size: 18px; }
+.md-typeset { font-size: 15px; line-height: 1.7; }
+.md-typeset h1 { color: var(--handbook-heading); font-size: 30px; font-weight: 600; line-height: 1.3; margin-bottom: 24px; }
+.md-typeset h2 { color: var(--handbook-heading); font-size: 23px; font-weight: 600; line-height: 1.4; margin: 2em 0 0.8em; }
+.md-typeset h3 { color: var(--handbook-heading); font-size: 18px; font-weight: 600; line-height: 1.45; }
+.md-typeset h4, .md-typeset h5, .md-typeset h6 { color: var(--handbook-heading); font-size: 15px; font-weight: 600; }
+.md-typeset :is(h1, h2, h3, h4, h5, h6) { overflow-wrap: anywhere; }
+.md-typeset h1 .twemoji { color: var(--handbook-teal); margin-right: 4px; }
+.md-typeset a { color: var(--handbook-link); }
+.md-typeset p a:is(:hover, :focus-visible), .md-typeset li a:is(:hover, :focus-visible) { text-decoration: underline; text-underline-offset: 3px; }
+.md-typeset :not(pre) > code { overflow-wrap: anywhere; }
+.md-typeset pre > code { font-size: 13px; line-height: 1.65; border-radius: 4px; padding: 14px 16px; scrollbar-width: thin; }
+/* Keep the copy control beside the code, outside its horizontal scroll area. */
+.md-typeset .highlight:has(.md-code__button) pre {
+  padding-right: 40px;
+  background: var(--md-code-bg-color);
+  border-radius: 4px;
+}
+.md-typeset table:not([class]) { font-size: 13px; line-height: 1.6; box-shadow: none; border: 1px solid var(--handbook-border); border-radius: 4px; }
+.md-typeset table:not([class]) th { color: var(--handbook-heading); background: var(--handbook-surface); vertical-align: top; }
+.md-typeset table:not([class]) td { border-top-color: var(--handbook-border); }
+.md-typeset .admonition, .md-typeset details { font-size: 14px; box-shadow: none; }
+/* Native Markdown cards stay in the documentation source and stack on phones. */
+.md-typeset .grid.cards { gap: 16px; margin: 24px 0; }
+.md-typeset .grid.cards > ul > li {
+  border: 1px solid var(--handbook-border);
+  border-radius: 6px;
+  padding: 20px;
+  box-shadow: none;
+}
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--handbook-teal);
+  box-shadow: none;
+}
+.md-typeset .grid.cards > ul > li > :first-child {
+  color: var(--handbook-heading);
+  font-size: 17px;
+}
+.md-typeset .grid.cards .twemoji { color: var(--handbook-teal); }
+.md-typeset .grid.cards hr { border-bottom-color: var(--handbook-border); margin: 16px 0; }
+@media (max-width: 40em) {
+  .md-typeset { font-size: 16px; }
+  .md-typeset h1 { font-size: 28px; }
+  .md-typeset h2 { font-size: 22px; }
+  .md-typeset .highlight { margin-inline: 0; }
+  .md-typeset .grid.cards { grid-template-columns: minmax(0, 1fr); }
+  .md-typeset .grid.cards > ul > li { padding: 18px; }
+}
+.md-nav { font-size: 13px; }
+.md-sidebar--primary { border-right: 1px solid var(--handbook-border); }
+.md-post { padding-bottom: 20px; border-bottom: 1px solid var(--handbook-border); }
+@media (max-width: 76.234375em) {
+  .md-sidebar--primary { border-right: 0; }
+  .md-nav--primary .md-nav__link { min-height: 36px; align-items: center; }
+}
+/* Use the site name without a logo. */
+.md-header .md-logo, .md-nav--primary .md-nav__title .md-logo { display: none; }
+.md-nav__link--active {
+  color: var(--handbook-link);
+  font-weight: 700;
+  background: var(--handbook-active);
+  border-left: 2px solid var(--handbook-teal);
+  padding: 5px 8px;
+}
+a:focus-visible, button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--handbook-link); outline-offset: 3px;
+}
+.md-typeset .md-code__button { color: var(--handbook-muted); }
+.md-typeset .md-code__button:hover { color: var(--handbook-link); }
+.md-typeset .mermaid { overflow-x: auto; padding: 16px; border: 1px solid var(--handbook-border); border-radius: 4px; background: var(--handbook-surface); }
+/* Desktop hierarchy: site title, spaced section headings, indented pages. */
+@media (min-width: 76.25em) {
+  .md-nav--primary > .md-nav__title {
+    color: var(--handbook-heading);
+    font-size: 17px;
+    font-weight: 750;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--handbook-border);
+    margin-bottom: 12px;
+  }
+  .md-nav--primary .md-nav__item--section > .md-nav__link {
+    color: var(--handbook-heading);
+    font-size: 13px;
+    font-weight: 750;
+    margin-top: 24px;
+    margin-bottom: 9px;
+  }
+  .md-nav--primary .md-nav__item--section > .md-nav > .md-nav__list {
+    border-left: 1px solid var(--handbook-border);
+    margin-left: 3px;
+    padding-left: 12px;
+  }
+  .md-nav--secondary > .md-nav__title {
+    color: var(--handbook-heading);
+    font-weight: 700;
+  }
+}
+.md-nav__item .md-nav__link--active:not(.md-nav__link--index) {
+  color: var(--handbook-link);
+}
+.md-nav__link:hover, .md-nav__link:focus-visible { color: var(--handbook-link); }
+.md-nav--primary .md-nav__item--section > label.md-nav__link[for] { color: var(--handbook-heading); }
+/* The reading position should not change the table of contents geometry. */
+.md-nav--secondary .md-nav__link { line-height: 1.5; }
+.md-nav--secondary .md-nav__link--active {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+/* Keep the site name stable when Material activates its scrolled header. */
+.md-header__title .md-header__topic:first-child {
+  opacity: 1;
+  transform: none;
+  transition: none;
+  pointer-events: auto;
+  z-index: 0;
+}
+.md-header__title .md-header__topic + .md-header__topic { display: none; }
+/* A simple text launch link, with an external-link arrow. */
+.md-typeset a.dashboard-launch {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  margin: 12px 0;
+  padding: 6px 0;
+  color: var(--handbook-link);
+  line-height: 1.6;
+  border-bottom: 1px solid var(--handbook-border);
+}
+.md-typeset a.dashboard-launch strong { font-weight: 600; }
+.md-typeset a.dashboard-launch .twemoji { flex-shrink: 0; }
+.md-typeset a.dashboard-launch:hover,
+.md-typeset a.dashboard-launch:focus-visible {
+  border-bottom-color: var(--handbook-link);
+}
+/* Keep repository identity and counts compact beside the GitHub icon. */
+.md-header__source { width: auto; }
+.md-source__repository { max-width: none; }
+.md-source__repository--active .md-source__facts,
+.md-source__repository--active .md-source__fact { animation: none; }
+.md-nav__source .md-source__repository {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.md-nav__source .md-source { display: flex; align-items: center; }
+.md-nav__source .md-source__repository { min-width: 0; }
+.source-links { display: flex; align-items: center; }
+.source-links .md-source { padding-right: 8px; }
+/* Keep the source link's full focus ring visible inside the header and drawer. */
+.source-links .md-source:focus-visible { outline: 2px solid #fff; outline-offset: -3px; }

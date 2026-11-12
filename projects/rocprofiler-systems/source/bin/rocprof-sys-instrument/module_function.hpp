@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include "common/string_utility.hpp"
 #include "function_signature.hpp"
 #include "fwd.hpp"
 #include <cstdint>
+#include <iomanip>
 
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
@@ -22,7 +24,8 @@ struct module_function
     using str_msg_t         = std::tuple<int, string_t, string_t, string_t, string_t>;
     using str_msg_vec_t     = std::vector<str_msg_t>;
 
-    static constexpr size_t absolute_max_width = 80;
+    static constexpr size_t k_absolute_max_width   = 80;
+    static constexpr int    k_numeric_column_width = 14;
     static width_t&         get_width();
     static void             reset_width();
     static void             update_width(const module_function& rhs);
@@ -84,22 +87,22 @@ struct module_function
     bool is_visibility_constrained() const;
     bool is_linkage_constrained() const;
 
-    size_t                                         start_address     = 0;
-    std::uint64_t                                  address_range     = 0;
-    std::uint64_t                                  num_instructions  = 0;
-    module_t*                                      module            = nullptr;
-    procedure_t*                                   function          = nullptr;
-    symtab_func_t*                                 symtab_function   = nullptr;
-    flow_graph_t*                                  flow_graph        = nullptr;
-    string_t                                       module_name       = {};
-    string_t                                       function_name     = {};
-    function_signature                             signature         = {};
-    basic_block_set_t                              basic_blocks      = {};
-    basic_loop_vec_t                               loop_blocks       = {};
-    std::map<instruction_category_t, std::int64_t> instruction_types = {};
-    std::vector<std::vector<instr_addr_pair_t>>    instructions      = {};
+    size_t                                         start_address    = 0;
+    std::uint64_t                                  address_range    = 0;
+    std::uint64_t                                  num_instructions = 0;
+    module_t*                                      module           = nullptr;
+    procedure_t*                                   function         = nullptr;
+    symtab_func_t*                                 symtab_function  = nullptr;
+    flow_graph_t*                                  flow_graph       = nullptr;
+    string_t                                       module_name;
+    string_t                                       function_name;
+    function_signature                             signature = {};
+    basic_block_set_t                              basic_blocks;
+    basic_loop_vec_t                               loop_blocks;
+    std::map<instruction_category_t, std::int64_t> instruction_types;
+    std::vector<std::vector<instr_addr_pair_t>>    instructions;
 
-    mutable str_msg_vec_t messages = {};
+    mutable str_msg_vec_t messages;
 
     bool is_overlapping() const;  // checks if func overlaps
 
@@ -137,22 +140,23 @@ public:
     {
         std::stringstream ss;
 
-        auto w0 = std::min<size_t>(get_width()[0], absolute_max_width);
-        auto w1 = std::min<size_t>(get_width()[1], absolute_max_width);
-        auto w2 = std::min<size_t>(get_width()[2], absolute_max_width);
+        auto const w0 = std::min<size_t>(get_width()[0], k_absolute_max_width);
+        auto const w1 = std::min<size_t>(get_width()[1], k_absolute_max_width);
+        auto const w2 = std::min<size_t>(get_width()[2], k_absolute_max_width);
 
-        auto _get_str = [](const std::string& _inc) {
-            if(_inc.length() > absolute_max_width)
-                return _inc.substr(0, absolute_max_width - 3) + "...";
+        auto const _get_str = [](const std::string& _inc) {
+            if(_inc.length() > k_absolute_max_width)
+            {
+                return _inc.substr(0, k_absolute_max_width - 3) + "...";
+            }
             return _inc;
         };
 
-        std::stringstream _addr{};
-        _addr << "0x" << std::hex << rhs.start_address;
+        auto const addr = rocprofsys::utility::string::hex_padded(rhs.start_address, 0);
         // clang-format off
-        ss << std::setw(14) << _addr.str() << " "
-           << std::setw(14) << rhs.address_range << " "
-           << std::setw(14) << rhs.num_instructions << " "
+        ss << std::setw(k_numeric_column_width) << addr << " "
+           << std::setw(k_numeric_column_width) << rhs.address_range << " "
+           << std::setw(k_numeric_column_width) << rhs.num_instructions << " "
            << std::setw(6) << std::setprecision(2) << std::fixed << (rhs.address_range / static_cast<double>(rhs.num_instructions)) << "  "
            << std::setw(7) << std::to_string(rhs.get_linkage()) << " "
            << std::setw(10) << std::to_string(rhs.get_visibility()) << " "
@@ -173,9 +177,8 @@ module_function::serialize(ArchiveT& ar, const unsigned)
     namespace cereal = tim::cereal;
     if constexpr(tim::concepts::is_output_archive<ArchiveT>::value)
     {
-        std::stringstream _addr{};
-        _addr << "0x" << std::hex << start_address;
-        ar(cereal::make_nvp("start_address", _addr.str()));
+        ar(cereal::make_nvp("start_address",
+                            rocprofsys::utility::string::hex_padded(start_address, 0)));
     }
 
     ar(cereal::make_nvp("address_range", address_range),
@@ -224,7 +227,9 @@ module_function::serialize(ArchiveT& ar, const unsigned)
         ar.setNextName("instruction_breakdown");
         ar.startNode();
         for(auto itr : instruction_types)
+        {
             ar(cereal::make_nvp(std::to_string(itr.first).c_str(), itr.second));
+        }
         ar.finishNode();
         // instructions can inflate JSON size so only output when verbosity is increased
         // above default
@@ -238,9 +243,9 @@ module_function::serialize(ArchiveT& ar, const unsigned)
                 ar.startNode();
                 for(auto&& iitr : itr)
                 {
-                    std::stringstream _addr{};
-                    _addr << "0x" << std::hex << iitr.second;
-                    ar(cereal::make_nvp(_addr.str().c_str(), iitr.first.format()));
+                    auto const addr =
+                        rocprofsys::utility::string::hex_padded(iitr.second, 0);
+                    ar(cereal::make_nvp(addr.c_str(), iitr.first.format()));
                 }
                 ar.finishNode();
             }

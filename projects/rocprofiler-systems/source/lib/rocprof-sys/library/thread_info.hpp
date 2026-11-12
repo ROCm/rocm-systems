@@ -103,8 +103,8 @@ struct thread_info
 
     bool                is_offset    = false;
     const std::int64_t* causal_count = nullptr;
-    index_data_t        index_data   = {};
-    lifetime_data_t     lifetime     = { 0, 0 };
+    index_data_t        index_data;
+    lifetime_data_t     lifetime = { 0, 0 };
 
     static std::atomic<size_t> initialized_threads;
 

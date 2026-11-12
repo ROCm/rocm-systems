@@ -31,13 +31,12 @@ execution.
 | `amdgpu/sdma_ring_consumer.h/cpp` | `SdmaRingConsumer`: per-queue ring cursor, fetch, retry, execution, and retirement publication |
 | `amdgpu/sdma_packet_processor.h/cpp` | SdmaPacketProcessor: SDMA packet decoding and effects over caller-owned typed continuation state |
 | `amdgpu/packet_processor.h` | Shared compile-time one-packet contract and validated protocol-independent result envelope |
-| `amdgpu/aql_packet_processor.h/cpp` | AqlPacketProcessor: fixed-size AQL decode and durable CP admission |
-| `amdgpu/pm4_packet_processor.h/cpp` | Pm4PacketProcessor: PM4 framing, validation, and supported packet effects |
-| `amdgpu/pm4_ring_consumer.h/cpp` | `Pm4RingConsumer`: per-queue ring traversal, retry, and cursor publication owned by the CP |
-| `amdgpu/pm4_queue_controller.h/cpp` | Pm4QueueController: CP-owned PM4 queue, VM snapshot, retry, and cursor-publication state |
-| `amdgpu/pm4_queue_binding_factory.h/cpp` | Thin PM4 lifetime/notification adapter from GpuQueueRegistry to the owning CP |
+| `amdgpu/aql/aql_packet_processor.h/cpp` | AqlPacketProcessor: fixed-size AQL decode and durable CP admission |
+| `amdgpu/pm4/pm4_packet_processor.h/cpp` | Production PM4 fetch, opcode effects, register updates, IB traversal, and cursor publication |
+| `amdgpu/pm4/pm4.h` | PM4 opcodes, registers, scratch leases, and persistent submission state |
+| `amdgpu/dispatch_entry.h` | ComputeQueueRecord: CP-owned AQL/PM4 queues, nested command streams, shader dispatches and cursor publication |
 | `amdgpu/gpu_queue_registry.h/cpp` | Frontend-neutral queue admission, lifetime, routing, and generation-safe handles |
-| `amdgpu/aql_queue_binding_factory.h/cpp` | Reusable binding adapter from GpuQueueRegistry to the AQL command processor |
+| `amdgpu/compute_queue_binding_factory.h/cpp` | Reusable binding adapter from GpuQueueRegistry to the unified compute command processor |
 
 ---
 
@@ -85,10 +84,16 @@ VMID/PASID as lifetime identity.
 
 An address-space slot generation changes when a slot is destroyed and reused.
 Its translation epoch changes when a root is replaced or invalidated. A
-`GpuVmAccess` captures the handle, epoch, translator, and physical backing under
-one lock for the duration of an operation. This prevents a multi-page access
-from combining an old root with a replacement backing and provides
-`VmCacheNamespace` for virtually indexed clean caches. Access results are
+`GpuVmAccess` selects an immutable translator/backing generation under the
+registry lock. Ordinary snapshots share its retirement state; each pinned
+snapshot has independent retirement state and survives root replacement.
+Invalidation and unregistration revoke both kinds. Access methods hold a shared
+revocation lease, allowing an in-flight access to finish without combining an
+old root with a replacement backing. The captured handle and epoch provide
+`VmCacheNamespace` for virtually indexed clean caches. Functional instruction
+fetch reuses an ordinary snapshot within a quantum and checks `is_current()`
+before reuse; the access method still takes a lease and checks for retirement.
+Access results are
 typed as complete, temporarily unavailable, faulted, or malformed; transport
 availability is not encoded as a fake mapping in `GpuMemory`.
 
@@ -168,6 +173,20 @@ ring extent. An unavailable access retains the snapshot and exact progress for a
 later retry; faulted or malformed work becomes terminal after any required cursor
 publication.
 
+`COPY_LINEAR_SWAP` supports disjoint, adjacent, and identical operand ranges.
+Partially overlapping ranges are unsupported: the processor rejects them before
+writing either operand and logs the packet operands `address_a` and `address_b`
+and the byte count. ROCr places the API destination in A and source in B. The
+queue becomes terminal and subsequent completion packets remain
+unexecuted. ROCr may accept such submissions, but that acceptance does not
+establish hardware overlap semantics. This conservative restriction is a
+simulator limitation.
+
+Malformed packet warnings label the root packet's starting byte cursor as
+`root_cursor`; the reported header can belong to that root packet or an indirect
+packet within it. A cursor-publication failure preserves this packet diagnostic,
+including when the cursor store faults after an unavailable retry.
+
 KFD and PCI/MES only adapt queue creation, producer notifications, interrupts,
 and reset into `GpuQueueRegistry`. MES may supply the initial device cursor captured
 from an MQD. KFD supplies the zero cursor it establishes during queue creation.
@@ -176,12 +195,12 @@ its published read pointer. These front ends must not duplicate scheduling,
 ring fetch, packet decoding, retry, or cursor-publication state. The command
 processor serves compute queues only and has no SDMA implementation or state.
 
-The AQL command processor, restricted PM4 compute-queue path, and SDMA
-scheduler use the same compile-time packet-processor interface and
+The AQL command processor and SDMA scheduler use the same compile-time
+packet-processor interface and
 `PacketProcessResult` envelope, not a common execution engine. SDMA may suspend
 after a partial effect, so its ring consumer owns an opaque typed continuation
 that only `SdmaPacketProcessor`
-interprets; AQL and PM4 block only before committing an effect and can restart
+interprets; AQL blocks only before committing an effect and can restart
 the same request. The common `required_bytes` field requests more head-packet
 input; `retirement_bytes` reports the eventual cursor advance and can include a
 protocol-defined skipped extent, which the ring owner must bound against its ring
@@ -189,16 +208,35 @@ and producer cursor. Ring ownership, VM snapshots, scheduling, consumer publicat
 and completion remain outside packet processors. Guest-controlled AQL validation failures are
 reported through the typed packet/admission result and fault only their queue;
 internal invariant violations remain exceptions.
-The firmware-free PM4 path supports a restricted compute-queue packet subset,
+The firmware-free PM4 path supports the modeled compute-queue packet subset,
 rather than general PM4. MES maps its MQD and address space, but submits the
 queue through `GpuQueueRegistry` to a selected command processor. The binding
 retains only a CP registration token; the CP-owned queue controller retains the
-VM snapshot, ring traversal, packet processor, and retry-safe cursor publication.
-The PCI/MMIO layer supplies only the narrow register-write sink. PM4 service runs
-outside the AQL queue lock and uses bounded queue turns for event-loop fairness.
+VM snapshot and retry-safe cursor publication state. The production packet
+processor in `pm4/` performs ring traversal, opcode effects, register updates,
+and nested IB traversal over that CP-owned state. CP supplies cache flushing,
+dispatch admission, retry scheduling, and synchronous fault cancellation
+callbacks. Temporary unavailability retains command and cursor-publication state
+for retry; cancellation stops resident waves before submission resources are
+released. A snapshot captured before GART publication is unready and must be
+released before retrying, so the next turn can capture the published binding.
+Once ready, the snapshot stays pinned through execution and retirement publication.
+For native rings, CP captures `command_access`, initializes the consumer cursor,
+builds root submissions from doorbells, and retries pending publication even when
+execution is suspended. The processor traverses packets and nested IBs, captures
+access for submitted streams as needed, and commits/publishes packet retirement
+through `read_pointer_journal`. The retry callback sets `command_retry_pending`,
+which CP clears before resuming. Dispatch admission appends to `dispatches.entries`;
+CP retires these entries before packet processing continues. On terminal publication
+failure, the processor sets `publication_faulted` before invoking cancellation.
+The cancellation callback marks the queue faulted, cancels pending work, and notifies
+failed submissions while preserving the publication failure.
+The PCI/MMIO layer supplies only the narrow register-write sink. PM4 service
+uses bounded queue turns for event-loop fairness and retains CP queue
+serialization.
 
 Graceful AQL removal is a publication barrier. The CP retains the registration
-while a consumed ring cursor, dispatch completion, or queue-idle signal still
+while a consumed ring cursor, dispatch completion, or queue-idle notification still
 needs retry, and reports a terminal publication failure instead of silently
 dropping it. Reset and rollback use a distinct force-cancel operation.
 
@@ -351,6 +389,42 @@ owner would retire the grid and fire the completion signal for workgroups that
 never executed. KFD teardown is what reaches this window, since it removes
 replicas in XCD order while a later owner is still registered.
 
+### Queue exceptions and debugger notification
+
+A trap exception has one owner for its complete mask. The send site records
+whether the debugger or ROCr owns it; trap completion preserves that decision.
+Runtime delivery freezes all replicas of the logical queue before publishing
+one shared exception status and interrupt. Status publication and acknowledgment
+polling use checked atomic memory accesses. An inaccessible status or an unchanged
+status at the runtime acknowledgment deadline is a failed delivery, so the
+exception remains available to a later debugger. When a debugger was attached at
+the send site, its retained queue status also survives a successful ROCr
+acknowledgment and becomes queryable when a matching exception bit is enabled.
+A debugger can recover a retained fatal stop through a valid CWSR suspend/resume.
+While the runtime ownership result is pending, resume reports a queue error and
+preserves the stopped waves, saved CWSR image, and exception gate. Once the result
+is committed, the debugger can retry recovery. Successful recovery clears the
+exception gate on every replica, preserves independent runtime and debugger
+suspension reasons, and schedules deferred queue work when all gates open.
+
+Debugger publication separates the event from the notifier transport. Queue
+status stays hidden while a write is in flight so a failed publication can roll
+back a debugger-only stop. If QUERY arrives after reading the wake but before
+that write commits, or while an overlapping ROCr reservation hides the event,
+the session records a replacement-wake obligation. Once
+status is visible, the retry worker sends that wake under the session lock,
+without hiding the event again. The recovery write is bounded and holds no CU
+or allocation lock. Retained events, including queue creation, survive transport
+failures until acknowledged. Process events are already queryable during a
+write; their claims record which bits QUERY consumed so completion cannot mark
+a later event as already notified.
+
+The notifier uses a disposable child because another holder of the shared file
+description can change its blocking mode. Application signal handlers are
+blocked before cloning and remain blocked in the child; the parent restores
+its original mask. A deadline bounds the parent's wait, and a process-owned
+reaper handles a child that has not exited after cancellation.
+
 ### Event-Driven Dispatch
 
 The CP is event-driven, and work reaches it only through a registered queue --
@@ -421,7 +495,10 @@ wavefronts it stops scheduling and fires its `on_idle` callback. When all
 CUs are idle and no packets remain, the CP signals completion via
 `engine()->primary_release()`.
 
-Completion-signal and queue-inactive writes are durable per-queue journals.
+Each queue journals its completion-signal updates and idle notifications.
+An idle notification writes the event ID to the queue event's mailbox when
+present, delivers the targeted interrupt for a nonzero event ID, then delivers
+the generic interrupt.
 An unavailable translated backing pauses admission and advancement only for
 the queue whose journal is incomplete; the CP continues fetching, dispatching,
 and retiring independent queues. A later retry resumes at the first uncommitted
@@ -449,6 +526,7 @@ producer writes an AQL packet into the ring, then rings the doorbell
 
 The in-flight record the CP builds from that packet is a `DispatchEntry`, which
 carries among other things:
+
 - `kernel_entry_pc` - byte address of kernel code in GPU memory
 - `total_wgs` - workgroups to launch, narrowed to this XCD's share once sharded
 - `wfs_per_workgroup` - wavefronts per workgroup
@@ -488,9 +566,72 @@ SC0/GLC is set. The L1 line is invalidated after the atomic to prevent
 stale reads. Supported integer atomics: swap, cmpswap, add, sub,
 smin/umin, smax/umax, and, or, xor, inc, dec.
 
+**Scalar atomics** (`s_atomic_*`, `s_buffer_atomic_*` and their `_x2` forms,
+CDNA1–4) bypass the L1 scalar cache and perform read-modify-write at L2; the
+atomic boundary's coherence epoch makes stale K$ lines refetch. The old value
+is returned to SDATA when GLC is set. Supported: swap, cmpswap, add, sub,
+smin/umin, smax/umax, and, or, xor, inc, dec. Compare-swap reads the source
+and then the compare value from SDATA and returns only the old value, to the
+low half. A buffer atomic's address is the V# base plus the offset; stride
+only scales the bound. A buffer atomic whose element is not wholly in range
+performs no access and returns zero when GLC is set. A misaligned `_x2` buffer
+atomic faults even when out of range. The CDNA ISA manuals do not describe
+these bounds and fault-order rules. They are observed on gfx90a with
+`s_buffer_atomic_inc[_x2]`, and the fault order also with
+`s_buffer_atomic_dec_x2`. The other operations and CDNA targets are modeled
+the same way by extrapolation, including `s_buffer_atomic_cmpswap_x2`, whose
+bound covers its 8-byte memory element although SDATA holds 16 bytes.
+
 **Cache management instructions:**
+
 - `s_dcache_inv` / `s_dcache_inv_vol` — invalidate the L1 scalar cache
 - `s_gl1_inv` — invalidate the L1 vector cache
+
+### Transaction observation boundaries
+
+Cache geometry does not establish transfer atomicity. `MemoryTransactionPolicy`
+selects an observation boundary independently of the 128-byte L1 vector and L2
+cache lines. A 256-byte wave access consists of multiple transactions and may
+observe different publication epochs in different transactions.
+
+| Target | Modeled boundary | Basis |
+|--------|------------------|-------|
+| gfx1250 | 128 bytes | RCCL communication protocol evidence |
+| Other or unknown targets, including gfx1251 | 128 bytes | Preserve existing compatibility behavior pending hardware qualification |
+| Internal `unqualified_64()` profile | 64 bytes | Boundary tests; no production target selects it |
+
+[RCCL's target selection](https://github.com/ROCm/rocm-systems/blob/9c35798820670b1a2301730c9b4ee90200731160/projects/rccl/src/include/archinfo.h#L40-L56)
+uses 128-byte LL records for gfx1250 and 64-byte records for other targets.
+Its [gfx1250 FIFO accesses](https://github.com/ROCm/rocm-systems/blob/9c35798820670b1a2301730c9b4ee90200731160/projects/rccl/src/device/prims_ll128.h#L15-L69)
+use system-scope `b128` operations (16 bytes per lane). That evidence supports
+a protocol model under the required access and buffer-ownership conditions;
+it does not establish an arbitrary concurrent snapshot guarantee, a fabric
+packet size, or the same behavior on every gfx12 target. Changing older target
+defaults to 64 bytes requires qualification of the relevant physical access
+paths. A cache-line size or fabric transfer width alone is insufficient.
+
+The backing memory owns the policy; each CU inherits it. No per-target override
+is enabled until qualification justifies changing a default. The policy bounds
+coalesced vector transfers and legacy mapped-memory copies. Permuted non-overlapping lanes gather/scatter
+through contiguous transactions; overlapping operands retain lane order.
+Lanes crossing a boundary contribute byte fragments to each neighboring
+transaction. Legacy mapped accesses synchronize on shared host-storage lock stripes, so
+aliases and independent XCD cache objects coordinate. Stripe hashing remains
+identical across policies: a shared stripe can serialize two adjacent 64-byte
+transfers without making their combined 128 bytes one observation. Failed host
+accesses release the stripes, and translated retries preserve completed requests.
+
+Translated backends retain one request per lane-ordered run at the default
+policy, avoiding extra transport/DMA round trips. Reordered runs are transaction
+bounded; the internal 64-byte profile also splits ordered requests for testing.
+
+Cache hits and fills may observe more bytes together than the selected boundary;
+the model does not force every permitted interleaving. External physical-memory
+backends still own their snapshot/publication contract, including translation
+span boundaries. Tests demonstrate 64/128-byte request boundaries with unchanged
+cache geometry, separate 64-byte publications, split 256-byte records, lane
+permutations, aliases, and retry progress. These are simulator regressions, not
+physical-hardware qualification results.
 
 ---
 
@@ -609,7 +750,7 @@ ROCm application
 
 | ioctl | Handler | Notes |
 |-------|---------|-------|
-| `GET_VERSION` | `get_version_ioctl` | Returns KFD_IOCTL_MAJOR/MINOR_VERSION |
+| `GET_VERSION` | `get_version_ioctl` | Returns the implemented KFD UAPI version 1.18; the shared header describes 1.19, whose metadata-ring queue creation is unsupported |
 | `GET_PROCESS_APERTURES_NEW` | `get_process_apertures_ioctl` | Returns `gpu_apertures(ordinal)` — LDS/scratch shifted by `kApertureStride` per GPU, with per-instance `gpu_id` |
 | `ACQUIRE_VM` | `acquire_vm_ioctl` | No-op (VM is always acquired) |
 | `ALLOC_MEMORY_OF_GPU` | `alloc_memory_ioctl` | Allocates host memory, assigns GPU VA from a linear bump allocator |
@@ -658,7 +799,7 @@ convenience wrapper that releases the last reference and tears down the VM.
 #include <rocjitsu/rocjitsu.h>
 
 rj_vm_t *vm = NULL;
-rj_vm_create("configs/gfx950_mi355x.json", &vm);
+rj_vm_create("configs/gfx950_mi350x.json", &vm);
 
 uint64_t ticks = 0;
 rj_vm_run(vm, &ticks);

@@ -43,14 +43,14 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 #define HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 
-#include <array>
-#include <climits>
-#include <map>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/driver.h"
 #include "core/inc/memory_region.h"
+#include "inc/hsa_ext_amd_aie.h"
 
 namespace rocr {
 
@@ -61,21 +61,6 @@ namespace AMD {
 /// @details The user-mode driver for AMD AIE that provides APIs for the ROCr core to allocate
 /// memory, manage DMA buffers, allocate queues, and more.
 class XdnaDriver final : public core::Driver {
-  /// @brief BO handle information.
-  struct BOHandle {
-    /// Mapped address.
-    void* vaddr = nullptr;
-    /// Handle returned by xdna. Same value as AMDXDNA_INVALID_BO_HANDLE.
-    uint32_t handle = 0;
-    /// Size in bytes.
-    size_t size = 0;
-
-    constexpr BOHandle() = default;
-    constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
-        : vaddr{vaddr}, handle{handle}, size{size} {}
-    constexpr bool IsValid() const { return handle != 0; }
-  };
-
 public:
   XdnaDriver(std::string devnode_name);
 
@@ -84,8 +69,25 @@ public:
   /// @param[out] driver object
   static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
 
-  /// @brief Returns the size of the dev heap in bytes.
+  /// @brief Returns the size of the dev heap in bytes. This is the size reserved when a dev heap
+  /// exists on this device; check @ref HasDevHeap first, since UMQ (AIE4) devices have none.
   static uint64_t GetDevHeapByteSize();
+
+  /// @brief Returns whether this device has a dev heap. KMQ (aie2/aie2p) devices do; UMQ (AIE4)
+  /// devices do not, since the kernel driver rejects AMDXDNA_BO_DEV_HEAP creation for them.
+  bool HasDevHeap() const { return has_dev_heap_; }
+
+  /// @brief Matches aie4_host_queue.h's CTX_MAX_CMDS: the fixed slot count CERT validates
+  /// write_index/read_index against (get_read_index()/valid_queue_index() in the kernel driver),
+  /// regardless of the header's declared capacity. A UMQ queue's ring must be sized for exactly
+  /// this many packets, and no HSA queue on a UMQ agent can hold more packets in flight at once
+  /// (see AieAgent's min_aql_size_/max_aql_size_, which this bounds).
+  static constexpr uint32_t UmqMaxCmds() { return 32; }
+
+  /// @brief Size of the header that opens a UMQ queue's buffer, ahead of its packet ring: sizeof
+  /// the host_queue_header the driver defines (checked where it is defined, in
+  /// amd_xdna_driver.cpp).
+  static constexpr size_t UmqHeaderBytes() { return 128; }
 
   hsa_status_t Init() override;
   hsa_status_t ShutDown() override;
@@ -104,6 +106,10 @@ public:
                               core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
                               uint32_t node_id, core::DriverMemoryHandle* handle) override;
   hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
+  hsa_status_t QueryPointerInfo(const void* ptr, const core::MemoryRegion* region,
+                                core::MemoryRegion::AllocateFlags alloc_flags,
+                                const core::DriverMemoryHandle* handle,
+                                HsaPointerInfo* info) const override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,
@@ -116,8 +122,14 @@ public:
   /// dispatch queue.
   ///
   /// @param[in] queue_size size of the dispatch queue in number of packets
+  /// @param[in] num_cols number of columns to create the queue's initial hardware context with.
+  /// Dispatch resizes the context to the columns its kernels declare.
+  /// @param[in] num_core_rows number of core tiles in each column
+  /// @param[in] device_id PCI device ID of the agent the queue dispatches to, resolved here so
+  /// dispatch does not look the device type up per batch
   /// @param[out] queue_metadata KMQ metadata created for the dispatch queue
-  hsa_status_t CreateKernelModeQueue(size_t queue_size, void** queue_metadata) const;
+  hsa_status_t CreateKernelModeQueue(size_t queue_size, uint32_t num_cols, uint32_t num_core_rows,
+                                     uint16_t device_id, void** queue_metadata) const;
 
   /// @brief Destroy the Kernel Mode Queue (KMQ) metadata.
   ///
@@ -127,6 +139,65 @@ public:
   ///
   /// @param[in] queue_metadata KMQ metadata to be destroyed
   hsa_status_t DestroyKernelModeQueue(void* queue_metadata) const;
+
+  /// @brief Returns whether this device submits through a user-mode queue (UMQ) rather than a
+  /// kernel-mode queue (KMQ), per the kernel driver's own device_type. Defaults to false (KMQ) if
+  /// the device_type cannot be read.
+  bool UsesUserModeQueue() const;
+
+  /// @brief Create User Mode Queue (UMQ) metadata: the hardware context created against the
+  /// queue's own ring, and the mapped doorbell, for an AIE4 agent dispatch queue.
+  ///
+  /// Unlike KMQ, UMQ has no separate ring: @p ring_buf (a header followed by the queue's own
+  /// HSA-visible AQL packet ring) is handed to the device directly, and dispatch is a single
+  /// doorbell write with no per-batch driver call -- the same model a GPU hardware queue uses.
+  /// This fills in the header; the caller allocates the buffer zeroed.
+  ///
+  /// @param[in] ring_buf the queue's buffer: @ref UmqHeaderBytes of header, then
+  /// @ref UmqMaxCmds packets, which are hsa_queue_t::base_address
+  /// @param[in] agent agent the queue dispatches to, to resolve @p ring_buf's BO handle
+  /// @param[in] num_cols number of columns to create the queue's hardware context with
+  /// @param[in] num_core_rows number of core tiles in each column
+  /// @param[out] queue_metadata UMQ metadata created for the dispatch queue
+  /// @param[out] doorbell the mapped hardware doorbell to ring on dispatch
+  hsa_status_t CreateUserModeQueue(void* ring_buf, const core::Agent& agent, uint32_t num_cols,
+                                   uint32_t num_core_rows, void** queue_metadata,
+                                   volatile uint32_t** doorbell) const;
+
+  /// @brief Destroy the User Mode Queue (UMQ) metadata: its hardware context and doorbell mapping.
+  ///
+  /// @param[in] queue_metadata UMQ metadata to be destroyed
+  hsa_status_t DestroyUserModeQueue(void* queue_metadata) const;
+
+  /// @brief Submits a contiguous range of UMQ packets to CERT and blocks until they are retired.
+  /// Mirrors @ref SubmitCmdChain's caller contract (a batch of packets in, @p num_completed
+  /// packets' completion signals already released out) even though UMQ has no equivalent of
+  /// KMQ's single ioctl that chains a whole batch in the kernel: every packet is translated and
+  /// readied here, then rung with one doorbell write for the whole batch.
+  ///
+  /// A translate failure is the one case this does not mirror: since nothing is rung until every
+  /// packet has translated, a bad packet partway through aborts the whole batch (@p num_completed
+  /// is 0), not just itself and what follows.
+  ///
+  /// @param[in,out] ring the queue's packet ring; each packet translated in place before it is
+  /// submitted
+  /// @param[in] ring_capacity number of packet slots in @p ring
+  /// @param[in] queue_metadata this queue's UMQ metadata, as created by CreateUserModeQueue; its
+  /// queue header's write_index is advanced as each packet is readied
+  /// @param[in] doorbell the mapped hardware doorbell to ring once for the whole batch
+  /// @param[in] first_pkt_idx index of the first packet in the queue
+  /// @param[in] num_pkts number of packets to submit, starting at @p first_pkt_idx. Must be
+  /// greater than 0.
+  /// @param[in] agent agent that owns the queue
+  /// @param[out] num_completed how many packets, counting from @p first_pkt_idx, executed and had
+  /// their completion signals released. @p num_pkts on success. On a translate failure this is 0.
+  /// On a wait failure this is the prefix that completed before it, so the caller can consume
+  /// exactly those and leave the rest; that failing packet may still run until the hardware
+  /// context is destroyed.
+  hsa_status_t SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* ring, uint32_t ring_capacity,
+                                void* queue_metadata, volatile uint32_t* doorbell,
+                                uint64_t first_pkt_idx, uint64_t num_pkts,
+                                const core::Agent& agent, uint64_t* num_completed) const;
 
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
                               uint32_t* queue_cu_mask) const override;
@@ -154,10 +225,13 @@ public:
   /// driver needs to create a new hardware context.
   /// @param[in] first_pkt_idx index of the first packet in the queue
   /// @param[in] num_pkts number of packets in the queue to be submitted. Must be greater than 0.
-  /// @param[in] num_core_tiles number of core tiles in the AIE device
   /// @param[in] agent agent that owns the queue
+  /// @param[out] num_completed how many packets, counting from @p first_pkt_idx, executed and had
+  /// their completion signals released. @p num_pkts on success. On failure this is the prefix the
+  /// device got through before it stopped, so the caller can consume exactly those and leave the
+  /// failing packet and everything after it in the ring.
   hsa_status_t SubmitCmdChain(hsa_queue_t& q, void* queue_metadata, uint64_t first_pkt_idx,
-                              uint64_t num_pkts, uint32_t num_core_tiles, const core::Agent& agent);
+                              uint64_t num_pkts, const core::Agent& agent, uint64_t* num_completed);
 
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
@@ -186,14 +260,11 @@ public:
 
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
 
- private:
-  /// @brief Destroys @p bo_handle.
-  ///
-  /// @note This function will unmap the virtual address and close the BO, even if the former fails.
-  ///
-  /// @param[in,out] bo_handle BO handle to destroy.
-  hsa_status_t DestroyBOHandle(BOHandle& bo_handle) const;
+  hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) override {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
 
+ private:
   /// @brief Queries the driver version and updates internal state.
   hsa_status_t QueryDriverVersion();
 
@@ -203,20 +274,6 @@ public:
   /// @brief Free device accessible heap (dev heap) space.
   hsa_status_t FreeDeviceHeap();
 
-  /// @brief Creates a command BO and returns it to @p bo_info.
-  ///
-  /// @param[in] size size of memory to allocate
-  /// @param[out] bo_info allocated BO
-  hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info) const;
-
-  /// @brief Returns true if @p vaddr lies within the dev heap mapping.
-  ///
-  /// Dev heap BOs carve their VA out of the device heap and borrow its mapping, so
-  /// FreeMemory must not unmap them. This lets FreeMemory distinguish those from
-  /// BO_SHAREs (which own an independent mmap) by the VA alone, without the caller
-  /// tracking mapping ownership.
-  bool IsDevHeapVA(const void* vaddr) const;
-
   /// @brief Device heap BO.
   ///
   /// Its mapping is @ref dev_heap_vaddr, which BO_DEV allocations carve their VA out of.
@@ -225,6 +282,9 @@ public:
   /// @brief The aligned device heap mapping, of size @ref dev_heap_size and alignment
   /// @ref dev_heap_alignment.
   void* dev_heap_vaddr = nullptr;
+
+  /// @brief Whether this device has a dev heap. Set by InitDeviceHeap(); see @ref HasDevHeap.
+  bool has_dev_heap_ = false;
 
   /// @brief Device heap size in bytes.
   static constexpr size_t dev_heap_size = 64 * 1024 * 1024;

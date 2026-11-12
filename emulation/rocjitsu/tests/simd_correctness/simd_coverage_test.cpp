@@ -4,7 +4,9 @@
 /// @file simd_coverage_test.cpp
 /// @brief Exact SIMD coverage for packed, true16, compare and dual-slot paths.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "util/host_target.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
@@ -54,7 +56,8 @@ protected:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    cu = ComputeUnitCore::create("simd_coverage_cu", config, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "simd_coverage_cu", config, &memory, &l2));
     wf = cu->dispatch_wf(0, 0, 106, 256, 32);
     wf->set_mode_raw(3u << 6);
     wf->set_exec(0xffffffffu);
@@ -227,10 +230,10 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
             expected = fp_mode::packed_select_bf16(af, bf, Op == PackedFloatOp::MIN);
           expected = fp_mode::clamp_bf16(expected, iteration & 1, floating_clamp_nan_to_zero(wf));
         } else if constexpr (Op == PackedFloatOp::FMA) {
-          expected =
-              fp_mode::fma_f16(a[i], b[i], c[i], false, false, false, false, false, false,
-                               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0,
-                               iteration & 1, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf));
+          expected = fp_mode::fma_f16(a[i], b[i], c[i], false, false, false, false, false, false,
+                                      wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0,
+                                      iteration & 1, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
+                                      fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
         } else {
           constexpr auto operation = Op == PackedFloatOp::ADD   ? fp_mode::PackedBinaryOp::ADD
                                      : Op == PackedFloatOp::MUL ? fp_mode::PackedBinaryOp::MUL
@@ -241,7 +244,8 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
                                          : fp_mode::PackedBinaryOp::MAXIMUM;
           expected = fp_mode::packed_binary_f16(operation, a[i], b[i], wf.fp_round_mode_f16_f64(),
                                                 wf.fp_denorm_mode_f16_f64(), iteration & 1,
-                                                wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf));
+                                                wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
+                                                wf.cu().arch(), wf.ieee_mode());
         }
         ASSERT_EQ(actual[i], expected)
             << mode << ":" << iteration << " inputs=" << a[i] << "," << b[i] << "," << c[i];
@@ -378,7 +382,9 @@ TEST_F(SimdCoverage, DecodedPackedFmacPreservesDirectedZeroSigns) {
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    auto target = ComputeUnitCore::create("packed_fmac_zero", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> target;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(target, "packed_fmac_zero", config, &memory, &l2));
     auto *wave = target->dispatch_wf(0, 0, 106, 256, 32);
     ASSERT_NE(wave, nullptr);
     for (uint32_t rounding = 0; rounding < 4; ++rounding) {
@@ -480,6 +486,9 @@ const DecodedCase kDecodedCases[] = {
     {ROCJITSU_CODE_ARCH_RDNA4,
      "v_dual_add_f32 v6, v0, v1 :: v_dual_mul_f32 v7, v2, v3",
      {0xc9060300u, 0x06060702u}},
+    {ROCJITSU_CODE_ARCH_RDNA4,
+     "v_dual_cndmask_b32 v7, v7, v9 :: v_dual_cndmask_b32 v6, v6, v8",
+     {0xca521307u, 0x07061106u}},
     {ROCJITSU_CODE_ARCH_RDNA4, "v_pk_fmac_f16 v6, v0, v1", {0x780c0300u}},
     {ROCJITSU_CODE_ARCH_RDNA4, "v_cvt_f16_f32 v6.h, v0", {0x7f0c1500u}},
     {ROCJITSU_CODE_ARCH_RDNA4, "v_cmpx_lt_f16_e64 v0.h, v1.l", {0xd481087eu, 0x02020300u}},
@@ -503,7 +512,9 @@ TEST_F(SimdCoverage, DecodedTargetPathsMatchScalar) {
         config.sgprs_per_wf = 106;
         config.vgprs_per_wf = 256;
         config.lds_size_kb = 64;
-        auto target = ComputeUnitCore::create("simd_decoded_target", config, &memory, &l2);
+        std::unique_ptr<ComputeUnitCore> target;
+        ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+            target, "simd_decoded_target", config, &memory, &l2));
         const uint32_t wave_size = test.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
         auto *wave = target->dispatch_wf(0, 0, 106, 256, wave_size);
         ASSERT_NE(wave, nullptr);
@@ -577,21 +588,31 @@ TEST_F(SimdCoverage, MixedFmaUsesProfileSemanticsAndCompilerGuard) {
   WordInst inst;
   inst.inst_.opsel_hi = 0;
   inst.inst_.opsel_hi_2 = 0;
+  constexpr uint32_t exec = 0xa5a5f0f0u;
+  constexpr uint32_t sentinel = 0xdeadbeefu;
+  wf->set_exec(exec);
   const float a = std::bit_cast<float>(0x3f800001u);
   const float b = std::bit_cast<float>(0x3f7fffffu);
   for (uint32_t lane = 0; lane < 32; ++lane) {
     put(0, lane, 0x3f800001u);
     put(1, lane, 0x3f7fffffu);
     put(2, lane, 0xbf800000u);
+    put(3, lane, sentinel);
   }
-#if defined(__clang__) && defined(__FMA__)
+#if RJ_HOST_HAS_FMA
   ASSERT_FALSE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, false>(inst, *wf)));
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    EXPECT_EQ(get(3, lane), sentinel);
 #else
   ASSERT_TRUE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, false>(inst, *wf)));
-  EXPECT_EQ(get(3, 0), std::bit_cast<uint32_t>(a * b - 1.0f));
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    EXPECT_EQ(get(3, lane),
+              (exec & (1u << lane)) ? std::bit_cast<uint32_t>(a * b - 1.0f) : sentinel);
 #endif
   ASSERT_TRUE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, true>(inst, *wf)));
-  EXPECT_EQ(get(3, 0), std::bit_cast<uint32_t>(std::fma(a, b, -1.0f)));
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    EXPECT_EQ(get(3, lane),
+              (exec & (1u << lane)) ? std::bit_cast<uint32_t>(std::fma(a, b, -1.0f)) : sentinel);
 }
 
 // Opt-in simulator host timing. Alternate scalar/SIMD order with matched inputs
@@ -610,7 +631,9 @@ TEST_F(SimdCoverage, DISABLED_InstructionTimings) {
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    auto target = ComputeUnitCore::create("simd_benchmark_target", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> target;
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(target, "simd_benchmark_target",
+                                                                    config, &memory, &l2));
     uint32_t wave_size = test.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
     auto *wave = target->dispatch_wf(0, 0, 106, 256, wave_size);
     ASSERT_NE(wave, nullptr);

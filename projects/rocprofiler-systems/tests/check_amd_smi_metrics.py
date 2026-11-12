@@ -22,6 +22,8 @@ Usage:
     python3 check_amd_smi_metrics.py --json
 """
 
+from __future__ import annotations
+
 import json
 import subprocess
 import sys
@@ -118,7 +120,9 @@ def _run_command(cmd: list[str], exit_on_failure: bool = True) -> str | None:
     If False, returns None on error (for graceful fallback).
     """
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=30, check=False
+        )
         if result.returncode != 0:
             if exit_on_failure:
                 print(
@@ -300,6 +304,15 @@ def detect_power_metrics(gpus: list[GpuMetricAvailability]) -> None:
         ) or _is_available(power.get("average_socket_power"))
 
 
+def _clock_domain_available(clock: dict, prefix: str) -> bool:
+    for key, val in clock.items():
+        if not key.startswith(prefix):
+            continue
+        if isinstance(val, dict) and _is_available(val.get("clk")):
+            return True
+    return False
+
+
 def detect_clock_metrics(gpus: list[GpuMetricAvailability]) -> None:
     """Detect clock metrics from 'amd-smi metric -c --json'.
 
@@ -323,16 +336,8 @@ def detect_clock_metrics(gpus: list[GpuMetricAvailability]) -> None:
         if not isinstance(clock, dict):
             continue
 
-        def _domain_available(prefix: str) -> bool:
-            for key, val in clock.items():
-                if not key.startswith(prefix):
-                    continue
-                if isinstance(val, dict) and _is_available(val.get("clk")):
-                    return True
-            return False
-
-        gpu.gfx_clock = _domain_available("gfx")
-        gpu.mem_clock = _domain_available("mem")
+        gpu.gfx_clock = _clock_domain_available(clock, "gfx")
+        gpu.mem_clock = _clock_domain_available(clock, "mem")
 
 
 def detect_pcie_metrics(gpus: list[GpuMetricAvailability]) -> None:
@@ -613,7 +618,7 @@ def main():
             print(f"  mem_usage:            {gpu.mem_usage}")
             print(f"  xgmi:                 {gpu.xgmi}")
             print(f"  pcie:                 {gpu.pcie}")
-            print(f"  ---")
+            print("  ---")
             print(f"  busy (derived):       {gpu.busy}")
             print(f"  temp (derived):       {gpu.temp}")
             print(f"  power (derived):      {gpu.power}")

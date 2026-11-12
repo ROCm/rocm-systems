@@ -8,11 +8,26 @@ The video decode raw sample illustrates decoding a single packetized video strea
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_raw_sample && cd video_decode_raw_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir video_decode_raw_sample && cd video_decode_raw_sample
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running; see
+> [Windows setup](../README.md#windows-setup).
 
 ## Run
 

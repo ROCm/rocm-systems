@@ -19,6 +19,7 @@ set(CLI_FILES
     amdsmi_helpers.py
     amdsmi_init.py
     amdsmi_logger.py
+    amdsmi_metrics_field_support.py
     amdsmi_parser.py
     amdsmi_cli_exceptions.py
     amdsmi_rocm_smi_compat.py

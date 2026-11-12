@@ -44,6 +44,11 @@ amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device
 amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int* length,
                                               char* version);
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed);
+// PLX temperature is carried in gpu_metrics rather than hwmon. Reports
+// NOT_SUPPORTED when the reading holds the not-applicable sentinel (an APU has
+// no such sensor), otherwise writes *temperature.
+amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& metrics,
+                                                 int64_t* temperature);
 amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device,
                                                        char* market_name);
 amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDevice* device,
@@ -54,9 +59,7 @@ std::string smi_amdgpu_split_string(std::string str, char delim);
 std::vector<std::string> split_string(const std::string& line, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name);
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name);
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data);
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name);
 
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len, std::string newString);
 
@@ -308,5 +311,13 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
  *  @param[out] info Structure to reset to its not-supported state.
  */
 void init_asic_info_defaults(amdsmi_asic_info_t* info);
+
+/**
+ *  @brief Format a DRM driver date such as ``20150101`` as ``2015/01/01 00:00``.
+ *
+ *  Returns an empty string (N/A) for ``0``, which kernels without a DRM driver
+ *  date report.
+ */
+auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string;
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

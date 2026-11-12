@@ -1,0 +1,9 @@
+{
+    global:
+        torch_trace_collector_abi_revision;
+        torch_trace_collector_install;
+        torch_trace_collector_push_launcher_tid;
+        torch_trace_collector_pop_launcher_tid;
+    local:
+        *;
+};

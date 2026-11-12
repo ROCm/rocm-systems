@@ -16,11 +16,26 @@ This sample uses multiple threads to decode the same input video parallelly.
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_perf_sample && cd video_decode_perf_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir video_decode_perf_sample && cd video_decode_perf_sample
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running; see
+> [Windows setup](../README.md#windows-setup).
 
 ## Run
 

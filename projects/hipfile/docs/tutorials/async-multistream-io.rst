@@ -33,96 +33,95 @@ Verify you have:
 Step-by-step walkthrough
 ===========================
 
-Select the GPU and seed the input file
---------------------------------------
+The walkthrough follows a complete file round trip, from seeding the input
+file and registering per-stream GPU buffers and HIP streams to verifying the
+output and cleaning up. Each stream reads and then writes a separate slice of
+the file, allowing I/O on different slices to overlap. After synchronizing the
+streams, the example checks byte counts and compares file hashes before
+releasing the buffers and streams.
 
-.. code-block:: cpp
+#. **Select the GPU and seed the input file**
 
-   hip_err = hipSetDevice(gpu_id);
+   .. code-block:: cpp
 
-   if (seed_read_file(read_path, TOTAL_SIZE))
-       return EXIT_FAILURE;
+      hip_err = hipSetDevice(gpu_id);
 
-``seed_read_file()`` allocates a buffer where byte ``i`` is ``i & 0xFF``. It
-writes that buffer to ``read_path`` with POSIX ``write()``, replacing any prior
-file contents. The output size is ``NUM_STREAMS * SLICE_SIZE``. The defaults
-use four streams and 1 MiB per slice, so 4 MiB total.
+      if (seed_read_file(read_path, TOTAL_SIZE))
+          return EXIT_FAILURE;
 
-Allocate per-stream GPU buffers and register them
--------------------------------------------------
+   ``seed_read_file()`` allocates a buffer where byte ``i`` is ``i & 0xFF``. It
+   writes that buffer to ``read_path`` with POSIX ``write()``, replacing any prior
+   file contents. The output size is ``NUM_STREAMS * SLICE_SIZE``. The defaults
+   use four streams and 1 MiB per slice, so 4 MiB total.
 
-For each of the ``NUM_STREAMS`` streams, the example calls ``hipMalloc()`` to
-allocate a GPU buffer. It registers that buffer with hipFile, creates a
-non-blocking HIP stream, zeros the buffer on that stream, and registers the
-stream with the driver.
+#. **Allocate per-stream GPU buffers and register them**
 
-Each buffer is registered separately with ``hipFileBufRegister()`` with ``flags``
-set to ``0``. Streams are created with the ``hipStreamNonBlocking`` flag so they
-don't implicitly synchronize with the legacy default stream.
+   For each of the ``NUM_STREAMS`` streams, the example calls ``hipMalloc()`` to
+   allocate a GPU buffer. It registers that buffer with hipFile, creates a
+   non-blocking HIP stream, zeros the buffer on that stream, and registers the
+   stream with the driver.
 
-``hipFileStreamRegister()`` takes flags that mark the properties that stay fixed
-for every later submission on that stream:
+   Each buffer is registered separately with ``hipFileBufRegister()`` with ``flags``
+   set to ``0``. Streams are created with the ``hipStreamNonBlocking`` flag so they
+   don't implicitly synchronize with the legacy default stream.
 
-- ``HIPFILE_STREAM_FIXED_BUF_OFFSET``: the buffer offset cannot be changed after submission.
-- ``HIPFILE_STREAM_FIXED_FILE_OFFSET``: the file offset cannot be changed after submission.
-- ``HIPFILE_STREAM_FIXED_FILE_SIZE``: the transfer size cannot be changed after submission.
-- ``HIPFILE_STREAM_PAGE_ALIGNED_INPUTS``: all offsets and sizes are 4 KiB
-  aligned.
+   ``hipFileStreamRegister()`` takes flags that mark the properties that stay fixed
+   for every later submission on that stream:
 
-The ``slice_state`` struct holds sizes and offsets as named fields. The
-asynchronous API reads those values by pointer and dereferences them at
-completion time. You must keep them valid until ``hipStreamSynchronize()``
-finishes.
+   - ``HIPFILE_STREAM_FIXED_BUF_OFFSET``: the buffer offset cannot be changed after submission.
+   - ``HIPFILE_STREAM_FIXED_FILE_OFFSET``: the file offset cannot be changed after submission.
+   - ``HIPFILE_STREAM_FIXED_FILE_SIZE``: the transfer size cannot be changed after submission.
+   - ``HIPFILE_STREAM_PAGE_ALIGNED_INPUTS``: all offsets and sizes are 4 KiB
+     aligned.
 
-Open input and output files
----------------------------
+   The ``slice_state`` struct holds sizes and offsets as named fields. The
+   asynchronous API reads those values by pointer and dereferences them at
+   completion time. You must keep them valid until ``hipStreamSynchronize()``
+   finishes.
 
-The ``open_file()`` helper from ``examples_common`` calls ``open()`` and
-then ``hipFileHandleRegister()``. One pair of file descriptors is shared across
-all streams.
+#. **Open input and output files**
 
-Submit reads on all streams
----------------------------
+   The ``open_file()`` helper from ``examples_common`` calls ``open()`` and
+   then ``hipFileHandleRegister()``. One pair of file descriptors is shared across
+   all streams.
 
-Each ``hipFileReadAsync()`` call enqueues a read of ``SLICE_SIZE`` bytes at file
-offset ``i * SLICE_SIZE`` into the matching GPU buffer. The streams are
-independent, so those reads can run concurrently.
+#. **Submit reads on all streams**
 
-Submit writes on all streams
-----------------------------
+   Each ``hipFileReadAsync()`` call enqueues a read of ``SLICE_SIZE`` bytes at file
+   offset ``i * SLICE_SIZE`` into the matching GPU buffer. The streams are
+   independent, so those reads can run concurrently.
 
-Each write uses the same stream as its matching read. HIP stream semantics run
-operations on one stream in submission order. The write for slice ``i`` sees
-the read for slice ``i`` finish without an extra host synchronization call
-between them. Across streams, reads and writes can overlap freely.
+#. **Submit writes on all streams**
 
-Synchronize and verify byte counts
-----------------------------------
+   Each write uses the same stream as its matching read. HIP stream semantics run
+   operations on one stream in submission order. The write for slice ``i`` sees
+   the read for slice ``i`` finish without an extra host synchronization call
+   between them. Across streams, reads and writes can overlap freely.
 
-After synchronization, each ``slice_state`` instance reports ``bytes_read`` and
-``bytes_written``. The example checks that every slice moved ``SLICE_SIZE``
-bytes.
+#. **Synchronize and verify byte counts**
 
-Verify the output file hash
----------------------------
+   After synchronization, each ``slice_state`` instance reports ``bytes_read`` and
+   ``bytes_written``. The example checks that every slice moved ``SLICE_SIZE``
+   bytes.
 
-``verify_files_match()`` hashes the first ``TOTAL_SIZE`` bytes of both files
-with FNV-1a and compares the digests. Matching hashes mean the round trip was
-lossless.
+#. **Verify the output file hash**
 
-Clean up resources
-------------------
+   ``verify_files_match()`` hashes the first ``TOTAL_SIZE`` bytes of both files
+   with FNV-1a and compares the digests. Matching hashes mean the round trip was
+   lossless.
 
-Teardown reverses setup for each slice:
+#. **Clean up resources**
 
-1. ``hipFileStreamDeregister()``: remove the stream from hipFile.
-2. ``hipStreamDestroy()``: destroy the HIP stream.
-3. ``hipFileBufDeregister()``: remove the GPU buffer from hipFile.
-4. ``hipFree()``: free the device memory.
+   Teardown reverses setup for each slice:
 
-The booleans ``stream_registered``, ``stream_created``, and ``buf_registered``
-track partial setup. If the setup loop fails partway through, only resources
-that were created get torn down.
+   1. ``hipFileStreamDeregister()``: remove the stream from hipFile.
+   2. ``hipStreamDestroy()``: destroy the HIP stream.
+   3. ``hipFileBufDeregister()``: remove the GPU buffer from hipFile.
+   4. ``hipFree()``: free the device memory.
+
+   The booleans ``stream_registered``, ``stream_created``, and ``buf_registered``
+   track partial setup. If the setup loop fails partway through, only resources
+   that were created get torn down.
 
 Stream ordering
 =================

@@ -22,6 +22,7 @@
 /// equal per active, non-skipped lane (util::set_force_scalar_for_testing flips
 /// the gate in-process).
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -90,7 +91,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop2_fma_simd", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop2_fma_simd", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -182,6 +185,8 @@ void check_case(const FmaCase &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t enc = vop2_encode(c.opcode, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
@@ -201,13 +206,12 @@ void check_case(const FmaCase &c, uint64_t exec) {
   const auto scalar_out = run_mode(/*force_scalar=*/true);
   const auto simd_out = run_mode(/*force_scalar=*/false);
 
-  // Core A/B equivalence per active, non-skipped lane. NaN-input lanes carry an
-  // accepted NaN-payload divergence and are excluded identically in both runs
-  // (the skip condition is input-derived).
+  // F32 compares every active lane, including the selected NaN payload.
+  // Legacy F16 forms retain their separate host-arithmetic behavior.
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (active) {
-      if (nan_lane[lane])
+      if (c.is_f16 && nan_lane[lane])
         continue;
       EXPECT_EQ(scalar_out[lane], simd_out[lane])
           << c.label << " lane " << lane << ": SIMD path diverged from scalar body";

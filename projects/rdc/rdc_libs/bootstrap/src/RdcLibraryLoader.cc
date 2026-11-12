@@ -33,11 +33,15 @@ rdc_status_t RdcLibraryLoader::load(const char* filename, int dlopen_flags) {
   if (filename == nullptr) {
     return RDC_ST_FAIL_LOAD_MODULE;
   }
-  if (libHandler_) {
-    unload();
-  }
 
   std::lock_guard<std::mutex> guard(library_mutex_);
+  if (libHandler_) {
+    if (filename_ == filename) {
+      return RDC_ST_OK;
+    }
+    RDC_LOG(RDC_ERROR, "RdcLibraryLoader: " << filename_ << " is loaded, cannot load " << filename);
+    return RDC_ST_FAIL_LOAD_MODULE;
+  }
   libHandler_ = dlopen(filename, dlopen_flags);
   if (!libHandler_) {
     char* error = dlerror();
@@ -46,6 +50,7 @@ rdc_status_t RdcLibraryLoader::load(const char* filename, int dlopen_flags) {
         std::string("Fail to open ") + std::string(filename) + ": " + std::string(error));
     return RDC_ST_FAIL_LOAD_MODULE;
   }
+  filename_ = filename;
 
   return RDC_ST_OK;
 }
@@ -55,6 +60,7 @@ rdc_status_t RdcLibraryLoader::unload() {
   if (libHandler_) {
     dlclose(libHandler_);
     libHandler_ = nullptr;
+    filename_.clear();
   }
   return RDC_ST_OK;
 }

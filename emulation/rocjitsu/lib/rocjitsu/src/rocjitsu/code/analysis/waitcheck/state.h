@@ -136,6 +136,9 @@ struct PendingEvent {
   // event's canonical vector position. Matching events join by minimum. Use the
   // wait-threshold width for arithmetic; only dense per-kind summaries are packed.
   uint32_t min_younger = 0;
+  // Guaranteed younger requests in this event's own typed EXPCNT FIFO.
+  // Other export types can overtake it and contribute no progress proof.
+  uint8_t min_younger_in_fifo = 0;
 
   bool operator==(const PendingEvent &) const = default;
 };
@@ -323,6 +326,10 @@ struct WaitcheckStateOps : WaitcheckTarget {
   [[nodiscard]] static bool is_xcnt_store_event(const PendingEvent &event);
 
   static void apply_xcnt_wait(PendingState &state, uint32_t count);
+
+  // Includes counter-only requests as well as materialized register hazards.
+  [[nodiscard]] static bool has_xcnt_smem(const PendingState &state);
+  [[nodiscard]] static bool has_xcnt_vmem(const PendingState &state);
 
   static void apply_xcnt_wait_implied_by_kmcnt(PendingState &state, uint32_t count);
 

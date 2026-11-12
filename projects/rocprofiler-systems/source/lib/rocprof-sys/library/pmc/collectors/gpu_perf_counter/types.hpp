@@ -33,11 +33,14 @@ struct counter_value
     double       value{ 0.0 };
 };
 
+static_assert(sizeof(counter_value) == sizeof(counter_id_t) + sizeof(double),
+              "counter_value is cached as raw bytes and must not have padding");
+
 using metrics = std::vector<counter_value>;
 
 struct counter_definition
 {
-    std::string name{};
+    std::string name;
     size_t      device_index{ 0 };
 
     [[nodiscard]] std::string to_string() const
@@ -84,7 +87,7 @@ struct enabled_metrics
 
     [[nodiscard]] bool is_counter_enabled(const counter_definition& def) const
     {
-        return m_counters.count(def) > 0;
+        return m_counters.contains(def);
     }
 
 private:
@@ -124,7 +127,10 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter
 inline std::string
 make_qualified_name(const counter_metadata& meta)
 {
-    if(meta.dimensions.empty()) return meta.name;
+    if(meta.dimensions.empty())
+    {
+        return meta.name;
+    }
     return fmt::format("{}[{}]", meta.name, fmt::join(meta.dimensions, ","));
 }
 

@@ -295,6 +295,37 @@ void DeviceBitcodeTester::execute() {
 
   rocshmem_barrier_all();
 
+  { // test_signal_ops
+    uint64_t* sym_signal = static_cast<uint64_t*>(
+        alloc_test_buffer(sizeof(uint64_t)));
+    *sym_signal = 0;
+    uint64_t* d_observed;
+    CHECK_HIP(hipMalloc(&d_observed, sizeof(uint64_t)));
+    CHECK_HIP(hipMemset(d_observed, 0, sizeof(uint64_t)));
+    rocshmem_barrier_all();
+
+    void* kargs[] = {&sym_signal, &d_observed, &my_pe, &n_pes};
+    launch("test_signal_ops", kargs);
+    rocshmem_barrier_all();
+
+    uint64_t observed = 0;
+    CHECK_HIP(hipMemcpy(&observed, d_observed, sizeof(observed),
+                        hipMemcpyDeviceToHost));
+
+    int sender = (my_pe - 1 + n_pes) % n_pes;
+    uint64_t expected = 10 + static_cast<uint64_t>(sender + 1);
+    bool pass = (*sym_signal == expected && observed == expected);
+    printf("[PE %d] test_signal_ops: signal=%" PRIu64
+           " observed=%" PRIu64 " expect=%" PRIu64 " %s\n",
+           my_pe, *sym_signal, observed, expected, pass ? "PASS" : "FAIL");
+    if (!pass) all_pass = false;
+
+    CHECK_HIP(hipFree(d_observed));
+    free_test_buffer(sym_signal);
+  }
+
+  rocshmem_barrier_all();
+
   { // test_typed_wait_until
     int* sym_flag = static_cast<int*>(alloc_test_buffer(sizeof(int)));
     *sym_flag = 0;

@@ -289,6 +289,27 @@ __device__ void Context::broadcast_wg(T *dest, const T *source, int nelems,
 }
 
 template <typename T>
+__device__ __forceinline__ int Context::test_value(T value, int cmp,
+                                                   T cmp_value) {
+  switch (cmp) {
+    case ROCSHMEM_CMP_EQ:
+      return value == cmp_value;
+    case ROCSHMEM_CMP_NE:
+      return value != cmp_value;
+    case ROCSHMEM_CMP_GT:
+      return value > cmp_value;
+    case ROCSHMEM_CMP_GE:
+      return value >= cmp_value;
+    case ROCSHMEM_CMP_LT:
+      return value < cmp_value;
+    case ROCSHMEM_CMP_LE:
+      return value <= cmp_value;
+    default:
+      return false;
+  }
+}
+
+template <typename T>
 __device__ __forceinline__ void Context::wait_until(T *ivars, int cmp,
                                                     T val) {
   while (!test(ivars, cmp, val)) {
@@ -495,42 +516,7 @@ size_t Context::wait_until_some_vector(T *ivars, size_t nelems,
 template <typename T>
 __device__ __forceinline__ int Context::test(T *ivars, int cmp,
                                              T val) {
-  int ret = 0;
-  switch (cmp) {
-    case ROCSHMEM_CMP_EQ:
-      if (uncached_load(ivars) == val) {
-        ret = 1;
-      }
-      break;
-    case ROCSHMEM_CMP_NE:
-      if (uncached_load(ivars) != val) {
-        ret = 1;
-      }
-      break;
-    case ROCSHMEM_CMP_GT:
-      if (uncached_load(ivars) > val) {
-        ret = 1;
-      }
-      break;
-    case ROCSHMEM_CMP_GE:
-      if (uncached_load(ivars) >= val) {
-        ret = 1;
-      }
-      break;
-    case ROCSHMEM_CMP_LT:
-      if (uncached_load(ivars) < val) {
-        ret = 1;
-      }
-      break;
-    case ROCSHMEM_CMP_LE:
-      if (uncached_load(ivars) <= val) {
-        ret = 1;
-      }
-      break;
-    default:
-      break;
-  }
-  return ret;
+  return test_value(uncached_load(ivars), cmp, val);
 }
 
 template <typename T>

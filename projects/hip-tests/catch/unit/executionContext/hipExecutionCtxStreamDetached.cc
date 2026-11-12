@@ -587,7 +587,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamDetached_ActiveCapture_Invalidated) {
  *    stream. Both streams are owned by the same ctx. After
  *    hipExecutionCtxDestroy, both captureStatus_ slots must flip to
  *    hipStreamCaptureStatusInvalidated. Covers requirement (d) for
- *    parallelCaptureStreams_.
+ *    captureStreams_.
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2

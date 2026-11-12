@@ -26,10 +26,63 @@
 #include "topology.hpp"
 #include "ibv_wrapper.hpp"
 
+#include <cstdlib>
 #include <numa.h>
 #include <numaif.h>
 
 using namespace rocshmem;
+
+#define ERR_CHECK(cmd)                                                        \
+  do {                                                                        \
+    int error = cmd;                                                          \
+    if (error != 0) {                                                         \
+      fprintf(stderr, "error: %d at %s:%d\n", error, __FILE__, __LINE__);     \
+      exit(EXIT_FAILURE);                                                     \
+    }                                                                         \
+} while (0)
+
+// Helper macros for calling RDMA functions and reporting errors
+#ifdef VERBS_DEBUG
+#define IBV_CALL(__func__, ...)                                               \
+  do {                                                                        \
+    int error = __func__(__VA_ARGS__);                                        \
+    if (error != 0) {                                                         \
+      fprintf(stderr,"Encountered IbVerbs error (%d) at line (%d) "           \
+              "and function (%s)", (error), __LINE__, #__func__);             \
+      exit(EXIT_FAILURE);                                                     \
+    }                                                                         \
+  } while (0)
+
+#define IBV_PTR_CALL(__ptr__, __func__, ...)                                  \
+  do {                                                                        \
+    __ptr__ = __func__(__VA_ARGS__);                                          \
+    if (__ptr__ == nullptr) {                                                 \
+      fprintf(stderr, "Encountered IbVerbs nullptr error at line (%d) "       \
+              "and function (%s)", __LINE__, #__func__);                      \
+      exit(EXIT_FAILURE);                                                     \
+    }                                                                         \
+  } while (0)
+#else
+#define IBV_CALL(__func__, ...)                                               \
+  do {                                                                        \
+    int error = __func__(__VA_ARGS__);                                        \
+    if (error != 0) {                                                         \
+      fprintf(stderr, "Encountered IbVerbs error (%d) in func (%s) "          \
+              , error, #__func__);                                            \
+      exit(EXIT_FAILURE);                                                     \
+    }                                                                         \
+  } while (0)
+
+#define IBV_PTR_CALL(__ptr__, __func__, ...)                                  \
+  do {                                                                        \
+    __ptr__ = __func__(__VA_ARGS__);                                          \
+    if (__ptr__ == nullptr) {                                                 \
+      fprintf(stderr, "Encountered IbVerbs nullptr error in func (%s) ",      \
+               #__func__);                                                    \
+      exit(EXIT_FAILURE);                                                     \
+    }                                                                         \
+  } while (0)
+#endif
 
 namespace rocshmem
 {
@@ -78,7 +131,7 @@ namespace rocshmem
                 mistakeCount, numPages, targetId);
       return -1;
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   // Allocate memory
@@ -124,7 +177,7 @@ namespace rocshmem
       LOG_ERROR("Unsupported memory type (%d)", memType);
       return -1;
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   // Deallocate memory
@@ -151,7 +204,7 @@ namespace rocshmem
       LOG_ERROR("Attempting to deallocate unrecognized memory type (%d)", memType);
       return -1;
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
 
@@ -176,11 +229,17 @@ namespace rocshmem
       int32_t* tempBuffer;
 
       // Index CPU agents
-      cpuAgents.clear();
+      // Skip nodes outside this process's cpuset (numa_set_preferred would
+      // fail silently and CheckPages() would then hard-abort on the mismatch).
+      cpuAgents.assign(numCpus, hsa_agent_t{0});
       for (int i = 0; i < numCpus; i++) {
+        if (!numa_bitmask_isbitset(numa_get_mems_allowed(), i)) {
+          LOG_WARN("Skipping CPU NUMA node %d: not in this process's allowed NUMA mems mask", i);
+          continue;
+        }
         ERR_CHECK(AllocateMemory({MEM_CPU, i}, 1024, (void**)&tempBuffer));
         CHECK_HSA(hsa_amd_pointer_info(tempBuffer, &info, NULL, NULL, NULL));
-        cpuAgents.push_back(info.agentOwner);
+        cpuAgents[i] = info.agentOwner;
         ERR_CHECK(DeallocateMemory(MEM_CPU, tempBuffer, 1024));
       }
 
@@ -215,7 +274,7 @@ namespace rocshmem
              exeDevice.exeType);
       return -1;
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   // Get the hsa_agent_t associated with a MemDevice
@@ -257,6 +316,10 @@ namespace rocshmem
                                   int&        version)
   {
     char const* deviceName = ibv.get_device_name(context->device);
+    if (deviceName == nullptr || strchr(deviceName, '/') != nullptr) {
+      LOG_ERROR("Invalid IB device name: %s", deviceName ? deviceName : "(null)");
+      return -1;
+    }
     char gidRoceVerStr[16]      = {};
     char roceTypePath[PATH_MAX] = {};
     snprintf(roceTypePath, sizeof(roceTypePath),
@@ -286,7 +349,7 @@ namespace rocshmem
         version = 2;
       }
     }
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   static bool IsIPv4MappedIPv6(const union ibv_gid &gid)
@@ -309,7 +372,7 @@ namespace rocshmem
                          int const&                   portNum,
                          std::pair<int, std::string>& gidInfo)
   {
-    if(gidInfo.first >= 0) return ROCSHMEM_SUCCESS; // honor user choice
+    if(gidInfo.first >= 0) return 0; // honor user choice
     union ibv_gid gid;
 
     GidPriority highestPriority = GidPriority::UNKNOWN;
@@ -319,7 +382,7 @@ namespace rocshmem
       IBV_CALL(ibv.query_gid, context, portNum, i, &gid);
       if (!IsConfiguredGid(gid)) continue;
       int gidCurrRoceVersion;
-      if(GetRoceVersionNumber(context, portNum, i, gidCurrRoceVersion) != ROCSHMEM_SUCCESS) continue;
+      if(GetRoceVersionNumber(context, portNum, i, gidCurrRoceVersion) != 0) continue;
       GidPriority currPriority;
       if (IsIPv4MappedIPv6(gid)) {
         currPriority = (gidCurrRoceVersion == 2) ? GidPriority::ROCEV2_IPV4 : GidPriority::ROCEV1_IPV4;
@@ -341,7 +404,7 @@ namespace rocshmem
     }
     gidInfo.first = gidIndex;
     gidInfo.second = GidPriorityStr[highestPriority];
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   vector<IbvDevice> const& GetIbvDeviceList()
@@ -387,7 +450,7 @@ namespace rocshmem
                       ibvDevice.isRoce = true;
                       std::pair<int, std::string> gidInfo (-1, "");
                       auto res = GetGidIndex(context, portAttr.gid_tbl_len, activePort, gidInfo);
-                      if (res == ROCSHMEM_SUCCESS) {
+                      if (res == 0) {
                         ibvDevice.gidIndex = gidInfo.first;
                         ibvDevice.gidDescriptor = gidInfo.second;
                       }
@@ -587,7 +650,7 @@ namespace rocshmem
     }
     currNode->description = description;
 
-    return ROCSHMEM_SUCCESS;
+    return 0;
   }
 
   // Returns root node for PCIe tree.  Constructed on first use
@@ -1103,6 +1166,14 @@ namespace rocshmem
       for (int node = 0; node <= numa_max_node(); node++)
         if (numa_bitmask_isbitset(numa_get_mems_allowed(), node))
           remappingCpu.push_back(node);
+    }
+    if (origIdx < 0) {
+      return -1;  // never a valid node, no sensible fallback
+    }
+    // Unmapped under cgroup restriction, but still a real node id for the
+    // read-only distance/CPU-count queries below, so keep it as-is.
+    if (origIdx >= static_cast<int>(remappingCpu.size())) {
+      return origIdx;
     }
     return remappingCpu[origIdx];
   }

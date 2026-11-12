@@ -30,7 +30,7 @@ template <typename BackendFactory>
 class provider
 {
 public:
-    using backend_t = typename BackendFactory::backend_t;
+    using backend_t = BackendFactory::backend_t;
 
     provider()
     : m_cpu_count(static_cast<size_t>(std::max(0L, sysconf(_SC_NPROCESSORS_ONLN))))

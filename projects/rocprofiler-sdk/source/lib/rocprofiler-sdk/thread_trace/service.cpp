@@ -90,6 +90,29 @@ build_pack_from_array(parameter_pack&                             pack,
             case ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL:
                 pack.no_detail_simd = param.value != 0;
                 break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_EXEC_MASK_TRACE:
+                pack.exec_mask_trace = param.value != 0;
+                break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE:
+            {
+                switch(param.value)
+                {
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA:
+                        pack.resource_mode = ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA;
+                        break;
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT:
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT:
+                        pack.resource_mode =
+                            ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT;
+                        break;
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HIP:
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_ALL:
+                    case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DISPATCH:
+                        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+                    default: return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+                }
+                break;
+            }
             case ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS:
             {
                 // CPU staging buffer count. 0 (default) and 1 = single buffer (sync path).
@@ -107,6 +130,10 @@ build_pack_from_array(parameter_pack&                             pack,
                 return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
     }
+    if(pack.exec_mask_trace && agent->gfx_target_version / 10000 < 12)
+        return ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED;
+    if(pack.exec_mask_trace && pack.no_detail_simd)
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     if(!pack.are_params_valid()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     return ROCPROFILER_STATUS_SUCCESS;

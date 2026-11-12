@@ -26,7 +26,7 @@ namespace rocjitsu {
 namespace cdna1 {
 
 void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -37,7 +37,7 @@ void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -45,7 +45,7 @@ void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -56,7 +56,7 @@ void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -64,7 +64,7 @@ void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -75,7 +75,7 @@ void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -83,7 +83,7 @@ void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 8u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 8u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -94,7 +94,7 @@ void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -102,7 +102,7 @@ void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 16u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 16u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -113,7 +113,7 @@ void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -121,7 +121,7 @@ void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SScratchLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -132,7 +132,7 @@ void SScratchLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -140,7 +140,7 @@ void SScratchLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SScratchLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -151,7 +151,7 @@ void SScratchLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -159,7 +159,7 @@ void SScratchLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SScratchLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -170,7 +170,7 @@ void SScratchLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -178,7 +178,7 @@ void SScratchLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -189,7 +189,7 @@ void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -197,7 +197,7 @@ void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -208,7 +208,7 @@ void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -216,7 +216,7 @@ void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -227,7 +227,7 @@ void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -235,7 +235,7 @@ void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 8u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 8u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -246,7 +246,7 @@ void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -254,7 +254,7 @@ void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 16u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 16u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -265,7 +265,7 @@ void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -284,7 +284,7 @@ void SStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 1; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -303,7 +303,7 @@ void SStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 2; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -322,7 +322,7 @@ void SStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 4; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -341,7 +341,7 @@ void SScratchStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 1; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -360,7 +360,7 @@ void SScratchStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 2; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -379,7 +379,7 @@ void SScratchStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 4; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -398,7 +398,7 @@ void SBufferStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 1; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -417,7 +417,7 @@ void SBufferStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 2; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -436,7 +436,7 @@ void SBufferStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 4; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -474,273 +474,1089 @@ void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SDcacheDiscardSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (auto addr = smem_calculate_address(inst_, wf))
+    wf.cu().l1_scalar().discard(*addr, 1, wf.process_id());
 }
 
 void SDcacheDiscardX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (auto addr = smem_calculate_address(inst_, wf))
+    wf.cu().l1_scalar().discard(*addr, 2, wf.process_id());
 }
 
 void SBufferAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::SWAP;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->dst_register.width = 1;
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::ADD;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::SMIN;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::UMIN;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::SMAX;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::UMAX;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::AND;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::OR;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::XOR;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::INC;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::DEC;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::SWAP;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->dst_register.width = 2;
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->store_data[2] = amdgpu::read_scalar_register(wf, *data_register, 2);
+  d->store_data[3] = amdgpu::read_scalar_register(wf, *data_register, 3);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::ADD;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::SMIN;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::UMIN;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::SMAX;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::UMAX;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::AND;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::OR;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::XOR;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::INC;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SBufferAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::DEC;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::SWAP;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->dst_register.width = 1;
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::ADD;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::SMIN;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::UMIN;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::SMAX;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::UMAX;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::AND;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::OR;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::XOR;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::INC;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::DEC;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::SWAP;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->dst_register.width = 2;
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->store_data[2] = amdgpu::read_scalar_register(wf, *data_register, 2);
+  d->store_data[3] = amdgpu::read_scalar_register(wf, *data_register, 3);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::ADD;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::SMIN;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::UMIN;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::SMAX;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::UMAX;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::AND;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::OR;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::XOR;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::INC;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
+  d->num_dwords = 2;
+  d->elem_size = 8;
+  d->atomic_op = amdgpu::AtomicOp::DEC;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->store_data[1] = amdgpu::read_scalar_register(wf, *data_register, 1);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf, d.get());
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 } // namespace cdna1

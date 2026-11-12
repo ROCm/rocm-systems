@@ -108,5 +108,4 @@ setup(
         compiler_directives=compiler_directives,
     ),
     zip_safe=False,
-    options={"build_ext": {"inplace": False}},
 )

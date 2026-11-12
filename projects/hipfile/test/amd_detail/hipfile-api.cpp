@@ -36,6 +36,7 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <cstring>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
@@ -616,6 +617,7 @@ struct HipFileIoParam : public TestWithParam<IoType> {
     const void                      *unreg_bufptr{reinterpret_cast<void *>(0xFACEFEED)};
     shared_ptr<StrictMock<MBackend>> mbackend{make_shared<StrictMock<MBackend>>()};
     vector<shared_ptr<Backend>>      mbackends{mbackend};
+    vector<hipMemoryType>            unsupported_memory_types;
 
     HipFileIoParam()
     {
@@ -631,6 +633,9 @@ struct HipFileIoParam : public TestWithParam<IoType> {
             expect_buffer_registration(mhip, hipMemoryTypeDevice);
             Context<DriverState>::get()->registerBuffer(bufptr, buflen, 0);
         }
+
+        vector supported_memory_types = set_union(SupportedFastpathMemoryTypes, SupportedHostMemoryTypes);
+        unsupported_memory_types      = set_difference(KnownHipMemoryTypes, supported_memory_types);
     }
 };
 
@@ -643,7 +648,7 @@ TEST_P(HipFileIoParam, HipFileIoHandlesHipPointerGetAttributesError)
 
 TEST_P(HipFileIoParam, HipFileIoHandlesUnsupportedHipMemoryType)
 {
-    for (const auto memoryType : UnsupportedHipMemoryTypes) {
+    for (const auto memoryType : unsupported_memory_types) {
         StrictMock<MHip>      mhip;
         hipPointerAttribute_t attrs{};
         attrs.type = memoryType;
@@ -1006,10 +1011,12 @@ TEST_F(HipFileGetStatsL2, SizeHistogramsAreZeroFilled)
 struct HipFileGetStatsL3 : public HipFileUnopened {
     Stats                    stats{};
     StrictMock<MStatsServer> mstats{};
+    StrictMock<MHip>         mhip{};
 
     void SetUp() override
     {
         EXPECT_CALL(mstats, getStats).WillRepeatedly(testing::Return(&stats));
+        EXPECT_CALL(mhip, hipDeviceGetUuid).WillRepeatedly(testing::Return(hipUUID{}));
         stats.setLevel(StatsLevel::Basic);
     }
 };
@@ -1087,6 +1094,33 @@ TEST_F(HipFileGetStatsL3, FastpathMapsToNvfsAndFallbackMapsToPosix)
     EXPECT_EQ(out.per_gpu_stats[0].n_nvfs_reads, 3u);
     EXPECT_EQ(out.per_gpu_stats[0].n_posix_reads, 7u);
     EXPECT_EQ(out.per_gpu_stats[0].n_total_reads, 10u);
+}
+
+TEST_F(HipFileGetStatsL3, PerGpuUuidPopulated)
+{
+    hipUUID uuid{};
+    for (int i{}; i < HIPFILE_GPU_UUID_LEN; ++i) {
+        uuid.bytes[i] = static_cast<char>(i + 1);
+    }
+    EXPECT_CALL(mhip, hipDeviceGetUuid(2)).WillOnce(testing::Return(uuid));
+
+    stats.getPerGpuStats(2, StatsBackend::Fastpath)->inUse = 1;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    EXPECT_EQ(std::memcmp(out.per_gpu_stats[2].uuid, uuid.bytes, HIPFILE_GPU_UUID_LEN), 0);
+}
+
+TEST_F(HipFileGetStatsL3, PerGpuUuidZeroFilledOnHipError)
+{
+    EXPECT_CALL(mhip, hipDeviceGetUuid(0)).WillOnce(testing::Throw(Hip::RuntimeError{hipErrorInvalidDevice}));
+
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->inUse = 1;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    const char zero[HIPFILE_GPU_UUID_LEN]{};
+    EXPECT_EQ(std::memcmp(out.per_gpu_stats[0].uuid, zero, HIPFILE_GPU_UUID_LEN), 0);
 }
 
 TEST_F(HipFileGetStatsL3, PerGpuUnalignedCountsPopulated)

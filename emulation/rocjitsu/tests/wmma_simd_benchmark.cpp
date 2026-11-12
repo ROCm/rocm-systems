@@ -4,18 +4,20 @@
 /// @file wmma_simd_benchmark.cpp
 /// @brief A/B microbenchmark: SIMD vs forced-scalar execution of the shared
 /// WMMA/SWMMAC execute kernels (exec_wmma_f32 / exec_wmma_i32 / exec_wmma_f16 /
-/// exec_swmmac_*), covering the gfx1250 (RDNA4, wave32) matrix shapes that route
+/// exec_swmmac_*), covering the gfx1250 (CDNA5, wave32) matrix shapes that route
 /// through them.
 ///
 /// Both modes run in the same process; util::set_force_scalar_for_testing flips
 /// the kernel between its dense native-width matmul (SIMD) and the per-output
-/// scalar triple-loop. The benchmark drives the execute kernels directly (no
-/// decode) so it isolates the matmul body, then reports ns/op and speedup and
-/// checks SIMD-vs-scalar agreement:
+/// scalar triple-loop. Most cases drive the execute kernels directly to isolate
+/// the matmul body; the mixed BF16/F32 target also measures dispatch through a
+/// pre-decoded instruction. The benchmark reports ns/op and speedup and checks
+/// SIMD-vs-scalar agreement:
 ///   - i32 output: integer MAC is exact, bit-identical.
-///   - f32/f16/bf16 output: SIMD uses fused FMA (matching the hardware) while the
-///     scalar reference is non-fused, so results agree to a small tolerance.
+///   - most f32/f16/bf16 output paths retain a fused-vs-nonfused tolerance;
+///   - mixed BF16/F32 uses fused scalar and SIMD paths and compares raw output.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/code/rj_code.h"
@@ -42,6 +44,7 @@
 #include <cstdio>
 #include <functional>
 #include <random>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -84,7 +87,9 @@ struct BenchFixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_wmma_simd", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_wmma_simd", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
     if (wf)
       vbase = wf->vgpr_alloc().base;
@@ -195,7 +200,7 @@ void compare(const char *label, Cmp cmp, const std::vector<uint32_t> &sc,
   }
 }
 
-// Drive one WMMA kernel A/B: run scalar then SIMD, compare dst, then time both.
+// Drive one WMMA kernel A/B: compare dst, then time balanced scalar/SIMD blocks.
 void bench(const char *label, BenchFixture &fx, const std::function<void()> &run, double macs,
            Cmp cmp, uint32_t out_regs = OUT_REGS) {
   ASSERT_NE(fx.cu, nullptr);
@@ -209,20 +214,25 @@ void bench(const char *label, BenchFixture &fx, const std::function<void()> &run
   auto result_simd = fx.snapshot_out(out_regs);
   compare(label, cmp, result_scalar, result_simd);
 
-  auto time_mode = [&](bool force_scalar) -> double {
+  auto time_block = [&](bool force_scalar, int iterations) -> Clock::duration::rep {
     util::set_force_scalar_for_testing(force_scalar);
-    for (int i = 0; i < 50; ++i)
+    for (int i = 0; i < 25; ++i)
       run();
     auto t0 = Clock::now();
-    for (int i = 0; i < ITERATIONS; ++i)
+    for (int i = 0; i < iterations; ++i)
       run();
     auto t1 = Clock::now();
     util::set_force_scalar_for_testing(false);
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() /
-           static_cast<double>(ITERATIONS);
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
   };
-  double sc = time_mode(true);
-  double sd = time_mode(false);
+  const int first_iterations = ITERATIONS / 2;
+  const int second_iterations = ITERATIONS - first_iterations;
+  const auto sc_first = time_block(true, first_iterations);
+  const auto sd_first = time_block(false, first_iterations);
+  const auto sd_second = time_block(false, second_iterations);
+  const auto sc_second = time_block(true, second_iterations);
+  const double sc = static_cast<double>(sc_first + sc_second) / ITERATIONS;
+  const double sd = static_cast<double>(sd_first + sd_second) / ITERATIONS;
   std::printf("\n  === %s (gfx1250, wave32) ===\n"
               "  MACs/op: %.0f   scalar: %9.1f ns   simd: %9.1f ns   speedup: %5.2fx\n",
               label, macs, sc, sd, (sd > 0) ? sc / sd : 0.0);
@@ -236,13 +246,14 @@ void bench(const char *label, BenchFixture &fx, const std::function<void()> &run
 TEST(WmmaSimdBenchmark, F32_16x16x16_f16) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 16, bits = 16;
   fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(1));
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(2));
   auto run = [&] {
-    amdgpu::exec_wmma_f32(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
-                          amdgpu::extract_f16, /*const_acc=*/0);
+    amdgpu::exec_wmma_f32<M, N, K>(*fx.cu, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                   fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
+                                   amdgpu::extract_f16, /*const_acc=*/0);
   };
   bench("v_wmma_f32_16x16x16_f16", fx, run, double(M) * N * K, Cmp::F32Tol);
 }
@@ -251,13 +262,14 @@ TEST(WmmaSimdBenchmark, F32_16x16x16_f16) {
 TEST(WmmaSimdBenchmark, F16_16x16x16_f16) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 16, bits = 16;
   fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(3));
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(4));
   auto run = [&] {
-    amdgpu::exec_wmma_f16(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
-                          amdgpu::extract_f16, /*const_acc=*/0);
+    amdgpu::exec_wmma_f16<M, N, K>(*fx.cu, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                   fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
+                                   amdgpu::extract_f16, /*const_acc=*/0);
   };
   bench("v_wmma_f16_16x16x16_f16", fx, run, double(M) * N * K, Cmp::F16Tol);
 }
@@ -266,13 +278,14 @@ TEST(WmmaSimdBenchmark, F16_16x16x16_f16) {
 TEST(WmmaSimdBenchmark, Bf16_16x16x16_bf16) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 16, bits = 16;
   fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(5));
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(6));
   auto run = [&] {
-    amdgpu::exec_wmma_bf16(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                           fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_bf16,
-                           amdgpu::extract_bf16, /*const_acc=*/0);
+    amdgpu::exec_wmma_bf16<M, N, K>(*fx.cu, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                    fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_bf16,
+                                    amdgpu::extract_bf16, /*const_acc=*/0);
   };
   bench("v_wmma_bf16_16x16x16_bf16", fx, run, double(M) * N * K, Cmp::Bf16Tol);
 }
@@ -281,12 +294,13 @@ TEST(WmmaSimdBenchmark, Bf16_16x16x16_bf16) {
 TEST(WmmaSimdBenchmark, I32_16x16x16_i8) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 16;
   fx.seed_i8(S0_OFF, 16, mma_test::SmallI8Gen(7));
   fx.seed_i8(S1_OFF, 16, mma_test::SmallI8Gen(8));
   auto run = [&] {
-    amdgpu::exec_wmma_i32_i8(*fx.cu, M, N, K, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                             fx.vbase + S1_OFF, fx.vbase + S2_OFF, /*const_acc=*/0);
+    amdgpu::exec_wmma_i32_i8<M, N, K>(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                      fx.vbase + S1_OFF, fx.vbase + S2_OFF, /*const_acc=*/0);
   };
   bench("v_wmma_i32_16x16x16_i8", fx, run, double(M) * N * K, Cmp::IntExact);
 }
@@ -295,15 +309,16 @@ TEST(WmmaSimdBenchmark, I32_16x16x16_i8) {
 TEST(WmmaSimdBenchmark, SwmmacF32_16x16x32_f16) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 32, bits = 16;
   fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(9));
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(10));
   fx.seed_words(INDEX_OFF, 2, 0xE4E4E4E4u); // arbitrary but valid 2-bit index set
   auto run = [&] {
-    amdgpu::exec_swmmac_f32(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                            fx.vbase + S1_OFF, fx.vbase + S2_OFF, fx.vbase + INDEX_OFF,
-                            INDEX_ENTRIES, INDEX_KEY, amdgpu::extract_f16, amdgpu::extract_f16,
-                            /*const_acc=*/0);
+    amdgpu::exec_swmmac_f32<M, N, K>(
+        *fx.cu, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF, fx.vbase + S1_OFF, fx.vbase + S2_OFF,
+        fx.vbase + INDEX_OFF, INDEX_ENTRIES, INDEX_KEY, amdgpu::extract_f16, amdgpu::extract_f16,
+        /*const_acc=*/0);
   };
   bench("v_swmmac_f32_16x16x32_f16", fx, run, double(M) * N * (K / 2), Cmp::F32Tol);
 }
@@ -312,14 +327,15 @@ TEST(WmmaSimdBenchmark, SwmmacF32_16x16x32_f16) {
 TEST(WmmaSimdBenchmark, SwmmacI32_16x16x32_i8) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 32;
   fx.seed_i8(S0_OFF, 16, mma_test::SmallI8Gen(11));
   fx.seed_i8(S1_OFF, 16, mma_test::SmallI8Gen(12));
   fx.seed_words(INDEX_OFF, 2, 0xE4E4E4E4u);
   auto run = [&] {
-    amdgpu::exec_swmmac_i32_i8(*fx.cu, M, N, K, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                               fx.vbase + S1_OFF, fx.vbase + S2_OFF, fx.vbase + INDEX_OFF,
-                               INDEX_ENTRIES, INDEX_KEY, /*const_acc=*/0);
+    amdgpu::exec_swmmac_i32_i8<M, N, K>(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                        fx.vbase + S1_OFF, fx.vbase + S2_OFF, fx.vbase + INDEX_OFF,
+                                        INDEX_ENTRIES, INDEX_KEY, /*const_acc=*/0);
   };
   bench("v_swmmac_i32_16x16x32_i8", fx, run, double(M) * N * (K / 2), Cmp::IntExact);
 }
@@ -328,13 +344,14 @@ TEST(WmmaSimdBenchmark, SwmmacI32_16x16x32_i8) {
 TEST(WmmaSimdBenchmark, F32_16x16x32_f16) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 32, bits = 16;
   fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(13));
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(14));
   auto run = [&] {
-    amdgpu::exec_wmma_f32(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
-                          amdgpu::extract_f16, /*const_acc=*/0);
+    amdgpu::exec_wmma_f32<M, N, K>(*fx.cu, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                   fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
+                                   amdgpu::extract_f16, /*const_acc=*/0);
   };
   bench("v_wmma_f32_16x16x32_f16", fx, run, double(M) * N * K, Cmp::F32Tol);
 }
@@ -343,6 +360,7 @@ TEST(WmmaSimdBenchmark, F32_16x16x32_f16) {
 TEST(WmmaSimdBenchmark, F32_16x16x32_f16_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 32, bits = 16;
   fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(13));
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(14));
@@ -357,6 +375,7 @@ TEST(WmmaSimdBenchmark, F32_16x16x32_f16_Specialized) {
 TEST(WmmaSimdBenchmark, F32_16x16x4_f32_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 4, bits = 32;
   fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(41));
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(42));
@@ -373,13 +392,14 @@ TEST(WmmaSimdBenchmark, F32_16x16x4_f32_Specialized) {
 TEST(WmmaSimdBenchmark, F32_16x16x32_bf16) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 32, bits = 16;
   fx.seed_bf16(S0_OFF, 16, mma_test::SmallGen(61));
   fx.seed_bf16(S1_OFF, 16, mma_test::SmallGen(62));
   auto run = [&] {
-    amdgpu::exec_wmma_f32(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_bf16,
-                          amdgpu::extract_bf16, /*const_acc=*/0);
+    amdgpu::exec_wmma_f32<M, N, K>(*fx.cu, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                   fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_bf16,
+                                   amdgpu::extract_bf16, /*const_acc=*/0);
   };
   bench("v_wmma_f32_16x16x32_bf16", fx, run, double(M) * N * K, Cmp::F32Tol);
 }
@@ -387,6 +407,7 @@ TEST(WmmaSimdBenchmark, F32_16x16x32_bf16) {
 TEST(WmmaSimdBenchmark, F32_16x16x32_bf16_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 32;
   fx.seed_bf16(S0_OFF, 16, mma_test::SmallGen(61));
   fx.seed_bf16(S1_OFF, 16, mma_test::SmallGen(62));
@@ -401,6 +422,7 @@ TEST(WmmaSimdBenchmark, F32_16x16x32_bf16_Specialized) {
 TEST(WmmaSimdBenchmark, Bf16_16x16x32_bf16_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 32;
   fx.seed_bf16(S0_OFF, 16, mma_test::SmallGen(63));
   fx.seed_bf16(S1_OFF, 16, mma_test::SmallGen(64));
@@ -411,18 +433,72 @@ TEST(WmmaSimdBenchmark, Bf16_16x16x32_bf16_Specialized) {
   bench("v_wmma_bf16_16x16x32_bf16 [specialized]", fx, run, double(M) * N * K, Cmp::Bf16Tol);
 }
 
+// Dense WMMA, f32 accumulator and packed bf16 output.  Keep the eight-register
+// f32 accumulator separate from the four-register destination so repeated
+// iterations do not reinterpret a prior packed result as the next accumulator.
+TEST(WmmaSimdBenchmark, Bf16F32_16x16x32_bf16) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+  BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  constexpr uint32_t M = 16, N = 16, K = 32;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(65));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(66));
+  fx.seed(INDEX_OFF, 8, /*bit_width=*/32, mma_test::SmallGen(67));
+  auto run = [&] {
+    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                            fx.vbase + S1_OFF, fx.vbase + INDEX_OFF,
+                                            amdgpu::ACC_FROM_VGPR, /*c_modifier=*/0);
+  };
+  bench("v_wmma_bf16f32_16x16x32_bf16", fx, run, double(M) * N * K, Cmp::IntExact, /*out_regs=*/4);
+}
+
+// Full decoded/executed path for the same mixed-width instruction.  Decode is
+// intentionally outside the timed loop; dispatch and architectural register
+// routing remain inside it.
+TEST(WmmaSimdBenchmark, DecodedBf16F32_16x16x32_bf16) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+  BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  constexpr uint32_t M = 16, N = 16, K = 32;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(68));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(69));
+  fx.seed(INDEX_OFF, 8, /*bit_width=*/32, mma_test::SmallGen(70));
+
+  const auto words = cdna5::build_vop3p(
+      cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p,
+      {.vdst = S2_OFF, .src0 = 256 + S0_OFF, .src1 = 256 + S1_OFF, .src2 = 256 + INDEX_OFF});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_wmma_bf16f32_16x16x32_bf16");
+  ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+  bool execution_failed = false;
+  auto run = [&] {
+    execution_failed |= !fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded();
+  };
+  bench("decoded v_wmma_bf16f32_16x16x32_bf16", fx, run, double(M) * N * K, Cmp::IntExact,
+        /*out_regs=*/4);
+  ASSERT_FALSE(execution_failed);
+}
+
 // Dense WMMA, i32 output, iu8 input, K=64 — the real gfx1250 integer shape,
 // generic baseline vs specialized (constexpr + i8 bulk sign-extend convert).
 TEST(WmmaSimdBenchmark, I32_16x16x64_iu8) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 64;
   fx.seed_i8(S0_OFF, 16, mma_test::SmallI8Gen(71));
   fx.seed_i8(S1_OFF, 16, mma_test::SmallI8Gen(72));
   auto run = [&] {
-    amdgpu::exec_wmma_i32(*fx.cu, M, N, K, 8, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_i8,
-                          amdgpu::extract_u8, /*clamp=*/false, /*const_acc=*/0);
+    amdgpu::exec_wmma_i32<M, N, K>(*fx.cu, 8, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                   fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_i8,
+                                   amdgpu::extract_u8, /*clamp=*/false, /*const_acc=*/0);
   };
   bench("v_wmma_i32_16x16x64_iu8", fx, run, double(M) * N * K, Cmp::IntExact);
 }
@@ -430,6 +506,7 @@ TEST(WmmaSimdBenchmark, I32_16x16x64_iu8) {
 TEST(WmmaSimdBenchmark, I32_16x16x64_iu8_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 64;
   fx.seed_i8(S0_OFF, 16, mma_test::SmallI8Gen(71));
   fx.seed_i8(S1_OFF, 16, mma_test::SmallI8Gen(72));
@@ -446,13 +523,14 @@ TEST(WmmaSimdBenchmark, I32_16x16x64_iu8_Specialized) {
 TEST(WmmaSimdBenchmark, F32_16x16x64_fp8) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 64;
   fx.seed_f8(S0_OFF, 16, mma_test::SmallGen(81));
   fx.seed_f8(S1_OFF, 16, mma_test::SmallGen(82));
   auto run = [&] {
-    amdgpu::exec_wmma_f32(*fx.cu, M, N, K, 8, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_fp8,
-                          amdgpu::extract_fp8, /*const_acc=*/0);
+    amdgpu::exec_wmma_f32<M, N, K>(*fx.cu, 8, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                   fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_fp8,
+                                   amdgpu::extract_fp8, /*const_acc=*/0);
   };
   bench("v_wmma_f32_16x16x64_fp8_fp8", fx, run, double(M) * N * K, Cmp::F32Tol);
 }
@@ -460,6 +538,7 @@ TEST(WmmaSimdBenchmark, F32_16x16x64_fp8) {
 TEST(WmmaSimdBenchmark, F32_16x16x64_fp8_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 64;
   fx.seed_f8(S0_OFF, 16, mma_test::SmallGen(81));
   fx.seed_f8(S1_OFF, 16, mma_test::SmallGen(82));
@@ -474,6 +553,7 @@ TEST(WmmaSimdBenchmark, F32_16x16x64_fp8_Specialized) {
 TEST(WmmaSimdBenchmark, DecodedScaleF32_16x16x128_fp4) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 128;
   const uint32_t fp4_one = util::f32_to_fp4_e2m1_rne(1.0f);
   const uint32_t packed_fp4_one = fp4_one * 0x11111111u;
@@ -501,6 +581,7 @@ TEST(WmmaSimdBenchmark, DecodedScaleF32_16x16x128_fp4) {
 TEST(WmmaSimdBenchmark, DecodedScaleF32_32x16x128_fp4) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 32, N = 16, K = 128;
   constexpr uint32_t kM32OutRegs = 16;
   const uint32_t fp4_one = util::f32_to_fp4_e2m1_rne(1.0f);
@@ -531,6 +612,7 @@ TEST(WmmaSimdBenchmark, DecodedScaleF32_32x16x128_fp4) {
 TEST(WmmaSimdBenchmark, F32_16x16x128_bf8_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 128;
   fx.seed_f8(S0_OFF, 16, mma_test::SmallGen(83));
   fx.seed_f8(S1_OFF, 16, mma_test::SmallGen(84));
@@ -546,6 +628,7 @@ TEST(WmmaSimdBenchmark, F32_16x16x128_bf8_Specialized) {
 TEST(WmmaSimdBenchmark, F16_16x16x64_fp8_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 64;
   fx.seed_f8(S0_OFF, 16, mma_test::SmallGen(85));
   fx.seed_f8(S1_OFF, 16, mma_test::SmallGen(86));
@@ -561,6 +644,7 @@ TEST(WmmaSimdBenchmark, F16_16x16x64_fp8_Specialized) {
 TEST(WmmaSimdBenchmark, F16_16x16x32_f16_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 32, bits = 16;
   fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(51));
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(52));

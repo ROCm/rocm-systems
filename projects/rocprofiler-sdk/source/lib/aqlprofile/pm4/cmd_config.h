@@ -38,6 +38,7 @@ public:
     counters_vector()
     : Parent()
     , attr_(0)
+    , original_event_count_(0)
     {}
 
     void push_back(const counter_des_t& des)
@@ -47,9 +48,15 @@ public:
     }
 
     uint32_t get_attr() const { return attr_; }
+    void     set_original_event_count(size_t count) { original_event_count_ = count; }
+    size_t   get_original_event_count() const
+    {
+        return original_event_count_ ? original_event_count_ : this->size();
+    }
 
 private:
     uint32_t attr_;
+    size_t   original_event_count_;
 };
 
 }  // namespace pm4_builder

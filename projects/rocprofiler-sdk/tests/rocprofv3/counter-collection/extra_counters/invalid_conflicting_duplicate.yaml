@@ -1,0 +1,9 @@
+rocprofiler-sdk:
+  counters:
+  - name: GRBM_GUI_ACTIVE
+    description: The GUI is Active
+    definitions:
+    - architectures:
+      - gfx942
+      block: GRBM
+      event: 3

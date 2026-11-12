@@ -89,17 +89,38 @@ prove layers 3 and 7 are done.
 
 # Tests
 
-| Suite | Path | Runner |
-|-------|------|--------|
-| C++ GTest | `tests/amd_smi_test/` | `build/tests/amd_smi_test/amdsmitst` |
-| Python unit | `tests/python_unittest/unit_tests.py` | `python3` |
-| Python integration | `tests/python_unittest/integration_test.py` | `python3` |
-| Python CLI | `tests/python_unittest/cli_unit_test.py` | `python3` |
-| Python perf | `tests/python_unittest/perf_tests.py` | `python3` |
-| ABI checks | `tests/abi_check/` | CI workflow |
-| API summary | `tests/api_summary.py` | `python3` |
+Full map: [tests/README.md](../../tests/README.md). Design rationale:
+[docs/conceptual/test-design.md](../../docs/conceptual/test-design.md).
+Python runner details: [tests/python/README.md](../../tests/python/README.md).
 
-All tests require GPU hardware. Python tests need `AMDSMI_PATH=/opt/rocm/share/amd_smi`.
+| Suite | Path | Runner | Hardware |
+|-------|------|--------|----------|
+| C++ GTest | `tests/amd_smi_test/{unit,functional}/` | `build/tests/amd_smi_test/amdsmitst` | `functional/` only |
+| Python unit | `tests/python/unit/` | `tests/python/unit_tests.py` | No |
+| Python functional | `tests/python/functional/` | `tests/python/integration_test.py` | Yes |
+| Python CLI | `tests/python/cli/` | `tests/python/cli_unit_test.py` | Yes (installed `amd-smi`) |
+| Packaging guards | `tests/python/test_*_guard.py`, `test_packaging_scriptlets.py`, `test_abi_compat.py` | `python3` (stdlib only) | No |
+| Package-manager harnesses | `tests/run_amdsmi_*.py` | `sudo python3` | No |
+| Build driver | `tests/amdsmi_build/` | `sudo python3 tests/amdsmi_build/run_amdsmi_build.py` | No |
+| ABI checks | `tests/abi_check/` | `abi_check.py` (CI workflow) | No |
+| DME integration | `tests/dme_integration/` | `PYTHONPATH=tests python3 -m dme_integration` | No |
+| API summary | `tests/api_summary.py` | `python3` | No |
+
+The three Python runners require root and resolve the `amdsmi` package via
+`AMDSMI_PATH` → `ROCM_HOME` → `ROCM_PATH` → `/opt/rocm`. Each discovers only its
+own subtree. Leaf `test_*.py` files have no `sys.path` bootstrap and are not
+directly runnable, so always go through a runner with `-k`. Shared flags:
+`-v -q -b -k PAT -x PAT -l`.
+
+C++ suite names are the selection mechanism: `<Component><Type>[<Operation>]`,
+e.g. `GpuUnit`, `GpuFunctionalReadOnly`, `GpuFunctionalReadWrite`. Per-ASIC
+exclusions come from `amdsmitst.exclude` + `detect_asic_filter.sh`.
+
+Install remaps `tests/python/` → `<share>/amd_smi/tests/python_unittest/`, so the
+historical installed path still works.
+
+Pre-commit gates: `tests/amd_smi_test/check_test_conventions.py` (layout/naming),
+`tests/check_license_headers.py`.
 
 # Build & Packaging
 

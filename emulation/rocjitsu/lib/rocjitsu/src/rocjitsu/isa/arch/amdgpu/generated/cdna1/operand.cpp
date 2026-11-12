@@ -8,7 +8,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include <format>
 #include <optional>
-#include <stdexcept>
 #include <string>
 
 namespace rocjitsu {
@@ -26,11 +25,16 @@ std::string reg_name(const char *prefix, int reg_num, int size_bits) {
 
 Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
     : IsaOperand<Isa>(size_bits, opr_type, encoding_value),
-      execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())) {
+      execution_backend_(
+          static_cast<const ExecutionBackend *>(detail::current_isa_operand_backend_inline())) {
   switch (opr_type) {
   case OperandType::OPR_ACCVGPR:
     if (!((encoding_value >= 768 && encoding_value <= 1023)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN &&
+        encoding_value <= OpSelAccvgpr::OPR_ACCVGPR_ACC_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN + 256);
+    }
     break;
   case OperandType::OPR_ATTR:
     if (!((encoding_value >= 0 && encoding_value <= 32)))
@@ -79,6 +83,23 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 235 && encoding_value <= 248) ||
           (encoding_value >= 251 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelSrc::OPR_SRC_VGPR_MIN &&
+        encoding_value <= OpSelSrc::OPR_SRC_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelSrc::OPR_SRC_VGPR_MIN + 0);
+    }
+    break;
+  case OperandType::OPR_SRC_ACCVGPR:
+    if (encoding_value >= OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN &&
+        encoding_value <= OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN + 256);
+    }
+    break;
+  case OperandType::OPR_SRC_ACCVGPR_OR_CONST:
+    if (encoding_value >= OpSelSrcAccvgprOrConst::OPR_SRC_ACCVGPR_OR_CONST_ACC_MIN &&
+        encoding_value <= OpSelSrcAccvgprOrConst::OPR_SRC_ACCVGPR_OR_CONST_ACC_MAX) {
+      initialize_vgpr_reference(encoding_value -
+                                OpSelSrcAccvgprOrConst::OPR_SRC_ACCVGPR_OR_CONST_ACC_MIN + 256);
+    }
     break;
   case OperandType::OPR_SRC_NOLDS:
     if (!((encoding_value >= 0 && encoding_value <= 124) ||
@@ -87,6 +108,10 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 251 && encoding_value <= 253) ||
           (encoding_value >= 255 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MIN &&
+        encoding_value <= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MIN + 0);
+    }
     break;
   case OperandType::OPR_SRC_NOLIT:
     if (!((encoding_value >= 0 && encoding_value <= 124) ||
@@ -95,6 +120,10 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 251 && encoding_value <= 254) ||
           (encoding_value >= 256 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelSrcNolit::OPR_SRC_NOLIT_VGPR_MIN &&
+        encoding_value <= OpSelSrcNolit::OPR_SRC_NOLIT_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelSrcNolit::OPR_SRC_NOLIT_VGPR_MIN + 0);
+    }
     break;
   case OperandType::OPR_SRC_SIMPLE:
     if (!((encoding_value >= 0 && encoding_value <= 124) ||
@@ -103,10 +132,30 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
           (encoding_value >= 251 && encoding_value <= 253) ||
           (encoding_value >= 256 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&
+        encoding_value <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN + 0);
+    }
     break;
   case OperandType::OPR_SRC_VGPR:
     if (!((encoding_value >= 256 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidVgprSourceSelector);
+    if (encoding_value >= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN &&
+        encoding_value <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN + 0);
+    }
+    break;
+  case OperandType::OPR_SRC_VGPR_OR_ACCVGPR:
+    if (encoding_value >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN &&
+        encoding_value <= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value -
+                                OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN + 0);
+    }
+    if (encoding_value >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN &&
+        encoding_value <= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MAX) {
+      initialize_vgpr_reference(encoding_value -
+                                OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN + 256);
+    }
     break;
   case OperandType::OPR_SREG:
     if (!((encoding_value >= 0 && encoding_value <= 123)))
@@ -154,11 +203,19 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
   case OperandType::OPR_VGPR:
     if (!((encoding_value >= 0 && encoding_value <= 255)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelVgpr::OPR_VGPR_VGPR_MIN &&
+        encoding_value <= OpSelVgpr::OPR_VGPR_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelVgpr::OPR_VGPR_VGPR_MIN + 0);
+    }
     break;
   case OperandType::OPR_VGPR_OR_LDS:
     if (!((encoding_value >= 254 && encoding_value <= 254) ||
           (encoding_value >= 256 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelVgprOrLds::OPR_VGPR_OR_LDS_VGPR_MIN &&
+        encoding_value <= OpSelVgprOrLds::OPR_VGPR_OR_LDS_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelVgprOrLds::OPR_VGPR_OR_LDS_VGPR_MIN + 0);
+    }
     break;
   default:
     break;
@@ -175,7 +232,8 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
 
 Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64)
     : IsaOperand<Isa>(size_bits, opr_type, static_cast<int>(literal64_value)),
-      execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
+      execution_backend_(
+          static_cast<const ExecutionBackend *>(detail::current_isa_operand_backend_inline())),
       literal64_value_(literal64_value), has_literal64_(is_literal64) {
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
@@ -332,31 +390,31 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSdst::OPR_SDST_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSdst::OPR_SDST_XNACK_MASK_LO)
-      return "xnack_mask_lo";
+      return size_bits_ == 64 ? "xnack_mask" : "xnack_mask_lo";
     if (encoding_value_ == OpSelSdst::OPR_SDST_XNACK_MASK_HI)
       return "xnack_mask_hi";
     if (encoding_value_ == OpSelSdst::OPR_SDST_FLAT_SCRATCH_LO)
-      return "flat_scratch_lo";
+      return size_bits_ == 64 ? "flat_scratch" : "flat_scratch_lo";
     if (encoding_value_ == OpSelSdst::OPR_SDST_FLAT_SCRATCH_HI)
       return "flat_scratch_hi";
     if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN &&
         encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX)
       return reg_name("ttmp", encoding_value_ - OpSelSdst::OPR_SDST_TTMP_MIN, size_bits_);
     if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_LO)
-      return "vcc_lo";
+      return size_bits_ == 64 ? "vcc" : "vcc_lo";
     if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_HI)
       return "vcc_hi";
     if (encoding_value_ == OpSelSdst::OPR_SDST_M0)
       return "m0";
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
-      return "exec_lo";
+      return size_bits_ == 64 ? "exec" : "exec_lo";
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
       return "exec_hi";
     break;
   }
   case OperandType::OPR_SDST_EXEC: {
     if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO)
-      return "exec_lo";
+      return size_bits_ == 64 ? "exec" : "exec_lo";
     if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
       return "exec_hi";
     break;
@@ -371,11 +429,11 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_XNACK_MASK_LO)
-      return "xnack_mask_lo";
+      return size_bits_ == 64 ? "xnack_mask" : "xnack_mask_lo";
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_XNACK_MASK_HI)
       return "xnack_mask_hi";
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_FLAT_SCRATCH_LO)
-      return "flat_scratch_lo";
+      return size_bits_ == 64 ? "flat_scratch" : "flat_scratch_lo";
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_FLAT_SCRATCH_HI)
       return "flat_scratch_hi";
     if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
@@ -383,7 +441,7 @@ std::string Operand::name() const {
       return reg_name("ttmp", encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN,
                       size_bits_);
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_LO)
-      return "vcc_lo";
+      return size_bits_ == 64 ? "vcc" : "vcc_lo";
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_HI)
       return "vcc_hi";
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_M0)
@@ -395,24 +453,24 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSrc::OPR_SRC_XNACK_MASK_LO)
-      return "xnack_mask_lo";
+      return size_bits_ == 64 ? "xnack_mask" : "xnack_mask_lo";
     if (encoding_value_ == OpSelSrc::OPR_SRC_XNACK_MASK_HI)
       return "xnack_mask_hi";
     if (encoding_value_ == OpSelSrc::OPR_SRC_FLAT_SCRATCH_LO)
-      return "flat_scratch_lo";
+      return size_bits_ == 64 ? "flat_scratch" : "flat_scratch_lo";
     if (encoding_value_ == OpSelSrc::OPR_SRC_FLAT_SCRATCH_HI)
       return "flat_scratch_hi";
     if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN &&
         encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX)
       return reg_name("ttmp", encoding_value_ - OpSelSrc::OPR_SRC_TTMP_MIN, size_bits_);
     if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_LO)
-      return "vcc_lo";
+      return size_bits_ == 64 ? "vcc" : "vcc_lo";
     if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_HI)
       return "vcc_hi";
     if (encoding_value_ == OpSelSrc::OPR_SRC_M0)
       return "m0";
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
-      return "exec_lo";
+      return size_bits_ == 64 ? "exec" : "exec_lo";
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI)
       return "exec_hi";
     if (encoding_value_ >= OpSelSrc::OPR_SRC_POS_INT_MIN &&
@@ -510,24 +568,24 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSrcNolds::OPR_SRC_NOLDS_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSrcNolds::OPR_SRC_NOLDS_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_XNACK_MASK_LO)
-      return "xnack_mask_lo";
+      return size_bits_ == 64 ? "xnack_mask" : "xnack_mask_lo";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_XNACK_MASK_HI)
       return "xnack_mask_hi";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_FLAT_SCRATCH_LO)
-      return "flat_scratch_lo";
+      return size_bits_ == 64 ? "flat_scratch" : "flat_scratch_lo";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_FLAT_SCRATCH_HI)
       return "flat_scratch_hi";
     if (encoding_value_ >= OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MIN &&
         encoding_value_ <= OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MAX)
       return reg_name("ttmp", encoding_value_ - OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MIN, size_bits_);
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_VCC_LO)
-      return "vcc_lo";
+      return size_bits_ == 64 ? "vcc" : "vcc_lo";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_VCC_HI)
       return "vcc_hi";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_M0)
       return "m0";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_EXEC_LO)
-      return "exec_lo";
+      return size_bits_ == 64 ? "exec" : "exec_lo";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_EXEC_HI)
       return "exec_hi";
     if (encoding_value_ >= OpSelSrcNolds::OPR_SRC_NOLDS_POS_INT_MIN &&
@@ -582,24 +640,24 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSrcNolit::OPR_SRC_NOLIT_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSrcNolit::OPR_SRC_NOLIT_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_XNACK_MASK_LO)
-      return "xnack_mask_lo";
+      return size_bits_ == 64 ? "xnack_mask" : "xnack_mask_lo";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_XNACK_MASK_HI)
       return "xnack_mask_hi";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_FLAT_SCRATCH_LO)
-      return "flat_scratch_lo";
+      return size_bits_ == 64 ? "flat_scratch" : "flat_scratch_lo";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_FLAT_SCRATCH_HI)
       return "flat_scratch_hi";
     if (encoding_value_ >= OpSelSrcNolit::OPR_SRC_NOLIT_TTMP_MIN &&
         encoding_value_ <= OpSelSrcNolit::OPR_SRC_NOLIT_TTMP_MAX)
       return reg_name("ttmp", encoding_value_ - OpSelSrcNolit::OPR_SRC_NOLIT_TTMP_MIN, size_bits_);
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_VCC_LO)
-      return "vcc_lo";
+      return size_bits_ == 64 ? "vcc" : "vcc_lo";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_VCC_HI)
       return "vcc_hi";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_M0)
       return "m0";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_EXEC_LO)
-      return "exec_lo";
+      return size_bits_ == 64 ? "exec" : "exec_lo";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_EXEC_HI)
       return "exec_hi";
     if (encoding_value_ >= OpSelSrcNolit::OPR_SRC_NOLIT_POS_INT_MIN &&
@@ -654,11 +712,11 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_XNACK_MASK_LO)
-      return "xnack_mask_lo";
+      return size_bits_ == 64 ? "xnack_mask" : "xnack_mask_lo";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_XNACK_MASK_HI)
       return "xnack_mask_hi";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_FLAT_SCRATCH_LO)
-      return "flat_scratch_lo";
+      return size_bits_ == 64 ? "flat_scratch" : "flat_scratch_lo";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_FLAT_SCRATCH_HI)
       return "flat_scratch_hi";
     if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MIN &&
@@ -666,13 +724,13 @@ std::string Operand::name() const {
       return reg_name("ttmp", encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MIN,
                       size_bits_);
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_VCC_LO)
-      return "vcc_lo";
+      return size_bits_ == 64 ? "vcc" : "vcc_lo";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_VCC_HI)
       return "vcc_hi";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_M0)
       return "m0";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_LO)
-      return "exec_lo";
+      return size_bits_ == 64 ? "exec" : "exec_lo";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_HI)
       return "exec_hi";
     if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN &&
@@ -744,18 +802,18 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSreg::OPR_SREG_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSreg::OPR_SREG_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSreg::OPR_SREG_XNACK_MASK_LO)
-      return "xnack_mask_lo";
+      return size_bits_ == 64 ? "xnack_mask" : "xnack_mask_lo";
     if (encoding_value_ == OpSelSreg::OPR_SREG_XNACK_MASK_HI)
       return "xnack_mask_hi";
     if (encoding_value_ == OpSelSreg::OPR_SREG_FLAT_SCRATCH_LO)
-      return "flat_scratch_lo";
+      return size_bits_ == 64 ? "flat_scratch" : "flat_scratch_lo";
     if (encoding_value_ == OpSelSreg::OPR_SREG_FLAT_SCRATCH_HI)
       return "flat_scratch_hi";
     if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN &&
         encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX)
       return reg_name("ttmp", encoding_value_ - OpSelSreg::OPR_SREG_TTMP_MIN, size_bits_);
     if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_LO)
-      return "vcc_lo";
+      return size_bits_ == 64 ? "vcc" : "vcc_lo";
     if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_HI)
       return "vcc_hi";
     break;
@@ -765,11 +823,11 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSregNovcc::OPR_SREG_NOVCC_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSregNovcc::OPR_SREG_NOVCC_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_XNACK_MASK_LO)
-      return "xnack_mask_lo";
+      return size_bits_ == 64 ? "xnack_mask" : "xnack_mask_lo";
     if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_XNACK_MASK_HI)
       return "xnack_mask_hi";
     if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_FLAT_SCRATCH_LO)
-      return "flat_scratch_lo";
+      return size_bits_ == 64 ? "flat_scratch" : "flat_scratch_lo";
     if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_FLAT_SCRATCH_HI)
       return "flat_scratch_hi";
     if (encoding_value_ >= OpSelSregNovcc::OPR_SREG_NOVCC_TTMP_MIN &&
@@ -783,24 +841,24 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_XNACK_MASK_LO)
-      return "xnack_mask_lo";
+      return size_bits_ == 64 ? "xnack_mask" : "xnack_mask_lo";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_XNACK_MASK_HI)
       return "xnack_mask_hi";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLAT_SCRATCH_LO)
-      return "flat_scratch_lo";
+      return size_bits_ == 64 ? "flat_scratch" : "flat_scratch_lo";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLAT_SCRATCH_HI)
       return "flat_scratch_hi";
     if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
         encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX)
       return reg_name("ttmp", encoding_value_ - OpSelSsrc::OPR_SSRC_TTMP_MIN, size_bits_);
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_LO)
-      return "vcc_lo";
+      return size_bits_ == 64 ? "vcc" : "vcc_lo";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_HI)
       return "vcc_hi";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_M0)
       return "m0";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
-      return "exec_lo";
+      return size_bits_ == 64 ? "exec" : "exec_lo";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI)
       return "exec_hi";
     if (encoding_value_ >= OpSelSsrc::OPR_SSRC_POS_INT_MIN &&
@@ -855,11 +913,11 @@ std::string Operand::name() const {
       return reg_name("s", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN,
                       size_bits_);
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_XNACK_MASK_LO)
-      return "xnack_mask_lo";
+      return size_bits_ == 64 ? "xnack_mask" : "xnack_mask_lo";
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_XNACK_MASK_HI)
       return "xnack_mask_hi";
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_FLAT_SCRATCH_LO)
-      return "flat_scratch_lo";
+      return size_bits_ == 64 ? "flat_scratch" : "flat_scratch_lo";
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_FLAT_SCRATCH_HI)
       return "flat_scratch_hi";
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
@@ -867,7 +925,7 @@ std::string Operand::name() const {
       return reg_name("ttmp", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN,
                       size_bits_);
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_LO)
-      return "vcc_lo";
+      return size_bits_ == 64 ? "vcc" : "vcc_lo";
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_HI)
       return "vcc_hi";
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_M0)
@@ -882,11 +940,11 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSsrcNolit::OPR_SSRC_NOLIT_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSsrcNolit::OPR_SSRC_NOLIT_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_XNACK_MASK_LO)
-      return "xnack_mask_lo";
+      return size_bits_ == 64 ? "xnack_mask" : "xnack_mask_lo";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_XNACK_MASK_HI)
       return "xnack_mask_hi";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_FLAT_SCRATCH_LO)
-      return "flat_scratch_lo";
+      return size_bits_ == 64 ? "flat_scratch" : "flat_scratch_lo";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_FLAT_SCRATCH_HI)
       return "flat_scratch_hi";
     if (encoding_value_ >= OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP_MIN &&
@@ -894,13 +952,13 @@ std::string Operand::name() const {
       return reg_name("ttmp", encoding_value_ - OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP_MIN,
                       size_bits_);
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_VCC_LO)
-      return "vcc_lo";
+      return size_bits_ == 64 ? "vcc" : "vcc_lo";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_VCC_HI)
       return "vcc_hi";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_M0)
       return "m0";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_EXEC_LO)
-      return "exec_lo";
+      return size_bits_ == 64 ? "exec" : "exec_lo";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_EXEC_HI)
       return "exec_hi";
     if (encoding_value_ >= OpSelSsrcNolit::OPR_SSRC_NOLIT_POS_INT_MIN &&
@@ -1442,6 +1500,42 @@ std::optional<RegClass> Operand::to_special_reg_class() const {
   return std::nullopt;
 }
 
+bool Operand::has_register_selector() const {
+  switch (opr_type_) {
+  case OperandType::OPR_SDST:
+    return !fieldless_;
+  case OperandType::OPR_SMEM_OFFSET:
+    return !fieldless_;
+  case OperandType::OPR_SRC:
+    return !fieldless_;
+  case OperandType::OPR_SRC_NOLDS:
+    return !fieldless_;
+  case OperandType::OPR_SRC_NOLIT:
+    return !fieldless_;
+  case OperandType::OPR_SRC_SIMPLE:
+    return !fieldless_;
+  case OperandType::OPR_SREG:
+    return !fieldless_;
+  case OperandType::OPR_SREG_NOVCC:
+    return !fieldless_;
+  case OperandType::OPR_SSRC:
+    return !fieldless_;
+  case OperandType::OPR_SSRC_LANESEL:
+    return !fieldless_;
+  case OperandType::OPR_SSRC_NOLIT:
+    return !fieldless_;
+  default:
+    return false;
+  }
+}
+
+bool Operand::execution_backend_available() const {
+  // Captured tables are the immutable full table or null; no
+  // independently populated/partial tables are supported.
+  return execution_backend_ != nullptr &&
+         (!delegate() || delegate()->execution_backend_available());
+}
+
 bool Operand::simd_capable() const {
   decltype(ExecutionBackend::simd_capable) callback =
       execution_backend_ ? execution_backend_->simd_capable : nullptr;
@@ -1452,8 +1546,10 @@ void Operand::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, u
                               uint32_t *out) const {
   decltype(ExecutionBackend::read_lane_chunk) callback =
       execution_backend_ ? execution_backend_->read_lane_chunk : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return;
+  }
   (this->*callback)(wf, lane_base, count, out);
 }
 
@@ -1461,72 +1557,90 @@ void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32
                                const uint32_t *vals, uint64_t mask) const {
   decltype(ExecutionBackend::write_lane_chunk) callback =
       execution_backend_ ? execution_backend_->write_lane_chunk : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return;
+  }
   (this->*callback)(wf, lane_base, count, vals, mask);
 }
 
 uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::read_scalar) callback =
       execution_backend_ ? execution_backend_->read_scalar : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return 0;
+  }
   return (this->*callback)(wf);
 }
 
 uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
   decltype(ExecutionBackend::read_lane) callback =
       execution_backend_ ? execution_backend_->read_lane : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return 0;
+  }
   return (this->*callback)(wf, lane);
 }
 
 void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
   decltype(ExecutionBackend::write_scalar) callback =
       execution_backend_ ? execution_backend_->write_scalar : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return;
+  }
   (this->*callback)(wf, val);
 }
 
 void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
   decltype(ExecutionBackend::write_lane) callback =
       execution_backend_ ? execution_backend_->write_lane : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return;
+  }
   (this->*callback)(wf, lane, val);
 }
 
 uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {
   decltype(ExecutionBackend::read_lane64) callback =
       execution_backend_ ? execution_backend_->read_lane64 : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return 0;
+  }
   return (this->*callback)(wf, lane);
 }
 
 void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {
   decltype(ExecutionBackend::write_lane64) callback =
       execution_backend_ ? execution_backend_->write_lane64 : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return;
+  }
   (this->*callback)(wf, lane, val);
 }
 
 uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::read_scalar64) callback =
       execution_backend_ ? execution_backend_->read_scalar64 : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return 0;
+  }
   return (this->*callback)(wf);
 }
 
 void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {
   decltype(ExecutionBackend::write_scalar64) callback =
       execution_backend_ ? execution_backend_->write_scalar64 : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return;
+  }
   (this->*callback)(wf, val);
 }
 

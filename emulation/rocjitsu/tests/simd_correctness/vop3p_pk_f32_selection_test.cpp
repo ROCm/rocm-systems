@@ -4,9 +4,11 @@
 /// @file vop3p_pk_f32_selection_test.cpp
 /// @brief Compare packed FP32 ADD/MUL/FMA source selection and floating-point
 /// policies between scalar and SIMD execution on CDNA2 through CDNA5.
-/// Only FMA NaN sign/payload selection may differ; both results must be quiet NaNs.
+/// NaN selection and quieting must also agree with the architectural policy.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "util/host_target.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -30,7 +32,7 @@
 #include <memory>
 #include <tuple>
 
-#if defined(__x86_64__) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
 #include <xmmintrin.h>
 #endif
 
@@ -62,7 +64,7 @@ struct Machine {
   amdgpu::L2Cache cache{"packed_f32_selection_cache"};
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::unique_ptr<Decoder> decoder;
-  amdgpu::Wavefront *wave;
+  amdgpu::Wavefront *wave = nullptr;
 
   explicit Machine(rj_code_arch_t arch) {
     amdgpu::ComputeUnitCore::Config config{};
@@ -72,11 +74,16 @@ struct Machine {
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
     cache.set_backing_memory(&memory);
-    cu = amdgpu::ComputeUnitCore::create("packed_f32_selection", config, &memory, &cache);
+    rocjitsu::test::initialize_compute_unit(cu, "packed_f32_selection", config, &memory, &cache);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256);
   }
-  ~Machine() { wave->halt(); }
+  ~Machine() {
+    if (wave)
+      wave->halt();
+  }
 
   using Result = std::array<std::array<uint32_t, 2>, 64>;
   Result run(Instruction &inst, bool scalar, uint32_t mode, uint64_t exec, uint32_t dst) {
@@ -184,14 +191,11 @@ protected:
     const auto simd = machine.run(*inst, false, mode, exec, dst);
     for (uint32_t lane = 0; lane < machine.wave->wf_size(); ++lane) {
       for (uint32_t half = 0; half < 2; ++half) {
-        // As in the existing FMA SIMD contract, NaN payload choice can differ.
-        // Both paths must produce a quiet NaN; non-NaN results must agree exactly.
+        ASSERT_EQ(simd[lane][half], scalar[lane][half]) << "lane=" << lane << " half=" << half;
+        // CDNA2-4 can preserve signaling NaNs with IEEE mode disabled.
         if ((exec & (uint64_t{1} << lane)) && operation == 2 && is_nan(scalar[lane][half]) &&
-            is_nan(simd[lane][half])) {
+            (arch == ROCJITSU_CODE_ARCH_CDNA5 || (mode & 0x200u))) {
           EXPECT_NE(scalar[lane][half] & 0x00400000, 0u);
-          EXPECT_NE(simd[lane][half] & 0x00400000, 0u);
-        } else {
-          ASSERT_EQ(simd[lane][half], scalar[lane][half]) << "lane=" << lane << " half=" << half;
         }
         if (dst == 6 && !(exec & (uint64_t{1} << lane))) {
           ASSERT_EQ(simd[lane][half], kSentinel);
@@ -204,6 +208,7 @@ protected:
 TEST_P(PackedF32Selection, AllSelectionsPreservePolicies) {
   HostState saved;
   Machine machine(std::get<0>(GetParam()));
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const unsigned selections = std::get<1>(GetParam()) == 2 ? 8 : 4;
   for (uint8_t lo = 0; lo < selections; ++lo)
     for (uint8_t hi = 0; hi < selections; ++hi)
@@ -211,13 +216,15 @@ TEST_P(PackedF32Selection, AllSelectionsPreservePolicies) {
         for (uint32_t denorm = 0; denorm < 4; ++denorm)
           for (uint8_t clamp : {0, 1})
             for (uint32_t dx10_clamp : {0u, 0x100u})
-              compare(machine, lo, hi, 5, 2, 0xc0 | round | (denorm << 4) | dx10_clamp, clamp, 6,
-                      SourceKind::Vgpr, 0xd6a53cf0a5c3697bULL);
+              for (uint32_t ieee : {0u, 0x200u})
+                compare(machine, lo, hi, 5, 2, 0xc0 | round | (denorm << 4) | dx10_clamp | ieee,
+                        clamp, 6, SourceKind::Vgpr, 0xd6a53cf0a5c3697bULL);
 }
 
 TEST_P(PackedF32Selection, ScalarSourcesAliasingAndEmptyExec) {
   HostState saved;
   Machine machine(std::get<0>(GetParam()));
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   // Only CDNA5 admits a literal source in this packed-F32 encoding.
   for (SourceKind source :
        {SourceKind::Vgpr, SourceKind::Sgpr, SourceKind::InlineFloat, SourceKind::Literal}) {
@@ -234,11 +241,12 @@ TEST_P(PackedF32Selection, ScalarSourcesAliasingAndEmptyExec) {
 TEST_P(PackedF32Selection, RestoresHostEnvironment) {
   HostState saved;
   Machine machine(std::get<0>(GetParam()));
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (int rounding : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
     ASSERT_EQ(std::fesetround(rounding), 0);
     std::feclearexcept(FE_ALL_EXCEPT);
     std::feraiseexcept(FE_DIVBYZERO);
-#if defined(__x86_64__) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     _mm_setcsr(_mm_getcsr() | (1u << 6) | (1u << 15));
     const uint32_t mxcsr = _mm_getcsr();
 #endif
@@ -246,7 +254,7 @@ TEST_P(PackedF32Selection, RestoresHostEnvironment) {
     compare(machine, 0, 2, 0, 0, 0xf1, 0, 6, SourceKind::Vgpr, ~uint64_t{0});
     EXPECT_EQ(std::fegetround(), rounding);
     EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), exceptions);
-#if defined(__x86_64__) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     EXPECT_EQ(_mm_getcsr(), mxcsr);
 #endif
   }

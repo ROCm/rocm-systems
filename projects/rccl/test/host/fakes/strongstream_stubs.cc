@@ -20,6 +20,11 @@
 #include "strongstream.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_cudaGetCapturingGraph, ncclCudaGetCapturingGraph);
+ASSERT_HOOK_MATCHES_PROD(g_ncclStreamAdvanceToEvent, ncclStreamAdvanceToEvent);
+ASSERT_HOOK_MATCHES_PROD(g_ncclStreamAdvanceToStream, ncclStreamAdvanceToStream);
+ASSERT_HOOK_MATCHES_PROD(g_ncclStrongStreamAcquiredWorkStream, ncclStrongStreamAcquiredWorkStream);
+ASSERT_HOOK_MATCHES_PROD(g_ncclCudaGraphRecordEvent, ncclCudaGraphRecordEvent);
+ASSERT_HOOK_MATCHES_PROD(g_cudaGraphAddDestructor, ncclCudaGraphAddDestructor);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclCudaContext;
@@ -33,15 +38,46 @@ std::function<ncclResult_t(struct ncclCudaGraph*, hipStream_t, int)> g_cudaGetCa
 ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph* graph, hipStream_t stream, int graphUsageMode) {
   return g_cudaGetCapturingGraph(graph, stream, graphUsageMode);
 }
-ncclResult_t ncclCudaGraphAddDestructor(struct ncclCudaGraph, hipHostFn_t, void*) {
+static ncclResult_t DefaultCudaGraphAddDestructor(struct ncclCudaGraph, hipHostFn_t, void*) {
   FailLoudUnfaked("strongstream_stubs", "ncclCudaGraphAddDestructor");
 }
-ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph, hipStream_t, hipEvent_t) {
+std::function<ncclResult_t(struct ncclCudaGraph, hipHostFn_t, void*)> g_cudaGraphAddDestructor =
+    DefaultCudaGraphAddDestructor;
+ncclResult_t ncclCudaGraphAddDestructor(struct ncclCudaGraph graph, hipHostFn_t fn, void* arg) {
+  return g_cudaGraphAddDestructor(graph, fn, arg);
+}
+static ncclResult_t DefaultStreamAdvanceToEvent(struct ncclCudaGraph, hipStream_t, hipEvent_t) {
   FailLoudUnfaked("strongstream_stubs", "ncclStreamAdvanceToEvent");
 }
-ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph, struct ncclStrongStream*,
-                                                bool, hipStream_t*) {
+std::function<ncclResult_t(struct ncclCudaGraph, hipStream_t, hipEvent_t)> g_ncclStreamAdvanceToEvent =
+    DefaultStreamAdvanceToEvent;
+ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph graph, hipStream_t stream, hipEvent_t event) {
+  return g_ncclStreamAdvanceToEvent(graph, stream, event);
+}
+static ncclResult_t DefaultCudaGraphRecordEvent(struct ncclCudaGraph, hipEvent_t, hipStream_t) {
+  FailLoudUnfaked("strongstream_stubs", "ncclCudaGraphRecordEvent");
+}
+std::function<ncclResult_t(struct ncclCudaGraph, hipEvent_t, hipStream_t)> g_ncclCudaGraphRecordEvent =
+    DefaultCudaGraphRecordEvent;
+ncclResult_t ncclCudaGraphRecordEvent(struct ncclCudaGraph graph, hipEvent_t event, hipStream_t stream) {
+  return g_ncclCudaGraphRecordEvent(graph, event, stream);
+}
+static ncclResult_t DefaultStrongStreamAcquiredWorkStream(struct ncclCudaGraph, struct ncclStrongStream*, bool,
+                                                          hipStream_t*) {
   FailLoudUnfaked("strongstream_stubs", "ncclStrongStreamAcquiredWorkStream");
+}
+std::function<ncclResult_t(struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t*)>
+    g_ncclStrongStreamAcquiredWorkStream = DefaultStrongStreamAcquiredWorkStream;
+ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph graph, struct ncclStrongStream* ss,
+                                                bool concurrent, hipStream_t* workStream) {
+  return g_ncclStrongStreamAcquiredWorkStream(graph, ss, concurrent, workStream);
+}
+static ncclResult_t DefaultStreamAdvanceToStream(hipStream_t, hipStream_t) {
+  FailLoudUnfaked("strongstream_stubs", "ncclStreamAdvanceToStream");
+}
+std::function<ncclResult_t(hipStream_t, hipStream_t)> g_ncclStreamAdvanceToStream = DefaultStreamAdvanceToStream;
+ncclResult_t ncclStreamAdvanceToStream(hipStream_t s, hipStream_t source) {
+  return g_ncclStreamAdvanceToStream(s, source);
 }
 // Benign teardown: commFree reaches this on a happy-path destroy.
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream*) { return ncclSuccess; }
@@ -61,6 +97,11 @@ ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out, int, uint64_t) {
 
 void ResetStrongStreamStubs() {
   g_cudaGetCapturingGraph = DefaultCudaGetCapturingGraph;
+  g_ncclStreamAdvanceToEvent = DefaultStreamAdvanceToEvent;
+  g_ncclStreamAdvanceToStream = DefaultStreamAdvanceToStream;
+  g_ncclStrongStreamAcquiredWorkStream = DefaultStrongStreamAcquiredWorkStream;
+  g_ncclCudaGraphRecordEvent = DefaultCudaGraphRecordEvent;
+  g_cudaGraphAddDestructor = DefaultCudaGraphAddDestructor;
   g_ncclStrongStreamResult = ncclSuccess;
   g_ncclCudaContextTrackResult = ncclSuccess;
   g_ncclCudaContextTrackCalls = 0;

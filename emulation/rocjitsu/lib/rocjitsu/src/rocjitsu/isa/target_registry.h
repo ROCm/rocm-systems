@@ -23,9 +23,14 @@ class Decoder;
 /// @brief Immutable semantic capabilities of one concrete GPU target.
 ///
 /// Capability bits are defined by the ISA family that consumes them. They
-/// describe instruction/encoding legality, rather than naming a GPU revision.
+/// describe instruction/encoding legality and target-specific semantics rather
+/// than asking consumers to name a GPU revision.
 struct IsaTargetCapabilities {
   uint64_t instruction_features = 0;
+  /// Whether S_SETREG writes to MODE have the VGPR-MSB clobber and
+  /// S_SETREG_IMM32_B32(MODE) has the adjacency hazard that require the
+  /// target-specific software fixup.
+  bool setreg_vgpr_msb_fixup = false;
   /// Whether the selected provider implements execution for this target.
   bool execution_implemented = false;
 };

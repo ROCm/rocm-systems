@@ -32,6 +32,7 @@ public:
   struct Config {
     uint32_t num_compute_units;           ///< Number of CUs in this SE.
     ComputeUnitCore::Config compute_unit; ///< Configuration applied to each CU.
+    uint32_t cus_per_shader_array = 0;    ///< Shader-array width; zero means unknown.
   };
 
   /// @brief Construct a shader engine from configuration.
@@ -41,6 +42,7 @@ public:
   /// @param memory Shared GPU memory (not owned).
   /// @param l2 Shared L2 cache (owned by the XCD).
   /// @param exec_mode Execution mode for CU creation.
+  /// @throws util::ConfigError if CU configuration or execution mode is rejected.
   ShaderEngine(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
                L2Cache *l2, simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL);
 

@@ -58,9 +58,10 @@
 // Step Ids of the Api tables exported by Hsa Core Runtime
 #define HSA_API_TABLE_STEP_VERSION                  0x01
 #define HSA_CORE_API_TABLE_STEP_VERSION             0x00
-#define HSA_AMD_EXT_API_TABLE_STEP_VERSION          0x13
+#define HSA_AMD_EXT_API_TABLE_STEP_VERSION          0x17
 #define HSA_FINALIZER_API_TABLE_STEP_VERSION        0x00
-#define HSA_IMAGE_API_TABLE_STEP_VERSION            0x01
+// 0x02 - added hsa_ext_sampler_create_v3 (anisotropic filtering) to ImageExtTable
+#define HSA_IMAGE_API_TABLE_STEP_VERSION            0x02
 // Rocprofiler just checks HSA_MAGE_EXT_API_TABLE_STEP_VERSION
 #define HSA_IMAGE_EXT_API_TABLE_STEP_VERSION        HSA_IMAGE_API_TABLE_STEP_VERSION
 #define HSA_AQLPROFILE_API_TABLE_STEP_VERSION       0x00

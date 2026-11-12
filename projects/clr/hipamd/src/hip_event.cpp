@@ -111,6 +111,7 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
     // Events are the same, which indicates the stream is empty and likely
     // eventRecord is called on another stream. For such cases insert and measure a marker.
     auto* command = new amd::Marker(*event_->command().queue(), kMarkerDisableFlush);
+    command->EnableTiming();
     command->enqueue();
     command->awaitCompletion();
     ms = static_cast<float>(static_cast<int64_t>(command->event().profilingInfo().end_) -
@@ -205,13 +206,13 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
     return amd::Device::kCacheStateInvalid;
   }();
 
-  constexpr bool kMarkerTs = true;
+  constexpr bool kSignalRequired = true;
   constexpr bool kFlushCache = false;
 
   // Check hipEventDisableTiming flag to skip profiling/timing infrastructure
   const bool enable_profiling = !(flags & hipEventDisableTiming);
 
-  auto* marker = new hip::EventMarker(*stream, kFlushCache, kMarkerTs, releaseFlags,
+  auto* marker = new hip::EventMarker(*stream, kFlushCache, kSignalRequired, releaseFlags,
                                       batch_flush, enable_profiling);
 
   // Only timing-disabled events opt into coalescing: a non-null coalesceEvent()
@@ -513,9 +514,10 @@ static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
     return hipSuccess;
   }
   // Case 1: Event was recorded during an active stream capture and is part of an active capture.
+  // The whole sequence is invalidated, not just the stream the query names.
   auto* s = reinterpret_cast<hip::Stream*>(hip_stream);
   if (s->GetCaptureStatus() == hipStreamCaptureStatusActive && s->IsEventCaptured(event)) {
-    s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    s->InvalidateCapture();
     return hipErrorCapturedEvent;
   }
   // Case 2: The event was recorded on a stream that is neither actively capturing nor part of an
@@ -531,7 +533,7 @@ static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
     amd::ScopedLock lock(g_captureStreamsLock);
     if (!g_captureStreams.empty()) {
       for (auto stream : g_captureStreams) {
-        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+        stream->InvalidateCapture();
       }
       return hipErrorStreamCaptureUnsupported;
     }
@@ -540,7 +542,7 @@ static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
   // Block if calling thread itself is capturing (both GLOBAL and THREAD_LOCAL)
   if (!hip::tls.capture_streams_.empty()) {
     for (auto stream : hip::tls.capture_streams_) {
-      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      stream->InvalidateCapture();
     }
     return hipErrorStreamCaptureUnsupported;
   }

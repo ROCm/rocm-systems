@@ -73,99 +73,101 @@ struct cache_policy
         {
             const auto freq_name =
                 fmt::format("{} [{}] Core [{}]", freq_base, socket_id, cpu_id);
-            registry.add_pmc_info(
-                { /* type             = */ agent_type::cpu,
-                  /* agent_type_index = */ socket_id,
-                  /* target_arch      = */ target_arch,
-                  /* event_code       = */ event_code,
-                  /* instance_id      = */ instance_id,
-                  /* name             = */ freq_name,
-                  /* symbol           = */ freq_name,
-                  /* description      = */ "CPU Core Frequency",
-                  /* long_description = */ long_description,
-                  /* component        = */ component,
-                  /* units            = */ "MHz",
-                  /* value_type       = */ rocprofsys::trace_cache::ABSOLUTE,
-                  /* block            = */ block,
-                  /* expression       = */ expression,
-                  /* is_constant      = */ is_constant,
-                  /* is_derived       = */ is_derived,
-                  /* extdata          = */ extdata });
-            registry.add_track({ freq_name, std::nullopt, extdata });
+            registry.add_pmc_info({ .type             = agent_type::cpu,
+                                    .agent_type_index = socket_id,
+                                    .target_arch      = target_arch,
+                                    .event_code       = event_code,
+                                    .instance_id      = instance_id,
+                                    .name             = freq_name,
+                                    .symbol           = freq_name,
+                                    .description      = "CPU Core Frequency",
+                                    .long_description = long_description,
+                                    .component        = component,
+                                    .units            = "MHz",
+                                    .value_type  = rocprofsys::trace_cache::k_absolute,
+                                    .block       = block,
+                                    .expression  = expression,
+                                    .is_constant = is_constant,
+                                    .is_derived  = is_derived,
+                                    .extdata     = extdata });
+            registry.ensure_track(freq_name, std::nullopt, extdata);
 
             const auto load_name =
                 fmt::format("{} [{}] Core [{}]", load_base, socket_id, cpu_id);
-            registry.add_pmc_info(
-                { /* type             = */ agent_type::cpu,
-                  /* agent_type_index = */ socket_id,
-                  /* target_arch      = */ target_arch,
-                  /* event_code       = */ event_code,
-                  /* instance_id      = */ instance_id,
-                  /* name             = */ load_name,
-                  /* symbol           = */ load_name,
-                  /* description      = */ "CPU Core Load Percentage",
-                  /* long_description = */ long_description,
-                  /* component        = */ component,
-                  /* units            = */ trace_cache::PERCENTAGE,
-                  /* value_type       = */ rocprofsys::trace_cache::ABSOLUTE,
-                  /* block            = */ block,
-                  /* expression       = */ expression,
-                  /* is_constant      = */ is_constant,
-                  /* is_derived       = */ is_derived,
-                  /* extdata          = */ extdata });
-            registry.add_track({ load_name, std::nullopt, extdata });
+            registry.add_pmc_info({ .type             = agent_type::cpu,
+                                    .agent_type_index = socket_id,
+                                    .target_arch      = target_arch,
+                                    .event_code       = event_code,
+                                    .instance_id      = instance_id,
+                                    .name             = load_name,
+                                    .symbol           = load_name,
+                                    .description      = "CPU Core Load Percentage",
+                                    .long_description = long_description,
+                                    .component        = component,
+                                    .units            = trace_cache::k_percentage,
+                                    .value_type  = rocprofsys::trace_cache::k_absolute,
+                                    .block       = block,
+                                    .expression  = expression,
+                                    .is_constant = is_constant,
+                                    .is_derived  = is_derived,
+                                    .extdata     = extdata });
+            registry.ensure_track(load_name, std::nullopt, extdata);
         }
 
-        if(!is_first_socket) return;
+        if(!is_first_socket)
+        {
+            return;
+        }
 
-        auto add_process_pmc = [&, socket_id](const char* metric_name, const char* symbol,
-                                              const char* description, const char* units,
-                                              const char* value_type) {
-            registry.add_pmc_info({ /* type             = */ agent_type::cpu,
-                                    /* agent_type_index = */ socket_id,
-                                    /* target_arch      = */ target_arch,
-                                    /* event_code       = */ event_code,
-                                    /* instance_id      = */ instance_id,
-                                    /* name             = */ metric_name,
-                                    /* symbol           = */ symbol,
-                                    /* description      = */ description,
-                                    /* long_description = */ long_description,
-                                    /* component        = */ component,
-                                    /* units            = */ units,
-                                    /* value_type       = */ value_type,
-                                    /* block            = */ block,
-                                    /* expression       = */ expression,
-                                    /* is_constant      = */ is_constant,
-                                    /* is_derived       = */ is_derived,
-                                    /* extdata          = */ extdata });
-            registry.add_track({ metric_name, std::nullopt, extdata });
-        };
+        auto const add_process_pmc =
+            [&, socket_id](const char* metric_name, const char* symbol,
+                           const char* description, const char* units,
+                           const char* value_type) {
+                registry.add_pmc_info({ .type             = agent_type::cpu,
+                                        .agent_type_index = socket_id,
+                                        .target_arch      = target_arch,
+                                        .event_code       = event_code,
+                                        .instance_id      = instance_id,
+                                        .name             = metric_name,
+                                        .symbol           = symbol,
+                                        .description      = description,
+                                        .long_description = long_description,
+                                        .component        = component,
+                                        .units            = units,
+                                        .value_type       = value_type,
+                                        .block            = block,
+                                        .expression       = expression,
+                                        .is_constant      = is_constant,
+                                        .is_derived       = is_derived,
+                                        .extdata          = extdata });
+                registry.ensure_track(metric_name, std::nullopt, extdata);
+            };
 
         add_process_pmc(name<category::process_page>::value, "Page RSS",
                         "Process Physical Memory (RSS)", "MB",
-                        rocprofsys::trace_cache::ABSOLUTE);
+                        rocprofsys::trace_cache::k_absolute);
 
         add_process_pmc(name<category::process_virt>::value, "Virt Mem",
                         "Process Virtual Memory", "MB",
-                        rocprofsys::trace_cache::ABSOLUTE);
+                        rocprofsys::trace_cache::k_absolute);
 
         add_process_pmc(name<category::process_peak>::value, "Peak RSS",
                         "Process Peak Memory (HWM)", "MB",
-                        rocprofsys::trace_cache::ABSOLUTE);
+                        rocprofsys::trace_cache::k_absolute);
 
         add_process_pmc(name<category::process_context_switch>::value, "Ctx Switches",
-                        "Context Switches", "count", rocprofsys::trace_cache::ABSOLUTE);
+                        "Context Switches", "count", rocprofsys::trace_cache::k_absolute);
 
         add_process_pmc(name<category::process_page_fault>::value, "Page Faults",
-                        "Page Faults", "count", rocprofsys::trace_cache::ABSOLUTE);
+                        "Page Faults", "count", rocprofsys::trace_cache::k_absolute);
 
         add_process_pmc(name<category::process_user_mode_time>::value, "User Time",
                         "Process CPU Time in User Mode", "sec",
-                        rocprofsys::trace_cache::ABSOLUTE);
+                        rocprofsys::trace_cache::k_absolute);
 
         add_process_pmc(name<category::process_kernel_mode_time>::value, "Kernel Time",
                         "Process CPU Time in Kernel Mode", "sec",
-                        rocprofsys::trace_cache::ABSOLUTE);
+                        rocprofsys::trace_cache::k_absolute);
     }
 
     /**
@@ -231,7 +233,10 @@ private:
                 s_zero_entries.clear();
                 s_zero_entries.reserve(src.size());
                 for(const auto& cpu : src)
-                    s_zero_entries.push_back({ cpu.cpu_id, 0.0f, 0.0 });
+                {
+                    s_zero_entries.push_back(
+                        { .cpu_id = cpu.cpu_id, .frequency = 0.0f, .load = 0.0 });
+                }
             }
             return src;
         }

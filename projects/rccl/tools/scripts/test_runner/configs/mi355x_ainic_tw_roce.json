@@ -65,6 +65,56 @@
           "name": "A3_NetIB_SimpleSendRecv",
           "description": "Verifies basic send/recv over AINIC data path (no collectives).",
           "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "A17_NetIB_DefaultPluginIsIbCastOnAinic",
+          "description": "NCCL_NET is unset here, so this pins the AINIC default to IB-CAST.",
+          "test_filter": "NetIbMPITest.DefaultPluginIsIbCastOnAinic"
+        }
+      ]
+    },
+
+    "net_plugin_selection": {
+      "extends": "gtest_base",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "timeout": 60,
+      "description": "NCCL_NET name resolution. Pure logic, single rank, no NIC required.",
+      "tests": [
+        {
+          "name": "A18_NetPlugin_Selection",
+          "description": "NCCL_NET resolves case-insensitively, ROCM-IB selects the ib-cast plugin, unset follows the detected NIC, and unknown names resolve to nothing instead of falling back to plain IB.",
+          "test_filter": "NetPluginSelection.*"
+        }
+      ]
+    },
+
+    "netib_rocmib": {
+      "extends": "gtest_base",
+      "description": "netib_core re-run under the ROCM-IB alias, which forces AINIC mode and so makes libionic.so mandatory. AINIC-only by construction.",
+      "env_variables": {
+        "NCCL_NET": "ROCM-IB"
+      },
+      "tests": [
+        {
+          "name": "A19_NetIB_RocmIb_PluginMatchesNcclNetEnv",
+          "description": "ROCM-IB resolves to the ib-cast plugin in the fixture rather than silently falling back to plain IB.",
+          "test_filter": "NetIbMPITest.PluginMatchesNcclNetEnv"
+        },
+        {
+          "name": "A20_NetIB_RocmIb_InitializePlugin",
+          "description": "Plugin init under forced-AINIC mode, including the libionic.so load.",
+          "test_filter": "NetIbMPITest.InitializePlugin"
+        },
+        {
+          "name": "A21_NetIB_RocmIb_GetDeviceProperties",
+          "description": "IONIC devices visible and properties valid under the alias.",
+          "test_filter": "NetIbMPITest.GetDeviceProperties"
+        },
+        {
+          "name": "A22_NetIB_RocmIb_SimpleSendRecv",
+          "description": "Send/recv over the AINIC data path under the alias.",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
         }
       ]
     },
@@ -156,6 +206,25 @@
         }
       ]
     },
+    "resiliency_gid_change": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "description": "Port failover + recovery with a merged vNIC: GID refresh on the CAST and IB paths.",
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1",
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Resiliency_GidChangeRefresh",
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+          "test_filter": "Transport/NetIbGidChangeTest.*"
+        }
+      ]
+    },
     "a_netib_multithread": {
       "extends": "gtest_base",
       "timeout": 600,
@@ -196,6 +265,61 @@
           "name": "A17_NetIB_MultiThread_ProgressDoesNotSerialize",
           "description": "Gate: concurrent workers must progress at the same time. Catches a lock held across a progress call, which functional tests pass straight through.",
           "test_filter": "NetIbMPITest.ThreadedProgressDoesNotSerialize"
+        }
+      ]
+    },
+    "a_cast_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "description": "A18: four worker threads per rank on independent IB-CAST connections, so several WRR schedulers advance at once.",
+      "env_variables": {
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "A18_Cast_MultiThread_StressMultiRound",
+          "description": "Concurrent CAST connections, each auditing its own WRR token ledger.",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        }
+      ]
+    },
+    "a_fault_recovery_nightly": {
+      "extends": "cast_base",
+      "timeout": 900,
+      "command_args": "--net_ib_nthreads=2",
+      "env_variables": {
+        "RCCL_IB_FAULT_INJECTION": "0",
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1"
+      },
+      "description": "A20: open finding, nightly-only canary. Ten blocking messages on a recovered connection must not leave the ranks a message apart. It is omitted from label-gated PR smoke; a failure on the scheduled run is intentionally reported as a real nightly failure until the plugin issue is fixed.",
+      "tests": [
+        {
+          "name": "A20_Cast_PostRecoveryPingPongHoldsSync",
+          "description": "After recovery reports device 0 healthy, ten ping-pong messages must all arrive; the sender exhausting its FIFO-slot retries on message n+1 while the receiver waits for n is the finding.",
+          "test_filter": "NetIbMPITest.PostRecoveryPingPongHoldsSync"
+        }
+      ]
+    },
+    "a_fault_inject_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "RCCL_IB_FAULT_INJECTION": "0"
+      },
+      "description": "A19: fault isolation between workers. One worker breaks its own connection while the others must keep transferring cleanly. Fault injection stays off: the tests use the per-comm hooks, and the libibverbs shims add process-global mutex traffic to every poll_cq while their per-device registry lets one worker's clear disarm the others.",
+      "tests": [
+        {
+          "name": "A19_Cast_FaultIsolationAcrossWorkers",
+          "description": "One worker breaks its own connection while the others keep transferring: the bystanders' transfers must all verify while the fault is live",
+          "test_filter": "NetIbMPITest.FaultIsolationAcrossWorkers"
+        },
+        {
+          "name": "A19_Cast_FaultShimsAbsentUnlessRequested",
+          "description": "The libibverbs ops shims must not be installed while RCCL_IB_FAULT_INJECTION is off: their poll_cq serializes the whole process on one mutex.",
+          "test_filter": "NetIbMPITest.FaultInjectionShimsAbsentUnlessRequested"
         }
       ]
     },
@@ -292,6 +416,99 @@
       ]
     },
 
+    "gin_device_get_flush": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "description": "GIN device-side gin.get completed by gin.flush or gin.flushAsync + gin.wait must be visible in the same kernel. Require NCCL_NET=ib-cast.",
+      "env_variables": {
+        "NCCL_NET": "ib-cast",
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "A21_Gin_GetFlush_Visibility",
+          "description": "gin.flush makes prior gets visible in the same kernel (8 B - 4 MiB).",
+          "test_filter": "GinMPIDeviceTests.GetFlush_Visibility"
+        },
+        {
+          "name": "A22_Gin_GetFlushAsyncWait_Visibility",
+          "description": "gin.flushAsync + gin.wait makes prior gets visible in the same kernel.",
+          "test_filter": "GinMPIDeviceTests.GetFlushAsyncWait_Visibility"
+        },
+        {
+          "name": "A23_Gin_GetFlush_ConcurrentBlocks",
+          "description": "8 CTAs get + flush concurrently on one GIN context.",
+          "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks"
+        },
+        {
+          "name": "A24_Gin_PutBurst_LocalCounter",
+          "description": "256-put burst through the GIN proxy.",
+          "test_filter": "GinMPIDeviceTests.PutBurst_LocalCounter"
+        },
+        {
+          "name": "A25_Gin_PutBurst_LocalCounter_PollBatch1",
+          "description": "256-put burst through the GIN proxy, one GFD per peer per progress iteration.",
+          "test_filter": "GinMPIDeviceTests.PutBurst_LocalCounter",
+          "env_variables": {
+            "NCCL_GIN_PROXY_POLL_BATCH": "1"
+          }
+        }
+      ]
+    },
+
+    "cast_by_order_no_cts": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "description": "Software BY_ORDER receive matching with CTS offload forced off (the no-offload arm). QP scheduler off so TX fan-out stays at base nqps. QPS=4 / splitData=0 covers FIFO matching across QPs.",
+      "env_variables": {
+        "NCCL_NET": "ib-cast",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
+      },
+      "tests": [
+        {
+          "name": "A18_ByOrder_NoCts_SimpleSendRecv",
+          "description": "Basic send/recv on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultipleSizes",
+          "description": "Size ladder on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_LargeTransfer",
+          "description": "Large transfer on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.LargeTransfer"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultipleOutstanding",
+          "description": "Multiple in-flight send/recv on software BY_ORDER with CTS offload off.",
+          "test_filter": "NetIbMPITest.MultipleOutstandingSendRecv"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultiRecv",
+          "description": "irecv batching matched by posted WR identity (software BY_ORDER, no CTS offload).",
+          "test_filter": "NetIbMPITest.MultiRecv"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultiRecvShuffled",
+          "description": "Shuffled irecv slots: wr_id is the request index, not the CTS slot (software BY_ORDER, no CTS offload).",
+          "test_filter": "NetIbMPITest.MultiRecvShuffled"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_FlushAfterRecv",
+          "description": "GDR flush after recv hits the BY_ORDER IBV_WC_RDMA_READ completion arm (skipped if GDR unavailable).",
+          "test_filter": "NetIbMPITest.FlushAfterRecv"
+        }
+      ]
+    },
+
     "bootstrap_socket_poll": {
       "extends": "gtest_base",
       "binary": "rccl-UnitTestsFixturesDebug",
@@ -352,6 +569,262 @@
           "name": "A18_SubnetMatchesAny",
           "description": "subnetMatchesAny skips invalid/zero GIDs and matches against the remaining set.",
           "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
+        },
+        {
+          "name": "A18_SignalingRateTable",
+          "description": "ibvSpeeds[] maps every IB signaling rate, including FDR10, to its Mb/s value.",
+          "test_filter": "NetIbCastSpeed.SignalingRateTable"
+        }
+      ]
+    },
+
+    "host_api_rma_disable_intranode": {
+      "extends": "gtest_base",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "description": "NCCL_RMA_DISABLE=1 on a single node: both ranks are in the LSA team, so one-sided put/wait must still work over the copy engine. NCCL_PARAM is cached per process, so the flag has to come from the environment.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_RMA_DISABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "A21_HostApi_RmaDisableIntraNodePutUsesCe",
+          "description": "NCCL_RMA_DISABLE=1 leaves intra-node put/wait working and the data correct.",
+          "test_filter": "HostApiTest.RmaDisableIntraNodePutUsesCe"
+        }
+      ]
+    },
+
+    "host_api_rma_disable_proxy": {
+      "extends": "gtest_base",
+      "timeout": 180,
+      "description": "NCCL_RMA_DISABLE=1 across two nodes: the peer needs the RMA proxy, which the flag keeps down, so put and wait must fail with ncclInvalidUsage instead of hanging, on symmetric and non-symmetric windows.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_RMA_USE_DMABUF": "1",
+        "NCCL_RMA_DISABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "A22_HostApi_RmaDisableCrossNodePutFails_Sym",
+          "description": "Symmetric window: registration succeeds, cross-node put/wait return ncclInvalidUsage, and the communicator stays usable.",
+          "test_filter": "HostApiTest.RmaDisableCrossNodePutFails"
+        },
+        {
+          "name": "A22_HostApi_RmaDisableCrossNodePutFails_NonSym",
+          "description": "Non-symmetric window (NCCL_CUMEM_ENABLE=0): registration skips the proxy, cross-node put/wait return ncclInvalidUsage.",
+          "test_filter": "HostApiTest.RmaDisableCrossNodePutFails",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "0"
+          }
+        }
+      ]
+    },
+
+    "qpshare_base": {
+      "extends": "gtest_base",
+      "timeout": 600,
+      "description": "QP-sharing base (RCCL_IB_QP_SHARING_ENABLE master switch + RCCL_IB_COMM_NGROUPS). No tests here; children extend and set the tunables. NIC merging is turned off because the suite connects on device 0 and reasons about one physical IB device per rank. The CAST scheduler is deliberately left off: the QP-sharing tests skip themselves when RCCL_IB_QP_SCHED_ENABLE=1, so these configs extend gtest_base rather than cast_base. RCCL_IB_QP_SHARING_ENABLE, RCCL_IB_COMM_NGROUPS and RCCL_IB_QP_DEPTH_MULTIPLIER are all RCCL_PARAMs and are cached for the process lifetime, which is why each value is a separate config rather than a case inside one run. RCCL_IB_QP_SHARING_VALIDATE_POOL=1 runs IbCastValidateSharedQpPool each time the plugin's last finalize() drops netRefCount to 0 (every test's TearDown), so a leaked pool slot or commId is reported by the suite whose subject is pool bookkeeping; in a debug build its assert aborts the binary on the first leak.",
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "0",
+        "RCCL_IB_QP_SHARING_ENABLE": "1",
+        "RCCL_IB_QP_SHARING_VALIDATE_POOL": "1"
+      }
+    },
+
+    "qpshare_ngroups1": {
+      "extends": "qpshare_base",
+      "description": "A17: QP sharing at NGROUPS=1 — every connection is assigned to group 0, so the whole functional set runs on a single shared QP. RCCL_IB_QP_DEPTH_MULTIPLIER=8 scales the shared QP's CQ and work-queue sizing so the configuration is not close to the queue-depth limit at these connection counts.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "1",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "A17_QpShare_AlgoLayoutSweep",
+          "description": "Group-assignment layout, state only, no data phase. Opens connections one at a time up to min(2*NGROUPS+1, 64) and compares every live comm against the reference model (test/transport/NetIbMPI/QpShareRefModel.hpp) after each create — sharedGroupIdx, isSharedQpPrimary, refcount, cqRefcount, commId, and the cross-comm QP-identity relation — then tears down in creation order, releasing each group's PRIMARY while its SECONDARYs are live, re-checking after each destroy. Expectations are derived from RCCL_IB_COMM_NGROUPS rather than pinned to one value.",
+          "test_filter": "NetIbMPITest.QpShareAlgoLayoutSweep"
+        },
+        {
+          "name": "A17_QpShare_AlgoChurnLayout",
+          "description": "Group assignment under interleaved create/destroy with rotating non-tail victims, so a comm is released while it still has live neighbours in its group. Re-validates the full layout against the reference model after every operation, which is where a refcount that survives teardown or a pool slot that is freed but still counted becomes visible. Group spread is measured and reported, never asserted.",
+          "test_filter": "NetIbMPITest.QpShareAlgoChurnLayout"
+        },
+        {
+          "name": "A17_QpShare_DataAllConnsTransfer",
+          "description": "Data path at this (NGROUPS, DEPTH_MULTIPLIER) point: opens QPSHARE_TEST_NCONNS connections (default derived from NGROUPS) and moves data on every one of them across a payload sweep of 0, 1, 127, 128, 4095, 4096, 65535, 65536 and 1 MiB bytes, pattern-verified per connection.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        },
+        {
+          "name": "A17_QpShare_DataUnsharedGroups",
+          "description": "The unshared regime as an explicit case rather than a skip: the connection count is derived as min(NGROUPS, 8) so occupancy-modulo gives every comm a group of its own. Asserts each comm is a solo PRIMARY on a distinct physical QP and exercises the data path on each.",
+          "test_filter": "NetIbMPITest.QpShareDataUnsharedGroups"
+        },
+        {
+          "name": "A17_QpShare_DataFlushRouting",
+          "description": "GDR flush completion routing over a shared CQ. A flush QP is per-comm and is not itself shared, but its completion lands on the group's shared CQ. Locates a PRIMARY/SECONDARY pair from the reference model rather than hardcoded indices, posts iflush() on both, and waits the SECONDARY first so completions are exercised against commId routing rather than post order. An unshared comm supplies the baseline. Requires GDR-capable hardware and skips otherwise.",
+          "test_filter": "NetIbMPITest.QpShareDataFlushRouting"
+        }
+      ]
+    },
+
+    "qpshare_ngroups2": {
+      "extends": "qpshare_base",
+      "description": "A18: QP sharing at NGROUPS=2 — the smallest value that mixes a PRIMARY-only group with a PRIMARY+SECONDARY group, so group-index arithmetic has more than one possible answer. Same five functional tests as A17.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "2",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "A18_QpShare_AlgoLayoutSweep",
+          "description": "Group-assignment layout at NGROUPS=2, state only. See A17 for what the sweep checks; the connection count and every expectation are re-derived from NGROUPS.",
+          "test_filter": "NetIbMPITest.QpShareAlgoLayoutSweep"
+        },
+        {
+          "name": "A18_QpShare_AlgoChurnLayout",
+          "description": "Interleaved create/destroy with rotating non-tail victims at NGROUPS=2, layout re-validated against the reference model after every operation.",
+          "test_filter": "NetIbMPITest.QpShareAlgoChurnLayout"
+        },
+        {
+          "name": "A18_QpShare_DataAllConnsTransfer",
+          "description": "Payload sweep from 0 to 1 MiB on every connection at NGROUPS=2, pattern-verified per connection.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        },
+        {
+          "name": "A18_QpShare_DataUnsharedGroups",
+          "description": "Unshared regime at NGROUPS=2: two connections, one solo PRIMARY per group, each on its own physical QP.",
+          "test_filter": "NetIbMPITest.QpShareDataUnsharedGroups"
+        },
+        {
+          "name": "A18_QpShare_DataFlushRouting",
+          "description": "GDR flush completion routing over a shared CQ at NGROUPS=2, with an unshared comm as baseline. Skips on hardware without GDR.",
+          "test_filter": "NetIbMPITest.QpShareDataFlushRouting"
+        }
+      ]
+    },
+
+    "qpshare_ngroups16": {
+      "extends": "qpshare_base",
+      "description": "A19: QP sharing at NGROUPS=16 — the wide point. The connection counts the tests derive straddle the shared and unshared regimes within one run, and the layout sweep reaches 33 connections across 16 groups. Same five functional tests as A17.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "16",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "A19_QpShare_AlgoLayoutSweep",
+          "description": "Group-assignment layout across 16 groups, state only: 33 connections created and torn down one at a time, full layout re-checked after every operation.",
+          "test_filter": "NetIbMPITest.QpShareAlgoLayoutSweep"
+        },
+        {
+          "name": "A19_QpShare_AlgoChurnLayout",
+          "description": "Interleaved create/destroy with rotating non-tail victims across 16 groups — the widest point at which occupancy-modulo assignment is exercised against the reference model.",
+          "test_filter": "NetIbMPITest.QpShareAlgoChurnLayout"
+        },
+        {
+          "name": "A19_QpShare_DataAllConnsTransfer",
+          "description": "Payload sweep from 0 to 1 MiB on every connection at NGROUPS=16, pattern-verified per connection.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        },
+        {
+          "name": "A19_QpShare_DataUnsharedGroups",
+          "description": "Unshared regime at NGROUPS=16: the connection count is capped at 8, so every comm is a solo PRIMARY on its own physical QP.",
+          "test_filter": "NetIbMPITest.QpShareDataUnsharedGroups"
+        },
+        {
+          "name": "A19_QpShare_DataFlushRouting",
+          "description": "GDR flush completion routing over a shared CQ at NGROUPS=16, with an unshared comm as baseline. Skips on hardware without GDR.",
+          "test_filter": "NetIbMPITest.QpShareDataFlushRouting"
+        }
+      ]
+    },
+
+    "qpshare_depth_ceiling": {
+      "extends": "qpshare_base",
+      "timeout": 300,
+      "description": "A20: shared-QP depth-multiplier sizing. RCCL_IB_QP_DEPTH_MULTIPLIER scales the shared CQ, which is sized 3 x NET_IB_MAX_REQUESTS(256) x NCCL_IB_QPS_PER_CONNECTION x multiplier entries, so the multiplier and the QP count multiply into the same device limit and both are pinned here. 96 with QPS=1 requests a CQ far larger than the default and covers how the transport sizes that CQ against the device's queried max_cqe. QPSHARE_TEST_NCONNS=2 keeps the run to the sizing question rather than connection volume. The usable multiplier is hardware-dependent (a function of the device's max_cqe), so this value is a probe of the sizing path, not a portable constant.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "1",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "96",
+        "NCCL_IB_QPS_PER_CONNECTION": "1",
+        "QPSHARE_TEST_NCONNS": "2"
+      },
+      "tests": [
+        {
+          "name": "A20_QpShare_DataAllConnsTransfer_DepthCeiling",
+          "description": "Two connections in one group at a depth multiplier of 96, exercising shared-CQ sizing and the data path at that setting.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        }
+      ]
+    },
+
+    "qpshare_stress": {
+      "extends": "qpshare_base",
+      "timeout": 900,
+      "description": "A21: QP-sharing scale and resource lifetime. NGROUPS=2 with DEPTH_MULTIPLIER=64 and one QP per connection, so the shared QP carries the queue depth the default connection counts require. Scale with QPSHARE_TEST_NCONNS and QPSHARE_TEST_ITERS. Connection churn is intentionally not in this config — it runs separately as A22.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "2",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "64",
+        "NCCL_IB_QPS_PER_CONNECTION": "1"
+      },
+      "tests": [
+        {
+          "name": "A21_QpShare_StressManyConns",
+          "description": "Sustained batched traffic over QPSHARE_TEST_NCONNS connections to one peer (default 100, so roughly 50 comms per shared QP at NGROUPS=2). Each connection sends 20 messages of 4 KiB and the received data is compared byte-for-byte.",
+          "test_filter": "NetIbMPITest.QpShareStressManyConns"
+        },
+        {
+          "name": "A21_QpShare_StressSharedRqSaturation",
+          "description": "Loads the shared receive queue: one message posted from every connection before any completion is waited on, repeated for QPSHARE_TEST_ITERS rounds (default 10) over QPSHARE_TEST_NCONNS connections (default 50), with per-round pattern verification.",
+          "test_filter": "NetIbMPITest.QpShareStressSharedRqSaturation"
+        },
+        {
+          "name": "A21_QpShare_StressBatchCreateDestroy",
+          "description": "Bursty lifecycle: QPSHARE_TEST_ITERS batches (default 110) of QPSHARE_TEST_NCONNS connections (default 10) created together, used, and destroyed together. Every batch starts from an empty live set, so at each checkpoint the layout is re-derived from a fresh reference model and RDMA object counts are compared against a pre-batch baseline. Because several comms are live at once, the batch size has to fit the configured depth multiplier.",
+          "test_filter": "NetIbMPITest.QpShareStressBatchCreateDestroy"
+        }
+      ]
+    },
+
+    "qpshare_stress_churn": {
+      "extends": "qpshare_base",
+      "timeout": 1800,
+      "description": "A22: sequential connection churn under QP sharing, isolated in its own config so it runs in a separate process from A21 and its result is reported independently. Long-running by design — the default 2048 connect/transfer/close cycles are minutes of wall time, hence the 1800s timeout.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "2",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "64",
+        "NCCL_IB_QPS_PER_CONNECTION": "1"
+      },
+      "tests": [
+        {
+          "name": "A22_QpShare_StressConnectionChurn",
+          "description": "QPSHARE_TEST_ITERS connect/transfer/close cycles (default 2048) with exactly one connection live at a time, so every cycle is fully torn down before the next begins and each teardown reaches the group-release path. RDMA object counts and the comm's pool state are checkpointed every quarter of the run against a pre-churn baseline. Sharing depth is 1 by construction here: the test covers the create/destroy lifecycle of a shared group, not concurrent occupancy.",
+          "test_filter": "NetIbMPITest.QpShareStressConnectionChurn"
+        }
+      ]
+    },
+
+    "qpshare_heap_poison": {
+      "extends": "qpshare_base",
+      "description": "A23: QP-sharing group teardown under glibc heap poisoning. Same test and tunables as A19; the addition is MALLOC_PERTURB_=165, which makes glibc overwrite freed heap with 0xa5, so any read through a pointer into a freed comm returns poison instead of whatever the allocator happened to leave behind. MALLOC_PERTURB_ is a glibc feature and is inert on other allocators, so on a non-glibc platform this config is equivalent to A19.",
+      "env_variables": {
+        "RCCL_IB_COMM_NGROUPS": "16",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8",
+        "NCCL_GDR_FLUSH_DISABLE": "0",
+        "MALLOC_PERTURB_": "165"
+      },
+      "tests": [
+        {
+          "name": "A23_QpShare_AlgoChurnLayout_HeapPoison",
+          "description": "Interleaved create/destroy across 16 groups with freed heap poisoned, exercising the shared-QP group teardown path against pointers that may outlive the comm they point into.",
+          "test_filter": "NetIbMPITest.QpShareAlgoChurnLayout"
         }
       ]
     },
@@ -524,6 +997,43 @@
       ]
     },
 
+    "opt_recv_completion": {
+      "extends": "rccl_tests_base",
+      "timeout": 600,
+      "description": "Optional recv completion with CTS offload on. RCCL_IB_OPTIONAL_RECV_COMPLETION=0 so CTS offload is the only thing that enables the skip. QP sched off. Allreduce pins NCCL_PROTO so net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_CTS_OFFLOAD_ENABLED": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "0",
+        "NCCL_NET_OPTIONAL_RECV_COMPLETION": "1",
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "0"
+      },
+      "tests": [
+        { "name": "B13_alltoall_optRecvCompletion", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16M -f 2 -g 1", "description": "Alltoall with optional recv completion enabled (P2P/CTS-offload comms)." },
+        { "name": "B13_allreduce_optRecvCompletion_LL", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1", "env_variables": { "NCCL_PROTO": "LL" }, "description": "Allreduce LL: net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION." },
+        { "name": "B13_allreduce_optRecvCompletion_LL128", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "Allreduce LL128: net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION." }
+      ]
+    },
+
+    "opt_recv_completion_no_cts": {
+      "extends": "rccl_tests_base",
+      "timeout": 600,
+      "description": "Optional recv completion with CTS offload off: the combination this PR newly makes reachable (control param on, not equivalent to useCtsOffload).",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_NET_OPTIONAL_RECV_COMPLETION": "1",
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1"
+      },
+      "tests": [
+        { "name": "B13_alltoall_optRecvCompletion_noCts", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16M -f 2 -g 1", "description": "Alltoall optional recv completion with software CTS (offload off)." },
+        { "name": "B13_allreduce_optRecvCompletion_noCts_LL", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1", "env_variables": { "NCCL_PROTO": "LL" }, "description": "Allreduce LL with optional recv completion and CTS offload off." },
+        { "name": "B13_allreduce_optRecvCompletion_noCts_LL128", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "Allreduce LL128 with optional recv completion and CTS offload off." }
+      ]
+    },
+
     "alltoall_fullrange_guard": {
       "extends": "rccl_tests_base",
       "command_args": "-b 1K -e 16G -f 2 -g 1",
@@ -532,6 +1042,82 @@
         { "name": "B12_alltoall_IB_1K_16G_control", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "IB" }, "description": "CONTROL: plain RoCE alltoall over 1K-16G (HW health check)." },
         { "name": "B12_alltoall_CAST_1K_16G", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "IB-CAST", "RCCL_IB_P2P_DISABLE_CTS": "1" }, "description": "CAST alltoall over 1K-16G." },
         { "name": "B12_alltoall_ROCMIB_1K_16G", "binary": "alltoall_perf", "env_variables": { "NCCL_NET": "ROCM-IB", "RCCL_IB_P2P_DISABLE_CTS": "1" }, "description": "ROCM-IB alltoall over 1K-16G (CAST path via alias)." }
+      ]
+    },
+
+    "net_ib_gdr_flush_flag_base": {
+      "extends": "gtest_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 1200,
+      "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them. NCCL_NET=IB: with RCCL_AINIC_ROCE=1 an unset NCCL_NET selects IB-CAST, which keeps the flag off.",
+      "env_variables": {
+        "RCCL_IB_GDR_FLUSH_FLAG": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "0",
+        "NCCL_NET": "IB"
+      }
+    },
+    "net_ib_gdr_flush_flag": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "tests": [
+        {
+          "name": "GdrFlushFlag_DefaultQps",
+          "description": "Remote GDR flush flag with default QPs. GdrFlushFlagTest needs 2 ranks; GdrFlushFlagProtoSwitchMPITest needs 2 nodes.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        },
+        {
+          "name": "GdrFlushFlag_FusedNic",
+          "description": "Fused (two-NIC) device keeps the RDMA read flush. Its own process: the vNIC it makes stays in the device list, and later comms in the process would use it and run without the flag.",
+          "test_filter": "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4Qps",
+          "description": "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps_split": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4QpsSplit",
+          "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_tune": {
+      "extends": "rccl_tests_base",
+      "timeout": 1200,
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -c 1",
+      "description": "RCCL_IB_GDR_FLUSH_FLAG_TUNE=1 on 2 nodes x 8 gfx950 GPUs, data checked: the 4x collective LL128 buffer next to the 1x send/recv LL128 buffer, and the tuned AllReduce/ReduceScatter choices and broadcast/reduce LL128 chunk.",
+      "env_variables": {
+        "RCCL_IB_GDR_FLUSH_FLAG": "1",
+        "RCCL_IB_GDR_FLUSH_FLAG_TUNE": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "0",
+        "NCCL_NET": "IB"
+      },
+      "tests": [
+        { "name": "GdrFlushFlagTune_sendrecv_LL128", "binary": "sendrecv_perf", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "Send/recv LL128 on the 1x buffer while collectives use 4x." },
+        { "name": "GdrFlushFlagTune_allreduce_LL128", "binary": "all_reduce_perf", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "AllReduce LL128 on the 4x buffer." },
+        { "name": "GdrFlushFlagTune_allreduce", "binary": "all_reduce_perf", "description": "AllReduce with the tuned algorithm, protocol and channel choices." },
+        { "name": "GdrFlushFlagTune_reduce_scatter", "binary": "reduce_scatter_perf", "description": "ReduceScatter with LL128 up to 7 MiB per rank." },
+        { "name": "GdrFlushFlagTune_broadcast", "binary": "broadcast_perf", "description": "Broadcast with the scaled-down Ring/LL128 pipeline chunk." },
+        { "name": "GdrFlushFlagTune_reduce", "binary": "reduce_perf", "description": "Reduce with the scaled-down Ring/LL128 pipeline chunk." }
       ]
     },
 
@@ -549,23 +1135,56 @@
         { "name": "C1_alltoall_counters_ROCMIB", "binary": "alltoall_perf", "command_args": "-b 1M -e 128M -f 2 -g 1", "env_variables": { "NCCL_NET": "ROCM-IB" }, "description": "IONIC counters (tx_rdma_ucast_bytes) non-zero and BW > 10 GB/s on the ROCM-IB backend. Capped at 128M to keep the counter run fast; large-size coverage lives in alltoall_fullrange_guard." },
         { "name": "C1_allreduce_counters_ROCMIB", "binary": "all_reduce_perf", "command_args": "-b 1G -e 8G -f 2 -g 1", "env_variables": { "NCCL_NET": "ROCM-IB" }, "description": "IONIC counter validation on allreduce over the ROCM-IB backend." }
       ]
+    },
+
+    "gin_proxy_max_msg": {
+      "extends": "gin_proxy",
+      "description": "Same GIN proxy tests with RCCL_IB_MAX_MSG_SIZE at 256 MiB. Filters name RmaMPITest; the parent suite's GinMPITest filters match nothing.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "268435456"
+      },
+      "tests": [
+        { "name": "A9_Gin_IPutBasic", "test_filter": "*RmaMPITest.IPutBasic*" },
+        { "name": "A10_Gin_IGetBasic", "test_filter": "*RmaMPITest.IGetBasic*" },
+        { "name": "A11_Gin_IPutSignal", "test_filter": "*RmaMPITest.IPutSignalInc*:*RmaMPITest.IPutSignalAdd*" },
+        { "name": "A12_Gin_MultipleInflight", "test_filter": "*RmaMPITest.MultipleInflightIPuts*:*RmaMPITest.MultipleInflightIGets*" },
+        { "name": "A13_Gin_IPutSignalStress10k", "test_filter": "*RmaMPIStressTest.IPutSignalStress10k*" }
+      ]
+    },
+
+    "cast_alltoall_full_max_msg": {
+      "extends": "cast_alltoall_full",
+      "description": "Same full-range CAST alltoall with RCCL_IB_MAX_MSG_SIZE at 256 MiB, so messages above the cap are posted as several work requests.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "268435456"
+      }
     }
   },
 
   "test_suites": [
     { "config": "netib_core",            "enabled": true, "smoke": true },
+    { "config": "net_plugin_selection",  "enabled": true, "smoke": true },
+    { "config": "netib_rocmib",          "enabled": true },
     { "config": "cts_off_stress",        "enabled": true, "smoke": true },
     { "config": "cts_on_depth32",        "enabled": true, "smoke": true },
     { "config": "cast_wrr",              "enabled": true, "smoke": true },
     { "config": "cast_fault_injection",  "enabled": true, "smoke": true },
+    { "config": "resiliency_gid_change", "enabled": true },
+    { "config": "cast_by_order_no_cts",  "enabled": true, "smoke": true },
     { "config": "cast_grh",              "enabled": true, "smoke": true },
     { "config": "cast_subnet_routing",   "enabled": true, "smoke": true },
     { "config": "gin_proxy",             "enabled": true, "smoke": true },
     { "config": "gin_enable_gate",       "enabled": true },
     { "config": "gin_ainic_backend",     "enabled": true },
+    { "config": "gin_device_get_flush",  "enabled": true },
     { "config": "bootstrap_socket_poll", "enabled": true, "smoke": true },
     { "config": "net_ib_cast_plane_subnet", "enabled": true, "smoke": true },
     { "config": "a_netib_multithread",   "enabled": true, "smoke": true },
+    { "config": "a_cast_multithread",    "enabled": true, "smoke": true },
+    { "config": "host_api_rma_disable_intranode", "enabled": true },
+    { "config": "host_api_rma_disable_proxy",     "enabled": true },
+    { "config": "a_fault_inject_multithread", "enabled": true, "smoke": true },
+    { "config": "a_fault_recovery_nightly",   "enabled": true },
 
     { "config": "ib_baseline",           "enabled": true, "smoke": true },
     { "config": "cast_alltoall_full",    "enabled": true, "smoke": true },
@@ -578,8 +1197,26 @@
     { "config": "autodetect_off",        "enabled": true, "smoke": true },
     { "config": "rocmib_no_cts_offload", "enabled": true, "smoke": true },
     { "config": "cts_force_override",    "enabled": true, "smoke": true },
+    { "config": "opt_recv_completion",   "enabled": true, "smoke": true },
+    { "config": "opt_recv_completion_no_cts", "enabled": true, "smoke": true },
     { "config": "alltoall_fullrange_guard", "enabled": true, "smoke": true },
 
-    { "config": "ionic_counters",        "enabled": true }
+    { "config": "net_ib_gdr_flush_flag", "enabled": true },
+    { "config": "net_ib_gdr_flush_flag_4qps", "enabled": true },
+    { "config": "net_ib_gdr_flush_flag_4qps_split", "enabled": true },
+    { "config": "net_ib_gdr_flush_flag_tune", "enabled": true },
+
+    { "config": "qpshare_ngroups1",       "enabled": true, "smoke": true },
+    { "config": "qpshare_ngroups2",       "enabled": true, "smoke": true },
+    { "config": "qpshare_ngroups16",      "enabled": true, "smoke": true },
+    { "config": "qpshare_depth_ceiling",  "enabled": true },
+    { "config": "qpshare_stress",         "enabled": true },
+    { "config": "qpshare_stress_churn",   "enabled": true },
+    { "config": "qpshare_heap_poison",    "enabled": true },
+
+    { "config": "ionic_counters",        "enabled": true },
+
+    { "config": "gin_proxy_max_msg",          "enabled": true },
+    { "config": "cast_alltoall_full_max_msg", "enabled": true }
   ]
 }

@@ -3,11 +3,16 @@
 
 #pragma once
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
+#include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -20,12 +25,14 @@ namespace rocjitsu::plugins::race_detector {
 ///
 /// An event is trimmable when it can never be accessed again:
 ///   - RETIRED events (explicitly retired at s_barrier via retireEvent).
-///   - WAVE_COMPLETE non-LDS events. These have left all per-wave and
-///     per-register lists; retireEvent is a no-op for them, so they don't
-///     need to wait for s_barrier.
-///   - WAVE_COMPLETE LDS events are NOT trimmable until retired, because
-///     retireEvent must still remove them from ldsWriteEvents/ldsReadEvents
-///     and adjust byte counts.
+///   - WAVE_COMPLETE events without LDS intervals: non-LDS events, and LDS
+///     events that touch no LDS bytes, such as a tensor transfer that moves no
+///     data. These have left all per-wave and per-register lists and were never
+///     added to ldsWriteEvents/ldsReadEvents; retireEvent is a no-op for them,
+///     so they don't need to wait for s_barrier.
+///   - WAVE_COMPLETE LDS events with intervals are NOT trimmable until
+///     retired, because retireEvent must still remove them from
+///     ldsWriteEvents/ldsReadEvents and adjust byte counts.
 ///
 /// Trimming is attempted every kTrimAttemptInterval allocations. The
 /// trimmable prefix is scanned and erased only if it covers at least half
@@ -33,24 +40,50 @@ namespace rocjitsu::plugins::race_detector {
 class EventRegistry {
   struct EventInfo {
     WaveId waveId;
-    uint64_t pc;
+    InstructionSnapshot instruction;
     MemoryEventType type;
-    amdgpu::WaitCounterType waitCounterType;
+    std::array<amdgpu::MemoryCounterObligation, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS>
+        counterObligations;
+    uint8_t numCounterObligations;
+    uint8_t satisfiedCounterMask;
+    MemoryOrderClass memoryOrder;
     EventStatus status;
     uint8_t byteMask;
+    uint8_t lastRegisterByteMask;
     uint64_t execMask;
     std::vector<uint32_t> registers;
     IntervalSet ldsIntervals;
+    LdsAccess ldsAccess;
   };
 
 public:
-  /// Allocate a new event. Returns a unique EventId.
-  EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
-              uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
-              amdgpu::WaitCounterType waitCounterType) {
+  /// Allocate an event with its producing instruction and every counter obligation.
+  EventId add(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
+              std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+              IntervalSet ldsIntervals,
+              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
+              LdsAccess ldsAccess = {}) {
     int id = base_offset_ + static_cast<int>(entries_.size());
-    entries_.push_back({waveId, pc, type, waitCounterType, EventStatus::ACTIVE, byteMask, execMask,
-                        std::move(registers), std::move(ldsIntervals)});
+    assert(!counterObligations.empty() ||
+           (isFromLds(type) && registers.empty() && !ldsIntervals.empty()));
+    assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
+    EventInfo event{waveId,
+                    instruction,
+                    type,
+                    {},
+                    static_cast<uint8_t>(counterObligations.size()),
+                    0,
+                    memoryOrder,
+                    counterObligations.empty() ? EventStatus::WAVE_COMPLETE : EventStatus::ACTIVE,
+                    byteMask,
+                    lastRegisterByteMask ? lastRegisterByteMask : byteMask,
+                    execMask,
+                    std::move(registers),
+                    std::move(ldsIntervals),
+                    ldsAccess};
+    std::ranges::copy(counterObligations, event.counterObligations.begin());
+    entries_.push_back(std::move(event));
 
     // To prevent the number of events recorded growing indefinitely, we try to
     // remove retired events from time to time.
@@ -59,9 +92,10 @@ public:
     return EventId{id};
   }
 
-  /// Transition ACTIVE → WAVE_COMPLETE (s_waitcnt resolved this event).
+  /// Transition ACTIVE → WAVE_COMPLETE after every counter obligation is satisfied.
   void markComplete(EventId id) {
     assert(entries_[index(id)].status == EventStatus::ACTIVE);
+    assert(allWaitCountersSatisfied(id));
     entries_[index(id)].status = EventStatus::WAVE_COMPLETE;
   }
 
@@ -71,23 +105,78 @@ public:
   // -- Typed accessors (all inline) --
 
   MemoryEventType type(EventId id) const { return entries_[index(id)].type; }
-  amdgpu::WaitCounterType waitCounterType(EventId id) const {
-    return entries_[index(id)].waitCounterType;
+  bool hasPendingWaitCounter(EventId id, amdgpu::WaitCounterType waitType) const {
+    const auto &event = entries_[index(id)];
+    for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
+      if ((event.satisfiedCounterMask & (uint8_t{1} << i)) == 0 &&
+          amdgpu::wait_counter_covers(waitType, event.counterObligations[i].wait_counter_type()))
+        return true;
+    }
+    return false;
   }
+  std::optional<MemoryOrderClass> pendingCompletionClass(EventId id,
+                                                         amdgpu::WaitCounterType waitType) const {
+    const auto &event = entries_[index(id)];
+    for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
+      if ((event.satisfiedCounterMask & (uint8_t{1} << i)) == 0 &&
+          amdgpu::wait_counter_covers(waitType, event.counterObligations[i].wait_counter_type()))
+        return event.counterObligations[i].completion_class();
+    }
+    return std::nullopt;
+  }
+  uint8_t pendingCounterIncrement(EventId id, amdgpu::WaitCounterType waitType) const {
+    const auto &event = entries_[index(id)];
+    for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
+      if ((event.satisfiedCounterMask & (uint8_t{1} << i)) == 0 &&
+          amdgpu::wait_counter_covers(waitType, event.counterObligations[i].wait_counter_type()))
+        return event.counterObligations[i].counter_increment();
+    }
+    return 0;
+  }
+  bool satisfyWaitCounter(EventId id, amdgpu::WaitCounterType waitType) {
+    auto &event = entries_[index(id)];
+    assert(event.status == EventStatus::ACTIVE);
+    for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
+      if (amdgpu::wait_counter_covers(waitType, event.counterObligations[i].wait_counter_type()))
+        event.satisfiedCounterMask |= uint8_t{1} << i;
+    }
+    return allWaitCountersSatisfied(id);
+  }
+  bool allWaitCountersSatisfied(EventId id) const {
+    const auto &event = entries_[index(id)];
+    return event.satisfiedCounterMask ==
+           static_cast<uint8_t>((uint8_t{1} << event.numCounterObligations) - 1);
+  }
+  bool atomicLdsElementMatches(EventId id, uint8_t bytes) const {
+    return bytes != 0 && entries_[index(id)].ldsAccess.aligned_atomic_bytes == bytes;
+  }
+  bool readsLds(EventId id) const {
+    const auto &event = entries_[index(id)];
+    return event.ldsAccess.read_modify_write || isFromLds(event.type);
+  }
+  bool writesLds(EventId id) const {
+    const auto &event = entries_[index(id)];
+    return event.ldsAccess.read_modify_write || isToLds(event.type);
+  }
+  MemoryOrderClass memoryOrder(EventId id) const { return entries_[index(id)].memoryOrder; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
   bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
-  uint64_t pc(EventId id) const { return entries_[index(id)].pc; }
-  uint8_t byteMask(EventId id) const { return entries_[index(id)].byteMask; }
+  const InstructionSnapshot &instruction(EventId id) const {
+    return entries_[index(id)].instruction;
+  }
+  /// Packed loads can write fewer bytes in the last destination without
+  /// creating a second event or consuming another wait-counter increment.
+  uint8_t registerByteMask(EventId id, uint32_t reg) const {
+    const auto &event = entries_[index(id)];
+    return !event.registers.empty() && reg == event.registers.back() ? event.lastRegisterByteMask
+                                                                     : event.byteMask;
+  }
   uint64_t execMask(EventId id) const { return entries_[index(id)].execMask; }
   WaveId waveId(EventId id) const { return entries_[index(id)].waveId; }
 
   std::span<const uint32_t> registers(EventId id) const { return entries_[index(id)].registers; }
 
   const IntervalSet &ldsIntervals(EventId id) const { return entries_[index(id)].ldsIntervals; }
-
-  bool isActiveForLane(EventId id, int lane) const {
-    return (entries_[index(id)].execMask >> lane) & 1;
-  }
 
   // -- Test helpers --
 
@@ -113,7 +202,8 @@ private:
   static bool isEntryTrimmable(const EventInfo &e) {
     if (e.status == EventStatus::RETIRED)
       return true;
-    return e.status == EventStatus::WAVE_COMPLETE && isWaveLocal(e.type);
+    return e.status == EventStatus::WAVE_COMPLETE &&
+           (isWaveLocal(e.type) || e.ldsIntervals.empty());
   }
 
   void tryTrimEvents() {

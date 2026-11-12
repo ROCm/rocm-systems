@@ -41,7 +41,7 @@ def generate_noop_archive(output_dir: Path) -> None:
     archive.add_kernel(prepared2)
 
     # Kernel 3: bin/testapp#0 @ gfx900
-    kernel3_data = b"KERNEL3_APP_GFX900" + b"\xFF" * 150
+    kernel3_data = b"KERNEL3_APP_GFX900" + b"\xff" * 150
     prepared3 = archive.prepare_kernel("bin/testapp#0", "gfx900", kernel3_data)
     archive.add_kernel(prepared3)
 
@@ -92,6 +92,109 @@ def generate_zstd_archive(output_dir: Path) -> None:
         f"  - lib/libhip.so#0: gfx1100 ({len(kernel1_data)} bytes), gfx1101 ({len(kernel2_data)} bytes)"
     )
     print(f"  - bin/hiptest#0: gfx1100 ({len(kernel3_data)} bytes)")
+
+
+def generate_fallthrough_archives(output_dir: Path) -> None:
+    """Generate archives for the xnack-split archive-fallthrough regression test.
+
+    Reproduces the ROCm/TheRock#7081 archive layout: a kernel's full set of
+    kpack archives is split across a more-specific (xnack) archive holding
+    unrelated kernels and a less-specific (bare) archive holding the actual
+    kernel. The loader must fall through from the xnack archive to the bare
+    archive on a kernel-not-found miss instead of giving up immediately.
+    """
+    # xnack-specific archive: matches the agent ISA more specifically, but
+    # does not contain the kernel under test.
+    xnack_archive = PackedKernelArchive(
+        group_name="test",
+        gfx_arch_family="gfx90aX",
+        gfx_arches=["gfx90a:xnack-"],
+        compressor=NoOpCompressor(),
+    )
+    other_data = b"OTHER_KERNEL_XNACK_MINUS" + b"\x00" * 50
+    prepared = xnack_archive.prepare_kernel(
+        "lib/libother.so#0", "gfx90a:xnack-", other_data
+    )
+    xnack_archive.add_kernel(prepared)
+    xnack_archive.finalize_archive()
+    xnack_archive.write(output_dir / "test_fallthrough_xnack.kpack")
+    print(
+        f"Generated fallthrough xnack archive: {output_dir / 'test_fallthrough_xnack.kpack'}"
+    )
+    print("  - gfx90a:xnack-, 1 unrelated kernel (lib/libother.so#0)")
+
+    # Bare/generic archive: less specific, holds the kernel under test.
+    generic_archive = PackedKernelArchive(
+        group_name="test",
+        gfx_arch_family="gfx90aX",
+        gfx_arches=["gfx90a"],
+        compressor=NoOpCompressor(),
+    )
+    target_data = b"GENERIC_GFX90A_KERNEL_DATA" + b"\x00" * 50
+    prepared2 = generic_archive.prepare_kernel(
+        "lib/libtest.so#0", "gfx90a", target_data
+    )
+    generic_archive.add_kernel(prepared2)
+    generic_archive.finalize_archive()
+    generic_archive.write(output_dir / "test_fallthrough_generic.kpack")
+    print(
+        f"Generated fallthrough generic archive: {output_dir / 'test_fallthrough_generic.kpack'}"
+    )
+    print("  - gfx90a, 1 kernel (lib/libtest.so#0)")
+
+
+def generate_fallthrough_two_feature_archives(output_dir: Path) -> None:
+    """Generate archives for a two-feature (sramecc+xnack) fallthrough test.
+
+    Reproduces the ROCM-31644 archive layout on gfx950: the agent reports
+    "gfx950:sramecc+:xnack+", but no archive is tagged with "sramecc+" at
+    all (rocFFT's build strips feature flags before compiling — see
+    projects/rocfft/CMakeLists.txt). Only two archives exist for the group:
+    one tagged "gfx950:xnack+" holding an unrelated binary's kernel (e.g.
+    hipFFT-test), and one bare "gfx950" holding the target kernel (e.g.
+    rocFFT-test). The loader must walk the full compatible-target power set
+    ("gfx950:sramecc+:xnack+" -> "gfx950:sramecc+" -> "gfx950:xnack+" ->
+    "gfx950"), skipping the two candidates that have no archive at all,
+    missing the kernel in the "gfx950:xnack+" archive, and finally finding
+    it in the bare "gfx950" archive.
+    """
+    xnack_archive = PackedKernelArchive(
+        group_name="test",
+        gfx_arch_family="gfx950X",
+        gfx_arches=["gfx950:xnack+"],
+        compressor=NoOpCompressor(),
+    )
+    other_data = b"OTHER_KERNEL_HIPFFT_TEST" + b"\x00" * 50
+    prepared = xnack_archive.prepare_kernel(
+        "lib/libother.so#0", "gfx950:xnack+", other_data
+    )
+    xnack_archive.add_kernel(prepared)
+    xnack_archive.finalize_archive()
+    xnack_archive.write(output_dir / "test_fallthrough_2feat_xnack.kpack")
+    print(
+        f"Generated 2-feature fallthrough xnack archive: "
+        f"{output_dir / 'test_fallthrough_2feat_xnack.kpack'}"
+    )
+    print("  - gfx950:xnack+, 1 unrelated kernel (lib/libother.so#0)")
+
+    generic_archive = PackedKernelArchive(
+        group_name="test",
+        gfx_arch_family="gfx950X",
+        gfx_arches=["gfx950"],
+        compressor=NoOpCompressor(),
+    )
+    target_data = b"GENERIC_GFX950_ROCFFT_TEST" + b"\x00" * 50
+    prepared2 = generic_archive.prepare_kernel(
+        "lib/libtest.so#0", "gfx950", target_data
+    )
+    generic_archive.add_kernel(prepared2)
+    generic_archive.finalize_archive()
+    generic_archive.write(output_dir / "test_fallthrough_2feat_generic.kpack")
+    print(
+        f"Generated 2-feature fallthrough generic archive: "
+        f"{output_dir / 'test_fallthrough_2feat_generic.kpack'}"
+    )
+    print("  - gfx950, 1 kernel (lib/libtest.so#0)")
 
 
 def generate_test_manifests(output_dir: Path) -> None:
@@ -174,6 +277,10 @@ def main() -> None:
     generate_noop_archive(output_dir)
     print()
     generate_zstd_archive(output_dir)
+    print()
+    generate_fallthrough_archives(output_dir)
+    print()
+    generate_fallthrough_two_feature_archives(output_dir)
     print()
     generate_test_manifests(output_dir)
     print()

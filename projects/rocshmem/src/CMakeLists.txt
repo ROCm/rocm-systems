@@ -46,7 +46,6 @@ target_sources(
     wf_coal_policy.cpp
     ipc_policy.cpp
     sdma_policy.cpp
-    sdma/gin_anvil_sdma_factory.cpp
 )
 
 set(
@@ -110,6 +109,9 @@ add_subdirectory(ipc)
 endif()
 if (USE_SDMA)
 add_subdirectory(sdma)
+endif()
+if (USE_HOST_VERBS)
+add_subdirectory(net)
 endif()
 add_subdirectory(host)
 add_subdirectory(containers)

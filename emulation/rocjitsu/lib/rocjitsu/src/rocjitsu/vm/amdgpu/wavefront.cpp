@@ -2,25 +2,157 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
+
+#include <algorithm>
 
 namespace rocjitsu {
 namespace amdgpu {
 
-Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
+Wavefront::Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_size,
+                     uint32_t max_wf_size, uint32_t max_sgprs, uint32_t max_vgprs,
+                     bool mode_has_gpr_idx_en)
+    : cu_(cu), cu_view_(cu, *this), wf_id_(wf_id), wf_size_(default_wf_size),
+      default_wf_size_(default_wf_size), max_wf_size_(max_wf_size), max_sgprs_(max_sgprs),
+      max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en),
+      memory_wait_checks_enabled_(cu.config().memory_wait_checks_enabled()) {}
 
-const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
+bool Wavefront::valu_destinations_allocated(const Instruction &inst) const {
+  for (int i = 0; i < inst.num_dst_operands(); ++i) {
+    const auto *op = inst.dst_operand(i);
+    const auto ref = op->to_register_ref();
+    if (ref && ref->cls == RegClass::SGPR && inst.num_dst_operands() > 1 &&
+        exceeds_rounded_sgpr_allocation(ref->index, ref->width))
+      return false;
+    if (!ref || (ref->cls != RegClass::VGPR && ref->cls != RegClass::ACC_VGPR))
+      continue;
+    const bool acc = ref->cls == RegClass::ACC_VGPR;
+    const uint32_t start =
+        acc ? ACC_VGPR_OFFSET + ref->index : apply_gpr_idx(*this, ref->index, op->vgpr_msb_role());
+    if (!vgpr_bank(acc).contains(start, ref->width))
+      return false;
+  }
+  return true;
+}
+
+bool Wavefront::memory_destination_out_of_range(const Instruction &inst) const {
+  const auto arch = cu_.arch();
+  if (arch != ROCJITSU_CODE_ARCH_CDNA2 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
+      arch != ROCJITSU_CODE_ARCH_CDNA4)
+    return false;
+  for (int i = 0; i < inst.num_dst_operands(); ++i) {
+    const auto reg = inst.dst_operand(i)->decoded_vgpr();
+    if (reg && !unified_vgpr_range_is_allocated(reg->index, reg->width))
+      return true;
+  }
+  return false;
+}
+
+void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
+  if (!activity_tracked_)
+    return;
+  const bool active = !is_halted();
+  const bool runnable = active && !debug_paused();
+  if (active != was_active) {
+    if (active) {
+      cu_.active_slot_limit_ = std::max(cu_.active_slot_limit_, wf_id_ + 1);
+    } else if (wf_id_ + 1 == cu_.active_slot_limit_) {
+      while (cu_.active_slot_limit_ != 0) {
+        const auto &last = cu_.wfs_[cu_.active_slot_limit_ - 1];
+        if (last && !last->is_halted())
+          break;
+        --cu_.active_slot_limit_;
+      }
+    }
+  }
+  const uint64_t delta = (uint64_t(active) - uint64_t(was_active)) +
+                         ((uint64_t(runnable) - uint64_t(was_runnable)) << 32);
+  const uint64_t previous = cu_.wave_activity_.fetch_add(delta, std::memory_order_release);
+  assert((active || !was_active || static_cast<uint32_t>(previous) != 0) &&
+         "active wave count underflow");
+  assert((runnable || !was_runnable || (previous >> 32) != 0) && "runnable wave count underflow");
+  (void)previous;
+}
+
+void Wavefront::set_in_trap_handler(bool value) {
+  if (in_trap_handler_ == value)
+    return;
+  const bool was_runnable = !is_halted() && !debug_paused();
+  if (!value && trap_resume_exec_edited_)
+    set_exec(trap_saved_exec_);
+  trap_resume_exec_edited_ = false;
+  in_trap_handler_ = value;
+  status_raw_ = value ? status_raw_ | kStatusPrivMask
+                      : (status_raw_ & ~kStatusPrivMask) | (trap_saved_status_ & kStatusPrivMask);
+  if (was_runnable != (!is_halted() && !debug_paused()))
+    update_activity_counts(!is_halted(), was_runnable);
+}
+
+void Wavefront::return_from_trap() {
+  set_in_trap_handler(false);
+  set_status_raw(status_raw() & ~kStatusPrivMask);
+}
 
 bool Wavefront::uses_separate_trap_ctrl() const {
   return isa_properties(cu_.arch()).wave_state_layout != WaveStateLayout::Legacy;
 }
 
+bool Wavefront::discards_valu_result(const Instruction &inst) const {
+  if (!(inst.flags() & VALU))
+    return false;
+  switch (cu_.arch()) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return !valu_destinations_allocated(inst);
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return !vgpr_destinations_allocated(inst);
+  default:
+    return false;
+  }
+}
+
+bool Wavefront::vgpr_destinations_allocated(const Instruction &inst) const {
+  return RegisterAccess(*this).vgpr_results_fit_allocation(inst);
+}
+
+uint64_t Wavefront::memory_exec(const Instruction &inst) const {
+  if ((cu_.arch() == ROCJITSU_CODE_ARCH_RDNA1 || cu_.arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
+      (inst.flags() & (VMEM | LDS)) && !vgpr_destinations_allocated(inst))
+    return 0;
+  return exec();
+}
+
+void Wavefront::observe_lds_direct_read(uint32_t address, uint32_t bytes, uint32_t lane) const {
+  cu_.plugin_group().onAmdgpuLdsDirectRead(*this, address, bytes, lane);
+}
+
 bool Wavefront::has_gpu_memory() const { return cu_.memory() != nullptr; }
 
+uint64_t Wavefront::shader_cycles() const { return cu_.cycle_count(); }
+
+uint64_t Wavefront::realtime_clock() const {
+  return gpu_clock_from_ns(realtime_timestamp(), gpu_clock_mhz(cu_.arch()));
+}
+
+uint64_t Wavefront::realtime_timestamp() const {
+  if (use_system_clock_)
+    return hsa_system_timestamp();
+  return cu_.model_realtime_timestamp() / (simdojo::TICKS_PER_SECOND / 1'000'000'000);
+}
+
 std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
+  if (vm_access_)
+    return vm_access_->value;
   GpuVm *gpu_vm = cu_.gpu_vm();
   if (gpu_vm == nullptr)
     return std::nullopt;
@@ -30,6 +162,9 @@ std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
 VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const {
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
+    if (vm_access_)
+      return vm_access_->value.read(
+          addr, std::span<std::byte>(reinterpret_cast<std::byte *>(dst.data()), dst.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
     if (!access)
       return VmAccessOutcome::Faulted;
@@ -43,6 +178,10 @@ VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst
 VmAccessOutcome Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8_t> src) {
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
+    if (vm_access_)
+      return vm_access_->value.write(
+          addr,
+          std::span<const std::byte>(reinterpret_cast<const std::byte *>(src.data()), src.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
     if (!access)
       return VmAccessOutcome::Faulted;
@@ -67,11 +206,68 @@ uint32_t Wavefront::barrier_state(int32_t barrier_id) const {
   return cu_.barrier_state(*this, barrier_id);
 }
 
+void Wavefront::restore_rdna4_checkpoint_barriers(uint8_t complete_mask, uint8_t waiting) {
+  barrier_complete_[kWorkgroupBarrierBit] = (complete_mask & 1u) != 0;
+  barrier_complete_[kWorkgroupTrapBarrierBit] = (complete_mask & 2u) != 0;
+  if (waiting) {
+    waiting_barrier_bit_ = waiting;
+    set_state(WfState::BARRIER);
+  }
+}
+
+bool Wavefront::workgroup_barrier_complete() const {
+  return barrier_complete_[kWorkgroupBarrierBit];
+}
+
+bool Wavefront::trap_barrier_complete() const {
+  return barrier_complete_[kWorkgroupTrapBarrierBit];
+}
+
+void Wavefront::set_workgroup_barrier_complete(bool complete) {
+  barrier_complete_[kWorkgroupBarrierBit] = complete;
+}
+
 void Wavefront::barrier_wait(int32_t barrier_id) { cu_.barrier_wait(*this, barrier_id); }
 
 bool Wavefront::barrier_leave() { return cu_.named_barrier_leave(*this); }
 
+void Wavefront::gws_init(uint32_t rid, uint32_t count) { cu_.gws_init(*this, rid, count); }
+
+void Wavefront::gws_barrier_arrive(uint32_t rid, uint32_t count) {
+  cu_.gws_barrier_arrive(*this, rid, count);
+}
+
+void Wavefront::gws_sema_v(uint32_t rid) { cu_.gws_sema_v(*this, rid); }
+
+void Wavefront::gws_sema_p(uint32_t rid) { cu_.gws_sema_p(*this, rid); }
+
+void Wavefront::gws_sema_br(uint32_t rid, uint32_t count) { cu_.gws_sema_br(*this, rid, count); }
+
+void Wavefront::gws_sema_release_all(uint32_t rid) { cu_.gws_sema_release_all(*this, rid); }
+
+bool Wavefront::fail_pm4_submission() {
+  if (!pm4_failure_)
+    return false;
+  pm4_failure_->fail();
+  return true;
+}
+
+void Wavefront::end_ordered_ps(uint32_t instruction_size) {
+  if (!wait_counters_.empty()) {
+    set_wait_all();
+    // Retry the message at this PC after the implicit waits have completed.
+    pc -= instruction_size;
+    return;
+  }
+  if (!cu_.handle_sendmsg(*this, 7)) { // MSG_ORDERED_PS_DONE
+    report_instruction_execution_error(InstructionExecutionError::MissingExecutionBackend);
+    return;
+  }
+  end(EndReason::OrderedPsDone);
+}
+
 void Wavefront::halt(CpCompletionNotice notice) {
+  // Observer snapshots are not instruction-side register consumers.
   // s_endpgm terminates the wave, frees its resources, and notifies the CP as one
   // action, mirroring hardware. Order matters:
   //   (1) fire the halt hook while registers are still live so observers snapshot
@@ -80,6 +276,7 @@ void Wavefront::halt(CpCompletionNotice notice) {
   //       first because reset() zeroes them,
   //   (3) notify the CU/CP of workgroup completion. Freeing before release_wf keeps
   //       has_active_wfs() accurate so the last wave triggers LDS reclaim.
+  // The halt hook also completes race events before release_wf can resolve a barrier.
   cu_.plugin_group().onAmdgpuWavefrontHalted(*this);
   const uint32_t dispatch_id = dispatch_id_;
   const uint32_t wg_id = wg_id_;
@@ -90,7 +287,7 @@ void Wavefront::halt(CpCompletionNotice notice) {
 void Wavefront::release_wait_counter(WaitCounterType type) {
   wait_counters_.decrement(type);
   if (state_ == WfState::WAITCNT && wait_satisfied())
-    state_ = WfState::RUNNING;
+    set_state(WfState::RUNNING);
   if (state_ == WfState::ENDING && wait_counters_.empty())
     halt();
 }

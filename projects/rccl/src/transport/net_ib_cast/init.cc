@@ -7,25 +7,31 @@
 
 #include "common_cast.h"
 #include "p2p_resiliency_recovery_cast.h"
+#include "capability_cast.h"
 #include "net_telemetry.h"
 #include "qp_sharing.h"
+#include "net_ib_cast_inspect.h"
+#include "archinfo.h"
+
+#include <hip/hip_runtime.h>
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
-extern int64_t ncclParamIbCastResiliencyPortFailover();
-extern int64_t ncclParamIbCastResiliencyPortRecovery();
 extern int64_t ncclParamIbCastGdrFlushDisable();
 // AMD AINIC
 RCCL_PARAM(IbCastCtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
 RCCL_PARAM(IbCastP2pDisableCts, "IB_P2P_DISABLE_CTS", 1);
+RCCL_PARAM(IbCastMaxMsgSize, "IB_MAX_MSG_SIZE", -1);
 
 bool IbCastAinicRoce = 0;
+bool IbCastMultiplaneEnable = false;
 bool IbCastOffloadEnabled = 0;
 bool IbCastUseInline = 0;
 bool IbCastAinicCtsInlineData = 0;
 int IbCastGdrFlushDisable = 0;
 extern int64_t rcclParamAinicRoce();
 extern int64_t ncclParamIbCastUseInline();
+extern int64_t rcclParamIbCastUDMAPolicy();
 static int IbCastGetNumaNodeFromPath(const char* pciPath);
 static ncclResult_t IbCastGetPciRootFromPath(const char* pciPath, char* root, size_t rootLen);
 
@@ -120,6 +126,7 @@ static int ibvSpeeds[] = {
   2500,  /* SDR */
   5000,  /* DDR */
   10000, /* QDR */
+  10000, /* FDR10 */
   14000, /* FDR */
   25000, /* EDR */
   50000, /* HDR */
@@ -138,6 +145,16 @@ static int IbCastWidth(int width) {
 static int IbCastSpeed(int speed) {
   return ibvSpeeds[firstBitSet(speed, sizeof(ibvSpeeds) / sizeof(int) - 1)];
 }
+
+extern "C" int ncclIbCastTestSpeed(int speed) { return IbCastSpeed(speed); }
+
+extern "C" ncclResult_t ncclIbCastTestSpeedSource(int dev, int* fromQuery) {
+  if (fromQuery == NULL || dev < 0 || dev >= IbCastNDevs) return ncclInvalidArgument;
+  *fromQuery = IbCastDevs[dev].speedFromQuery ? 1 : 0;
+  return ncclSuccess;
+}
+
+extern "C" int ncclIbCastTestGetNDevs(void) { return IbCastNDevs; }
 
 // Determine whether RELAXED_ORDERING is enabled and possible
 static int IbCastRelaxedOrderingCapable(void) {
@@ -369,6 +386,48 @@ ncclResult_t IbCastFinalizeDevices(void) {
 }
 
 extern int64_t IbCastArThreshold;
+
+static bool IbCastGpuIsGfx1250() {
+  int dev = 0;
+  hipDeviceProp_t prop{};
+  if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess) {
+    (void)hipGetLastError();
+    return false;
+  }
+  return IsArchMatch(prop.gcnArchName, "gfx1250");
+}
+
+// A positive RCCL_IB_MAX_MSG_SIZE explicitly sets the cap, overriding the
+// automatic gfx1250 and port limits. When unset or 0, the cap is the smallest
+// of the gfx1250 256 MiB limit and the non-zero port max_msg_sz values. The
+// result is raised to at least 1 MiB and rounded down to
+// IB_WRITE_CHUNK_ALIGNMENT.
+static void IbCastInitMaxPostSendBytes() {
+  constexpr uint32_t kGfx1250Cap = 256u * 1024u * 1024u;
+  constexpr uint32_t kMinCap = 1024u * 1024u;
+  const int64_t requested = rcclParamIbCastMaxMsgSize();
+  IbCastMaxPostSendBytes = UINT32_MAX;
+
+  if (requested > 0) {
+    INFO(NCCL_ENV, "NET/IB: RCCL_IB_MAX_MSG_SIZE set by environment to %lld", (long long)requested);
+    IbCastMaxPostSendBytes = (uint32_t)std::min(requested, (int64_t)UINT32_MAX);
+  } else {
+    if (IbCastGpuIsGfx1250()) {
+      IbCastMaxPostSendBytes = std::min(IbCastMaxPostSendBytes, kGfx1250Cap);
+    }
+    for (int i = 0; i < IbCastNDevs; i++) {
+      uint32_t portMax = IbCastDevs[i].portAttr.max_msg_sz;
+      if (portMax != 0 && portMax < IbCastMaxPostSendBytes) IbCastMaxPostSendBytes = portMax;
+    }
+  }
+  // The floor covers every source, so no data post splits below 1 MiB.
+  IbCastMaxPostSendBytes = std::max(IbCastMaxPostSendBytes, kMinCap);
+  // Round down to the IB_WRITE_CHUNK_ALIGNMENT
+  IbCastMaxPostSendBytes -= IbCastMaxPostSendBytes % IB_WRITE_CHUNK_ALIGNMENT;
+  INFO(NCCL_ENV, "NET/IB: IB-CAST data posts default to %u bytes",
+    IbCastMaxPostSendBytes);
+}
+
 ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
   // Never NCCLCHECKed; telemetry reports its own failures. See net_telemetry.h.
   if (rcclTelemetryInit() != 0) {
@@ -386,8 +445,8 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     INFO(NCCL_NET, "NET/IB : Failed to open mlx5dv symbols. Advance features like CX-8 Direct-NIC will be disabled.");
   }
   if (wrap_ionicdv_symbols() != ncclSuccess) {
-    INFO(NCCL_NET,
-         "NET/IB : Failed to open ionicdv symbols. Advance features like AINIC UD load balancing will be disabled.");
+    WARN("NET/IB-CAST : libionic is missing or lacks ionic_dv_pd_set_udma_mask; IB-CAST is disabled; RCCL tries the "
+         "remaining network plugins, if any. Upgrade libionic, or set NCCL_NET=IB.");
     return ncclInternalError;
   }
 
@@ -395,6 +454,10 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
   int nIbDevs = 0;
   struct ibv_device** devices = NULL;
   IbCastAinicRoce = rcclUseAinic();
+  {
+    const char* mapFile = ncclGetEnv("RCCL_MULTIPLANE_MAP_FILE");
+    IbCastMultiplaneEnable = IbCastAinicRoce && (mapFile != NULL && mapFile[0] != '\0');
+  }
 
   if (IbCastNDevs == -1) {
     std::lock_guard<std::mutex> lock(IbCastMutex);
@@ -486,7 +549,10 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                 TRACE(NCCL_NET, "NET/IB: Device %s does not support Data Direct DMA.", devices[d]->name);
               } else {
                 WARN("NET/IB: Error in mlx5dv_get_data_direct_sysfs_path with device %s", devices[d]->name);
-                return res;
+                // No port of this device has been recorded yet, so the context is still ours to close.
+                (void)wrap_ibv_close_device(context);
+                ret = res;
+                goto fail;
               }
             }
           }
@@ -497,14 +563,22 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             IbCastDevs[IbCastNDevs].portAttr = portAttr;
             IbCastDevs[IbCastNDevs].portNum = port_num;
             IbCastDevs[IbCastNDevs].link = portAttr.link_layer;
-            if (portAttr.active_speed_ex) {
-              // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
-              IbCastDevs[IbCastNDevs].speed =
-                IbCastSpeed(portAttr.active_speed_ex) * IbCastWidth(portAttr.active_width);
+            uint64_t querySpeed = 0;
+            if (wrap_ibv_query_port_speed(context, port_num, &querySpeed) == ncclSuccess && querySpeed != 0) {
+              // ibv_query_port_speed returns speed in granularity of 100 Mbps
+              IbCastDevs[IbCastNDevs].speed = querySpeed * 100;
+              IbCastDevs[IbCastNDevs].speedFromQuery = true;
             } else {
-              IbCastDevs[IbCastNDevs].speed = IbCastSpeed(portAttr.active_speed) * IbCastWidth(portAttr.active_width);
+              // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
+              int portSpeed = portAttr.active_speed_ex ? portAttr.active_speed_ex : portAttr.active_speed;
+              IbCastDevs[IbCastNDevs].speed = IbCastSpeed(portSpeed) * IbCastWidth(portAttr.active_width);
+              IbCastDevs[IbCastNDevs].speedFromQuery = false;
             }
             IbCastDevs[IbCastNDevs].context = context;
+            if (IbCastAinicRoce) {
+              uint8_t raw = wrap_ionicdv_ctx_get_udma_count(context);
+              IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount = ncclIbCastNormalizeUdmaCount(raw);
+            }
             IbCastDevs[IbCastNDevs].pdRefs = 0;
             IbCastDevs[IbCastNDevs].pd = NULL;
             // for dev==1 (data direct device), pciPath is given by mlx5
@@ -515,7 +589,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                           ret, fail);
             if (dev == 1) {
               snprintf(IbCastDevs[IbCastNDevs].devName, MAXNAMESIZE, "%s_dma", devices[d]->name);
-              NCCLCHECK(ncclCalloc(&IbCastDevs[IbCastNDevs].pciPath, PATH_MAX));
+              NCCLCHECKGOTO(ncclCalloc(&IbCastDevs[IbCastNDevs].pciPath, PATH_MAX), ret, fail);
               strncpy(IbCastDevs[IbCastNDevs].pciPath, dataDirectDevicePath, PATH_MAX);
               IbCastDevs[IbCastNDevs].capsProvider.mlx5.dataDirect = 1;
             }
@@ -523,10 +597,12 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             IbCastDevs[IbCastNDevs].maxQp = devAttr.max_qp;
             IbCastDevs[IbCastNDevs].maxCqe = devAttr.max_cqe;
             IbCastDevs[IbCastNDevs].oooRqSize = oooRqSize;
+            IbCastDevs[IbCastNDevs].udSupported = -1;
+            IbCastDevs[IbCastNDevs].rdmaReadSupported = -1;
             IbCastDevs[IbCastNDevs].mrCache.capacity = 0;
             IbCastDevs[IbCastNDevs].mrCache.population = 0;
             IbCastDevs[IbCastNDevs].mrCache.slots = NULL;
-            NCCLCHECK(IbCastStatsInit(&IbCastDevs[IbCastNDevs].stats));
+            NCCLCHECKGOTO(IbCastStatsInit(&IbCastDevs[IbCastNDevs].stats), ret, fail);
 
             IbCastDevs[IbCastNDevs].railId = (userIfId >= 0) ? userIfs[userIfId].rail : -1;
             IbCastDevs[IbCastNDevs].planeId = (userIfId >= 0) ? userIfs[userIfId].plane : -1;
@@ -536,11 +612,16 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             IbCastDevs[IbCastNDevs].ar = (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) ? 1 : 0;
             if (ncclParamIbCastAdaptiveRouting() != -2) IbCastDevs[IbCastNDevs].ar = ncclParamIbCastAdaptiveRouting();
 
-            INFO(NCCL_NET, "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d", d,
-                 devices[d]->name, devices[d]->dev_name, IbCastDevs[IbCastNDevs].portNum,
+            NCCLCHECKGOTO(IbCastGidInfoQuery(context, port_num, &portAttr, &IbCastDevs[IbCastNDevs].gidInfo), ret,
+                          fail);
+
+            INFO(NCCL_NET,
+                 "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d udmaCount=%u",
+                 d, devices[d]->name, devices[d]->dev_name, IbCastDevs[IbCastNDevs].portNum,
                  NCCL_IB_LLSTR(portAttr.link_layer), ibCastProviderName[IbCastDevs[IbCastNDevs].ibProvider],
                  IbCastDevs[IbCastNDevs].speed, context, IbCastDevs[IbCastNDevs].pciPath, IbCastDevs[IbCastNDevs].ar,
-                 IbCastDevs[IbCastNDevs].oooRqSize);
+                 IbCastDevs[IbCastNDevs].oooRqSize,
+                 IbCastAinicRoce ? IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount : 0u);
 
             IbCastAsyncThread = std::thread(IbCastAsyncThreadMain, IbCastDevs + IbCastNDevs);
             ncclSetThreadName(IbCastAsyncThread.native_handle(), "NCCL IbAsync %2d", IbCastNDevs);
@@ -614,7 +695,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     }
     char addrline[SOCKET_NAME_MAXLEN + 1];
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, IbCastRelaxedOrderingEnabled ? "[RO]" : "",
-         IbCastIfName, ncclSocketToString(&IbCastIfAddr, addrline));
+         IbCastIfName, ncclSocketToString(&IbCastIfAddr, addrline, sizeof(addrline)));
 
     IbCastQpSharingGlobalEnable = rcclParamIbCastQpSharingEnable() > 0;
     IbCastUseInline = ncclParamIbCastUseInline();
@@ -651,6 +732,15 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
            "IB Use Inline: %s; GDR Flush: %s",
            IbCastAinicCtsInlineData ? "Enabled" : "Disabled", IbCastOffloadEnabled ? "Enabled" : "Disabled",
            IbCastUseInline ? "Enabled" : "Disabled", IbCastGdrFlushDisable ? "Disabled" : "Enabled");
+
+      int64_t udmaPolicy = rcclParamIbCastUDMAPolicy();
+      if (!ncclIbCastUDMAPolicyIsValid(udmaPolicy)) {
+        WARN("NET/IB : RCCL_IB_UDMA_POLICY=%ld is invalid (must be %d-%d). Using RCCL_IB_UDMA_POLICY=%d.", udmaPolicy,
+             (int)ncclIbCastUDMAPolicy::First, (int)ncclIbCastUDMAPolicy::Last,
+             (int)ncclIbCastUDMAPolicy::ChannelAffinity);
+        udmaPolicy = (int64_t)ncclIbCastUDMAPolicy::ChannelAffinity;
+      }
+      INFO(NCCL_INIT | NCCL_NET, "NET/IB : AINIC uDMA policy: %ld", udmaPolicy);
     }
   }
 exit:
@@ -679,6 +769,22 @@ exit:
     IbCastUseInline = false;
     IbCastAinicCtsInlineData = false;
   }
+  // After all offload/scheduler mutations so BY_ORDER + failover logs match
+  // the scheme comms will actually use (IbCastByOrderRequested reads live).
+  if (ret == ncclSuccess && IbCastNDevs > 0) {
+    if (IbCastByOrderRequested()) {
+      if (ncclParamIbCastResiliencyPortFailover() > 0) {
+        WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling resiliency "
+             "(port failover and port recovery)", BY_ORDER);
+      }
+      if (ncclParamIbCastOooRq()) {
+        WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d):"
+             " disabling out-of-order RQ", BY_ORDER);
+      }
+    }
+    IbCastReportMatchingScheme();
+  }
+  if (ret == ncclSuccess) IbCastInitMaxPostSendBytes();
   return ret;
 fail:
   if (devices && (ncclSuccess != wrap_ibv_free_device_list(devices))) {
@@ -692,9 +798,24 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
   ncclResult_t ret = ncclSuccess;
   ncclNetCommConfig_t* netCommConfig = nullptr;
   // Telemetry is initialized and reported by IbCastInitDevices below.
+  // init()/finalize() is a strict pair in the net plugin contract, so any step below that fails
+  // must unwind itself via IbCastFinalizeDevices() rather than rely on a caller's finalize().
   NCCLCHECK(IbCastInitDevices(logFunction, profFunction));
-  NCCLCHECK(IbCastPortRecoveryThreadStart());
-  NCCLCHECK(ncclCalloc(&netCommConfig, 1));
+  // Probe QPs must use the final IbCastUseInline, like the resiliency QPs. Each probe self-cleans its
+  // own QP/MR/CQ/PD on failure, so finalize here is defensive, not unwinding a half-built device.
+  if ((ret = IbCastCapProbeDevices()) != ncclSuccess) {
+    IbCastFinalizeDevices();
+    return ret;
+  }
+  if ((ret = IbCastPortRecoveryThreadStart()) != ncclSuccess) {
+    IbCastFinalizeDevices();
+    return ret;
+  }
+  if ((ret = ncclCalloc(&netCommConfig, 1)) != ncclSuccess) {
+    IbCastPortRecoveryThreadStop();
+    IbCastFinalizeDevices();
+    return ret;
+  }
   netCommConfig->trafficClass = config->trafficClass;
   *ctx = (void*)netCommConfig;
   return ret;
@@ -721,7 +842,7 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
     props->ptrSupport |= NCCL_PTR_DMABUF; // GDR support via DMA-BUF
   }
   props->forceFlush = 0;
-  if (ibDev->capsProvider.mlx5.dataDirect) {
+  if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ibDev->capsProvider.mlx5.dataDirect) {
     props->forceFlush = 1;
   }
   props->latency = 0; // Not set

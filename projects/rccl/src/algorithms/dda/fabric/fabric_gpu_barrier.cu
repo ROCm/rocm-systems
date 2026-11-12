@@ -18,15 +18,17 @@
 namespace dda::common {
 
 /* static */ __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>
-FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* bootstrap,
-                                struct ncclMemManager* manager) {
+FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager,
+                                DdaKernelParams params) {
   if (nRanks <= 0 || nRanks > kDdaMaxNranks || selfRank < 0 || selfRank >= nRanks || nBlocks <= 0) {
     WARN("FabricGpuBarrier::mallocAndInit: invalid geometry nRanks=%d, selfRank=%d, nBlocks=%d",
          nRanks, selfRank, nBlocks);
     return {nullptr, FabricGpuBarrier{}};
   }
 
-  const size_t flagBytes = static_cast<size_t>(nRanks) * nBlocks * sizeof(FlagType);
+  // Three regions (see FabricGpuBarrier): the toggle flags, the epoch flags, and one epoch cell per block.
+  const size_t flagBytes =
+    (2 * static_cast<size_t>(nRanks) * nBlocks + static_cast<size_t>(nBlocks)) * sizeof(FlagType);
 
   // This rank's flag buffer, shared with peers (VMM-backed when available).
   auto selfFlagBuf = std::make_unique<DeviceBuffer>(flagBytes, /*useVmm=*/true, manager);
@@ -96,7 +98,7 @@ FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* boo
     return {nullptr, FabricGpuBarrier{}};
   }
 
-  FabricGpuBarrier barrier(nBlocks, selfRank, nRanks, static_cast<FlagType**>(peerFlagsDev->get()));
+  FabricGpuBarrier barrier(nBlocks, selfRank, nRanks, static_cast<FlagType**>(peerFlagsDev->get()), params);
 
   auto resources = std::make_unique<FabricGpuBarrierResources>();
   resources->fabricMemHandler = std::move(memHandler);

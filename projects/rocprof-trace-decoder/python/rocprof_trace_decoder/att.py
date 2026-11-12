@@ -10,7 +10,7 @@ from .bindings import Decoder
 from .code_index import CodeIndex
 from .codegen import CodeObject, generate_code_artifacts
 from .records import ShaderDataFlags
-from .rcv import (
+from .analysis.rcv import (
     DEFAULT_RUN_BASE_NAME,
     RcvOutputWriter,
     normalize_output_formats,

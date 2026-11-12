@@ -188,7 +188,7 @@ tracing_config<SdkBackend, Externals>::get_domain_choices()
     auto choices = std::unordered_set<std::string>{};
     choices.reserve(buffered_tracing_info.size() + callback_tracing_info.size());
 
-    auto add_domain_f = [&choices](std::string_view domain_to_add) {
+    auto const add_domain_f = [&choices](std::string_view domain_to_add) {
         const auto domain_lowercase = utility::string::to_lower(domain_to_add);
         if(get_domains_to_skip_for_domain_choices().contains(domain_lowercase))
         {
@@ -244,7 +244,7 @@ tracing_config<SdkBackend, Externals>::get_operation_settings()
 
     auto result = std::vector<operation_setting_spec>{};
 
-    auto gather_domain_f = [&result](auto kind, const auto& domain_operations) {
+    auto const gather_domain_f = [&result](auto kind, const auto& domain_operations) {
         const auto env_names = assemble_operation_env_names_for_kind(kind);
         if(env_names.is_empty())
         {

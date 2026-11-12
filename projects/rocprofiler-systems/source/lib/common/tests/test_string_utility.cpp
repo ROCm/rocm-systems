@@ -3,7 +3,12 @@
 
 #include "common/string_utility.hpp"
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
+
+#include <cstdint>
+#include <limits>
+#include <string>
 
 using namespace rocprofsys::utility::string;
 
@@ -127,4 +132,208 @@ TEST(strip_rocprofsys_prefix, strips_prefix_case_insensitively)
 TEST(strip_rocprofsys_prefix, no_prefix_is_only_lowercased)
 {
     EXPECT_EQ(strip_rocprofsys_prefix("SAMPLING_FREQ"), "sampling_freq");
+}
+
+TEST(strip_ansi, no_escape_sequences_is_unchanged)
+{
+    EXPECT_EQ(strip_ansi("hello world"), "hello world");
+}
+
+TEST(strip_ansi, empty_string_returns_empty_string) { EXPECT_EQ(strip_ansi(""), ""); }
+
+TEST(strip_ansi, strips_single_color_code)
+{
+    EXPECT_EQ(strip_ansi("\033[01;34minfo\033[0m"), "info");
+}
+
+TEST(strip_ansi, strips_multiple_color_codes)
+{
+    EXPECT_EQ(strip_ansi("\033[01;34m[a]\033[0m \033[01;31m[b]\033[0m"), "[a] [b]");
+}
+
+TEST(strip_ansi, code_followed_by_text_strips_only_the_code)
+{
+    EXPECT_EQ(strip_ansi("\033[01;34mafter"), "after");
+}
+
+TEST(strip_ansi, unterminated_escape_sequence_consumes_rest_of_string)
+{
+    // no 'm' anywhere after the escape starts, so everything through the end
+    // of the string is treated as (and dropped with) the escape sequence
+    EXPECT_EQ(strip_ansi("before\033[01;34no_end_here"), "before");
+}
+
+TEST(strip_ansi, string_with_only_escape_sequence_returns_empty_string)
+{
+    EXPECT_EQ(strip_ansi("\033[0m"), "");
+}
+
+TEST(hex_padded, basic_check)
+{
+    EXPECT_EQ(hex_padded(std::uintptr_t{ 0x10 }), "0x0000000000000010");
+}
+
+TEST(hex_padded, zero_value)
+{
+    EXPECT_EQ(hex_padded(std::uintptr_t{ 0 }), "0x0000000000000000");
+}
+
+TEST(hex_padded, value_filling_default_width_needs_no_padding)
+{
+    EXPECT_EQ(hex_padded(std::uintptr_t{ 0x123456789abcdef0 }), "0x123456789abcdef0");
+}
+
+TEST(hex_padded, custom_width_is_honored)
+{
+    EXPECT_EQ(hex_padded(std::uintptr_t{ 0xff }, 4), "0x00ff");
+}
+
+TEST(hex_padded, custom_width_narrower_than_value_is_not_truncated)
+{
+    EXPECT_EQ(hex_padded(std::uintptr_t{ 0x1234 }, 2), "0x1234");
+}
+
+TEST(is_numeric, digits_only)
+{
+    EXPECT_TRUE(is_numeric("0"));
+    EXPECT_TRUE(is_numeric("0123456789"));
+}
+
+TEST(is_numeric, rejects_empty_and_non_digits)
+{
+    EXPECT_FALSE(is_numeric(""));
+    EXPECT_FALSE(is_numeric("12a"));
+    EXPECT_FALSE(is_numeric("-1"));
+    EXPECT_FALSE(is_numeric("1.5"));
+    EXPECT_FALSE(is_numeric(" 1"));
+}
+
+TEST(decimal_width, counts_digits)
+{
+    EXPECT_EQ(decimal_width(0), 1U);
+    EXPECT_EQ(decimal_width(9), 1U);
+    EXPECT_EQ(decimal_width(10), 2U);
+    EXPECT_EQ(decimal_width(99), 2U);
+    EXPECT_EQ(decimal_width(100), 3U);
+    EXPECT_EQ(decimal_width(1234567), 7U);
+}
+
+TEST(split_key_value, splits_at_first_equals)
+{
+    auto const parsed = split_key_value("KEY=a=b");
+    if(parsed.has_value())
+    {
+        EXPECT_EQ(parsed->key, "KEY");
+        EXPECT_EQ(parsed->value, "a=b");
+    }
+    else
+    {
+        ASSERT_TRUE(parsed.has_value());
+    }
+}
+
+TEST(split_key_value, empty_value_and_empty_key)
+{
+    auto const empty_value = split_key_value("KEY=");
+    if(empty_value.has_value())
+    {
+        EXPECT_EQ(empty_value->key, "KEY");
+        EXPECT_TRUE(empty_value->value.empty());
+    }
+    else
+    {
+        ASSERT_TRUE(empty_value.has_value());
+    }
+
+    auto const empty_key = split_key_value("=v");
+    if(empty_key.has_value())
+    {
+        EXPECT_TRUE(empty_key->key.empty());
+        EXPECT_EQ(empty_key->value, "v");
+    }
+    else
+    {
+        ASSERT_TRUE(empty_key.has_value());
+    }
+}
+
+TEST(split_key_value, no_equals_yields_nullopt)
+{
+    EXPECT_FALSE(split_key_value("KEY").has_value());
+    EXPECT_FALSE(split_key_value("").has_value());
+}
+
+TEST(has_env_key, matches_whole_key_only)
+{
+    EXPECT_TRUE(has_env_key("PATH=/usr/bin", "PATH"));
+    EXPECT_TRUE(has_env_key("PATH=", "PATH"));
+    EXPECT_FALSE(has_env_key("PATHX=/usr/bin", "PATH"));
+    EXPECT_FALSE(has_env_key("PAT=1", "PATH"));
+    EXPECT_FALSE(has_env_key("PATH", "PATH"));
+    EXPECT_FALSE(has_env_key("", "PATH"));
+}
+
+TEST(safe_stoi, parses_whole_string)
+{
+    EXPECT_EQ(safe_stoi("42").value(), 42);
+    EXPECT_EQ(safe_stoi("-7").value(), -7);
+    constexpr auto k_int_max = std::numeric_limits<int>::max();
+    constexpr auto k_int_min = std::numeric_limits<int>::min();
+    EXPECT_EQ(safe_stoi(std::to_string(k_int_max)).value(), k_int_max);
+    EXPECT_EQ(safe_stoi(std::to_string(k_int_min)).value(), k_int_min);
+}
+
+TEST(safe_stoi, reports_why_input_was_rejected)
+{
+    EXPECT_EQ(safe_stoi("").error(), parse_error::empty);
+    EXPECT_EQ(safe_stoi("12a").error(), parse_error::not_a_number);
+    EXPECT_EQ(safe_stoi("12.5").error(), parse_error::not_a_number);
+    EXPECT_EQ(safe_stoi(" 1").error(), parse_error::not_a_number);
+    EXPECT_EQ(safe_stoi("abc").error(), parse_error::not_a_number);
+    EXPECT_EQ(safe_stoi("99999999999").error(), parse_error::out_of_range);
+    constexpr auto k_int_max = static_cast<long long>(std::numeric_limits<int>::max());
+    constexpr auto k_int_min = static_cast<long long>(std::numeric_limits<int>::min());
+    EXPECT_EQ(safe_stoi(std::to_string(k_int_max + 1)).error(),
+              parse_error::out_of_range);
+    EXPECT_EQ(safe_stoi(std::to_string(k_int_min - 1)).error(),
+              parse_error::out_of_range);
+}
+
+TEST(safe_stol, parses_whole_string)
+{
+    EXPECT_EQ(safe_stol("42").value(), 42L);
+    EXPECT_EQ(safe_stol("-7").value(), -7L);
+    constexpr auto k_long_max = std::numeric_limits<long>::max();
+    EXPECT_EQ(safe_stol(std::to_string(k_long_max)).value(), k_long_max);
+}
+
+TEST(safe_stol, reports_why_input_was_rejected)
+{
+    EXPECT_EQ(safe_stol("").error(), parse_error::empty);
+    EXPECT_EQ(safe_stol("12a").error(), parse_error::not_a_number);
+    EXPECT_EQ(safe_stol("12.5").error(), parse_error::not_a_number);
+    EXPECT_EQ(safe_stol(" 1").error(), parse_error::not_a_number);
+    constexpr auto k_long_max_plus_one =
+        static_cast<unsigned long>(std::numeric_limits<long>::max()) + 1UL;
+    EXPECT_EQ(safe_stol(std::to_string(k_long_max_plus_one)).error(),
+              parse_error::out_of_range);
+}
+
+TEST(safe_stol, value_or_substitutes_fallback_on_failure)
+{
+    EXPECT_EQ(safe_stol("abc").value_or(-1L), -1L);
+    EXPECT_EQ(safe_stol("5").value_or(-1L), 5L);
+}
+
+TEST(safe_from_chars, trailing_garbage_wins_over_out_of_range)
+{
+    EXPECT_EQ(safe_stoi("99999999999x").error(), parse_error::not_a_number);
+    EXPECT_EQ((safe_from_chars<double>("1e999x").error()), parse_error::not_a_number);
+}
+
+TEST(parse_error_formatter, describes_every_error)
+{
+    EXPECT_EQ(fmt::format("{}", parse_error::empty), "empty value");
+    EXPECT_EQ(fmt::format("{}", parse_error::not_a_number), "not a number");
+    EXPECT_EQ(fmt::format("{}", parse_error::out_of_range), "out of range");
 }

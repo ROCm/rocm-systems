@@ -53,8 +53,9 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   const size_t maxVGPRs = adjust_for_wave64
       ? device.info().vgprsPerSimd_ >> 1
       : device.info().vgprsPerSimd_;
+
   const size_t VgprWaves = wrkGrpInfo->usedVGPRs_ > 0
-      ? maxVGPRs / amd::alignUp(wrkGrpInfo->usedVGPRs_, VgprGranularity)
+      ? maxVGPRs / amd::roundUp<size_t>(wrkGrpInfo->usedVGPRs_, VgprGranularity)
       : MaxWavesPerSimd;
 
   if (VgprWaves == 0) {
@@ -70,8 +71,9 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   const size_t sgprAllocGranule = device.info().sgprAllocGranularity_ != 0
       ? device.info().sgprAllocGranularity_
       : DefaultSgprAllocGranule;
+
   const size_t sgprsPerWave =
-      amd::alignUp(wrkGrpInfo->usedSGPRs_, sgprAllocGranule) +
+      amd::roundUp<size_t>(wrkGrpInfo->usedSGPRs_, sgprAllocGranule) +
       device.info().sgprTrapHandlerReserve_;
   const size_t GprWaves = wrkGrpInfo->usedSGPRs_ > 0
       ? std::min(VgprWaves, device.info().sgprsPerSimd_ / sgprsPerWave)
@@ -155,7 +157,6 @@ struct __CudaFatBinaryWrapper {
 };
 
 // Forward declarations
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_params,
                                   hipStream_t hStream, void** kernelParams, void** extra,
                                   hipEvent_t startEvent, hipEvent_t stopEvent,
@@ -291,17 +292,16 @@ void __hipRegisterManagedVar(
 
   hip::Var* var_ptr = new hip::Var(std::string(name), hip::Var::DeviceVarKind::DVK_Managed, pointer,
                                    size, align, reinterpret_cast<hip::FatBinaryInfo**>(hipModule));
-  hipError_t status = PlatformState::Instance().StatCO().RegisterManagedVar(var_ptr);
-  guarantee(status == hipSuccess, "Cannot register Static Managed Var, error: %d", status);
 
   if (enable_deferred_loading) {
-    // Allocate temporary var on host and initialize
     *pointer = amd::Os::reserveMemory(0, size, align, amd::Os::MEM_PROT_RW);
+    guarantee(*pointer != nullptr, "Cannot reserve host memory for Static Managed Var");
     ::memcpy(*pointer, init_value, size);
   } else {
     HIP_INIT_VOID();
-    status = ihipMallocManaged(pointer, size, align, 0);
-    var_ptr->SetAllocFlag(true);
+    hipError_t status = ihipMallocManaged(pointer, size, align, /*use_host_ptr=*/false,
+                                         ManagedMemOwner::kModuleVariable);
+    var_ptr->SetManagedVarMapped(true);
     if (status == hipSuccess) {
       hip::Stream* stream = hip::getNullStream();
       if (stream != nullptr) {
@@ -314,6 +314,9 @@ void __hipRegisterManagedVar(
       guarantee(false, "Error during allocation of managed memory!, error: %d", status);
     }
   }
+
+  hipError_t status = PlatformState::Instance().StatCO().RegisterManagedVar(var_ptr);
+  guarantee(status == hipSuccess, "Cannot register Static Managed Var, error: %d", status);
 }
 
 // ================================================================================================
@@ -519,8 +522,12 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
 
   const amd::Device& device = *hip::getCurrentDevice()->devices()[dev_id];
   const amd::Kernel& kernel = *func_kernel;
-  const auto* wrkGrpInfo = kernel.getDeviceKernel(device)->workGroupInfo();
+  auto* device_kernel = kernel.getDeviceKernel(device);
+  if (device_kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
 
+  const auto* wrkGrpInfo = device_kernel->workGroupInfo();
   const int staticSharedMemoryUsage = wrkGrpInfo->usedLDSSize_;
   const int maxDynamicSharedSizeBytes = wrkGrpInfo->maxDynamicSharedSizeBytes_;
   const int maxNumBlocks = prop.maxThreadsPerMultiProcessor / blockSize;
@@ -540,56 +547,6 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
 }  // namespace hip
 
 namespace hip_impl {
-namespace {
-// based register usage for the device symbol and device capabilities, returns the maximum number
-// of threads that could be utilized
-int maxThreadsPerCU(const amd::device::Info& deviceInfo,
-                    const device::Kernel::WorkGroupInfo& wrkGrpInfo, amd::Isa isa) {
-  // Find wave occupancy per CU => simd_per_cu * GPR usage
-  size_t MaxWavesPerSimd;
-
-  if (isa.versionMajor() <= 9) {
-    MaxWavesPerSimd = 8;  // Limited by SPI 32 per CU, hence 8 per SIMD
-  } else {
-    MaxWavesPerSimd = 16;
-  }
-  size_t VgprWaves = MaxWavesPerSimd;
-  uint32_t VgprGranularity = deviceInfo.vgprAllocGranularity_;
-  size_t maxVGPRs = deviceInfo.vgprsPerSimd_;
-  size_t wavefrontSize = wrkGrpInfo.wavefrontSize_;
-  if (isa.versionMajor() >= 10) {
-    if (wavefrontSize == 64) {
-      maxVGPRs = maxVGPRs >> 1;
-      VgprGranularity = VgprGranularity >> 1;
-    }
-  }
-  if (wrkGrpInfo.usedVGPRs_ > 0) {
-    VgprWaves = maxVGPRs / amd::alignUp(wrkGrpInfo.usedVGPRs_, VgprGranularity);
-  }
-
-  if (VgprWaves == 0) {
-    // This should not happen ideally, but in case the value is
-    // incorrect, it can lead to a crash. By returning error, API can exit gracefully.
-    return hipErrorUnknown;
-  }
-
-  size_t GprWaves = VgprWaves;
-  if (wrkGrpInfo.usedSGPRs_ > 0) {
-    size_t maxSGPRs = deviceInfo.sgprsPerSimd_;
-    const size_t SgprWaves = maxSGPRs / amd::alignUp(wrkGrpInfo.usedSGPRs_, 16);
-    GprWaves = std::min(VgprWaves, SgprWaves);
-  }
-
-  // multiply the number of SIMDs by 2, to account for 2CUs in 1 WGP.
-  uint32_t simdPerCU = isa.simdPerCU();
-  if (wrkGrpInfo.isWGPMode_) {
-    simdPerCU *= 2;
-  }
-
-  const size_t alu_occupancy = simdPerCU * std::min(MaxWavesPerSimd, GprWaves);
-  return alu_occupancy * wrkGrpInfo.wavefrontSize_;
-}
-}  // namespace
 
 // ================================================================================================
 // @launchConfig  a launch configuration that might have the cluster size unconfigured
@@ -731,6 +688,7 @@ namespace hip {
 hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
                             size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent,
                             hipEvent_t stopEvent, int flags, dim3 clusterDim = {1, 1, 1},
+                            bool clusterDimsSpecified = false,
                             const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr) {
   if (hostFunction == nullptr) {
     return hipErrorInvalidDeviceFunction;
@@ -772,8 +730,8 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   }
 
   amd::HIPLaunchParams launch_params(gridDim.x, gridDim.y, gridDim.z, blockDim.x, blockDim.y,
-                                     blockDim.z, sharedMemBytes, *device, 0, 0, 0,
-                                     clusterDim.x, clusterDim.y, clusterDim.z);
+                                     blockDim.z, sharedMemBytes, *device, 0, 0, 0, clusterDim.x,
+                                     clusterDim.y, clusterDim.z, clusterDimsSpecified);
   if (!launch_params.IsValidConfig()) {
     return hipErrorInvalidConfiguration;
   }
@@ -1062,16 +1020,20 @@ hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
 }
 
 // ================================================================================================
-void PlatformState::Init() {
+hipError_t PlatformState::Init() {
   std::scoped_lock lock(lock_);
   if (initialized_ || g_devices.empty()) {
-    return;
+    return hipSuccess;
   }
-  initialized_ = true;
   statCO_.ResizeForDevices(g_devices.size());
+
   amd::RuntimeTearDown::RegisterTearDownCallback("PlatformState static fatbin cleanup", [this]() {
     statCO_.RemoveAllFatBinaries();
   });
+
+  IHIP_RETURN_ONFAIL(statCO_.EnsureAllManagedVarsAreMapped());
+  initialized_ = true;
+  return hipSuccess;
 }
 
 // ================================================================================================
@@ -1100,8 +1062,44 @@ hipError_t PlatformState::LoadModule(hipModule_t* module, const char* fname, con
 }
 
 // ================================================================================================
+hipError_t PlatformState::RegisterLibraryModule(hipModule_t hmod, hip::DynCO* dynCO) {
+  if (hmod == nullptr || dynCO == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  std::scoped_lock lock(lock_);
+
+  const auto [it, inserted] = dynCO_map_.try_emplace(hmod, dynCO);
+  if (!inserted) {
+    return (it->second == dynCO) ? hipSuccess : hipErrorAlreadyMapped;
+  }
+  library_modules_.insert(hmod);
+
+  return hipSuccess;
+}
+
+// ================================================================================================
+void PlatformState::UnregisterLibraryModule(hipModule_t hmod) {
+  std::scoped_lock lock(lock_);
+
+  if (library_modules_.erase(hmod) == 0) {
+    return;
+  }
+
+  dynCO_map_.erase(hmod);
+  RemoveTexRefs(hmod);
+}
+
+// ================================================================================================
 hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
   std::scoped_lock lock(lock_);
+
+  // Modules returned by hipLibraryGetModule() are owned by their library.
+  // Unloading them should be done via hipLibraryUnload(), which also tears down the library's DynCO.
+  if (library_modules_.find(hmod) != library_modules_.end()) {
+    LogPrintfError("Module %p is owned by a library, unload it with hipLibraryUnload", hmod);
+    return hipErrorNotPermitted;
+  }
 
   if (auto it = dynCO_map_.find(hmod); it == dynCO_map_.end()) {
     return hipErrorNotFound;
@@ -1110,7 +1108,13 @@ hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
     dynCO_map_.erase(it);  // Iterator-based erase avoids second lookup
   }
 
-  // Remove all texture references associated with this module
+  RemoveTexRefs(hmod);
+
+  return hipSuccess;
+}
+
+// ================================================================================================
+void PlatformState::RemoveTexRefs(hipModule_t hmod) {
   for (auto tex_it = texRef_map_.begin(); tex_it != texRef_map_.end(); ) {
     if (tex_it->second.first == hmod) {
       tex_it = texRef_map_.erase(tex_it);
@@ -1118,8 +1122,6 @@ hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
       ++tex_it;
     }
   }
-
-  return hipSuccess;
 }
 
 // ================================================================================================
@@ -1150,6 +1152,21 @@ hipError_t PlatformState::GetFuncCount(unsigned int* count, hipModule_t hmod) {
     return hipErrorNotFound;
   }
   return it->second->getFuncCount(count);
+}
+
+// ================================================================================================
+hipError_t PlatformState::EnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
+                                             hipModule_t hmod) {
+  std::unordered_map<hipModule_t, hip::DynCO*>::iterator it;
+  {
+    std::scoped_lock lock(lock_);
+    it = dynCO_map_.find(hmod);
+    if (it == dynCO_map_.end()) {
+      LogPrintfError("Cannot find the module: %p", hmod);
+      return hipErrorNotFound;
+    }
+  }
+  return it->second->enumerateFunctions(functions, numFunctions);
 }
 
 // ================================================================================================

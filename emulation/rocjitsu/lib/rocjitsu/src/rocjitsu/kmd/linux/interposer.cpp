@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file interposer.cpp
-/// @brief LD_PRELOAD interposer that redirects KFD syscalls to rocjitsu KFD drivers.
+/// @brief LD_PRELOAD interposer for simulated KFD and DRM compute devices.
 ///
 /// @details Intercepts open, close, ioctl, mmap, munmap, and filesystem access
 /// to route /dev/kfd operations and sysfs topology reads through one of two
@@ -11,34 +11,40 @@
 /// append one synthetic guest GPU over either real KFD hardware or an existing
 /// SimulatedKfd target. The HSA tools hook maps guest-agent API calls to that
 /// execution agent and translates guest code objects before loading them. All
-/// mutable state is consolidated in InterposerContext.
+/// mutable state is consolidated in InterposerContext. The DRM path emulates
+/// render-node discovery, GEM buffers, contexts, syncobj fences, and PM4 compute
+/// submission for the Vulkan userspace driver.
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/guest_kfd.h"
+#include "rocjitsu/kmd/linux/host_access_guard.h"
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
+#include "util/diagnostic.h"
 
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_ioctl.h"
+#include "uapi/linux/kfd_ioctl.h"
 // Vendored kernel DRM/amdgpu UAPI (MIT). Provides the real drm_version,
 // drm_amdgpu_info, drm_amdgpu_info_device, drm_amdgpu_info_vram_gtt, and
 // drm_amdgpu_memory_info structs so the interposer services the amdgpu DRM
 // ioctl ABI directly. These are kernel ABI, not libdrm library types, so this
 // keeps the interposer independent of libdrm.
-#include <libdrm/amdgpu_drm.h>
-#include <libdrm/drm.h>
+#include <uapi/linux/drm/amdgpu_drm.h>
+#include <uapi/linux/drm/drm.h>
 RJ_DIAGNOSTIC_POP
 
 #include "util/dynamic_loader.h"
@@ -61,9 +67,12 @@ RJ_DIAGNOSTIC_POP
 #include <dlfcn.h>
 #include <exception>
 #include <fcntl.h>
+#include <format>
 #include <limits>
 #include <linux/futex.h>
 #include <linux/memfd.h>
+#include <linux/sync_file.h>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -73,6 +82,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -86,6 +96,7 @@ RJ_DIAGNOSTIC_POP
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -94,6 +105,36 @@ using rocjitsu::LinuxKfd;
 using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedKfd;
 using rocjitsu::Sysfs;
+
+namespace rocjitsu {
+
+/// @brief BO state every handle to one backing file shares.
+/// @details The kernel returns the same BO for every import of its dmabuf, so
+/// create info, placement, and UMD metadata set through one handle are what
+/// every other handle reads.
+struct GemObject {
+  dev_t device = 0; ///< Backing file identity; zero when fstat failed.
+  ino_t inode = 0;
+  // GET_GEM_CREATE_INFO returns this record: the allocated size and the
+  // GEM_CREATE alignment, domains, and flags. SET_PLACEMENT updates domains.
+  drm_amdgpu_gem_create_in create_info{};
+  // Userspace (libdrm amdgpu_bo_query_info / amdgpu_bo_set_metadata) reads and
+  // writes this on every VMM import. An empty record is a valid buffer.
+  uint64_t metadata_flags = 0;
+  uint64_t tiling_info = 0;
+  uint32_t metadata_size = 0;
+  uint32_t metadata[64] = {};
+  // The KFD allocation flags the GPU PTE type derives from, recorded at the first
+  // export or import of the buffer. A duplicate of the export fd, or a repeated
+  // import, has no EXPORT_DMABUF record of its own and takes them from here.
+  uint32_t alloc_flags = 0;
+  bool has_alloc_flags = false;
+  int prime_access_mode = -1; ///< Public dma-buf mode fixed by the first export/import.
+};
+
+} // namespace rocjitsu
+
+using rocjitsu::GemObject;
 
 namespace {
 
@@ -112,8 +153,11 @@ static_assert(std::atomic<uint32_t>::is_always_lock_free,
 
 /// @brief Sleep while @p word still equals @p expected, until @p deadline or a signal.
 long futex_wait_until(std::atomic<uint32_t> &word, uint32_t expected, const timespec *deadline) {
-  return syscall(SYS_futex, &word, FUTEX_WAIT_BITSET_PRIVATE, expected, deadline, nullptr,
-                 FUTEX_BITSET_MATCH_ANY);
+  // Wine may call pthread_exit from a signal handler during this wait. Use the
+  // resolved pointer to avoid libc's noexcept declaration of syscall, which
+  // would terminate forced unwinding instead of releasing the waiter's state.
+  return rocjitsu::libc_passthrough().syscall(SYS_futex, &word, FUTEX_WAIT_BITSET_PRIVATE, expected,
+                                              deadline, nullptr, FUTEX_BITSET_MATCH_ANY);
 }
 
 /// @brief Wake every waiter sleeping on @p word.
@@ -174,7 +218,12 @@ int open_proc_maps_snapshot(const char *path, int flags) {
   }
   int read_errno = errno;
   libc.close(source);
-  if (contents.find("/memfd:rocjitsu_remote_kfd (deleted)") == std::string::npos) {
+  const std::string token_marker = std::format(
+      "/SYSV{:0{}x}", rocjitsu::kmd::kDeviceTokenKeyPrefix >> rocjitsu::kmd::kDeviceTokenSlotBits,
+      sizeof(rocjitsu::kmd::kDeviceTokenKeyPrefix) * 2 - rocjitsu::kmd::kDeviceTokenSlotHexDigits);
+  if (contents.find("/memfd:rocjitsu_remote_kfd (deleted)") == std::string::npos &&
+      contents.find(rocjitsu::kmd::kDeviceBackingNamePrefix) == std::string::npos &&
+      contents.find(token_marker) == std::string::npos) {
     errno = read_errno;
     return -1;
   }
@@ -186,12 +235,48 @@ int open_proc_maps_snapshot(const char *path, int flags) {
     position += sizeof("/dev/kfd") - 1;
   }
 
+  // ROCr selects device-backed regions for both full and lightweight GPU
+  // cores by their render-node path. Preserve that identity on shared backing
+  // descriptors so another process reading this map sees the same device.
+  constexpr std::string_view kDeleted = " (deleted)";
+  const std::string allocation_marker =
+      "/memfd:" + std::string(rocjitsu::kmd::kDeviceBackingNamePrefix);
+  position = 0;
+  while ((position = contents.find(allocation_marker, position)) != std::string::npos) {
+    const size_t digits = position + allocation_marker.size();
+    size_t end = digits;
+    while (end < contents.size() && contents[end] >= '0' && contents[end] <= '9')
+      ++end;
+    if (end != digits && contents.compare(end, kDeleted.size(), kDeleted) == 0) {
+      const std::string device = "/dev/dri/renderD" + contents.substr(digits, end - digits);
+      contents.replace(position, end + kDeleted.size() - position, device);
+      position += device.size();
+    } else {
+      position = end;
+    }
+  }
+
+  // System V preserves its creation key in the VMA name after IPC_RMID,
+  // including after all tokens close or a view moves. ROCr only needs the
+  // render-node prefix to select GPU pages; this marker carries no device minor.
+  position = 0;
+  while ((position = contents.find(token_marker, position)) != std::string::npos) {
+    const size_t suffix = position + token_marker.size();
+    const size_t end = suffix + rocjitsu::kmd::kDeviceTokenSlotHexDigits;
+    if (end <= contents.size() && contents.find_first_not_of("0123456789abcdef", suffix) == end &&
+        contents.compare(end, kDeleted.size(), kDeleted) == 0) {
+      constexpr std::string_view kDevice = "/dev/dri/renderD-shared";
+      contents.replace(position, end + kDeleted.size() - position, kDevice);
+      position += kDevice.size();
+    } else {
+      position = suffix;
+    }
+  }
+
   int snapshot = libc.memfd_create("rocjitsu_proc_maps", MFD_CLOEXEC);
   if (snapshot < 0)
     return -1;
-  if (libc.write(snapshot, contents.data(), contents.size()) !=
-          static_cast<ssize_t>(contents.size()) ||
-      lseek(snapshot, 0, SEEK_SET) < 0) {
+  if (rocjitsu::populate_backing_file(snapshot, contents.data(), contents.size()) != 0) {
     int saved_errno = errno;
     libc.close(snapshot);
     errno = saved_errno;
@@ -456,6 +541,10 @@ public:
       std::fprintf(stderr, "rocjitsu: cannot register fork child initialization: %s\n",
                    std::strerror(fork_error));
     real().resolve();
+    // Keep generated topology and proc snapshots independent of limits lowered
+    // by application code before its first GPU call. Inherited hard limits on
+    // GPU backing are handled by the keeper's shared-RAM fallback.
+    rocjitsu::prepare_memory_keeper();
   }
 
   /// @brief Conservatively detect real GPU descriptors inherited outside this backend.
@@ -794,7 +883,12 @@ public:
     // out local-VM creation / a later remote retry. Only a fully-open driver is
     // ever visible to lock-free readers.
     if (!active_remote)
-      active_remote = std::make_shared<RemoteDriver>(sock);
+      active_remote = std::make_shared<RemoteDriver>(sock, [] {
+        // The daemon has stopped servicing GPU work. Native signal waits can
+        // otherwise spin forever without touching the disconnected RPC stream.
+        std::fprintf(stderr, "rocjitsu: daemon connection lost; exiting native process\n");
+        std::_Exit(EXIT_FAILURE);
+      });
     int fd = active_remote->open();
     if (fd < 0)
       return {};
@@ -1174,10 +1268,158 @@ public:
     sysfs_fds_.erase(fd);
   }
 
+  struct SyncobjFence {
+    mutable std::atomic<bool> signaled{false};
+    std::atomic<bool> failed{false};
+    // Merged sync files retain immutable snapshots of the original fences.
+    std::vector<std::shared_ptr<SyncobjFence>> dependencies;
+    bool is_signaled() const {
+      if (signaled.load(std::memory_order_acquire))
+        return true;
+      // Merges and timeline transfers form a DAG. Visit each payload once,
+      // without recursive calls or repeated walks through shared predecessors.
+      std::vector<const SyncobjFence *> pending{this};
+      std::unordered_set<const SyncobjFence *> visited;
+      while (!pending.empty()) {
+        const auto *fence = pending.back();
+        pending.pop_back();
+        if (fence->signaled.load(std::memory_order_acquire) || !visited.insert(fence).second)
+          continue;
+        if (fence->dependencies.empty())
+          return false;
+        // Check the newly appended work before revisiting its predecessors.
+        for (auto it = fence->dependencies.rbegin(); it != fence->dependencies.rend(); ++it)
+          pending.push_back(it->get());
+      }
+      // Successful completion is permanent; subsequent queries need not revisit
+      // an immutable subtree whose leaves have all completed successfully.
+      for (const auto *fence : visited)
+        fence->signaled.store(true, std::memory_order_release);
+      return true;
+    }
+    bool is_failed() const {
+      std::vector<const SyncobjFence *> pending{this};
+      std::unordered_set<const SyncobjFence *> visited;
+      while (!pending.empty()) {
+        const auto *fence = pending.back();
+        pending.pop_back();
+        if (fence->signaled.load(std::memory_order_acquire) || !visited.insert(fence).second)
+          continue;
+        if (fence->failed.load(std::memory_order_acquire))
+          return true;
+        for (const auto &dependency : fence->dependencies)
+          pending.push_back(dependency.get());
+      }
+      return false;
+    }
+  };
+
   struct SyncobjEntry {
     bool has_fence = false;
+    bool signaled = false;
     uint64_t submitted_point = 0;
     uint64_t signaled_point = 0;
+    std::shared_ptr<SyncobjFence> binary_fence;
+    std::map<uint64_t, std::shared_ptr<SyncobjFence>> timeline_fences;
+  };
+
+  /// Private backing descriptors move when application dup2/dup3 replaces their
+  /// numbers. All uses share the relocation lock, including asynchronous writes.
+  class PrivateDrmFd {
+  public:
+    PrivateDrmFd() = default;
+    PrivateDrmFd(const PrivateDrmFd &) = delete;
+    PrivateDrmFd &operator=(const PrivateDrmFd &) = delete;
+
+    static std::shared_ptr<PrivateDrmFd> duplicate(int source, bool require_readwrite = false) {
+      auto result = std::make_shared<PrivateDrmFd>();
+      std::lock_guard lock(mutex_);
+      // CPU access through a public dma-buf fd does not restrict the BO's GPU
+      // mapping or the importing DRM file's GEM_MMAP view.
+      int reopened = -1;
+      if (require_readwrite &&
+          (rocjitsu::fcntl_memory_backing(source, F_GETFL, 0) & O_ACCMODE) != O_RDWR) {
+        reopened = rocjitsu::reopen_memory_backing(source, O_RDWR | O_CLOEXEC);
+        if (reopened < 0)
+          return {};
+        source = reopened;
+      }
+      const int fd = duplicate_backing(source);
+      if (reopened >= 0)
+        real().close(reopened);
+      if (fd < 0)
+        return {};
+      result->fd_ = fd;
+      owned_.emplace(fd, result.get());
+      return result;
+    }
+
+    ~PrivateDrmFd() {
+      std::lock_guard lock(mutex_);
+      if (fd_ < 0)
+        return;
+      owned_.erase(fd_);
+      real().close(fd_);
+    }
+
+    template <typename F> auto use(F &&operation) const {
+      std::lock_guard lock(mutex_);
+      return operation(fd_);
+    }
+
+    static bool owns(int fd) {
+      std::lock_guard lock(mutex_);
+      return owned_.contains(fd);
+    }
+
+    template <typename F> static int replace(int target, F &&operation) {
+      std::lock_guard lock(mutex_);
+      const auto it = owned_.find(target);
+      if (it == owned_.end())
+        return operation();
+      const int relocated = duplicate_backing(target);
+      if (relocated < 0)
+        return -1;
+      auto *owner = it->second;
+      const int result = operation();
+      if (result < 0) {
+        const int error = errno;
+        real().close(relocated);
+        errno = error;
+        return result;
+      }
+      auto node = owned_.extract(target);
+      node.key() = relocated;
+      owned_.insert(std::move(node));
+      owner->fd_ = relocated;
+      return result;
+    }
+
+  private:
+    static int duplicate_backing(int source) {
+      int fd = real().fcntl(source, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin);
+      if (fd < 0 && errno == EINVAL)
+        fd = real().fcntl(source, F_DUPFD_CLOEXEC, 0);
+      return fd;
+    }
+
+    int fd_ = -1;
+    static inline std::mutex mutex_;
+    static inline std::unordered_map<int, PrivateDrmFd *> owned_;
+  };
+
+  struct SyncFile {
+    std::shared_ptr<SyncobjFence> fence;
+    std::shared_ptr<PrivateDrmFd> event_fd;
+    bool notified = false;
+    void refresh() {
+      if (notified || !fence || (!fence->is_signaled() && !fence->is_failed()))
+        return;
+      uint64_t value = 1;
+      if (event_fd->use([&](int fd) { return syscall(SYS_write, fd, &value, sizeof(value)); }) ==
+          sizeof(value))
+        notified = true;
+    }
   };
 
   /// @brief Move-only operational reference to the backend serving a DRM file.
@@ -1265,7 +1507,8 @@ public:
       // Through the accessor, not the field: publish_mutex_ is the innermost lock
       // and every other reader goes this way, so a raw read here would be the one
       // access a reviewer has to re-derive the safety of.
-      if (auto active_remote = remote()) {
+      if (auto active_remote = remote();
+          active_remote && active_remote->handles_drm_render_minor(render_minor)) {
         remote_open_refs_.fetch_add(1, std::memory_order_acq_rel);
         return DrmBackendLease(this, std::move(active_remote));
       }
@@ -1296,6 +1539,18 @@ public:
     // futex(2), which preserves EINTR instead of transparently restarting after a
     // signal as std::condition_variable does.
     std::atomic<uint32_t> syncobj_generation{0};
+    bool imported_sync_fence = false; // Wait on the cross-file notification generation.
+    uint32_t next_context_id = 1;
+    std::unordered_set<uint32_t> contexts;
+    bool vmid_reserved = false;
+    std::mutex submission_mutex;
+    /// Submission identity and retained fences for one context/engine/ring namespace.
+    struct Pm4Queue {
+      uint64_t key = 0;           ///< SimulatedKfd queue identity, retained until release.
+      uint64_t next_sequence = 1; ///< CS sequence local to this namespace.
+      std::map<uint64_t, std::shared_ptr<SyncobjFence>> fences; ///< Bounded WAIT_CS history.
+    };
+    std::unordered_map<uint64_t, Pm4Queue> pm4_queues; ///< Context/engine/ring namespaces.
   };
 
   using DrmFileToken = std::shared_ptr<DrmFileState>;
@@ -1324,6 +1579,7 @@ public:
   struct DrmFinalRelease {
     std::optional<uint64_t> file_id;
     DrmBackendLease lease;
+    std::unordered_map<uint64_t, DrmFileState::Pm4Queue> queues;
   };
 
   /// @brief Drop one fd or reservation reference while fd_mutex_ is held.
@@ -1338,7 +1594,7 @@ public:
     --state->open_fds;
     if (state->open_fds != 0)
       return {};
-    return {state->id, std::move(state->backend_lease)};
+    return {state->id, std::move(state->backend_lease), std::move(state->pm4_queues)};
   }
 
   struct DrmUntrackResult {
@@ -1346,9 +1602,12 @@ public:
     DrmFinalRelease release;
   };
 
-  /// @brief Finish a final DRM release: reap GEM, then drop the backend lease.
+  /// @brief Cancel the file's PM4 queues, reap GEM, then drop the backend lease.
   /// @details Must run with NO interposer lock held.
   void complete_drm_release(DrmFinalRelease release) {
+    if (auto *driver = dynamic_cast<SimulatedKfd *>(release.lease.local().get()))
+      for (const auto &[context_ring, queue] : release.queues)
+        driver->retire_pm4_queue(queue.key);
     if (release.file_id)
       reap_gem_for_drm_file(*release.file_id);
     // release.lease destructs here, dropping the open reference. For a local
@@ -1533,6 +1792,11 @@ public:
     try {
       auto entry = std::make_shared<SyncobjEntry>();
       entry->has_fence = (flags & DRM_SYNCOBJ_CREATE_SIGNALED) != 0;
+      entry->signaled = entry->has_fence;
+      if (entry->has_fence) {
+        entry->binary_fence = std::make_shared<SyncobjFence>();
+        entry->binary_fence->signaled.store(true, std::memory_order_relaxed);
+      }
       state.syncobj_entries.emplace(candidate, std::move(entry));
     } catch (const std::bad_alloc &) {
       return -ENOMEM;
@@ -1551,6 +1815,326 @@ public:
     if (file->syncobj_entries.erase(handle) == 0)
       return -EINVAL;
     return 0;
+  }
+
+  /// @brief Allocate nonzero context IDs or query/remove one in this DRM file.
+  int drm_context(const DrmFileToken &file, drm_amdgpu_ctx *argument) {
+    if (!file)
+      return -EBADF;
+    const auto request = argument->in;
+    // Serialize with CS acceptance; callbacks run only after dropping fd_mutex_.
+    std::lock_guard submission_lock(file->submission_mutex);
+    if (request.op == AMDGPU_CTX_OP_FREE_CTX) {
+      std::vector<uint64_t> retired;
+      {
+        std::lock_guard lock(fd_mutex_);
+        if (!file->contexts.erase(request.ctx_id))
+          return -EINVAL;
+        std::erase_if(file->pm4_queues, [&](const auto &entry) {
+          if ((entry.first >> 32) != request.ctx_id)
+            return false;
+          retired.push_back(entry.second.key);
+          return true;
+        });
+      }
+      if (auto *driver = dynamic_cast<SimulatedKfd *>(file->backend_lease.local().get()))
+        for (uint64_t key : retired)
+          driver->retire_pm4_queue(key);
+      return 0;
+    }
+    std::lock_guard lock(fd_mutex_);
+    switch (request.op) {
+    case AMDGPU_CTX_OP_ALLOC_CTX: {
+      uint32_t id = file->next_context_id++;
+      while (!id || file->contexts.count(id))
+        id = file->next_context_id++;
+      file->contexts.insert(id);
+      argument->out.alloc.ctx_id = id;
+      return 0;
+    }
+    case AMDGPU_CTX_OP_QUERY_STATE:
+    case AMDGPU_CTX_OP_QUERY_STATE2:
+      if (!file->contexts.count(request.ctx_id))
+        return -EINVAL;
+      std::memset(&argument->out, 0, sizeof(argument->out));
+      return 0;
+    default:
+      return -EINVAL;
+    }
+  }
+
+  /// @brief Track the DRM file's compute VMID reservation.
+  int drm_vm(const DrmFileToken &file, uint32_t operation) {
+    if (!file)
+      return -EBADF;
+    std::lock_guard lock(fd_mutex_);
+    if (operation == AMDGPU_VM_OP_RESERVE_VMID) {
+      file->vmid_reserved = true;
+      return 0;
+    }
+    if (operation == AMDGPU_VM_OP_UNRESERVE_VMID) {
+      file->vmid_reserved = false;
+      return 0;
+    }
+    return -EINVAL;
+  }
+
+  int update_syncobjs(const DrmFileToken &file, uint64_t handles_address, uint64_t points_address,
+                      uint32_t count, bool reset) {
+    std::vector<uint32_t> handles;
+    std::vector<uint64_t> points(count, 0);
+    if (int result = snapshot_user_array(handles_address, count, handles); result != 0)
+      return result;
+    if (points_address) {
+      if (int result = snapshot_user_array(points_address, count, points); result != 0)
+        return result;
+    }
+    if (!file)
+      return -EBADF;
+    {
+      std::lock_guard lock(fd_mutex_);
+      for (uint32_t handle : handles)
+        if (!lookup_syncobj_locked(file, handle))
+          return -ENOENT;
+      for (size_t i = 0; i < handles.size(); ++i) {
+        auto entry = lookup_syncobj_locked(file, handles[i]);
+        if (reset)
+          *entry = {};
+        else
+          signal_syncobj_locked(entry, points[i]);
+      }
+    }
+    notify_syncobj_waiters(file);
+    return 0;
+  }
+
+  int query_syncobjs(const DrmFileToken &file, const drm_syncobj_timeline_array &request) {
+    if (request.flags & ~DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED)
+      return -EINVAL;
+    std::vector<uint32_t> handles;
+    if (int result = snapshot_user_array(request.handles, request.count_handles, handles);
+        result != 0)
+      return result;
+    if (!file)
+      return -EBADF;
+    std::vector<uint64_t> points;
+    {
+      std::lock_guard lock(fd_mutex_);
+      for (uint32_t handle : handles) {
+        auto entry = lookup_syncobj_locked(file, handle);
+        if (!entry)
+          return -ENOENT;
+        refresh_syncobj_locked(*entry);
+        points.push_back(request.flags & DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED
+                             ? entry->submitted_point
+                             : entry->signaled_point);
+      }
+    }
+    const size_t bytes = points.size() * sizeof(uint64_t);
+    iovec local{points.data(), bytes};
+    iovec remote{reinterpret_cast<void *>(request.points), bytes};
+    return process_vm_writev(getpid(), &local, 1, &remote, 1, 0) == static_cast<ssize_t>(bytes)
+               ? 0
+               : -EFAULT;
+  }
+
+  static std::shared_ptr<SyncobjFence> syncobj_fence_locked(const SyncobjEntry &entry,
+                                                            uint64_t point) {
+    if (!point)
+      return entry.binary_fence;
+    auto it = entry.timeline_fences.lower_bound(point);
+    return it == entry.timeline_fences.end() ? nullptr : it->second;
+  }
+
+  static void refresh_syncobj_locked(SyncobjEntry &entry) {
+    entry.signaled = entry.binary_fence && entry.binary_fence->is_signaled();
+    for (auto it = entry.timeline_fences.rbegin(); it != entry.timeline_fences.rend(); ++it) {
+      if (!it->second->is_signaled())
+        continue;
+      entry.signaled_point = std::max(entry.signaled_point, it->first);
+      // Keep the completed boundary so waits on earlier points still resolve.
+      // Exported fence snapshots retain their own references to old payloads.
+      entry.timeline_fences.erase(entry.timeline_fences.begin(), std::prev(it.base()));
+      break;
+    }
+  }
+
+  /// @brief Append a timeline point while retaining all preceding work.
+  /// @details Fence payloads are immutable once published, including exported snapshots.
+  static void append_timeline_fence_locked(SyncobjEntry &entry, uint64_t point,
+                                           std::shared_ptr<SyncobjFence> fence) {
+    if (entry.binary_fence && entry.binary_fence != fence && !entry.binary_fence->is_signaled()) {
+      auto chain = std::make_shared<SyncobjFence>();
+      chain->dependencies = {std::move(fence), entry.binary_fence};
+      fence = std::move(chain);
+    }
+    entry.timeline_fences[point] = fence;
+    entry.binary_fence = std::move(fence);
+    entry.submitted_point = std::max(entry.submitted_point, point);
+    entry.has_fence = true;
+  }
+
+  int transfer_syncobj(const DrmFileToken &file, const drm_syncobj_transfer request) {
+    if (!file)
+      return -EBADF;
+    if ((request.flags & ~DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT) || request.pad)
+      return -EINVAL;
+    {
+      std::unique_lock lock(fd_mutex_);
+      auto source = lookup_syncobj_locked(file, request.src_handle);
+      auto target = lookup_syncobj_locked(file, request.dst_handle);
+      if (!source || !target)
+        return -ENOENT;
+      // Linux bounds WAIT_FOR_SUBMIT transfer waits to five seconds. Wait for
+      // the payload to exist, not for its GPU work to finish; retain the source
+      // and destination objects across handle deletion and replacement.
+      timespec deadline{};
+      if (clock_gettime(CLOCK_MONOTONIC, &deadline) != 0)
+        return -errno;
+      deadline.tv_sec += 5;
+      std::shared_ptr<SyncobjFence> fence;
+      while (true) {
+        const uint32_t generation = file->syncobj_generation.load(std::memory_order_acquire);
+        fence = syncobj_fence_locked(*source, request.src_point);
+        if (fence)
+          break;
+        if (!(request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT))
+          return -EINVAL;
+        lock.unlock();
+        const long rc = futex_wait_until(file->syncobj_generation, generation, &deadline);
+        const int wait_errno = errno;
+        lock.lock();
+        if (rc == 0 || wait_errno == EAGAIN)
+          continue;
+        return wait_errno == ETIMEDOUT ? -ETIME : -wait_errno;
+      }
+      if (request.dst_point) {
+        append_timeline_fence_locked(*target, request.dst_point, std::move(fence));
+      } else {
+        target->timeline_fences.clear();
+        target->submitted_point = target->signaled_point = 0;
+        target->binary_fence = std::move(fence);
+      }
+      target->has_fence = true;
+      refresh_syncobj_locked(*target);
+    }
+    notify_syncobj_waiters(file);
+    return 0;
+  }
+
+  // The fd table and fence state are process-local, like the simulated DRM file.
+  // Keep a private eventfd duplicate for poll notification after the export fd closes.
+  int create_sync_file_locked(const std::shared_ptr<SyncobjFence> &fence) {
+    auto object = std::make_shared<SyncFile>();
+    object->fence = fence;
+    const int fd = static_cast<int>(syscall(SYS_eventfd2, 0, EFD_CLOEXEC | EFD_NONBLOCK));
+    if (fd < 0)
+      return -errno;
+    object->event_fd = PrivateDrmFd::duplicate(fd);
+    if (!object->event_fd) {
+      const int error = errno;
+      real().close(fd);
+      return -error;
+    }
+    try {
+      sync_file_fds_.emplace(fd, object);
+    } catch (...) {
+      real().close(fd);
+      throw;
+    }
+    object->refresh();
+    return fd;
+  }
+
+  int export_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) try {
+    if (request.pad || request.flags != DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE)
+      return -EINVAL;
+    std::lock_guard lock(fd_mutex_);
+    auto entry = lookup_syncobj_locked(file, request.handle);
+    if (!entry)
+      return -ENOENT;
+    if (!entry->binary_fence)
+      return -EINVAL;
+    const int fd = create_sync_file_locked(entry->binary_fence);
+    if (fd < 0)
+      return fd;
+    request.fd = fd;
+    return 0;
+  } catch (const std::bad_alloc &) {
+    return -ENOMEM;
+  }
+
+  int import_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) try {
+    if (request.pad || request.flags != DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE)
+      return -EINVAL;
+    {
+      std::lock_guard lock(fd_mutex_);
+      auto it = sync_file_fds_.find(request.fd);
+      if (it == sync_file_fds_.end())
+        return -EINVAL;
+      const auto &object = it->second;
+      auto entry = lookup_syncobj_locked(file, request.handle);
+      if (!entry)
+        return -ENOENT;
+      entry->timeline_fences.clear();
+      entry->submitted_point = entry->signaled_point = 0;
+      entry->binary_fence = object->fence;
+      entry->has_fence = true;
+      refresh_syncobj_locked(*entry);
+      file->imported_sync_fence = true;
+    }
+    notify_syncobj_waiters(file);
+    return 0;
+  } catch (const std::bad_alloc &) {
+    return -ENOMEM;
+  }
+
+  std::optional<int> merge_sync_files(int fd, sync_merge_data &request) try {
+    std::lock_guard lock(fd_mutex_);
+    auto first = sync_file_fds_.find(fd);
+    if (first == sync_file_fds_.end())
+      return std::nullopt;
+    if (request.flags || request.pad)
+      return -EINVAL;
+    auto second = sync_file_fds_.find(request.fd2);
+    if (second == sync_file_fds_.end())
+      return -EINVAL;
+    auto merged = std::make_shared<SyncobjFence>();
+    for (const auto &fence : {first->second->fence, second->second->fence}) {
+      if (fence->dependencies.empty())
+        merged->dependencies.push_back(fence);
+      else
+        merged->dependencies.insert(merged->dependencies.end(), fence->dependencies.begin(),
+                                    fence->dependencies.end());
+    }
+    std::ranges::sort(merged->dependencies);
+    merged->dependencies.erase(std::ranges::unique(merged->dependencies).begin(),
+                               merged->dependencies.end());
+    const int result = create_sync_file_locked(merged);
+    if (result < 0)
+      return result;
+    request.fence = result;
+    return 0;
+  } catch (const std::bad_alloc &) {
+    return -ENOMEM;
+  }
+
+  // Called inside the fd lifecycle lock, after a successful kernel dup operation.
+  void duplicate_sync_file(int source, int target) {
+    std::lock_guard lock(fd_mutex_);
+    auto it = sync_file_fds_.find(source);
+    auto object = it == sync_file_fds_.end() ? nullptr : it->second;
+    sync_file_fds_.erase(target);
+    if (object)
+      sync_file_fds_.emplace(target, std::move(object));
+  }
+
+  bool close_sync_file(int fd) {
+    std::lock_guard lock(fd_mutex_);
+    if (!sync_file_fds_.erase(fd))
+      return false;
+    real().close(fd);
+    return true;
   }
 
   /// @brief Copy a caller-owned array without faulting inside the interposer.
@@ -1597,7 +2181,9 @@ public:
     if (!file)
       return -EBADF;
     std::vector<std::shared_ptr<SyncobjEntry>> entries;
+    std::vector<std::shared_ptr<SyncobjFence>> fences;
     try {
+      fences.resize(request.count_handles);
       entries.reserve(request.count_handles);
     } catch (const std::bad_alloc &) {
       return -ENOMEM;
@@ -1618,9 +2204,8 @@ public:
     // unrelated wakeup must not turn a valid pending wait into EINVAL.
     if (!wait_for_submit && !wait_available) {
       for (uint32_t i = 0; i < request.count_handles; ++i) {
-        const auto &entry = *entries[i];
-        const bool submitted =
-            entry.has_fence && (points[i] == 0 || entry.submitted_point >= points[i]);
+        fences[i] = syncobj_fence_locked(*entries[i], points[i]);
+        const bool submitted = fences[i] != nullptr;
         if (!submitted)
           return -EINVAL;
       }
@@ -1630,12 +2215,12 @@ public:
       bool any_ready = false;
       uint32_t first_ready = 0;
       for (uint32_t i = 0; i < request.count_handles; ++i) {
-        const auto &entry = *entries[i];
-        const bool submitted =
-            entry.has_fence && (points[i] == 0 || entry.submitted_point >= points[i]);
-        const bool ready = wait_available ? submitted
-                                          : entry.has_fence && (points[i] == 0 ||
-                                                                entry.signaled_point >= points[i]);
+        if (!fences[i])
+          fences[i] = syncobj_fence_locked(*entries[i], points[i]);
+        const bool submitted = fences[i] != nullptr;
+        if (submitted && !wait_available && fences[i]->is_failed())
+          return {-EIO, 0};
+        const bool ready = submitted && (wait_available || fences[i]->is_signaled());
         all_ready = all_ready && ready;
         if (!wait_all && ready && !any_ready) {
           first_ready = i;
@@ -1646,6 +2231,9 @@ public:
     };
 
     while (true) {
+      auto &generation_word =
+          file->imported_sync_fence ? imported_syncobj_generation_ : file->syncobj_generation;
+      const uint32_t generation = generation_word.load(std::memory_order_acquire);
       auto [state, first_ready] = evaluate();
       if (state < 0)
         return state;
@@ -1660,7 +2248,6 @@ public:
       const int64_t now_ns = static_cast<int64_t>(now.tv_sec) * 1'000'000'000LL + now.tv_nsec;
       if (request.timeout_nsec <= now_ns)
         return -ETIME;
-      const uint32_t generation = file->syncobj_generation.load(std::memory_order_relaxed);
       lock.unlock();
       const timespec deadline{static_cast<time_t>(request.timeout_nsec / 1'000'000'000LL),
                               static_cast<long>(request.timeout_nsec % 1'000'000'000LL)};
@@ -1668,7 +2255,7 @@ public:
       // so it cannot apply the kernel ioctl layer's SA_RESTART decision. Surface
       // EINTR consistently and let callers retry; the focused regression pins
       // that documented difference from the in-kernel DRM implementation.
-      const long rc = futex_wait_until(file->syncobj_generation, generation, &deadline);
+      const long rc = futex_wait_until(generation_word, generation, &deadline);
       const int wait_errno = errno;
       lock.lock();
       if (rc == 0 || wait_errno == EAGAIN)
@@ -1686,13 +2273,20 @@ public:
     if (!entry)
       return;
     entry->has_fence = true;
+    entry->signaled = true;
     if (point == 0) {
       entry->submitted_point = 0;
       entry->signaled_point = 0;
+      entry->timeline_fences.clear();
+      entry->binary_fence = std::make_shared<SyncobjFence>();
+      entry->binary_fence->signaled.store(true, std::memory_order_release);
       return;
     }
-    entry->submitted_point = std::max(entry->submitted_point, point);
-    entry->signaled_point = std::max(entry->signaled_point, point);
+    // A host signal appends a completed payload; preceding GPU work still
+    // belongs to the timeline and must not be completed through another handle.
+    auto fence = std::make_shared<SyncobjFence>();
+    fence->signaled.store(true, std::memory_order_release);
+    append_timeline_fence_locked(*entry, point, std::move(fence));
   }
 
   /// @brief Resolve one handle while fd_mutex_ is held.
@@ -1705,16 +2299,24 @@ public:
   }
 
   /// @brief Advance the per-file generation and wake every futex waiter.
-  static void notify_syncobj_waiters(const DrmFileToken &file) {
+  void notify_syncobj_waiters(const DrmFileToken &file) {
     if (!file)
       return;
     file->syncobj_generation.fetch_add(1, std::memory_order_release);
     futex_wake_all(file->syncobj_generation);
+    imported_syncobj_generation_.fetch_add(1, std::memory_order_release);
+    futex_wake_all(imported_syncobj_generation_);
+    std::lock_guard lock(fd_mutex_);
+    for (const auto &[fd, object] : sync_file_fds_)
+      object->refresh();
   }
 
   bool create_local_vm(const std::string &config_path) {
+    util::FailureOr<std::string> config_json = read_file_passthrough(config_path.c_str());
+    if (config_json.failed())
+      return false;
     rj_vm_t *created_vm = nullptr;
-    if (rj_vm_create(config_path.c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
+    if (rj_vm_create_from_string(config_json.value().c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
         ROCJITSU_STATUS_SUCCESS) {
       util::Logger::debug_print("rocjitsu: failed to create VM from ", config_path);
       return false;
@@ -1757,8 +2359,7 @@ public:
       return false;
     }
 
-    std::string config_json = read_file_passthrough(config_path.c_str());
-    if (rj_vm_load_plugins(local_vm_.get(), config_json.c_str(), nullptr) !=
+    if (rj_vm_load_plugins(local_vm_.get(), config_json.value().c_str(), nullptr) !=
         ROCJITSU_STATUS_SUCCESS) {
       util::Logger::debug_print("rocjitsu: failed to configure execution plugins");
       local_vm_.reset();
@@ -1847,8 +2448,16 @@ public:
       // later interposed open/close and the DSO finalizer itself. The engine's own
       // in-band latch wins; this only fires if nothing latched.
       local_vm_thread_ = std::make_unique<std::thread>([vm = local_vm_.get()]() {
-        rj_vm_run(vm, nullptr);
+        const rj_status_t status = rj_vm_run(vm, nullptr);
         vm->engine->latch_startup_if_unlatched(/*failed=*/true);
+        if (status != ROCJITSU_STATUS_SUCCESS && vm->engine->wait_until_started()) {
+          util::Logger::warn("rocjitsu: local VM failed: ", vm->engine->last_exit().message);
+          // rj_vm_run() has joined the engine workers and shut down components
+          // and plugins. The host may be blocked on a completion that can no
+          // longer arrive. exit() would run the interposer finalizer on this
+          // thread and try to join itself, so use the process-level fatal exit.
+          std::_Exit(EXIT_FAILURE);
+        }
       });
     } catch (const std::exception &e) {
       util::Logger::debug_print("rocjitsu: failed to start local VM engine thread: ", e.what());
@@ -1870,13 +2479,12 @@ public:
   /// hands userspace a dmabuf fd whose KFD allocation flags determine the GPU PTE
   /// MTYPE; PRIME_FD_TO_HANDLE then mints a STABLE, monotonically-increasing GEM
   /// handle (never derived from the fd number). The entry is keyed by that handle,
-  /// which owns the mapping's lifetime: it carries the flags from export through to
-  /// GEM_VA (where it lazily mmaps the backing pages used to install the GPU page
-  /// table) and lives until DRM_IOCTL_GEM_CLOSE (or until its owning DRM file
-  /// closes). It deliberately does NOT die when the transient dmabuf export fd is
-  /// closed — ROCr closes that fd immediately after GEM_VA returns, while the GPU
-  /// mapping must stay live for the caller. Because handles are not fd-derived, a
-  /// recycled dmabuf fd number can never resolve to a still-live handle and tear
+  /// which shares the mapping's lifetime with submitted jobs: it carries the flags from export
+  /// through to GEM_VA (where it lazily mmaps the backing pages used to install the GPU page table)
+  /// and lives until DRM_IOCTL_GEM_CLOSE (or until its owning DRM file closes). It deliberately
+  /// does NOT die when the transient dmabuf export fd is closed — ROCr closes that fd immediately
+  /// after GEM_VA returns, while the GPU mapping must stay live for the caller. Because handles are
+  /// not fd-derived, a recycled dmabuf fd number can never resolve to a still-live handle and tear
   /// down an unrelated BO. `dmabuf_fd` is a PRIVATE dup taken at PRIME time and held
   /// only for the lazy backing mmap, so the backing stays valid even if the caller
   /// closes the export fd before GEM_VA (the fd number cannot be recycled out from
@@ -1906,15 +2514,546 @@ public:
   };
 
   struct GemEntry {
-    int dmabuf_fd = -1;          ///< Private dup of the backing dmabuf fd for the lazy mmap.
-    bool owns_dmabuf_fd = false; ///< True if dmabuf_fd is our dup (close at teardown).
-    uint64_t drm_file_id = 0;    ///< Owning DRM file; the entry is reaped on its last close.
+    std::shared_ptr<PrivateDrmFd>
+        dmabuf_fd;            ///< Backing retained through lazy mmap and submissions.
+    uint64_t drm_file_id = 0; ///< Owning DRM file; the entry is reaped on its last close.
     uint64_t size = 0;
+    size_t submission_refs = 0; ///< Jobs retaining backing after the handle closes.
+    bool handle_closed = false; ///< Close invalidates the handle; jobs retain its backing.
+    uint64_t mmap_offset = 0;
     uint32_t alloc_flags = 0;
+    std::shared_ptr<GemObject> object; ///< Shared with every handle to this backing.
     void *cpu_ptr = nullptr;
+    bool sealed_ram = false;
     SimulatedKfd *owner = nullptr;
     std::vector<GemMapping> installed_vas;
   };
+
+  /// @brief Submission-owned BO references, also released on rejected enqueue.
+  struct GemSubmissionLease {
+    InterposerContext *context;
+    std::vector<uint32_t> handles;
+    void *fence_view = nullptr;
+    size_t fence_view_size = 0;
+    bool active = false;
+    ~GemSubmissionLease() { release(); }
+    void release(SimulatedKfd *executing_driver = nullptr) {
+      if (!active && !fence_view)
+        return;
+      std::lock_guard lock(context->fd_mutex_);
+      if (fence_view) {
+        auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
+        InterposerContext::real().munmap(fence_view, fence_view_size);
+        fence_view = nullptr;
+      }
+      if (!active)
+        return;
+      for (auto handle : handles) {
+        auto it = context->gem_entries_.find(handle);
+        assert(it != context->gem_entries_.end() && it->second.submission_refs);
+        auto &gem = it->second;
+        if (--gem.submission_refs == 0 && gem.handle_closed) {
+          context->teardown_gem_entry_locked(gem, executing_driver);
+          context->gem_entries_.erase(it);
+        }
+      }
+      active = false;
+    }
+  };
+
+  static constexpr uint64_t kGemMmapOffsetBase = uint64_t{1} << 48;
+
+  /// @brief Allocate shared BO backing and an offset in the GEM mmap namespace.
+  int create_gem(const DrmFileToken &file, const drm_amdgpu_gem_create_in &request,
+                 uint32_t *handle) {
+    if (!file || !drm_file_simulated(file))
+      return -ENODEV;
+    constexpr uint64_t domains =
+        AMDGPU_GEM_DOMAIN_CPU | AMDGPU_GEM_DOMAIN_GTT | AMDGPU_GEM_DOMAIN_VRAM;
+    if (!request.bo_size || request.bo_size > (uint64_t{1} << 47) || !(request.domains & domains) ||
+        (request.domains & ~domains))
+      return -EINVAL;
+    uint64_t size = (request.bo_size + 4095) & ~uint64_t{4095};
+    int fd = rocjitsu::create_memory_backing(size);
+    if (fd < 0)
+      return -errno;
+    auto object = std::make_shared<GemObject>();
+    if (struct stat st{}; rocjitsu::stat_memory_backing(fd, &st) == 0) {
+      object->device = st.st_dev;
+      object->inode = st.st_ino;
+    }
+    object->create_info = request;
+    object->create_info.bo_size = size;
+    auto backing = PrivateDrmFd::duplicate(fd);
+    const int error = errno;
+    real().close(fd);
+    if (!backing)
+      return -error;
+    std::lock_guard lock(fd_mutex_);
+    if (next_gem_mmap_offset_ > uint64_t{INT64_MAX} - size)
+      return -ENOSPC;
+    uint32_t candidate = next_gem_handle_++;
+    while (candidate == 0 || gem_entries_.count(candidate))
+      candidate = next_gem_handle_++;
+    GemEntry entry{};
+    entry.dmabuf_fd = std::move(backing);
+    entry.sealed_ram = true;
+    entry.drm_file_id = file->id;
+    entry.size = size;
+    entry.mmap_offset = next_gem_mmap_offset_;
+    entry.alloc_flags = (request.domains & AMDGPU_GEM_DOMAIN_VRAM) ? KFD_IOC_ALLOC_MEM_FLAGS_VRAM
+                                                                   : KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    entry.object = std::move(object);
+    gem_entries_.emplace(candidate, std::move(entry));
+    next_gem_mmap_offset_ += size;
+    *handle = candidate;
+    return 0;
+  }
+
+  /// @brief Retain BOs, enqueue IBs, and publish syncobj and userspace completion fences.
+  int submit_drm_cs(const DrmFileToken &file, drm_amdgpu_cs *argument) {
+    auto *driver = drm_file_simulated(file);
+    if (!driver)
+      return -ENODEV;
+    std::shared_ptr<SyncobjFence> finished;
+    // Keep queue identity stable through acceptance and exception cleanup.
+    std::lock_guard submission_lock(file->submission_mutex);
+    std::optional<uint64_t> pending_queue;
+    uint64_t sequence = 0;
+    try {
+      const auto request = argument->in;
+      if (request.flags || request.bo_list_handle || !request.num_chunks ||
+          request.num_chunks > 1024)
+        return -EINVAL;
+      std::vector<uint64_t> pointers;
+      if (int rc = snapshot_user_array(request.chunks, request.num_chunks, pointers); rc)
+        return rc;
+      rocjitsu::amdgpu::Pm4Submission submission;
+      std::vector<drm_amdgpu_cs_chunk_syncobj> inputs, outputs;
+      std::vector<drm_amdgpu_bo_list_entry> buffers;
+      std::optional<drm_amdgpu_cs_chunk_fence> user_fence;
+      uint32_t engine = UINT32_MAX, ring = UINT32_MAX;
+      for (uint64_t pointer : pointers) {
+        std::vector<drm_amdgpu_cs_chunk> chunks;
+        if (int rc = snapshot_user_array(pointer, 1, chunks); rc)
+          return rc;
+        const auto chunk = chunks[0];
+        if (chunk.length_dw > (1u << 20))
+          return -EINVAL;
+        std::vector<uint32_t> words;
+        if (int rc = snapshot_user_array(chunk.chunk_data, chunk.length_dw, words); rc)
+          return rc;
+        const size_t bytes = words.size() * 4;
+        switch (chunk.chunk_id) {
+        case AMDGPU_CHUNK_ID_IB: {
+          if (bytes != sizeof(drm_amdgpu_cs_chunk_ib))
+            return -EINVAL;
+          drm_amdgpu_cs_chunk_ib ib;
+          std::memcpy(&ib, words.data(), sizeof(ib));
+          if ((ib.ip_type != AMDGPU_HW_IP_COMPUTE && ib.ip_type != AMDGPU_HW_IP_GFX) ||
+              ib.ip_instance || ib.ring >= (ib.ip_type == AMDGPU_HW_IP_GFX ? 1u : 4u) ||
+              !ib.ib_bytes || (ib.ib_bytes & 3) ||
+              (ib.flags & ~(AMDGPU_IB_FLAG_PREAMBLE | AMDGPU_IB_FLAG_PREEMPT |
+                            AMDGPU_IB_FLAG_TC_WB_NOT_INVALIDATE | AMDGPU_IB_FLAG_EMIT_MEM_SYNC)))
+            return -EINVAL;
+          if (engine != UINT32_MAX && (engine != ib.ip_type || ring != ib.ring))
+            return -EINVAL;
+          submission.graphics_engine = ib.ip_type == AMDGPU_HW_IP_GFX;
+          engine = ib.ip_type;
+          ring = ib.ring;
+          submission.buffers.push_back({.address = ib.va_start, .dwords = ib.ib_bytes / 4});
+          break;
+        }
+        case AMDGPU_CHUNK_ID_FENCE: {
+          if (bytes != sizeof(drm_amdgpu_cs_chunk_fence) || user_fence)
+            return -EINVAL;
+          user_fence.emplace();
+          std::memcpy(&*user_fence, words.data(), sizeof(*user_fence));
+          break;
+        }
+        case AMDGPU_CHUNK_ID_BO_HANDLES: {
+          if (bytes != sizeof(drm_amdgpu_bo_list_in))
+            return -EINVAL;
+          drm_amdgpu_bo_list_in list;
+          std::memcpy(&list, words.data(), sizeof(list));
+          if (list.bo_info_size != sizeof(drm_amdgpu_bo_list_entry))
+            return -EINVAL;
+          if (int rc = snapshot_user_array(list.bo_info_ptr, list.bo_number, buffers); rc)
+            return rc;
+          break;
+        }
+        case AMDGPU_CHUNK_ID_SYNCOBJ_IN:
+        case AMDGPU_CHUNK_ID_SYNCOBJ_OUT: {
+          auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_IN ? inputs : outputs;
+          for (uint32_t handle : words)
+            target.push_back({handle, 0, 0});
+          break;
+        }
+        case AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT:
+        case AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_SIGNAL: {
+          if (bytes % sizeof(drm_amdgpu_cs_chunk_syncobj))
+            return -EINVAL;
+          auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT ? inputs : outputs;
+          for (size_t offset = 0; offset < bytes; offset += sizeof(drm_amdgpu_cs_chunk_syncobj)) {
+            drm_amdgpu_cs_chunk_syncobj object;
+            std::memcpy(&object, reinterpret_cast<uint8_t *>(words.data()) + offset,
+                        sizeof(object));
+            if (object.flags & ~DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT)
+              return -EINVAL;
+            target.push_back(object);
+          }
+          break;
+        }
+        default:
+          return -ENOTSUP;
+        }
+      }
+      if (submission.buffers.empty())
+        return -EINVAL;
+      struct Dependency {
+        std::shared_ptr<SyncobjEntry> entry;
+        std::shared_ptr<SyncobjFence> fence;
+        uint64_t point;
+      };
+      std::vector<Dependency> dependencies;
+      finished = std::make_shared<SyncobjFence>();
+      auto retained = std::make_shared<GemSubmissionLease>();
+      retained->context = this;
+      for (const auto &buffer : buffers)
+        retained->handles.push_back(buffer.bo_handle);
+      if (user_fence)
+        retained->handles.push_back(user_fence->handle);
+      std::ranges::sort(retained->handles);
+      retained->handles.erase(std::ranges::unique(retained->handles).begin(),
+                              retained->handles.end());
+      void *fence_address = nullptr;
+      uint64_t queue_key;
+      {
+        std::lock_guard lock(fd_mutex_);
+        if (!file->contexts.count(request.ctx_id))
+          return -EINVAL;
+        for (auto handle : retained->handles) {
+          auto it = gem_entries_.find(handle);
+          if (it == gem_entries_.end() || it->second.handle_closed ||
+              it->second.drm_file_id != file->id)
+            return -ENOENT;
+        }
+        for (const auto &input : inputs) {
+          auto entry = lookup_syncobj_locked(file, input.handle);
+          if (!entry)
+            return -ENOENT;
+          auto fence = syncobj_fence_locked(*entry, input.point);
+          if (!fence && !(input.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT))
+            return -EINVAL;
+          dependencies.push_back({entry, fence, input.point});
+        }
+        for (const auto &output : outputs)
+          if (!lookup_syncobj_locked(file, output.handle))
+            return -ENOENT;
+        if (user_fence) {
+          auto it = gem_entries_.find(user_fence->handle);
+          if (it == gem_entries_.end() || it->second.handle_closed ||
+              it->second.drm_file_id != file->id || user_fence->offset % 8 || it->second.size < 8 ||
+              user_fence->offset > it->second.size - 8)
+            return -EINVAL;
+          auto &gem = it->second;
+          if (gem.cpu_ptr) {
+            fence_address = static_cast<uint8_t *>(gem.cpu_ptr) + user_fence->offset;
+          } else {
+            // Retain only the fence page through GEM_CLOSE and rejected enqueue.
+            // Token backing still needs a temporary full-BO shmat attachment.
+            const size_t page = sysconf(_SC_PAGESIZE);
+            const uint64_t offset = user_fence->offset / page * page;
+            auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
+            void *mapping = gem.dmabuf_fd->use([&](int fd) {
+              return rocjitsu::map_memory_backing(nullptr, page, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                                  fd, offset);
+            });
+            if (mapping == MAP_FAILED)
+              return -errno;
+            retained->fence_view = mapping;
+            retained->fence_view_size = page;
+            fence_address = static_cast<uint8_t *>(mapping) + (user_fence->offset - offset);
+          }
+        }
+        for (auto handle : retained->handles)
+          ++gem_entries_.at(handle).submission_refs;
+        retained->active = true;
+        for (const auto &output : outputs) {
+          auto entry = lookup_syncobj_locked(file, output.handle);
+          if (output.point) {
+            append_timeline_fence_locked(*entry, output.point, finished);
+          } else {
+            entry->timeline_fences.clear();
+            entry->submitted_point = entry->signaled_point = 0;
+            entry->binary_fence = finished;
+          }
+          entry->has_fence = true;
+          entry->signaled = false;
+        }
+        const uint64_t key = (uint64_t{request.ctx_id} << 32) | (engine << 16) | ring;
+        static std::atomic<uint64_t> next_queue_key{1};
+        auto [it, inserted] = file->pm4_queues.try_emplace(key);
+        auto &queue = it->second;
+        if (inserted)
+          queue.key = next_queue_key.fetch_add(1, std::memory_order_relaxed);
+        queue_key = queue.key;
+        // Reserve storage before acceptance, but publish the sequence and
+        // retire history only after the command processor accepts the job.
+        sequence = queue.next_sequence;
+        queue.fences.emplace(sequence, finished);
+        pending_queue = key;
+      }
+      submission.ready = [this, dependencies = std::move(dependencies)](
+                             util::DiagnosticEmitter emit_error) mutable -> util::FailureOr<bool> {
+        std::lock_guard lock(fd_mutex_);
+        for (auto &dependency : dependencies) {
+          if (!dependency.fence)
+            dependency.fence = syncobj_fence_locked(*dependency.entry, dependency.point);
+          if (dependency.fence && dependency.fence->is_failed())
+            return emit_error.emit() << "PM4 submission dependency failed";
+          if (!dependency.fence || !dependency.fence->is_signaled())
+            return false;
+        }
+        return true;
+      };
+      submission.complete = [this, file, finished, fence_address, sequence, retained,
+                             driver](bool success) {
+        if (success && fence_address) {
+          auto mapping_lock = rocjitsu::host_mapping_lock().lock_shared();
+          success = rocjitsu::with_host_access_guard(
+              [&] { std::memcpy(fence_address, &sequence, sizeof(sequence)); });
+        }
+        // The executing CP keeps its driver alive. Do not acquire a VM ownership
+        // snapshot here: its last release must never join the engine from itself.
+        retained->release(driver);
+        if (success)
+          finished->signaled.store(true, std::memory_order_release);
+        else
+          finished->failed.store(true, std::memory_order_release);
+        notify_syncobj_waiters(file);
+      };
+      int result = driver->submit_pm4(file->render_minor, queue_key, std::move(submission));
+      {
+        std::lock_guard lock(fd_mutex_);
+        // A concurrent final close may already have retired this file's queues.
+        auto it = file->pm4_queues.find(*pending_queue);
+        if (it != file->pm4_queues.end() && result) {
+          it->second.fences.erase(sequence);
+        } else if (it != file->pm4_queues.end()) {
+          auto &queue = it->second;
+          ++queue.next_sequence;
+          // Rejected submissions must not evict accepted fence errors from
+          // the bounded history or change WAIT_CS's latest sequence.
+          while (queue.fences.size() > 64) {
+            const auto &oldest = queue.fences.begin()->second;
+            if (!oldest->is_signaled() && !oldest->is_failed())
+              break;
+            queue.fences.erase(queue.fences.begin());
+          }
+        }
+        pending_queue.reset();
+      }
+      if (result) {
+        finished->failed.store(true, std::memory_order_release);
+        notify_syncobj_waiters(file);
+        return result;
+      }
+      argument->out.handle = sequence;
+      notify_syncobj_waiters(file);
+      return 0;
+    } catch (const std::exception &error) {
+      if (pending_queue) {
+        std::lock_guard lock(fd_mutex_);
+        if (auto it = file->pm4_queues.find(*pending_queue); it != file->pm4_queues.end())
+          it->second.fences.erase(sequence);
+      }
+      if (finished) {
+        finished->failed.store(true, std::memory_order_release);
+        notify_syncobj_waiters(file);
+      }
+      util::Logger::warn("DRM submission failed: ", error.what());
+      return dynamic_cast<const std::bad_alloc *>(&error) ? -ENOMEM : -EINVAL;
+    }
+  }
+
+  /// @brief Query a context/engine/ring submission fence using an absolute deadline.
+  int wait_drm_cs(const DrmFileToken &file, drm_amdgpu_wait_cs *argument) {
+    if (!file || !argument)
+      return -EINVAL;
+    const auto request = argument->in;
+    if ((request.ip_type != AMDGPU_HW_IP_GFX && request.ip_type != AMDGPU_HW_IP_COMPUTE) ||
+        request.ip_instance || request.ring >= (request.ip_type == AMDGPU_HW_IP_GFX ? 1u : 4u))
+      return -EINVAL;
+    std::unique_lock lock(fd_mutex_);
+    if (!file->contexts.count(request.ctx_id))
+      return -EINVAL;
+    const uint64_t key = (uint64_t{request.ctx_id} << 32) | (request.ip_type << 16) | request.ring;
+    const auto queue = file->pm4_queues.find(key);
+    const uint64_t next = queue == file->pm4_queues.end() ? 1 : queue->second.next_sequence;
+    const uint64_t sequence = request.handle == UINT64_MAX ? next - 1 : request.handle;
+    if (sequence >= next)
+      return -EINVAL;
+    std::shared_ptr<SyncobjFence> fence;
+    if (sequence && queue != file->pm4_queues.end()) {
+      const auto it = queue->second.fences.find(sequence);
+      if (it != queue->second.fences.end())
+        fence = it->second;
+    }
+    const auto finish = [&](bool busy) {
+      std::memset(argument, 0, sizeof(*argument));
+      argument->out.status = busy;
+      return 0;
+    };
+    while (true) {
+      const uint32_t generation = file->syncobj_generation.load(std::memory_order_acquire);
+      if (fence && fence->is_failed())
+        return -EIO;
+      if (!fence || fence->is_signaled())
+        return finish(false);
+      timespec now{};
+      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return -errno;
+      const uint64_t now_ns = static_cast<uint64_t>(now.tv_sec) * 1'000'000'000 + now.tv_nsec;
+      if (request.timeout <= now_ns)
+        return finish(true);
+      const timespec deadline{static_cast<time_t>(request.timeout / 1'000'000'000),
+                              static_cast<long>(request.timeout % 1'000'000'000)};
+      lock.unlock();
+      const long rc = futex_wait_until(file->syncobj_generation, generation,
+                                       request.timeout == UINT64_MAX ? nullptr : &deadline);
+      const int wait_errno = errno;
+      lock.lock();
+      if (rc == 0 || wait_errno == EAGAIN || wait_errno == ETIMEDOUT)
+        continue;
+      return -wait_errno;
+    }
+  }
+
+  int gem_mmap_offset(const DrmFileToken &file, uint32_t handle, uint64_t *offset) {
+    std::lock_guard lock(fd_mutex_);
+    auto it = gem_entries_.find(handle);
+    if (it == gem_entries_.end() || !file || it->second.handle_closed ||
+        it->second.drm_file_id != file->id)
+      return -ENOENT;
+    if (it->second.mmap_offset == 0)
+      return -EINVAL;
+    *offset = it->second.mmap_offset;
+    return 0;
+  }
+
+  /// @brief Get or set the UMD metadata libdrm stores on a GEM buffer.
+  /// @details hsa_amd_vmem_handle_create imports the KFD dmabuf and then queries
+  /// this. Rejecting the ioctl makes ROCr report the whole allocation as out of
+  /// memory. The record belongs to the BO, so a PRIME import reads what the
+  /// exporter set. A fresh buffer has an empty one.
+  int gem_metadata(const DrmFileToken &file, drm_amdgpu_gem_metadata *args) {
+    if (!args)
+      return -EINVAL;
+    std::lock_guard lock(fd_mutex_);
+    auto it = gem_entries_.find(args->handle);
+    if (it == gem_entries_.end() || !file || it->second.handle_closed ||
+        it->second.drm_file_id != file->id)
+      return -ENOENT;
+    auto &gem = *it->second.object;
+    if (args->op == AMDGPU_GEM_METADATA_OP_GET_METADATA) {
+      args->data.flags = gem.metadata_flags;
+      args->data.tiling_info = gem.tiling_info;
+      args->data.data_size_bytes = gem.metadata_size;
+      if (gem.metadata_size != 0)
+        std::memcpy(args->data.data, gem.metadata, gem.metadata_size);
+      return 0;
+    }
+    if (args->op != AMDGPU_GEM_METADATA_OP_SET_METADATA)
+      return -EINVAL;
+    if (args->data.data_size_bytes > sizeof(args->data.data))
+      return -EINVAL;
+    gem.metadata_flags = args->data.flags;
+    gem.tiling_info = args->data.tiling_info;
+    gem.metadata_size = args->data.data_size_bytes;
+    std::memset(gem.metadata, 0, sizeof(gem.metadata));
+    if (gem.metadata_size != 0)
+      std::memcpy(gem.metadata, args->data.data, gem.metadata_size);
+    return 0;
+  }
+
+  /// @brief Answer libdrm's buffer-info query (DRM_AMDGPU_GEM_OP).
+  /// @details amdgpu_bo_import reads the create info through a user pointer in
+  /// value. hipIpcGetMemHandle imports the exported dmabuf and fails the whole
+  /// call when this ioctl is rejected.
+  int gem_op(const DrmFileToken &file, drm_amdgpu_gem_op *args) {
+    if (!args)
+      return -EINVAL;
+    drm_amdgpu_gem_create_in info{};
+    uint64_t user_pointer = 0;
+    {
+      std::lock_guard lock(fd_mutex_);
+      auto it = gem_entries_.find(args->handle);
+      if (it == gem_entries_.end() || !file || it->second.handle_closed ||
+          it->second.drm_file_id != file->id)
+        return -ENOENT;
+      if (args->op == AMDGPU_GEM_OP_GET_GEM_CREATE_INFO) {
+        if (args->value == 0)
+          return -EINVAL;
+        info = it->second.object->create_info;
+        user_pointer = args->value;
+      } else if (args->op == AMDGPU_GEM_OP_SET_PLACEMENT) {
+        constexpr uint64_t domains =
+            AMDGPU_GEM_DOMAIN_CPU | AMDGPU_GEM_DOMAIN_GTT | AMDGPU_GEM_DOMAIN_VRAM;
+        if (args->value & ~domains)
+          return -EINVAL;
+        // The backing stays in host memory; the preferred domains are what
+        // GET_GEM_CREATE_INFO reports.
+        it->second.object->create_info.domains = args->value;
+        return 0;
+      } else {
+        return -EINVAL;
+      }
+    }
+    // value is a caller pointer. A raw copy faults the process; an ioctl returns EFAULT.
+    iovec local{&info, sizeof(info)};
+    iovec remote{reinterpret_cast<void *>(user_pointer), sizeof(info)};
+    return process_vm_writev(getpid(), &local, 1, &remote, 1, 0) ==
+                   static_cast<ssize_t>(sizeof(info))
+               ? 0
+               : -EFAULT;
+  }
+
+  /// @brief Map a live GEM handle's backing through its synthetic mmap offset.
+  void *mmap_gem(const DrmFileToken &file, void *address, size_t size, int prot, int flags,
+                 uint64_t offset) {
+    std::lock_guard lock(fd_mutex_);
+    for (const auto &[handle, entry] : gem_entries_) {
+      if (!file || entry.handle_closed || entry.drm_file_id != file->id || !entry.mmap_offset ||
+          offset < entry.mmap_offset || offset - entry.mmap_offset >= entry.size)
+        continue;
+      uint64_t relative = offset - entry.mmap_offset;
+      if (!size || size > entry.size - relative)
+        break;
+      auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
+      return entry.dmabuf_fd->use([&](int fd) {
+        void *mapped = rocjitsu::map_memory_backing(address, size, prot, flags, fd, relative);
+        const int mmap_errno = errno;
+        // A PRIME import maps its BO backing, not the synthetic DRM file used
+        // to select it. Classify that pinned backing for the host core policy.
+        if (mapped != MAP_FAILED && rocjitsu::kmd::is_device_memory_backing(fd))
+          real().madvise(mapped, size, MADV_DONTDUMP);
+        errno = mmap_errno;
+        return mapped;
+      });
+    }
+    errno = EINVAL;
+    return MAP_FAILED;
+  }
+
+  /// @brief Attach existing BO metadata to a newly created KFD dma-buf import.
+  void retain_kfd_import_state(int dmabuf_fd, SimulatedKfd &driver) {
+    struct stat st {};
+    if (rocjitsu::stat_memory_backing(dmabuf_fd, &st) != 0)
+      return;
+    std::lock_guard lock(fd_mutex_);
+    (void)driver.retain_bo_state(st, shared_gem_object_locked(st));
+  }
 
   /// @brief Record KFD alloc flags for an exported dmabuf fd (at EXPORT_DMABUF).
   /// @details The flags determine the GPU PTE MTYPE when the fd is later mapped via
@@ -1923,20 +3062,65 @@ public:
   /// consumed by the next PRIME_FD_TO_HANDLE on the same fd (which folds the flags
   /// into a stable-handle GemEntry). To keep the fd key from going stale — a dmabuf
   /// fd closed without a PRIME, then recycled by the kernel for an unrelated file —
-  /// drop_pending_gem_flags(fd) clears the record at close(fd), so a reused fd
+  /// drop_gem_export(fd) clears the record at close(fd), so a reused fd
   /// number can never inherit a previous export's MTYPE.
   void track_gem_flags(int dmabuf_fd, uint32_t alloc_flags) {
     std::lock_guard lock(fd_mutex_);
     pending_gem_flags_[dmabuf_fd] = alloc_flags;
   }
 
-  /// @brief Drop any transient EXPORT_DMABUF flags recorded for @p fd (at close(fd)).
-  /// @details Called from the close() hook for every fd. Cheap no-op when @p fd is
-  /// not a pending dmabuf export. Prevents a closed-without-PRIME export fd from
-  /// leaving a stale flag that a later PRIME on the recycled fd number would apply.
-  void drop_pending_gem_flags(int fd) {
+  /// @brief Drop what the interposer keeps for the dma-buf export @p fd (at close(fd), or
+  /// when dup2/dup3 replace it).
+  /// @details Erases the transient EXPORT_DMABUF flags and releases the BO state the
+  /// export retained. Called from the close() hook for every fd; a cheap no-op when
+  /// @p fd is not an export. Prevents a closed-without-PRIME export fd from leaving a
+  /// stale flag that a later PRIME on the recycled fd number would apply, and ends
+  /// the export's hold on the BO record that duplicate_gem_export extends to a
+  /// duplicate. Call it, and the kernel close or replacement it pairs with, inside one
+  /// lock_drm_fd_lifecycle() scope, as duplicate_gem_export is.
+  /// @returns Whether @p fd was a dma-buf export.
+  bool drop_gem_export(int fd) {
     std::lock_guard lock(fd_mutex_);
-    pending_gem_flags_.erase(fd);
+    const bool flags = pending_gem_flags_.erase(fd) != 0;
+    const bool state = exported_gem_objects_.erase(fd) != 0;
+    return flags || state;
+  }
+
+  /// @brief Whether @p fd is a descriptor the interposer serves itself (a KFD, DRM or
+  /// sync-file descriptor, or one of its private backing fds) and so cannot be a dma-buf.
+  bool is_interposer_fd(int fd) {
+    if (lookup(fd) || owns_fd(fd) || PrivateDrmFd::owns(fd))
+      return true;
+    std::lock_guard lock(fd_mutex_);
+    return drm_fds_.count(fd) != 0 || sync_file_fds_.count(fd) != 0 || kfd_dup_fds_.count(fd) != 0;
+  }
+
+  /// @brief Whether the interposer holds an export record for @p fd.
+  bool has_gem_export(int fd) {
+    std::lock_guard lock(fd_mutex_);
+    return pending_gem_flags_.count(fd) != 0 || exported_gem_objects_.count(fd) != 0;
+  }
+
+  /// @brief Keep the BO state a PRIME export retained for @p source on its duplicate @p target.
+  /// @details The state must outlive the export fd's last close, and a duplicate is
+  /// that same open file under another number. Called after a successful dup,
+  /// dup2, dup3 or fcntl(F_DUPFD*), in the lock_drm_fd_lifecycle() scope of that call so
+  /// a racing close of @p source cannot drop the record between the kernel dup and
+  /// this copy; a no-op when @p source is neither a PRIME export nor a KFD export awaiting its
+  /// import.
+  void duplicate_gem_export(int source, int target) {
+    std::lock_guard lock(fd_mutex_);
+    // A KFD export has only its pending flags until the first PRIME import, and the
+    // duplicate must import with them whichever descriptor reaches PRIME first.
+    if (const auto flags = pending_gem_flags_.find(source); flags != pending_gem_flags_.end()) {
+      const uint32_t alloc_flags = flags->second;
+      pending_gem_flags_[target] = alloc_flags;
+    }
+    const auto it = exported_gem_objects_.find(source);
+    if (it == exported_gem_objects_.end())
+      return;
+    std::shared_ptr<GemObject> object = it->second;
+    exported_gem_objects_[target] = std::move(object);
   }
 
   /// @brief Mint a stable GEM handle for a prime-imported dmabuf (PRIME_FD_TO_HANDLE).
@@ -1953,8 +3137,10 @@ public:
     if (gem_entries_.size() == std::numeric_limits<uint32_t>::max())
       return 0;
     uint32_t alloc_flags = 0;
+    bool flags_exported = false;
     if (auto it = pending_gem_flags_.find(dmabuf_fd); it != pending_gem_flags_.end()) {
       alloc_flags = it->second;
+      flags_exported = true;
       pending_gem_flags_.erase(it);
     }
     // Pin the backing to the HANDLE's lifetime by dup'ing the dmabuf fd now, rather
@@ -1963,9 +3149,10 @@ public:
     // client from closing it between PRIME and a deferred GEM_VA MAP; the fd number
     // could then be recycled and the lazy mmap in gem_map() would map an unrelated
     // file. The dup keeps the same dmabuf open under a private fd until the handle is
-    // torn down. Falls back to the raw fd if dup fails (best effort; the common
-    // fd-still-open case is unaffected).
-    int backing_fd = InterposerContext::real().fcntl(dmabuf_fd, F_DUPFD_CLOEXEC, 0);
+    // torn down. Reject an import if its backing cannot be retained.
+    auto backing_fd = PrivateDrmFd::duplicate(dmabuf_fd, /*require_readwrite=*/true);
+    if (!backing_fd)
+      return 0;
     // Mint the next free handle. Skip 0 ("no handle") and any handle still live, so a
     // uint32 wrap after a very long-lived process cannot silently overwrite an
     // in-use entry (which would detach its PTEs from a future GEM_CLOSE).
@@ -1974,39 +3161,133 @@ public:
       handle = next_gem_handle_++;
     GemEntry &gem = gem_entries_[handle];
     gem = {};
-    gem.dmabuf_fd = (backing_fd >= 0) ? backing_fd : dmabuf_fd;
-    gem.owns_dmabuf_fd = (backing_fd >= 0);
+    gem.dmabuf_fd = std::move(backing_fd);
+    // Repeated imports can map the same file bytes at different host addresses.
+    // Only fresh GEM allocations qualify for disjoint parallel RAM accesses.
     gem.drm_file_id = drm_file->id;
     gem.size = size;
+    struct stat st {};
+    const bool identified = rocjitsu::stat_memory_backing(dmabuf_fd, &st) == 0;
+    if (identified)
+      gem.object = shared_gem_object_locked(st);
+    if (!gem.object) {
+      // A buffer no GEM handle has seen, such as a KFD export, has no GEM_CREATE
+      // request. Synthesize one from its size and domain.
+      gem.object = std::make_shared<GemObject>();
+      if (identified) {
+        gem.object->device = st.st_dev;
+        gem.object->inode = st.st_ino;
+      }
+      gem.object->create_info.bo_size = size;
+      gem.object->create_info.alignment = 4096;
+      gem.object->create_info.domains = (alloc_flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
+                                            ? AMDGPU_GEM_DOMAIN_VRAM
+                                            : AMDGPU_GEM_DOMAIN_GTT;
+    }
+    // ROCr's IPC export sets metadata through a handle it closes at once, with
+    // its dmabuf fd, and the importer checks that metadata later.
+    if (auto *drv = identified ? drm_file_simulated(drm_file) : nullptr)
+      gem.object = drv->retain_bo_state(st, gem.object);
+    // The dmabuf fd is a reference to the buffer too: a KFD export has none of the
+    // state a PRIME export retains, and the allocation may be freed while the fd lives.
+    if (identified)
+      exported_gem_objects_[dmabuf_fd] = gem.object;
+    if (gem.object->prime_access_mode < 0)
+      gem.object->prime_access_mode =
+          rocjitsu::fcntl_memory_backing(dmabuf_fd, F_GETFL, 0) & O_ACCMODE;
+    // The first export or import fixes the buffer's flags; later imports of any
+    // descriptor to it map with the same cache policy.
+    if (flags_exported && !gem.object->has_alloc_flags) {
+      gem.object->alloc_flags = alloc_flags;
+      gem.object->has_alloc_flags = true;
+    } else if (gem.object->has_alloc_flags) {
+      alloc_flags = gem.object->alloc_flags;
+    }
     gem.alloc_flags = alloc_flags;
+    // hsaKmtMemoryGetCpuAddr follows a prime import with GEM_MMAP. A zero offset
+    // is "no mapping" and that call fails the VMM handle create.
+    const uint64_t map_bytes = (size + 4095) & ~uint64_t{4095};
+    if (map_bytes != 0 && next_gem_mmap_offset_ <= uint64_t{INT64_MAX} - map_bytes) {
+      gem.mmap_offset = next_gem_mmap_offset_;
+      next_gem_mmap_offset_ += map_bytes;
+    }
     return handle;
   }
 
-  /// @brief Install (or replace) a GEM_VA range in the GPU page table for @p handle.
-  /// @details Runs entirely under fd_mutex_ and performs BOTH the bookkeeping AND
-  /// the page-table install (drv->gem_va_map) and output timeline signal atomically,
-  /// so a concurrent GEM_CLOSE
-  /// (untrack_gem, also under fd_mutex_) can never interleave between recording the
-  /// range and installing the PTEs — which would otherwise leave PTEs pointing into
-  /// a munmapped cpu_ptr with no entry left to tear them down. It lazily mmaps the
-  /// dmabuf fd's backing pages the first time (the fd is still open at GEM_VA time),
-  /// bounds-checks the request against the BO size, records the range, installs
-  /// the PTEs, and publishes the output timeline point. The lock order
-  /// fd_mutex_ -> driver page-table lock matches
-  /// teardown_gem_entry_locked, so there is no inversion.
-  /// @param replace When true (AMDGPU_VA_OP_REPLACE), reject overlap with another
-  ///   DRM file before evicting an existing range in the calling DRM-file namespace.
-  ///   The namespaces share one simulated GPU page table, so neither operation may
-  ///   overwrite another file's PTEs. When false (AMDGPU_VA_OP_MAP), any overlapping
-  ///   pre-existing range is a conflict.
-  /// @param publish_timeline Whether this update publishes its output timeline.
+  /// @brief Find the BO state of a live handle or open PRIME export backed by
+  /// the file @p st describes.
+  /// @returns The shared state, or null when neither uses that file.
+  std::shared_ptr<GemObject> shared_gem_object_locked(const struct stat &st) const {
+    const auto matches = [&st](const std::shared_ptr<GemObject> &object) {
+      return object && object->inode != 0 && object->device == st.st_dev &&
+             object->inode == st.st_ino;
+    };
+    for (const auto &[handle, entry] : gem_entries_)
+      if (matches(entry.object))
+        return entry.object;
+    for (const auto &[fd, object] : exported_gem_objects_)
+      if (matches(object))
+        return object;
+    return {};
+  }
+
+  /// @brief Turn a GEM handle back into a dma-buf fd (DRM_IOCTL_PRIME_HANDLE_TO_FD).
+  /// @details hsa_amd_vmem_set_access exports the imported BO this way before it maps
+  /// the VA. A fresh export honors DRM_RDWR; later exports keep the first public
+  /// mode, including across import. The private BO alias remains read-write.
+  /// The caller owns the returned fd.
+  int prime_export(const DrmFileToken &file, uint32_t handle, uint32_t flags) {
+    if (flags & ~(DRM_CLOEXEC | DRM_RDWR))
+      return -EINVAL;
+    std::lock_guard lock(fd_mutex_);
+    auto it = gem_entries_.find(handle);
+    if (it == gem_entries_.end() || !file || it->second.handle_closed ||
+        it->second.drm_file_id != file->id || !it->second.dmabuf_fd)
+      return -ENOENT;
+    const auto &entry = it->second;
+    const auto &object = entry.object;
+    const int access_mode = object->prime_access_mode >= 0
+                                ? object->prime_access_mode
+                                : ((flags & DRM_RDWR) ? O_RDWR : O_RDONLY);
+    int exported = -1;
+    int error = 0;
+    entry.dmabuf_fd->use([&](int fd) {
+      const int open_flags = access_mode | ((flags & DRM_CLOEXEC) ? O_CLOEXEC : 0);
+      exported = rocjitsu::reopen_memory_backing(fd, open_flags);
+      error = errno;
+      return exported;
+    });
+    if (exported < 0)
+      return error ? -error : -EBADF;
+    // Linux reuses an existing export's access mode, including after import.
+    // Keep that public mode separate from our private read-write BO alias.
+    object->prime_access_mode = access_mode;
+    pending_gem_flags_[exported] = entry.alloc_flags;
+    if (!object->has_alloc_flags) {
+      object->alloc_flags = entry.alloc_flags;
+      object->has_alloc_flags = true;
+    }
+    exported_gem_objects_[exported] = object;
+    return exported;
+  }
+
+  /// @brief Install or replace a resident mapping or sparse VA reservation.
+  /// @details Serializes range bookkeeping, PTE updates and output timeline signals
+  /// under fd_mutex_, so GEM_CLOSE cannot remove backing during an update. Resident
+  /// mappings validate BO bounds and lazily mmap the retained dmabuf. The lock order
+  /// fd_mutex_ -> driver page-table lock matches teardown_gem_entry_locked.
+  /// @param replace Preserve existing tails outside the updated range. Reject
+  /// overlap with other DRM files; without replacement, reject any overlap.
+  /// @param publish_timeline Whether to publish the output timeline point.
   ///   AMDGPU_VM_DELAY_UPDATE suppresses publication, matching the kernel contract.
-  /// @returns Zero when the range was installed, `-ENOENT` for an unknown handle in
-  ///   this DRM-file namespace, or another negative errno for invalid requests.
+  /// @param prt Ignore the GEM handle and reserve VA in this DRM file without
+  /// allocating backing or installing PTEs.
+  /// @returns Zero on success, -ENOENT for an unknown resident handle, or another
+  /// negative errno for an invalid request.
   [[nodiscard]] int gem_map(const DrmFileToken &file, uint32_t handle, uint64_t va_address,
                             uint64_t offset_in_bo, uint64_t map_size, bool replace,
                             bool publish_timeline = true, uint32_t timeline_handle = 0,
-                            uint64_t timeline_point = 0) {
+                            uint64_t timeline_point = 0, bool prt = false) {
     std::unique_lock lock(fd_mutex_);
     if (!file)
       return -EBADF;
@@ -2017,15 +3298,15 @@ public:
     if (!drv)
       return -ENODEV;
     auto it = gem_entries_.find(handle);
-    if (it == gem_entries_.end() || it->second.drm_file_id != file->id)
+    if (!prt && (it == gem_entries_.end() || it->second.handle_closed ||
+                 it->second.drm_file_id != file->id))
       return -ENOENT;
-    GemEntry &gem = it->second;
-    // Bound the request within the BO without letting offset_in_bo + map_size
-    // overflow (both are caller-controlled __u64 from the UAPI struct): a wrap
-    // would defeat a naive sum-vs-size check and install PTEs pointing outside
-    // the mmap. Reject a zero-size BO, a zero-size map, and any range past the end.
-    if (gem.size == 0 || map_size == 0 || offset_in_bo > gem.size ||
-        map_size > gem.size - offset_in_bo)
+    if (map_size == 0 || va_address > UINT64_MAX - map_size || offset_in_bo > UINT64_MAX - map_size)
+      return -EINVAL;
+    if ((va_address | offset_in_bo | map_size) & 4095)
+      return -EINVAL;
+    GemEntry &gem = prt ? prt_entries_[file->id] : it->second;
+    if (!prt && (gem.size == 0 || offset_in_bo > gem.size || map_size > gem.size - offset_in_bo))
       return -EINVAL;
     const GemMapping range{va_address, map_size};
     // Handle the target VA range's current occupant. Independent DRM files have
@@ -2043,19 +3324,20 @@ public:
                          va_address);
       return -EINVAL;
     }
-    if (replace) {
-      if (!evict_range_locked(drv, file->id, range, /*allow_missing=*/true))
-        return -EINVAL;
-    } else if (range_is_mapped_locked(range)) {
+    if (!replace && range_is_mapped_locked(range)) {
       return -EINVAL;
     }
-    if (!gem.cpu_ptr) {
-      void *p = InterposerContext::real().mmap(nullptr, gem.size, PROT_READ | PROT_WRITE,
-                                               MAP_SHARED, gem.dmabuf_fd, 0);
+    if (!prt && !gem.cpu_ptr) {
+      void *p = gem.dmabuf_fd->use([&](int fd) {
+        return rocjitsu::map_memory_backing(nullptr, gem.size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                            fd, 0);
+      });
       if (p == MAP_FAILED)
         return -EINVAL;
       gem.cpu_ptr = p;
     }
+    if (replace && !evict_range_locked(drv, file->id, range, /*allow_missing=*/true))
+      return -EINVAL;
     // Record which SimulatedKfd's page table receives these PTEs so GEM_CLOSE (or a
     // DRM-file-close reap) unmaps through the driver that installed them, never a
     // replacement one. Set the owner on the first mapping and keep it: all ranges of
@@ -2067,15 +3349,17 @@ public:
       gem.owner = drv;
     else
       assert(gem.owner == drv && "GEM ranges of one BO must share one owning driver");
-    void *host = static_cast<uint8_t *>(gem.cpu_ptr) + offset_in_bo;
+    void *host = prt ? nullptr : static_cast<uint8_t *>(gem.cpu_ptr) + offset_in_bo;
     // Install the PTEs while still holding fd_mutex_ so the range record and the
     // page-table state stay consistent against a concurrent teardown. gem_va_map
     // only returns false if the local process vanished mid-call; treat that as a
     // failed map (do not record the range) so GEM_VA reports the error rather than a
     // phantom success.
-    if (!drv->gem_va_map(va_address, host, map_size, gem.alloc_flags))
+    if (!prt && !drv->gem_va_map(va_address, host, map_size, gem.alloc_flags, gem.sealed_ram))
       return -EINVAL;
     gem.installed_vas.push_back(range);
+    if (prt)
+      publish_prt_locked(drv);
     if (publish_timeline)
       signal_syncobj_locked(timeline, timeline_point);
     lock.unlock();
@@ -2084,17 +3368,16 @@ public:
     return 0;
   }
 
-  /// @brief Remove a GEM_VA range from the GPU page table for @p handle (UNMAP).
-  /// @details Performs the page-table unmap AND the bookkeeping erase atomically
-  /// under fd_mutex_ (same rationale as gem_map). Validates that @p handle actually
-  /// owns the exact {va_address, map_size} range before mutating the page table, so
-  /// an UNMAP with a wrong handle or range cannot tear down PTEs the handle does not
-  /// own and cannot report success for a no-op.
-  /// @returns Zero when the range was unmapped, `-ENOENT` for an unknown handle in
-  ///   this DRM-file namespace, or another negative errno for invalid requests.
+  /// @brief Remove an exact resident mapping or sparse VA reservation.
+  /// @details Checks range ownership and updates bookkeeping and resident PTEs
+  /// under fd_mutex_, using the same lock order as gem_map.
+  /// @param prt Ignore the GEM handle and remove this DRM file's sparse reservation.
+  /// @returns Zero on success, -ENOENT for an unknown handle or reservation owner,
+  /// or another negative errno for an invalid request.
   [[nodiscard]] int gem_unmap(const DrmFileToken &file, uint32_t handle, uint64_t va_address,
                               uint64_t map_size, bool publish_timeline = true,
-                              uint32_t timeline_handle = 0, uint64_t timeline_point = 0) {
+                              uint32_t timeline_handle = 0, uint64_t timeline_point = 0,
+                              bool prt = false) {
     std::unique_lock lock(fd_mutex_);
     if (!file)
       return -EBADF;
@@ -2105,16 +3388,20 @@ public:
     if (!drv)
       return -ENODEV;
     auto it = gem_entries_.find(handle);
-    if (it == gem_entries_.end() || it->second.drm_file_id != file->id)
+    auto prt_it = prt_entries_.find(file->id);
+    if (prt ? prt_it == prt_entries_.end()
+            : it == gem_entries_.end() || it->second.handle_closed ||
+                  it->second.drm_file_id != file->id)
       return -ENOENT;
-    GemEntry &gem = it->second;
+    GemEntry &gem = prt ? prt_it->second : it->second;
     const GemMapping range{va_address, map_size};
-    if (std::find(gem.installed_vas.begin(), gem.installed_vas.end(), range) ==
-        gem.installed_vas.end())
+    if (std::ranges::find(gem.installed_vas, range) == gem.installed_vas.end())
       return -EINVAL; // This handle does not own the exact range — do not touch PTEs.
-    if (!drv->gem_va_unmap(va_address, map_size))
+    if (!prt && !drv->gem_va_unmap(va_address, map_size))
       return -EINVAL;
     std::erase(gem.installed_vas, range);
+    if (prt)
+      publish_prt_locked(drv);
     if (publish_timeline)
       signal_syncobj_locked(timeline, timeline_point);
     lock.unlock();
@@ -2138,6 +3425,8 @@ public:
     std::unique_lock lock(fd_mutex_);
     if (!file)
       return -EBADF;
+    if (map_size == 0 || va_address > UINT64_MAX - map_size || ((va_address | map_size) & 4095))
+      return -EINVAL;
     auto timeline = lookup_syncobj_locked(file, timeline_handle);
     if (timeline_handle != 0 && !timeline)
       return -ENOENT;
@@ -2155,15 +3444,25 @@ public:
     return 0;
   }
 
-  /// @brief Reap every GEM handle owned by a closing DRM file (at its close()).
+  /// @brief Reap GEM handles and sparse reservations owned by a closing DRM file.
   /// @details A well-behaved caller GEM_CLOSEs each handle, but a crash or leak can
   /// leave handles live; the DRM file close is their backstop, mirroring the kernel
   /// dropping a drm_file's GEM objects. Tears each entry's PTEs + host mmap down
   /// under fd_mutex_ before erasing, so no state escapes the lock.
   void reap_gem_for_drm_file(uint64_t drm_file_id) {
     std::lock_guard lock(fd_mutex_);
+    if (auto prt = prt_entries_.find(drm_file_id); prt != prt_entries_.end()) {
+      auto snapshot = driver();
+      auto *active = dynamic_cast<SimulatedKfd *>(snapshot.get());
+      bool publish = active && active == prt->second.owner;
+      prt_entries_.erase(prt);
+      if (publish)
+        publish_prt_locked(active);
+    }
     for (auto it = gem_entries_.begin(); it != gem_entries_.end();) {
-      if (it->second.drm_file_id == drm_file_id) {
+      if (it->second.drm_file_id == drm_file_id)
+        it->second.handle_closed = true;
+      if (it->second.handle_closed && !it->second.submission_refs) {
         teardown_gem_entry_locked(it->second);
         it = gem_entries_.erase(it);
       } else {
@@ -2173,20 +3472,21 @@ public:
   }
 
   /// @brief Drop the GEM entry for a closing GEM handle (at DRM_IOCTL_GEM_CLOSE).
-  /// @details The handle owns the mapping lifetime, so this is the point where the
-  /// BO is truly gone. Tears down the page-table entries (through the owning driver)
-  /// and munmaps the host mapping entirely under fd_mutex_, so no GemEntry pointer
-  /// or driver pointer escapes the lock and a concurrent GEM_VA cannot race the
-  /// teardown.
+  /// @details Closing removes userspace access immediately. Submitted jobs retain
+  /// the backing and GPU mappings until retirement; the last owner tears them down
+  /// under fd_mutex_, before freeing their host mapping.
   int untrack_gem(const DrmFileToken &file, uint32_t handle) {
     std::lock_guard lock(fd_mutex_);
     if (!file)
       return -EBADF;
     auto it = gem_entries_.find(handle);
-    if (it == gem_entries_.end() || it->second.drm_file_id != file->id)
+    if (it == gem_entries_.end() || it->second.handle_closed || it->second.drm_file_id != file->id)
       return -ENOENT;
-    teardown_gem_entry_locked(it->second);
-    gem_entries_.erase(it);
+    it->second.handle_closed = true;
+    if (!it->second.submission_refs) {
+      teardown_gem_entry_locked(it->second);
+      gem_entries_.erase(it);
+    }
     return 0;
   }
 
@@ -2248,7 +3548,15 @@ public:
       }
 
       try {
-        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff);
+        util::StringDiagnostic diagnostic;
+        auto maybe_dbt_guest =
+            rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff, diagnostic.emitter());
+        if (maybe_dbt_guest.failed()) {
+          util::Logger::warn("rocjitsu: failed to load child config: ", diagnostic.message());
+          destroy_local_vm();
+          return nullptr;
+        }
+        auto dbt_guest = std::move(maybe_dbt_guest.value());
         if (dbt_guest.enabled) {
           LinuxKfd *execution_driver = nullptr;
           const bool simulator_backend =
@@ -2260,8 +3568,13 @@ public:
               return nullptr;
             }
             execution_driver = local_vm_->vm->driver();
-            rocjitsu::config::validate_dbt_simulator_device_limits(dbt_guest,
-                                                                   local_vm_->loaded.device);
+            if (rocjitsu::config::validate_dbt_simulator_device_limits(
+                    dbt_guest, local_vm_->loaded.device, diagnostic.emitter())
+                    .failed()) {
+              util::Logger::warn("rocjitsu: failed to load child config: ", diagnostic.message());
+              destroy_local_vm();
+              return nullptr;
+            }
           }
 
           // The deleter captures local_vm_, so the guest is destroyed BEFORE the VM
@@ -2296,10 +3609,9 @@ public:
           return nullptr;
         }
       } catch (const std::exception &e) {
-        // This is where a broken runtime handoff lands, including an enabled DBT config
-        // with no resolved host gpu_id. Failing closed leaves the process with a null
-        // driver and an opaque downstream failure, so the reason must be audible in a
-        // default build the way the hook layer's equivalent refusal already is.
+        // Retain containment for allocation and library exceptions during config
+        // loading and driver initialization. Failing closed leaves the process with
+        // a null driver, so the reason must be audible in a default build.
         util::Logger::warn("rocjitsu: failed to load child config: ", e.what());
         destroy_local_vm();
         return nullptr;
@@ -2325,16 +3637,21 @@ public:
   /// close), retrying on EINTR.
   /// @details Used during driver construction where re-entering our interposed
   /// I/O path could recurse. Read errors (other than EINTR) are reported and
-  /// yield an empty string, distinct from a successfully read empty file.
-  static std::string read_file_passthrough(const char *path) {
-    if (!real().ready())
-      return {};
+  /// return failure, distinct from a successfully read empty file.
+  static util::FailureOr<std::string> read_file_passthrough(const char *path) {
+    if (!real().ready()) {
+      util::Logger::warn("rocjitsu: cannot read VM configuration: libc passthrough is unavailable");
+      return util::Result::failure();
+    }
     int fd;
     do {
       fd = real().openat(AT_FDCWD, path, O_RDONLY, 0);
     } while (fd < 0 && errno == EINTR);
-    if (fd < 0)
-      return {};
+    if (fd < 0) {
+      util::Logger::warn("rocjitsu: cannot open plugin configuration '", path,
+                         "': ", std::strerror(errno));
+      return util::Result::failure();
+    }
     std::string out;
     char buf[4096] = {};
     for (;;) {
@@ -2344,7 +3661,7 @@ public:
           continue;
         util::Logger::warn("rocjitsu: read error on '", path, "': ", std::strerror(errno));
         real().close(fd);
-        return {};
+        return util::Result::failure();
       }
       if (n == 0)
         break; // EOF.
@@ -2514,6 +3831,8 @@ private:
 
   std::mutex init_mutex_;
   std::mutex fd_mutex_;
+  std::unordered_map<int, std::shared_ptr<SyncFile>> sync_file_fds_;
+  std::atomic<uint32_t> imported_syncobj_generation_{0};
   /// Serializes synthetic DRM fd-table operations with tracking updates. The
   /// kernel makes close and duplication atomic with respect to the process fd
   /// table; this lock extends that atomicity through the interposer's drm_fds_
@@ -2539,6 +3858,11 @@ private:
   /// closes (reap_gem_for_drm_file). Because handles are not recycled with fd numbers,
   /// a reused dmabuf fd can never collide with a still-live BO.
   std::unordered_map<uint32_t, GemEntry> gem_entries_;
+  // Sparse VA reservations have no GEM handle or resident backing. Keep their
+  // intervals per DRM file; allocating storage proportional to VA size defeats PRT.
+  std::unordered_map<uint64_t, GemEntry> prt_entries_;
+  /// @brief GEM mmap cursor, outside the KFD doorbell/queue offset namespace.
+  uint64_t next_gem_mmap_offset_ = kGemMmapOffsetBase;
   /// @brief Next stable GEM handle to mint. Starts at 1 so 0 means "no handle".
   uint32_t next_gem_handle_ = 1;
   /// @brief Transient EXPORT_DMABUF fd→alloc_flags association awaiting the next
@@ -2546,14 +3870,25 @@ private:
   /// erases the pending record. Short-lived, so keying by (recyclable) fd is safe.
   std::unordered_map<int, uint32_t> pending_gem_flags_;
 
+  /// @brief BO state retained by each open PRIME_HANDLE_TO_FD fd.
+  /// @details The kernel BO outlives its last GEM handle while a dmabuf fd is
+  /// open, so a later import still sees its create info and metadata. Dropped
+  /// at close(fd) with pending_gem_flags_.
+  std::unordered_map<int, std::shared_ptr<GemObject>> exported_gem_objects_;
+
   /// @brief Tear down a GEM entry's GPU PTEs and host mapping. Caller holds
   /// fd_mutex_. Removes page-table ranges through the driver that installed them
   /// (owner), BEFORE munmapping cpu_ptr, so the page table never holds pointers
   /// into freed host memory. If that driver is no longer the active one, its page
   /// table is already gone with it, so the PTE removal is skipped (never applied to
   /// a different, replacement driver).
-  void teardown_gem_entry_locked(GemEntry &gem) {
-    if (gem.owner && gem.owner == dynamic_cast<SimulatedKfd *>(driver().get())) {
+  void teardown_gem_entry_locked(GemEntry &gem, SimulatedKfd *executing_driver = nullptr) {
+    // Completion runs on the engine. Other callers are application-side teardown
+    // or VM destruction after the engine has joined, and may take a snapshot.
+    auto snapshot = executing_driver ? std::shared_ptr<LinuxKfd>{} : driver();
+    auto *active_driver =
+        executing_driver ? executing_driver : dynamic_cast<SimulatedKfd *>(snapshot.get());
+    if (gem.owner && gem.owner == active_driver) {
       // The owning driver is still active; remove its PTEs. gem_va_unmap only fails
       // if the local process already vanished, in which case the page table is gone
       // and there is nothing to remove — either way the range must not remain
@@ -2568,54 +3903,61 @@ private:
     // Release our private dup of the backing dmabuf (taken in prime_import) now that
     // no lazy mmap can reference it. Close through the passthrough table so we don't
     // re-enter our own close() hook and its GEM/dup bookkeeping.
-    if (gem.owns_dmabuf_fd && gem.dmabuf_fd >= 0)
-      InterposerContext::real().close(gem.dmabuf_fd);
-    gem.dmabuf_fd = -1;
-    gem.owns_dmabuf_fd = false;
+    gem.dmabuf_fd.reset();
   }
 
-  /// @brief Evict every recorded range that OVERLAPS @p range in one DRM file.
-  /// @details Caller holds fd_mutex_ and passes the live simulated @p drv and stable
-  /// DRM-file identity. Used by GEM_VA REPLACE (evict prior mappings before installing
-  /// the new one) and CLEAR (handle-agnostic teardown). Matching is by interval
-  /// intersection, not exact equality: a REPLACE at a VA previously mapped with a
-  /// DIFFERENT size (or a sub/super-range) must still evict the old mapping, otherwise
-  /// its stale bookkeeping would later double-unmap or leak the new PTEs. Each
-  /// overlapping range is unmapped by its OWN {va_address, map_size} extent (not @p
-  /// range's) so the page-table removal matches what was installed, then dropped from
-  /// its entry's bookkeeping. The host mmap is left intact — the owning handle still
-  /// exists and other ranges may reference it; it is munmapped only at GEM_CLOSE /
-  /// reap.
-  /// @param allow_missing When true, no overlap is a success (a MAP onto a free VA has
-  ///   nothing to evict); when false (REPLACE/CLEAR), no overlap is a failure so the
-  ///   ioctl reports EINVAL.
-  /// @retval true nothing overlapped (allow_missing) or all overlaps were evicted.
-  /// @retval false nothing overlapped (only when !allow_missing) or an unmap failed.
-  /// @note Not rolled back on a mid-loop unmap failure: already-evicted ranges stay
-  ///   evicted. This is safe because gem_va_unmap() only fails when the local process
-  ///   has already vanished (SimulatedKfd::gem_va_unmap), i.e. its page table is being
-  ///   torn down anyway, so a partially-evicted state is never observed by a live GPU.
+  void publish_prt_locked(SimulatedKfd *drv) {
+    rocjitsu::amdgpu::PrtRanges ranges;
+    for (const auto &[file, gem] : prt_entries_) {
+      if (gem.owner == drv)
+        for (const auto &r : gem.installed_vas)
+          ranges.push_back({r.va_address, r.va_address + r.map_size});
+    }
+    drv->publish_prt_ranges(std::move(ranges));
+  }
+
+  /// @brief Remove only the intersection with a VA update, preserving both tails.
+  /// @details PRT intervals carry no resident PTEs. Buffer intervals retain their
+  /// existing host translations outside the update, including the original BO offset.
+  /// Caller holds fd_mutex_. Return false if no range overlaps unless allow_missing,
+  /// or if a resident unmap fails. Completed removals are not rolled back on failure.
   [[nodiscard]] bool evict_range_locked(SimulatedKfd *drv, uint64_t drm_file_id,
                                         const GemMapping &range, bool allow_missing) {
     bool evicted_any = false;
-    for (auto &[handle, gem] : gem_entries_) {
-      if (gem.drm_file_id != drm_file_id)
-        continue;
-      for (auto vit = gem.installed_vas.begin(); vit != gem.installed_vas.end();) {
-        if (!vit->overlaps(range)) {
-          ++vit;
+    auto evict = [&](std::vector<GemMapping> &ranges, bool resident) {
+      for (size_t i = 0; i < ranges.size();) {
+        const auto old = ranges[i];
+        if (!old.overlaps(range)) {
+          ++i;
           continue;
         }
-        if (!drv->gem_va_unmap(vit->va_address, vit->map_size))
-          return false; // process gone; page table already being destroyed (see @note)
-        vit = gem.installed_vas.erase(vit);
+        const uint64_t begin = std::max(old.va_address, range.va_address);
+        const uint64_t end =
+            std::min(old.va_address + old.map_size, range.va_address + range.map_size);
+        if (resident && !drv->gem_va_unmap(begin, end - begin))
+          return false;
+        ranges.erase(ranges.begin() + i);
+        if (old.va_address < begin)
+          ranges.push_back({old.va_address, begin - old.va_address});
+        if (end < old.va_address + old.map_size)
+          ranges.push_back({end, old.va_address + old.map_size - end});
         evicted_any = true;
       }
+      return true;
+    };
+    for (auto &[handle, gem] : gem_entries_)
+      if (gem.drm_file_id == drm_file_id && !evict(gem.installed_vas, true))
+        return false;
+    auto prt = prt_entries_.find(drm_file_id);
+    if (prt != prt_entries_.end()) {
+      if (!evict(prt->second.installed_vas, false))
+        return false;
+      publish_prt_locked(drv);
     }
     return evicted_any || allow_missing;
   }
 
-  /// @brief Whether any GEM entry owns a range OVERLAPPING @p range in the shared
+  /// @brief Whether any GEM mapping or sparse reservation overlaps @p range in the shared
   /// simulated GPU page table. Caller holds fd_mutex_. Used by plain MAP to reject
   /// a map that would collide with an existing range's PTEs, regardless of which
   /// DRM file owns it.
@@ -2625,10 +3967,14 @@ private:
         if (existing.overlaps(range))
           return true;
     }
+    for (const auto &[file_id, gem] : prt_entries_)
+      for (const auto &existing : gem.installed_vas)
+        if (existing.overlaps(range))
+          return true;
     return false;
   }
 
-  /// @brief Whether a GEM entry owned by a DRM file other than @p drm_file_id
+  /// @brief Whether a GEM mapping or sparse reservation owned by a file other than @p drm_file_id
   /// overlaps @p range in the shared simulated GPU page table. Caller holds
   /// fd_mutex_. Used by REPLACE to reject a foreign collision before evicting any
   /// mapping owned by the caller.
@@ -2641,6 +3987,11 @@ private:
         if (existing.overlaps(range))
           return true;
     }
+    for (const auto &[file_id, gem] : prt_entries_)
+      if (file_id != drm_file_id)
+        for (const auto &existing : gem.installed_vas)
+          if (existing.overlaps(range))
+            return true;
     return false;
   }
 
@@ -2682,11 +4033,57 @@ template <typename F> auto with_host_mapping_held(F &&syscall) {
 }
 } // namespace
 
+template <typename Stat> static void finish_backing_stat(int fd, Stat *buf) {
+  if (!S_ISSOCK(buf->st_mode))
+    return;
+  struct stat backing {};
+  if (rocjitsu::stat_memory_backing_token(fd, &backing)) {
+    buf->st_dev = backing.st_dev;
+    buf->st_ino = backing.st_ino;
+    buf->st_mode = backing.st_mode;
+    buf->st_size = backing.st_size;
+  }
+}
+
 extern "C" {
+
+RJ_INTERPOSER_EXPORT off_t lseek(int fd, off_t offset, int whence) {
+  auto real = rocjitsu::libc_passthrough().lseek_fn;
+  if (!real)
+    real = util::lookup_symbol<decltype(real)>(RTLD_NEXT, "lseek");
+  if (!real) {
+    errno = ENOSYS;
+    return -1;
+  }
+  off_t result = real(fd, offset, whence);
+  if (result == -1 && errno == ESPIPE &&
+      !rocjitsu::seek_memory_backing_token(fd, offset, whence, result))
+    errno = ESPIPE;
+  return result;
+}
+
+RJ_INTERPOSER_EXPORT off64_t lseek64(int fd, off64_t offset, int whence) {
+  auto real = rocjitsu::libc_passthrough().lseek64_fn;
+  if (!real)
+    real = util::lookup_symbol<decltype(real)>(RTLD_NEXT, "lseek64");
+  if (!real) {
+    errno = ENOSYS;
+    return -1;
+  }
+  const off64_t result = real(fd, offset, whence);
+  if (result == -1 && errno == ESPIPE) {
+    off_t token_result;
+    if (rocjitsu::seek_memory_backing_token(fd, offset, whence, token_result))
+      return token_result;
+    errno = ESPIPE;
+  }
+  return result;
+}
 
 static std::string redirect_sysfs_path(const char *path);
 static std::string redirect_sys_dev_char(const char *path);
 static std::optional<Sysfs::GpuInfo> interposer_gpu_info(uint32_t render_minor);
+static std::optional<dev_t> synthetic_alias_for_host_drm(dev_t device);
 static std::optional<Sysfs::GpuInfo>
 interposer_gpu_info_for(const InterposerContext::DrmFileToken &file);
 
@@ -3240,8 +4637,31 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   // Drop any transient EXPORT_DMABUF flags for this fd: a dmabuf export fd closed
   // before a PRIME_FD_TO_HANDLE would otherwise leave a stale fd→flags record that a
   // later PRIME on the recycled fd number could misapply as the wrong PTE MTYPE.
-  // No-op for non-dmabuf fds.
-  InterposerContext::ctx.drop_pending_gem_flags(fd);
+  // A PRIME export fd also releases the BO state it retained. No-op for
+  // non-dmabuf fds.
+  //
+  // A record does not prove the fd is a dmabuf: close_range or a raw SYS_close leaves
+  // it behind on a number the kernel then reuses. The descriptor's own cleanup below
+  // therefore still runs, and only a descriptor nothing else tracks is closed here.
+  const bool maybe_export = InterposerContext::ctx.has_gem_export(fd);
+  const bool tracked_elsewhere = maybe_export && (InterposerContext::ctx.lookup(fd) != nullptr ||
+                                                  InterposerContext::ctx.owns_fd(fd) ||
+                                                  InterposerContext::PrivateDrmFd::owns(fd));
+  bool dropped_export = false;
+  InterposerContext::DrmUntrackResult drm_close;
+  {
+    // The record goes with the kernel close, inside the scope a dup of this fd holds
+    // from its syscall to duplicate_gem_export, so that dup sees both or neither.
+    auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+    dropped_export = InterposerContext::ctx.drop_gem_export(fd);
+    if (InterposerContext::ctx.close_sync_file(fd))
+      return 0;
+    drm_close = InterposerContext::ctx.untrack_drm(fd);
+    if (drm_close.tracked)
+      InterposerContext::real().close(fd);
+    else if (dropped_export && !tracked_elsewhere && !InterposerContext::ctx.is_kfd_dup(fd))
+      return static_cast<int>(InterposerContext::real().close(fd));
+  }
   // NOTE: a GEM/dmabuf mapping is NOT torn down when a transient dmabuf EXPORT fd
   // closes. ROCr closes that fd immediately after VMemorySetAccessPerHandle()
   // returns, while the GPU mapping must stay live for the caller. GEM state is keyed
@@ -3249,13 +4669,6 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   // handler). Closing the DRM FILE itself, however, is the true backstop: reap any
   // handles still open on it (mirroring the kernel dropping a drm_file's GEM
   // objects) so a leaked/never-GEM_CLOSE'd handle cannot outlive its DRM file.
-  InterposerContext::DrmUntrackResult drm_close;
-  {
-    auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
-    drm_close = InterposerContext::ctx.untrack_drm(fd);
-    if (drm_close.tracked)
-      InterposerContext::real().close(fd);
-  }
   if (drm_close.tracked) {
     // Reaps GEM while the backend is still open, then drops the lease. Releasing a
     // local lease routes through release_local_open(), so a final DRM close can
@@ -3284,7 +4697,7 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
     InterposerContext::ctx.release_local_open();
     return 0;
   }
-  if (is_owned_fd)
+  if (is_owned_fd || InterposerContext::PrivateDrmFd::owns(fd))
     return 0;
   return static_cast<int>(InterposerContext::real().close(fd));
 }
@@ -3314,7 +4727,10 @@ __attribute__((destructor)) void rj_interposer_shutdown() {
   InterposerContext::ctx.request_local_vm_shutdown();
 }
 
-RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
+// Use the public symbol without inheriting libc's noexcept declaration: a signal
+// handler may terminate a thread blocked in a simulated ioctl via pthread_exit.
+RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) asm("ioctl");
+RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
   assert(InterposerContext::real().ready());
   va_list ap;
   va_start(ap, request);
@@ -3326,12 +4742,21 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
     return InterposerContext::real().ioctl(fd, request, arg);
   }
 
+  if (request == SYNC_IOC_MERGE && arg) {
+    auto lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+    if (auto result =
+            InterposerContext::ctx.merge_sync_files(fd, *static_cast<sync_merge_data *>(arg)))
+      return kfd_ioctl_ret(*result);
+    return InterposerContext::real().ioctl(fd, request, arg);
+  }
+
   constexpr unsigned kDrmIoctlType = 'd';
   constexpr unsigned kDrmIoctlNrVersion = 0x00;
   constexpr unsigned kDrmIoctlNrGemClose = _IOC_NR(DRM_IOCTL_GEM_CLOSE);
   constexpr unsigned kDrmIoctlNrAmdgpuInfo = DRM_COMMAND_BASE + DRM_AMDGPU_INFO;
   constexpr unsigned kDrmIoctlNrGemVa = DRM_COMMAND_BASE + DRM_AMDGPU_GEM_VA;
   constexpr unsigned kDrmIoctlNrPrimeFdToHandle = _IOC_NR(DRM_IOCTL_PRIME_FD_TO_HANDLE);
+  constexpr unsigned kDrmIoctlNrPrimeHandleToFd = _IOC_NR(DRM_IOCTL_PRIME_HANDLE_TO_FD);
   constexpr unsigned kDrmIoctlNrSyncobjCreate = _IOC_NR(DRM_IOCTL_SYNCOBJ_CREATE);
   constexpr unsigned kDrmIoctlNrSyncobjDestroy = _IOC_NR(DRM_IOCTL_SYNCOBJ_DESTROY);
   constexpr unsigned kDrmIoctlNrSyncobjTimelineWait = _IOC_NR(DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT);
@@ -3341,6 +4766,83 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
   if (drm_file) {
     unsigned nr = _IOC_NR(request);
     unsigned type = _IOC_TYPE(request);
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_CS && arg)
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.submit_drm_cs(drm_file, static_cast<drm_amdgpu_cs *>(arg)));
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_WAIT_CS && arg)
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.wait_drm_cs(drm_file, static_cast<drm_amdgpu_wait_cs *>(arg)));
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_GET_CAP) && arg) {
+      auto *cap = static_cast<drm_get_cap *>(arg);
+      cap->value = 0;
+      if (cap->capability == DRM_CAP_SYNCOBJ || cap->capability == DRM_CAP_SYNCOBJ_TIMELINE)
+        cap->value = 1;
+      else if (cap->capability == DRM_CAP_PRIME)
+        cap->value = DRM_PRIME_CAP_IMPORT;
+      return 0;
+    }
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_CTX && arg)
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.drm_context(drm_file, static_cast<drm_amdgpu_ctx *>(arg)));
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_VM && arg)
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.drm_vm(drm_file, static_cast<drm_amdgpu_vm *>(arg)->in.op));
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_WAIT) && arg) {
+      auto *wait = static_cast<drm_syncobj_wait *>(arg);
+      constexpr uint32_t kSupportedFlags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL |
+                                           DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT |
+                                           DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE;
+      if ((wait->flags & ~kSupportedFlags) != 0)
+        return kfd_ioctl_ret(-EINVAL);
+      std::vector<uint64_t> points;
+      try {
+        points.resize(wait->count_handles, 0);
+      } catch (const std::bad_alloc &) {
+        return kfd_ioctl_ret(-ENOMEM);
+      } catch (const std::length_error &) {
+        return kfd_ioctl_ret(-ENOMEM);
+      }
+      drm_syncobj_timeline_wait timeline{};
+      timeline.handles = wait->handles;
+      timeline.points = reinterpret_cast<uint64_t>(points.data());
+      timeline.count_handles = wait->count_handles;
+      timeline.timeout_nsec = wait->timeout_nsec;
+      timeline.flags = wait->flags;
+      int result = InterposerContext::ctx.wait_syncobj_timeline(drm_file, &timeline);
+      wait->first_signaled = timeline.first_signaled;
+      return kfd_ioctl_ret(result);
+    }
+    if (type == kDrmIoctlType &&
+        (nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_SIGNAL) || nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_RESET)) &&
+        arg) {
+      auto *array = static_cast<drm_syncobj_array *>(arg);
+      if (array->pad)
+        return kfd_ioctl_ret(-EINVAL);
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.update_syncobjs(drm_file, array->handles, 0, array->count_handles,
+                                                 nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_RESET)));
+    }
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL) && arg) {
+      auto *array = static_cast<drm_syncobj_timeline_array *>(arg);
+      if (array->flags)
+        return kfd_ioctl_ret(-EINVAL);
+      return kfd_ioctl_ret(InterposerContext::ctx.update_syncobjs(
+          drm_file, array->handles, array->points, array->count_handles, false));
+    }
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD) && arg)
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.export_syncobj(drm_file, *static_cast<drm_syncobj_handle *>(arg)));
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE) && arg) {
+      auto lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.import_syncobj(drm_file, *static_cast<drm_syncobj_handle *>(arg)));
+    }
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_QUERY) && arg)
+      return kfd_ioctl_ret(InterposerContext::ctx.query_syncobjs(
+          drm_file, *static_cast<drm_syncobj_timeline_array *>(arg)));
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_TRANSFER) && arg)
+      return kfd_ioctl_ret(InterposerContext::ctx.transfer_syncobj(
+          drm_file, *static_cast<drm_syncobj_transfer *>(arg)));
     if (type == kDrmIoctlType && nr == kDrmIoctlNrVersion && arg) {
       auto *ver = static_cast<drm_version *>(arg);
       ver->version_major = 3;
@@ -3367,6 +4869,14 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       ver->desc_len = 1;
       return 0;
     }
+    if (type == kDrmIoctlType && nr == kDrmIoctlNrPrimeHandleToFd && arg) {
+      auto *prime = static_cast<drm_prime_handle *>(arg);
+      int exported = InterposerContext::ctx.prime_export(drm_file, prime->handle, prime->flags);
+      if (exported < 0)
+        return kfd_ioctl_ret(exported);
+      prime->fd = exported;
+      return 0;
+    }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrPrimeFdToHandle && arg) {
       auto *prime = static_cast<drm_prime_handle *>(arg);
       if (prime->fd < 0) {
@@ -3374,12 +4884,22 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         return -1;
       }
 
+      // The backing adapter recognizes native files and opaque tokens as regular
+      // storage. Reject other sockets, pipes, device nodes, and descriptors the
+      // interposer serves itself so fd reuse cannot misclassify them as exports.
+      struct stat kind {};
+      if (InterposerContext::ctx.is_interposer_fd(prime->fd) ||
+          rocjitsu::stat_memory_backing(prime->fd, &kind) != 0 || !S_ISREG(kind.st_mode)) {
+        errno = EINVAL;
+        return -1;
+      }
+
       // Size the BO so GEM_VA can map the dmabuf into the GPU page table. The dmabuf
-      // fd is mmap-able (it dups the allocation's backing memfd). Use the real fstat
-      // (not the interposed one) so we don't re-enter our own hook.
+      // fd aliases the allocation's backing, which may be a socket token. Use
+      // the backing metadata adapter to handle both forms without hook re-entry.
       uint64_t sz = 0;
       struct stat st {};
-      if (InterposerContext::real().fstat_fn(prime->fd, &st) == 0 && st.st_size > 0) {
+      if (rocjitsu::stat_memory_backing(prime->fd, &st) == 0 && st.st_size > 0) {
         sz = static_cast<uint64_t>(st.st_size);
       } else {
         // No size means a later GEM_VA MAP on this handle will fail (EINVAL);
@@ -3398,6 +4918,38 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         return -1;
       }
       return 0;
+    }
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_GEM_CREATE && arg) {
+      auto *create = static_cast<drm_amdgpu_gem_create *>(arg);
+      const auto request = create->in;
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.create_gem(drm_file, request, &create->out.handle));
+    }
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_GEM_MMAP && arg) {
+      auto *map = static_cast<drm_amdgpu_gem_mmap *>(arg);
+      const uint32_t handle = map->in.handle;
+      uint64_t offset = 0;
+      int result = InterposerContext::ctx.gem_mmap_offset(drm_file, handle, &offset);
+      if (result != 0)
+        return kfd_ioctl_ret(result);
+      map->out.addr_ptr = offset;
+      return 0;
+    }
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_GEM_METADATA && arg) {
+      if (_IOC_SIZE(request) < sizeof(drm_amdgpu_gem_metadata)) {
+        errno = EINVAL;
+        return -1;
+      }
+      return kfd_ioctl_ret(InterposerContext::ctx.gem_metadata(
+          drm_file, static_cast<drm_amdgpu_gem_metadata *>(arg)));
+    }
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_GEM_OP && arg) {
+      if (_IOC_SIZE(request) < sizeof(drm_amdgpu_gem_op)) {
+        errno = EINVAL;
+        return -1;
+      }
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.gem_op(drm_file, static_cast<drm_amdgpu_gem_op *>(arg)));
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrSyncobjCreate && arg) {
       auto *create = static_cast<drm_syncobj_create *>(arg);
@@ -3438,24 +4990,69 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       if (!out || info->return_size == 0)
         return 0;
       std::memset(out, 0, info->return_size);
+      const uint32_t major = gpu->gfx_target_version / 10000;
+      const bool rdna_compute = gpu->gfx_target_version == 100100 ||
+                                gpu->gfx_target_version == 100300 || major == 11 ||
+                                gpu->gfx_target_version / 100 == 1200;
 
       switch (info->query) {
+      case AMDGPU_INFO_TIMESTAMP: {
+        const uint64_t timestamp = rocjitsu::amdgpu::gpu_clock_from_ns(
+            rocjitsu::amdgpu::hsa_system_timestamp(), gpu->clock_frequency_mhz());
+        std::memcpy(out, &timestamp, std::min<size_t>(info->return_size, sizeof(timestamp)));
+        return 0;
+      }
+      case AMDGPU_INFO_HW_IP_INFO: {
+        drm_amdgpu_info_hw_ip ip{};
+        if (info->query_hw_ip.ip_instance != 0) {
+          errno = EINVAL;
+          return -1;
+        }
+        if (rdna_compute && info->query_hw_ip.type <= AMDGPU_HW_IP_COMPUTE) {
+          ip.hw_ip_version_major = major;
+          ip.hw_ip_version_minor = (gpu->gfx_target_version / 100) % 100;
+          ip.ip_discovery_version =
+              rocjitsu::kmd::gc_ip_version_for_gfx_target_version(gpu->gfx_target_version) >> 8;
+          ip.ib_start_alignment = 32;
+          ip.ib_size_alignment = 32;
+          ip.available_rings = info->query_hw_ip.type == AMDGPU_HW_IP_COMPUTE ? 0xf : 1;
+        }
+        std::memcpy(out, &ip, std::min<size_t>(info->return_size, sizeof(ip)));
+        return 0;
+      }
+      case AMDGPU_INFO_HW_IP_COUNT: {
+        const uint32_t count =
+            rdna_compute && info->query_hw_ip.type <= AMDGPU_HW_IP_COMPUTE ? 1 : 0;
+        std::memcpy(out, &count, std::min<size_t>(info->return_size, sizeof(count)));
+        return 0;
+      }
+      case AMDGPU_INFO_MAX_IBS: {
+        if (info->return_size >= (AMDGPU_HW_IP_COMPUTE + 1) * sizeof(uint32_t))
+          static_cast<uint32_t *>(out)[AMDGPU_HW_IP_COMPUTE] = 125;
+        if (info->return_size >= sizeof(uint32_t))
+          static_cast<uint32_t *>(out)[AMDGPU_HW_IP_GFX] = 192;
+        return 0;
+      }
       case AMDGPU_INFO_ACCEL_WORKING: {
         if (info->return_size >= sizeof(uint32_t))
           *static_cast<uint32_t *>(out) = 1u;
         return 0;
       }
       case AMDGPU_INFO_READ_MMR_REG: {
-        // rocjitsu does not model raster/tiling MMRs. libdrm only stores the
-        // returned words (never validates them), so zero-fill `count` u32s is
-        // sufficient for both the AI short path and the pre-AI cascade.
-        return 0; // buffer already zeroed
+        // libdrm uses GB_ADDR_CONFIG for address-library initialization;
+        // other raster/tiling registers remain unmodeled.
+        if (info->read_mmr_reg.dword_offset == 0x263e && info->read_mmr_reg.count == 1 &&
+            info->return_size >= sizeof(uint32_t)) {
+          *static_cast<uint32_t *>(out) =
+              rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
+        }
+        return 0;
       }
       case AMDGPU_INFO_VRAM_GTT: {
         if (info->return_size >= sizeof(drm_amdgpu_info_vram_gtt)) {
           auto *vg = static_cast<drm_amdgpu_info_vram_gtt *>(out);
           vg->vram_size = gpu->local_mem_size;
-          vg->vram_cpu_accessible_size = gpu->local_mem_size;
+          vg->vram_cpu_accessible_size = gpu->visible_vram_size;
           vg->gtt_size = gpu->local_mem_size;
         }
         return 0;
@@ -3465,8 +5062,12 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
           auto *m = static_cast<drm_amdgpu_memory_info *>(out);
           m->vram.total_heap_size = gpu->local_mem_size;
           m->vram.usable_heap_size = gpu->local_mem_size;
+          m->vram.heap_usage = 0;
           m->vram.max_allocation = gpu->local_mem_size;
           m->cpu_accessible_vram = m->vram;
+          m->cpu_accessible_vram.total_heap_size = gpu->visible_vram_size;
+          m->cpu_accessible_vram.usable_heap_size = gpu->visible_vram_size;
+          m->cpu_accessible_vram.max_allocation = gpu->visible_vram_size;
           m->gtt = m->vram;
         }
         return 0;
@@ -3485,9 +5086,10 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         dev.num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
             gpu->array_count_per_xcc(), gpu->num_shader_arrays_per_engine);
         dev.num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
-        dev.gpu_counter_freq = 100000;
-        dev.max_engine_clock = gpu->max_engine_clk_fcompute;
-        dev.max_memory_clock = gpu->mem_clk_max;
+        dev.gpu_counter_freq = 1000u * gpu->clock_frequency_mhz(); // kHz
+        // KFD topology clocks are MHz; the DRM ABI reports kHz.
+        dev.max_engine_clock = uint64_t{gpu->max_engine_clk_fcompute} * 1000;
+        dev.max_memory_clock = uint64_t{gpu->mem_clk_max} * 1000;
         dev.wave_front_size = gpu->wave_front_size;
         dev.num_cu_per_sh = gpu->num_cu_per_sh;
         dev.num_hw_gfx_contexts =
@@ -3496,6 +5098,27 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         dev.vram_bit_width = gpu->mem_width;
         dev.cu_active_number =
             rocjitsu::kmd::drm_cu_active_number(gpu->simd_count, gpu->simd_per_cu);
+        if (rdna_compute) {
+          for (uint32_t se = 0; se < std::min(dev.num_shader_engines, 8u); ++se)
+            for (uint32_t sa = 0; sa < std::min(dev.num_shader_arrays_per_engine, 2u); ++sa)
+              dev.cu_bitmap[se % 4][sa + (se / 4) * 2] =
+                  util::mask<uint32_t>(std::min(dev.num_cu_per_sh, 32u));
+          dev.num_shader_visible_vgprs = major == 10 ? 1024 : 1536;
+          dev.num_tcc_blocks = gpu->mem_width / (major <= 11 ? 16 : 8);
+          // Cache sizes in this ioctl are KiB, except MALL which is bytes.
+          // RADV uses them to size mandatory graphics-queue preamble buffers.
+          dev.tcp_cache_size = major == 10 ? 16 : 32;
+          dev.sqc_data_cache_size = 16;
+          dev.sqc_inst_cache_size = 32;
+          dev.gl1c_cache_size = major == 10 ? 128 : 256;
+          dev.gl2c_cache_size = dev.num_tcc_blocks * 256;
+          const uint32_t mall_mb_per_tcc =
+              major == 10 ? (gpu->gfx_target_version == 100300 ? 8 : 0) : (major == 11 ? 4 : 2);
+          dev.mall_size = uint64_t{dev.num_tcc_blocks} * mall_mb_per_tcc * 1024 * 1024;
+          dev.num_rb_pipes = gpu->gfx_target_version == 100100 ? 16 : dev.num_shader_engines * 4;
+          dev.enabled_rb_pipes_mask = util::mask<uint32_t>(std::min(dev.num_rb_pipes, 32u));
+          dev.gc_double_offchip_lds_buf = 64;
+        }
         // VA aperture — libdrm's VA manager (amdgpu_vamgr_init) needs a sane
         // range. Mirror the KFD GPUVM aperture used elsewhere.
         dev.virtual_address_offset = 0x200000;       // 2 MiB
@@ -3527,12 +5150,12 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       return kfd_ioctl_ret(InterposerContext::ctx.untrack_gem(drm_file, gc->handle));
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrGemVa && arg) {
-      // GEM_VA installs (or tears down) a GPU virtual mapping for a prime-
-      // imported buffer. HSA's vmem path (hsa_amd_vmem_map) lowers to this via
-      // amdgpu_bo_va_op; IREE's ring allocator triple-maps one BO at adjacent
-      // VAs. We map by GEM handle, lazily mmap the backing pages, and
-      // install/remove them in the GPU page table.
-      auto *va = static_cast<drm_amdgpu_gem_va *>(arg);
+      // GEM_VA updates resident mappings or handle-less sparse VA reservations.
+      // Resident mappings lazily mmap the imported BO and update GPU PTEs; sparse
+      // reservations only record intervals in the calling DRM-file namespace.
+      drm_amdgpu_gem_va request_va{};
+      std::memcpy(&request_va, arg, std::min<size_t>(_IOC_SIZE(request), sizeof(request_va)));
+      auto *va = &request_va;
       // The kernel waits synchronously for every input fence before touching the
       // VM. This model has no input-fence lookup/wait implementation, so reject a
       // nonzero authoritative count instead of applying the update before its
@@ -3549,6 +5172,9 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         return -1;
       }
       const bool publish_timeline = (va->flags & AMDGPU_VM_DELAY_UPDATE) == 0;
+      const bool prt = (va->flags & AMDGPU_VM_PAGE_PRT) != 0;
+      if (prt && (va->flags & ~(AMDGPU_VM_PAGE_PRT | AMDGPU_VM_DELAY_UPDATE)))
+        return kfd_ioctl_ret(-EINVAL);
       int result = 0;
       switch (va->operation) {
       case AMDGPU_VA_OP_MAP:
@@ -3559,13 +5185,13 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         result = InterposerContext::ctx.gem_map(
             drm_file, va->handle, va->va_address, va->offset_in_bo, va->map_size,
             /*replace=*/va->operation == AMDGPU_VA_OP_REPLACE, publish_timeline,
-            va->vm_timeline_syncobj_out, va->vm_timeline_point);
+            va->vm_timeline_syncobj_out, va->vm_timeline_point, prt);
         break;
       case AMDGPU_VA_OP_UNMAP:
         // UNMAP requires the supplied handle to own the exact range.
         result = InterposerContext::ctx.gem_unmap(
             drm_file, va->handle, va->va_address, va->map_size, publish_timeline,
-            va->vm_timeline_syncobj_out, va->vm_timeline_point);
+            va->vm_timeline_syncobj_out, va->vm_timeline_point, prt);
         break;
       case AMDGPU_VA_OP_CLEAR:
         // CLEAR is handle-agnostic within the calling DRM-file namespace.
@@ -3585,7 +5211,7 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
     // The AMDGPU command range starts at DRM_COMMAND_BASE, while generic DRM
     // requests occupy ranges on both sides of it (timeline syncobj requests, for
     // example, start at 0xbf). Only label requests in the range defined by this
-    // vendored AMDGPU UAPI as driver-relative commands.
+    // shared AMDGPU UAPI as driver-relative commands.
     if (nr >= DRM_COMMAND_BASE && nr < DRM_COMMAND_END) {
       util::Logger::warn("DRM ioctl rejected: nr=0x", std::hex, nr, " (AMDGPU cmd 0x",
                          nr - DRM_COMMAND_BASE, std::dec, ") fd=", fd);
@@ -3636,14 +5262,20 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
           // flags determine the GPU PTE MTYPE when the fd is later mapped via GEM_VA,
           // and must be recorded now because the allocation may be freed first. Only
           // the local simulated driver exports dmabufs this path can later map.
+          if (rc == 0 && request == AMDKFD_IOC_IMPORT_DMABUF && arg) {
+            if (auto *sim = dynamic_cast<SimulatedKfd *>(drv.get())) {
+              auto *import_args = static_cast<kfd_ioctl_import_dmabuf_args *>(arg);
+              InterposerContext::ctx.retain_kfd_import_state(import_args->dmabuf_fd, *sim);
+            }
+          }
           if (rc == 0 && request == AMDKFD_IOC_EXPORT_DMABUF && arg) {
             if (auto *sim = dynamic_cast<SimulatedKfd *>(drv.get())) {
               auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
-              // alloc_flags_for_handle locks the process alloc mutex internally, so the
+              // mapping_flags_for_handle locks the process alloc mutex internally, so the
               // interposer does not reach into driver-private per-process state.
               InterposerContext::ctx.track_gem_flags(
                   static_cast<int>(export_args->dmabuf_fd),
-                  sim->alloc_flags_for_handle(export_args->handle));
+                  sim->mapping_flags_for_handle(export_args->handle));
             }
           }
           return kfd_ioctl_ret(rc);
@@ -3682,6 +5314,17 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
     }
   }
 
+  // A display server can lend us a real render fd through SCM_RIGHTS. Its
+  // discovery identity is aliased below, but it must never submit to hardware.
+  if (_IOC_TYPE(request) == kDrmIoctlType) {
+    struct stat info {};
+    if (rocjitsu::stat_memory_backing(fd, &info) == 0 && S_ISCHR(info.st_mode) &&
+        synthetic_alias_for_host_drm(info.st_rdev)) {
+      errno = ENODEV;
+      return -1;
+    }
+  }
+
   // Every tracked KFD primary/dup is routed above by its recorded backend
   // (remote_lookup / kfd_backend_of). Deliberately NO local-driver fallback for
   // tracked dups here: a Remote-tagged dup observed during a remote teardown
@@ -3715,8 +5358,11 @@ RJ_INTERPOSER_EXPORT int dup(int oldfd) {
     // tracking update complete. Backend and GEM cleanup run after this scope.
     drm_file = InterposerContext::ctx.reserve_drm_file(oldfd);
     rc = InterposerContext::real().dup(oldfd);
-    if (rc >= 0)
+    if (rc >= 0) {
+      InterposerContext::ctx.duplicate_sync_file(oldfd, rc);
+      InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
       drm_release = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
+    }
   }
   if (rc < 0) {
     const int saved_errno = errno;
@@ -3753,12 +5399,11 @@ void reconcile_dup_target(int newfd, std::optional<InterposerContext::DupBackend
                           InterposerContext::DrmFinalRelease displaced_release) {
   InterposerContext::ctx.untrack_sysfs(newfd);
   // dup2/dup3 atomically close whatever newfd was, bypassing the close() hook, so
-  // every per-fd cleanup close() performs must be mirrored here. Drop any transient
-  // EXPORT_DMABUF flags for newfd: a dmabuf export fd overwritten before a
-  // PRIME_FD_TO_HANDLE would otherwise leave a stale fd→flags record that a later
-  // PRIME on the recycled fd number could misapply as the wrong PTE MTYPE. No-op for
-  // non-dmabuf fds.
-  InterposerContext::ctx.drop_pending_gem_flags(newfd);
+  // every per-fd cleanup close() performs must be mirrored here. The export record
+  // for newfd was dropped with the kernel replacement, in the lifecycle scope: a
+  // dmabuf export fd overwritten before a PRIME_FD_TO_HANDLE would otherwise leave a
+  // stale fd→flags record that a later PRIME on the recycled fd number could
+  // misapply as the wrong PTE MTYPE.
   InterposerContext::ctx.complete_drm_release(std::move(overwritten_release));
   InterposerContext::ctx.complete_drm_release(std::move(displaced_release));
   InterposerContext::ctx.invalidate_overwritten_kfd_fd(newfd);
@@ -3793,8 +5438,13 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
   {
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
     drm_file = InterposerContext::ctx.reserve_drm_file(oldfd);
-    rc = InterposerContext::real().dup2(oldfd, newfd);
+    rc = InterposerContext::PrivateDrmFd::replace(
+        newfd, [&] { return InterposerContext::real().dup2(oldfd, newfd); });
     if (rc >= 0) {
+      InterposerContext::ctx.duplicate_sync_file(oldfd, rc);
+      // The replaced target's export record goes with its descriptor.
+      InterposerContext::ctx.drop_gem_export(rc);
+      InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
       auto drm_close = InterposerContext::ctx.untrack_drm(rc);
       overwritten_release = std::move(drm_close.release);
       displaced_release = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
@@ -3837,8 +5487,13 @@ RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
   {
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
     drm_file = InterposerContext::ctx.reserve_drm_file(oldfd);
-    rc = InterposerContext::real().dup3(oldfd, newfd, flags);
+    rc = InterposerContext::PrivateDrmFd::replace(
+        newfd, [&] { return InterposerContext::real().dup3(oldfd, newfd, flags); });
     if (rc >= 0) {
+      InterposerContext::ctx.duplicate_sync_file(oldfd, rc);
+      // The replaced target's export record goes with its descriptor.
+      InterposerContext::ctx.drop_gem_export(rc);
+      InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
       auto drm_close = InterposerContext::ctx.untrack_drm(rc);
       overwritten_release = std::move(drm_close.release);
       displaced_release = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
@@ -3922,6 +5577,10 @@ namespace {
 // ABI, so InterposerContext::real().fcntl services both.
 int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
   FcntlArgKind kind = fcntl_arg_kind(cmd);
+  if (cmd == F_GETFL || cmd == F_GET_SEALS || cmd == F_ADD_SEALS) {
+    if (rocjitsu::is_memory_backing_token(fd))
+      return rocjitsu::fcntl_memory_backing(fd, cmd, int_arg);
+  }
   // Gate here rather than in fcntl()/fcntl64(): both funnel through this, and the
   // F_DUPFD paths below touch inherited dup and DRM tracking.
   if (!rj_owns_interposer_state()) {
@@ -3972,8 +5631,11 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
     drm_file = InterposerContext::ctx.reserve_drm_file(fd);
     rc = invoke();
-    if (rc >= 0)
+    if (rc >= 0) {
+      InterposerContext::ctx.duplicate_sync_file(fd, static_cast<int>(rc));
+      InterposerContext::ctx.duplicate_gem_export(fd, static_cast<int>(rc));
       drm_release = InterposerContext::ctx.commit_drm_dup(static_cast<int>(rc), drm_file);
+    }
   } else {
     rc = invoke();
   }
@@ -4037,9 +5699,12 @@ RJ_INTERPOSER_EXPORT int fcntl64(int fd, int cmd, ...) {
 // one implementation so the two can never drift.
 static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
 
+static void *mmap_with_dump_policy(void *addr, size_t length, int prot, int flags, int fd,
+                                   off_t offset);
+
 RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, int fd,
                                 off_t offset) {
-  return mmap_impl(addr, length, prot, flags, fd, offset);
+  return mmap_with_dump_policy(addr, length, prot, flags, fd, offset);
 }
 
 RJ_INTERPOSER_EXPORT void *mmap64(void *addr, size_t length, int prot, int flags, int fd,
@@ -4049,7 +5714,7 @@ RJ_INTERPOSER_EXPORT void *mmap64(void *addr, size_t length, int prot, int flags
   // offset truncation.
   static_assert(sizeof(off_t) == sizeof(off64_t),
                 "mmap64 would truncate its offset: off_t is narrower than off64_t");
-  return mmap_impl(addr, length, prot, flags, fd, static_cast<off_t>(offset));
+  return mmap_with_dump_policy(addr, length, prot, flags, fd, static_cast<off_t>(offset));
 }
 
 static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
@@ -4060,7 +5725,7 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
       return MAP_FAILED;
     // A forked child owns none of this state, and the mapping lock is inherited
     // like any other: its holder may not exist here. Straight to libc.
-    return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset);
+    return rocjitsu::map_memory_backing(addr, length, prot, flags, fd, offset);
   }
 
   assert(InterposerContext::real().ready());
@@ -4096,6 +5761,8 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
     if (!remote_mmap) {
       if (auto drm_file = InterposerContext::ctx.reserve_drm_file(fd)) {
         InterposerContext::DrmFileReservation held(InterposerContext::ctx, drm_file);
+        if (static_cast<uint64_t>(offset) >= InterposerContext::kGemMmapOffsetBase)
+          return InterposerContext::ctx.mmap_gem(drm_file, addr, length, prot, flags, offset);
         const auto &lease = drm_file->backend_lease;
         // BOTH branches dispatch inside the reservation. Holding a shared_ptr keeps
         // the object allocated but not OPERATIONAL: if the reservation were released
@@ -4116,12 +5783,13 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
     return remote_mmap->mmap(addr, length, prot, flags, offset);
 
   if (fd < 0 && (flags & MAP_FIXED) && prot != PROT_NONE && addr) {
-    int memfd_out = -1;
-    off_t memfd_offset = 0;
-    auto remote_memfd = InterposerContext::ctx.remote();
-    if (remote_memfd) {
-      auto lookup = remote_memfd->find_memfd_for_addr(addr, length, &memfd_out, &memfd_offset);
-      if (lookup == RemoteDriver::MemfdLookup::kDupFailed) {
+    int backing_out = -1;
+    off_t backing_offset = 0;
+    auto remote_backing = InterposerContext::ctx.remote();
+    if (remote_backing) {
+      auto lookup =
+          remote_backing->find_backing_for_addr(addr, length, &backing_out, &backing_offset);
+      if (lookup == RemoteDriver::BackingLookup::kDupFailed) {
         // A daemon-shared range covered this address but we could not obtain a
         // descriptor for it. Falling back to an anonymous mapping would silently
         // detach it from the shared memory, so fail the mmap instead. Preserve
@@ -4129,23 +5797,31 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
         // clobbering it, so the caller sees the real failure cause.
         return MAP_FAILED;
       }
-      if (lookup == RemoteDriver::MemfdLookup::kFound) {
-        // memfd_out is a caller-owned dup; close it once we are done. Its
+      if (lookup == RemoteDriver::BackingLookup::kFound) {
+        // backing_out is a caller-owned dup; close it once we are done. Its
         // validity is independent of a concurrent RemoteDriver teardown/close.
-        auto total = static_cast<off_t>(length) + memfd_offset;
-        [[maybe_unused]] auto ft_rc = ftruncate(memfd_out, total);
-        fallocate(memfd_out, 0, memfd_offset, static_cast<off_t>(length));
+        auto total = static_cast<off_t>(length) + backing_offset;
+        if (rocjitsu::check_memory_backing_size(backing_out, total) != 0) {
+          const int error = errno;
+          InterposerContext::real().close(backing_out);
+          errno = error;
+          return MAP_FAILED;
+        }
         auto *raw = with_host_mapping_held([&] {
-          return InterposerContext::real().mmap(
-              addr, length, prot, (flags & ~MAP_ANONYMOUS) | MAP_SHARED, memfd_out, memfd_offset);
+          return rocjitsu::map_memory_backing(addr, length, prot,
+                                              (flags & ~(MAP_ANONYMOUS | MAP_TYPE)) | MAP_SHARED,
+                                              backing_out, backing_offset);
         });
         // Preserve the mmap errno across close() (which may set its own).
         int mmap_errno = errno;
-        InterposerContext::real().close(memfd_out);
+        const bool gpu_mapping = rocjitsu::kmd::is_device_memory_backing(backing_out);
+        InterposerContext::real().close(backing_out);
         if (raw != MAP_FAILED) {
 #ifdef MADV_POPULATE_WRITE
           InterposerContext::real().madvise(raw, length, MADV_POPULATE_WRITE);
 #endif
+          if (gpu_mapping)
+            InterposerContext::real().madvise(raw, length, MADV_DONTDUMP);
           return raw;
         }
         // A daemon-shared range matched but the shared mapping failed. Fail
@@ -4162,7 +5838,35 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
       return driver->mmap_replacing_client_doorbell_views(addr, length, prot, flags, fd, offset);
   }
   return with_host_mapping_held(
-      [&] { return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset); });
+      [&] { return rocjitsu::map_memory_backing(addr, length, prot, flags, fd, offset); });
+}
+
+static void *mmap_with_dump_policy(void *addr, size_t length, int prot, int flags, int fd,
+                                   off_t offset) {
+  if (fd < 0 || (flags & MAP_ANONYMOUS) || !InterposerContext::real().ready() ||
+      !rj_owns_interposer_state())
+    return mmap_impl(addr, length, prot, flags, fd, offset);
+
+  // Pin both the file object and its simulated-driver metadata for the whole
+  // operation. The caller may close and reuse its descriptor as soon as mmap
+  // enters the kernel; classification must still describe the mapped file.
+  const int pinned = fcntl_impl(fd, F_DUPFD_CLOEXEC, nullptr, 0);
+  if (pinned < 0) {
+    // Dump advice is best effort, like madvise itself. Descriptor exhaustion
+    // must not turn an otherwise valid application mapping into a failure;
+    // without a pin, skip classification rather than inspect a reused fd.
+    return mmap_impl(addr, length, prot, flags, fd, offset);
+  }
+  void *mapped = mmap_impl(addr, length, prot, flags, pinned, offset);
+  const int mmap_errno = errno;
+  if (mapped != MAP_FAILED && rocjitsu::kmd::is_device_memory_backing(pinned)) {
+    // Device memory belongs in ROCr's GPU core, whose filter decides which
+    // regions to save, rather than also appearing in the host core.
+    InterposerContext::real().madvise(mapped, length, MADV_DONTDUMP);
+  }
+  ::close(pinned);
+  errno = mmap_errno;
+  return mapped;
 }
 
 RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
@@ -4269,7 +5973,7 @@ RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
     struct stat st {};
     const int fd = fileno(stream);
     if (fd >= 0 && InterposerContext::real().fstat_fn &&
-        InterposerContext::real().fstat_fn(fd, &st) == 0 && rj_is_gpu_device_stat(st)) {
+        rocjitsu::stat_memory_backing(fd, &st) == 0 && rj_is_gpu_device_stat(st)) {
       fclose(stream);
       errno = ENODEV;
       return nullptr;
@@ -4328,7 +6032,7 @@ RJ_INTERPOSER_EXPORT FILE *freopen(const char *path, const char *mode, FILE *str
     struct stat st {};
     const int fd = fileno(reopened);
     if (fd >= 0 && InterposerContext::real().fstat_fn &&
-        InterposerContext::real().fstat_fn(fd, &st) == 0 && rj_is_gpu_device_stat(st)) {
+        rocjitsu::stat_memory_backing(fd, &st) == 0 && rj_is_gpu_device_stat(st)) {
       fclose(reopened);
       errno = ENODEV;
       return nullptr;
@@ -4426,7 +6130,7 @@ interposer_gpu_info_for(const InterposerContext::DrmFileToken &file) {
     return std::nullopt;
   }
   if (const auto &remote = lease.remote()) {
-    if (const Sysfs::GpuInfo *info = remote->gpu_info())
+    if (const Sysfs::GpuInfo *info = remote->gpu_info_for_render_minor(render_minor))
       return *info;
     return std::nullopt;
   }
@@ -4442,7 +6146,7 @@ static std::optional<Sysfs::GpuInfo> interposer_gpu_info(uint32_t render_minor) 
     }
   }
   if (auto remote = InterposerContext::ctx.remote()) {
-    if (const Sysfs::GpuInfo *info = remote->gpu_info())
+    if (const Sysfs::GpuInfo *info = remote->gpu_info_for_render_minor(render_minor))
       return *info;
   }
   return std::nullopt;
@@ -4464,6 +6168,8 @@ static std::string redirect_dev_dri(const char *path) {
                                              sv.substr(kDevDri.size()).starts_with("card"));
   if (!is_dir && !is_node)
     return {};
+  if (!InterposerContext::ctx.initialized())
+    InterposerContext::ctx.get_or_create();
   std::string drm_base;
   {
     auto drv = InterposerContext::ctx.driver();
@@ -4483,6 +6189,41 @@ static std::string redirect_dev_dri(const char *path) {
   return drm_base + "/dev_dri/" + std::string(sv.substr(kDevDri.size()));
 }
 
+static int finish_drm_node_stat(const char *path, int result, mode_t *mode, dev_t *device) {
+  if (result != 0 || !path || !S_ISREG(*mode))
+    return result;
+  std::string_view view(path);
+  if (!view.starts_with("/dev/dri/renderD") &&
+      view.find("/dev_dri/renderD") == std::string_view::npos &&
+      view.find("/dev_dri/card") == std::string_view::npos)
+    return result;
+  std::string drm_base;
+  if (auto driver = InterposerContext::ctx.driver())
+    drm_base = driver->drm_path();
+  else
+    drm_base = InterposerContext::ctx.remote_drm_path();
+  if (drm_base.empty())
+    return result;
+
+  uint32_t node_minor = 0;
+  bool synthetic_node = render_minor_from_drm_node_path(path, drm_base.c_str(), &node_minor) &&
+                        interposer_gpu_info(node_minor).has_value();
+  const std::string primary_prefix = drm_base + "/dev_dri/card";
+  if (view.starts_with(primary_prefix)) {
+    // The existing file belongs to the generated tree. Its primary index is
+    // independent of the configured render minor (card0 may pair with renderD129).
+    synthetic_node = parse_render_minor_suffix(view.data() + primary_prefix.size(),
+                                               view.data() + view.size(), &node_minor);
+  }
+  if (synthetic_node) {
+    // libdrm groups primary/render nodes using their character-device metadata.
+    // Backing files are regular files, but their public identities follow DRM.
+    *device = makedev(226, node_minor);
+    *mode = (*mode & ~S_IFMT) | S_IFCHR;
+  }
+  return result;
+}
+
 RJ_INTERPOSER_EXPORT int stat(const char *path, struct stat *buf) {
   if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "stat");
@@ -4495,9 +6236,9 @@ RJ_INTERPOSER_EXPORT int stat(const char *path, struct stat *buf) {
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (!redirected.empty())
-    return InterposerContext::real().stat(redirected.c_str(), buf);
-  return InterposerContext::real().stat(path, buf);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = InterposerContext::real().stat(actual, buf);
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int lstat(const char *path, struct stat *buf) {
@@ -4512,9 +6253,9 @@ RJ_INTERPOSER_EXPORT int lstat(const char *path, struct stat *buf) {
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (!redirected.empty())
-    return InterposerContext::real().lstat(redirected.c_str(), buf);
-  return InterposerContext::real().lstat(path, buf);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = InterposerContext::real().lstat(actual, buf);
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int access(const char *path, int mode) {
@@ -4560,7 +6301,58 @@ RJ_INTERPOSER_EXPORT DIR *opendir(const char *name) {
   return InterposerContext::real().opendir(name);
 }
 
-// -- fstat interposition (DRM memfd → synthetic st_rdev) --
+// -- fstat interposition (DRM descriptors → synthetic device identity) --
+
+// Keep borrowed display render descriptors in the same device namespace as
+// /dev/dri and sysfs. libdrm matches fstat(fd).st_rdev against enumerated nodes;
+// the host display GPU's minor need not exist in the simulated topology.
+// Primary nodes retain their real identity for host display control, as do
+// hardware-backed guests, which have no synthetic DRM enumeration tree.
+static std::optional<dev_t> synthetic_alias_for_host_drm(dev_t device) {
+  if (major(device) != 226 || minor(device) < 128 || InterposerContext::in_construction)
+    return std::nullopt;
+  if (!InterposerContext::ctx.initialized())
+    InterposerContext::ctx.get_or_create();
+  std::string drm_base;
+  if (auto driver = InterposerContext::ctx.driver())
+    drm_base = driver->drm_path();
+  else
+    drm_base = InterposerContext::ctx.remote_drm_path();
+  if (drm_base.empty())
+    return std::nullopt;
+  // Use the render node published for card0, independently of host numbering
+  // and of which simulated GPU the caller will eventually use for rendering.
+  DIR *nodes = InterposerContext::real().opendir((drm_base + "/card0/device/drm").c_str());
+  if (!nodes)
+    return std::nullopt;
+  std::optional<uint32_t> render_minor;
+  while (const dirent *entry = InterposerContext::real().readdir(nodes)) {
+    const std::string_view name(entry->d_name);
+    uint32_t parsed = 0;
+    if (name.starts_with("renderD") &&
+        parse_render_minor_suffix(name.data() + 7, name.data() + name.size(), &parsed)) {
+      render_minor = parsed;
+      break;
+    }
+  }
+  InterposerContext::real().closedir(nodes);
+  if (!render_minor)
+    return std::nullopt;
+  const std::string node = drm_base + "/dev_dri/renderD" + std::to_string(*render_minor);
+  if (InterposerContext::real().access(node.c_str(), F_OK) != 0)
+    return std::nullopt;
+  return makedev(226, *render_minor);
+}
+
+static void finish_drm_fd_stat(int fd, mode_t *mode, dev_t *device) {
+  if (InterposerContext::ctx.is_drm(fd)) {
+    *device = makedev(226, InterposerContext::ctx.drm_render_minor(fd));
+    *mode = (*mode & ~S_IFMT) | S_IFCHR;
+  } else if (S_ISCHR(*mode)) {
+    if (auto alias = synthetic_alias_for_host_drm(*device))
+      *device = *alias;
+  }
+}
 
 RJ_INTERPOSER_EXPORT int fstat(int fd, struct stat *buf) {
   if (!InterposerContext::real().ready()) {
@@ -4568,13 +6360,10 @@ RJ_INTERPOSER_EXPORT int fstat(int fd, struct stat *buf) {
     return fn ? fn(fd, buf) : -1;
   }
   if (!rj_owns_interposer_state())
-    return InterposerContext::real().fstat_fn(fd, buf);
-  int rc = InterposerContext::real().fstat_fn(fd, buf);
-  if (rc == 0 && InterposerContext::ctx.is_drm(fd)) {
-    uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
-    buf->st_rdev = makedev(226, render_minor);
-    buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
-  }
+    return rocjitsu::stat_memory_backing(fd, buf);
+  int rc = rocjitsu::stat_memory_backing(fd, buf);
+  if (rc == 0)
+    finish_drm_fd_stat(fd, &buf->st_mode, &buf->st_rdev);
   return rc;
 }
 
@@ -4587,16 +6376,14 @@ RJ_INTERPOSER_EXPORT int fstat64(int fd, struct stat64 *buf) {
     errno = ENOSYS;
     return -1;
   }
-  int rc = real.fstat64_fn(fd, reinterpret_cast<void *>(buf));
+  int rc = real.fstat64_fn(fd, buf);
+  if (rc == 0)
+    finish_backing_stat(fd, buf);
   // Gate BEFORE is_drm(), which takes fd_mutex_. No lazy static above this point:
   // its initialization guard could be inherited mid-init by a forked child.
   if (rc != 0 || !real.ready() || !rj_owns_interposer_state())
     return rc;
-  if (InterposerContext::ctx.is_drm(fd)) {
-    uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
-    buf->st_rdev = makedev(226, render_minor);
-    buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
-  }
+  finish_drm_fd_stat(fd, &buf->st_mode, &buf->st_rdev);
   return rc;
 }
 
@@ -4610,15 +6397,13 @@ RJ_INTERPOSER_EXPORT int __fxstat(int ver, int fd, struct stat *buf) {
     return -1;
   }
   int rc = real.fxstat_fn(ver, fd, buf);
+  if (rc == 0)
+    finish_backing_stat(fd, buf);
   // Gate BEFORE is_drm(), which takes fd_mutex_. No lazy static above this point:
   // its initialization guard could be inherited mid-init by a forked child.
   if (rc != 0 || !real.ready() || !rj_owns_interposer_state())
     return rc;
-  if (InterposerContext::ctx.is_drm(fd)) {
-    uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
-    buf->st_rdev = makedev(226, render_minor);
-    buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
-  }
+  finish_drm_fd_stat(fd, &buf->st_mode, &buf->st_rdev);
   return rc;
 }
 
@@ -4631,17 +6416,56 @@ RJ_INTERPOSER_EXPORT int __fxstat64(int ver, int fd, struct stat64 *buf) {
     errno = ENOSYS;
     return -1;
   }
-  int rc = real.fxstat64_fn(ver, fd, reinterpret_cast<void *>(buf));
+  int rc = real.fxstat64_fn(ver, fd, buf);
+  if (rc == 0)
+    finish_backing_stat(fd, buf);
   // Gate BEFORE is_drm(), which takes fd_mutex_. No lazy static above this point:
   // its initialization guard could be inherited mid-init by a forked child.
   if (rc != 0 || !real.ready() || !rj_owns_interposer_state())
     return rc;
-  if (InterposerContext::ctx.is_drm(fd)) {
-    uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
-    buf->st_rdev = makedev(226, render_minor);
-    buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
-  }
+  finish_drm_fd_stat(fd, &buf->st_mode, &buf->st_rdev);
   return rc;
+}
+
+// libc canonicalization uses internal filesystem calls that bypass the ordinary
+// stat/readlink wrappers. Redirect the input before resolving symlinks so libdrm
+// cannot escape from a simulated node to the host GPU's PCI sysfs directory.
+static std::string redirect_canonical_path(const char *path) {
+  auto redirected = redirect_sysfs_path(path);
+  if (redirected.empty())
+    redirected = redirect_sys_dev_char(path);
+  if (redirected.empty())
+    redirected = redirect_dev_dri(path);
+  return redirected;
+}
+
+RJ_INTERPOSER_EXPORT char *realpath(const char *path, char *resolved_path) {
+  auto &real = InterposerContext::real();
+  if (!real.ready()) {
+    auto fn = util::lookup_symbol<char *(*)(const char *, char *)>(RTLD_NEXT, "realpath");
+    return fn ? fn(path, resolved_path) : nullptr;
+  }
+  if (!rj_owns_interposer_state() || InterposerContext::in_construction)
+    return real.realpath_fn(path, resolved_path);
+  auto redirected = redirect_canonical_path(path);
+  return real.realpath_fn(redirected.empty() ? path : redirected.c_str(), resolved_path);
+}
+
+RJ_INTERPOSER_EXPORT char *__realpath_chk(const char *path, char *resolved_path, size_t size) {
+  auto &real = InterposerContext::real();
+  if (!real.ready()) {
+    auto fn =
+        util::lookup_symbol<char *(*)(const char *, char *, size_t)>(RTLD_NEXT, "__realpath_chk");
+    return fn ? fn(path, resolved_path, size) : nullptr;
+  }
+  if (!real.realpath_chk_fn) {
+    errno = ENOSYS;
+    return nullptr;
+  }
+  if (!rj_owns_interposer_state() || InterposerContext::in_construction)
+    return real.realpath_chk_fn(path, resolved_path, size);
+  auto redirected = redirect_canonical_path(path);
+  return real.realpath_chk_fn(redirected.empty() ? path : redirected.c_str(), resolved_path, size);
 }
 
 // -- readlink interposition (redirect /sys/dev/char/) --
@@ -4674,15 +6498,15 @@ RJ_INTERPOSER_EXPORT int stat64(const char *path, struct stat64 *buf) {
   // Gate BEFORE redirect_sysfs_path(), which reaches published driver and fd state.
   // No lazy static above this point (see LibcPassthrough for why).
   if (!real.ready() || !rj_owns_interposer_state())
-    return real.stat64_fn(path, reinterpret_cast<void *>(buf));
+    return real.stat64_fn(path, buf);
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (redirected.empty())
-    return real.stat64_fn(path, reinterpret_cast<void *>(buf));
-  return real.stat64_fn(redirected.c_str(), reinterpret_cast<void *>(buf));
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = real.stat64_fn(actual, buf);
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int lstat64(const char *path, struct stat64 *buf) {
@@ -4697,15 +6521,15 @@ RJ_INTERPOSER_EXPORT int lstat64(const char *path, struct stat64 *buf) {
   // Gate BEFORE redirect_sysfs_path(), which reaches published driver and fd state.
   // No lazy static above this point (see LibcPassthrough for why).
   if (!real.ready() || !rj_owns_interposer_state())
-    return real.lstat64_fn(path, reinterpret_cast<void *>(buf));
+    return real.lstat64_fn(path, buf);
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (redirected.empty())
-    return real.lstat64_fn(path, reinterpret_cast<void *>(buf));
-  return real.lstat64_fn(redirected.c_str(), reinterpret_cast<void *>(buf));
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = real.lstat64_fn(actual, buf);
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int __xstat(int ver, const char *path, struct stat *buf) {
@@ -4726,9 +6550,9 @@ RJ_INTERPOSER_EXPORT int __xstat(int ver, const char *path, struct stat *buf) {
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (redirected.empty())
-    return real.xstat_fn(ver, path, buf);
-  return real.xstat_fn(ver, redirected.c_str(), buf);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = real.xstat_fn(ver, actual, buf);
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int __xstat64(int ver, const char *path, struct stat64 *buf) {
@@ -4743,15 +6567,15 @@ RJ_INTERPOSER_EXPORT int __xstat64(int ver, const char *path, struct stat64 *buf
   // Gate BEFORE redirect_sysfs_path(), which reaches published driver and fd state.
   // No lazy static above this point (see LibcPassthrough for why).
   if (!real.ready() || !rj_owns_interposer_state())
-    return real.xstat64_fn(ver, path, reinterpret_cast<void *>(buf));
+    return real.xstat64_fn(ver, path, buf);
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (redirected.empty())
-    return real.xstat64_fn(ver, path, reinterpret_cast<void *>(buf));
-  return real.xstat64_fn(ver, redirected.c_str(), reinterpret_cast<void *>(buf));
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = real.xstat64_fn(ver, actual, buf);
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int __lxstat(int ver, const char *path, struct stat *buf) {
@@ -4772,9 +6596,9 @@ RJ_INTERPOSER_EXPORT int __lxstat(int ver, const char *path, struct stat *buf) {
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (redirected.empty())
-    return real.lxstat_fn(ver, path, buf);
-  return real.lxstat_fn(ver, redirected.c_str(), buf);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = real.lxstat_fn(ver, actual, buf);
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *buf) {
@@ -4789,15 +6613,15 @@ RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *bu
   // Gate BEFORE redirect_sysfs_path(), which reaches published driver and fd state.
   // No lazy static above this point (see LibcPassthrough for why).
   if (!real.ready() || !rj_owns_interposer_state())
-    return real.lxstat64_fn(ver, path, reinterpret_cast<void *>(buf));
+    return real.lxstat64_fn(ver, path, buf);
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (redirected.empty())
-    return real.lxstat64_fn(ver, path, reinterpret_cast<void *>(buf));
-  return real.lxstat64_fn(ver, redirected.c_str(), reinterpret_cast<void *>(buf));
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = real.lxstat64_fn(ver, actual, buf);
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 // fork() is not interposed. The child handler resets only an unused context;

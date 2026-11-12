@@ -3,11 +3,13 @@
 #include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/common/environment.hpp"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 #include <memory>
@@ -244,6 +246,66 @@ TEST_F(AqlProfileV2Test, PmcProfile)
     EXPECT_EQ(profile.events[1].event_id, 200);
     EXPECT_EQ(profile.events[2].block_index, 2);
     EXPECT_EQ(profile.events[2].event_id, 300);
+}
+
+TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineGlobal)
+{
+    int se_index  = 0;
+    int sa_index  = 0;
+    int wgp_index = 0;
+
+    const hsa_status_t status =
+        aqlprofile_spm_decode_shader_engine(-1, &se_index, &sa_index, &wgp_index);
+
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(se_index, -1);
+    EXPECT_EQ(sa_index, -1);
+    EXPECT_EQ(wgp_index, -1);
+}
+
+TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineBaseSe)
+{
+    int se_index  = -1;
+    int sa_index  = -1;
+    int wgp_index = -1;
+
+    const hsa_status_t status =
+        aqlprofile_spm_decode_shader_engine(3, &se_index, &sa_index, &wgp_index);
+
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(se_index, 3);
+    EXPECT_EQ(sa_index, 0);
+    EXPECT_EQ(wgp_index, 0);
+}
+
+TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineExpanded)
+{
+    int se_index  = -1;
+    int sa_index  = -1;
+    int wgp_index = -1;
+
+    const int          packed = (7 << 24) | (5 << 16) | 11;
+    const hsa_status_t status =
+        aqlprofile_spm_decode_shader_engine(packed, &se_index, &sa_index, &wgp_index);
+
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(se_index, 11);
+    EXPECT_EQ(sa_index, 5);
+    EXPECT_EQ(wgp_index, 7);
+}
+
+TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineNullArgs)
+{
+    int se_index  = -1;
+    int sa_index  = -1;
+    int wgp_index = -1;
+
+    EXPECT_EQ(aqlprofile_spm_decode_shader_engine(0, nullptr, &sa_index, &wgp_index),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_EQ(aqlprofile_spm_decode_shader_engine(0, &se_index, nullptr, &wgp_index),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_EQ(aqlprofile_spm_decode_shader_engine(0, &se_index, &sa_index, nullptr),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
 }
 
 // Test ATT parameter structure
@@ -563,9 +625,10 @@ protected:
         last_callback_name_  = "";
     }
 
-    static int         callback_call_count_;
-    static int         last_callback_id_;
-    static std::string last_callback_name_;
+    static int                                                   callback_call_count_;
+    static int                                                   last_callback_id_;
+    static std::string                                           last_callback_name_;
+    static std::vector<aqlprofile_spm_available_configuration_t> captured_spm_configs_;
 
     // Mock callback functions for testing
     static hsa_status_t eventname_callback_mock(int id, const char* name, void* data)
@@ -632,17 +695,35 @@ protected:
         }
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
+
+    static hsa_status_t record_memory_copy(void* dst, const void* src, size_t size, void* userdata)
+    {
+        auto*       copies = static_cast<std::vector<std::vector<uint8_t>>*>(userdata);
+        const auto* bytes  = static_cast<const uint8_t*>(src);
+        copies->emplace_back(bytes, bytes + size);
+        return memory_copy_mock(dst, src, size, nullptr);
+    }
+
+    static hsa_status_t capture_spm_configurations(
+        const aqlprofile_spm_available_configuration_t* cfg,
+        size_t                                          count,
+        void*)
+    {
+        captured_spm_configs_.assign(cfg, cfg + count);
+        return HSA_STATUS_SUCCESS;
+    }
 };
 
 // Initialize static members
-int         AqlProfileV2ApiTest::callback_call_count_ = 0;
-int         AqlProfileV2ApiTest::last_callback_id_    = -1;
-std::string AqlProfileV2ApiTest::last_callback_name_  = "";
+int                                                   AqlProfileV2ApiTest::callback_call_count_ = 0;
+int                                                   AqlProfileV2ApiTest::last_callback_id_   = -1;
+std::string                                           AqlProfileV2ApiTest::last_callback_name_ = "";
+std::vector<aqlprofile_spm_available_configuration_t> AqlProfileV2ApiTest::captured_spm_configs_{};
 
 TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurations_NullCallback)
 {
     aqlprofile_agent_info_v1_t info{};
-    info.agent_gfxip          = "gfx900";
+    info.agent_gfxip          = "gfx942";
     info.xcc_num              = 1;
     info.se_num               = 4;
     info.cu_num               = 64;
@@ -667,5 +748,302 @@ TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurations_InvalidAgent)
 
     EXPECT_EQ(aqlprofile_spm_query_agent_configurations(agent, cb, nullptr),
               HSA_STATUS_ERROR_INVALID_AGENT);
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurationsGfx9Interval)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    captured_spm_configs_.clear();
+
+    ASSERT_EQ(aqlprofile_spm_query_agent_configurations(
+                  agent, &AqlProfileV2ApiTest::capture_spm_configurations, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(captured_spm_configs_.size(), 1u);
+    EXPECT_EQ(captured_spm_configs_[0].interval.mode, AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK);
+    EXPECT_EQ(captured_spm_configs_[0].interval.min_interval, 32u);
+    EXPECT_EQ(captured_spm_configs_[0].interval.max_interval, static_cast<uint64_t>(0x10000 - 32));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurationsGfx11Interval)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx1100";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    captured_spm_configs_.clear();
+
+    ASSERT_EQ(aqlprofile_spm_query_agent_configurations(
+                  agent, &AqlProfileV2ApiTest::capture_spm_configurations, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(captured_spm_configs_.size(), 2u);
+    EXPECT_EQ(captured_spm_configs_[0].interval.mode, AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK);
+    EXPECT_EQ(captured_spm_configs_[0].interval.min_interval, 1u);
+    EXPECT_EQ(captured_spm_configs_[0].interval.max_interval, 0x10000u);
+    EXPECT_EQ(captured_spm_configs_[1].interval.mode, AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK);
+    EXPECT_EQ(captured_spm_configs_[1].interval.min_interval, 1u);
+    EXPECT_EQ(captured_spm_configs_[1].interval.max_interval, 0x10000u);
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedGpuGateStillClosed)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx1100";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.event_id   = 1;
+
+    EXPECT_FALSE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedGfx9SqDefaultDepth)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.event_id   = 1;
+
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedGfx9SqRejectsWrongExplicitDepth)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name            = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.event_id              = 1;
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_16_BITS;
+
+    EXPECT_FALSE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedGfx9SqAcceptsExplicit32Bit)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name            = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.event_id              = 1;
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_32_BITS;
+
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedRejectsBlockWithoutSpmSupport)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx900";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM;
+    event.event_id   = 1;
+
+    EXPECT_FALSE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedNonSqDepthOptions)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI;
+    event.event_id   = 1;
+
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_NONE;
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_16_BITS;
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_32_BITS;
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmRepeatedCreateEmitsIdenticalCommandStreams)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx950";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI;
+    event.event_id   = 1;
+
+    auto create_command_streams = [&]() {
+        std::vector<std::vector<uint8_t>> copies{};
+        aqlprofile_spm_profile_t          profile{};
+        profile.aql_agent   = agent;
+        profile.events      = &event;
+        profile.event_count = 1;
+        profile.alloc_cb    = memory_alloc_mock;
+        profile.dealloc_cb  = memory_dealloc_mock;
+        profile.memcpy_cb   = record_memory_copy;
+        profile.userdata    = &copies;
+
+        aqlprofile_handle_t          handle{};
+        aqlprofile_spm_buffer_desc_t desc{};
+        aqlprofile_spm_aql_packets_t packets{};
+        EXPECT_EQ(aqlprofile_spm_create_packets(&handle, &desc, &packets, profile, 0),
+                  HSA_STATUS_SUCCESS);
+        aqlprofile_spm_delete_packets(handle);
+        return copies;
+    };
+
+    const auto first  = create_command_streams();
+    const auto second = create_command_streams();
+    ASSERT_EQ(first.size(), 2u);
+    EXPECT_EQ(second, first);
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmTcaProgramsOneDelayPerInstance)
+{
+    using rocprofiler::common::env_config;
+    using rocprofiler::common::env_store;
+
+    struct tca_case_t
+    {
+        const char* gfxip;
+        uint32_t    se_num;
+        uint32_t    tca_count;
+    };
+
+    // SPM is disabled on gfx90a unless the agent check is overridden.
+    auto spm_override = env_store{{env_config{"AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK", "1", 1}}};
+    ASSERT_TRUE(spm_override.push());
+
+    // gfx908 goes last: Mi100Factory shares its static block table with the gfx942/gfx950
+    // factories, which Pm4Factory can return from its cache without rebuilding that table.
+    for(const auto& [gfxip, se_num, tca_count] : {tca_case_t{"gfx942", 4, 2},
+                                                  tca_case_t{"gfx950", 4, 2},
+                                                  tca_case_t{"gfx90a", 8, 4},
+                                                  tca_case_t{"gfx908", 8, 4}})
+    {
+        aqlprofile_agent_info_v1_t info{};
+        info.agent_gfxip          = gfxip;
+        info.xcc_num              = 1;
+        info.se_num               = se_num;
+        info.cu_num               = 64;
+        info.shader_arrays_per_se = 2;
+        info.domain               = 0;
+        info.location_id          = 0x1234;
+        auto agent                = aql_profile::RegisterAgent(&info);
+
+        aqlprofile_pmc_event_t event{};
+        event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCA;
+        event.event_id   = 1;
+
+        const auto* factory    = aql_profile::Pm4Factory::Create(agent);
+        const auto* block_info = factory->GetBlockInfo(&event);
+        ASSERT_EQ(block_info->instance_count, tca_count) << gfxip;
+
+        std::vector<std::vector<uint8_t>> copies{};
+        aqlprofile_spm_profile_t          profile{};
+        profile.aql_agent   = agent;
+        profile.events      = &event;
+        profile.event_count = 1;
+        profile.alloc_cb    = memory_alloc_mock;
+        profile.dealloc_cb  = memory_dealloc_mock;
+        profile.memcpy_cb   = record_memory_copy;
+        profile.userdata    = &copies;
+
+        aqlprofile_handle_t          handle{};
+        aqlprofile_spm_buffer_desc_t desc{};
+        aqlprofile_spm_aql_packets_t packets{};
+        ASSERT_EQ(aqlprofile_spm_create_packets(&handle, &desc, &packets, profile, 0),
+                  HSA_STATUS_SUCCESS);
+        aqlprofile_spm_delete_packets(handle);
+        ASSERT_EQ(copies.size(), 2u);
+
+        const auto* ip_offsets = acquire_ip_offset_table(aql_profile::GetAgentInfo(agent));
+        pm4_builder::CmdBuffer delay_write{};
+        factory->GetCmdBuilder()->BuildWriteUConfigRegPacket(
+            &delay_write, (*ip_offsets)[block_info->delay_info.reg], 0);
+        ASSERT_EQ(delay_write.DwSize(), 3u);
+        const auto* delay_write_dwords = static_cast<const uint32_t*>(delay_write.Data());
+
+        const auto&           start_bytes = copies.front();
+        std::vector<uint32_t> start(start_bytes.size() / sizeof(uint32_t));
+        std::memcpy(start.data(), start_bytes.data(), start.size() * sizeof(uint32_t));
+
+        std::vector<uint32_t> written_delays{};
+        for(size_t i = 0; i + 2 < start.size(); ++i)
+        {
+            if(start[i] == delay_write_dwords[0] && start[i + 1] == delay_write_dwords[1])
+                written_delays.push_back(start[i + 2]);
+        }
+
+        const auto*                 delays = block_info->delay_info.val;
+        const std::vector<uint32_t> expected_delays(delays, delays + block_info->instance_count);
+        EXPECT_EQ(written_delays, expected_delays) << gfxip;
+    }
 }
 }  // namespace aql_profile_v2_tests

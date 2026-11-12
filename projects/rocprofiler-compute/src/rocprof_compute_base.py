@@ -70,9 +70,8 @@ class RocProfCompute:
         assert self.__args is not None
         self.__mode = self.__args.mode
 
-        gui_value = getattr(self.__args, "gui", None)
         self.__loglevel = setup_logging_priority(
-            self.__args.verbose, self.__args.quiet, self.__mode, gui_value
+            self.__args.verbose, self.__args.quiet, self.__mode
         )
         setattr(self.__args, "loglevel", self.__loglevel)
         reconfigure_stdio_utf8()
@@ -115,6 +114,10 @@ class RocProfCompute:
     def get_mode(self) -> Optional[str]:
         return self.__mode
 
+    def get_args(self) -> argparse.Namespace:
+        assert self.__args is not None
+        return self.__args
+
     def set_version(self) -> None:
         vData = get_version(config.rocprof_compute_home)
         self.__version["ver"] = vData["version"]
@@ -135,11 +138,7 @@ class RocProfCompute:
             )
 
     def detect_analyze(self) -> None:
-        if self.__args.gui:
-            self.__analyze_mode = "web_ui"
-        elif self.__args.tui:
-            self.__analyze_mode = "tui"
-        elif self.__args.output_format in ("db", "csv"):
+        if self.__args.output_format in ("db", "csv"):
             self.__analyze_mode = "db"
         else:
             self.__analyze_mode = "cli"
@@ -156,43 +155,6 @@ class RocProfCompute:
             )
 
         self._validate_list_option_exclusions()
-
-        # Validate block 30 / block 21 require their respective experimental flags
-        filter_list: list[str] = []
-        if hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks:
-            filter_list = self.__args.filter_blocks
-        elif hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics:
-            filter_list = self.__args.filter_metrics
-
-        for block_input in filter_list:
-            # Check if this is block 30 (starts with "30" or "30.")
-            if block_input.startswith("30") and (
-                len(block_input) == 2 or block_input[2] == "."
-            ):
-                if not self.__args.membw_analysis or not self.__args.experimental:
-                    console_error(
-                        "Block 30 (Memory Bandwidth Analysis) is an experimental "
-                        "feature.\n"
-                        f'To use "-b {block_input}", you must also specify: '
-                        "--experimental --membw-analysis"
-                    )
-            # Block 21 (PC sampling) is profile-only; analyze auto-detects it
-            # from the profiling config yaml.
-            if self.__mode == "profile" and block_input in ("21", "pc_sampling"):
-                if not self.__args.pc_sampling or not self.__args.experimental:
-                    console_error(
-                        "Block 21 (PC Sampling) is an experimental feature.\n"
-                        f'To use "-b {block_input}", you must also specify: '
-                        "--experimental --pc-sampling"
-                    )
-
-        # When --pc-sampling is set, inject "21" into filter_blocks so the
-        # profiling config yaml records it and downstream code is unchanged.
-        if self.__mode == "profile" and self.__args.pc_sampling:
-            current = list(self.__args.filter_blocks or [])
-            if "21" not in current:
-                current.append("21")
-            self.__args.filter_blocks = current
 
         if self.__mode == "profile":
             self._validate_profile_mode_arguments()
@@ -333,28 +295,19 @@ class RocProfCompute:
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
+        if args.list_stats and args.output_format in ("csv", "db"):
+            console_error(
+                "--list-stats cannot be used with --output-format "
+                f"{args.output_format}. "
+                "Use --output-format stdout or txt, or remove --list-stats."
+            )
+
         operator_filter = (
             args.torch_operator is not None or args.triton_operator is not None
         )
         operator_listing = args.list_torch_operators or args.list_triton_operators
 
         if operator_filter or operator_listing:
-            if args.gui is not None:
-                console_error(
-                    "ml api trace",
-                    "Operator flags (--torch-operator, --triton-operator, "
-                    "--list-torch-operators, --list-triton-operators) are not "
-                    "supported in --gui mode. Please remove --gui or run "
-                    "without the operator flags.",
-                )
-            if args.tui:
-                console_error(
-                    "ml api trace",
-                    "Operator flags (--torch-operator, --triton-operator, "
-                    "--list-torch-operators, --list-triton-operators) are not "
-                    "supported in --tui mode. Please remove --tui or run "
-                    "without the operator flags.",
-                )
             if args.output_format != "stdout":
                 console_error(
                     "ml api trace",
@@ -366,22 +319,14 @@ class RocProfCompute:
                     "Remove the --output-format option or drop the operator flags.",
                 )
 
-            if operator_filter:
-                if args.list_stats:
-                    console_warning(
-                        "ml api trace",
-                        "Operator filters are ignored by --list-stats; the "
-                        "full kernel stats table will be shown regardless "
-                        "of the operator filter.",
-                    )
-                if operator_listing:
-                    console_warning(
-                        "ml api trace",
-                        "Operator filters are ignored when a --list-*-operators "
-                        "flag is used; the full operator tree will be shown. "
-                        "Drop the listing flag to apply the operator filter, or "
-                        "drop the filter to list all operators.",
-                    )
+            if operator_filter and operator_listing:
+                console_warning(
+                    "ml api trace",
+                    "Operator filters are ignored when a --list-*-operators "
+                    "flag is used; the full operator tree will be shown. "
+                    "Drop the listing flag to apply the operator filter, or "
+                    "drop the filter to list all operators.",
+                )
 
     @demarcate
     def handle_list_args(self) -> None:
@@ -507,9 +452,6 @@ class RocProfCompute:
                 "rocprofiler_sdk_profiler",
             ),
         }
-
-        if self.__profiler_mode not in profiler_classes:
-            console_error("Unsupported profiler")
 
         module_name, class_name = profiler_classes[self.__profiler_mode]
         module = importlib.import_module(module_name)
@@ -748,15 +690,6 @@ class RocProfCompute:
             from rocprof_compute_analyze.analysis_cli import cli_analysis
 
             analyzer = cli_analysis(self.__args, self.__supported_archs)
-        elif self.__analyze_mode == "web_ui":
-            from rocprof_compute_analyze.analysis_webui import webui_analysis
-
-            analyzer = webui_analysis(self.__args, self.__supported_archs)
-        elif self.__analyze_mode == "tui":
-            from rocprof_compute_tui.tui_app import run_tui
-
-            run_tui(self.__args, self.__supported_archs)
-            return
         elif self.__analyze_mode == "db":
             from rocprof_compute_analyze.analysis_db import db_analysis
 

@@ -4,14 +4,18 @@
 """Matrix instruction execute body generators.
 
 Free functions that emit C++ execute_impl bodies for matrix
-instructions: MFMA (matrix fused multiply-add), AccVGPR read/write.
+instructions: WMMA, SWMMAC, MFMA, and AccVGPR read/write. Opted-in
+targets dispatch to rj-arith; other targets use the legacy mma_exec.h helpers.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from amdisa.codegen.execute.fp8_formats import FNUZ_FP8_ARCHES, fp8_helper_name
+from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_fnuz_fp8
+from amdisa.codegen.execute.required_vgpr import append_required_vgpr_offset
+from amdisa.codegen.execute.rj_arith_matrix import gen_dense_wmma
+from amdisa.codegen.execute.rj_arith_sparse_matrix import gen_swmmac
 from amdisa.isa_profile import MatrixLayout, SwmmacLayout
 
 if TYPE_CHECKING:
@@ -45,12 +49,8 @@ def _mma_targ(M: int, N: int, K: int, B: int, *, batch_optional: bool) -> str:
 
 
 def _f8_bools(input_type: str) -> tuple[str, str]:
-    """(A_FP8, B_FP8) C++ bool literals for a fixed f8 input family."""
-    parts = input_type.split('_')
-    return (
-        'true' if parts[0] == 'FP8' else 'false',
-        'true' if parts[1] == 'FP8' else 'false',
-    )
+    """C++ (A_FP8, B_FP8) literals: true denotes FP8, false denotes BF8."""
+    return tuple('true' if part == 'FP8' else 'false' for part in input_type.split('_'))
 
 
 def _fixed_wave32_wmma_spec(
@@ -115,11 +115,18 @@ def gen_accvgpr_write(dst: list[str], src: list[str]) -> str:
 def gen_mfma(ctx: ExecuteContext) -> str:
     """Generate MFMA / SMFMAC matrix multiply-accumulate.
 
-    Uses the mma_exec.h helpers which implement the exact GFX9 register
+    Opted-in targets use rj-arith or reject a missing binding. Other targets
+    use the mma_exec.h helpers which implement the exact GFX9 register
     mapping formulas. The helpers handle cross-lane data movement, WAR
     hazard avoidance (buffered writes), and inline constant accumulator
     initialization without clobbering overlapping source operands.
     """
+    if (rj_arith_body := gen_dense_wmma(ctx) or gen_swmmac(ctx)) is not None:
+        return rj_arith_body
+    if ctx.profile.uses_rj_arith_matrix:
+        raise ValueError(
+            f'Missing rj-arith matrix binding: {ctx.arch_name} {ctx.inst.name}'
+        )
     inst, dst, src = ctx.inst, ctx.dst_ops, ctx.src_ops
     arch_name = ctx.arch_name
     supports_gpr_idx = ctx.profile.supports_gpr_idx
@@ -163,9 +170,8 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     dst_regs = max(1, dst_bits // 32)
 
     # SMFMAC: sparse matrix FMA with 4:2 structured sparsity.
-    # F32-result variants use cross-lane exec_smfmac_* helpers from
-    # mma_exec.h; I32-result variants fall through to the per-lane stub.
-    if 'SMFMAC' in name and result_type == 'F32':
+    # Sparse inputs and metadata are distributed across the whole wave.
+    if 'SMFMAC' in name:
         _SMFMAC_READ = {
             'F16': 'amdgpu::smfmac_read_f16',
             'BF16': 'amdgpu::smfmac_read_bf16',
@@ -178,24 +184,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         L.append(f'  auto &cu = wf.cu();')
         L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
         if ctx.profile.uses_vgpr_msb_indexing:
-            L.append(
-                f'  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, {d}.opr_type_, '
-                f'{d}.encoding_value_, {d}.vgpr_msb_role());'
-            )
-            L.append(
-                f'  uint32_t s0b = vb + *Isa::resolved_vgpr_offset(wf, {s0}.opr_type_, '
-                f'{s0}.encoding_value_, {s0}.vgpr_msb_role());'
-            )
-            L.append(
-                f'  uint32_t s1b = vb + *Isa::resolved_vgpr_offset(wf, {s1}.opr_type_, '
-                f'{s1}.encoding_value_, {s1}.vgpr_msb_role());'
-            )
-            L.append(
-                f'  auto index_off = Isa::resolved_vgpr_offset(wf, {s2}.opr_type_, '
-                f'{s2}.encoding_value_, {s2}.vgpr_msb_role());'
-            )
-            L.append(f'  if (!index_off)')
-            L.append(f'    throw util::UnimplementedInst(mnemonic());')
+            append_required_vgpr_offset(L, 'dst_off', d, uses_vgpr_msb_indexing=True)
+            L.append('  uint32_t dst = vb + *dst_off;')
+            append_required_vgpr_offset(L, 's0b_off', s0, uses_vgpr_msb_indexing=True)
+            L.append('  uint32_t s0b = vb + *s0b_off;')
+            append_required_vgpr_offset(L, 's1b_off', s1, uses_vgpr_msb_indexing=True)
+            L.append('  uint32_t s1b = vb + *s1b_off;')
+            append_required_vgpr_offset(L, 'index_off', s2, uses_vgpr_msb_indexing=True)
             L.append(f'  uint32_t idx = vb + *index_off;')
         else:
             if 'acc_cd' in ctx.enc_field_names:
@@ -215,26 +210,42 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f'  uint32_t idx = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s2}.encoding_value_)", "Src2")};'
             )
 
-        if input_type in ('F16', 'BF16'):
-            read_fn = _SMFMAC_READ[input_type]
+        # Each lane stores half its K entries and uses a two-bit selector per stored entry.
+        set_bits = M * K // 64
+        index_arg = (
+            f', amdgpu::smfmac_index_shift<{set_bits}>(inst_.cbsz, inst_.abid)'
+            if arch_name == 'cdna4' and set_bits < 32
+            else ''
+        )
+        if result_type == 'I32' and input_type == 'I8':
+            clamp_arg = ', wf.fp16_ovfl()' if arch_name == 'cdna4' else ''
             L.append(
-                f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_f16(cu, dst, s0b, s1b, idx, {read_fn});'
+                f'  amdgpu::exec_smfmac_i32_i8<{M}, {N}, {K}>'
+                f'(cu, dst, s0b, s1b, idx, inst_.cbsz, inst_.abid{clamp_arg});'
             )
-        else:
+        elif result_type == 'F32' and input_type in ('F16', 'BF16'):
+            read_fn = _SMFMAC_READ[input_type]
+            # BF16 has enough exponent range for finite products to overflow
+            # an F32 accumulator. F16 and F8 products cannot reach that range.
+            mode_arg = ''
+            if arch_name == 'cdna4' and input_type == 'BF16':
+                index_arg = index_arg or ', 0'
+                mode_arg = ', wf.fp16_ovfl()'
+            L.append(
+                f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_f16(cu, dst, s0b, s1b, idx, {read_fn}{index_arg}{mode_arg});'
+            )
+        elif result_type == 'F32' and input_type in _F8_FIXED:
             parts = input_type.split('_')
-            read_a = _SMFMAC_FP8_READ.get(parts[0], 'amdgpu::smfmac_read_fp8')
-            read_b = _SMFMAC_FP8_READ.get(parts[1], 'amdgpu::smfmac_read_fp8')
+            read_a = _SMFMAC_FP8_READ[parts[0]]
+            read_b = _SMFMAC_FP8_READ[parts[1]]
             L.append(
                 f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_fp8(cu, dst, s0b, s1b, idx, {read_a},\n'
-                f'                                       {read_b});'
+                f'                                       {read_b}{index_arg});'
             )
-        return '\n'.join(L)
-
-    if 'SMFMAC' in name:
-        L = []
-        L.append(f'  // SMFMAC stub: {name} (I32 result, no cross-lane helper)')
-        L.append(f'  (void)wf;')
-        L.append(f'  throw util::UnimplementedInst(mnemonic());')
+        else:
+            raise ValueError(
+                f'{name}: unsupported SMFMAC types: {result_type}, {input_type}'
+            )
         return '\n'.join(L)
 
     # Compute number of blocks from output register count and matrix dims.
@@ -307,9 +318,36 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     uses_supported_swmmac_layout = swmmac_layout is not SwmmacLayout.NONE
     uses_fixed_wave_swmmac_layout = swmmac_layout is SwmmacLayout.FIXED_WAVE
     uses_runtime_wave_swmmac_layout = swmmac_layout is SwmmacLayout.RUNTIME_WAVE
+    uses_rdna_swmmac_arithmetic = (
+        uses_runtime_wave_swmmac_layout
+        and (M, N) == (16, 16)
+        and (
+            (
+                result_type == 'I32'
+                and (input_type, K) in {('IU8', 32), ('IU4', 32), ('IU4', 64)}
+            )
+            or (
+                K == 32
+                and (
+                    (result_type, input_type)
+                    in {
+                        ('F32', 'F16'),
+                        ('F32', 'BF16'),
+                        ('F16', 'F16'),
+                        ('BF16', 'BF16'),
+                    }
+                    or (result_type == 'F32' and input_type in _F8_FIXED)
+                )
+            )
+        )
+    )
+    if uses_runtime_wave_swmmac_layout and not uses_rdna_swmmac_arithmetic:
+        # Reject unsupported sparse shapes before resolving operands or index keys.
+        L = ['  throw util::UnimplementedInst(mnemonic());']
+        return '\n'.join(L)
     # Fixed-wave OPSEL bits are matrix-reuse hints, not sparse index selectors.
     swmmac_index_key_expr = (
-        '0u' if uses_fixed_wave_swmmac_layout else 'inst_.opsel & 0x1u'
+        '0u' if uses_fixed_wave_swmmac_layout else 'inst_.opsel & 0x3u'
     )
     uses_fixed_wave32_split_k_dense_layout = (
         matrix_layout is MatrixLayout.WMMA_SPLIT_K
@@ -327,6 +365,18 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         matrix_layout is MatrixLayout.WMMA_SPLIT_K
         and ctx.profile.wave_size < ctx.profile.wave_size_max
         and is_dense_wmma
+    )
+    uses_rdna_wmma_arithmetic = (
+        (uses_gfx11_wmma_layout or uses_gfx12_wmma_layout)
+        and input_type in ('IU4', 'IU8')
+        and (
+            (M, N, K) == (16, 16, 16)
+            or (
+                uses_gfx12_wmma_layout
+                and input_type == 'IU4'
+                and (M, N, K) == (16, 16, 32)
+            )
+        )
     )
     is_gfx1251_f64_wmma = (
         arch == 'cdna5'
@@ -349,29 +399,19 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         L.append('  }')
     swmmac_index_entries = 32 if is_swmmac and K >= 128 and in_bits <= 8 else 16
     if ctx.profile.uses_vgpr_msb_indexing:
-        L.append(
-            f'  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, {d}.opr_type_, '
-            f'{d}.encoding_value_, {d}.vgpr_msb_role());'
-        )
-        L.append(
-            f'  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, {s0}.opr_type_, '
-            f'{s0}.encoding_value_, {s0}.vgpr_msb_role());'
-        )
-        L.append(
-            f'  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, {s1}.opr_type_, '
-            f'{s1}.encoding_value_, {s1}.vgpr_msb_role());'
-        )
+        append_required_vgpr_offset(L, 'dst_off', d, uses_vgpr_msb_indexing=True)
+        L.append('  uint32_t dst = vb + *dst_off;')
+        append_required_vgpr_offset(L, 'src0_base_off', s0, uses_vgpr_msb_indexing=True)
+        L.append('  uint32_t src0_base = vb + *src0_base_off;')
+        append_required_vgpr_offset(L, 'src1_base_off', s1, uses_vgpr_msb_indexing=True)
+        L.append('  uint32_t src1_base = vb + *src1_base_off;')
         src0_base_expr = 'src0_base'
         src1_base_expr = 'src1_base'
         if uses_supported_swmmac_layout:
-            L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
-            L.append(f'  uint32_t s2 = dst;')
-            L.append(
-                f'  auto index_off = Isa::resolved_vgpr_offset(wf, {s2}.opr_type_, '
-                f'{s2}.encoding_value_, {s2}.vgpr_msb_role());'
-            )
-            L.append(f'  if (!index_off)')
-            L.append(f'    throw util::UnimplementedInst(mnemonic());')
+            if uses_fixed_wave_swmmac_layout:
+                L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
+                L.append(f'  uint32_t s2 = dst;')
+            append_required_vgpr_offset(L, 'index_off', s2, uses_vgpr_msb_indexing=True)
             L.append(f'  uint32_t index_base = vb + *index_off;')
             L.append(f'  uint32_t index_key = {swmmac_index_key_expr};')
             index_base_expr = 'index_base'
@@ -413,8 +453,9 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         src0_base_expr = 'src0_base'
         src1_base_expr = 'src1_base'
         if uses_supported_swmmac_layout:
-            L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
-            L.append(f'  uint32_t s2 = dst;')
+            if uses_fixed_wave_swmmac_layout:
+                L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
+                L.append(f'  uint32_t s2 = dst;')
             L.append(
                 f'  uint32_t index_base = amdgpu::src_base(vb, {s2}.encoding_value_);'
             )
@@ -423,17 +464,253 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             index_key_expr = 'index_key'
         else:
             L.append(f'  uint32_t const_acc;')
-            L.append(f'  uint32_t s2 = amdgpu::resolve_acc(vb, dst,')
+            L.append(f'  uint32_t s2 = {arch_name}::resolve_acc(vb, dst,')
             L.append(
                 f'      {s2}.encoding_value_, const_acc,'
                 f' [&] {{ return amdgpu::RegisterAccess(wf).read_scalar({s2}); }});'
             )
             if supports_gpr_idx:
-                L.append('  if (const_acc == amdgpu::ACC_FROM_VGPR)')
+                L.append(f'  if ({s2}.decoded_vgpr())')
                 L.append(
                     '    s2 = amdgpu::apply_gpr_idx_to_mma_base('
                     'wf, vb, s2, amdgpu::VgprMsbRole::Src2);'
                 )
+
+    if arch_name == 'rdna3_5' and is_dense_wmma:
+        L.extend(
+            [
+                '  const amdgpu::RegisterAccess registers(wf);',
+                f'  src0_base = registers.gfx115_wmma_source_base({s0}, src0_base);',
+                f'  src1_base = registers.gfx115_wmma_source_base({s1}, src1_base);',
+                f'  s2 = registers.gfx115_wmma_source_base({s2}, s2);',
+            ]
+        )
+
+    # FP64 BLGP is a negate mask, unlike the lane permutation used for FP32.
+    if (
+        arch in ('cdna3', 'cdna4')
+        and result_type == input_type == 'F64'
+        and (M, N, K, B) in {(16, 16, 4, 1), (4, 4, 4, 4)}
+    ):
+        api = 'rj_arith_' + name.lower() + '_w64'
+        outputs = M * N * B // 32
+        L.append(
+            '  const bool compatibility = (cu.arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK)'
+        )
+        L.append('      == RJ_ARITH_SEMANTICS_COMPATIBILITY;')
+        L.append('  // Preserve legacy FP32 widening only in Compatibility.')
+        L.append('  std::optional<uint64_t> inline_c;')
+        L.append(f'  if (!{s2}.decoded_vgpr()) {{')
+        L.append('    inline_c = compatibility')
+        L.append(
+            '        ? std::bit_cast<uint64_t>(double(std::bit_cast<float>(const_acc)))'
+        )
+        L.append(f'        : amdgpu::RegisterAccess(wf).read_scalar64({s2});')
+        L.append('  }')
+        L.append(
+            f'  amdgpu::arith::exec_dense_fp_matrix<2, {outputs}, 64, {outputs}, false, true>('
+        )
+        L.append(f'      wf, {api}, cu.arithmetic_flags(), inst_.blgp,')
+        L.append(f'      dst, {src0_base_expr}, {src1_base_expr}, s2,')
+        L.append('      inline_c);')
+        return '\n'.join(L)
+
+    # Dense integer matrix formats share the observed whole-wave register bridge.
+    is_dense_i8_mfma = (
+        arch in ('cdna3', 'cdna4')
+        and result_type == 'I32'
+        and input_type == 'I8'
+        and M == N
+        and (M, K, B)
+        in {
+            (32, 4, 2),
+            (16, 4, 4),
+            (4, 4, 16),
+            (32, 16, 1),
+            (16, 32, 1),
+            (16, 64, 1),
+            (32, 32, 1),
+        }
+    )
+    is_dense_iu8_wmma = uses_fixed_wave32_split_k_dense_layout and (
+        M,
+        N,
+        K,
+        result_type,
+        input_type,
+    ) == (16, 16, 64, 'I32', 'IU8')
+    if is_dense_i8_mfma or is_dense_iu8_wmma:
+        lanes = 32 if is_dense_iu8_wmma else 64
+        api = 'rj_arith_' + name.lower() + f'_w{lanes}'
+        if is_dense_iu8_wmma:
+            L.append('  uint64_t controls = inst_.neg & 3;')
+            L.append('  if (inst_.clamp) controls |= RJ_ARITH_WMMA_CLAMP;')
+            inputs, outputs = 8, 8
+        else:
+            L.append(
+                '  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3) | (uint64_t(inst_.blgp) << 7);'
+            )
+            inputs, outputs = M * K * B // 256, M * M * B // 64
+        if is_dense_i8_mfma:
+            L.append(
+                '  const uint64_t a_lanes = inst_.cbsz == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+            )
+            L.append(
+                '    return amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid); });'
+            )
+            L.append(
+                '  const uint64_t b_lanes = inst_.blgp == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+            )
+            L.append('    return amdgpu::permute_b_lane(lane, inst_.blgp); });')
+        L.append(
+            f'  amdgpu::arith::exec_dense_fp_matrix<{inputs}, {outputs}, {lanes}>('
+        )
+        flags = 'cu.arithmetic_flags()'
+        # MI300 §7.1 Table 28 and CDNA4 §7.1.2 specify I32 saturation. The model
+        # follows those control tables over the statements in MI300 §7.3 and
+        # CDNA4 §7.4 that integer operations ignore MODE.
+        if is_dense_i8_mfma:
+            flags += ' | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
+        L.append(f'      wf, {api}, {flags}, controls,')
+        L.append(f'      dst, {src0_base_expr}, {src1_base_expr}, s2,')
+        # Inline -1 is valid C even though its bits equal the legacy sentinel.
+        inline_acc = '!src2_off' if is_dense_iu8_wmma else f'!{s2}.decoded_vgpr()'
+        L.append(
+            f'      {inline_acc} ? std::optional<uint32_t>(const_acc) : std::nullopt'
+            + (', a_lanes, b_lanes);' if is_dense_i8_mfma else ');')
+        )
+        return '\n'.join(L)
+
+    # Carry the existing MFMA register/accumulator resolution into the library bridge.
+    # CDNA1/2 and other instruction families retain their original executors.
+    if (
+        arch in ('cdna3', 'cdna4')
+        and name.startswith('V_MFMA_F32_')
+        and M == N
+        and (
+            input_type in ('F16', 'BF16')
+            and (M, K, B)
+            in {
+                (32, 4, 2),
+                (16, 4, 4),
+                (4, 4, 16),
+                (32, 8, 1),
+                (16, 16, 1),
+                (16, 32, 1),
+                (32, 16, 1),
+            }
+            or input_type == 'F32'
+            and (M, K, B)
+            in {(32, 1, 2), (16, 1, 4), (4, 1, 16), (32, 2, 1), (16, 4, 1)}
+            or input_type == 'XF32'
+            and (M, K, B) in {(16, 8, 1), (32, 4, 1)}
+            or input_type in _F8_FIXED
+            and (M, K, B) in {(16, 32, 1), (32, 16, 1)}
+        )
+    ):
+        api = 'rj_arith_' + name.lower() + '_w64'
+        if input_type in _F8_FIXED and arch == 'cdna4':
+            api += '_gfx950'
+        L.append(
+            '  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << RJ_ARITH_MFMA_ABID_SHIFT)'
+        )
+        L.append('      | (uint64_t(inst_.blgp) << RJ_ARITH_MFMA_BLGP_SHIFT);')
+        L.append(
+            '  const uint64_t a_lanes = inst_.cbsz == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+        )
+        L.append('    return amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid); });')
+        L.append(
+            '  const uint64_t b_lanes = inst_.blgp == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+        )
+        L.append('    return amdgpu::permute_b_lane(lane, inst_.blgp); });')
+        L.append(
+            f'  amdgpu::arith::exec_dense_fp_matrix<{M * K * B * in_bits // 2048}, {M * N * B // 64}, 64>('
+        )
+        flags = 'cu.arithmetic_flags()'
+        # CDNA4 §7.1.2 specifies finite F32 overflow saturation. MI300's table
+        # also lists it, but gfx942 retains its existing floating-point behavior
+        # pending a physical mode-toggle measurement on that target.
+        if arch == 'cdna4' and input_type in ('F32', 'BF16'):
+            flags += ' | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
+        L.append(f'      wf, {api}, {flags}, controls,')
+        L.append(f'      dst, {src0_base_expr}, {src1_base_expr}, s2,')
+        L.append(
+            f'      !{s2}.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt, a_lanes, b_lanes);'
+        )
+        return '\n'.join(L)
+
+    if (
+        arch == 'cdna4'
+        and input_type in ('F8_F6_F4', 'F8F6F4')
+        and (M, N, K) in ((16, 16, 128), (32, 32, 64))
+    ):
+        L.append(
+            '  auto registers_for = [](uint32_t format) -> uint32_t { return format < 2 ? 8 : format < 4 ? 6 : 4; };'
+        )
+        L.append(
+            '  if (inst_.cbsz > 4 || inst_.blgp > 4) { wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue); return; }'
+        )
+        L.append(
+            '  uint64_t controls = inst_.cbsz | (uint64_t(inst_.blgp) << RJ_ARITH_MATRIX_FORMAT_B_SHIFT);'
+        )
+        L.append(f'  amdgpu::arith::exec_dense_fp_matrix<8, {M*M//64}, 64>(')
+        L.append(
+            f'      wf, rj_arith_{name.lower()}_w64, cu.arithmetic_flags(), controls, dst, {src0_base_expr}, {src1_base_expr}, s2,'
+        )
+        L.append(
+            f'      !{s2}.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,'
+        )
+        L.append(
+            '      ~uint64_t{0}, ~uint64_t{0}, registers_for(inst_.cbsz), registers_for(inst_.blgp));'
+        )
+        return '\n'.join(L)
+
+    is_split_half = (M, N, K) == (16, 16, 32) and (result_type, input_type) in {
+        ('F32', 'F16'),
+        ('F32', 'BF16'),
+        ('F16', 'F16'),
+        ('BF16', 'BF16'),
+        ('BF16F32', 'BF16'),
+    }
+    is_split_f8 = (
+        (M, N) == (16, 16)
+        and K in (64, 128)
+        and input_type in _F8_FIXED
+        and result_type in ('F32', 'F16')
+    )
+    is_split_f32 = (M, N, K, result_type, input_type) == (16, 16, 4, 'F32', 'F32')
+    if uses_fixed_wave32_split_k_dense_layout and (
+        is_split_half or is_split_f8 or is_split_f32
+    ):
+        api = 'rj_arith_' + name.lower() + '_w32'
+        L.append('  uint64_t controls = (inst_.neg & 4) ? RJ_ARITH_WMMA_NEG_C : 0;')
+        L.append('  if (inst_.neg_hi & 4) controls |= RJ_ARITH_WMMA_ABS_C;')
+        factors = 2 if is_split_f32 else K // 8 if is_split_f8 else 8
+        if result_type in ('F16', 'BF16'):
+            bf16 = 'true' if result_type == 'BF16' else 'false'
+            L.append('  if (!src2_off &&')
+            L.append(
+                '      (cu.arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY) {'
+            )
+            L.append(
+                f'    const_acc = amdgpu::dot_packed16::inline_word<{bf16}>(const_acc, inst_.src2);'
+            )
+            L.append('  }')
+            bridge_shape = f'{factors}, 4, 32, 4, true'
+        elif result_type == 'BF16F32':
+            bridge_shape = f'{factors}, 4, 32, 8'
+        else:
+            bridge_shape = f'{factors}, 8, 32'
+        L.append('  uint64_t flags = cu.arithmetic_flags();')
+        if result_type in ('F16', 'BF16', 'BF16F32'):
+            L.append('  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;')
+        L.append(f'  amdgpu::arith::exec_dense_fp_matrix<{bridge_shape}>(')
+        L.append(f'      wf, {api}, flags, controls,')
+        L.append(f'      dst, {src0_base_expr}, {src1_base_expr}, s2,')
+        L.append(
+            '      !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt);'
+        )
+        return '\n'.join(L)
 
     if is_gfx1251_f64_wmma:
         L.append(f'  amdgpu::exec_wmma_f64_16x16x4_f64(cu, dst,')
@@ -447,6 +724,15 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         neg = 'inst_.blgp' if arch in ('cdna3', 'cdna4') else '0u'
         L.append(f'                 s2, const_acc, {neg});')
     elif result_type == 'I32':
+
+        if uses_rdna_swmmac_arithmetic:
+            L.append(
+                f'  amdgpu::exec_rdna_swmmac_i32<{in_bits}, {K}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, {index_base_expr}, {index_key_expr},'
+                f' /*a_signed=*/(inst_.neg & 0x1u) != 0,'
+                f' /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);'
+            )
+            return '\n'.join(L)
 
         def append_signed_extractors(suffix: str) -> None:
             L.append(
@@ -466,6 +752,18 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             )
             L.append(f'  }};')
 
+        if uses_rdna_wmma_arithmetic:
+            gfx12 = str(uses_gfx12_wmma_layout).lower()
+            shape_arg = f', {K}' if K != 16 else ''
+            L.append(
+                f'  amdgpu::exec_rdna_wmma_i32<{gfx12}, {in_bits}{shape_arg}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, s2,'
+                f' {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,'
+                f' /*a_signed=*/(inst_.neg & 0x1u) != 0,'
+                f' /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);'
+            )
+            return '\n'.join(L)
+
         if uses_fixed_wave_swmmac_layout:
             if input_type in ('IU4', 'IU8'):
                 suffix = '4' if input_type == 'IU4' else '8'
@@ -474,7 +772,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 L.append(f'  auto extract_a = amdgpu::extract_i8;')
                 L.append(f'  auto extract_b = amdgpu::extract_i8;')
             L.append(
-                f'  amdgpu::exec_swmmac_i32(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                f'  amdgpu::exec_swmmac_i32<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                 f' {src0_base_expr}, {src1_base_expr}, s2, {index_base_expr},'
                 f' {swmmac_index_entries}, {index_key_expr},'
                 f' extract_a, extract_b, inst_.clamp, const_acc);'
@@ -500,47 +798,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 L.append(f'  auto extract_a = amdgpu::extract_i8;')
                 L.append(f'  auto extract_b = amdgpu::extract_i8;')
             L.append(
-                f'  amdgpu::exec_wmma_i32(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                f'  amdgpu::exec_wmma_i32<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                 f' {src0_base_expr}, {src1_base_expr}, s2, extract_a, extract_b,'
                 f' inst_.clamp, const_acc);'
             )
-        elif uses_runtime_wave_swmmac_layout:
-            if input_type in ('IU4', 'IU8'):
-                suffix = '4' if input_type == 'IU4' else '8'
-                append_signed_extractors(suffix)
-            else:
-                L.append(f'  auto extract_a = amdgpu::extract_i8;')
-                L.append(f'  auto extract_b = amdgpu::extract_i8;')
-            L.append(
-                f'  amdgpu::exec_swmmac_i32(cu, {M}, {N}, {K}, {in_bits}, dst,'
-                f' {src0_base_expr}, {src1_base_expr}, s2, {index_base_expr},'
-                f' {swmmac_index_entries}, {index_key_expr}, extract_a, extract_b,'
-                f' inst_.clamp, const_acc, wf.wf_size());'
-            )
-        elif uses_gfx11_wmma_layout:
-            if input_type in ('IU4', 'IU8'):
-                suffix = '4' if input_type == 'IU4' else '8'
-                append_signed_extractors(suffix)
-            else:
-                L.append(f'  auto extract_a = amdgpu::extract_i8;')
-                L.append(f'  auto extract_b = amdgpu::extract_i8;')
-            L.append(
-                f'  amdgpu::exec_gfx11_wmma_i32(cu, wf.wf_size(), {M}, {N}, {K}, {in_bits}, dst,'
-                f' {src0_base_expr}, {src1_base_expr}, s2, extract_a, extract_b,'
-                f' inst_.clamp, const_acc);'
-            )
-        elif uses_gfx12_wmma_layout:
-            if input_type in ('IU4', 'IU8'):
-                suffix = '4' if input_type == 'IU4' else '8'
-                append_signed_extractors(suffix)
-            else:
-                L.append(f'  auto extract_a = amdgpu::extract_i8;')
-                L.append(f'  auto extract_b = amdgpu::extract_i8;')
-            L.append(
-                f'  amdgpu::exec_wmma_i32(cu, {M}, {N}, {K}, {in_bits}, dst,'
-                f' {src0_base_expr}, {src1_base_expr}, s2, extract_a, extract_b,'
-                f' inst_.clamp, const_acc, wf.wf_size());'
-            )
+        elif uses_gfx11_wmma_layout or uses_gfx12_wmma_layout:
+            # Do not apply an existing accumulation policy to an unsupported shape.
+            L.append('  throw util::UnimplementedInst(mnemonic());')
         else:
             has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
             if not has_blgp:
@@ -568,38 +832,69 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 L.append(f'                     {src0_base_expr},')
                 L.append(f'                     {src1_base_expr},')
                 L.append(f'                     s2, const_acc,')
-                L.append(f'                     inst_.cbsz, inst_.abid, inst_.blgp);')
+                clamp_arg = ', wf.fp16_ovfl()' if arch_name == 'cdna4' else ''
+                L.append(
+                    f'                     inst_.cbsz, inst_.abid, inst_.blgp{clamp_arg});'
+                )
     else:
-        # F32, F16, and BF16 matrix results accumulate in f32. Fixed Wave32 WMMA
-        # uses a Wave32 layout; CDNA MFMA uses the GFX9 MFMA layout helpers.
+        # Floating-point matrix results use the format-specific executors below.
+        # Fixed Wave32 WMMA uses a Wave32 layout; CDNA uses the GFX9 MFMA helpers.
         if uses_fixed_wave32_split_k_dense_layout and input_type in (
             'F8_F6_F4',
             'F8F6F4',
+            'F4',
         ):
-            L.append(f'  uint32_t matrix_a_fmt = inst_.opsel;')
+            if input_type == 'F4':
+                L.append('  uint32_t matrix_a_fmt = 4, matrix_b_fmt = 4;')
+                L.append('  uint64_t controls = 0;')
+            else:
+                L.append('  uint32_t matrix_a_fmt = inst_.opsel;')
+                L.append(
+                    f'  uint32_t matrix_b_fmt = ({op_sel_hi_2_expr} << 2) | inst_.opsel_hi;'
+                )
+                L.append(
+                    '  if (matrix_a_fmt > 4 || matrix_b_fmt > 4) { wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue); return; }'
+                )
+                L.append(
+                    '  uint64_t controls = matrix_a_fmt | (uint64_t(matrix_b_fmt) << 3);'
+                )
+            L.append('  if (inst_.neg & 4) controls |= RJ_ARITH_WMMA_MIXED_NEG_C;')
+            L.append('  if (inst_.neg_hi & 4) controls |= RJ_ARITH_WMMA_MIXED_ABS_C;')
             L.append(
-                f'  uint32_t matrix_b_fmt = ({op_sel_hi_2_expr} << 2) | '
-                f'inst_.opsel_hi;'
+                '  auto registers_for = [](uint32_t fmt) { return fmt < 2 ? 16u : fmt < 4 ? 12u : 8u; };'
+            )
+            api = (
+                f'rj_arith_v_wmma_f32_{M}x{N}x{K}_'
+                + ('f4' if input_type == 'F4' else 'f8f6f4')
+                + '_w32'
+            )
+            L.append(f'  amdgpu::arith::exec_dense_fp_matrix<16, {M*N//32}, 32>(')
+            L.append(
+                f'      wf, {api}, cu.arithmetic_flags(), controls, dst, {src0_base_expr}, {src1_base_expr}, s2,'
             )
             L.append(
-                f'  bool dispatched = amdgpu::dispatch_matrix_fmt_pair('
-                f'matrix_a_fmt, matrix_b_fmt,'
+                '      !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt,'
             )
             L.append(
-                f'      [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {{'
+                f'      0xffffffffULL, 0xffffffffULL, registers_for(matrix_a_fmt) * {M//16}, registers_for(matrix_b_fmt));'
             )
+            return '\n'.join(L)
+
+        if uses_rdna_swmmac_arithmetic:
+            if input_type in _F8_FIXED:
+                a_fp8, b_fp8 = _f8_bools(input_type)
+                L.append(
+                    f'  amdgpu::exec_gfx12_swmmac_dot8<{a_fp8}, {b_fp8}>(cu, wf.wf_size(), dst,'
+                    f' {src0_base_expr}, {src1_base_expr}, {index_base_expr}, {index_key_expr});'
+                )
+                return '\n'.join(L)
+            bf16 = str(input_type == 'BF16').lower()
+            packed_arg = ', true' if result_type != 'F32' else ''
             L.append(
-                f'        amdgpu::exec_wmma_f32_mixed(cu, {M}, {N}, {K}, a_bits, b_bits, dst,'
+                f'  amdgpu::exec_gfx12_swmmac_dot4<{bf16}{packed_arg}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, {index_base_expr}, {index_key_expr},'
+                f" inst_.neg, inst_.neg_hi{', wf.fp16_ovfl()' if packed_arg else ''});"
             )
-            L.append(f'            {src0_base_expr},')
-            L.append(f'            {src1_base_expr},')
-            L.append(
-                f'            s2, extract_a, extract_b, const_acc,'
-                f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
-            )
-            L.append(f'      }});')
-            L.append(f'  if (!dispatched)')
-            L.append(f'    throw util::UnimplementedInst(mnemonic());')
             return '\n'.join(L)
 
         ea = fp8_helper_name(arch, _EXTRACT_A.get(input_type, 'amdgpu::extract_f32'))
@@ -608,21 +903,28 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         # A-matrix broadcast and B-matrix lane permutation. RDNA does
         # not have MFMA (only WMMA), so these fields don't exist.
         if uses_fixed_wave_swmmac_layout:
-            if result_type == 'F16':
+            if result_type == 'BF16F32':
+                exec_fn = 'exec_swmmac_bf16f32'
+            elif result_type == 'F16':
                 exec_fn = 'exec_swmmac_f16'
             elif result_type == 'BF16':
                 exec_fn = 'exec_swmmac_bf16'
             else:
                 exec_fn = 'exec_swmmac_f32'
+            mode_args = (
+                ', amdgpu::WMMA_WAVE32, wf.fp16_ovfl()'
+                if result_type in ('F16', 'BF16', 'BF16F32')
+                else ''
+            )
             L.append(
-                f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                f'  amdgpu::{exec_fn}<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                 f' {src0_base_expr}, {src1_base_expr}, s2, {index_base_expr},'
                 f' {swmmac_index_entries}, {index_key_expr},'
-                f' {ea}, {eb}, const_acc);'
+                f' {ea}, {eb}, const_acc{mode_args});'
             )
         elif uses_fixed_wave32_split_k_dense_layout:
             # Dense WMMA: a specialized Wave32 kernel where one exists, else
-            # the generic exec_wmma_* runtime path.
+            # the generic exec_wmma_* kernel.
             spec = _fixed_wave32_wmma_spec(result_type, input_type, M, N, K)
             if spec is not None:
                 if result_type in ('F32', 'BF16F32'):
@@ -651,27 +953,34 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                     exec_fn = 'exec_wmma_f32'
                 if exec_fn == 'exec_wmma_f32':
                     L.append(
-                        f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                        f'  amdgpu::{exec_fn}<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                         f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                         f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
                     )
                 else:
                     L.append(
-                        f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                        f'  amdgpu::{exec_fn}<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                         f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc);'
                     )
-        elif uses_runtime_wave_swmmac_layout:
-            if result_type == 'F16':
-                exec_fn = 'exec_swmmac_f16'
-            elif result_type == 'BF16':
-                exec_fn = 'exec_swmmac_bf16'
-            else:
-                exec_fn = 'exec_swmmac_f32'
+        elif (
+            uses_gfx11_wmma_layout
+            and result_type in ('F32', 'F16', 'BF16')
+            and input_type in ('F16', 'BF16')
+            and (M, N, K) == (16, 16, 16)
+        ):
+            bf16 = str(input_type == 'BF16').lower()
+            packed_arg = ', true' if result_type != 'F32' else ''
+            if packed_arg:
+                L.append(f'  if ({s2}.encoding_value_ < 256)')
+                L.append(
+                    f'    const_acc = amdgpu::dot_packed16::inline_word<{bf16}>'
+                    f'(const_acc, {s2}.encoding_value_);'
+                )
             L.append(
-                f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst, {src0_base_expr},'
-                f' {src1_base_expr}, s2, {index_base_expr}, {swmmac_index_entries},'
-                f' {index_key_expr},'
-                f' {ea}, {eb}, const_acc, wf.wf_size());'
+                f'  amdgpu::exec_gfx11_wmma_dot2<{bf16}{packed_arg}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, s2,'
+                f' {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,'
+                f" inst_.neg, inst_.neg_hi{', (inst_.op_sel >> 2) & 1u, wf.fp16_ovfl()' if packed_arg else ''});"
             )
         elif (
             uses_gfx11_wmma_layout
@@ -679,26 +988,61 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             and input_type not in ('F8_F6_F4', 'F8F6F4')
         ):
             L.append(
-                f'  amdgpu::exec_gfx11_wmma_f32(cu, wf.wf_size(), {M}, {N}, {K}, {in_bits}, dst,'
+                f'  amdgpu::exec_gfx11_wmma_f32<{M}, {N}, {K}>(cu, wf.wf_size(), {in_bits}, dst,'
                 f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                 f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
             )
+        elif (
+            uses_gfx12_wmma_layout
+            and result_type in ('F32', 'F16', 'BF16')
+            and input_type in ('F16', 'BF16')
+            and (M, N, K) == (16, 16, 16)
+        ):
+            bf16 = str(input_type == 'BF16').lower()
+            packed_arg = ', true' if result_type != 'F32' else ''
+            if packed_arg:
+                L.append(f'  if ({s2}.encoding_value_ < 256)')
+                L.append(
+                    f'    const_acc = amdgpu::dot_packed16::inline_word<{bf16}>'
+                    f'(const_acc, {s2}.encoding_value_);'
+                )
+            L.append(
+                f'  amdgpu::exec_gfx12_wmma_dot4<{bf16}{packed_arg}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, s2,'
+                f' {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,'
+                f" inst_.neg, inst_.neg_hi{', wf.fp16_ovfl()' if packed_arg else ''});"
+            )
+        elif (
+            uses_gfx12_wmma_layout
+            and result_type == 'F32'
+            and input_type in _F8_FIXED
+            and (M, N, K) == (16, 16, 16)
+        ):
+            a_fp8, b_fp8 = _f8_bools(input_type)
+            L.append(
+                f'  amdgpu::exec_gfx12_wmma_dot8<{a_fp8}, {b_fp8}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, s2,'
+                f' {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);'
+            )
+        elif uses_gfx12_wmma_layout and input_type in _F8_FIXED:
+            # No native eight-product executor is defined for other shapes.
+            L.append('  throw util::UnimplementedInst(mnemonic());')
         elif uses_gfx12_wmma_layout and input_type not in ('F8_F6_F4', 'F8F6F4'):
             if result_type == 'F16':
                 L.append(
-                    f'  amdgpu::exec_wmma_f16(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                    f'  amdgpu::exec_wmma_f16<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                     f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                     f' wf.wf_size());'
                 )
             elif result_type == 'BF16':
                 L.append(
-                    f'  amdgpu::exec_wmma_bf16(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                    f'  amdgpu::exec_wmma_bf16<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                     f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                     f' wf.wf_size());'
                 )
             else:
                 L.append(
-                    f'  amdgpu::exec_wmma_f32(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                    f'  amdgpu::exec_wmma_f32<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                     f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                     f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi), wf.wf_size());'
                 )
@@ -715,14 +1059,19 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             )
             L.append('      [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {')
             L.append(
-                f'        amdgpu::exec_f32_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits,'
+                f'        amdgpu::exec_f32_mixed<{M}, {N}, {K}, {B}>(cu, a_bits, b_bits,'
             )
             L.append(
                 f'                               dst, s0b, s1b, s2, ea, eb, const_acc);'
             )
             L.append('      });')
-            L.append('  if (!dispatched)')
-            L.append('    throw util::UnimplementedInst(mnemonic());')
+            L.append('  if (!dispatched) {')
+            L.append('    wf.report_instruction_execution_error(')
+            L.append(
+                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);'
+            )
+            L.append('    return;')
+            L.append('  }')
         elif uses_gfx11_wmma_layout and result_type in ('F16', 'BF16'):
             exec_fn = (
                 'exec_gfx11_wmma_f16'
@@ -730,14 +1079,14 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 else 'exec_gfx11_wmma_bf16'
             )
             L.append(
-                f'  amdgpu::{exec_fn}(cu, wf.wf_size(), {M}, {N}, {K}, {in_bits}, dst,'
+                f'  amdgpu::{exec_fn}<{M}, {N}, {K}>(cu, wf.wf_size(), {in_bits}, dst,'
             )
             L.append(f'      {src0_base_expr},')
             L.append(f'      {src1_base_expr}, s2,' ' (inst_.op_sel >> 2) & 0x1u,')
             L.append(f'      {ea}, {eb}, const_acc);')
         elif uses_gfx12_wmma_layout and result_type in ('F16', 'BF16'):
             exec_fn = 'exec_wmma_f16' if result_type == 'F16' else 'exec_wmma_bf16'
-            L.append(f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,')
+            L.append(f'  amdgpu::{exec_fn}<{M}, {N}, {K}>(cu, {in_bits}, dst,')
             L.append(f'      {src0_base_expr},')
             L.append(
                 f'      {src1_base_expr}, s2, {ea}, {eb}, const_acc,' f' wf.wf_size());'
@@ -752,9 +1101,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             blgp = 'inst_.blgp' if has_blgp else '0u'
             s0b = src0_base_expr
             s1b = src1_base_expr
+            denorm_arg = ''
+            if arch == 'cdna2' and input_type in _MFMA_F32_SPEC:
+                mode = 'wf.fp_denorm_mode_f32()' if input_type == 'F32' else '0u'
+                denorm_arg = f', amdgpu::MfmaF32Denorm{{{mode}}}'
             if N % 16 == 0 and input_type in _F8_FIXED and has_blgp:
                 a_fp8, b_fp8 = _f8_bools(input_type)
-                fnuz = ', true' if arch in FNUZ_FP8_ARCHES else ''
+                fnuz = ', true' if uses_fnuz_fp8(arch) else ''
                 L.append(
                     f'  amdgpu::exec_f32_mfma_f8_spec<{M}, {N}, {K}, {a_fp8}, {b_fp8}{fnuz}>('
                     f'cu, dst, {s0b}, {s1b}, s2, const_acc, {cbsz}, {abid}, {blgp});'
@@ -764,16 +1117,16 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 targ = _mma_targ(M, N, K, B, batch_optional=(fam != 'f32'))
                 L.append(
                     f'  amdgpu::exec_f32_mfma_{fam}_spec<{targ}>(cu, dst, {s0b}, {s1b}, s2,'
-                    f' const_acc, {cbsz}, {abid}, {blgp});'
+                    f' const_acc, {cbsz}, {abid}, {blgp}{denorm_arg});'
                 )
             elif has_blgp:
                 L.append(
-                    f'  amdgpu::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst, {s0b}, {s1b},'
-                    f' s2, {ea}, {eb}, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);'
+                    f'  amdgpu::exec_f32<{M}, {N}, {K}, {B}>(cu, {in_bits}, dst, {s0b}, {s1b},'
+                    f' s2, {ea}, {eb}, const_acc, inst_.cbsz, inst_.abid, inst_.blgp{denorm_arg});'
                 )
             else:
                 L.append(
-                    f'  amdgpu::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst, {s0b}, {s1b},'
+                    f'  amdgpu::exec_f32<{M}, {N}, {K}, {B}>(cu, {in_bits}, dst, {s0b}, {s1b},'
                     f' s2, {ea}, {eb}, const_acc);'
                 )
 

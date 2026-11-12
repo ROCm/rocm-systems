@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import ast
+import json
 import re
 import warnings
 from pathlib import Path
@@ -12,8 +13,10 @@ import pandas as pd
 
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
+from memory_chart.loader import Layouts
 from pc_sampling.code_object_analysis import (
     CodeObjectSymbol,
+    InstructionPipelines,
     load_code_object_disassemblies,
 )
 from pc_sampling.pc_sampling_analysis import (
@@ -36,9 +39,10 @@ from pc_sampling.source_snapshot_analysis import (
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
-from utils import csv_compression, schema, utils_analysis
+from utils import file_io, schema, utils_analysis
 from utils.analysis_orm import Database
 from utils.file_io import (
+    load_kernel_short_names,
     load_pc_sampling_results,
     process_pc_sampling_kernel_traces,
     rank_kernels_by_total_duration,
@@ -295,6 +299,17 @@ class SourceFrameCollector:
         })
 
 
+def memory_chart_layout_extdata(gpu_arch: str) -> Optional[dict[str, Any]]:
+    """The memory chart layout file of *gpu_arch*, unchanged; None if it has none.
+
+    src/memory_chart/README.md documents the format.
+    """
+    layout = Layouts.for_arch(gpu_arch)
+    if layout is None:
+        return None
+    return json.loads(layout.path.read_text(encoding="utf-8"))
+
+
 class db_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -323,10 +338,7 @@ class db_analysis(OmniAnalyze_Base):
             self._kernel_values_data_per_workload,
             self._workload_values_data_per_workload,
         ) = self.calc_expressions()
-        (
-            self._roofline_data_per_kernel,
-            self._roofline_data_per_workload,
-        ) = self.calc_roofline_data()
+        self._roofline_data_per_kernel = self.calc_roofline_data()
 
         report_evaluation_diagnostics()
 
@@ -358,12 +370,19 @@ class db_analysis(OmniAnalyze_Base):
                     workload_path
                 ),
                 profiling_config_extdata=self._profiling_config,
+                memory_chart_layout_extdata=memory_chart_layout_extdata(
+                    sys_info["gpu_arch"]
+                ),
             )
             Database.get_session().add(workload_obj)
             workload_objs.append(workload_obj)
 
             # Add kernel
             kernel_objs: dict[KernelKey, orm.Kernel] = {}
+            kernel_short_names = load_kernel_short_names(
+                workload_path,
+                self._pc_sampling_tool_data_per_workload.get(workload_path, []),
+            )
 
             for dispatch in self._dispatch_data_per_workload.get(
                 workload_path, pd.DataFrame()
@@ -373,6 +392,7 @@ class db_analysis(OmniAnalyze_Base):
                 if kernel_key not in kernel_objs:
                     kernel_objs[kernel_key] = orm.Kernel(
                         kernel_name=dispatch.kernel_name,
+                        short_name=kernel_short_names.get(dispatch.kernel_name),
                         workload=workload_obj,
                     )
                     Database.get_session().add(kernel_objs[kernel_key])
@@ -412,21 +432,6 @@ class db_analysis(OmniAnalyze_Base):
                     )
                 )
 
-            # Add workload-level roofline data
-            workload_roofline = self._roofline_data_per_workload.get(workload_path)
-            if workload_roofline:
-                Database.get_session().add(
-                    orm.WorkloadRooflineData(
-                        total_flops=workload_roofline.get("total_flops"),
-                        l0_cache_data=workload_roofline.get("l0_cache_data"),
-                        l1_cache_data=workload_roofline.get("l1_cache_data"),
-                        l2_cache_data=workload_roofline.get("l2_cache_data"),
-                        hbm_cache_data=workload_roofline.get("hbm_cache_data"),
-                        lds_cache_data=workload_roofline.get("lds_cache_data"),
-                        workload=workload_obj,
-                    )
-                )
-
             # Add pc sampling data, then the full code-object ISA
             source_frames = SourceFrameCollector(Path(workload_path), workload_obj)
             kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol] = {}
@@ -445,6 +450,7 @@ class db_analysis(OmniAnalyze_Base):
                 code_object_stores,
                 kernel_symbols,
                 source_frames,
+                sys_info,
             )
             workload_source_snapshots.append(
                 WorkloadSourceSnapshot(
@@ -588,15 +594,12 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
-            pmc_perf = csv_compression.compressed_name(
-                Path(workload_path) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+            pmc_df = file_io.create_df_pmc(
+                workload_path,
+                self.get_args().verbose,
             )
-            if not pmc_perf.exists():
+            if pmc_df.empty:
                 continue
-
-            pmc_df = utils_analysis.process_rocpd_csv(pd.read_csv(pmc_perf))
-
-            utils_analysis.add_unit_counter(pmc_df)
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
                 pmc_df = self.iteration_multiplex_impute_counters(
@@ -642,8 +645,8 @@ class db_analysis(OmniAnalyze_Base):
                     elif dtype.startswith("I"):
                         keys.append(f"{dtype}Ops")
                 if OpsSupport.MATRIX in SUPPORTED_DATATYPES[gpu_arch][dtype]:
-                    if dtype.startswith("F") or dtype.startswith("B"):
-                        # FP16 -> F16
+                    if dtype.startswith(("F", "B", "MX")):
+                        # FP16 -> F16, MXFP8 -> MXF8
                         matrix_dtype = dtype.replace("FP", "F")
                         keys.append(f"{matrix_ops_type}{matrix_dtype}Flops")
                     elif dtype.startswith("I"):
@@ -697,6 +700,7 @@ class db_analysis(OmniAnalyze_Base):
                         kernel,
                         kernel_symbols,
                         source_frames,
+                        sys_info.get("gpu_arch"),
                     )
 
         return code_object_stores
@@ -741,17 +745,36 @@ class db_analysis(OmniAnalyze_Base):
         return kernel_symbols[key]
 
     @staticmethod
+    def _get_instruction_type(
+        instruction: Optional[str],
+        gpu_arch: Optional[str],
+    ) -> Optional[orm.InstructionTypeLookup]:
+        """Return the lookup row for an instruction's execution pipeline.
+
+        None when the mnemonic is unknown, which leaves the column NULL and
+        makes the missing table entry visible.
+        """
+        pipeline = InstructionPipelines.lookup(instruction, gpu_arch)
+        if pipeline is None:
+            return None
+        return Database.get_or_create_type(orm.InstructionTypeLookup, pipeline)
+
+    @staticmethod
     def _add_instruction_line(
         line: InstructionLineRecord,
         code_object_store: orm.CodeObjectStore,
         kernel: orm.Kernel,
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
         source_frames: SourceFrameCollector,
+        gpu_arch: Optional[str] = None,
     ) -> None:
         """Insert one instruction line, its sample state, and child counts."""
         instruction_line = orm.InstructionLine(
             code_object_offset=line.code_object_offset,
             instruction=line.instruction,
+            instruction_type_lookup=db_analysis._get_instruction_type(
+                line.instruction, gpu_arch
+            ),
             kernel_symbol=db_analysis._get_or_create_kernel_symbol(
                 code_object_store, kernel, kernel_symbols
             ),
@@ -798,9 +821,11 @@ class db_analysis(OmniAnalyze_Base):
         code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore],
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
         source_frames: SourceFrameCollector,
+        sys_info: dict[str, Any],
     ) -> None:
         """Add dispatched kernels' disassembly as instruction lines,
         skipping any offset already present."""
+        gpu_arch = sys_info.get("gpu_arch")
         tool_data_records = self._pc_sampling_tool_data_per_workload.get(
             workload_path, []
         )
@@ -859,13 +884,14 @@ class db_analysis(OmniAnalyze_Base):
                     kernel_symbol.code_object_offset = (
                         symbol.virtual_address - code_object_store.load_base
                     )
-                    self._add_symbol_isa(kernel_symbol, symbol, source_frames)
+                    self._add_symbol_isa(kernel_symbol, symbol, source_frames, gpu_arch)
 
     @staticmethod
     def _add_symbol_isa(
         kernel_symbol: orm.KernelSymbol,
         symbol: CodeObjectSymbol,
         source_frames: SourceFrameCollector,
+        gpu_arch: Optional[str] = None,
     ) -> None:
         """Add a symbol's disassembly, skipping offsets it already holds."""
         existing_offsets = {
@@ -880,6 +906,9 @@ class db_analysis(OmniAnalyze_Base):
             instruction_line = orm.InstructionLine(
                 code_object_offset=code_object_offset,
                 instruction=instruction.instruction,
+                instruction_type_lookup=db_analysis._get_instruction_type(
+                    instruction.instruction, gpu_arch
+                ),
                 kernel_symbol=kernel_symbol,
             )
             Database.get_session().add(instruction_line)
@@ -1411,10 +1440,9 @@ class db_analysis(OmniAnalyze_Base):
 
         return pmc_df_per_workload
 
-    def calc_roofline_data(self) -> tuple[dict[str, pd.DataFrame], dict[str, dict]]:
-        """Calculate both kernel-level and workload-level roofline data"""
+    def calc_roofline_data(self) -> dict[str, pd.DataFrame]:
+        """Calculate per-kernel roofline data for each workload."""
         roofline_data_per_kernel: dict[str, pd.DataFrame] = {}
-        roofline_data_per_workload: dict[str, dict] = {}
 
         for workload_path in self._pmc_df_per_workload.keys():
             pmc_df = self._pmc_df_per_workload[workload_path].copy()
@@ -1465,24 +1493,10 @@ class db_analysis(OmniAnalyze_Base):
                         if roofline_data_expressions[metric_name]
                     },
                 }
-                for kernel_name in top_kernels[: self.get_args().max_stat_num]
+                for kernel_name in top_kernels
             ])
 
             roofline_data_per_kernel[workload_path] = roofline_df
 
-            # Calculate workload-level roofline data (using full dataframe)
-            workload_roofline = {
-                metric_name: db_analysis.evaluate(
-                    metric_name,
-                    roofline_data_expressions[metric_name],
-                    pmc_df,
-                    sys_info,
-                )
-                for metric_name in roofline_data_expressions
-                if roofline_data_expressions[metric_name]
-            }
-
-            roofline_data_per_workload[workload_path] = workload_roofline
-
-        console_debug("Calculated kernel-level and workload-level roofline data")
-        return roofline_data_per_kernel, roofline_data_per_workload
+        console_debug("Calculated kernel-level roofline data")
+        return roofline_data_per_kernel

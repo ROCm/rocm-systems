@@ -22,10 +22,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import itertools
 import sys
 import pytest
-import numpy as np
 import pandas as pd
 
 # =========================== Validating CSV output

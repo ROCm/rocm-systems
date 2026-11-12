@@ -10,11 +10,7 @@
 #include <cstdint>
 #include <future>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 struct causal_gotcha : tim::component::base<causal_gotcha, void>
 {
@@ -30,6 +26,4 @@ struct causal_gotcha : tim::component::base<causal_gotcha, void>
 
     static void remove_signals(sigset_t*);
 };
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal::component

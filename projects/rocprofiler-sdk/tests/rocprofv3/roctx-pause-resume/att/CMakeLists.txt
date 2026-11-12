@@ -38,19 +38,7 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(roctx-pause-resume-att-env "${PRELOAD_ENV}")
 
-find_library(
-    attdecoder_LIBRARY
-    NAMES rocprof-trace-decoder
-    HINTS ${ROCM_PATH}
-    PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib)
-
-if(attdecoder_LIBRARY)
-    cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
-endif()
-
-find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
-                                                           attdecoder_LIBRARY)
+rocprofiler_sdk_find_trace_decoder()
 
 set(IS_DISABLED ON)
 if(attdecoder_FOUND)

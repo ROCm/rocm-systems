@@ -451,6 +451,8 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
   std::vector<RdcFieldKey> fields_in_watch;
   result = get_fields_from_group(group_id, field_group_id, fields_in_watch);
   if (result != RDC_ST_OK) {
+    // Nothing refers to the new field group yet, so destroy it.
+    group_settings_->rdc_group_field_destroy(field_group_id);
     return result;
   }
 
@@ -479,6 +481,10 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
 
 rdc_status_t RdcWatchTableImpl::rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components) {
   if (nullptr == components) return RDC_ST_BAD_PARAMETER;
+
+  rdc_group_info_t ginfo;
+  rdc_status_t result = group_settings_->rdc_group_gpu_get_info(group_id, &ginfo);
+  if (result != RDC_ST_OK) return result;
 
   std::lock_guard<std::mutex> guard(watch_mutex_);
   auto table_iter = health_watch_table_.find(group_id);

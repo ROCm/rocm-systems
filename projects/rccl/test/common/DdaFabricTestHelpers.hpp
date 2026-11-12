@@ -36,6 +36,8 @@ struct DdaFabricMockComm
         comm.ddaScratchBytes    = std::numeric_limits<size_t>::max();
         comm.ddaFabricMaxBlocks = DDA_FABRIC_MAXBLOCKS;
         comm.archName            = const_cast<char*>("gfx1250");
+        // Non-null so launcher tests can tell the abort flag was forwarded.
+        comm.abortFlagDev       = reinterpret_cast<uint32_t*>(0x6);
         setFabricResourcesPresent(true);
     }
 

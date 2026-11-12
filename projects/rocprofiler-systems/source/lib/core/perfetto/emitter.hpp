@@ -6,6 +6,7 @@
 #include "core/categories.hpp"
 #include "core/concepts.hpp"
 #include "core/demangler.hpp"
+#include "core/node_info.hpp"
 #include "core/perfetto/category_registry.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/utility.hpp"
@@ -20,9 +21,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace core::perfetto
+namespace rocprofsys::core::perfetto
 {
 using hash_value_t = std::uint64_t;
 
@@ -55,6 +54,11 @@ get_active_process_track();
 void
 ensure_synthetic_process_track_emitted(int pid);
 
+/// @brief Writes a TracePacket carrying system_info.utsname (sysname, release,
+/// version, machine) to the sink bound to the calling thread's emitting pid.
+void
+emit_system_info_packet(const node_info& info);
+
 template <typename T>
     requires std::is_const_v<T>
 auto
@@ -82,11 +86,11 @@ add_perfetto_annotation(::perfetto::EventContext& ctx, Np&& name, Tp&& value,
     static_assert(concepts::is_string_type<named_type>::value,
                   "Error! name is not a string type");
 
-    auto get_debug_annotation = [&]() {
+    auto const get_debug_annotation = [&]() {
         auto* debug_annotation = ctx.event()->add_debug_annotations();
         if(idx >= 0)
         {
-            auto arg_name = fmt::format("arg{}-{}", idx, std::forward<Np>(name));
+            auto const arg_name = fmt::format("arg{}-{}", idx, std::forward<Np>(name));
             debug_annotation->set_name(arg_name);
         }
         else
@@ -119,9 +123,13 @@ add_perfetto_annotation(::perfetto::EventContext& ctx, Np&& name, Tp&& value,
     else if constexpr(std::is_integral<value_type>::value)
     {
         if constexpr(std::is_unsigned<value_type>::value)
+        {
             get_debug_annotation()->set_uint_value(value);
+        }
         else
+        {
             get_debug_annotation()->set_int_value(value);
+        }
     }
     else if constexpr(std::is_pointer<value_type>::value)
     {
@@ -193,7 +201,10 @@ inline void
 push_perfetto_track(CategoryT, const char* name, ::perfetto::Track track,
                     std::uint64_t timestamp, Args&&... args)
 {
-    if(!::tim::trait::runtime_enabled<CategoryT>::get()) return;
+    if(!::tim::trait::runtime_enabled<CategoryT>::get())
+    {
+        return;
+    }
 
     TRACE_EVENT_BEGIN(::tim::trait::name<CategoryT>::value, get_perfetto_string(name),
                       track, timestamp, std::forward<Args>(args)...);
@@ -204,7 +215,10 @@ inline void
 pop_perfetto_track(CategoryT, const char*, ::perfetto::Track track,
                    std::uint64_t timestamp, Args&&... args)
 {
-    if(!::tim::trait::runtime_enabled<CategoryT>::get()) return;
+    if(!::tim::trait::runtime_enabled<CategoryT>::get())
+    {
+        return;
+    }
 
     TRACE_EVENT_END(::tim::trait::name<CategoryT>::value, track, timestamp,
                     std::forward<Args>(args)...);
@@ -225,5 +239,4 @@ pop_perfetto(CategoryT, const char* name, ::perfetto::Track track,
 {
     pop_perfetto_track(CategoryT{}, name, track, timestamp, std::forward<Args>(args)...);
 }
-}  // namespace core::perfetto
-}  // namespace rocprofsys
+}  // namespace rocprofsys::core::perfetto

@@ -24,6 +24,7 @@
 #include "amd-dbgapi.h"
 #include "callbacks.h"
 #include "code_object.h"
+#include "cluster.h"
 #include "debug.h"
 #include "dispatch.h"
 #include "displaced_stepping.h"
@@ -116,6 +117,8 @@ private:
 
   bool m_supports_precise_alu_exceptions{ false };
 
+  bool m_supports_lds_exception{ false };
+
   os_process_flags_t m_process_flags{};
 
   bool m_forward_progress_needed{ true };
@@ -129,7 +132,8 @@ private:
     handle_object_set_t<code_object_t>, handle_object_set_t<dispatch_t>,
     handle_object_set_t<displaced_stepping_t>, handle_object_set_t<event_t>,
     handle_object_set_t<queue_t>, handle_object_set_t<watchpoint_t>,
-    handle_object_set_t<wave_t>, handle_object_set_t<workgroup_t>>
+    handle_object_set_t<wave_t>, handle_object_set_t<workgroup_t>,
+    handle_object_set_t<cluster_t>>
     m_handle_object_sets{};
 
   const agent_t m_dummy_agent;
@@ -286,6 +290,8 @@ public:
   void set_precise_memory (bool enabled);
 
   void set_precise_alu_exceptions (bool enabled);
+
+  void set_reporting_lds_exceptions (bool enabled);
 
   /* Suspend/resume a list of queues.  Queues may become invalid as a result of
      suspension/resumption, but not destroyed.  Queues made invalid will

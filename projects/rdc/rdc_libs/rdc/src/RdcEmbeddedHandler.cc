@@ -214,6 +214,9 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_attributes(uint32_t gpu_index,
   }
   rdc_field_value device_name;
   rdc_status_t status = metric_fetcher_->fetch_smi_field(gpu_index, RDC_FI_DEV_NAME, &device_name);
+  if (status != RDC_ST_OK) {
+    return status;  // device_name is unset when the fetch fails
+  }
   strncpy_with_null(p_rdc_attr->device_name, device_name.value.str, RDC_MAX_STR_LENGTH);
   return status;
 }
@@ -307,11 +310,12 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_field_create(uint32_t num_field_ids,
     return RDC_ST_BAD_PARAMETER;
   }
 
-  // Check the field is valid or not
+  // Check the field is valid or not, as a number: a caller can pass any value
   if (num_field_ids <= RDC_MAX_FIELD_IDS_PER_FIELD_GROUP) {
     for (uint32_t i = 0; i < num_field_ids; i++) {
-      if (!is_field_valid(field_ids[i])) {
-        RDC_LOG(RDC_INFO, "Fail to create field group with unknown field id " << field_ids[i]);
+      const uint32_t id = rdc_field_id_number(field_ids[i]);
+      if (!is_field_id_valid(id)) {
+        RDC_LOG(RDC_INFO, "Fail to create field group with unknown field id " << id);
         return RDC_ST_NOT_SUPPORTED;
       }
     }
@@ -329,8 +333,8 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_field_add_field(rdc_field_grp_t rdc_f
     return RDC_ST_NOT_SUPPORTED;
   }
 
-  if (!is_field_valid(field_id)) {
-    RDC_LOG(RDC_INFO, "Fail to add field with unknown field id " << field_id);
+  if (!is_field_id_valid(rdc_field_id_number(field_id))) {
+    RDC_LOG(RDC_INFO, "Fail to add field with unknown field id " << rdc_field_id_number(field_id));
     return RDC_ST_NOT_SUPPORTED;
   }
 
@@ -392,8 +396,9 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_get_latest_value(uint32_t gpu_index, 
   if (!value) {
     return RDC_ST_BAD_PARAMETER;
   }
-  if (!is_field_valid(field)) {
-    RDC_LOG(RDC_INFO, "Fail to get latest value with unknown field id " << field);
+  if (!is_field_id_valid(rdc_field_id_number(field))) {
+    RDC_LOG(RDC_INFO,
+            "Fail to get latest value with unknown field id " << rdc_field_id_number(field));
     return RDC_ST_NOT_SUPPORTED;
   }
   return cache_mgr_->rdc_field_get_latest_value(gpu_index, field, value);
@@ -406,8 +411,9 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_get_value_since(uint32_t gpu_index, r
   if (!next_since_time_stamp || !value) {
     return RDC_ST_BAD_PARAMETER;
   }
-  if (!is_field_valid(field)) {
-    RDC_LOG(RDC_INFO, "Fail to get value since with unknown field id " << field);
+  if (!is_field_id_valid(rdc_field_id_number(field))) {
+    RDC_LOG(RDC_INFO,
+            "Fail to get value since with unknown field id " << rdc_field_id_number(field));
     return RDC_ST_NOT_SUPPORTED;
   }
   return cache_mgr_->rdc_field_get_value_since(gpu_index, field, since_time_stamp,

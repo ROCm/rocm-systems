@@ -287,6 +287,7 @@ def test_single_node_detailed_profiling(paths):
 
 @pytest.mark.ext_profiler
 @pytest.mark.alltoall
+@pytest.mark.multinode
 def test_multinode_detailed_profiling(paths):
     """Test profiler with multi-node AllToAll operations using full event mask (255)"""
     

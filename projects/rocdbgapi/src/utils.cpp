@@ -56,6 +56,8 @@ static_assert (
     && sizeof (amd_dbgapi_instruction_properties_t) == sizeof (uint32_t)
     && sizeof (amd_dbgapi_memory_precision_t) == sizeof (uint32_t)
     && sizeof (amd_dbgapi_os_queue_type_t) == sizeof (uint32_t)
+    && sizeof (amd_dbgapi_property_scope_t) == sizeof (uint32_t)
+    && sizeof (amd_dbgapi_property_type_t) == sizeof (uint32_t)
     && sizeof (amd_dbgapi_queue_state_t) == sizeof (uint32_t)
     && sizeof (amd_dbgapi_register_class_state_t) == sizeof (uint32_t)
     && sizeof (amd_dbgapi_register_properties_t) == sizeof (uint32_t)
@@ -195,6 +197,11 @@ template std::pair<amd_dbgapi_dispatch_id_t * /* objects */,
                    size_t /* count */>
 get_handle_list<dispatch_t> (const std::vector<process_t *> &processes,
                              amd_dbgapi_changed_t *changed);
+
+template std::pair<amd_dbgapi_cluster_id_t * /* objects */,
+                   size_t /* count */>
+get_handle_list<cluster_t> (const std::vector<process_t *> &processes,
+                            amd_dbgapi_changed_t *changed);
 
 template std::pair<amd_dbgapi_workgroup_id_t * /* objects */,
                    size_t /* count */>

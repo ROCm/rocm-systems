@@ -4,7 +4,7 @@
 """Unit tests for src/rocprof_compute_analyze/analysis_base.py."""
 
 import argparse
-import gzip
+import functools
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,165 +26,10 @@ PRE_PROCESSING_ARGS = {
 }
 
 
-def test_concat_result_csvs_concatenates_rocpd_results(tmp_path, monkeypatch) -> None:
-    """Concatenates rocpd long-form results_*.csv.gz into one pmc_perf.csv.gz."""
-    common.patch_console(monkeypatch, MODULE, "debug", "warning")
-
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_0.csv.gz",
-        header + "0,kernel_a,SQ_WAVES,10\n0,kernel_a,SQ_WAVES,20\n",
-    )
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_1.csv.gz",
-        header + "0,kernel_a,SQ_BUSY_CYCLES,30\n",
-    )
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    inst.concat_result_csvs(
-        sorted(tmp_path.glob("results_*.csv.gz")), common.pmc_perf_path(tmp_path)
-    )
-    merged = pd.read_csv(common.pmc_perf_path(tmp_path))
-
-    assert list(merged.columns) == [
-        "GPU_ID",
-        "Kernel_Name",
-        "Counter_Name",
-        "Counter_Value",
-    ]
-    assert len(merged) == 3
-    assert set(merged["Counter_Name"]) == {"SQ_WAVES", "SQ_BUSY_CYCLES"}
-    assert sorted(merged["Counter_Value"].tolist()) == [10, 20, 30]
-
-
-def test_concat_result_csvs_skips_empty_and_errors_when_all_empty(
-    tmp_path, monkeypatch
-) -> None:
-    mocks = common.patch_console(monkeypatch, MODULE, "debug", "warning")
-    (tmp_path / "results_pmc_perf_0.csv.gz").write_bytes(b"")
-    (tmp_path / "results_pmc_perf_1.csv.gz").write_bytes(b"")
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    with pytest.raises(SystemExit):
-        inst.concat_result_csvs(
-            sorted(tmp_path.glob("results_*.csv.gz")),
-            common.pmc_perf_path(tmp_path),
-        )
-
-    assert not (common.pmc_perf_path(tmp_path)).exists()
-    skipped = [
-        call.args[0]
-        for call in mocks["warning"].call_args_list
-        if "Skipping empty" in str(call.args[0])
-    ]
-    assert len(skipped) == 2
-
-
-def test_concat_result_csvs_skips_zero_byte_compressed_pass(
-    tmp_path, monkeypatch
-) -> None:
-    common.patch_console(monkeypatch, MODULE, "debug", "warning")
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_0.csv.gz",
-        header + "0,kernel_a,SQ_WAVES,10\n",
-    )
-    (tmp_path / "results_pmc_perf_1.csv.gz").write_bytes(b"")
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    inst.concat_result_csvs(
-        sorted(tmp_path.glob("results_*.csv.gz")), common.pmc_perf_path(tmp_path)
-    )
-
-    assert pd.read_csv(common.pmc_perf_path(tmp_path))["Counter_Value"].tolist() == [10]
-
-
-def test_join_workload_csvs_finds_compressed_results(tmp_path, monkeypatch) -> None:
-    """join_workload_csvs picks up compressed results_*.csv.gz artifacts."""
-    common.patch_console(monkeypatch, MODULE, "debug", "warning", "log")
-
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_0.csv.gz",
-        header + "0,kernel_a,SQ_WAVES,10\n",
-    )
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    inst.join_workload_csvs(tmp_path)
-
-    assert pd.read_csv(common.pmc_perf_path(tmp_path))["Counter_Value"].tolist() == [10]
-
-
-def test_join_workload_csvs_reuses_existing_merge(tmp_path, monkeypatch) -> None:
-    """An existing merge wins over results_*.csv.gz instead of being rebuilt."""
-    common.patch_console(monkeypatch, MODULE, "debug", "warning", "log")
-
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    common.write_pmc_perf(tmp_path, header + "0,kernel_a,SQ_WAVES,10\n")
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_0.csv.gz",
-        header + "0,kernel_a,SQ_WAVES,99\n",
-    )
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    inst.join_workload_csvs(tmp_path)
-
-    assert pd.read_csv(common.pmc_perf_path(tmp_path))["Counter_Value"].tolist() == [10]
-
-
-def test_concat_result_csvs_errors_on_truncated_compressed_results(
-    tmp_path, monkeypatch
-) -> None:
-    """Partial .csv.gz from a killed profile run must not leave output behind."""
-    common.patch_console(monkeypatch, MODULE, "debug", "warning")
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    rows = "".join(f"0,kernel_a,SQ_WAVES,{i}\n" for i in range(2000))
-    whole = gzip.compress((header + rows).encode("utf-8"))
-    (tmp_path / "results_pmc_perf_0.csv.gz").write_bytes(whole[: len(whole) // 2])
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    with pytest.raises(SystemExit):
-        inst.concat_result_csvs(
-            sorted(tmp_path.glob("results_*.csv.gz")),
-            common.pmc_perf_path(tmp_path),
-        )
-
-    assert not (common.pmc_perf_path(tmp_path)).exists()
-
-
-def test_concat_result_csvs_errors_when_only_headers(tmp_path, monkeypatch) -> None:
-    """Header-only results files must not leave a reusable output behind."""
-    common.patch_console(monkeypatch, MODULE, "debug", "warning")
-    header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-    common.write_gzip_csv(tmp_path / "results_pmc_perf_0.csv.gz", header)
-    common.write_gzip_csv(tmp_path / "results_pmc_perf_1.csv.gz", header)
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    with pytest.raises(SystemExit):
-        inst.concat_result_csvs(
-            sorted(tmp_path.glob("results_*.csv.gz")),
-            common.pmc_perf_path(tmp_path),
-        )
-
-    assert not (common.pmc_perf_path(tmp_path)).exists()
-
-
-def test_concat_result_csvs_rejects_wide_legacy_results(tmp_path, monkeypatch) -> None:
-    """Wide legacy results_*.csv without Counter_Name are rejected."""
-    common.patch_console(monkeypatch, MODULE, "debug", "warning")
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_0.csv.gz",
-        "GPU_ID,Kernel_Name,Dispatch_ID,SQ_WAVES\n0,kernel_a,0,10\n",
-    )
-
-    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
-    with pytest.raises(SystemExit):
-        inst.concat_result_csvs(
-            sorted(tmp_path.glob("results_*.csv.gz")),
-            common.pmc_perf_path(tmp_path),
-        )
-
-    assert not (common.pmc_perf_path(tmp_path)).exists()
+def record_error_and_exit(errors, *args, **kwargs):
+    """Record a console_error call, then exit like the real one."""
+    errors.append(args)
+    raise SystemExit(1)
 
 
 def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -> None:
@@ -196,7 +41,7 @@ def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -
 
     # The mock records instead of exiting, so sanitize runs on to a later error.
     with pytest.raises(SystemExit):
-        OmniAnalyze_Base(argparse.Namespace(tui=False, path=paths), {}).sanitize()
+        OmniAnalyze_Base(argparse.Namespace(path=paths), {}).sanitize()
 
     assert "last two components" in mock_error.call_args.args[1]
 
@@ -312,5 +157,88 @@ def test_initalize_runs_corrects_specs_only_when_asked(
 
     expected_num_xcd = "4" if specs_correction else 8
     assert workload.sys_info["num_xcd"].item() == expected_num_xcd
-    # initalize_runs reads ip_blocks off sys_info straight after the correction.
-    assert workload.avail_ips == sysinfo["ip_blocks"].split("|")
+
+
+# =============================================================================
+# membw_analysis_collected tests
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "profiling_config,expected",
+    [
+        pytest.param({"membw_analysis": True}, True, id="collected"),
+        pytest.param({"membw_analysis": False}, False, id="not_collected"),
+        pytest.param({}, False, id="absent"),
+    ],
+)
+def test_membw_analysis_collected(profiling_config, expected) -> None:
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    inst._profiling_config = profiling_config
+    assert inst.membw_analysis_collected() is expected
+
+
+def test_membw_analysis_collected_without_config_attribute() -> None:
+    inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
+    assert inst.membw_analysis_collected() is False
+
+
+@pytest.mark.parametrize(
+    "flag_kwargs, expected_trace",
+    [
+        pytest.param(
+            {
+                "list_torch_operators": True,
+                "list_triton_operators": False,
+                "torch_operator": None,
+                "triton_operator": None,
+            },
+            "--torch-trace",
+            id="list_torch",
+        ),
+        pytest.param(
+            {
+                "list_torch_operators": False,
+                "list_triton_operators": True,
+                "torch_operator": None,
+                "triton_operator": None,
+            },
+            "--triton-trace",
+            id="list_triton",
+        ),
+        pytest.param(
+            {
+                "list_torch_operators": False,
+                "list_triton_operators": False,
+                "torch_operator": None,
+                "triton_operator": ["*matmul*"],
+            },
+            "--triton-trace",
+            id="triton_operator",
+        ),
+    ],
+)
+def test_sanitize_errors_when_operator_flag_without_trace(
+    tmp_path, monkeypatch, flag_kwargs, expected_trace
+):
+    workload = tmp_path / "app" / "MI300"
+    workload.mkdir(parents=True)
+    (workload / "profiling_config.yaml").write_text(
+        "torch_trace: false\ntriton_trace: false\nml_api_trace: false\n",
+        encoding="utf-8",
+    )
+    errors = []
+    monkeypatch.setattr(
+        f"{MODULE}.console_error", functools.partial(record_error_and_exit, errors)
+    )
+    with pytest.raises(SystemExit):
+        OmniAnalyze_Base(
+            argparse.Namespace(
+                tui=False,
+                path=[[str(workload)]],
+                **flag_kwargs,
+            ),
+            {},
+        ).sanitize()
+    assert "was not profiled" in errors[-1][1]
+    assert expected_trace in errors[-1][1]

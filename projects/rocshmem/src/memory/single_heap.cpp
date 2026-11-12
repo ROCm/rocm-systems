@@ -24,6 +24,7 @@
 
 #include "single_heap.hpp"
 
+#include <cassert>
 #include <sstream>
 #include "log.hpp"
 

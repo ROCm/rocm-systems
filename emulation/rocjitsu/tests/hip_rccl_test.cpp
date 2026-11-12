@@ -11,6 +11,7 @@
 ///
 /// Compiled with hipcc, linked with -lrccl. Requires LD_PRELOAD=librocjitsu.so.
 /// Arguments: --rank=N --world-size=M --shared-dir=DIR [--seed=S]
+///            [--expected-devices=N]
 
 #include <hip/hip_runtime.h>
 #include <rccl/rccl.h>
@@ -32,6 +33,7 @@ static int g_rank = 0;
 static int g_world_size = 2;
 static std::string g_shared_dir;
 static uint32_t g_base_seed = 42;
+static int g_expected_devices = -1;
 static constexpr int kFuzzIters = 3;
 static constexpr float kTolerance = 1e-4f;
 
@@ -102,7 +104,7 @@ static std::vector<float> all_ranks_input(uint32_t iter_seed, int n) {
   std::vector<float> all(n * g_world_size);
   for (int r = 0; r < g_world_size; ++r) {
     auto v = random_floats(iter_seed + r, n);
-    std::copy(v.begin(), v.end(), all.begin() + r * n);
+    std::ranges::copy(v, all.begin() + r * n);
   }
   return all;
 }
@@ -110,14 +112,27 @@ static std::vector<float> all_ranks_input(uint32_t iter_seed, int n) {
 class RcclTest : public ::testing::Test {
 protected:
   void SetUp() override {
+    if (g_expected_devices >= 0) {
+      int device_count = 0;
+      HIP_ASSERT(hipGetDeviceCount(&device_count));
+      ASSERT_EQ(device_count, g_expected_devices)
+          << "rank=" << g_rank << " expected node-local GPU discovery";
+    }
+
+    const auto *test_info = ::testing::UnitTest::GetInstance()->current_test_info();
+    ASSERT_NE(test_info, nullptr);
+    // A process may run several cases in one shared directory. Give each
+    // communicator its own files so the next case cannot reuse stale markers.
+    const std::string rendezvous = test_info->name();
+    const std::string id_path = g_shared_dir + "/nccl_id." + rendezvous;
     ncclUniqueId id{};
     if (g_rank == 0) {
       NCCL_ASSERT(ncclGetUniqueId(&id));
-      write_file(g_shared_dir + "/nccl_id", &id, sizeof(id));
+      write_file(id_path, &id, sizeof(id));
     }
-    barrier("nccl_init");
+    barrier("nccl_init." + rendezvous);
     if (g_rank != 0)
-      read_file_blocking(g_shared_dir + "/nccl_id", &id, sizeof(id));
+      read_file_blocking(id_path, &id, sizeof(id));
     NCCL_ASSERT(ncclCommInitRank(&comm_, g_world_size, id, g_rank));
     HIP_ASSERT(hipStreamCreate(&stream_));
   }
@@ -262,35 +277,36 @@ TEST_F(RcclTest, ReduceScatter) {
 }
 
 TEST_F(RcclTest, SendRecv) {
+  ASSERT_GE(g_world_size, 2);
   for (int iter = 0; iter < kFuzzIters; ++iter) {
     uint32_t size_seed = g_base_seed + 100 * iter + 40;
     int n = fuzz_size(size_seed);
     uint32_t iter_seed = g_base_seed + 1000 * iter + 40;
-    auto send_data = random_floats(iter_seed, n);
+    const int source = (g_rank + g_world_size - 1) % g_world_size;
+    const int destination = (g_rank + 1) % g_world_size;
+    auto send_data = random_floats(iter_seed + g_rank, n);
+    auto expected = random_floats(iter_seed + source, n);
 
-    float *d_buf = nullptr;
-    HIP_ASSERT(hipMalloc(&d_buf, n * sizeof(float)));
+    float *d_send = nullptr, *d_recv = nullptr;
+    HIP_ASSERT(hipMalloc(&d_send, n * sizeof(float)));
+    HIP_ASSERT(hipMalloc(&d_recv, n * sizeof(float)));
+    HIP_ASSERT(hipMemcpy(d_send, send_data.data(), n * sizeof(float), hipMemcpyHostToDevice));
 
-    if (g_rank == 0) {
-      HIP_ASSERT(hipMemcpy(d_buf, send_data.data(), n * sizeof(float), hipMemcpyHostToDevice));
-      NCCL_ASSERT(ncclGroupStart());
-      NCCL_ASSERT(ncclSend(d_buf, n, ncclFloat, 1, comm_, stream_));
-      NCCL_ASSERT(ncclGroupEnd());
-    } else {
-      NCCL_ASSERT(ncclGroupStart());
-      NCCL_ASSERT(ncclRecv(d_buf, n, ncclFloat, 0, comm_, stream_));
-      NCCL_ASSERT(ncclGroupEnd());
-    }
+    // Every rank posts one matching send and receive in the same group.
+    NCCL_ASSERT(ncclGroupStart());
+    NCCL_ASSERT(ncclSend(d_send, n, ncclFloat, destination, comm_, stream_));
+    NCCL_ASSERT(ncclRecv(d_recv, n, ncclFloat, source, comm_, stream_));
+    NCCL_ASSERT(ncclGroupEnd());
     HIP_ASSERT(hipStreamSynchronize(stream_));
 
-    if (g_rank == 1) {
-      std::vector<float> result(n);
-      HIP_ASSERT(hipMemcpy(result.data(), d_buf, n * sizeof(float), hipMemcpyDeviceToHost));
-      for (int i = 0; i < n; ++i)
-        EXPECT_NEAR(result[i], send_data[i], kTolerance) << "iter=" << iter << " i=" << i;
-    }
+    std::vector<float> result(n);
+    HIP_ASSERT(hipMemcpy(result.data(), d_recv, n * sizeof(float), hipMemcpyDeviceToHost));
+    for (int i = 0; i < n; ++i)
+      EXPECT_NEAR(result[i], expected[i], kTolerance)
+          << "iter=" << iter << " rank=" << g_rank << " i=" << i;
 
-    (void)hipFree(d_buf);
+    (void)hipFree(d_send);
+    (void)hipFree(d_recv);
   }
 }
 
@@ -304,11 +320,14 @@ int main(int argc, char **argv) {
       g_shared_dir = argv[i] + 13;
     else if (std::strncmp(argv[i], "--seed=", 7) == 0)
       g_base_seed = static_cast<uint32_t>(std::atoi(argv[i] + 7));
+    else if (std::strncmp(argv[i], "--expected-devices=", 19) == 0)
+      g_expected_devices = std::atoi(argv[i] + 19);
   }
 
   if (g_shared_dir.empty()) {
     std::cerr << "Usage: " << argv[0]
-              << " --rank=N --world-size=M --shared-dir=DIR [--seed=S] [gtest args]\n";
+              << " --rank=N --world-size=M --shared-dir=DIR [--seed=S]"
+                 " [--expected-devices=N] [gtest args]\n";
     return 1;
   }
 

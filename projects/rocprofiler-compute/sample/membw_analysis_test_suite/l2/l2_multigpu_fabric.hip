@@ -32,7 +32,7 @@
 //   rocprof-compute profile -n fabric_rw --experimental --membw-analysis --no-roof -- ./l2_multigpu_fabric
 //
 // Analyze:
-//   rocprof-compute analyze -p <profiled_result_path> --experimental --membw-analysis
+//   rocprof-compute analyze -p <profiled_result_path>
 
 #include <hip/hip_runtime.h>
 #include <iostream>

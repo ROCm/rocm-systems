@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/dim3d.h"
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -22,17 +23,10 @@ struct WaveId {
   bool operator<(WaveId o) const { return value < o.value; }
 };
 
-/// Number of lanes per wave (32 for RDNA, 64 for CDNA).
-/// Implicitly convertible to int for use in arithmetic and loop bounds.
-struct WaveSize {
-  int value;
-  operator int() const { return value; }
-};
-
 /// Identifies a memory event within a workgroup. Each memory instruction
 /// (LDS read/write, global load/store) creates an event via
 /// RaceDetector::allocateEventId(). The event ID is used to track the event
-/// through its lifecycle: registration, s_waitcnt completion, and barrier
+/// through its lifecycle: registration, wave-local completion, and barrier
 /// retirement. Strongly typed to prevent accidental mixing with wave IDs,
 /// register indices, or byte addresses.
 struct EventId {
@@ -46,8 +40,15 @@ struct EventId {
   bool operator<(EventId o) const { return value < o.value; }
 };
 
+/// A contiguous run of LDS bytes, for events described by byte ranges rather
+/// than per-lane addresses.
+struct LdsByteRange {
+  uint32_t address = 0; ///< Absolute CU LDS byte address.
+  uint32_t bytes = 0;
+};
+
 inline void removeFromUnorderedList(std::vector<EventId> &list, EventId eventId) {
-  auto it = std::find(list.begin(), list.end(), eventId);
+  auto it = std::ranges::find(list, eventId);
   if (it != list.end()) {
     std::swap(*it, list.back());
     list.pop_back();
@@ -68,7 +69,7 @@ struct RaceViolation {
   Space space;
   int index;    ///< Register index (VGPR/SGPR) or byte address (LDS).
   int wave;     ///< Wave that triggered the violation.
-  int lane;     ///< Lane within the wave, or -1 for scalar.
+  int lane;     ///< Lane within the wave, or -1 for no lane (scalar or tensor DMA).
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
   EventId conflictingEvent; ///< Exact pending memory event that caused the violation.

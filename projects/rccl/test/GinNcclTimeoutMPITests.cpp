@@ -24,7 +24,11 @@
  *   - BackToBackTimeouts: 4 sequential stuck barriers, each yields ncclTimeout
  *
  * GinBarrierTimeoutMPITest — real GIN device barrier timeout
- *                            (requires NCCL_GIN_TYPE=2, NCCL_CUMEM_ENABLE=1):
+ *                            (requires NCCL_GIN_TYPE=2, NCCL_CUMEM_ENABLE=1).
+ * AICOMRCCL-2017 / NVIDIA/nccl#2279: the GIN_ProxyNthreads_2 and _4 runner
+ * arms re-run HealthyBarrierReturnsSuccess with NCCL_GIN_PROXY_NTHREADS=2
+ * and 4 (host progress threads only exist on PROXY). The other cases below
+ * stay on the default thread count.
  *   - HealthyBarrierReturnsSuccess
  *   - AbsentPeerProducesTimeout
  *   - ZeroBudgetAbsentPeerTimesOut
@@ -330,7 +334,7 @@ class LsaBarrierTimeoutMPITest : public MPITestBase {
         ncclComm_t comm = getActiveCommunicator();
         ncclResult_t devRc = createLsaDevComm(comm, nBarriers, devCommOut);
         if (devRc != ncclSuccess) {
-            skipReason_ = std::string("LSA devComm requires symmetric memory (cuMem, kernel >= 6.8); "
+            skipReason_ = std::string("LSA devComm requires symmetric memory (cuMem/VMM); "
                                       "ncclDevCommCreate returned ") + ncclGetErrorString(devRc);
             return false;
         }

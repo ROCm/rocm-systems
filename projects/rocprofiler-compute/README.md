@@ -10,6 +10,9 @@ targets usage on MI100, MI200, MI300, and MI350 series accelerators.
 workload profiling and analysis, please refer to the online
 [documentation](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
+* Agent Skills for profiling and analyzing workloads with `rocprof-compute`
+live under [skills/](skills/).
+
 * ROCm Compute Profiler is an AMD open source tool that is part of the ROCm software stack. We welcome contributions and
 feedback from the community. Please see the
 [CONTRIBUTING.md](CONTRIBUTING.md) file for additional details on our

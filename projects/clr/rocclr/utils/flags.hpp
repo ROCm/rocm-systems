@@ -108,8 +108,8 @@ release(bool, DISABLE_DEFERRED_ALLOC, false,                                  \
         "Disables deferred memory allocation on device")                      \
 release(int, AMD_GPU_FORCE_SINGLE_FP_DENORM, -1,                              \
         "Force denorm for single precision: -1 - don't force, 0 - disable, 1 - enable") \
-release(uint, OCL_SET_SVM_SIZE, 256*1024,                                     \
-        "set SVM space size for discrete GPU")                                \
+release(uint, OCL_SET_SVM_SIZE, 4 * 1024 * 1024,                              \
+        "Set SVM space size for discrete GPU (MiB)")                          \
 release(uint, GPU_WAVES_PER_SIMD, 0,                                          \
         "Force the number of waves per SIMD (1-10)")                          \
 release(bool, OCL_STUB_PROGRAMS, false,                                       \
@@ -196,6 +196,8 @@ release(bool, DEBUG_HIP_MEM_POOL_VMHEAP, true,                                \
         "Enables virtual memory for memory pools")                            \
 release(bool, PAL_HIP_IPC_FLAG, true,                                         \
         "Enable interprocess flag for device allocation in PAL HIP")          \
+release(bool, OMNICACHE_ENABLE, true,                                         \
+        "Opt the process into OmniCache VRAM<->DRAM tiering.")                \
 release(uint, PAL_FORCE_ASIC_REVISION, 0,                                     \
         "Force a specific asic revision for all devices")                     \
 release(bool, PAL_EMBED_KERNEL_MD, false,                                     \
@@ -223,8 +225,6 @@ release(bool, ROC_SKIP_KERNEL_ARG_COPY, false,                                \
         "If true, then runtime can skip kernel arg copy")                     \
 release(bool, GPU_STREAMOPS_CP_WAIT, false,                                   \
         "Force the stream wait memory operation to wait on CP.")              \
-release(bool, HIPRTC_USE_RUNTIME_UNBUNDLER, false,                            \
-        "Set this to true to force runtime unbundler in hiprtc.")             \
 release(size_t, HIP_INITIAL_DM_SIZE, 8 * Mi,                                  \
         "Set initial heap size for device malloc.")                           \
 release(bool, HIP_FORCE_DEV_KERNARG, true,                                    \
@@ -248,6 +248,11 @@ release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
 release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 0,                          \
         "Segment scheduling mode (segmented path only): "                      \
         "0=Hybrid/auto, 1=Round-robin, 2=DFS")                                \
+release(uint, DEBUG_HIP_GRAPH_COLLAPSE_RULE, 1,                               \
+        "When a segmented graph collapses to one stream: 1 = C1, a cross-stream "\
+        "edge touching a node that isn't AQL-captured collapses it, and the "  \
+        "slack rule applies only if DEBUG_HIP_GRAPH_MIN_OVERLAP is set; 0 = the "\
+        "slack rule (DEBUG_HIP_GRAPH_MIN_OVERLAP) alone, as before")          \
 release(uint, DEBUG_HIP_GRAPH_MIN_OVERLAP, 2,                                 \
         "Min overlappable work (in occupancy passes) per unit of cross-stream "\
         "sync (barrier packets + completion signals) to keep a graph "         \
@@ -286,7 +291,7 @@ release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
         "Disables certain fallback paths")                                    \
 release(bool, DEBUG_CLR_DIRECT_DOORBELL, false,                               \
         "Write the hardware doorbell directly from CLR")                      \
-release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 0,                                     \
+release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 1,                                     \
         "Device-memory AQL ring buffer for supported asics "                  \
         "(1=enabled, 0=force system mem (default))")                          \
 release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
@@ -294,6 +299,15 @@ release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
         "(1=enabled (default), 0=non-temporal store path)")                   \
 release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
         "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
+release(bool, DEBUG_CLR_GRAPH_DEV_SIGNALS, true,                              \
+        "Place graph signals in device memory (large BAR only)")              \
+release(bool, DEBUG_CLR_DEV_SIGNALS, false,                                   \
+        "Place queue signals in device memory (large BAR only)")              \
+release(bool, DEBUG_CLR_GRAPH_FAST_LAUNCH, true,                             \
+        "Graph launches on several streams: one-packet end markers with a "  \
+        "gate for the other queues, fork waits without marker commands, "     \
+        "empty nodes carrying their waits, no host read-backs of device "     \
+        "memory on the launch path (0 = the previous launch path)")           \
 
 namespace amd {
 

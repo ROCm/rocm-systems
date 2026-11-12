@@ -55,3 +55,8 @@ __device__ __attribute__((noinline)) void ncclDevFunc_Nop();
 // per-impl/specialized files, so the definition must live here (as in upstream and
 // the v2.29.7-1 base). The generated ncclDevFuncTable references this symbol.
 __device__ void ncclDevFunc_Nop() {}
+
+// Capture %globaltimer for optional CPU/GPU clock calibration in init.cc.
+__global__ void ncclProgressCounterCaptureGpuTime(uint64_t* out) {
+  if (threadIdx.x == 0) *out = globaltimer();
+}

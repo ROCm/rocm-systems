@@ -4,6 +4,7 @@
 #pragma once
 #include <algorithm>
 #include <cassert>
+#include <optional>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -43,8 +44,7 @@ public:
     if (intervals.size() <= 1) {
       return;
     }
-    std::sort(intervals.begin(), intervals.end(),
-              [](const Interval &a, const Interval &b) { return a.start < b.start; });
+    std::ranges::sort(intervals, {}, &Interval::start);
     size_t out = 0;
     for (size_t i = 1; i < intervals.size(); ++i) {
       if (intervals[i].start <= intervals[out].end) {
@@ -95,14 +95,28 @@ public:
   /// it overlaps; otherwise no interval does.
   bool overlapsRange(int qStart, int qEnd) const {
     // Find first interval with start >= qEnd.
-    auto it = std::lower_bound(intervals.begin(), intervals.end(), qEnd,
-                               [](const Interval &iv, int val) { return iv.start < val; });
+    auto it = std::ranges::lower_bound(intervals, qEnd, {}, &Interval::start);
     // The candidate is the interval just before it.
     if (it == intervals.begin()) {
       return false;
     }
     --it;
     return it->end > qStart;
+  }
+
+  /// Return the lowest byte of [qStart, qEnd) that some interval covers, or
+  /// nullopt if none does, including for an empty query. Requires intervals to
+  /// be sorted (finalize()).
+  ///
+  /// Sorted non-overlapping intervals also have sorted ends, so the first
+  /// interval ending after qStart is the only candidate for the lowest byte.
+  std::optional<int> firstOverlap(int qStart, int qEnd) const {
+    if (qStart >= qEnd)
+      return std::nullopt;
+    auto it = std::ranges::upper_bound(intervals, qStart, {}, &Interval::end);
+    if (it == intervals.end() || it->start >= qEnd)
+      return std::nullopt;
+    return std::max(it->start, qStart);
   }
 
   auto begin() const { return intervals.begin(); }

@@ -7,7 +7,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -116,25 +115,6 @@ TEST(ObservableSharedMutexTest, ExclusiveOwnershipHoldsOffAReader) {
   }
   reader.join();
   EXPECT_TRUE(read_entered.load(std::memory_order_acquire));
-}
-
-// Acquiring can throw -- std::shared_timed_mutex::lock() reports system errors
-// that way -- and a throw past the count would leave a writer that does not
-// exist. Nothing lowers it again, so a later wait for it to fall hangs and a
-// wait for it to rise passes without anything having blocked.
-TEST(ObservableSharedMutexTest, TheWaitingCountUnwindsWhenAcquisitionThrows) {
-  ObservableSharedMutex mutex;
-  ASSERT_EQ(mutex.blocked_writers(), 0u);
-
-  try {
-    const ObservableSharedMutex::ExclusiveGuard::CountedWait counted(mutex);
-    EXPECT_EQ(mutex.blocked_writers(), 1u) << "the wait was never counted";
-    throw std::runtime_error("acquisition failed");
-  } catch (const std::runtime_error &) {
-  }
-
-  EXPECT_EQ(mutex.blocked_writers(), 0u)
-      << "a throw past the count leaves a phantom writer that nothing ever clears";
 }
 
 } // namespace

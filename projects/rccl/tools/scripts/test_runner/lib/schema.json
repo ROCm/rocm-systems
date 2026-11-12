@@ -281,6 +281,10 @@
           "type": "string",
           "description": "Shared base command-line arguments for this configuration. A test's own 'command_args' is appended to this base at execution time (see test_executor.run_test). Inherited via 'extends': a child that omits command_args takes the parent's value."
         },
+        "skip_if_missing": {
+          "type": "boolean",
+          "description": "When true, a missing single-rank test binary is SKIPPED instead of FAILED. Use for targets CMake omits unless an optional dependency is present, such as the GIN-SDMA AllGather and Broadcast unit tests that require sibling rccl-tests headers. Default: false. Missing MPI binaries (num_ranks > 1) are already skipped."
+        },
         "description": {
           "type": "string",
           "description": "Human-readable description of this configuration block (not interpreted by the runner)"

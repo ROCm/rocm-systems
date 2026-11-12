@@ -13,13 +13,11 @@
 #include "gin_sdma_devtime.h"  // shared device-side (wall_clock64) timing scaffold
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
-// ncclGinAnvilSdmaGPUContext: read by BroadcastGetSdmaThreshold to pick up the
-// backend's NCCL_GIN_ANVIL_SDMA_THRESHOLD when no per-collective override is set.
-#include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 // v4u / v4u_gptr / RCCL_SYSTEM_SYNCSCOPE / RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS for
 // nontemporal system-scope b128 peer stores (the store path LL/host use over xGMI).
 #include "nccl_device/rccl_ptr.h"
 #include "rccl_vector_types.h"
+#include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
 #endif
 
 // LL (low-latency, packed data+flag) small-message Broadcast path. Broadcast is
@@ -225,6 +223,18 @@ testResult_t  BroadcastGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclD
   return testSuccess;
 }
 
+extern int nGpus;
+extern int agg_iters;
+
+testResult_t  BroadcastGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
+    const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetCollImplInfo == NULL) return testInternalError;
+  // Grouped broadcasts (AllGatherV mode, -g > 1, -m > 1) always enqueue; let the caller fall back to the enqueue reporter.
+  if (broadcast_grouped || nGpus > 1 || agg_iters > 1) return testNotImplemented;
+  NCCLCHECK(rcclTestsGetCollImplInfo(comm, ncclFuncBroadcast, count, type, op, sendbuff, recvbuff, graphCapturing, algo, proto, nchannels));
+  return testSuccess;
+}
+
 void BroadcastGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   if (broadcast_grouped) {
     double baseBw = (double)(count * nranks * typesize) / 1.0E9 / sec;
@@ -320,6 +330,9 @@ testResult_t BroadcastGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
       // Barriers must cover BOTH the size-adaptive hybrid/SAG grids (pool =
       // max(-V, ladder peak)) and the ring's own (larger) CTA count.
       {
@@ -390,6 +403,10 @@ bool BroadcastGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* re
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
 __device__ size_t BroadcastGetSdmaThreshold(struct ncclDevComm const& devComm) {
+// nccl_device.h delivers the Anvil SDMA context type transitively through
+// gin_device_api.h only when NCCL_GIN_ANVIL_SDMA_ENABLE self-detects the backend
+// (a non-GIN install ships no anvil_sdma headers), so read it only when enabled.
+#if NCCL_GIN_ANVIL_SDMA_ENABLE
   using nccl::utility::loadConst;
   if (devComm.ginConnectionCount == 0 || devComm.ginHandles[0] == nullptr) {
     return NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
@@ -401,6 +418,12 @@ __device__ size_t BroadcastGetSdmaThreshold(struct ncclDevComm const& devComm) {
     return NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
   }
   return loadConst(&rsCtx->sdmaThreshold);
+#else
+  // No Anvil SDMA backend installed: no GIN context to read, so fall back to the
+  // anvil-free default from the shared tier policy.
+  (void)devComm;
+  return gin_sdma::kBroadcastSdmaThresholdDefault;
+#endif
 }
 
 // Local send->recv copy on the root (out-of-place). Uses 16-byte vector stores
@@ -574,7 +597,9 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
 
   const int ginContext = 0;
   const unsigned int signalIndex = 0;
-  ncclGin gin { devComm, ginContext };
+  // Only block 0 communicates (commCta below), one thread per peer QP
+  // (single-owner), so THREAD mode drops the SQ lock.
+  ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
 
   // All GIN traffic on this path is confined to block 0, and so are the signal
   // read and wait that bracket it. `bar` synchronizes same-index blocks across
@@ -586,7 +611,7 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
   // edge that does order them. Other CTAs still run the grid-strided local copy.
   const bool commCta = (blockIdx.x == 0);
 
-  // ncclGin_SignalInc is a *remote* action: each put increments the receiving
+  // The put's SignalInc is a *remote* action: each put increments the receiving
   // peer's signal (confirmed vs AllGather/AlltoAll, where a rank receives N puts
   // and waits base+N). So the root -- which receives no puts -- must not wait on
   // its own signal; instead every non-root receives exactly one put and waits
@@ -594,11 +619,16 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
   // receiver-side waitSignal is what makes the payload visible on non-roots.
   const uint64_t signalValue = commCta ? gin.readSignal(signalIndex) : 0;
 
-  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
   // Entry barrier: every rank's recv buffer quiescent before root starts writing.
-  // Every CTA takes part -- this is a cross-rank barrier keyed by blockIdx.x, so
-  // dropping a block here would hang the matching block on every other rank.
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  // Block 0 only: the remote puts and their receiver-side wait are block 0's, so
+  // block 0 carries the one cross-rank edge the puts need; CTAs 1..N only do the
+  // root's LOCAL self-copy, which needs no cross-rank order. Confining it to block
+  // 0 keeps the world barrier single-poster on qps[peer] for THREAD mode (the
+  // barrier signals/flushes those QPs too). Symmetric across ranks, so no hang.
+  if (commCta) {
+    ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, 0 };
+    bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  }
 
   if (devComm.rank == root) {
     // Out-of-place self copy (no-op when in-place: local src == local dst).
@@ -618,7 +648,7 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
         gin.put(ncclTeamWorld(devComm), r,
             recvwin, recvoffset,
             sendwin, sendoffset,
-            msgBytes, ncclGin_SignalInc{signalIndex});
+            msgBytes, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
       }
 
       // flush(): all source buffers safe to reuse once the puts are pushed.
@@ -674,7 +704,9 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
   const int tid = threadIdx.x + blockIdx.x * blockDim.x;
   const int nthreads = blockDim.x * gridDim.x;
 
-  ncclGin gin { devComm, /*context=*/0 };
+  // Only block 0 communicates (commCta below), one thread per peer QP in both
+  // phases (single-owner), so THREAD mode drops the SQ lock.
+  ncclGin gin { devComm, /*context=*/0, ginResourceSharingModeDev() };
   const unsigned int sigScatter = 0;
   const unsigned int sigGather = 1;
 
@@ -688,9 +720,14 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
   const uint64_t baseGather = commCta ? gin.readSignal(sigGather) : 0;
 
   // Entry barrier: every rank's recvbuff quiescent before the root scatters.
-  // All CTAs participate; it is keyed by blockIdx.x across ranks.
-  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  // Block 0 only: all GIN (scatter/allgather puts, their waits) is block 0's, so
+  // block 0 carries the cross-rank edge; CTAs 1..N only do the root's LOCAL slice
+  // self-copy, which needs no cross-rank order. Confining it keeps the world
+  // barrier single-poster on qps[peer] for THREAD mode. Symmetric, so no hang.
+  if (commCta) {
+    ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, 0 };
+    bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  }
 
   // --- Phase 1: scatter chunk r -> rank r (root only) ---
   if (rank == root) {
@@ -713,7 +750,7 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
         gin.put(ncclTeamWorld(devComm), r,
             recvwin, recvoffset + rOff,
             sendwin, sendoffset + rOff,
-            rChunk.count * sizeof(T), ncclGin_SignalInc{sigScatter});
+            rChunk.count * sizeof(T), TEST_GIN_WEAK_SIGNAL_INC(sigScatter));
       }
     }
     // No intermediate flush: the scatter and allgather sources are both the
@@ -739,7 +776,7 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
       gin.put(ncclTeamWorld(devComm), r,
           recvwin, recvoffset + myByteOff,
           myWin, myWinOff,
-          myBytes, ncclGin_SignalInc{sigGather});
+          myBytes, TEST_GIN_WEAK_SIGNAL_INC(sigGather));
     }
     // Every rank (root included) receives exactly N-1 allgather puts. Block 0
     // issued them all, so it is also the only CTA with queues left to drain.
@@ -1323,7 +1360,7 @@ testResult_t BroadcastDeviceTime(struct threadArgs* args, ncclDataType_t type, n
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
-        ncclDevComm* devComm = args->devComms + i;
+        ncclDevComm* devComm = testDevComms(args, i);
         ncclWindow_t sendwin = (ncclWindow_t)(in_place ? args->recvRegHandles[i] : args->sendRegHandles[i]);
         ncclWindow_t recvwin = (ncclWindow_t)args->recvRegHandles[i];
         kernel<<<gridCtas, 512, 0, args->streams[i]>>>(sendwin, 0, recvwin, 0, count, root, *devComm,
@@ -1359,7 +1396,7 @@ struct testColl broadcastTest = {
   BroadcastRunColl,
   BroadcastGetAlgoProtoChannels,
   NULL,
-  NULL,
+  BroadcastGetCollImplInfo,
   BroadcastDeviceTime
 };
 
@@ -1370,6 +1407,12 @@ void BroadcastGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, in
 
 testResult_t BroadcastRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
   args->collTest = &broadcastTest;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    TESTCHECK(uploadGinResourceSharingMode());
+  }
+#endif
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;

@@ -27,13 +27,10 @@
 
 #include "context.hpp"
 #include "team.hpp"
-#include "queue_pair.hpp"
+#include "queue_pair_provider.hpp"
 #include "constmem.hpp"
-#include "gda/gda_symm_table.hpp"
 
 namespace rocshmem {
-
-class QueuePair;
 
 class GDAContext : public Context {
  public:
@@ -454,20 +451,24 @@ class GDAContext : public Context {
                                           int worker_count);
   __device__ void tile_quiet_gda_workers(int pe, int worker_id, int worker_count,
                                          int wave_qp_index);
+  /**
+   * @brief Post one NBI put for a contiguous region.
+   *
+   * The leader posts the whole region as a single WQE. Per-worker slices
+   * share one QP, so splitting a contiguous transfer adds WQE and completion
+   * latency without extra link parallelism. Strided layouts stripe separately.
+   * Does not quiet.
+   */
   __device__ void tile_put_contig_slices_nbi(char *dst, const char *src,
                                              size_t bytes, int pe, int qp_index,
                                              int worker_id, int worker_count);
+  /** @brief Post one NBI get for a contiguous region. See tile_put_contig_slices_nbi. */
   __device__ void tile_get_contig_slices_nbi(char *dst, const char *src,
                                              size_t bytes, int pe, int qp_index,
                                              int worker_id, int worker_count);
 
   /**
    * @brief Post NBI puts for contiguous rows, striped across workers.
-   *
-   * Workers may diverge when num_rows is not a multiple of worker_count; each
-   * round posts as a collective over whichever lanes are still in the loop.
-   * Does not quiet; caller must quiet_single (or tile_finish_put) after a
-   * wave/block barrier.
    * Strides are in bytes between consecutive rows.
    */
   __device__ void tile_put_rows_nbi(char *dst_base, const char *src_base,

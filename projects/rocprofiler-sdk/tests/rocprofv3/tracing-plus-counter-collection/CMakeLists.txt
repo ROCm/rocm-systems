@@ -62,6 +62,7 @@ foreach(_GROUP "single" "multiple")
             2 50 5
         DEPENDS transpose
         TIMEOUT 45
+        WSL_TIMEOUT_SCALE
         PRELOAD "${PRELOAD_ENV}"
         FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})
 

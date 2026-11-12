@@ -51,6 +51,7 @@ test_categories:
 
 # Unit tests
       - "unit_tests_n4"
+      - "tdm_tests_n2"
 
     labels:
       - "smoke"
@@ -83,15 +84,20 @@ test_categories:
       # Signal operations
       - "putsignal_.*"
       - "signalfetch_.*"
+      - "signaladd_.*"
+      - "signalset_.*"
+      - "signalwaituntil_.*"
 
       # Stream tests (basic)
       - "putmem_signal_on_stream_.*"
       - "barrier_all_on_stream_.*"
       - "signal_wait_until_on_stream_.*"
+      - "signal_ops_on_stream_.*"
 
       # Specialized tests
       - "shmemptr_.*"
       - "library_info_.*"
+      - "buffer_register_symmetric_.*"
       - "hipmodule_init_.*"
 
     labels:
@@ -247,6 +253,12 @@ test_categories:
 
       # Heatmap/performance tests (no timeout)
       - "heatmap_.*"
+
+      # QP (GDA raw queue-pair) and SDMA direct RMA tests
+      - "qp_pingpong_.*"
+      - "qp_putnbi.*"
+      - "sdma_pingpong_.*"
+      - "sdma_putnbi.*"
 
     labels:
       - "weekly"

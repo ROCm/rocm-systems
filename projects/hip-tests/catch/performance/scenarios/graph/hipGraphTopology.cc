@@ -7,6 +7,7 @@
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <resource_guards.hh>
 
 #include <cstdio>
 #include <cstdlib>
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
+#include <numeric>
 
 /**
  * @addtogroup GraphTopologyPerformance GraphTopologyPerformance
@@ -40,6 +42,8 @@ __global__ void timing_kernel(uint64_t count) {
   } while (begin_time + count > curr_time);
 #endif
 }
+
+__global__ void graph_update_value_kernel(int* output, int value) { output[0] = value; }
 
 struct TestOptions {
   std::string topology = "straight";
@@ -324,6 +328,22 @@ static void run_graph_topology_test(const TestOptions& opt) {
   auto t_inst_end = std::chrono::steady_clock::now();
   double instantiation_us = std::chrono::duration<double, std::micro>(t_inst_end - t_inst_begin).count();
 
+  // The first instantiation includes one-time setup and varies by tens of microseconds between
+  // processes; the median of repeated instantiations of the same graph is the stable figure.
+  constexpr int kInstantiateRepeats = 20;
+  std::vector<double> inst_times;
+  inst_times.reserve(kInstantiateRepeats);
+  for (int i = 0; i < kInstantiateRepeats; ++i) {
+    hipGraphExec_t repeat_exec{};
+    auto t0 = std::chrono::steady_clock::now();
+    HIP_CHECK(hipGraphInstantiate(&repeat_exec, graph, nullptr, nullptr, 0));
+    auto t1 = std::chrono::steady_clock::now();
+    inst_times.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+    HIP_CHECK(hipGraphExecDestroy(repeat_exec));
+  }
+  std::sort(inst_times.begin(), inst_times.end());
+  double instantiation_p50_us = inst_times[inst_times.size() / 2];
+
   if (opt.preupload) {
     HIP_CHECK(hipGraphUpload(gexec, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
@@ -397,6 +417,7 @@ static void run_graph_topology_test(const TestOptions& opt) {
   CONSOLE_PRINT("%-32s %14s   %s", "Metric", "Total", "Per-node");
   CONSOLE_PRINT("%s", std::string(64, '-').c_str());
   CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Instantiation", instantiation_us, per_node_ns(instantiation_us));
+  CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Instantiation p50 (repeat)", instantiation_p50_us, per_node_ns(instantiation_p50_us));
   CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "First launch CPU", first_launch_cpu_us, per_node_ns(first_launch_cpu_us));
   CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "First launch end-to-end", first_e2e_us, per_node_ns(first_e2e_us));
   CONSOLE_PRINT("%-32s %11.3f us   (%9.1f ns/node)", "Repeat launch CPU avg", repeat_cpu_avg_us, per_node_ns(repeat_cpu_avg_us));
@@ -463,4 +484,65 @@ HIP_TEST_CASE(Performance_GraphTopology_Mixed) {
   opt.repeats = 5;
   opt.warmup = 2;
   run_graph_topology_test(opt);
+}
+
+/**
+ * Measure unchanged and changed exec updates on a long linear graph.
+ */
+HIP_TEST_CASE(Performance_GraphExecUpdate_Linear) {
+  const size_t node_count = isQuickLevel() ? 1024 : 8192;
+  LinearAllocGuard<int> output(LinearAllocs::hipMalloc, sizeof(int));
+  hipGraph_t graph = nullptr;
+  hipGraphExec_t exec = nullptr;
+  std::vector<hipGraphNode_t> nodes(node_count);
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  int value = 0;
+  int* output_ptr = output.ptr();
+  void* args[] = {&output_ptr, &value};
+  hipKernelNodeParams params{};
+  params.func = reinterpret_cast<void*>(graph_update_value_kernel);
+  params.gridDim = dim3(1);
+  params.blockDim = dim3(1);
+  params.kernelParams = args;
+
+  hipGraphNode_t previous = nullptr;
+  for (size_t i = 0; i < node_count; ++i) {
+    HIP_CHECK(hipGraphAddKernelNode(&nodes[i], graph, previous == nullptr ? nullptr : &previous,
+                                    previous == nullptr ? 0 : 1, &params));
+    previous = nodes[i];
+  }
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+
+  auto update = [&]() {
+    hipGraphNode_t error_node = nullptr;
+    hipGraphExecUpdateResult result = hipGraphExecUpdateError;
+    const auto start = std::chrono::steady_clock::now();
+    HIP_CHECK(hipGraphExecUpdate(exec, graph, &error_node, &result));
+    const auto end = std::chrono::steady_clock::now();
+    REQUIRE(result == hipGraphExecUpdateSuccess);
+    return std::chrono::duration<double, std::micro>(end - start).count();
+  };
+
+  const double unchanged_us = update();
+  std::vector<double> changed_us;
+  for (value = 1; value <= 4; ++value) {
+    for (auto node : nodes) {
+      HIP_CHECK(hipGraphKernelNodeSetParams(node, &params));
+    }
+    changed_us.push_back(update());
+  }
+  const double changed_avg_us =
+      std::accumulate(changed_us.begin(), changed_us.end(), 0.0) / changed_us.size();
+  CONSOLE_PRINT("Graph exec update: nodes=%zu unchanged=%.3f us changed_avg=%.3f us", node_count,
+                unchanged_us, changed_avg_us);
+
+  HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+  HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  int actual = 0;
+  HIP_CHECK(hipMemcpy(&actual, output.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(actual == value - 1);
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
 }

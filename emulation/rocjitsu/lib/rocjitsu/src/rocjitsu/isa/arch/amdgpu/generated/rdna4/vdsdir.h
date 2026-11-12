@@ -28,6 +28,9 @@ class DsDirectLoadVdsdir : public Vdsdir {
 public:
   DsDirectLoadVdsdir(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.exec_whole_quads = true;
+  }
   Operand vdst;
   Operand dsmem;
   Operand m0;

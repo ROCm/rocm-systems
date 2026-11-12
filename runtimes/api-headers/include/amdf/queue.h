@@ -6,6 +6,7 @@
 
 #include "amdf/base.h"
 #include "amdf/memory.h"
+#include "amdf/native_event.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,7 +32,8 @@ enum amdf_queue_command_type_e {
 /// Encoding features within a command format and version.
 ///
 /// Bit meanings belong to the command type and are documented by its extension.
-/// These describe native packet layouts, not additional publication services.
+/// These describe native packet layouts and required register settings, not
+/// additional publication services.
 /// A zero value reports the baseline encoding; it never means unqueried state.
 typedef uint64_t amdf_queue_format_features_t;
 
@@ -328,10 +330,16 @@ typedef struct amdf_kernel_queue_info_t {
   uint32_t queue_family_ordinal;
   /// Native command representation accepted by the queue.
   amdf_queue_command_type_t command_type;
-  /// Maximum accepted submissions that may remain unretired.
+  /// Nonzero maximum accepted submissions that may remain unretired.
+  /// Native resource exhaustion may reject work before this bound is reached.
   uint32_t maximum_pending_submission_count;
   /// Maximum commands accepted by one submission.
   uint32_t maximum_command_count;
+  /// Native wake destinations accepted by kernel_queue_request_notification.
+  /// Zero means notification is unavailable; all bits are resolved at creation.
+  amdf_native_event_types_t notification_types;
+  /// Optional operations resolved for this live queue without lazy setup.
+  amdf_kernel_queue_capabilities_t capabilities;
 } amdf_kernel_queue_info_t;
 
 /// Current retirement and terminal state of one kernel-mediated queue.
@@ -342,7 +350,9 @@ typedef struct amdf_kernel_queue_status_t {
   uint32_t structure_size;
   /// Optional output extension chain. No extensions are currently defined.
   void* next;
-  /// Greatest accepted submission whose native storage is no longer in use.
+  /// Greatest accepted submission whose checked retirement, including
+  /// command-result inspection, is complete.
+  /// Native fence completion alone does not advance this frontier.
   uint64_t retired_submission;
   /// Current queue lifecycle state.
   amdf_queue_state_t state;

@@ -20,15 +20,21 @@ __global__ void TileBroadcastThreadTest(rocshmem_team_t team,
                                         int tile_extent_0, int tile_extent_1,
                                         int my_world_pe, int pe_root,
                                         ShmemContextType ctx_type,
+                                        int loop, int skip,
+                                        long long int *start_time,
+                                        long long int *end_time,
                                         int *error_flag);
 
-// Wave-level broadcast test - single WG, single wave
-__global__ void TileBroadcastWaveTest(rocshmem_team_t team,
+// Wave-level broadcast test - multiple waves, each with its own team/context
+__global__ void TileBroadcastWaveTest(rocshmem_team_t *teams,
                                       float *source, float *dest,
                                       int tile_extent_0, int tile_extent_1,
                                       int my_world_pe, int pe_root,
                                       ShmemContextType ctx_type,
-                                      int wf_size,
+                                      int wf_size, int num_waves_per_wg,
+                                      int loop, int skip,
+                                      long long int *start_time,
+                                      long long int *end_time,
                                       int *error_flag);
 
 // Workgroup-level broadcast test - multiple WGs with different teams
@@ -37,6 +43,9 @@ __global__ void TileBroadcastTest(rocshmem_team_t *teams, int num_teams,
                                   int tile_extent_0, int tile_extent_1,
                                   int my_world_pe, int pe_root,
                                   ShmemContextType ctx_type,
+                                  int loop, int skip,
+                                  long long int *start_time,
+                                  long long int *end_time,
                                   int *error_flag);
 
 /******************************************************************************
@@ -62,6 +71,9 @@ class TileBroadcastTester : public Tester {
  protected:
   rocshmem_team_t *teams;  // Array of teams
   int num_teams;           // Number of teams to create
+
+  static constexpr int DEFAULT_TILE_ROWS = 8;
+  static constexpr int DEFAULT_TILE_COLS = 8;
 
   float *source;           // Source tile data
   float *dest;             // Destination tile data

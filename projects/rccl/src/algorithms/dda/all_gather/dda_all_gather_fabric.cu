@@ -15,6 +15,7 @@
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -60,24 +61,25 @@ static ncclResult_t ncclAllGatherDdaFabricTyped(const void* sendbuff, void* recv
   INFO(NCCL_COLL, "DDA fabric AllGather: launching kernel: nRanks=%d sendcount=%zu grid=%u block=%u%s", nRanks,
        sendcount, grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // Specialize the kernel for common clique sizes (compile-time NRANKS -> the
   // unrolled CollCommon allGather), and fall back to the runtime kernel
   // (NRANKS_CT == 0) for any other size.
   switch (nRanks) {
   case 4:
-    dda::common::ddaAllGatherFabric<T, 4><<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
-                                                                      static_cast<const T*>(sendbuff), comm->rank,
-                                                                      nRanks, barrierHost);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabric<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
+                          static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
     break;
   case 8:
-    dda::common::ddaAllGatherFabric<T, 8><<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
-                                                                      static_cast<const T*>(sendbuff), comm->rank,
-                                                                      nRanks, barrierHost);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabric<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
+                          static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
     break;
   default:
-    dda::common::ddaAllGatherFabric<T, 0><<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
-                                                                      static_cast<const T*>(sendbuff), comm->rank,
-                                                                      nRanks, barrierHost);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabric<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), sendcount,
+                          static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost);
     break;
   }
 
@@ -109,7 +111,7 @@ bool ncclAllGatherDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -133,7 +135,7 @@ uint32_t ncclAllGatherDdaFabricBlocks(ncclComm* comm, size_t sendcount, ncclData
 
 ncclResult_t ncclAllGatherDdaFabric(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                     ncclComm* comm, cudaStream_t stream) {
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return ncclInvalidArgument;
   }
   int typeSize = ncclTypeSize(datatype);

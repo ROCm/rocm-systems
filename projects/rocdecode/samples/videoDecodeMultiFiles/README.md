@@ -16,11 +16,26 @@ The reconfigure option can be disabled by the user if needed. The input file is 
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_multi_files_sample && cd video_decode_multi_files_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir video_decode_multi_files_sample && cd video_decode_multi_files_sample
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running; see
+> [Windows setup](../README.md#windows-setup).
 
 ## Run
 

@@ -88,17 +88,17 @@ Side-by-side baseline vs. optimized comparison:
 ```bash
 src/rocprof-compute analyze \
     -p /tmp/ea_test_baseline -p /tmp/ea_test_opt \
-    -b 30.13 30.14 30.15 30.16 30.17 30.18 --experimental --membw-analysis
+    -b 30.13 30.14 30.15 30.16 30.17 30.18
 ```
 
 To analyze each run independently:
 
 ```bash
 src/rocprof-compute analyze -p /tmp/ea_test_baseline \
-    -b 30.13 30.14 30.15 30.16 30.17 30.18 --experimental --membw-analysis
+    -b 30.13 30.14 30.15 30.16 30.17 30.18
 
 src/rocprof-compute analyze -p /tmp/ea_test_opt \
-    -b 30.13 30.14 30.15 30.16 30.17 30.18 --experimental --membw-analysis
+    -b 30.13 30.14 30.15 30.16 30.17 30.18
 ```
 
 ## Validation Results (MI350X)

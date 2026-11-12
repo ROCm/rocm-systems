@@ -40,6 +40,9 @@
 
 #include <unistd.h>
 
+#include <cstdlib>
+#include <optional>
+
 namespace fs       = ::rocprofiler::common::filesystem;
 namespace common   = ::rocprofiler::common;
 namespace agent    = ::rocprofiler::agent;
@@ -55,19 +58,27 @@ public:
     explicit EnvGuard(std::initializer_list<std::string_view> names)
     {
         for(auto n : names)
-            saved_.emplace_back(n, common::get_env(n, std::string{}));
+        {
+            const auto* value = ::getenv(n.data());
+            saved_.emplace_back(n, value ? std::make_optional<std::string>(value) : std::nullopt);
+        }
     }
     ~EnvGuard()
     {
         for(const auto& [n, v] : saved_)
-            common::set_env(n, v, 1);
+        {
+            if(v)
+                common::set_env(n, *v, 1);
+            else
+                ::unsetenv(n.c_str());
+        }
     }
 
     EnvGuard(const EnvGuard&) = delete;
     EnvGuard& operator=(const EnvGuard&) = delete;
 
 private:
-    std::vector<std::pair<std::string, std::string>> saved_;
+    std::vector<std::pair<std::string, std::optional<std::string>>> saved_;
 };
 
 fs::path
@@ -107,6 +118,16 @@ TEST(platform_dispatch, wsl_enumerate_off_wsl_is_empty)
     EXPECT_TRUE(agents.empty());
 }
 
+// rocprof-attach sets this marker before tool registration. The WSL provider
+// must refuse immediately, independent of whether this host has /dev/dxg.
+TEST(platform_dispatch, late_attach_marker_disables_wsl_enumeration)
+{
+    EnvGuard guard{{"ROCPROFILER_REGISTER_TOOL_ATTACHED"}};
+    common::set_env("ROCPROFILER_REGISTER_TOOL_ATTACHED", std::string{"1"}, 1);
+
+    EXPECT_TRUE(platform::wsl::enumerate().empty());
+}
+
 // gnulinux::is_available() must accept the test fixture's sysfs tree via
 // the documented env override. This is the same fixture used by
 // agent_local_topology in agent.cpp.
@@ -123,19 +144,21 @@ TEST(platform_dispatch, gnulinux_is_available_with_local_topology)
     EXPECT_TRUE(platform::gnulinux::is_available());
 }
 
-// Verifies the dispatcher honors ROCPROFILER_FORCE_PLATFORM=gnulinux: with
-// the test fixture sysfs, internal_refresh_topology() must populate agents
-// from the gnulinux enumerator regardless of any wsl probing.
-TEST(platform_dispatch, force_platform_gnulinux_populates_agents)
+// The explicit late-attach marker disables only the WSL provider. With the
+// fixture sysfs and gnulinux forced, the ordinary Linux enumerator must still
+// populate agents exactly as it does outside attach mode.
+TEST(platform_dispatch, late_attach_marker_does_not_change_gnulinux_enumeration)
 {
     auto topo = local_topology_path();
     if(topo.empty()) GTEST_SKIP() << "test data 'data/topology/nodes' not found next to binary";
 
     EnvGuard guard{{"ROCPROFILER_FORCE_PLATFORM",
+                    "ROCPROFILER_REGISTER_TOOL_ATTACHED",
                     "ROCPROFILER_KFD_TOPOLOGY",
                     "AMD_KFD_TOPOLOGY",
                     "HSA_MODEL_TOPOLOGY"}};
     common::set_env("ROCPROFILER_FORCE_PLATFORM", std::string{"gnulinux"}, 1);
+    common::set_env("ROCPROFILER_REGISTER_TOOL_ATTACHED", std::string{"1"}, 1);
     common::set_env("ROCPROFILER_KFD_TOPOLOGY", topo.string(), 1);
     common::set_env("AMD_KFD_TOPOLOGY", std::string{}, 1);
     common::set_env("HSA_MODEL_TOPOLOGY", std::string{}, 1);

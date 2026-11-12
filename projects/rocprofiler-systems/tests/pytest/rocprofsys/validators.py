@@ -15,6 +15,7 @@ We also provide the following validators:
 """
 
 from __future__ import annotations
+
 import os
 import re
 import shlex
@@ -23,7 +24,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 def _python_for_validation_scripts() -> str:
@@ -57,7 +58,7 @@ class ValidationResult:
 
     is_valid: bool
     message: str
-    details: Optional[dict[str, Any]] = None
+    details: dict[str, Any] | None = None
     stdout: str = ""
     stderr: str = ""
     command: str = ""
@@ -79,8 +80,8 @@ from rocprofsys.runners import TestResult
 
 def _validate_regex(
     text: str,
-    pass_regex: Optional[list[str]] = None,
-    fail_regex: Optional[list[str]] = None,
+    pass_regex: list[str] | None = None,
+    fail_regex: list[str] | None = None,
     use_abort_fail_regex: bool = False,
 ) -> ValidationResult:
     """Validate the regex patterns in some given text.
@@ -134,8 +135,8 @@ def _validate_regex(
 
 def validate_regex(
     test_result: TestResult,
-    pass_regex: Optional[list[str]] = None,
-    fail_regex: Optional[list[str]] = None,
+    pass_regex: list[str] | None = None,
+    fail_regex: list[str] | None = None,
     use_abort_fail_regex: bool = True,
 ) -> ValidationResult:
     return _validate_regex(
@@ -145,8 +146,8 @@ def validate_regex(
 
 def validate_file_regex(
     file_path: Path,
-    pass_regex: Optional[list[str]] = None,
-    fail_regex: Optional[list[str]] = None,
+    pass_regex: list[str] | None = None,
+    fail_regex: list[str] | None = None,
     use_abort_fail_regex: bool = True,
 ) -> ValidationResult:
     if not file_path.exists():
@@ -208,6 +209,7 @@ def _run_validation_script(
             capture_output=True,
             text=True,
             timeout=timeout,
+            check=False,
         )
 
         if result.returncode == 0:
@@ -248,15 +250,17 @@ def _run_validation_script(
 def validate_perfetto_trace(
     trace_path: Path,
     tests_dir: Path,
-    categories: Optional[list[str]] = None,
-    labels: Optional[list[str]] = None,
-    counts: Optional[list[int]] = None,
-    depths: Optional[list[int]] = None,
-    label_substrings: Optional[list[str]] = None,
-    counter_names: Optional[list[str]] = None,
-    key_names: Optional[list[str]] = None,
-    key_counts: Optional[list[int]] = None,
-    trace_processor_path: Optional[Path] = None,
+    categories: list[str] | None = None,
+    labels: list[str] | None = None,
+    counts: list[int] | None = None,
+    depths: list[int] | None = None,
+    label_substrings: list[str] | None = None,
+    counter_names: list[str] | None = None,
+    counter_names_present: list[str] | None = None,
+    counter_names_zero: list[str] | None = None,
+    key_names: list[str] | None = None,
+    key_counts: list[int] | None = None,
+    trace_processor_path: Path | None = None,
     print_output: bool = False,
     check_counter_pairing: bool = False,
     timeout: int = 120,
@@ -276,7 +280,12 @@ def validate_perfetto_trace(
         counts: Expected counts (-c flag)
         depths: Expected depths (-d flag); omit for aggregate-by-name validation
         label_substrings: Expected label substrings (-s flag)
-        counter_names: Counter names to validate (--counter-names flag)
+        counter_names: Counter names to validate (--counter-names flag); each must
+            have a positive total
+        counter_names_present: Counter names that must exist and be sampled, whatever
+            their values (--counter-names-present flag)
+        counter_names_zero: Counter names that must exist, be sampled, and stay zero
+            throughout (--counter-names-zero flag)
         key_names: Debug key names to check (--key-names flag)
         key_counts: Expected counts for debug keys (--key-counts flag)
         trace_processor_path: Path to trace_processor_shell (-t flag). When omitted,
@@ -311,6 +320,12 @@ def validate_perfetto_trace(
     if counter_names:
         args.extend(["--counter-names"] + counter_names)
 
+    if counter_names_present:
+        args.extend(["--counter-names-present"] + counter_names_present)
+
+    if counter_names_zero:
+        args.extend(["--counter-names-zero"] + counter_names_zero)
+
     if check_counter_pairing:
         args.append("--check-counter-pairing")
 
@@ -337,9 +352,9 @@ def validate_perfetto_trace(
 def validate_rocpd_database(
     db_path: Path,
     tests_dir: Path,
-    rules_files: Optional[list[Path]] = None,
+    rules_files: list[Path] | None = None,
     timeout: int = 60,
-    gpu_category_to_skip: Optional[list[str]] = None,
+    gpu_category_to_skip: list[str] | None = None,
 ) -> ValidationResult:
     """Validate a ROCpd database file using validate-rocpd.py.
 
@@ -379,9 +394,9 @@ def validate_timemory_json(
     json_path: Path,
     tests_dir: Path,
     metric: str,
-    labels: Optional[list[str]] = None,
-    counts: Optional[list[int]] = None,
-    depths: Optional[list[int]] = None,
+    labels: list[str] | None = None,
+    counts: list[int] | None = None,
+    depths: list[int] | None = None,
     print_output: bool = False,
     timeout: int = 60,
 ) -> ValidationResult:
@@ -429,7 +444,7 @@ def validate_causal_json(
     json_path: Path,
     tests_dir: Path,
     ci_mode: bool = False,
-    additional_args: Optional[list[str]] = None,
+    additional_args: list[str] | None = None,
     timeout: int = 60,
 ) -> ValidationResult:
     """Validate a causal profiling JSON output file using validate-causal-json.py.

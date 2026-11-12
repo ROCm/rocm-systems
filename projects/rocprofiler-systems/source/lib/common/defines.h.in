@@ -69,6 +69,14 @@
     ((10000 * ROCPROFSYS_ROCM_VERSION_MAJOR) + (100 * ROCPROFSYS_ROCM_VERSION_MINOR) +   \
      ROCPROFSYS_ROCM_VERSION_PATCH)
 
+// clang-format off
+// profiler-hub version this build was configured against
+#define ROCPROFSYS_PROFILER_HUB_VERSION_STRING "@ROCPROFSYS_PROFILER_HUB_VERSION@"
+#define ROCPROFSYS_PROFILER_HUB_VERSION_MAJOR  @ROCPROFSYS_PROFILER_HUB_VERSION_MAJOR@
+#define ROCPROFSYS_PROFILER_HUB_VERSION_MINOR  @ROCPROFSYS_PROFILER_HUB_VERSION_MINOR@
+#define ROCPROFSYS_PROFILER_HUB_VERSION_PATCH  @ROCPROFSYS_PROFILER_HUB_VERSION_PATCH@
+// clang-format on
+
 #if ROCPROFSYS_ROCM_VERSION_MAJOR > 0
 #    define ROCPROFSYS_ROCM_VERSION_COMPAT_STRING                                        \
         "v@ROCPROFSYS_ROCM_VERSION_MAJOR@.@ROCPROFSYS_ROCM_VERSION_MINOR@.x"
@@ -84,8 +92,9 @@
         "v" ROCPROFSYS_VERSION_STRING, ROCPROFSYS_GIT_DESCRIBE, ROCPROFSYS_GIT_REVISION, \
         {                                                                                \
             { "", ROCPROFSYS_LIBRARY_ARCH }, { "compiler", ROCPROFSYS_COMPILER_STRING }, \
+                { "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING },                          \
             {                                                                            \
-                "rocm", ROCPROFSYS_ROCM_VERSION_COMPAT_STRING                            \
+                "profiler-hub", "v" ROCPROFSYS_PROFILER_HUB_VERSION_STRING               \
             }                                                                            \
         }
 #endif

@@ -14,65 +14,61 @@
 #include "primitives.cuh"
 #endif
 
-template <int BytePerPack, int UnrollPacks, int UnrollPeers, bool EnableTma>
+// TileAligned: the caller's tier guarantees every tile address is ncclSymkTileLine-aligned, which
+// lets the staging wrappers drop TDM's head peel.
+template <int BytePerPack, int UnrollPacks, int UnrollPeers, bool EnableTma, bool TileAligned = false>
 static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int t, bool waitNeeded,
                                  ncclLsaBarrierSession<ncclCoopCta>& bar, ncclSymPtr<char> input,
-                                 ncclSymPtr<char> output, bool inPlace, int nIters) {
+                                 ncclSymPtr<char> output, bool inPlace, int nIters, ncclTeam team, int slot0) {
   using Pack = BytePack<BytePerPack>;
   int wn = tn / WARP_SIZE;
   int w = t / WARP_SIZE;
   int lane = t % WARP_SIZE;
-  int const& rank = handler.comm.rank;
-  int const& nRanks = handler.comm.nRanks;
+  int const& rank = team.rank;
+  int const& nRanks = team.nRanks;
 
   Pack* inpPacks = (Pack*)input.localPtr() + intptr_t(w) * UnrollPacks * WARP_SIZE +
                    (
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
                      EnableTma ? 0 :
 #endif
                                  lane);
 
   ncclSymPtr<Pack> outPacks = (ncclSymPtr<Pack>)output + intptr_t(w) * UnrollPacks * WARP_SIZE +
                               (
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
                                 EnableTma ? 0 :
 #endif
                                             lane);
+  // Read the window once here: lsaPtr() inside the loop re-reads it after every store.
+  ncclLsaPointerGetter<Pack> outLsa(outPacks);
 
   Pack tmp[UnrollPacks];
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
   int lw = threadIdx.x / WARP_SIZE;
-  extern __shared__ char smemScratch[];
   using tmaSmemStruct_t = tmaSmemStruct<Pack, UnrollPacks>;
-  constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
-  tmaSmemStruct_t* tmaSmem = reinterpret_cast<tmaSmemStruct_t*>(smemScratch + lw * smemSizePerWarp);
+  tmaSmemStruct_t* tmaSmem = ncclSymkTileSmem<tmaSmemStruct_t>(lw);
   constexpr size_t tileSize = UnrollPacks * WARP_SIZE * BytePerPack;
 #endif
   bool skip = false; // all lanes issue loads/stores
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
+  size_t pending = 0;
   if NCCL_IF_CONSTEXPR (EnableTma) {
-    if (lane == 0) {
-      // lane0 issues async.cp.bulk commands
-      init(&tmaSmem->bar, 1);
-    } else {
-      // other lanes can skip the loop
-      skip = true;
-    }
+    ncclSymkTileBarInit(&tmaSmem->bar, /*arrivers=*/1, lane);
+    // TMA issues from lane 0, so the rest of the warp has nothing left to do.
+    // TDM needs the whole warp to build the descriptor, so every lane stays in.
+    skip = NCCL_SYMK_TILE_TMA && lane != 0;
   }
 #endif
 
   nIters -= w;
   if (0 < nIters) {
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
     if NCCL_IF_CONSTEXPR (EnableTma) {
-      if (lane == 0) {
-        cuda::device::memcpy_async_tx(tmaSmem->buff[0], inpPacks, cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
-        cuda::barrier<cuda::thread_scope_block>::arrival_token token =
-          cuda::device::barrier_arrive_tx(tmaSmem->bar, 1, tileSize);
-        tmaSmem->bar.wait(std::move(token));
-      }
+      ncclSymkTileLoad<TileAligned>(tmaSmem->buff[0], inpPacks, tileSize, tmaSmem->bar, pending, lane);
+      ncclSymkTileLoadWait</*Arrivers=*/1>(tmaSmem->bar, pending, lane);
     } else
 #endif
     {
@@ -96,42 +92,35 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
         for (int i = 0; partial ? i < 1 : (dr + UnrollPeers <= nRanks); partial ? i++ : (dr += UnrollPeers)) {
           NVCC_PRAGMA_UNROLL_AUTO
           for (int ur = 0; ur < UnrollPeers - partial; ur++) {
-            if (partial && dr == nRanks) break;
-#if __CUDA_ARCH__ >= 1000
+            if (partial && dr + ur == nRanks) break;
+#if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              ptx::cp_async_bulk(ptx::space_global, ptx::space_shared, outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize);
+              ncclSymkTileStore<TileAligned>(outLsa(slot0 + r), tmaSmem->buff[0], tileSize, lane);
             } else
 #endif
             {
               NVCC_PRAGMA_UNROLL(UnrollPacks)
               for (int u = 0; u < UnrollPacks; u++) {
-                outPacks.lsaPtr(r)[u * WARP_SIZE] = tmp[u];
+                outLsa(slot0 + r)[u * WARP_SIZE] = tmp[u];
               }
             }
             if (++r == nRanks) r = 0;
           }
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
           if NCCL_IF_CONSTEXPR (EnableTma) {
-            if (lane == 0) {
-              ptx::cp_async_bulk_commit_group();
-              ptx::cp_async_bulk_wait_group_read(ptx::n32_t<0>());
-            }
+            ncclSymkTileStoreWait(lane);
           }
 #endif
         }
       }
       inpPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
-      outPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
+      outLsa.base = (Pack*)outLsa.base + intptr_t(wn) * UnrollPacks * WARP_SIZE;
       nIters -= wn;
       if (nIters <= 0) break;
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        if (lane == 0) {
-          cuda::device::memcpy_async_tx(tmaSmem->buff[0], inpPacks, cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
-          cuda::barrier<cuda::thread_scope_block>::arrival_token token =
-            cuda::device::barrier_arrive_tx(tmaSmem->bar, 1, tileSize);
-          tmaSmem->bar.wait(std::move(token));
-        }
+        ncclSymkTileLoad<TileAligned>(tmaSmem->buff[0], inpPacks, tileSize, tmaSmem->bar, pending, lane);
+        ncclSymkTileLoadWait</*Arrivers=*/1>(tmaSmem->bar, pending, lane);
       } else
 #endif
       {
@@ -146,11 +135,12 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
 
 template <int UnrollPeers, typename T>
 static __device__ void bcastEnds(ncclSymkArgsHandler const& handler, int tn, int t, ncclSymPtr<T> input,
-                                 ncclSymPtr<T> output, bool inPlace, size_t nElts, uint32_t nPreElts, size_t nSufElts) {
-  int const& rank = handler.comm.rank;
-  int const& nRanks = handler.comm.nRanks;
+                                 ncclSymPtr<T> output, bool inPlace, size_t nElts, uint32_t nPreElts, size_t nSufElts,
+                                 ncclTeam team, int slot0) {
+  int const& rank = team.rank;
+  int const& nRanks = team.nRanks;
   BytePack<sizeof(T)>* inpPacks = (BytePack<sizeof(T)>*)input.localPtr();
-  ncclSymPtr<BytePack<sizeof(T)>> outPacks = (ncclSymPtr<BytePack<sizeof(T)>>)output;
+  ncclLsaPointerGetter<BytePack<sizeof(T)>> outLsa((ncclSymPtr<BytePack<sizeof(T)>>)output);
   NVCC_PRAGMA_UNROLL_DISABLED
   for (size_t i = t; i < nPreElts + nSufElts; i += tn) {
     size_t elt = i < nPreElts ? i : nElts - nPreElts - nSufElts + i;
@@ -162,30 +152,46 @@ static __device__ void bcastEnds(ncclSymkArgsHandler const& handler, int tn, int
     for (; dr + UnrollPeers <= nRanks; dr += UnrollPeers) {
       NVCC_PRAGMA_UNROLL(UnrollPeers)
       for (int u = 0; u < UnrollPeers; u++) {
-        outPacks.lsaPtr(r)[elt] = tmp;
+        outLsa(slot0 + r)[elt] = tmp;
         if (++r == nRanks) r = 0;
       }
     }
     NVCC_PRAGMA_UNROLL(UnrollPeers)
     for (int u = 0; u < UnrollPeers; u++) {
       if (dr + u == nRanks) break;
-      outPacks.lsaPtr(r)[elt] = tmp;
+      outLsa(slot0 + r)[elt] = tmp;
       if (++r == nRanks) r = 0;
     }
   }
 }
 
-template <typename T, bool EnableTma>
+// Copy `input` into `output` on every rank of `team`, which must be a unit-stride sub-team of the
+// LSA team, or only on LSA slot `dstSlot` when one is given.
+template <typename T, bool EnableTma, bool Deep = false>
 static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, int nBlocks, bool waitNeeded,
                              ncclLsaBarrierSession<ncclCoopCta>& bar, ncclSymPtr<T> input, ncclSymPtr<T> output,
-                             size_t nElts) {
-  bool inPlace = (input == output);
+                             size_t nElts, ncclTeam team, int dstSlot = -1) {
+  // A single destination is always written, even when input and output name the same offset.
+  bool inPlace = dstSlot < 0 && input == output;
+  int slot0 = ncclTeamRankToLsa(handler.comm, team, 0);
+  if (dstSlot >= 0) {
+    team = ncclTeam{/*nRanks=*/1, /*rank=*/0, /*stride=*/1};
+    slot0 = dstSlot;
+  }
   size_t nBytes = nElts * sizeof(T);
+
+#if defined(__gfx950__)
+  // Engage on a floor instead of trimming, so the partial final wave is kept rather than handed to
+  // the per-byte tail. The floor is the old trim modulus, so the deep path engages where it did.
+  uint32_t const chunkFloor = uint32_t(nBlocks);
+#else
   uint32_t nBlocks_rcp32 = nccl::utility::idivRcp32_upto64(nBlocks);
+  uint32_t const chunkFloor = 1;
+#endif
 
   uint32_t alignment = uint32_t(input.offset - output.offset);
   uint32_t nPreBytes =
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
     (EnableTma && alignment % 256 == 0) ? (256 - input.offset) % 256 :
 #endif
                                           (16 - input.offset) % 16;
@@ -193,7 +199,7 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
   nPreBytes = min((size_t)nPreBytes, nBytes);
   uintptr_t cursor = nPreBytes;
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
   if NCCL_IF_CONSTEXPR (EnableTma) {
     if (alignment % 256 == 0) {
       constexpr int BytePerPack = ncclSymkBytePerPack, UnrollPacks = ncclSymkAlign256BDeepUnrollPacks, UnrollPeers = 2;
@@ -202,10 +208,12 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
       chunks -= imodFast32(chunks, nBlocks, nBlocks_rcp32);
       if (chunks != 0) {
         uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
-        bcastDeep<BytePerPack, UnrollPacks, UnrollPeers, EnableTma>(handler, tn, t, waitNeeded, bar,
-                                                                    (ncclSymPtr<char>)input + cursor,
-                                                                    (ncclSymPtr<char>)output + cursor, inPlace,
-                                                                    chunks * ncclSymkMinWarpsPerBlock);
+        // Both sides start on a 256 B boundary here (nPreBytes peels input to one, alignment % 256
+        // carries output with it, window bases are page-aligned) and every tile advances by a
+        // multiple of 256, so the tiles are ncclSymkTileLine-aligned and the peel can go.
+        bcastDeep<BytePerPack, UnrollPacks, UnrollPeers, EnableTma, /*TileAligned=*/true>(
+          handler, tn, t, waitNeeded, bar, (ncclSymPtr<char>)input + cursor,
+          (ncclSymPtr<char>)output + cursor, inPlace, chunks * ncclSymkMinWarpsPerBlock, team, slot0);
         cursor = cursorAfter;
         waitNeeded = false;
       }
@@ -214,31 +222,48 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
 #endif
 
   if (alignment % 16 == 0) {
-    constexpr int BytePerPack = ncclSymkBytePerPack, UnrollPacks = ncclSymkUnrollPacks, UnrollPeers = 2;
-    constexpr int BytePerChunk = ncclSymkBytePerChunk;
+#if defined(__gfx950__)
+    // Dropping to one pack cuts BytePerChunk to a quarter, so mid sizes reach this tier's floor instead
+    // of falling to the 4-byte and per-byte paths. One pack per peer lets UnrollPeers batch them all.
+    constexpr int UnrollPacks = 1, UnrollPeers = 8;
+#else
+    constexpr int UnrollPacks = Deep ? 4 * ncclSymkUnrollPacks : ncclSymkUnrollPacks, UnrollPeers = 2;
+#endif
+    constexpr int BytePerPack = ncclSymkBytePerPack;
+    constexpr int BytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, UnrollPacks);
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+#if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nBlocks, nBlocks_rcp32);
-    if (chunks != 0) {
+#endif
+    if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
       bcastDeep<BytePerPack, UnrollPacks, UnrollPeers, EnableTma>(handler, tn, t, waitNeeded, bar,
                                                                   (ncclSymPtr<char>)input + cursor,
                                                                   (ncclSymPtr<char>)output + cursor, inPlace,
-                                                                  chunks * ncclSymkMinWarpsPerBlock);
+                                                                  chunks * ncclSymkMinWarpsPerBlock, team, slot0);
       cursor = cursorAfter;
       waitNeeded = false;
     }
   }
 
   if (sizeof(T) == 4 || (sizeof(T) < 4 && alignment % 4 == 0)) {
-    constexpr int BytePerPack = 4, UnrollPacks = 4, UnrollPeers = 4;
+#if defined(__gfx950__)
+    // Only reached by 16-byte misaligned buffers, since the tier above shares this chunk size.
+    constexpr int UnrollPeers = 8;
+#else
+    constexpr int UnrollPeers = 4;
+#endif
+    constexpr int BytePerPack = 4, UnrollPacks = 4;
     constexpr int BytePerChunk = ncclSymkMinWarpsPerBlock * UnrollPacks * WARP_SIZE * BytePerPack;
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+#if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nBlocks, nBlocks_rcp32);
-    if (chunks != 0) {
+#endif
+    if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
       bcastDeep<(sizeof(T) <= BytePerPack ? BytePerPack : 0), UnrollPacks, UnrollPeers, false>(
         handler, tn, t, waitNeeded, bar, (ncclSymPtr<char>)input + cursor, (ncclSymPtr<char>)output + cursor, inPlace,
-        chunks * ncclSymkMinWarpsPerBlock);
+        chunks * ncclSymkMinWarpsPerBlock, team, slot0);
       cursor = cursorAfter;
       waitNeeded = false;
     }
@@ -248,7 +273,7 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
 
   constexpr int UnrollPeers = 8;
   size_t nSufElts = (nBytes - cursor) / sizeof(T);
-  bcastEnds<UnrollPeers>(handler, tn, t, input, output, inPlace, nElts, nPreBytes / sizeof(T), nSufElts);
+  bcastEnds<UnrollPeers>(handler, tn, t, input, output, inPlace, nElts, nPreBytes / sizeof(T), nSufElts, team, slot0);
 }
 
 template <bool EnableProfiler, bool EnableTma>
@@ -273,7 +298,8 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_ST_impl(ncclSymkDevWorkArg
     int bt =
       flattenIx(threadIdx.x % WARP_SIZE, WARP_SIZE, block, nBlocks, threadIdx.x / WARP_SIZE, blockDim.x / WARP_SIZE);
     int btn = nBlocks * blockDim.x;
-    bcast<char, EnableTma>(handler, btn, bt, nBlocks, waitNeeded, bar, input, output + rank * nAllElts, nElts);
+    bcast<char, EnableTma>(handler, btn, bt, nBlocks, waitNeeded, bar, input, output + rank * nAllElts, nElts,
+                           ncclTeamLsa(handler.comm));
     waitNeeded = false;
   });
 
@@ -291,6 +317,140 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_TmaST(ncclSymkDevWorkArgs 
   ncclSymkRun_AllGather_ST_impl<EnableProfiler, /*EnableTma=*/true>(args);
 }
 
+// Largest chunk a block pushes.
+static constexpr size_t ncclSymkAgHierMaxChunkBytes = 256 << 10;
+
+template <bool EnableTma>
+static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBarrierSession<ncclCoopCta>& bar,
+                                  int block, int nBlocks, ncclTeam scaleIn, ncclTeam scaleUp,
+                                  ncclDevResourceHandle flagsBuf, uint64_t& seq, size_t nElts, size_t nAllElts,
+                                  ncclSymPtr<char> input, ncclSymPtr<char> output) {
+  int const& rank = handler.comm.rank;
+  int lane = threadIdx.x % WARP_SIZE;
+  int warp = threadIdx.x / WARP_SIZE;
+  int nBlockWarps = blockDim.x / WARP_SIZE;
+  int nGroups = scaleUp.nRanks;
+  int nG0Blocks = ncclSymkAgHierG0Blocks(nBlocks, nGroups);
+  int nGroupBlocks = ncclSymkAgHierGroupBlocks(nBlocks, nGroups);
+  // Units below nRows hold a block of every group, the rest a block of each pushing group.
+  int nRows = nGroups * nG0Blocks;
+  int nUnits = nG0Blocks + (nGroups - 1) * nGroupBlocks;
+  ncclSymPtr<char> mySlot = output + rank * nAllElts;
+
+  // Half of each block pushes and half forwards, threads numbered over the half.
+  int nHalfWarps = nBlockWarps / 2;
+  bool pusher = warp < nHalfWarps;
+  bool forwarder = !pusher && warp < 2 * nHalfWarps;
+  int t = (pusher ? warp : warp - nHalfWarps) * WARP_SIZE + lane;
+  int tn = nHalfWarps * WARP_SIZE;
+  ncclCoopWarpSpan half{/*warp0=*/pusher ? 0 : nHalfWarps, /*nWarps=*/nHalfWarps, /*id=*/pusher ? 0 : 1};
+
+  // Every block of a group pushes the same number of chunks of up to ncclSymkAgHierMaxChunkBytes, each a
+  // multiple of ncclSymkBytePerChunk per warp, so bcast()'s 16-byte tier copies it all, split evenly. With
+  // tile staging the multiple is one 256-byte-tier tile per warp, for the same split in that tier.
+  size_t chunkAlign = size_t(nHalfWarps) * (ncclSymkAsyncTile && EnableTma ?
+                                              ncclSymkAlign256BDeepBytePerChunk / ncclSymkMinWarpsPerBlock :
+                                              ncclSymkBytePerChunk);
+  size_t nBlockChunksMax = max(size_t(1), divUp(divUp(nElts, size_t(nGroupBlocks)), ncclSymkAgHierMaxChunkBytes));
+  size_t chunkBytes = roundUp(divUp(nElts, nBlockChunksMax * nGroupBlocks), chunkAlign);
+  size_t nChunks = chunkBytes == 0 ? 0 : divUp(nElts, chunkBytes);
+  size_t flagRow = size_t(blockIdx.x) * nGroups;
+
+  for (int unit = block; unit < nUnits; unit += nBlocks) {
+    int group = unit < nRows ? unit % nGroups : 1 + (unit - nRows) % (nGroups - 1);
+    int groupBlock = unit < nRows ? unit / nGroups : nG0Blocks + (unit - nRows) / (nGroups - 1);
+    if (group == 0) {
+      int bt = flattenIx(lane, WARP_SIZE, groupBlock, nG0Blocks, warp, nBlockWarps);
+      bcast<char, EnableTma, /*Deep=*/true>(handler, nG0Blocks * blockDim.x, bt, /*nBlocks=*/1, /*waitNeeded=*/false,
+                                            bar, input, mySlot, nElts, scaleIn);
+      continue;
+    }
+
+    int to = scaleUp.rank + group;
+    if (to >= nGroups) to -= nGroups;
+    int from = scaleUp.rank - group;
+    if (from < 0) from += nGroups;
+    int toSlot = ncclTeamRankToLsa(handler.comm, scaleUp, to);
+    ncclSymPtr<char> fromSlot = output + ncclTeamRankToWorld(handler.comm, scaleUp, from) * nAllElts;
+
+    // The block's chunk i is chunk i * nGroupBlocks + groupBlock of the slot.
+    int nBlockChunks = groupBlock < nChunks ? int(divUp(nChunks - groupBlock, size_t(nGroupBlocks))) : 0;
+    if (pusher) {
+      uint64_t* flags = (uint64_t*)ncclGetResourceBufferLsaPointer(handler.comm, flagsBuf, toSlot);
+      cuda::atomic_ref<uint64_t> flag(flags[flagRow + group]);
+      for (int i = 0; i < nBlockChunks; i++) {
+        size_t lo = (size_t(i) * nGroupBlocks + groupBlock) * chunkBytes;
+        bcast<char, EnableTma, /*Deep=*/true>(handler, tn, t, 1, false, bar, input + lo, mySlot + lo,
+                                              min(chunkBytes, nElts - lo), scaleIn, toSlot);
+        // half.sync() orders every pusher warp's stores before this system-scope fence
+        half.sync();
+        if (t == 0) {
+          cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+          flag.store(seq + i + 1, cuda::memory_order_relaxed);
+        }
+      }
+    } else if (forwarder) {
+      uint64_t* flags = (uint64_t*)ncclGetResourceBufferLocalPointer(handler.comm, flagsBuf);
+      cuda::atomic_ref<uint64_t> flag(flags[flagRow + group]);
+      for (int i = 0; i < nBlockChunks; i++) {
+        if (t == 0) {
+          uint32_t steps = 0;
+          while (flag.load(cuda::memory_order_relaxed) < seq + i + 1) {
+            if (nccl::utility::testAbort(handler.comm.abortFlag, steps)) break;
+          }
+          cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
+        }
+        half.sync();
+        size_t lo = (size_t(i) * nGroupBlocks + groupBlock) * chunkBytes;
+        bcast<char, EnableTma, /*Deep=*/true>(handler, tn, t, 1, false, bar, fromSlot + lo, fromSlot + lo,
+                                              min(chunkBytes, nElts - lo), scaleIn);
+      }
+    }
+    seq += nBlockChunks;
+  }
+}
+
+// Two-level load/store AllGather for an LSA team over packages of hierScaleInSize consecutive ranks.
+// Each rank pushes its slot to its counterpart on every other package, which forwards it to its
+// package peers, so each remote slot reaches a package once.
+template <bool EnableProfiler, bool EnableTma>
+__device__ __forceinline__ void ncclSymkRun_AllGather_HierLsaST_impl(ncclSymkDevWorkArgs const* args) {
+  ncclSymkArgsHandler handler{args};
+  ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), handler.comm, ncclTeamTagLsa(), blockIdx.x};
+
+  ncclTeam lsa = ncclTeamLsa(handler.comm);
+  ncclTeam scaleIn = ncclTeamInnerFactor(lsa, args->kcomm.hierScaleInSize);
+  ncclTeam scaleUp = ncclTeamOuterFactor(lsa, args->kcomm.hierScaleInSize);
+  // Group 0 raises no flag, so its slot in our row keeps the block's chunk count across launches.
+  uint64_t* seqSlot = (uint64_t*)ncclGetResourceBufferLocalPointer(handler.comm, args->kcomm.hierPushFlags) +
+                      size_t(blockIdx.x) * scaleUp.nRanks;
+  uint64_t seq = *seqSlot;
+
+  ncclCoopNamedBarrierInit();
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
+
+  handler.forEachWork<char>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
+                                           ncclSymPtr<char> input, ncclSymPtr<char> output) {
+    agHierPush<EnableTma>(handler, bar, block, nBlocks, scaleIn, scaleUp, args->kcomm.hierPushFlags, seq, nElts,
+                          nAllElts, input, output);
+  });
+  if (threadIdx.x == 0) *seqSlot = seq;
+
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
+  bar.sync(ncclCoopCta(), cuda::memory_order_release);
+}
+
+template <bool EnableProfiler>
+__device__ __forceinline__ void ncclSymkRun_AllGather_HierLsaST(ncclSymkDevWorkArgs const* args) {
+  ncclSymkRun_AllGather_HierLsaST_impl<EnableProfiler, /*EnableTma=*/false>(args);
+}
+
+template <bool EnableProfiler>
+__device__ __forceinline__ void ncclSymkRun_AllGather_HierLsaTmaST(ncclSymkDevWorkArgs const* args) {
+  ncclSymkRun_AllGather_HierLsaST_impl<EnableProfiler, /*EnableTma=*/true>(args);
+}
+
 template <bool EnableProfiler, bool EnableTma>
 __device__ __forceinline__ void ncclSymkRun_AllGather_STMC_impl(ncclSymkDevWorkArgs const* args) {
   ncclSymkArgsHandler handler{args};
@@ -302,11 +462,11 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_STMC_impl(ncclSymkDevWorkA
 
   handler.forEachWork<char>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
                                            ncclSymPtr<char> input, ncclSymPtr<char> output) {
-        // Round robin memory to blocks.
+    // Round robin memory to blocks.
     int t =
       flattenIx(threadIdx.x % WARP_SIZE, WARP_SIZE, block, nBlocks, threadIdx.x / WARP_SIZE, blockDim.x / WARP_SIZE);
     int tn = nBlocks * blockDim.x;
-    bcastMultimem<char, EnableTma>(handler, tn, t, input, output + rank * nAllElts, nElts);
+    bcastMultimem<char, EnableTma>(handler, tn, t, input, output + rank * nAllElts, nElts, rank);
   });
 
   if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
@@ -332,7 +492,8 @@ static __device__ void allgather_LL_body(ncclSymkDevWorkArgs const* args, ncclSy
   int const& rank = handler.comm.rank;
   int const& nRanks = handler.comm.nRanks;
   int t = threadIdx.x;
-  constexpr int tn = ncclSymkMaxThreads;
+  // The round-downs below mask with -(Unroll * tn), so the launch width must be a power of two.
+  int tn = blockDim.x;
 
   // LL fuses the peer sync into the first epoch, so AFTER_OPEN is stamped once, at the
   // first endEpoch below (see ncclDevProfilerPhases in device.h); BEGIN marks the start.

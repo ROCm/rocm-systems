@@ -13,22 +13,22 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 608
-contract_domains: 118
-declared_apis: 497
-covered_apis: 486
-uncovered_allowlisted: 11
-coverage_pct: 97.8
+contract_tests: 635
+contract_domains: 119
+declared_apis: 507
+covered_apis: 494
+uncovered_allowlisted: 13
+coverage_pct: 97.4
 -->
 
-- Snapshot date: 2026-08-26
-- Snapshot commit: `920418c484`
-- Contract tests: 608
-- Contract domains: 118
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 497
-- Declared HIP runtime APIs directly exercised by contract tests: 486
-- Intentionally uncovered, allowlisted APIs: 11
-- Approximate declared API-name coverage: 97.8%
+- Snapshot date: 2026-11-05
+- Snapshot commit: `1daccbf1b37`
+- Contract tests: 635
+- Contract domains: 119
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 507
+- Declared HIP runtime APIs directly exercised by contract tests: 494
+- Intentionally uncovered, allowlisted APIs: 13
+- Approximate declared API-name coverage: 97.4%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`,
   `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`,
@@ -61,8 +61,8 @@ allowlisted:
 ### External-semaphore graph nodes
 
 These APIs require a valid external semaphore node. The device-only contract harness
-cannot construct such a node without an external producer, and the add path faults when
-fed an invalid handle on some runtime paths.
+cannot construct such a node without an external producer. Invalid-argument checks for
+all eight live in `catch/unit/graph/hipGraphExternalSemaphoresNodes.cc`.
 
 - `hipGraphAddExternalSemaphoresSignalNode`
 - `hipGraphAddExternalSemaphoresWaitNode`
@@ -104,7 +104,7 @@ binaries instead of exposing portable state to assert.
 | `context_config` | 6 |
 | `context_mutation` | 5 |
 | `copy3d` | 4 |
-| `device` | 7 |
+| `device` | 11 |
 | `device_config` | 6 |
 | `device_identity` | 9 |
 | `device_lifecycle` | 7 |
@@ -160,14 +160,14 @@ binaries instead of exposing portable state to assert.
 | `kernel` | 4 |
 | `kernel_launch` | 7 |
 | `kernel_name_ref` | 3 |
-| `kernel_object_attributes` | 3 |
+| `kernel_object_attributes` | 5 |
 | `library` | 14 |
 | `library_file` | 3 |
 | `logging` | 3 |
 | `managed_memory` | 5 |
 | `mem_advise` | 6 |
 | `mem_advise_v2` | 4 |
-| `mem_batch_copy` | 3 |
+| `mem_batch_copy` | 4 |
 | `mem_batch_copy_3d` | 4 |
 | `mem_batch_discard` | 7 |
 | `mem_location_pool` | 4 |
@@ -180,7 +180,7 @@ binaries instead of exposing portable state to assert.
 | `memset` | 6 |
 | `mipmapped_array` | 4 |
 | `module` | 7 |
-| `module_exec` | 8 |
+| `module_exec` | 12 |
 | `module_load_ex` | 4 |
 | `module_load_file` | 6 |
 | `multi_device_launch` | 4 |
@@ -209,7 +209,7 @@ binaries instead of exposing portable state to assert.
 | `texture_reference_symbol` | 10 |
 | `transfer` | 4 |
 | `vmm` | 5 |
-| `vmm_handle` | 4 |
+| `vmm_handle` | 6 |
 
 ## Keeping coverage honest
 

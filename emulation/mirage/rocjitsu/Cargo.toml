@@ -8,6 +8,7 @@ path = "src/lib.rs"
 
 [dependencies]
 mirage_core = { workspace = true }
+mirage_builtin = { workspace = true }
 rocjitsu_sys = { workspace = true }
 inventory = { workspace = true }
 chrono = { workspace = true }
@@ -20,7 +21,6 @@ thiserror = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
-mirage_builtin = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

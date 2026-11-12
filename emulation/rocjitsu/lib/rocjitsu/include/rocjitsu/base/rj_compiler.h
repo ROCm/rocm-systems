@@ -14,6 +14,15 @@
 #define RJ_API_EXPORT __attribute__((visibility("default")))
 #endif
 
+/// @brief Export RTTI and vtables used by polymorphic types across shared libraries.
+/// Clang can expose type metadata without exposing the class's member functions.
+/// GCC and Windows use the class visibility as the fallback.
+#if defined(__clang__) && !defined(_WIN32) && !defined(__CYGWIN__)
+#define RJ_API_TYPE_EXPORT __attribute__((type_visibility("default")))
+#else
+#define RJ_API_TYPE_EXPORT RJ_API_EXPORT
+#endif
+
 /// @brief Marks a libc entry point interposed by the LD_PRELOAD shim for export.
 #define RJ_INTERPOSER_EXPORT RJ_API_EXPORT
 

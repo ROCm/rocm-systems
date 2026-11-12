@@ -1,0 +1,45 @@
+# CTest categories for the host-only src/graph topology microtests.
+#
+# gtest's `*` does not cross `.`, so a suite missing here never runs under CTest; sync with graph-dev-test.cc's suites.
+test_categories:
+  quick: &micro_graph_quick
+    description: "Smoke - host-only src/graph topology micro-tests, sub-second."
+    test_patterns:
+      - "TopoGpuDevMicrotest.*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_graph_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_graph_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_graph_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

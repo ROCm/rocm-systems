@@ -10,6 +10,7 @@
 #include "hip_global.hpp"
 
 #include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -94,11 +95,16 @@ class DynCO : public CodeObject {
   std::recursive_mutex dclock_;
 
  public:
-  DynCO() : device_id_(ihipGetDevice()), fb_info_(nullptr), module_(nullptr) {}
+  explicit DynCO(int device_id = ihipGetDevice())
+      : device_id_(device_id), fb_info_(nullptr), module_(nullptr) {}
   virtual ~DynCO();
 
-  // LoadsCodeObject and its data
-  hipError_t loadCodeObject(const char* fname, const void* image = nullptr);
+  // Primary device loads code object and initialize global and managed variables. In case we need
+  // to set attribute for a device that's not current, we need to load the code object for it, but
+  // don't need to initialize global/managed-variable state.
+  hipError_t loadCodeObject(const char* fname, const void* image = nullptr,
+                            bool init_global_vars = true,
+                            std::vector<char>* image_storage = nullptr);
   hipModule_t getModule() const { return module_; };
 
   // Device the code object was loaded for at construction. Callers that key
@@ -110,6 +116,7 @@ class DynCO : public CodeObject {
   // Gets GlobalVar/Functions from a dynamically loaded code object
   hipError_t getDynFunc(hipFunction_t* hfunc, const std::string& func_name);
   hipError_t getFuncCount(unsigned int* count);
+  hipError_t enumerateFunctions(hipFunction_t* functions, unsigned int numFunctions);
   hipError_t GetDeviceVar(amd::Memory** mem, const std::string& var_name);
   hip::Var* getVar(const std::string& var_name);
 
@@ -183,14 +190,21 @@ class StatCO : public CodeObject {
   // pointer to the alocated managed memory has to be copied to the address of symbol
   hipError_t InitManagedVarDevicePtr(int deviceId);
 
-  // Find a deferred managed var whose mmap address equals ptr
-  Var* FindDeferredManagedVar(const void* ptr);
-
   // Resize device-specific data structures for all registered functions and variables
   void ResizeForDevices(size_t device_count);
 
+  // Back every registered managed variable with a tracked allocation, so its host
+  // pointer is resolvable through MemObjMap before any HIP API can observe it.
+  hipError_t EnsureAllManagedVarsAreMapped();
+
   // Iterate all registered fat binary data pointers — for HRR capture post-registration sweep.
   void ForEachFatBinaryBlob(void (*cb)(const void*)) const;
+
+  // Iterate all registered __device__ globals as (host shadow address, symbol
+  // name, size, device address) — the same post-registration sweep for HRR,
+  // which otherwise never sees __hipRegisterVar because it fires at
+  // static-init time. The device address is null if it cannot be resolved yet.
+  void ForEachGlobalVar(void (*cb)(const void*, const char*, size_t, const void*));
 
  private:
   mutable std::recursive_mutex sclock_;    //!< Guards Static Code object
@@ -208,10 +222,13 @@ class StatCO : public CodeObject {
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostFunctions_;
   //! Reverse mapping of vars
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
-  //! Tracks managed var initialization per device
-  std::unique_ptr<std::atomic<bool>[]> managedVarsDevicePtrInitialized_;
-  //! Number of entries in managedVarsDevicePtrInitialized_
-  size_t managedVarsDevicePtrInitializedSize_ = 0;
+  //! Managed variables registered so far; never decremented, since removing a fat binary
+  //! only shrinks managedVars_. Each Var keeps the number it was given.
+  std::atomic<uint64_t> managedVarRegCount_{0};
+  //! Indexed by device id: the registration number this device's managed-variable pointers
+  //! have been written up to. Never grown in place, since std::atomic is neither copyable
+  //! nor movable.
+  std::vector<std::atomic<uint64_t>> managedDevPtrWrittenUpTo_;
 };
 
 };  // namespace hip

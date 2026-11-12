@@ -27,20 +27,6 @@ Atomics [
   atomicXor_system
 ]
 
-Builtin atomics [
-  __hip_atomic_load
-  __hip_atomic_store
-  __hip_atomic_compare_exchange_weak
-  __hip_atomic_compare_exchange_strong
-  __hip_atomic_exchange
-  __hip_atomic_fetch_add
-  __hip_atomic_fetch_and
-  __hip_atomic_fetch_or
-  __hip_atomic_fetch_xor
-  __hip_atomic_fetch_min
-  __hip_atomic_fetch_max
-]
-
 Cooperative groups [
   File restriction: cooperative_groups
   Device groups: (

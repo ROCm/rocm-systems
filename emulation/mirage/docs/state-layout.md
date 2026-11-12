@@ -161,6 +161,20 @@ daemon binds a socket in the same place:
 └── exec/<exec>/<rank>.pid    # containerised ranks only (see above)
 ```
 
+The socket is also the one thing here the workload has to be told *who*
+is on the other end of. rocjitsu's interposer asks the daemon for
+permission to be read out of — pageable transfers are serviced by the
+daemon reaching into the workload with `process_vm_readv`, which Yama
+refuses to a non-descendant without that grant — and `SO_PEERCRED` alone
+cannot say whether the peer that answered is the right process, since the
+socket path is predictable. So mirage exports `$ROCJITSU_DAEMON_PID`
+naming the process hosting the daemon, which is the `mirage run` process
+itself: the daemon is started in-process (`rj_daemon_start`), not forked
+the way the `rocjitsu` CLI does it. Without that variable the interposer
+trusts whoever answered and says so on the workload's stderr at every
+launch. It is set only in daemon mode; `--in-process` connects to no
+socket.
+
 Mirage never reads these back to answer a control-plane query. The
 session creates the directory before bring-up and removes it wholesale
 during teardown, so it cannot outlive its session.

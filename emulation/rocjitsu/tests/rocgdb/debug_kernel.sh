@@ -5,12 +5,12 @@
 #
 # rocgdb wave-debugging demo + CI harness for the rocjitsu emulator.
 #
-# Compiles the demo HIP kernel with device debug info, then drives real ROCgdb
-# through `mirage run` to: set a breakpoint on the GPU kernel `add_one`, run,
-# stop at the wave, read PC/EXEC and the instruction at PC, single-step, and
-# continue the kernel to completion. It asserts the expected markers so it can
-# double as a CI smoke test for the full mirage + rocjitsu + rocm-dbgapi + ROCgdb
-# stack.
+# Compiles HIP workloads with device debug info, then drives real ROCgdb
+# through `mirage run` to exercise breakpoints, stepping, watchpoints, device
+# faults, scratch reads, multi-wave inspection, and fatal abort forwarding.
+# Checks wave state at debugger stops and host results after continuation.
+# Expected output markers make this a CI smoke test for the full mirage +
+# rocjitsu + rocm-dbgapi + ROCgdb stack.
 #
 # Exit codes:
 #   0   success (all debug markers observed) OR a required tool is missing and
@@ -42,7 +42,7 @@ fi
 
 # CTest matches the whole output against SKIP_REGULAR_EXPRESSION "SKIP:" (see
 # the RocgdbDebug.KernelBreakpoint registration in tests/CMakeLists.txt), and a
-# match reports the entire seven-scenario run skipped regardless of the exit
+# match reports the entire eight-scenario run skipped regardless of the exit
 # status. So the literal string "SKIP:" must be emitted only from here, where it
 # always means a test-wide prerequisite is missing and the run stops
 # immediately. A mid-run scenario that cannot proceed sets fail=1 instead --
@@ -99,13 +99,12 @@ mirage_runtime_args=()
 if [[ -n "$runtime_library_path" ]]; then
   mirage_runtime_args+=(--env "LD_LIBRARY_PATH=$runtime_library_path")
 fi
-# The nightly gfx1250 HIP/ROCr stack enables its code-object rewrite path by
-# default. A debugger qualification must observe the code object that hipcc
-# emitted, not a replacement held in anonymous memory, so disable that path in
-# both CLR and ROCr for every scenario below. The first ROCgdb run also prints
-# the inherited value and loaded libraries; the assertions below make this
-# fail closed if the variable is lost or the rewrite library is loaded anyway.
-mirage_runtime_args+=(--env "HSA_HOTSWAP_DISABLE=1")
+# A debugger qualification must observe the code object that hipcc emitted, not
+# a replacement held in anonymous memory, so explicitly leave ROCr's hotswap
+# path disabled for every scenario below. The first ROCgdb run also prints the
+# inherited value and loaded libraries; the assertions below make this fail
+# closed if the variable is changed or the rewrite library is loaded anyway.
+mirage_runtime_args+=(--env "HSA_HOTSWAP_ENABLE=0")
 
 # --- Build the demo kernel --------------------------------------------------
 workdir="$(mktemp -d)"
@@ -136,7 +135,7 @@ echo "running rocgdb under: $mirage_bin run --profile $profile"
 outfile="$workdir/rocgdb.out"
 timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" -- \
   rocgdb --batch \
-    -ex 'show environment HSA_HOTSWAP_DISABLE' \
+    -ex 'show environment HSA_HOTSWAP_ENABLE' \
     -ex 'set breakpoint pending on' \
     -ex 'break add_one' \
     -ex 'run' \
@@ -199,7 +198,7 @@ check() { # <regex> <description>
 }
 
 check 'hit Breakpoint 1, .*add_one .*at .*:[0-9]+' 'stopped at the GPU kernel breakpoint'
-check '^HSA_HOTSWAP_DISABLE = 1' 'disabled the gfx1250 code-object rewrite path'
+check '^HSA_HOTSWAP_ENABLE = 0' 'disabled the gfx1250 code-object rewrite path'
 if grep -qaE 'libhsa_hotswap_rocjitsu|HotSwap: forwarding' <<<"$out"; then
   echo "  FAIL: a HotSwap implementation was active during ROCgdb qualification" >&2
   fail=1
@@ -543,6 +542,65 @@ if hipcc --offload-arch="$arch" -g -O0 -o "$mwapp" "$here/multi_wave.hip" 2>"$wo
 else
   cat "$workdir/mwbuild.log" >&2
   echo "FAIL: could not build multi_wave.hip for $arch" >&2
+  fail=1
+fi
+
+# --- Eighth scenario: multi-wave abort forwarding -----------------------------
+# A fatal exception can be reported by several waves in one queue. ROCr's
+# exception callback is removed after the first report, but later debugger
+# forwards must still succeed. Inspect the first stop, then pass all remaining
+# SIGABRT stops to the runtime and require the host to observe a HIP error.
+# ROCr handlers may leave PC on the abort or advance it by four bytes. Inspect
+# both addresses; the instruction at PC-4 has no current-PC arrow in GDB output.
+abort_app="$workdir/abort_waves"
+if hipcc --offload-arch="$arch" -g -O0 -o "$abort_app" "$here/abort_waves.hip" 2>"$workdir/abort-build.log"; then
+  outfile8="$workdir/abort.out"
+  echo "running rocgdb (multi-wave abort forwarding) ..."
+  (
+    ulimit -c 0
+    timeout 180 "$mirage_bin" run --profile "$profile" "${mirage_runtime_args[@]}" \
+      --env HIP_SKIP_ABORT_ON_GPU_ERROR=1 -- \
+      rocgdb --batch \
+        -ex 'set print thread-events off' \
+        -ex 'run' \
+        -ex 'info registers pc exec' \
+        -ex 'x/i $pc' \
+        -ex 'x/i $pc-4' \
+        -ex 'handle SIGABRT nostop print pass' \
+        -ex 'continue' \
+        "$abort_app" </dev/null
+  ) >"$outfile8" 2>&1
+  status8=$?
+  out8="$(cat "$outfile8")"
+  echo "--------------------------------------------------------------------"
+  echo "$out8"
+  echo "--------------------------------------------------------------------"
+  if [[ $status8 -ne 0 ]]; then
+    echo "FAIL: multi-wave abort run exited with status $status8" >&2
+    fail=1
+  fi
+  check8() {
+    if grep -qaE "$1" <<<"$out8"; then
+      echo "  ok: $2"
+    else
+      echo "  MISSING: $2 (/$1/)" >&2
+      fail=1
+    fi
+  }
+  check8 'SIGABRT, Aborted' 'stopped at a device abort'
+  check8 '^pc +0x[0-9a-f]+ +0x[0-9a-f]+ <.*abort_waves' 'read the aborted wave PC'
+  check8 "$exec_regex" 'read the aborted wave EXEC mask'
+  check8 '^[[:space:]]*(=> )?0x[0-9a-f]+ .*:[[:space:]]+s_trap +2([[:space:]]|$)' \
+    'found the abort instruction at PC or PC-4'
+  check8 'abort_waves done: hipDeviceSynchronize reported hipError' 'host synchronization received a HIP error'
+  check8 'Inferior 1 .*exited normally' 'inferior exited after forwarding every abort'
+  if grep -qaEi 'fatal error:|wave_resume .* failed|send_exceptions failed|internal-error' <<<"$out8"; then
+    echo "FAIL: debugger failed while forwarding a device abort" >&2
+    fail=1
+  fi
+else
+  cat "$workdir/abort-build.log" >&2
+  echo "FAIL: could not build abort_waves.hip for $arch" >&2
   fail=1
 fi
 

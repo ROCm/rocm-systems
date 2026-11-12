@@ -3,38 +3,21 @@
 
 include_guard(DIRECTORY)
 
-set(SPDLOG_VERSION "1.15.3" CACHE STRING "spdlog version")
+set(SPDLOG_VERSION "1.15.3" CACHE STRING "Minimum spdlog version")
 
-find_package(spdlog ${SPDLOG_VERSION} QUIET)
+# Fetching is Off by default: a missing or old package errors out.
+if(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
+    find_package(spdlog ${SPDLOG_VERSION})
 
-# A system spdlog is only safe to reuse if it was built with external fmt.
-# If it was built against its bundled fmt, its public headers pull in
-# <spdlog/fmt/bundled/...> and libspdlog exports bundled-fmt symbols, which
-# would coexist with the external fmt that profiler-hub links - two fmt
-# copies in one binary. Detect this via the interface compile definition
-# that spdlog's exported target carries when SPDLOG_FMT_EXTERNAL was set.
-if(spdlog_FOUND)
-    get_target_property(
-        _spdlog_iface_defs
-        spdlog::spdlog
-        INTERFACE_COMPILE_DEFINITIONS
-    )
-    if(NOT _spdlog_iface_defs MATCHES "SPDLOG_FMT_EXTERNAL")
+    if(NOT spdlog_FOUND)
         message(
-            STATUS
-            "System spdlog uses bundled fmt; falling back to FetchContent with external fmt"
+            FATAL_ERROR
+            "profiler-hub requires spdlog ${SPDLOG_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead."
         )
-        set(spdlog_FOUND FALSE)
     endif()
-endif()
 
-if(spdlog_FOUND)
     message(STATUS "Using system spdlog (version ${spdlog_VERSION})")
 else()
-    message(
-        STATUS
-        "System spdlog not found, fetching version ${SPDLOG_VERSION}"
-    )
     include(FetchContent)
 
     FetchContent_Declare(
@@ -42,6 +25,8 @@ else()
         GIT_REPOSITORY https://github.com/gabime/spdlog.git
         GIT_TAG v${SPDLOG_VERSION}
         GIT_SHALLOW TRUE
+        # Without this, the MakeAvailable below always fetches.
+        FIND_PACKAGE_ARGS ${SPDLOG_VERSION}
     )
 
     set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
@@ -53,6 +38,7 @@ else()
     set(_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
     set(BUILD_SHARED_LIBS OFF)
 
+    # Tries find_package() first, fetches only if that fails.
     FetchContent_MakeAvailable(spdlog)
 
     set(BUILD_SHARED_LIBS ${_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP})
@@ -66,3 +52,20 @@ else()
         add_library(spdlog::spdlog ALIAS spdlog)
     endif()
 endif()
+
+# The exported target's interface definitions are the only reliable record
+# of which fmt a prebuilt spdlog was compiled against.
+get_target_property(
+    _spdlog_iface_defs
+    spdlog::spdlog
+    INTERFACE_COMPILE_DEFINITIONS
+)
+
+if(NOT _spdlog_iface_defs MATCHES "SPDLOG_FMT_EXTERNAL")
+    message(
+        FATAL_ERROR
+        "profiler-hub requires an spdlog built with SPDLOG_FMT_EXTERNAL. The one provided is built against its bundled fmt, which would put two fmt copies in one binary. Provide a suitable spdlog on CMAKE_PREFIX_PATH, or configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON -DCMAKE_DISABLE_FIND_PACKAGE_spdlog=ON to bypass it and download one."
+    )
+endif()
+
+unset(_spdlog_iface_defs)

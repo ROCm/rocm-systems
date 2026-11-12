@@ -53,7 +53,7 @@ target_compile_options(squareGenericTarget PRIVATE
 )
 
 # Test generic target with features
-set(OFFLOAD_ARCH_GENERIC_FEATURE_STR "--offload-arch=gfx9-generic --offload-arch=gfx9-4-generic:sramecc+:xnack- --offload-arch=gfx9-4-generic:sramecc-:xnack- --offload-arch=gfx9-4-generic:xnack+ --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic")
+set(OFFLOAD_ARCH_GENERIC_FEATURE_STR "--offload-arch=gfx9-generic --offload-arch=gfx9-4-generic:sramecc+:xnack- --offload-arch=gfx9-4-generic:sramecc-:xnack- --offload-arch=gfx9-4-generic:sramecc+:xnack+ --offload-arch=gfx9-4-generic:sramecc-:xnack+ --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic")
 separate_arguments(OFFLOAD_ARCH_GENERIC_FEATURE_LIST UNIX_COMMAND "${OFFLOAD_ARCH_GENERIC_FEATURE_STR}")
 
 add_executable(squareGenericTargetWithFeatures ${EXCLUDE_OPTION} square.cpp ../../../catch/hipTestMain/hip_test_features.cc)

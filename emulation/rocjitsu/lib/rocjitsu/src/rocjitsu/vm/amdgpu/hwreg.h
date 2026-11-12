@@ -14,8 +14,12 @@ namespace amdgpu {
 
 class Wavefront;
 
-/// @brief Encode the GFX12 STATE_PRIV fields backed by internal STATUS.
-[[nodiscard]] uint32_t gfx12_state_priv_from_status(uint32_t status, bool scratch_enabled);
+/// @brief Encode GFX12 STATE_PRIV using the selected STATUS and live workgroup flags.
+[[nodiscard]] uint32_t gfx12_state_priv_from_status(const Wavefront &wf, uint32_t status,
+                                                    bool scratch_enabled);
+
+/// @brief Apply the one-shot sleep credit and workgroup barrier completion fields.
+void set_gfx12_state_priv_workgroup_flags(Wavefront &wf, uint32_t state_priv);
 
 /// @brief Replace internal STATUS fields represented by GFX12 STATE_PRIV.
 [[nodiscard]] uint32_t update_status_from_gfx12_state_priv(uint32_t status, uint32_t state_priv);
@@ -43,8 +47,18 @@ enum class HwregAccessResult : uint8_t {
   Privileged,
 };
 
+/// @brief Instruction form issuing an HWREG write.
+enum class HwregWriteKind : uint8_t {
+  Generic,
+  Setreg,
+  SetregImm32,
+};
+
 /// @brief Extract the register ID field from an encoded HWREG operand.
 [[nodiscard]] uint32_t hwreg_id(uint16_t hwreg);
+
+/// Whether this permitted HWREG access reads or replaces the SCC bit.
+[[nodiscard]] bool hwreg_accesses_scc(const Wavefront &wf, uint16_t hwreg, bool write);
 
 /// @brief Return the architecture-specific name for an encoded HWREG operand.
 [[nodiscard]] const char *hwreg_name(const Wavefront &wf, uint16_t hwreg);
@@ -63,7 +77,8 @@ enum class HwregAccessResult : uint8_t {
 /// @details Failed writes leave wave state unchanged. Unknown registers report
 /// Unsupported; known read-only or privileged registers report that policy
 /// before checking whether rocjitsu backs the register state.
-[[nodiscard]] HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src);
+[[nodiscard]] HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
+                                                  HwregWriteKind kind = HwregWriteKind::Generic);
 
 } // namespace amdgpu
 } // namespace rocjitsu

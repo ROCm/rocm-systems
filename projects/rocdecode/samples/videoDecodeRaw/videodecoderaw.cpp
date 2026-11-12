@@ -25,13 +25,15 @@ THE SOFTWARE.
 #include <cstring>
 #include <string>
 #include <iomanip>
+#ifndef _WIN32
 #include <unistd.h>
+#include <sys/stat.h>
+#include <libgen.h>
+#endif
 #include <vector>
 #include <string>
 #include <chrono>
-#include <sys/stat.h>
-#include <libgen.h>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
 #else
     #include <experimental/filesystem>
@@ -200,7 +202,7 @@ int main(int argc, char **argv) {
     }
 
     try {
-        std::size_t found_file = input_file_path.find_last_of('/');
+        std::size_t found_file = input_file_path.find_last_of("/\\");
         std::cout << "info: Input file: " << input_file_path.substr(found_file + 1) << std::endl;
         std::cout << "info: Using built-in bitstream reader" << std::endl;
         RocdecBitstreamReader bs_reader = nullptr;
@@ -224,9 +226,22 @@ int main(int argc, char **argv) {
         }
 
         RocVideoDecoder viddec(device_id, mem_type, rocdec_codec_id, b_force_zero_latency, p_crop_rect, b_extract_sei_messages, disp_delay);
-        if(!viddec.CodecSupported(device_id, rocdec_codec_id, bit_depth)) {
-            std::cerr << "Error: GPU doesn't support codec!" << std::endl;
+        // Query the decode capabilities directly instead of using RocVideoDecoder::CodecSupported(), which reports a
+        // failed query the same way as an unsupported codec. A codec the GPU's VCN doesn't support (e.g. AV1 on gfx90a)
+        // is skipped with exit code 77, the conventional skip code; a failed query is an error.
+        RocdecDecodeCaps decode_caps = {};
+        decode_caps.device_id = device_id;
+        decode_caps.codec_type = rocdec_codec_id;
+        decode_caps.chroma_format = rocDecVideoChromaFormat_420;
+        decode_caps.bit_depth_minus_8 = bit_depth - 8;
+        rocDecStatus caps_status = rocDecGetDecoderCaps(&decode_caps);
+        if (caps_status != ROCDEC_SUCCESS) {
+            std::cerr << "Error: rocDecGetDecoderCaps failed: " << rocDecGetErrorName(caps_status) << std::endl;
             return 1;
+        }
+        if (!decode_caps.is_supported) {
+            std::cout << "info: Codec not supported on GPU, skipping!" << std::endl;
+            return 77;
         }
         std::string device_name, gcn_arch_name;
         int pci_bus_id, pci_domain_id, pci_device_id;
@@ -244,7 +259,6 @@ int main(int argc, char **argv) {
         uint8_t *pframe = nullptr;
         int64_t pts = 0;
         OutputSurfaceInfo *surf_info;
-        uint32_t width, height;
         double total_dec_time = 0;
         bool first_frame = true;
         // initialize reconfigure params: the following is configured to dump to output which is relevant for this sample
@@ -289,7 +303,7 @@ int main(int argc, char **argv) {
             total_dec_time += time_per_decode;
             n_frame += n_frame_returned;
             n_pic_decoded += decoded_pics;
-            if (num_decoded_frames && num_decoded_frames <= n_frame) {
+            if (num_decoded_frames && num_decoded_frames <= static_cast<uint32_t>(n_frame)) {
                 break;
             }
 

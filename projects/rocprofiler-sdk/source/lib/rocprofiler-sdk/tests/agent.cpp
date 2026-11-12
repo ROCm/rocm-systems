@@ -26,6 +26,8 @@
 #include "lib/common/filesystem.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/platform/agent.hpp"
+#include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
+#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tests/details/agent.hpp"
 
@@ -48,6 +50,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <random>
+#include <set>
 #include <sstream>
 #include <type_traits>
 #include <typeinfo>
@@ -204,7 +207,29 @@ TEST(rocprofiler_lib, agent)
 
     auto& hsa_agents_v = _rocm_info.agents;
 
-    EXPECT_GE(agents.size(), hsa_agents_v.size());
+    // rocprofiler and the HSA runtime enumerate the topology independently. On
+    // bare metal both read the same KFD tree, so rocprofiler's list is a superset
+    // of HSA's. On WSL rocprofiler drops every GPU the DXG topology thunk cannot
+    // fully describe while HSA keeps reporting it, so there the list may
+    // legitimately be a strict subset.
+    //
+    // select_platform() in agent.cpp has internal linkage, so its precedence has
+    // to be restated here: an explicit ROCPROFILER_FORCE_PLATFORM decides, a
+    // value it does not recognize is ignored in favour of autodetect, and
+    // autodetect prefers gnulinux over wsl.
+    const bool wsl_topology = []() {
+        const auto forced =
+            ::rocprofiler::common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
+        if(forced == "wsl") return true;
+        if(forced == "gnulinux") return false;
+        return !::rocprofiler::platform::gnulinux::is_available() &&
+               ::rocprofiler::platform::wsl::is_available();
+    }();
+
+    if(!wsl_topology)
+    {
+        EXPECT_GE(agents.size(), hsa_agents_v.size());
+    }
 
     uint64_t skipped = 0;
     for(const auto* agent : agents)
@@ -252,7 +277,21 @@ TEST(rocprofiler_lib, agent)
             EXPECT_TRUE(false) << msg << " :: agent-type != CPU|GPU :: " << agent->type;
         }
 
-        EXPECT_EQ(std::string_view{agent->name}, std::string_view{hsa_agent->name}) << msg;
+        // HSA re-points A0 silicon on gfx12+ targets to a "-strict" ISA variant (see
+        // amd_gpu_agent.cpp in the HSA runtime). That suffix only selects an alternate
+        // ISA for code generation, it is not a distinct GPU architecture, so
+        // rocprofiler's name (reconstructed independently from KFD's gfx_target_version)
+        // intentionally omits it.
+        constexpr auto strict_suffix  = std::string_view{"-strict"};
+        auto           hsa_agent_name = std::string_view{hsa_agent->name};
+        if(hsa_agent_name.size() > strict_suffix.size() &&
+           hsa_agent_name.compare(hsa_agent_name.size() - strict_suffix.size(),
+                                  strict_suffix.size(),
+                                  strict_suffix) == 0)
+        {
+            hsa_agent_name.remove_suffix(strict_suffix.size());
+        }
+        EXPECT_EQ(std::string_view{agent->name}, hsa_agent_name) << msg;
         EXPECT_EQ(std::string_view{agent->vendor_name}, std::string_view{hsa_agent->vendor_name})
             << msg;
         EXPECT_EQ(std::string_view{agent->product_name},
@@ -297,7 +336,19 @@ TEST(rocprofiler_lib, agent)
         }
     }
 
-    EXPECT_EQ(skipped, (agents.size() - hsa_agents_v.size()));
+    // Every rocprofiler agent either paired with a distinct HSA agent or was
+    // counted in 'skipped'. Phrased as a subtraction from agents.size() (never
+    // less than 'skipped') rather than 'skipped == agents.size() -
+    // hsa_agents_v.size()' so it cannot underflow when rocprofiler published
+    // fewer agents than HSA reports.
+    if(wsl_topology)
+    {
+        EXPECT_LE(agents.size() - skipped, hsa_agents_v.size());
+    }
+    else
+    {
+        EXPECT_EQ(agents.size() - skipped, hsa_agents_v.size());
+    }
 
     // clean up memory leak
     for(auto& itr : _rocm_info.isas)
@@ -632,15 +683,18 @@ TEST(rocprofiler_lib, agent_visibility_multigpu)
 
     ASSERT_EQ(in_half.size(), num_gpu_agents);
 
-    auto strngpus = std::to_string(num_gpu_agents);
-    all_ordinals  = all_ordinals.substr(1);
-    all_uuids     = all_uuids.substr(1);
-    all_mixed     = all_mixed.substr(1);
-
+    // Must precede the substr() calls below: the accumulators are only non-empty
+    // once the loop above has appended at least one ",<device>" pair, so with no
+    // gpu agents at all trimming the leading separator would throw.
     if(num_gpu_agents < 2)
     {
         GTEST_SKIP() << "requires multiple gpu agents";
     }
+
+    auto strngpus = std::to_string(num_gpu_agents);
+    all_ordinals  = all_ordinals.substr(1);
+    all_uuids     = all_uuids.substr(1);
+    all_mixed     = all_mixed.substr(1);
 
     common::set_env("ROCR_VISIBLE_DEVICES", all_ordinals, 1);
     common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
@@ -765,6 +819,75 @@ TEST(rocprofiler_lib, agent_visibility_multigpu)
         ASSERT_EQ(itr->runtime_visibility.rocdecode, in_half.at(itr->id))
             << "agent-" << itr->node_id;
     }
+}
+
+// AIPROFSDK-1169: HIP_VISIBLE_DEVICES indexes the ROCR-visible list, so ROCR-hidden agents
+// must not trigger the "not visible to HSA" warning
+TEST(rocprofiler_lib, agent_visibility_rocr_hip_stacked)
+{
+    constexpr auto noval = std::string_view{};
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    auto num_gpu_agents = get_gpu_agents().size();
+    if(num_gpu_agents < 3)
+    {
+        GTEST_SKIP() << "requires 3 or more gpu agents";
+    }
+
+    // on an 8-GPU system this reproduces the ticket's table exactly (target = GPU 4)
+    const uint32_t target = (num_gpu_agents >= 6) ? 4 : 1;
+
+    struct visibility_case
+    {
+        std::string        rocr;
+        std::string        hip;
+        std::set<uint32_t> hsa_visible;
+        std::set<uint32_t> hip_visible;
+    };
+
+    auto cases = std::vector<visibility_case>{
+        {"", std::to_string(target), {}, {target}},
+        {fmt::format("{},{}", target - 1, target), "1", {target - 1, target}, {target}},
+        {fmt::format("{},{}", target, target + 1), "0", {target, target + 1}, {target}},
+        {std::to_string(target), std::to_string(target), {target}, {}},
+    };
+
+    for(const auto& itr : cases)
+    {
+        common::set_env("ROCR_VISIBLE_DEVICES", itr.rocr, 1);
+        common::set_env("HIP_VISIBLE_DEVICES", itr.hip, 1);
+
+        testing::internal::CaptureStderr();
+        auto agents = get_gpu_agents();
+        auto err    = testing::internal::GetCapturedStderr();
+
+        auto msg = fmt::format("ROCR_VISIBLE_DEVICES={} HIP_VISIBLE_DEVICES={}", itr.rocr, itr.hip);
+
+        // get_gpu_agents() always warns; its absence means stderr was not captured
+        ASSERT_NE(err.find("refreshing internal topology"), std::string::npos) << msg << "\n"
+                                                                               << err;
+        EXPECT_EQ(err.find("not visible to HSA"), std::string::npos) << msg << "\n" << err;
+
+        ASSERT_EQ(agents.size(), num_gpu_agents) << msg;
+        for(const auto* agent : agents)
+        {
+            auto id      = agent->logical_node_type_id;
+            auto hsa_exp = static_cast<uint32_t>(itr.rocr.empty() || itr.hsa_visible.count(id) > 0);
+            auto hip_exp = static_cast<uint32_t>(itr.hip_visible.count(id) > 0);
+
+            EXPECT_EQ(agent->runtime_visibility.hsa, hsa_exp) << msg << " :: GPU " << id;
+            EXPECT_EQ(agent->runtime_visibility.hip, hip_exp) << msg << " :: GPU " << id;
+            EXPECT_EQ(agent->runtime_visibility.rccl, hip_exp) << msg << " :: GPU " << id;
+            EXPECT_EQ(agent->runtime_visibility.rocdecode, hip_exp) << msg << " :: GPU " << id;
+        }
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
 }
 
 TEST(rocprofiler_lib, agent_visibility_inverted_multigpu)

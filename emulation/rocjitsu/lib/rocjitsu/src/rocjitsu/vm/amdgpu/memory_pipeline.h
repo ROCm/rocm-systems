@@ -7,11 +7,14 @@
 #pragma once
 
 #include "rocjitsu/isa/instruction.h"
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <array>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <queue>
@@ -25,9 +28,14 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 
+/// An unaligned native GFX12 LDS atomic faults before any active lane accesses bytes.
+bool native_ds_atomic_misaligned(const VectorMemState &state, rj_code_arch_t arch,
+                                 uint64_t request_lanes);
+
 enum class [[nodiscard]] MemoryAccessCompletion {
   Complete,
   Deferred,
+  Failed,
 };
 
 using MemoryAccessDeferredCompletion = std::function<void()>;
@@ -44,7 +52,14 @@ using MemoryAccessDeferredCompletion = std::function<void()>;
 /// in a single tick() and then complete on the next tick().
 class MemoryPipeline {
 public:
-  using FaultHandler = std::function<void(Wavefront &, VmAccessOutcome)>;
+  using FaultHandler = std::function<void(Wavefront &, VmAccessOutcome, uint64_t issue_pc)>;
+  static constexpr std::size_t MAX_WAIT_COUNTER_TOKENS =
+      MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS * MemoryCounterObligation::MAX_COUNTER_INCREMENT;
+
+  struct WaitCounterTokens {
+    std::array<WaitCounterType, MAX_WAIT_COUNTER_TOKENS> types{};
+    uint8_t size = 0;
+  };
 
   explicit MemoryPipeline(WaitCounterType type) : counter_type_(type) {}
   virtual ~MemoryPipeline();
@@ -52,17 +67,18 @@ public:
   struct PipelineEntry {
     Instruction *inst;
     Wavefront *wf;
-    WaitCounterType counter;
+    WaitCounterTokens counters;
     uint64_t wave_generation;
+    uint64_t issue_pc;
   };
 
   /// @brief Issue a memory instruction to this pipeline.
   ///
   /// In functional mode, memory accesses normally complete synchronously:
   /// the load or store is initiated and completed within this call, and the
-  /// wait counter is released only after complete_access() finishes all
-  /// writeback work.  A timing backend may return Deferred and release the
-  /// counter later through finish_completed_access().
+  /// wait-counter obligations are released only after complete_access()
+  /// finishes all writeback work. A timing backend may return Deferred and
+  /// release the counters later through finish_completed_access().
   VmAccessOutcome issue(Instruction *inst, Wavefront &wf);
 
   /// @brief Issue an instruction and retain it for retry on Unavailable.
@@ -74,6 +90,10 @@ public:
   /// @brief Retry every request that was unavailable on its preceding attempt.
   void tick();
 
+  /// @brief Retry only one queue's retained work without requesting an engine yield.
+  /// @details The caller holds the CU wave-state lock and owns this queue's pause.
+  void retry_for_queue(uint32_t process_id, uint32_t queue_id);
+
   bool empty() const { return issued_.empty() && returned_.empty(); }
 
   WaitCounterType counter_type() const { return counter_type_; }
@@ -82,6 +102,11 @@ public:
   /// @brief Retain an operation whose first access attempt already returned Unavailable.
   void defer_unavailable(Instruction *inst, Wavefront &wf);
 
+  /// @brief Cancel one unavailable side-effect-free load and rewind its issuing PC.
+  /// @details Used by debugger suspension so an unresolved load can be saved and
+  /// re-issued after restore. Stores, atomics and LDS-destination loads are retained.
+  bool rewind_unavailable_load(Wavefront &wf);
+
   /// @brief Cancel every retained operation belonging to one wave-slot occupant.
   void cancel(Wavefront &wf);
 
@@ -89,20 +114,32 @@ protected:
   virtual VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) = 0;
   /// Return Complete and do not call complete, or return Deferred and call it
   /// exactly once after the memory response is ready for architectural writeback.
+  /// Failed must not invoke complete. Earlier lane writes may remain.
   virtual MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
+  void retry_entries(bool all_queues, uint32_t process_id, uint32_t queue_id);
   VmAccessOutcome issue_impl(Instruction *inst, Wavefront &wf, bool retain_unavailable);
-  [[nodiscard]] WaitCounterType issue_counter(const Instruction &inst) const;
-  void complete_entry(PipelineEntry entry);
+  [[nodiscard]] WaitCounterTokens issue_counters(const Instruction &inst) const;
+  void acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
+  void release_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
+  bool cancel_wait_check_issue(const PipelineEntry &entry);
+  VmAccessOutcome complete_entry(PipelineEntry entry);
 
-  void finish_completed_access(Instruction *inst, Wavefront &wf, WaitCounterType counter,
+  void finish_completed_access(Instruction *inst, Wavefront &wf, const WaitCounterTokens &counters,
                                uint64_t wave_generation) {
     if (wf.dispatch_generation() != wave_generation) {
       delete inst;
       return;
     }
-    wf.release_wait_counter(counter);
+    const auto *state = inst->data();
+    if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        inst->data_as<VectorMemState>()->address_range_violation_lanes)
+      wf.record_rdna2_memory_violation();
+    release_wait_counters(wf, counters);
+    if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        inst->data_as<VectorMemState>()->flat_memory_violation)
+      wf.complete_flat_memory_violation();
     if (wf.state() == WfState::VM_RETRY)
       wf.set_state(WfState::RUNNING);
     delete inst;
@@ -113,6 +150,9 @@ protected:
   std::queue<PipelineEntry> returned_;
   FaultHandler fault_handler_;
 };
+
+/// Suppress only buffer TFE elements inside published nonresident PRT ranges.
+void qualify_buffer_residency(VectorMemState &state, const GpuVmAccess &vm);
 
 /// @brief Scalar memory pipeline for SMEM instructions.
 ///
@@ -147,6 +187,14 @@ protected:
                                          MemoryAccessDeferredCompletion complete) override;
 
 private:
+  VmAccessOutcome initiate_global_access(VectorMemState &state, Wavefront &wf,
+                                         uint64_t request_lanes);
+  // Per-request mutable state lives only in per_lane_addr, response_data and
+  // translated; sampling swaps each tap's versions around this call. The other
+  // request fields must be shared by every tap. Translation may refresh an
+  // unready request snapshot, so each tap retains its own translation progress.
+  VmAccessOutcome initiate_texel_access(VectorMemState &state, Wavefront &wf,
+                                        uint64_t request_lanes);
   L1VectorCache *l1_;
   L2Cache *l2_;
 };

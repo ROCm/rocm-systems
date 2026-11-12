@@ -13,7 +13,12 @@ from rocm_kpack.artifact_utils import (
     write_artifact_manifest,
 )
 from rocm_kpack.binutils import Toolchain
-from rocm_kpack.database_handlers import HipBLASLtHandler, MIOpenHandler, RocBLASHandler
+from rocm_kpack.database_handlers import (
+    ComposableKernelHandler,
+    HipBLASLtHandler,
+    MIOpenHandler,
+    RocBLASHandler,
+)
 from rocm_kpack.kpack import PackedKernelArchive
 from rocm_kpack.tools.verify_artifacts import ArtifactVerifier
 
@@ -27,10 +32,16 @@ from rocm_kpack.tools.verify_artifacts import ArtifactVerifier
         (MIOpenHandler(), "share/miopen/db/{target}_256.db.txt"),
         (MIOpenHandler(), "share/miopen/db/{target}256.HIP.fdb.txt"),
         (MIOpenHandler(), "lib/libMIOpenCKGroupedConv_{target}.so"),
+        (ComposableKernelHandler(), "lib/libdevice_conv_operations_{token}.a"),
+        (
+            ComposableKernelHandler(),
+            "lib/cmake/composable_kernel/"
+            "composable_kerneldevice_conv_operations_{token}Targets.cmake",
+        ),
     ],
 )
 def test_database_identity(tmp_path, target, handler, relative):
-    path = tmp_path / relative.format(target=target)
+    path = tmp_path / relative.format(target=target, token=target.replace("-", "_"))
     path.parent.mkdir(parents=True)
     path.write_text("payload")
     assert handler.detect(path, tmp_path) == target
@@ -65,6 +76,54 @@ def test_split_preserves_only_selected_database_payloads(tmp_path, selected):
         assert [p.name for p in output.iterdir()] == [f"{target}_256.db.txt"]
         assert (output / f"{target}_256.db.txt").read_text() == target
     assert not list((dest / "miopen_lib_generic").rglob("*.db.txt"))
+
+
+def test_split_routes_stepping_directory_to_base_arch(tmp_path):
+    # hipBLASLt installs gfx1250 A0 kernels under library/gfx1250v0/ with
+    # gfx1250 filenames; every file there must ship with the gfx1250 bundle.
+    source = tmp_path / "blas_lib_gfx125X-all"
+    prefix = "math-libs/BLAS/hipBLASLt/stage"
+    library = source / prefix / "lib/hipblaslt/library"
+    layout = {
+        "gfx1250": "gfx1250",
+        "gfx1250v0": "gfx1250",
+        "gfx1250-strict": "gfx1250-strict",
+    }
+    for directory, target in layout.items():
+        (library / directory).mkdir(parents=True)
+        for name in [
+            f"TensileLibrary_lazy_{target}.dat.zlib",
+            f"TensileLibrary_Type_HH_{target}.dat.zlib",
+            f"TensileLibrary_Type_HH_{target}.co",
+        ]:
+            (library / directory / name).write_text(directory)
+    write_artifact_manifest(source, [prefix])
+    dest = tmp_path / "split"
+    splitter = ArtifactSplitter(
+        artifact_prefix="blas_lib",
+        toolchain=Toolchain(),
+        database_handlers=[HipBLASLtHandler()],
+        gpu_targets=["gfx1250", "gfx1250-strict"],
+    )
+    splitter.split(source, dest)
+
+    def library_dirs(artifact):
+        output = dest / artifact / prefix / "lib/hipblaslt/library"
+        return {d.name: sorted(p.name for p in d.iterdir()) for d in output.iterdir()}
+
+    assert set(library_dirs("blas_lib_gfx1250")) == {"gfx1250", "gfx1250v0"}
+    assert len(library_dirs("blas_lib_gfx1250")["gfx1250v0"]) == 3
+    assert set(library_dirs("blas_lib_gfx1250-strict")) == {"gfx1250-strict"}
+    assert not [
+        p
+        for p in (dest / "blas_lib_generic").rglob("*")
+        if p.is_file() and "hipblaslt/library" in p.as_posix()
+    ]
+    verifier = ArtifactVerifier(dest, Toolchain())
+    verifier._check_architecture_separation(
+        [dest / "blas_lib_gfx1250", dest / "blas_lib_gfx1250-strict"]
+    )
+    assert verifier.results[-1].passed
 
 
 def test_archive_and_bundler_identity(tmp_path):
@@ -118,6 +177,55 @@ def test_verifier_detects_target_directory_contamination(tmp_path):
     directory = artifact / "stage/lib/rocblas/library/gfx1250-strict"
     directory.mkdir(parents=True)
     (directory / "TensileManifest.txt").write_text("data")
+    verifier = ArtifactVerifier(tmp_path, Toolchain())
+    verifier._check_architecture_separation([artifact])
+    assert not verifier.results[-1].passed
+
+
+@pytest.mark.parametrize(
+    "artifact_target,passed", [("gfx1250", True), ("gfx1250-strict", False)]
+)
+def test_verifier_maps_stepping_directory_to_base_arch(
+    tmp_path, artifact_target, passed
+):
+    artifact = tmp_path / f"blas_lib_{artifact_target}"
+    directory = artifact / "stage/lib/hipblaslt/library/gfx1250v0"
+    directory.mkdir(parents=True)
+    (directory / "TensileLibrary_lazy_gfx1250.dat.zlib").write_text("data")
+    verifier = ArtifactVerifier(tmp_path, Toolchain())
+    verifier._check_architecture_separation([artifact])
+    assert verifier.results[-1].passed == passed
+
+
+def test_verifier_stepping_alias_scoped_to_known_libraries(tmp_path):
+    """The gfx1250v0 alias is scoped to hipBLASLt/hipSPARSELt and must not
+    apply under rocblas/library/, even though the directory name matches."""
+    artifact = tmp_path / "blas_lib_gfx1250"
+    directory = artifact / "stage/lib/rocblas/library/gfx1250v0"
+    directory.mkdir(parents=True)
+    (directory / "TensileManifest.txt").write_text("data")
+    verifier = ArtifactVerifier(tmp_path, Toolchain())
+    verifier._check_architecture_separation([artifact])
+    assert not verifier.results[-1].passed
+
+
+@pytest.mark.parametrize(
+    "directory",
+    [
+        # Wrong revision: only v0 is a known, verified stepping.
+        "gfx1250v1",
+        # Wrong base arch: only gfx1250 is known to have a v0 stepping.
+        "gfx90av0",
+    ],
+)
+def test_verifier_flags_unknown_stepping_directory(tmp_path, directory):
+    """Only gfx1250v0 is a known, verified exception. A hypothetical, unverified
+    stepping suffix must still be flagged as contamination rather than silently
+    passed through, since we have no evidence it belongs with its base arch."""
+    artifact = tmp_path / "blas_lib_gfx1250"
+    stepping_dir = artifact / "stage/lib/hipblaslt/library" / directory
+    stepping_dir.mkdir(parents=True)
+    (stepping_dir / "TensileManifest.txt").write_text("data")
     verifier = ArtifactVerifier(tmp_path, Toolchain())
     verifier._check_architecture_separation([artifact])
     assert not verifier.results[-1].passed
@@ -177,3 +285,91 @@ def test_verifier_normalizes_ck_features_without_losing_strict_identity(
     verifier = ArtifactVerifier(tmp_path, Toolchain())
     verifier._check_architecture_separation([artifact])
     assert verifier.results[-1].passed == expected_pass
+
+
+_CK_STRICT_EXPORT = (
+    "cmake/composable_kernel/"
+    "composable_kerneldevice_conv_operations_gfx1250_strictTargets-release.cmake"
+)
+
+
+@pytest.mark.parametrize(
+    "artifact_target,payload,expected_pass",
+    [
+        ("gfx1250-strict", "libdevice_conv_operations_gfx1250_strict.a", True),
+        ("gfx1250", "libdevice_conv_operations_gfx1250_strict.a", False),
+        ("gfx1250", "libdevice_conv_operations_gfx1250.a", True),
+        ("gfx1250-strict", "libdevice_conv_operations_gfx1250.a", False),
+        ("gfx1250-strict", "libdevice_conv_operations_gfx1250_strict_xnackp.a", True),
+        ("gfx1250", "libdevice_conv_operations_gfx1250_strict_xnackp.a", False),
+        ("gfx1250-strict", _CK_STRICT_EXPORT, True),
+        ("gfx1250", _CK_STRICT_EXPORT, False),
+        ("gfx942", "libdevice_conv_operations_gfx942_xnackp.a", True),
+        ("gfx90a", "libdevice_conv_operations_gfx942_xnackp.a", False),
+    ],
+)
+def test_verifier_checks_ck_static_library_identity(
+    tmp_path, artifact_target, payload, expected_pass
+):
+    artifact = tmp_path / f"composable-kernel_dev_{artifact_target}"
+    library = artifact / "stage/lib" / payload
+    library.parent.mkdir(parents=True)
+    library.write_text("CK payload")
+    verifier = ArtifactVerifier(tmp_path, Toolchain())
+    verifier._check_architecture_separation([artifact])
+    assert verifier.results[-1].passed == expected_pass
+
+
+@pytest.mark.parametrize("selected", [["gfx1250"], ["gfx1250-strict"], None])
+def test_split_ck_static_libraries_keeps_strict_identity(tmp_path, selected):
+    source = tmp_path / "composable-kernel_dev_gfx125X-all"
+    prefix = "math-libs/composable_kernel/stage"
+    stage = source / prefix
+    exports = "lib/cmake/composable_kernel"
+    (stage / exports).mkdir(parents=True)
+
+    def per_target(target):
+        token = target.replace("-", "_")
+        return [
+            f"lib/libdevice_conv_operations_{token}.a",
+            f"{exports}/composable_kerneldevice_conv_operations_{token}Targets.cmake",
+        ]
+
+    targets = ["gfx1250", "gfx1250-strict"]
+    for target in targets:
+        for relative in per_target(target):
+            (stage / relative).write_text(target)
+    generic = [
+        "lib/libdevice_conv_operations.a",
+        f"{exports}/composable_kernelConfig.cmake",
+    ]
+    for relative in generic:
+        (stage / relative).write_text("generic")
+    write_artifact_manifest(source, [prefix])
+    dest = tmp_path / "split"
+    splitter = ArtifactSplitter(
+        artifact_prefix="composable-kernel_dev",
+        toolchain=Toolchain(),
+        database_handlers=[ComposableKernelHandler()],
+        gpu_targets=selected,
+    )
+    splitter.split(source, dest)
+
+    def contents(artifact):
+        root = dest / artifact / prefix
+        return {
+            p.relative_to(root).as_posix(): p.read_text()
+            for p in root.rglob("*")
+            if p.is_file()
+        }
+
+    expected = targets if selected is None else selected
+    assert {p.name for p in dest.iterdir() if p.is_dir()} == {
+        "composable-kernel_dev_generic"
+    } | {f"composable-kernel_dev_{t}" for t in expected}
+    for target in expected:
+        assert contents(f"composable-kernel_dev_{target}") == {
+            relative: target for relative in per_target(target)
+        }
+    # Per-target files never remain in generic, selected or not.
+    assert sorted(contents("composable-kernel_dev_generic")) == sorted(generic)

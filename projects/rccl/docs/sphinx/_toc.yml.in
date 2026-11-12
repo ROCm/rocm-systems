@@ -18,10 +18,16 @@ subtrees:
   entries:
   - file: how-to/device-api-gin
     title: Use the device API and GIN
+  - file: how-to/using-rccl-rma-plugin-api
+    title: Using the RCCL RMA plugin API
+  - file: how-to/using-rccl-gin-plugin-api
+    title: Using the RCCL GIN plugin API
   - file: how-to/using-rccl-env-plugin-api
     title: Using the RCCL environment plugin
   - file: how-to/using-rccl-tuner-plugin-api
     title: Using the RCCL Tuner plugin
+  - file: how-to/rccl-cost-model
+    title: The RCCL unified cost model
   - file: how-to/using-nccl
     title: Using the NCCL Net plugin
   - file: how-to/using-rccl-inspector-plugin
@@ -30,6 +36,10 @@ subtrees:
     title: Fault tolerance in RCCL
   - file: how-to/troubleshooting-rccl
     title: Troubleshoot RCCL
+  - file: how-to/using-rccl-ras-diagnostics
+    title: Check job configuration with RAS diagnostics
+  - file: how-to/using-rccl-diagnostics
+    title: Verify GPU P2P paths with diagnostics
   - file: how-to/rccl-usage-tips
   - file: how-to/network-telemetry
     title: RCCL network telemetry

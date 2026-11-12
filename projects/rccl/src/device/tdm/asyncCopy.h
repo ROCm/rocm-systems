@@ -60,7 +60,7 @@ THE SOFTWARE.
 // multi-arch build (e.g. --amdgpu_targets gfx950 gfx1250) compiles this header
 // once per target, and naming a gfx1250-only builtin on any other device pass is
 // a hard error -- so every body that emits one has to be gated on these.
-#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
                                   /* extend: || (defined(__gfxNNNN__) && ...) */
 #define ASYNC_COPY_SUPPORTED 1
 #else
@@ -70,7 +70,7 @@ THE SOFTWARE.
 // Same condition as tdmCopy.h's copy, kept #ifndef-guarded so the two headers can
 // be included together in either order.
 #ifndef TDM_SUPPORTED
-#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_tensor_load_to_lds) && TDM_TOOLCHAIN_AVAILABLE
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__builtin_amdgcn_tensor_load_to_lds) && TDM_TOOLCHAIN_AVAILABLE
                                   /* extend: || (defined(__gfxNNNN__) && ...) */
 #define TDM_SUPPORTED 1
 #else
@@ -329,6 +329,28 @@ __device__ inline void warpAsyncCopy(const uint8_t* global, uint8_t* lds, size_t
 template <int WAIT_CNT>
 __device__ inline void asyncWait() {
   __builtin_amdgcn_s_wait_asynccnt(WAIT_CNT);
+}
+
+// Wait until at most `keep` async ops are in flight, `keep` rounded down to a rung STEP * (2^k - 1), k = RUNGS..1, or 0.
+template <int STEP, int RUNGS>
+__device__ inline void asyncWaitAtMost(int keep) {
+  if constexpr (RUNGS == 0) {
+    asyncWait<0>();
+  } else {
+    constexpr int kRung = STEP * ((1 << RUNGS) - 1);
+    if (keep >= kRung) {
+      asyncWait<kRung>();
+    } else {
+      asyncWaitAtMost<STEP, RUNGS - 1>(keep);
+    }
+  }
+}
+
+// Async ops each lane issues in an Aligned copy of SIZE bytes on LANES lanes: one b128 per warp-wide row, no tail.
+template <size_t SIZE, size_t LANES>
+constexpr int asyncAlignedCopyOps() {
+  static_assert(SIZE % (LANES * async_detail::BYTES_PER_LANE_B128) == 0, "a tail would issue more ops per lane");
+  return (int)(SIZE / (LANES * async_detail::BYTES_PER_LANE_B128));
 }
 
 template <SyncPolicy sp, CachePolicy cp, bool Aligned>

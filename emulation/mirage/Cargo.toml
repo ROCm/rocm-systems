@@ -158,6 +158,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
 inventory = "0.3.24"
 libloading = "0.8"
+goblin = "0.10.7"
+rustix = { version = "1", features = ["fs"] }
 
 mirage_core = { path = "core" }
 mirage_ctl = { path = "ctl" }

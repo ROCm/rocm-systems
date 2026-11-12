@@ -286,6 +286,96 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Verify CUDA single-memcpy-node-type semantics across HIP's node variants: a linear 3D
+ *    description updates a 1D node (and round-trips through the 3D getter), a 1D update applies
+ *    to a 3D node, and a non-linear 3D description is rejected on a 1D node.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphMemcpyNodeSetParams.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_CrossKind) {
+  constexpr size_t kCount = 32;
+  constexpr size_t kBytes = kCount * sizeof(int);
+  int* src = nullptr;
+  int* dst = nullptr;
+  int* src2 = nullptr;
+  int* dst2 = nullptr;
+  HIP_CHECK(hipMalloc(&src, kBytes));
+  HIP_CHECK(hipMalloc(&dst, kBytes));
+  HIP_CHECK(hipMalloc(&src2, kBytes));
+  HIP_CHECK(hipMalloc(&dst2, kBytes));
+  std::vector<int> host(kCount);
+  for (size_t i = 0; i < kCount; ++i) host[i] = static_cast<int>(i) * 3 + 1;
+  HIP_CHECK(hipMemcpy(src2, host.data(), kBytes, hipMemcpyHostToDevice));
+
+  auto linear3D = [&](void* d, const void* s) {
+    hipMemcpy3DParms p{};
+    p.srcPtr = make_hipPitchedPtr(const_cast<void*>(s), kBytes, kCount, 1);
+    p.dstPtr = make_hipPitchedPtr(d, kBytes, kCount, 1);
+    p.srcPos = make_hipPos(0, 0, 0);
+    p.dstPos = make_hipPos(0, 0, 0);
+    p.extent = make_hipExtent(kBytes, 1, 1);
+    p.kind = hipMemcpyDeviceToDevice;
+    return p;
+  };
+  auto launch_and_check = [&](hipGraph_t graph, int* expected_dst) {
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(exec, hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+    std::vector<int> actual(kCount);
+    HIP_CHECK(hipMemcpy(actual.data(), expected_dst, kBytes, hipMemcpyDeviceToHost));
+    REQUIRE(actual == host);
+    HIP_CHECK(hipGraphExecDestroy(exec));
+  };
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  SECTION("linear 3D params update a 1D node and round-trip") {
+    hipGraphNode_t node1D = nullptr;
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&node1D, graph, nullptr, 0, dst, src, kBytes,
+                                      hipMemcpyDeviceToDevice));
+    hipMemcpy3DParms params = linear3D(dst2, src2);
+    HIP_CHECK(hipGraphMemcpyNodeSetParams(node1D, &params));
+    hipMemcpy3DParms returned{};
+    HIP_CHECK(hipGraphMemcpyNodeGetParams(node1D, &returned));
+    REQUIRE(returned.srcPtr.ptr == src2);
+    REQUIRE(returned.dstPtr.ptr == dst2);
+    REQUIRE(returned.extent.width == kBytes);
+    REQUIRE(returned.kind == hipMemcpyDeviceToDevice);
+    launch_and_check(graph, dst2);
+  }
+  SECTION("non-linear 3D params are rejected on a 1D node") {
+    hipGraphNode_t node1D = nullptr;
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&node1D, graph, nullptr, 0, dst, src, kBytes,
+                                      hipMemcpyDeviceToDevice));
+    hipMemcpy3DParms params = linear3D(dst2, src2);
+    params.extent = make_hipExtent(kBytes / 2, 2, 1);
+    HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node1D, &params), hipErrorInvalidValue);
+  }
+  SECTION("1D setter applies to a 3D node") {
+    hipGraphNode_t node3D = nullptr;
+    hipMemcpy3DParms params = linear3D(dst, src);
+    HIP_CHECK(hipGraphAddMemcpyNode(&node3D, graph, nullptr, 0, &params));
+    HIP_CHECK(hipGraphMemcpyNodeSetParams1D(node3D, dst2, src2, kBytes, hipMemcpyDeviceToDevice));
+    hipMemcpy3DParms returned{};
+    HIP_CHECK(hipGraphMemcpyNodeGetParams(node3D, &returned));
+    REQUIRE(returned.srcPtr.ptr == src2);
+    REQUIRE(returned.dstPtr.ptr == dst2);
+    launch_and_check(graph, dst2);
+  }
+
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(dst2));
+  HIP_CHECK(hipFree(src2));
+  HIP_CHECK(hipFree(dst));
+  HIP_CHECK(hipFree(src));
+}
+
+/**
  * End doxygen group GraphTest.
  * @}
  */

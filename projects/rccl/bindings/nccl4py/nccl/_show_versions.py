@@ -23,7 +23,7 @@ from pathlib import Path
 
 from packaging.version import Version as _Version
 
-from nccl._version import __version__
+from nccl.core._version import __version__
 from nccl.bindings import nccl as _nccl_bindings
 
 # nccl_ep is not built on ROCm; version reporting already treats it as optional.

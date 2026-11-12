@@ -28,17 +28,46 @@ class LegacyGpuVmAdapter::Binding final : public AddressSpaceTranslator,
                                           public PhysicalMemoryAccess {
 public:
   Binding(std::shared_ptr<GpuMemory> memory, uint32_t vmid,
-          LegacyAddressSpaceRegistration registration, std::shared_ptr<void> frontend_lifetime)
+          const LegacyAddressSpaceRegistration &registration,
+          std::shared_ptr<void> frontend_lifetime)
       : memory_(std::move(memory)), address_space_(std::make_shared<LegacyAddressSpace>(*memory_)),
-        vmid_(vmid), mutation_epoch_(std::move(registration.mutation_epoch)),
-        frontend_lifetime_(std::move(frontend_lifetime)) {
-    address_space_->register_process(vmid_, registration.page_table, registration.page_table_mutex,
-                                     registration.page_table_generation,
-                                     std::move(registration.request_mutex));
+        vmid_(vmid), original_request_mutex_(registration.request_mutex),
+        mutation_epoch_(registration.mutation_epoch), prt_residency_(registration.prt_residency),
+        frontend_lifetime_(std::move(frontend_lifetime)) {}
+
+  util::Result initialize(LegacyAddressSpaceRegistration registration,
+                          util::DiagnosticEmitter emit_error) {
+    if (address_space_
+            ->register_process(vmid_, registration.page_table, registration.page_table_mutex,
+                               registration.page_table_generation,
+                               std::move(registration.request_mutex),
+                               std::move(registration.page_table_cache_state), emit_error)
+            .failed())
+      return util::Result::failure();
     address_space_->set_process_client_pid(vmid_, registration.client_pid);
     address_space_->set_process_mem_fd(vmid_, registration.client_mem_fd);
     address_space_->set_process_passthrough(vmid_, registration.passthrough);
     address_space_->set_process_fault_reporter(vmid_, registration.fault_reporter);
+    return util::Result::success();
+  }
+
+  [[nodiscard]] bool try_write_private_dwords(PhysicalMemoryAccess &physical,
+                                              std::span<const VmRamDwordStore> stores,
+                                              Mtype instruction_mtype,
+                                              Mtype expected_mtype) const override {
+    return &physical == static_cast<const PhysicalMemoryAccess *>(this) &&
+           address_space_->try_write_private_dwords(stores, vmid_, instruction_mtype,
+                                                    expected_mtype, original_request_mutex_);
+  }
+
+  [[nodiscard]] bool try_read_uncached_ram(PhysicalMemoryAccess &physical, uint64_t address,
+                                           std::span<std::byte> bytes) const override {
+    return &physical == static_cast<const PhysicalMemoryAccess *>(this) &&
+           address_space_->try_read_uncached_ram(address, bytes, vmid_, original_request_mutex_);
+  }
+
+  [[nodiscard]] std::shared_ptr<const PrtRanges> nonresident_prt_ranges() const override {
+    return prt_residency_ ? prt_residency_->nonresident.load() : nullptr;
   }
 
   [[nodiscard]] VmTranslationResult translate(uint64_t address, std::size_t size,
@@ -46,13 +75,12 @@ public:
     if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
       return {.outcome = VmAccessOutcome::Malformed, .translation = {}};
     const uint64_t page_bytes = kLegacyPageSize - (address & (kLegacyPageSize - 1));
-    const std::size_t contiguous_bytes =
-        address_space_->translation_contiguous_bytes(address, vmid_);
+    const auto policy = address_space_->translation_policy(address, vmid_);
     // A host extent ending inside the current GPU page is a hard boundary, not
     // another transfer unit. Reject a request that crosses it before copying a
     // prefix so the non-resumable read/write APIs retain their all-or-nothing
     // physical-request contract. Ordinary page boundaries remain resumable.
-    if (contiguous_bytes < std::min<uint64_t>(size, page_bytes))
+    if (policy.contiguous_bytes < std::min<uint64_t>(size, page_bytes))
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
     return {
         .outcome = VmAccessOutcome::Complete,
@@ -60,8 +88,8 @@ public:
             {
                 .domain = VmMemoryDomain::Compatibility,
                 .address = address,
-                .contiguous_bytes = contiguous_bytes,
-                .mtype = address_space_->pte_mtype(address, vmid_),
+                .contiguous_bytes = policy.contiguous_bytes,
+                .mtype = policy.mtype,
                 .permissions =
                     {
                         .readable = access == VmAccessKind::Read || access == VmAccessKind::Atomic,
@@ -70,6 +98,37 @@ public:
                     },
             },
     };
+  }
+
+  [[nodiscard]] VmTransferStep read_step(PhysicalMemoryAccess &physical, uint64_t address,
+                                         std::span<std::byte> bytes,
+                                         VmAccessKind access) const override {
+    if (&physical != static_cast<const PhysicalMemoryAccess *>(this) ||
+        access != VmAccessKind::Read)
+      return AddressSpaceTranslator::read_step(physical, address, bytes, access);
+    if (bytes.empty() || bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address)
+      return {.outcome = VmAccessOutcome::Malformed, .report_translation_fault = true};
+    const auto step = address_space_->read_step(
+        address, std::span<uint8_t>(reinterpret_cast<uint8_t *>(bytes.data()), bytes.size()),
+        vmid_);
+    return {.completed_bytes = step.completed_bytes,
+            .outcome = vm_access_outcome(step.outcome),
+            .report_translation_fault = step.policy_fault};
+  }
+
+  [[nodiscard]] VmTransferStep write_step(PhysicalMemoryAccess &physical, uint64_t address,
+                                          std::span<const std::byte> bytes) const override {
+    if (&physical != static_cast<const PhysicalMemoryAccess *>(this))
+      return AddressSpaceTranslator::write_step(physical, address, bytes);
+    if (bytes.empty() || bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address)
+      return {.outcome = VmAccessOutcome::Malformed, .report_translation_fault = true};
+    const auto step = address_space_->write_step(
+        address,
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()),
+        vmid_);
+    return {.completed_bytes = step.completed_bytes,
+            .outcome = vm_access_outcome(step.outcome),
+            .report_translation_fault = step.policy_fault};
   }
 
   [[nodiscard]] std::optional<Mtype> query_mtype(uint64_t address) const override {
@@ -81,23 +140,34 @@ public:
     if (!mutation_epoch_ || !guard.cacheable())
       return {.mtype = guard.owns_lock() ? address_space_->pte_mtype(address, guard)
                                          : query_mtype(address)};
-    return {.mtype = address_space_->pte_mtype(address, guard),
+    bool may_batch_private_uc = false, may_batch_private_ram = false;
+    const auto mtype =
+        address_space_->pte_mtype(address, guard, &may_batch_private_uc, &may_batch_private_ram);
+    return {.mtype = mtype,
+            .may_batch_private_uc = may_batch_private_uc,
+            .may_batch_private_ram = may_batch_private_ram,
             .begin = address & ~(kLegacyPageSize - 1),
             .size = kLegacyPageSize,
             .mutation_epoch = mutation_epoch_,
-            .captured_epoch = mutation_epoch_->load(std::memory_order_relaxed)};
+            .captured_epoch = mutation_epoch_->value.load(std::memory_order_relaxed)};
   }
 
   [[nodiscard]] VmTranslationResult probe_translation(uint64_t address, std::size_t size,
                                                       VmAccessKind access) const override {
-    const bool accessible = access == VmAccessKind::Execute
-                                ? address_space_->is_fetchable(address, vmid_)
-                            : access == VmAccessKind::Write || access == VmAccessKind::Atomic
-                                ? address_space_->has_writable_host_backing(address, vmid_, size)
-                                : address_space_->has_host_backing(address, vmid_, size);
+    const auto translated = translate(address, size, access);
+    if (!translated)
+      return translated;
+    // GpuVmAccess walks translation spans. Probe only this span so a large
+    // range does not repeatedly rescan every remaining host page.
+    const auto span_size = std::min<uint64_t>(size, translated.translation.contiguous_bytes);
+    const bool accessible =
+        access == VmAccessKind::Execute ? address_space_->is_fetchable(address, vmid_)
+        : access == VmAccessKind::Write || access == VmAccessKind::Atomic
+            ? address_space_->has_writable_host_backing(address, vmid_, span_size)
+            : address_space_->has_host_backing(address, vmid_, span_size);
     if (!accessible)
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
-    return translate(address, size, access);
+    return translated;
   }
 
   [[nodiscard]] VmAccessOutcome read(VmMemoryDomain domain, uint64_t address,
@@ -131,6 +201,19 @@ public:
         address,
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()),
         vmid_));
+  }
+
+  [[nodiscard]] bool try_read_contiguous(VmMemoryDomain domain, uint64_t address,
+                                         std::span<std::byte> bytes) override {
+    return domain == VmMemoryDomain::Compatibility &&
+           address_space_->try_copy_contiguous(address, bytes.data(), bytes.size(), vmid_, false);
+  }
+
+  [[nodiscard]] bool try_write_contiguous(VmMemoryDomain domain, uint64_t address,
+                                          std::span<const std::byte> bytes) override {
+    return domain == VmMemoryDomain::Compatibility &&
+           address_space_->try_copy_contiguous(address, const_cast<std::byte *>(bytes.data()),
+                                               bytes.size(), vmid_, true);
   }
 
   [[nodiscard]] AtomicLoadResult atomic_load(VmMemoryDomain domain, uint64_t address,
@@ -177,6 +260,21 @@ public:
     return vm_access_outcome(outcome);
   }
 
+  [[nodiscard]] VmAccessOutcome atomic_modify_lanes(VmMemoryDomain domain,
+                                                    std::span<const uint64_t> addresses,
+                                                    uint64_t lane_mask, uint32_t width,
+                                                    const AtomicLaneMutation &mutation,
+                                                    uint32_t &next_lane) override {
+    if (domain != VmMemoryDomain::Compatibility)
+      return VmAccessOutcome::Malformed;
+    return vm_access_outcome(address_space_->atomic_modify_strict_lanes(
+        addresses, lane_mask, width,
+        [&](uint32_t lane, uint8_t *bytes) {
+          mutation(lane, std::span<std::byte>(reinterpret_cast<std::byte *>(bytes), width));
+        },
+        vmid_, next_lane));
+  }
+
   [[nodiscard]] std::byte *resolve_host_pointer(VmMemoryDomain domain, uint64_t address,
                                                 std::size_t size) const override {
     if (domain != VmMemoryDomain::Compatibility)
@@ -213,7 +311,11 @@ private:
   std::shared_ptr<GpuMemory> memory_;
   std::shared_ptr<LegacyAddressSpace> address_space_;
   uint32_t vmid_ = 0;
-  std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch_;
+  // Synchronous word reads and stores must not destroy the final request-mutex owner
+  // under the caller's VM-state lock, even after raw registry replacement.
+  const std::shared_ptr<util::DistributedSharedMutex> original_request_mutex_;
+  util::IntrusiveSharedPtr<const amdgpu::VmMutationEpoch> mutation_epoch_;
+  std::shared_ptr<const PrtResidency> prt_residency_;
   std::shared_ptr<void> frontend_lifetime_;
 };
 
@@ -249,18 +351,25 @@ bool LegacyGpuVmAdapter::set_memory(std::shared_ptr<GpuMemory> memory) {
   return true;
 }
 
-AddressSpaceHandle
-LegacyGpuVmAdapter::register_address_space(uint32_t vmid,
-                                           LegacyAddressSpaceRegistration registration,
-                                           std::shared_ptr<void> frontend_lifetime) {
+AddressSpaceHandle LegacyGpuVmAdapter::register_address_space(
+    uint32_t vmid, LegacyAddressSpaceRegistration registration,
+    std::shared_ptr<void> frontend_lifetime, util::DiagnosticEmitter emit_error) {
   if (registration.page_table == nullptr || registration.page_table_mutex == nullptr)
     return {};
-  std::lock_guard lock(mutex_);
+  std::unique_lock lock(mutex_);
   remove_stale_locked();
   if (memory_ == nullptr || bindings_.contains(vmid))
     return {};
-  auto binding = std::make_shared<Binding>(memory_, vmid, std::move(registration),
-                                           std::move(frontend_lifetime));
+  auto binding =
+      std::make_shared<Binding>(memory_, vmid, registration, std::move(frontend_lifetime));
+  util::StringDiagnostic diagnostic;
+  if (binding->initialize(std::move(registration), diagnostic.emitter()).failed()) {
+    // Diagnostic sinks may query the adapter, so deliver outside its mutex.
+    lock.unlock();
+    // Explicit emit propagates sink exceptions; destructor delivery catches them.
+    (void)(emit_error.emit() << diagnostic.message()).emit();
+    return {};
+  }
   const AddressSpaceHandle handle = gpu_vm_->register_address_space(
       vmid, binding, binding,
       [binding](uint64_t address, VmAccessKind) { binding->report_fault(address); }, true);
@@ -271,8 +380,9 @@ LegacyGpuVmAdapter::register_address_space(uint32_t vmid,
 }
 
 AddressSpaceHandle LegacyGpuVmAdapter::register_address_space(
-    uint32_t vmid, LegacyPageTable *page_table, std::shared_mutex *page_table_mutex,
-    const uint64_t *page_table_generation, std::shared_ptr<std::shared_mutex> request_mutex,
+    uint32_t vmid, LegacyPageTable *page_table, util::DistributedSharedMutex *page_table_mutex,
+    const uint64_t *page_table_generation,
+    std::shared_ptr<util::DistributedSharedMutex> request_mutex,
     std::shared_ptr<void> frontend_lifetime) {
   return register_address_space(vmid,
                                 {.page_table = page_table,

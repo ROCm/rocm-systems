@@ -4,8 +4,10 @@
 #pragma once
 
 #include "core/state.hpp"
+#include "core/trace_cache/archive.hpp"
 #include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
+#include "core/trace_cache/record_header.hpp"
 
 #include "policies/thread_state_policy.hpp"
 
@@ -24,9 +26,7 @@
 
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 using ofs_t             = std::basic_ostream<char>;
@@ -139,11 +139,8 @@ public:
                 "Trying to use buffered storage while it is not running");
         }
 
-        using TypeIdentifierEnumUderlayingType =
-            std::underlying_type_t<TypeIdentifierEnum>;
-
-        size_t sample_size      = get_size(value);
-        size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
+        const record_header<TypeIdentifierEnum> header{ .type = Type::type_identifier,
+                                                        .size = get_size(value) };
 
         // Hold the mutex for the entire reserve-and-write operation so that
         // the flush worker thread never reads a buffer region whose write is
@@ -151,17 +148,12 @@ public:
         // for position management; extending the critical section to cover the
         // actual memcpy closes the window that TSan (correctly) flags.
         //
-        auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
-        std::lock_guard scope{ m_mutex };
+        auto const thread_state_guard =
+            ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+        std::lock_guard const scope{ m_mutex };
 
-        auto*  buf      = reserve_memory_space(bytes_to_reserve);
-        size_t position = 0;
-        auto   type_identifier_value =
-            static_cast<TypeIdentifierEnumUderlayingType>(Type::type_identifier);
-
-        utility::store_value(type_identifier_value, buf, position);
-        utility::store_value(sample_size, buf, position);
-        serialize(buf + position, value);
+        auto* buf = reserve_memory_space(k_header_size<TypeIdentifierEnum> + header.size);
+        write_record(buf, header, value);
     }
 
     [[nodiscard]] __attribute__((always_inline)) bool is_running() const
@@ -175,19 +167,21 @@ private:
     {
         // Hold m_mutex for the full read so store() cannot write into the
         // region we are draining to the file.
-        auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
-        std::lock_guard guard{ m_mutex };
+        auto const thread_state_guard =
+            ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
+        std::lock_guard const guard{ m_mutex };
 
-        size_t _head = m_head;
-        size_t _tail = m_tail;
+        size_t const _head = m_head;
+        size_t const _tail = m_tail;
 
         if(_head == _tail)
         {
             return;
         }
 
-        auto used_space = _head > _tail ? (_head - _tail) : (buffer_size - _tail + _head);
-        if(!force && used_space < flush_threshold)
+        auto const used_space =
+            _head > _tail ? (_head - _tail) : (k_buffer_size - _tail + _head);
+        if(!force && used_space < k_flush_threshold)
         {
             return;
         }
@@ -201,7 +195,7 @@ private:
         else
         {
             ofs.write(reinterpret_cast<const char*>(m_buffer->data() + _tail),
-                      buffer_size - _tail);
+                      k_buffer_size - _tail);
             ofs.write(reinterpret_cast<const char*>(m_buffer->data()), _head);
         }
         if(ofs.fail())
@@ -216,14 +210,14 @@ private:
     {
         auto* _data = m_buffer->data();
         memset(_data + m_head, std::numeric_limits<std::uint8_t>::max(),
-               buffer_size - m_head);
+               k_buffer_size - m_head);
 
-        const TypeIdentifierEnum tag = TypeIdentifierEnum::fragmented_space;
-        std::memcpy(_data + m_head, &tag, sizeof(TypeIdentifierEnum));
-
-        size_t remaining_bytes = buffer_size - m_head - header_size<TypeIdentifierEnum>;
-        std::memcpy(_data + m_head + sizeof(TypeIdentifierEnum), &remaining_bytes,
-                    sizeof(size_t));
+        const record_header<TypeIdentifierEnum> header{
+            .type = TypeIdentifierEnum::fragmented_space,
+            .size = k_buffer_size - m_head - k_header_size<TypeIdentifierEnum>
+        };
+        binary_write_archive archive{ .buffer = _data + m_head, .position = 0 };
+        archive(header);
 
         m_head = 0;
     }
@@ -232,8 +226,8 @@ private:
     [[nodiscard]] __attribute__((always_inline)) std::uint8_t* reserve_memory_space(
         const size_t& number_of_bytes)
     {
-        if(__builtin_expect((m_head + number_of_bytes + header_size<TypeIdentifierEnum>) >
-                                buffer_size,
+        if(__builtin_expect((m_head + number_of_bytes +
+                             k_header_size<TypeIdentifierEnum>) > k_buffer_size,
                             0))
         {
             fragment_memory();
@@ -256,5 +250,4 @@ private:
     std::unique_ptr<buffer_array_t> m_buffer{ std::make_unique<buffer_array_t>() };
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

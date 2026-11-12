@@ -20,12 +20,13 @@
 ///     v_mov_b16 / v_not_b16   (low-16 forms)
 ///     v_cvt_i32_i16 / v_cvt_u32_u16  (sign/zero-extend low 16)
 ///     v_cvt_floor_i32_f32 / v_cvt_nearest_i32_f32  (aliases for flr / rpi)
-///   VOP3 (8):
+///   VOP3 (10):
 ///     same 6 VOP1 ops in their VOP3 form (all route via the `_vop3` ->
 ///     SIMD_VOP1_UNARY twin fallback since the scalar body of each ignores
-///     modifiers — verified inline in the regen for this slice) + 2 ints
+///     modifiers — verified inline in the regen for this slice) + 4 ints
 ///     missing from CDNA4 (v_minmax / v_maxmin u32/i32 are RDNA3+ only).
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -113,7 +114,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop_alias_rdna", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop_alias_rdna", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -176,13 +179,11 @@ const VopCase kCases[] = {
     {"v_cvt_u32_u16_vop3", VopCase::Kind::VOP3_UNARY, 491},
     {"v_cvt_nearest_i32_f32_vop3", VopCase::Kind::VOP3_UNARY, 396},
     {"v_cvt_floor_i32_f32_vop3", VopCase::Kind::VOP3_UNARY, 397},
-    // VOP3 ternary int minmax / maxmin remain scalar-only: their scalar bodies
-    // use std::fmin/fmax on ints and write back through a double->uint32 cast
-    // that saturates negatives to 0xFFFFFFFF (x86 overflow), which the integer
-    // SIMD min/max cannot match. The fp minmax/maxmin f32/f16 forms ARE wired
-    // (SIMD_VOP3_TERNARY_FP32/_FP16, same fmax/fmin as the verified min3/max3),
-    // but are not exercised here: this fixture's values alias to f32 NaNs and
-    // the comparison has no NaN skip.
+    // RDNA3-only integer minmax/maxmin VOP3 forms.
+    {"v_maxmin_u32_vop3", VopCase::Kind::VOP3_TERNARY, 610},
+    {"v_minmax_u32_vop3", VopCase::Kind::VOP3_TERNARY, 611},
+    {"v_maxmin_i32_vop3", VopCase::Kind::VOP3_TERNARY, 612},
+    {"v_minmax_i32_vop3", VopCase::Kind::VOP3_TERNARY, 613},
 };
 
 const uint64_t kVccPatterns[] = {
@@ -208,6 +209,8 @@ void check_case(const VopCase &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint64_t vcc_in, uint32_t rot) -> Fixture::Result {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};

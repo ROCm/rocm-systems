@@ -15,6 +15,8 @@ using test_support::callback_tracing_record_t;
 using test_support::mock_sdk;
 using test_support::user_data_t;
 
+using timestamp_t = mock_sdk::timestamp_t;
+
 int g_enter_calls = 0;
 int g_exit_calls  = 0;
 int g_none_calls  = 0;
@@ -28,19 +30,19 @@ reset_counters()
 }
 
 void
-record_enter(callback_tracing_record_t, user_data_t*, void*)
+record_enter(callback_tracing_record_t, user_data_t*, void*, timestamp_t)
 {
     ++g_enter_calls;
 }
 
 void
-record_exit(callback_tracing_record_t, user_data_t*, void*)
+record_exit(callback_tracing_record_t, user_data_t*, void*, timestamp_t)
 {
     ++g_exit_calls;
 }
 
 void
-record_none(callback_tracing_record_t, user_data_t*, void*)
+record_none(callback_tracing_record_t, user_data_t*, void*, timestamp_t)
 {
     ++g_none_calls;
 }

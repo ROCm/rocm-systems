@@ -25,23 +25,43 @@ PLUGIN_SO = f"{PLUGIN_DIR}/librccl-tuner-example.so"
 PROFILER_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/example"
 PROFILER_SO = f"{PROFILER_DIR}/librccl-profiler-example.so"
 
-INSPECTOR_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/inspector"
-INSPECTOR_SO = f"{INSPECTOR_DIR}/librccl-profiler-inspector.so"
-
 def _first_existing(*candidates):
     for path in candidates:
         if path and os.path.exists(path):
             return path
     return candidates[0] if candidates else ""
 
+_INSPECTOR_SRC = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "plugins", "profiler", "inspector")
+)
+INSPECTOR_SO = _first_existing(
+    os.path.join(RCCL_INSTALL_DIR, "plugins", "profiler", "inspector", "librccl-profiler-inspector.so"),
+    os.path.join(RCCL_INSTALL_DIR, "build", "release", "lib", "librccl-profiler-inspector.so"),
+    os.path.join(RCCL_INSTALL_DIR, "build", "debug", "lib", "librccl-profiler-inspector.so"),
+    os.path.join(_INSPECTOR_SRC, "librccl-profiler-inspector.so"),
+)
+INSPECTOR_DIR = os.path.dirname(INSPECTOR_SO)
+
 _PROXYTRACE_SRC = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "plugins", "profiler", "proxytrace")
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "plugins", "profiler", "proxytrace")
 )
 PROXYTRACE_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/proxytrace"
 PROXYTRACE_SO = _first_existing(
     os.path.join(PROXYTRACE_DIR, "librccl-profiler-proxytrace.so"),
     os.path.join(RCCL_INSTALL_DIR, "librccl-profiler-proxytrace.so"),
     os.path.join(_PROXYTRACE_SRC, "librccl-profiler-proxytrace.so"),
+)
+
+# The RMA example builds in place via its Makefile, or to test/unit/plugins via CMake.
+_RMA_SRC = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "plugins", "rma", "example")
+)
+RMA_DIR = f"{RCCL_INSTALL_DIR}/plugins/rma/example"
+RMA_SO = _first_existing(
+    os.path.join(RMA_DIR, "librccl-rma-example.so"),
+    os.path.join(RCCL_INSTALL_DIR, "build", "release", "test", "unit", "plugins", "librccl-rma-example.so"),
+    os.path.join(RCCL_INSTALL_DIR, "build", "debug", "test", "unit", "plugins", "librccl-rma-example.so"),
+    os.path.join(_RMA_SRC, "librccl-rma-example.so"),
 )
 
 # CSV Configs 
@@ -70,6 +90,38 @@ os.makedirs(LOGDIR, exist_ok=True)
 # iterations ran ~525 collectives per test, and since the plugin logs a line per
 # config per call that produced hundreds of MB of debug output per suite run.
 TUNER_PERF_ARGS = ["-b", "8", "-e", "128M", "-f", "8", "-g", "1", "-n", "1", "-w", "1"]
+
+def run_tuner_mpirun(args, env, log_file):
+    """Run a tuner rccl-tests job and return (rc, combined log text).
+
+    TUNING logs on the collective path hang multi-node pytest if they go through
+    mpirun stdout, so each rank writes NCCL_DEBUG_FILE next to log_file instead
+    (log_file.%h.%p). Assertions read those shards plus the captured stdout.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
+    shard_pattern = glob.escape(log_file) + ".*"
+    ignored_shards = set()
+    for stale in glob.glob(shard_pattern):
+        try:
+            os.remove(stale)
+        except OSError:
+            ignored_shards.add(stale)
+    env = dict(env)
+    env["NCCL_DEBUG_FILE"] = log_file + ".%h.%p"
+    with open(log_file, "w") as out:
+        result = subprocess.run(
+            args, env=env, stdout=out, stderr=subprocess.STDOUT, universal_newlines=True
+        )
+    chunks = []
+    if os.path.isfile(log_file):
+        with open(log_file) as fh:
+            chunks.append(fh.read())
+    for path in sorted(glob.glob(shard_pattern)):
+        if path in ignored_shards:
+            continue
+        with open(path) as fh:
+            chunks.append(fh.read())
+    return result.returncode, "\n".join(chunks)
 
 PROFILER_DUMP_DIR = os.path.join(WORKDIR, "profiler_dumps")
 INSPECTOR_DUMP_DIR = os.path.join(WORKDIR, "inspector_dumps")
@@ -217,6 +269,8 @@ def paths():
         INSPECTOR_SO=INSPECTOR_SO,
         PROXYTRACE_DIR=PROXYTRACE_DIR,
         PROXYTRACE_SO=PROXYTRACE_SO,
+        RMA_DIR=RMA_DIR,
+        RMA_SO=RMA_SO,
         # CSV Configs
         VALID_CONFIG_WITH_WILDCARDS=VALID_CONFIG_WITH_WILDCARDS,
         VALID_CONFIG_WITHOUT_WILDCARDS=VALID_CONFIG_WITHOUT_WILDCARDS,
@@ -234,6 +288,7 @@ def paths():
         check_node_interface=check_node_interface,
         find_common_interface=find_common_interface,
         get_available_nodes=get_available_nodes,
+        run_tuner_mpirun=run_tuner_mpirun,
         # Helper Functions for Ext-Profiler
         validate_json_trace=validate_json_trace,
         check_event_in_log=check_event_in_log,
@@ -261,6 +316,11 @@ def pytest_runtest_setup(item):
     if item.get_closest_marker("ext_inspector"):
         if not os.path.exists(INSPECTOR_SO):
             pytest.skip(f"Inspector plugin library not found at: {INSPECTOR_SO}")
+
+    # Check for ext_rma marker
+    if item.get_closest_marker("ext_rma"):
+        if not os.path.exists(RMA_SO):
+            pytest.skip(f"RMA plugin library not found at: {RMA_SO}")
 
 @pytest.fixture(scope="session", autouse=True)
 def clear_profiler_dump(request):

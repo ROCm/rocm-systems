@@ -2,7 +2,25 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# This code was automatically generated with version 2.30.7. Do not modify it directly.
+# This code was automatically generated with version 2.32.3. Do not modify it directly.
+
+
+# <<<< PREAMBLE CONTENT >>>>
+
+cimport cython as _cyb_cython
+from libc.stdint cimport (
+    int16_t,
+    int32_t,
+    int64_t,
+    int8_t,
+    uint16_t,
+    uint32_t,
+    uint64_t,
+    uint8_t,
+)
+
+
+# <<<< END OF PREAMBLE CONTENT >>>>
 
 from ._internal cimport nccl as _nccl
 
@@ -175,6 +193,38 @@ cdef ncclResult_t ncclScatter(const void* sendbuff, void* recvbuff, size_t count
     return _nccl._ncclScatter(sendbuff, recvbuff, count, datatype, root, comm, stream)
 
 
+cdef ncclResult_t ncclAllReduceConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclAllReduceConfig(sendbuff, recvbuff, count, datatype, op, comm, stream, config)
+
+
+cdef ncclResult_t ncclBroadcastConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclBroadcastConfig(sendbuff, recvbuff, count, datatype, root, comm, stream, config)
+
+
+cdef ncclResult_t ncclReduceConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclReduceConfig(sendbuff, recvbuff, count, datatype, op, root, comm, stream, config)
+
+
+cdef ncclResult_t ncclAllGatherConfig(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclAllGatherConfig(sendbuff, recvbuff, sendcount, datatype, comm, stream, config)
+
+
+cdef ncclResult_t ncclReduceScatterConfig(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclReduceScatterConfig(sendbuff, recvbuff, recvcount, datatype, op, comm, stream, config)
+
+
+cdef ncclResult_t ncclAlltoAllConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclAlltoAllConfig(sendbuff, recvbuff, count, datatype, comm, stream, config)
+
+
+cdef ncclResult_t ncclGatherConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclGatherConfig(sendbuff, recvbuff, count, datatype, root, comm, stream, config)
+
+
+cdef ncclResult_t ncclScatterConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root, ncclComm_t comm, cudaStream_t stream, const ncclCollConfig_t* config) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclScatterConfig(sendbuff, recvbuff, count, datatype, root, comm, stream, config)
+
+
 cdef ncclResult_t ncclSend(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t comm, cudaStream_t stream) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     return _nccl._ncclSend(sendbuff, count, datatype, peer, comm, stream)
 
@@ -205,6 +255,10 @@ cdef ncclResult_t ncclGroupEnd() except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nog
 
 cdef ncclResult_t ncclGroupSimulateEnd(ncclSimInfo_t* simInfo) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     return _nccl._ncclGroupSimulateEnd(simInfo)
+
+
+cdef ncclResult_t ncclSetEncryption(const ncclEncryptionConfig_t* config) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclSetEncryption(config)
 
 
 cdef ncclResult_t ncclParamBind(ncclParamHandle_t* out, const char* key) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
@@ -259,6 +313,7 @@ cdef ncclResult_t ncclParamGetAllParameterKeys(const char*** table, int* tableLe
     return _nccl._ncclParamGetAllParameterKeys(table, tableLen)
 
 
+@_cyb_cython.show_performance_hints(False)
 cdef void ncclParamDumpAll() except* nogil:
     _nccl._ncclParamDumpAll()
 
@@ -279,16 +334,28 @@ cdef ncclResult_t ncclGetLsaMultimemDevicePointer(ncclWindow_t window, size_t of
     return _nccl._ncclGetLsaMultimemDevicePointer(window, offset, outPtr)
 
 
-cdef ncclResult_t ncclGetLsaDevicePointer(ncclWindow_t window, size_t offset, int lsaRank, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
-    return _nccl._ncclGetLsaDevicePointer(window, offset, lsaRank, outPtr)
-
-
 cdef ncclResult_t ncclGetMultimemDevicePointer(ncclWindow_t window, size_t offset, ncclMultimemHandle_t multimem, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     return _nccl._ncclGetMultimemDevicePointer(window, offset, multimem, outPtr)
 
 
+cdef ncclResult_t ncclGetLsaDevicePointer(ncclWindow_t window, size_t offset, int lsaRank, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclGetLsaDevicePointer(window, offset, lsaRank, outPtr)
+
+
 cdef ncclResult_t ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, int peer, void** outPtr) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     return _nccl._ncclGetPeerDevicePointer(window, offset, peer, outPtr)
+
+
+cdef ncclResult_t ncclGetMultimemDeviceLeInfo(ncclWindow_t window, size_t offset, ncclCftLeId* leId, size_t* leOffset) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclGetMultimemDeviceLeInfo(window, offset, leId, leOffset)
+
+
+cdef ncclResult_t ncclGetCftDeviceLeInfo(ncclWindow_t window, size_t offset, int peerCft, ncclTeam_t cftTeam, ncclCftLeId* leId, size_t* leOffset) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclGetCftDeviceLeInfo(window, offset, peerCft, cftTeam, leId, leOffset)
+
+
+cdef ncclResult_t ncclGetPeerDeviceLeInfo(ncclWindow_t window, size_t offset, int peerWorld, ncclCftLeId* leId, size_t* leOffset) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclGetPeerDeviceLeInfo(window, offset, peerWorld, leId, leOffset)
 
 
 cdef ncclTeam_t ncclTeamWorld(ncclComm_t comm) except* nogil:
@@ -299,8 +366,12 @@ cdef ncclTeam_t ncclTeamLsa(ncclComm_t comm) except* nogil:
     return _nccl._ncclTeamLsa(comm)
 
 
-cdef ncclTeam_t ncclTeamRail(ncclComm_t comm) except* nogil:
-    return _nccl._ncclTeamRail(comm)
+cdef ncclTeam_t ncclTeamCft(ncclComm_t comm, ncclCftTeamMode_t mode) except* nogil:
+    return _nccl._ncclTeamCft(comm, mode)
+
+
+cdef ncclTeam_t ncclTeamCftMultimem(ncclComm_t comm) except* nogil:
+    return _nccl._ncclTeamCftMultimem(comm)
 
 
 cdef int ncclTeamRankToWorld(ncclComm_t comm, ncclTeam_t team, int rank) except?-42 nogil:
@@ -311,6 +382,10 @@ cdef int ncclTeamRankToLsa(ncclComm_t comm, ncclTeam_t team, int rank) except?-4
     return _nccl._ncclTeamRankToLsa(comm, team, rank)
 
 
+cdef ncclTeam_t ncclTeamRail(ncclComm_t comm) except* nogil:
+    return _nccl._ncclTeamRail(comm)
+
+
 cdef ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t team, int nBarriers, ncclLsaBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
     return _nccl._ncclLsaBarrierCreateRequirement(team, nBarriers, outHandle, outReq)
 
@@ -319,9 +394,9 @@ cdef ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t comm, ncclTeam_t te
     return _nccl._ncclGinBarrierCreateRequirement(comm, team, nBarriers, outHandle, outReq)
 
 
-cdef ncclResult_t ncclLLA2ACreateRequirement(int nBlocks, int nSlots, ncclLLA2AHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
-    return _nccl._ncclLLA2ACreateRequirement(nBlocks, nSlots, outHandle, outReq)
-
-
 cdef int ncclLLA2ACalcSlots(int maxElts, int maxEltSize) except?-42 nogil:
     return _nccl._ncclLLA2ACalcSlots(maxElts, maxEltSize)
+
+
+cdef ncclResult_t ncclLLA2ACreateRequirement(int nBlocks, int nSlots, ncclLLA2AHandle_t* outHandle, ncclDevResourceRequirements_t* outReq) except?_NCCLRESULT_T_INTERNAL_LOADING_ERROR nogil:
+    return _nccl._ncclLLA2ACreateRequirement(nBlocks, nSlots, outHandle, outReq)

@@ -15,11 +15,14 @@ extern ncclGin_t ncclGinAnvilSdmaPlugin;
 
 struct ncclComm;
 ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* resourceUserPtr, size_t arenaByteOffset,
-                                                   int nContexts, int nSignalsPerContext);
+                                                   int nSignalSlots, int nSignalsPerContext);
 
 void ncclGinAnvilSetInitContext(void* initCtx, struct ncclComm* comm);
 
 /** Clears plugin host singleton state (pending signal binds, MR refcounts). For unit tests. */
 void ncclGinAnvilPluginTestResetHostState(void);
+
+/** Live per-comm init contexts, one per init() the plugin has not seen finalize() for. For tests. */
+int ncclGinAnvilPluginTestLiveInitCtxCount(void);
 
 #endif

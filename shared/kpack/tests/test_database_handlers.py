@@ -10,6 +10,7 @@ from rocm_kpack.database_handlers import (
     HipSparseLtHandler,
     AotritonHandler,
     MIOpenHandler,
+    ComposableKernelHandler,
     HipKernelProviderArchContentHandler,
     HotswapCacheHandler,
     WHEEL_TYPE_PRESETS,
@@ -192,6 +193,19 @@ class TestRocBLASHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942-xnack+"
 
+    def test_detect_arch_subdir_stepping_not_applicable(self, handler, prefix_root):
+        """The gfx1250v0 stepping alias is scoped to hipBLASLt/hipSPARSELt and
+        must not apply to rocBLAS, even though rocBLAS shares the same
+        _TensileHandler base class. rocBLAS does not produce this directory
+        today, but if it ever did, a directory-only file should stay
+        unclassified rather than being silently merged into gfx1250."""
+        file_path = prefix_root / "lib/rocblas/library/gfx1250v0/TensileManifest.txt"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
     def test_reject_wrong_directory(self, handler, prefix_root):
         """Test that files not in rocblas/library are rejected."""
         file_path = prefix_root / "lib/other/library/TensileLibrary_gfx1100.dat"
@@ -334,6 +348,50 @@ class TestHipBLASLtHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx1100"
 
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "TensileLibrary_lazy_gfx1250.dat.zlib",
+            "TensileLibrary_Type_HH_gfx1250.dat.zlib",
+            "TensileLibrary_Type_HH_gfx1250.co",
+            "Kernels.so-000-gfx1250.hsaco",
+        ],
+    )
+    def test_detect_arch_subdir_stepping(self, handler, prefix_root, filename):
+        """Stepping subdirectory library/gfx1250v0/ belongs to the gfx1250 bundle."""
+        file_path = prefix_root / "lib/hipblaslt/library/gfx1250v0" / filename
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx1250"
+
+    @pytest.mark.parametrize(
+        "directory",
+        [
+            # Wrong revision: only v0 is a known, verified stepping.
+            "gfx1250v1",
+            # Wrong base arch: only gfx1250 is known to have a v0 stepping.
+            "gfx90av0",
+            "gfx942v0",
+        ],
+    )
+    def test_detect_arch_subdir_unknown_stepping_not_merged(
+        self, handler, prefix_root, directory
+    ):
+        """Only gfx1250v0 is a known, verified stepping alias. Neither a
+        different revision nor a different base arch should be silently folded
+        into a base arch -- a directory-only file (no arch in its own filename)
+        under such a directory should stay unclassified rather than guessed."""
+        file_path = (
+            prefix_root / "lib/hipblaslt/library" / directory / "TensileManifest.txt"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
     def test_reject_wrong_directory(self, handler, prefix_root):
         """Test that files not in hipblaslt/library are rejected."""
         file_path = prefix_root / "lib/rocblas/library/TensileLibrary_gfx1100.dat"
@@ -422,6 +480,18 @@ class TestHipSparseLtHandler:
 
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx950"
+
+    def test_detect_arch_subdir_stepping(self, handler, prefix_root):
+        """Stepping subdirectory library/gfx1250v0/ belongs to the gfx1250 bundle."""
+        file_path = (
+            prefix_root
+            / "lib/hipsparselt/library/gfx1250v0/TensileLibrary_lazy_gfx1250.dat.zlib"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx1250"
 
     def test_reject_wrong_directory(self, handler, prefix_root):
         file_path = prefix_root / "lib/rocblas/library/something_gfx942.co"
@@ -796,6 +866,91 @@ class TestMIOpenHandler:
         assert result is None
 
 
+class TestComposableKernelHandler:
+    """Tests for ComposableKernelHandler detection logic."""
+
+    @pytest.fixture
+    def handler(self):
+        return ComposableKernelHandler()
+
+    @pytest.fixture
+    def prefix_root(self, tmp_path):
+        root = tmp_path / "prefix"
+        root.mkdir()
+        return root
+
+    def _detect(self, handler, prefix_root, rel):
+        file_path = prefix_root / rel
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.touch()
+        return handler.detect(file_path, prefix_root)
+
+    def test_name(self, handler):
+        assert handler.name() == "composablekernel"
+
+    _EXPORTS = "lib/cmake/composable_kernel/composable_kerneldevice_conv_operations_"
+
+    @pytest.mark.parametrize(
+        "relative,expected",
+        [
+            ("lib/libdevice_conv_operations_gfx942.a", "gfx942"),
+            ("lib/libdevice_conv_operations_gfx950_xnackp.a", "gfx950"),
+            ("lib/libdevice_conv_operations_gfx90a_xnack_.a", "gfx90a"),
+            ("lib/libdevice_conv_operations_gfx942_srameccp_xnack_.a", "gfx942"),
+            ("lib/libdevice_conv_operations_gfx942_xnack__srameccp.a", "gfx942"),
+            ("lib/libdevice_conv_operations_gfx1250_strict.a", "gfx1250-strict"),
+            ("lib/libdevice_conv_operations_gfx1250_strict_xnackp.a", "gfx1250-strict"),
+            ("lib/libdevice_conv_operations_gfx1100.a", "gfx1100"),
+            # Windows: no lib prefix, .lib extension.
+            ("lib/device_conv_operations_gfx942.lib", "gfx942"),
+            ("lib/device_conv_operations_gfx1250_strict.lib", "gfx1250-strict"),
+            # CMake exports travel with their archive.
+            (_EXPORTS + "gfx942Targets.cmake", "gfx942"),
+            (_EXPORTS + "gfx942Targets-release.cmake", "gfx942"),
+            (_EXPORTS + "gfx90aTargets-relwithdebinfo.cmake", "gfx90a"),
+            (_EXPORTS + "gfx950_xnack_Targets.cmake", "gfx950"),
+            (_EXPORTS + "gfx1250_strictTargets.cmake", "gfx1250-strict"),
+            (_EXPORTS + "gfx1250_strict_xnackpTargets-release.cmake", "gfx1250-strict"),
+        ],
+    )
+    def test_detect(self, handler, prefix_root, relative, expected):
+        assert self._detect(handler, prefix_root, relative) == expected
+
+    @pytest.mark.parametrize(
+        "relative",
+        [
+            "lib/libdevice_conv_operations.a",
+            "lib/libdevice_conv_operations_foo.a",
+            "lib/libdevice_conv_operations_xnack.a",
+            "lib/libdevice_conv_operations_gfx11_generic.a",
+            "lib/libdevice_conv_operations_amdgcnspirv.a",
+            # A target id has at most one letter after its digits.
+            "lib/libdevice_conv_operations_gfx942xnackp.a",
+            "lib/libdevice_gemm_operations_gfx942.a",
+            "lib/libdevice_conv_operations_gfx942.so",
+            "lib/libdevice_conv_operations_gfx942.a.bak",
+            "lib/libdevice_conv_operations_gfx942.lib.a",
+            "lib/xlibdevice_conv_operations_gfx942.a",
+            "lib/libMIOpen.a",
+            # The config and the unified export stay generic.
+            "lib/cmake/composable_kernel/composable_kernelConfig.cmake",
+            "lib/cmake/composable_kernel/composable_kerneldevice_conv_operationsTargets.cmake",
+            _EXPORTS + "gfx11_genericTargets.cmake",
+            _EXPORTS + "gfx942Targets.cmake.bak",
+            _EXPORTS + "gfx942Targets-.cmake",
+            "lib/cmake/composable_kernel/composable_kernelutilityTargets.cmake",
+        ],
+    )
+    def test_reject(self, handler, prefix_root, relative):
+        assert self._detect(handler, prefix_root, relative) is None
+
+    def test_reject_file_outside_prefix(self, handler, prefix_root):
+        with pytest.raises(ValueError, match="is not under prefix_root"):
+            handler.detect(
+                Path("/tmp/lib/libdevice_conv_operations_gfx942.a"), prefix_root
+            )
+
+
 class TestHipKernelProviderArchContentHandler:
     """Tests for HipKernelProviderArchContentHandler detection logic."""
 
@@ -1063,7 +1218,8 @@ class TestDatabaseHandlerRegistry:
         assert "miopen" in handlers
         assert "hipkernelprovider" in handlers
         assert "hotswap_cache" in handlers
-        assert len(handlers) == 7
+        assert "composablekernel" in handlers
+        assert len(handlers) == 8
 
     def test_get_database_handlers_single(self):
         """Test getting a single handler by name."""
@@ -1089,9 +1245,10 @@ class TestDatabaseHandlerRegistry:
                 "miopen",
                 "hipkernelprovider",
                 "hotswap_cache",
+                "composablekernel",
             ]
         )
-        assert len(handlers) == 7
+        assert len(handlers) == 8
         assert isinstance(handlers[0], RocBLASHandler)
         assert isinstance(handlers[1], HipBLASLtHandler)
         assert isinstance(handlers[2], HipSparseLtHandler)
@@ -1099,6 +1256,7 @@ class TestDatabaseHandlerRegistry:
         assert isinstance(handlers[4], MIOpenHandler)
         assert isinstance(handlers[5], HipKernelProviderArchContentHandler)
         assert isinstance(handlers[6], HotswapCacheHandler)
+        assert isinstance(handlers[7], ComposableKernelHandler)
 
     def test_wheel_type_preset(self):
         """Test that wheel type presets resolve to valid handlers."""

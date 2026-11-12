@@ -107,7 +107,8 @@ static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1200) == 3);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1201) == 4);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1250) == 5);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1251) == 6);
-static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_NUM_TARGETS) == 7);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1100) == 7);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_NUM_TARGETS) == 8);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_INVALID) == INT32_MAX);
 static_assert(sizeof(rj_code_target_id_t) == sizeof(int32_t));
 static_assert(std::is_same_v<std::underlying_type_t<rj_code_target_id_t>, int32_t>);
@@ -423,11 +424,15 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
       registry.find_gpu_target(ROCJITSU_CODE_TARGET_GFX1250);
   const IsaGpuTargetDescription *gfx1251_binding =
       registry.find_gpu_target(ROCJITSU_CODE_TARGET_GFX1251);
+  const IsaGpuTargetDescription *gfx1100_binding =
+      registry.find_gpu_target(ROCJITSU_CODE_TARGET_GFX1100);
   ASSERT_NE(gfx1250_binding, nullptr);
   ASSERT_NE(gfx1251_binding, nullptr);
+  ASSERT_NE(gfx1100_binding, nullptr);
   constexpr std::array kExecutableTargets{
       ROCJITSU_CODE_TARGET_GFX90A,  ROCJITSU_CODE_TARGET_GFX942,  ROCJITSU_CODE_TARGET_GFX950,
       ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_TARGET_GFX1250,
+      ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_TARGET_GFX1100,
   };
   for (rj_code_target_id_t target : kExecutableTargets) {
     const IsaGpuTargetDescription *binding = registry.find_gpu_target(target);
@@ -436,8 +441,7 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   }
   EXPECT_EQ(gfx1250_binding->gfx_target_version, 120500u);
   EXPECT_EQ(gfx1251_binding->gfx_target_version, 120501u);
-  EXPECT_TRUE(gfx1250_binding->capabilities.execution_implemented);
-  EXPECT_FALSE(gfx1251_binding->capabilities.execution_implemented);
+  EXPECT_EQ(gfx1100_binding->gfx_target_version, 110000u);
   EXPECT_NE(gfx1250_binding->capabilities.instruction_features,
             gfx1251_binding->capabilities.instruction_features);
   EXPECT_EQ(registry.find_default_gpu_target(*gfx1250), gfx1250_binding);

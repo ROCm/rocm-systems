@@ -23,8 +23,9 @@ namespace simdojo {
 
 /// @brief Type of simulation event.
 ///
-/// @details Numeric order determines priority at the same tick: smaller value = higher
-/// priority. SIM_EXIT is last so that all real events at max_ticks fire first.
+/// @details Lower values have higher priority at the same tick. The single-threaded
+/// engine uses SIM_EXIT at max_ticks so queued timers and messages at that tick
+/// have priority over the exit.
 enum class EventType : uint8_t {
   TIMER_CALLBACK,  ///< A scheduled timer/tick callback.
   MESSAGE_ARRIVAL, ///< A message arrived at a port.
@@ -130,7 +131,7 @@ public:
     std::vector<EventQueueEntry> &entries =
         entry.asynchronous ? asynchronous_entries_ : local_entries_;
     entries.push_back(std::move(entry));
-    std::push_heap(entries.begin(), entries.end(), std::greater<>{});
+    std::ranges::push_heap(entries, std::greater<>{});
   }
 
   /// @brief Dequeue and return the earliest entry.
@@ -183,6 +184,18 @@ public:
   /// @returns Current queue size.
   size_t size() const { return local_entries_.size() + asynchronous_entries_.size(); }
 
+  /// @brief Check whether a specific event is the queue's only entry.
+  /// @param event Event identity to match.
+  /// @retval true The queue contains exactly one entry for @p event.
+  /// @retval false The queue is empty or contains any other entry.
+  bool contains_only(const Event *event) const {
+    if (size() != 1)
+      return false;
+    if (!local_entries_.empty())
+      return local_entries_.front().event == event;
+    return asynchronous_entries_.front().event == event;
+  }
+
   /// @brief Return the last processed tick (set by the engine).
   /// @returns The current tick value.
   Tick current_tick() const { return current_tick_; }
@@ -194,7 +207,7 @@ public:
 private:
   /// @brief Remove the minimum entry from one of the source-specific heaps.
   static EventQueueEntry pop_from(std::vector<EventQueueEntry> &entries) {
-    std::pop_heap(entries.begin(), entries.end(), std::greater<>{});
+    std::ranges::pop_heap(entries, std::greater<>{});
     EventQueueEntry entry = std::move(entries.back());
     entries.pop_back();
     return entry;

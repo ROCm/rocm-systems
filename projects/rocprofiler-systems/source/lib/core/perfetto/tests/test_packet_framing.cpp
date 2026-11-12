@@ -153,7 +153,7 @@ TEST(packet_framing_rewrite, applies_offset_to_existing_seq_id)
     std::vector<char> dst;
     ASSERT_TRUE(rewrite_trace_packet(dst, in.data(), in.size(), 42));
 
-    auto inner = extract_first_packet_payload(dst);
+    auto const inner = extract_first_packet_payload(dst);
 
     std::vector<char> expected;
     expected.push_back(static_cast<char>((8 << 3) | 0));
@@ -173,7 +173,7 @@ TEST(packet_framing_rewrite, preserves_distinct_seq_ids_across_packets)
     // (5 and 9). With the same offset (100) applied, the effective seq_ids
     // stay distinct (105 and 109) so each retains its own interned-data
     // namespace in the merged stream.
-    auto build_with = [](std::uint32_t seq_id) {
+    auto const build_with = [](std::uint32_t seq_id) {
         std::vector<char> p;
         p.push_back(static_cast<char>(TRUSTED_SEQ_ID_TAG));
         append_varint(p, seq_id);
@@ -187,7 +187,7 @@ TEST(packet_framing_rewrite, preserves_distinct_seq_ids_across_packets)
     ASSERT_TRUE(rewrite_trace_packet(dst, in_5.data(), in_5.size(), 100));
     ASSERT_TRUE(rewrite_trace_packet(dst, in_9.data(), in_9.size(), 100));
 
-    auto extract_seq_id_at = [&](std::size_t start) -> std::uint64_t {
+    auto const extract_seq_id_at = [&](std::size_t start) -> std::uint64_t {
         EXPECT_EQ(static_cast<std::uint8_t>(dst[start]), TRACE_PACKETS_TAG);
         std::size_t   pos = start + 1;
         std::uint64_t len = 0;
@@ -231,7 +231,7 @@ TEST(packet_framing_rewrite, offset_zero_leaves_seq_id_unchanged)
     std::vector<char> dst;
     ASSERT_TRUE(rewrite_trace_packet(dst, in.data(), in.size(), 0));
 
-    auto inner = extract_first_packet_payload(dst);
+    auto const inner = extract_first_packet_payload(dst);
 
     std::vector<char> expected;
     expected.push_back(static_cast<char>((8 << 3) | 0));
@@ -297,12 +297,14 @@ TEST(packet_framing_rewrite, fixed64_wire_advances_eight_bytes)
     std::vector<char> bytes;
     bytes.push_back(static_cast<char>((1 << 3) | 1));
     for(int i = 0; i < 8; ++i)
+    {
         bytes.push_back(static_cast<char>(0xAA));
+    }
 
     std::vector<char> dst;
     ASSERT_TRUE(rewrite_trace_packet(dst, bytes.data(), bytes.size(), 5));
 
-    auto inner = extract_first_packet_payload(dst);
+    auto const inner = extract_first_packet_payload(dst);
     EXPECT_GE(inner.size(), 9u);  // 1 tag + 8 fixed + seq_id pair
 }
 
@@ -311,7 +313,9 @@ TEST(packet_framing_rewrite, rejects_truncated_fixed64_field)
     std::vector<char> bytes;
     bytes.push_back(static_cast<char>((1 << 3) | 1));
     for(int i = 0; i < 7; ++i)
+    {
         bytes.push_back(static_cast<char>(0xAA));
+    }
 
     std::vector<char> dst;
     EXPECT_FALSE(rewrite_trace_packet(dst, bytes.data(), bytes.size(), 5));
@@ -323,7 +327,9 @@ TEST(packet_framing_rewrite, fixed32_wire_advances_four_bytes)
     std::vector<char> bytes;
     bytes.push_back(static_cast<char>((1 << 3) | 5));
     for(int i = 0; i < 4; ++i)
+    {
         bytes.push_back(static_cast<char>(0xBB));
+    }
 
     std::vector<char> dst;
     EXPECT_TRUE(rewrite_trace_packet(dst, bytes.data(), bytes.size(), 5));
@@ -334,7 +340,9 @@ TEST(packet_framing_rewrite, rejects_truncated_fixed32_field)
     std::vector<char> bytes;
     bytes.push_back(static_cast<char>((1 << 3) | 5));
     for(int i = 0; i < 3; ++i)
+    {
         bytes.push_back(static_cast<char>(0xBB));
+    }
 
     std::vector<char> dst;
     EXPECT_FALSE(rewrite_trace_packet(dst, bytes.data(), bytes.size(), 5));
@@ -347,7 +355,7 @@ TEST(packet_framing_rewrite, empty_input_emits_offset_as_seq_id)
     std::vector<char> dst;
     ASSERT_TRUE(rewrite_trace_packet(dst, nullptr, 0, 13));
 
-    auto              inner = extract_first_packet_payload(dst);
+    auto const        inner = extract_first_packet_payload(dst);
     std::vector<char> expected;
     expected.push_back(static_cast<char>(TRUSTED_SEQ_ID_TAG));
     append_varint(expected, 13);

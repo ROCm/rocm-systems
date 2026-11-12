@@ -23,6 +23,8 @@ THE SOFTWARE.
 #ifndef MODEL_H_
 #define MODEL_H_
 
+#include <stdexcept>
+#include <string>
 #include <vector>
 #include "topo.h"
 #include "xml.h"
@@ -51,10 +53,12 @@ public:
     strcat(filename, "models/");
     strcat(filename, xml_file);
     struct ncclTopoSystem* system;
-    ncclTopoGetSystem(filename, &system);
+    if (ncclTopoGetSystem(filename, &system) != ncclSuccess)
+      throw std::runtime_error(std::string("failed to load topology model ") + filename);
     systems.push_back(system);
     for (int i=0; i<getNumGpus()-1; i++) {
-      ncclTopoGetSystem(filename, &system);
+      if (ncclTopoGetSystem(filename, &system) != ncclSuccess)
+        throw std::runtime_error(std::string("failed to load topology model ") + filename);
       systems.push_back(system);
     }
     hostHash = ((uint64_t)rand() << 32) | rand();

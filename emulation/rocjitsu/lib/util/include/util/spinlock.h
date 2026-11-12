@@ -8,6 +8,7 @@
 #define UTIL_SPINLOCK_H_
 
 #include <atomic>
+#include <cstdint>
 
 // TSAN annotations: let ThreadSanitizer track this spinlock as a mutex.
 #if defined(__SANITIZE_THREAD__)
@@ -28,8 +29,9 @@ namespace util {
 ///
 /// @details Uses a test-and-test-and-set strategy: spins on a relaxed load
 /// (cache-local) until the lock appears free, then attempts an exchange
-/// (cache-line transfer). Uses C++20 atomic::wait() for efficient spinning
-/// (maps to pause on x86, WFE on AArch64).
+/// (cache-line transfer). C++20 atomic::wait() briefly spins and then parks
+/// where supported (for example, on a Linux futex), so a descheduled owner does
+/// not force waiters to spin indefinitely.
 ///
 /// Use for hot paths where the critical section is very short (e.g.,
 /// cross-partition queue push/drain). For longer critical sections or
@@ -80,7 +82,10 @@ public:
   }
 
 private:
-  std::atomic<bool> locked_{false};
+  // A native wait word lets Linux wait directly on this lock. A byte-sized
+  // flag needs the library's shared proxy counter even for an uncontended
+  // notification, adding a contended write between otherwise unrelated locks.
+  std::atomic<uint32_t> locked_{0};
 };
 
 } // namespace util

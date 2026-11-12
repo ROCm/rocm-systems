@@ -10,14 +10,18 @@
 // the build-tree fallback for in-tree runs.
 // Single-record parsing is also covered synthetically in cper_read_test.cc; these
 // fixtures add real-capture coverage: header byte alignment, multi-record
-// rings, and severity_mask filtering.
+// rings, severity_mask filtering, and amdgpu's crashdump section length.
 
 #include <gtest/gtest.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <climits>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -55,6 +59,11 @@ std::string MockDir() {
 }
 
 std::string MockPath(const char* name) { return MockDir() + "/" + name; }
+
+std::vector<char> ReadFixture(const char* name) {
+  std::ifstream in(MockPath(name), std::ios::binary);
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
 
 // Reads a mock fixture and returns the parsed severities of the accepted
 // records (those passing severity_mask). entry_count and buf_size are reported
@@ -192,4 +201,31 @@ TEST(GpuUnit, CperMockSeverityMaskRejectAll) {
   EXPECT_EQ(entry_count, 0u);
   EXPECT_EQ(buf_size, 0u);
   EXPECT_TRUE(sevs.empty());
+}
+
+// The fixture's crashdump section is amdgpu's 0xB0-byte fatal shape, shorter than
+// sizeof(cper_sec_crashdump). Its payload is scrubbed, so the registers of a real
+// MI308X fatal record (SMU GfxMmhubError, AFID 30) are written back in.
+TEST(GpuUnit, CperMockFatalRecordDecodesAfid) {
+  std::vector<char> rec = ReadFixture("cper_fatal.cper");
+  ASSERT_GE(rec.size(), sizeof(amdsmi_cper_hdr_t) + sizeof(struct cper_sec_desc));
+  const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(rec.data());
+  ASSERT_EQ(hdr->record_length, rec.size());
+  ASSERT_EQ(hdr->sec_cnt, 1);
+  const auto* desc =
+      reinterpret_cast<const struct cper_sec_desc*>(rec.data() + sizeof(amdsmi_cper_hdr_t));
+  ASSERT_EQ(desc->sec_length, 0xB0u);
+  ASSERT_EQ(desc->sec_offset + desc->sec_length, hdr->record_length);
+
+  EXPECT_TRUE(cper_decode(hdr, rec.size()).empty()) << "scrubbed payload decoded an AFID";
+
+  constexpr uint16_t kAcaRegisterContext = 1;
+  constexpr uint64_t kRegs[] = {0xBAA00000003B0000ULL, 0, 0x0001100103B30401ULL, 0x905ULL};
+  const size_t data_off = desc->sec_offset + offsetof(struct cper_sec_crashdump, data);
+  const size_t dump_off = data_off + offsetof(struct cper_sec_crashdump_data, dump);
+  ASSERT_LE(dump_off + sizeof(kRegs), rec.size());
+  std::memcpy(rec.data() + data_off, &kAcaRegisterContext, sizeof(kAcaRegisterContext));
+  std::memcpy(rec.data() + dump_off, kRegs, sizeof(kRegs));
+
+  EXPECT_EQ(cper_decode(hdr, rec.size()), std::vector<int>{30});
 }

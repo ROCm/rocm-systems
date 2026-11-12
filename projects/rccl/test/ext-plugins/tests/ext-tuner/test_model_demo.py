@@ -91,20 +91,10 @@ def test_model_demo_tuner_runs(paths):
     os.makedirs(log_dir, exist_ok=True)
 
     log_file = os.path.join(log_dir, "model_demo.log")
-    with open(log_file, "w") as logfile:
-        result = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert result.returncode == 0, \
-        f"Run with the model_demo tuner should exit cleanly, got {result.returncode}, see {log_file}"
-
-    with open(log_file, 'r') as f:
-        log_content = f.read()
+    assert rc == 0, \
+        f"Run with the model_demo tuner should exit cleanly, got {rc}, see {log_file}"
 
     for crash in ("Segmentation fault", "signal 11", "core dumped", "Address not mapped"):
         assert crash not in log_content, \

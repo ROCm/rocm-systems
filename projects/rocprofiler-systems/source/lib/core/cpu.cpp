@@ -13,12 +13,11 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <string_view>
 #include <unistd.h>
 #include <unordered_map>
 
-namespace rocprofsys
-{
-namespace cpu
+namespace rocprofsys::cpu
 {
 std::vector<cpu_info>
 process_cpu_info_data()
@@ -35,14 +34,8 @@ process_cpu_info_data()
     cpu_info    current_cpu;
     bool        has_processor_entry = false;
 
-    auto parse_long = [](const std::string& value) -> long {
-        try
-        {
-            return std::stol(value);
-        } catch(const std::exception&)
-        {
-            return -1;
-        }
+    auto parse_long = [](std::string_view value) -> long {
+        return utility::string::safe_stol(value).value_or(-1L);
     };
 
     static const std::unordered_map<std::string,
@@ -99,9 +92,10 @@ process_cpu_info_data()
 
         const std::string key =
             utility::string::to_lower(utility::string::trim(line.substr(0, colon_pos)));
-        const auto value = utility::string::trim(line.substr(colon_pos + 1));
+        const auto value =
+            utility::string::trim(std::string_view{ line }.substr(colon_pos + 1));
 
-        auto it = field_parsers.find(key);
+        auto const it = field_parsers.find(key);
         if(it != field_parsers.end())
         {
             it->second(current_cpu, std::string{ value });
@@ -123,7 +117,7 @@ process_cpu_info_data()
 std::vector<cpu_info>
 get_cpu_info()
 {
-    static auto _v = process_cpu_info_data();
+    static auto const _v = process_cpu_info_data();
     return _v;
 }
 
@@ -131,7 +125,7 @@ size_t
 device_count()
 {
     // Return unique socket count from parsed CPU info
-    auto           cpu_data = get_cpu_info();
+    auto const     cpu_data = get_cpu_info();
     std::set<long> sockets;
     for(const auto& cpu : cpu_data)
     {
@@ -143,8 +137,11 @@ device_count()
 void
 query_cpu_agents()
 {
-    auto cpu_data = get_cpu_info();
-    if(cpu_data.empty()) return;
+    auto const cpu_data = get_cpu_info();
+    if(cpu_data.empty())
+    {
+        return;
+    }
 
     // Group CPUs by socket (physical_id), collect model_name per socket
     std::map<size_t, std::string> socket_model_names;
@@ -153,7 +150,7 @@ query_cpu_agents()
     for(const auto& cpu : cpu_data)
     {
         const auto socket_id = static_cast<size_t>(std::max(0L, cpu.physical_id));
-        if(socket_model_names.find(socket_id) == socket_model_names.end())
+        if(!socket_model_names.contains(socket_id))
         {
             socket_model_names[socket_id] = cpu.model_name;
             socket_vendor_ids[socket_id]  = cpu.vendor_id;
@@ -185,5 +182,4 @@ query_cpu_agents()
         mgr.insert_agent(cur_agent);
     }
 }
-}  // namespace cpu
-}  // namespace rocprofsys
+}  // namespace rocprofsys::cpu

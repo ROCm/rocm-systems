@@ -182,7 +182,7 @@ ncclResult_t rasClientInitSocket() {
                     (addr.sa.sa_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6))),
                "bind", ret, fail);
   SYSCHECKGOTO(listen(rasClientListeningSocket, 16384), "listen", ret, fail);
-  INFO(NCCL_INIT | NCCL_RAS, "RAS client listening socket at %s", ncclSocketToString(&addr, rasLine));
+  INFO(NCCL_INIT | NCCL_RAS, "RAS client listening socket at %s", ncclSocketToString(&addr, rasLine, sizeof(rasLine)));
 exit:
   return ret;
 fail:
@@ -481,10 +481,13 @@ void rasClientEventLoop(struct rasClient* client, int pollIdx) {
         char* endPtr = nullptr;
         errno = 0;
         double timeout = strtod(cmd + strlen("timeout "), &endPtr);
-        if (errno != 0 || !endPtr || *endPtr != '\0' || !std::isfinite(timeout) || timeout < 0.0) {
+        // Range-check before the int64 conversion (out of range is UB); collectives.cc adds it to timestamps.
+        const double scaledTimeout = timeout * (double)CLOCK_UNITS_PER_SEC;
+        if (errno != 0 || !endPtr || *endPtr != '\0' || !std::isfinite(timeout) || timeout < 0.0 ||
+            !(scaledTimeout <= (double)RAS_MAX_TIMEOUT_NS)) {
           snprintf(rasLine, sizeof(rasLine), "ERROR: Invalid timeout value %s\n", cmd + strlen("timeout "));
         } else {
-          client->timeout = timeout * CLOCK_UNITS_PER_SEC;
+          client->timeout = (int64_t)scaledTimeout;
           strcpy(rasLine, "OK\n");
         }
         if (rasClientEnqueueString(client, rasLine) != ncclSuccess) {
@@ -692,6 +695,7 @@ static ncclResult_t rasClientRun(struct rasClient* client, bool* closed) {
       ret = ncclSuccess;
       break;
     }
+    // fall through
   case RAS_CLIENT_COMMS:
     NCCLCHECKGOTO(rasClientRunComms(client), ret, exit);
     client->status = RAS_CLIENT_FINISHED;
@@ -702,6 +706,7 @@ static ncclResult_t rasClientRun(struct rasClient* client, bool* closed) {
       ret = ncclSuccess;
       break;
     }
+    // fall through
   case RAS_CLIENT_DIAG_FINI:
     NCCLCHECKGOTO(rasDiagnosticsResume(client), ret, exit);
     client->status = RAS_CLIENT_FINISHED;
@@ -1477,17 +1482,18 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
               INFO(NCCL_RAS,
                    "RAS overflow of auxPeersBuf: nPeersBuf %d, rasPeerIdx %d (%s), collPeerIdx %d -- "
                    "internal error?",
-                   nPeersBuf, rasPeerIdx, ncclSocketToString(&rasPeers[rasPeerIdx].addr, rasLine), collPeerIdx);
+                   nPeersBuf, rasPeerIdx, ncclSocketToString(&rasPeers[rasPeerIdx].addr, rasLine, sizeof(rasLine)),
+                   collPeerIdx);
             }
           }
           TRACE(NCCL_RAS, "RAS rasPeerIdx %d (%s) is missing from coll->peers; dead %d", rasPeerIdx,
-                ncclSocketToString(&rasPeers[rasPeerIdx].addr, rasLine), dead);
+                ncclSocketToString(&rasPeers[rasPeerIdx].addr, rasLine, sizeof(rasLine)), dead);
           rasPeerIdx++;
         } else {
           // cmp > 0
           // Process not found in rasPeers -- shouldn't happen, unless during a race?
           INFO(NCCL_RAS, "RAS failed to find coll->peer[%d] (%s) in rasPeers -- internal error?", collPeerIdx,
-               ncclSocketToString(coll->peers + collPeerIdx, rasLine));
+               ncclSocketToString(coll->peers + collPeerIdx, rasLine, sizeof(rasLine)));
           collPeerIdx++;
         } // cmp > 0
       } // for (rasPeerIdx, collPeerIdx)

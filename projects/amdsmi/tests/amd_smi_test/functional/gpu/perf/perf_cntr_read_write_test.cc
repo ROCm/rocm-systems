@@ -84,6 +84,10 @@ void TestPerfCntrReadWrite::CountEvents(amdsmi_processor_handle dv_ind, amdsmi_e
   ret = amdsmi_gpu_control_counter(evt_handle, AMDSMI_CNTR_CMD_START, nullptr);
   DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
   if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+    // The caller skips unsupported events, so free the counter first. Don't
+    // check the result: stopping a counter that never started fails, but the
+    // counter is freed anyway.
+    amdsmi_gpu_destroy_counter(evt_handle);
     throw AMDSMI_STATUS_NOT_SUPPORTED;
   } else {
     CHK_ERR_ASRT(ret)

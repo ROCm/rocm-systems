@@ -13,53 +13,42 @@ populated and empty-list paths are pinned alongside it.
 ``AMDSMI_SPACING_REMOVAL`` marker and strips it afterwards by literal match, so
 the marker must never itself become an empty dict.
 
-``amdsmi_logger.py`` is loaded from the source tree so the test exercises the code
-under development rather than a possibly-stale installed copy.
+``amdsmi_logger.py`` is loaded through cli_search_order, so a plain checkout
+exercises the code under development; an explicit AMDSMI_PATH pins that install.
 """
 
-import importlib.util
 import os
-import sys
-import types
 import unittest
 
+from common.common import (
+    amdsmi_path,
+    cli_search_order,
+    fake_module,
+    find_cli_dir,
+    load_cli_module,
+    stub_modules,
+)
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-LOGGER_PATH = os.path.join(_REPO_ROOT, "amdsmi_cli", "amdsmi_logger.py")
-
-
-def _install_fake_helpers():
-    """Register a stub ``amdsmi_helpers`` so ``amdsmi_logger`` imports cleanly."""
-    module = types.ModuleType("amdsmi_helpers")
-    module.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
-    sys.modules["amdsmi_helpers"] = module
-
-
-def _restore_helpers(saved):
-    """Undo ``_install_fake_helpers`` so the stub does not leak into sibling suites."""
-    if saved is None:
-        sys.modules.pop("amdsmi_helpers", None)
-    else:
-        sys.modules["amdsmi_helpers"] = saved
+_CLI_DIR = find_cli_dir(*cli_search_order(_THIS_DIR))
+LOGGER_PATH = os.path.join(_CLI_DIR, "amdsmi_logger.py") if _CLI_DIR else None
 
 
 def _load_logger_module():
-    spec = importlib.util.spec_from_file_location("amdsmi_logger_under_test", LOGGER_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("amdsmi_logger_under_test", LOGGER_PATH)
 
 
 class TestCliEmptySectionNA(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(LOGGER_PATH):
-            raise unittest.SkipTest(f"amdsmi_logger not found at {LOGGER_PATH}")
+        if not LOGGER_PATH or not os.path.isfile(LOGGER_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI amdsmi_logger.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
         # Registered before the stub is installed, so the restore still runs if
         # loading the logger raises: unittest skips tearDownClass on that path.
-        saved = sys.modules.get("amdsmi_helpers")
-        cls.addClassCleanup(_restore_helpers, saved)
-        _install_fake_helpers()
+        helpers = fake_module("amdsmi_helpers", AMDSMIHelpers=type("AMDSMIHelpers", (), {}))
+        stub_modules(cls, {"amdsmi_helpers": helpers})
         module = _load_logger_module()
         cls.logger = module.AMDSMILogger.__new__(module.AMDSMILogger)
 
@@ -71,20 +60,19 @@ class TestCliEmptySectionNA(unittest.TestCase):
     # happily when the line lands in column 0.
     def test_empty_nested_dict_renders_na(self):
         # The AI-NIC case: a NIC whose RDMA driver is absent reports no devices.
-        output = self._render({"ai_nic": 0, "rdma_devices": {}})
-        self.assertEqual(output, "AI_NIC: 0\n    RDMA_DEVICES: N/A\n")
+        output = self._render({"nic": 0, "rdma_devices": {}})
+        self.assertEqual(output, "NIC: 0\n    RDMA_DEVICES: N/A\n")
 
     def test_populated_nested_dict_still_nests(self):
-        output = self._render({"ai_nic": 0, "rdma_devices": {"rdma_device_0": {"name": "ionic_0"}}})
+        output = self._render({"nic": 0, "rdma_devices": {"rdma_device_0": {"name": "ionic_0"}}})
         self.assertEqual(
-            output,
-            "AI_NIC: 0\n    RDMA_DEVICES:\n        RDMA_DEVICE_0:\n            NAME: ionic_0\n",
+            output, "NIC: 0\n    RDMA_DEVICES:\n        RDMA_DEVICE_0:\n            NAME: ionic_0\n"
         )
 
     def test_empty_dict_nested_inside_a_populated_section(self):
-        output = self._render({"ai_nic": 0, "asic": {"vendor_name": "AMD", "ports": {}}})
+        output = self._render({"nic": 0, "asic": {"vendor_name": "AMD", "ports": {}}})
         self.assertEqual(
-            output, "AI_NIC: 0\n    ASIC:\n        VENDOR_NAME: AMD\n        PORTS: N/A\n"
+            output, "NIC: 0\n    ASIC:\n        VENDOR_NAME: AMD\n        PORTS: N/A\n"
         )
 
     def test_empty_list_still_renders_na(self):
@@ -103,6 +91,8 @@ class TestCliEmptySectionNA(unittest.TestCase):
     def test_empty_payload_renders_nothing(self):
         self.assertEqual(self._render({}), "")
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_nic_store_keys_the_device_as_nic_in_json(self):
+        self.logger.format = self.logger.LoggerFormat.json.value
+        self.logger.output = {}
+        self.logger._store_ainic_output_amdsmi(nic_id=3, argument="values", data={"type": "AINIC"})
+        self.assertEqual(self.logger.output, {"nic": 3, "type": "AINIC"})

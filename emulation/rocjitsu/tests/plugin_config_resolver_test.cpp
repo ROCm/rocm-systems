@@ -37,8 +37,7 @@ TEST(PluginConfigResolver, EmptySchemaWithEmptyUserConfigYieldsEmptyObject) {
   std::string out;
   EXPECT_TRUE(resolve("{}", "", out));
   // An empty object may be rendered with insignificant whitespace.
-  out.erase(std::remove_if(out.begin(), out.end(), [](unsigned char c) { return std::isspace(c); }),
-            out.end());
+  std::erase_if(out, [](unsigned char c) { return std::isspace(c); });
   EXPECT_EQ(out, "{}");
 }
 
@@ -73,6 +72,24 @@ TEST(PluginConfigResolver, RequiredArgProvidedSucceeds) {
   std::string out;
   EXPECT_TRUE(resolve(schema, R"({"path": "/tmp/log"})", out));
   EXPECT_NE(out.find("\"path\": \"/tmp/log\""), std::string::npos);
+}
+
+TEST(PluginConfigResolver, OptionalArgMayBeAbsentOrProvided) {
+  const char *schema = R"({ "label": { "type": "string", "optional": true } })";
+  std::string out;
+  EXPECT_TRUE(resolve(schema, "", out));
+  EXPECT_EQ(out.find("\"label\""), std::string::npos);
+
+  EXPECT_TRUE(resolve(schema, R"({"label":"target"})", out));
+  EXPECT_NE(out.find("\"label\": \"target\""), std::string::npos);
+}
+
+TEST(PluginConfigResolver, DefaultTakesPrecedenceOverOptionalMarker) {
+  const char *schema =
+      R"({ "label": { "type": "string", "default": "fallback", "optional": true } })";
+  std::string out;
+  EXPECT_TRUE(resolve(schema, "", out));
+  EXPECT_NE(out.find("\"label\": \"fallback\""), std::string::npos);
 }
 
 TEST(PluginConfigResolver, WrongTypeFails) {

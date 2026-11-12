@@ -66,13 +66,42 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
+  const bool hints_;      //!< The CP firmware of the device decodes handle hints
   //! AccumulateCommand dispatch record this signal supplies timing for.
   uint32_t dispatch_slot_ = kNoDispatchSlot;
   std::recursive_mutex lock_;  //!< Signal lock for update
 
+  //! Reuse bookkeeping, touched only by the owning RetiringSignalTracker. Kept out of flags_
+  //! because timestamp processing updates flags_ from other threads.
+  uint64_t use_seq_ = 0;         //!< Queue sequence of the last use, 0 if unused
+  uint64_t use_aql_slot_ = kInvalidAqlSlot;  //!< AQL packet completing the use, if it retires
+                                             //!< in queue order
+  uint64_t use_queue_gen_ = 0;   //!< HW queue generation the packet was submitted to
+  bool use_fence_ = false;       //!< The packet was published with the barrier bit
+  bool use_retired_ = true;      //!< The last use is known to be complete
+  bool armed_ = false;           //!< The value holds kInitSignalValueOne, visible to the GPU
+  bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
+  bool binary_use_ = false;  //!< The current use starts at 1 and only its packet decrements it
+  bool timed_use_ = true;    //!< The current use captures timestamps
+  //! Bit 0: a host check on any thread loaded the current use's value as 0, unlike use_retired_,
+  //! which only the owning tracker updates. The other bits count uses, so a check that loaded the
+  //! previous use can't mark this one. Holders keep the signal from being reused, so the value
+  //! stays 0 until the next use.
+  std::atomic<uint64_t> use_completion_{0};
+  static constexpr uint64_t kUseCompleteBit = 1;
+
+  //! Starts tracking a new use. Every path that hands the signal out for a use must call it:
+  //! HwQueueTracker::BeginUse for queue signals, ResetHwEvents for graph signals.
+  void StartUse() {
+    const uint64_t completion = use_completion_.load(std::memory_order_relaxed);
+    use_completion_.store((completion | kUseCompleteBit) + 1, std::memory_order_release);
+  }
+
   typedef union {
     struct {
-      uint32_t done_ : 1;       //!< True if signal is done
+      //! The current use's timing was read out or it has none to read. Says nothing about
+      //! whether the GPU finished the use; use_completion_ tracks that.
+      uint32_t timing_processed_ : 1;
       uint32_t interrupt_ : 1;  //!< True if the signal will trigger an interrupt
       uint32_t reserved_ : 30;
     };
@@ -89,18 +118,24 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   };
   CachedTiming cached_timing_;
 
-  ProfilingSignal() : ts_(nullptr), engine_(HwQueueEngine::Compute) {
+  explicit ProfilingSignal(bool hints)
+      : ts_(nullptr), engine_(HwQueueEngine::Compute), hints_(hints) {
     signal_.handle = 0;
     flags_.data_ = 0;
-    flags_.done_ = true;
+    flags_.timing_processed_ = true;
     dispatch_slot_ = kNoDispatchSlot;
   }
 
   virtual ~ProfilingSignal();
   std::recursive_mutex& LockSignalOps() { return lock_; }
 
-  //! Cache timing data from HSA for this signal (called once when signal completes)
-  void CacheTimingData(hsa_agent_t gpu_device);
+  //! Cache timing data from HSA for this signal (called once when signal completes).
+  //! completed skips the value check when the caller already knows the signal completed.
+  void CacheTimingData(hsa_agent_t gpu_device, bool completed = false);
+
+  //! Caches the timing of a completed compute use from the raw start and end ticks the caller
+  //! read from the signal, as CacheTimingData would
+  void CacheTimingFromTicks(hsa_agent_t gpu_device, uint64_t start_tick, uint64_t end_tick);
 
   //! Reset cached timing for signal reuse
   void ResetCachedTiming() {
@@ -120,6 +155,28 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     start = cached_timing_.start_;
     end = cached_timing_.end_;
   }
+
+  //! The handle for the completion_signal of the AQL packet ending the current use. Without
+  //! timestamps the CP may skip capturing them; with them it captures them even when the queue
+  //! doesn't profile. Only AQL packets accept the hinted handle.
+  hsa_signal_t PacketHandle(bool timestamps) {
+    // A skipped capture leaves the timestamps of an earlier use in the signal
+    timed_use_ = timestamps;
+    if (!hints_) {
+      return signal_;
+    }
+    uint64_t hints = AMD_SIGNAL_HINT_INTR_NONE;
+    if (flags_.interrupt_) {
+      // A use that starts above 1, such as a blocking callback at 2, has a waiter that wakes
+      // before the value reaches 0
+      hints = binary_use_ ? AMD_SIGNAL_HINT_INTR_ON_ZERO : AMD_SIGNAL_HINT_INTR_DEFAULT;
+    }
+    if (binary_use_) {
+      hints |= AMD_SIGNAL_HINT_VALUE_BINARY;
+    }
+    hints |= timestamps ? AMD_SIGNAL_HINT_TS_ON : AMD_SIGNAL_HINT_TS_OFF;
+    return hsa_amd_signal_set_hints(signal_, hints);
+  }
 };
 
 class Sampler : public device::Sampler {
@@ -135,7 +192,7 @@ class Sampler : public device::Sampler {
   );
 
  private:
-  void fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescriptor,
+  void fillSampleDescriptor(hsa_ext_sampler_descriptor_v3_t& samplerDescriptor,
                             const amd::Sampler& sampler) const;
   Sampler& operator=(const Sampler&);
 
@@ -174,7 +231,8 @@ class NullDevice : public amd::Device {
   // List of dummy functions which are disabled for NullDevice
 
   //! Create a new virtual device environment.
-  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) override {
+  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
+                                             bool cooperative = false) override {
     ShouldNotReachHere();
     return nullptr;
   }
@@ -187,7 +245,8 @@ class NullDevice : public amd::Device {
   virtual void deregisterSvmMemory(void* ptr) const { ShouldNotReachHere(); }
 
   //! Just returns nullptr for the dummy device
-  device::Memory* createMemory(amd::Memory& owner) const override {
+  device::Memory* createMemory(
+      amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const override {
     ShouldNotReachHere();
     return nullptr;
   }
@@ -272,6 +331,12 @@ class NullDevice : public amd::Device {
     return true;
   }
 
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override {
+    ShouldNotReachHere();
+    return false;
+  }
+
   //! Determine if we can use device memory for SVM
   const bool forceFineGrain(amd::Memory* memory) const {
     return (memory->getContext().devices().size() > 1);
@@ -336,13 +401,11 @@ class NullDevice : public amd::Device {
   void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override {};
   void ReleaseGlobalSignal(void* signal) const override {}
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const {
     ShouldNotReachHere();
     return nullptr;
   }
-#endif
 #endif
 
  private:
@@ -414,13 +477,15 @@ class Device : public NullDevice {
   ///////////////////////////////////////////////////////////////////////////////
 
   //! Instantiate a new virtual device
-  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) override;
+  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
+                                                     bool cooperative = false) override;
 
   //! Construct an device program object from the ELF assuming it is valid
   virtual device::Program* createProgram(amd::Program& owner,
                                          amd::option::Options* options = nullptr) override;
 
-  virtual device::Memory* createMemory(amd::Memory& owner) const override;
+  virtual device::Memory* createMemory(
+      amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const override;
   virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const override;
   //! Sampler object allocation
   virtual bool createSampler(const amd::Sampler& owner,  //!< abstraction layer sampler object
@@ -476,9 +541,19 @@ class Device : public NullDevice {
   void deviceVmemRelease(uint64_t mem_handle) const;
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
-  //! Allocate a host-resident VMM handle on a CPU NUMA pool. numaNode < 0 resolves
-  //! to the calling thread's current node (HostNumaCurrent). Returns 0 on failure.
+  //! Allocate a host-resident VMM handle on a CPU NUMA pool. The node selector is resolved to a
+  //! CPU agent. numaNode = -1 resolves to calling thread's current node (HostNumaCurrent).
+  //! numaNode = -2 resolves to default ROCr CPU agent (Host). numaNode >= 0 resolves to that
+  //! particular NUMA node. Returns 0 on failure.
   uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
+
+  //! Recovers the location, owning device and size of a VMM allocation from its
+  //! ROCr handle. Returns false when ROCr cannot report them - an imported handle
+  //! whose placement the kernel could not describe, or (under ROCR_DLL_LOAD) a
+  //! ROCr too old to export hsa_amd_vmem_get_vmem_info - leaving the caller on
+  //! its default.
+  bool getVmmAllocInfo(amd::Memory& amd_mem_obj, amd::Device::VmmLocationType* location_type,
+                       int* device_id, size_t* size) const override;
 
   void* deviceLocalAlloc(size_t size,
                         const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;
@@ -497,6 +572,9 @@ class Device : public NullDevice {
                                 size_t num_attributes, const void* dev_ptr, size_t count) const override;
   virtual size_t ScratchLimitCurrent() const final;
   virtual bool UpdateScratchLimitCurrent(size_t limit) const final;
+  virtual size_t PersistingL2CacheSizeCurrent() const final;
+  virtual size_t PersistingL2CacheSizeMax() const final;
+  virtual bool UpdatePersistingL2CacheSizeCurrent(size_t size) const final;
   virtual void* virtualAlloc(void* req_addr, size_t size, size_t alignment) override;
   virtual bool virtualFree(void* addr) override;
 
@@ -527,13 +605,53 @@ class Device : public NullDevice {
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override;
   virtual void ReleaseGlobalSignal(void* signal) const override;
   virtual void RetainGlobalSignal(void* signal) const override;
-  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
+  virtual bool CreateHwEvents(int count, bool batched,
+                              std::vector<void*>& hw_events) const override;
+  //! Creates signals, from one allocation when batched, else from the ROCr signal pool.
+  //! A batch costs an allocation, so batched is for pooled signals. device_memory places the
+  //! batch in device memory, which requires a batch. Each signal is destroyed individually
+  //! either way. in_device_memory reports where the signals were placed.
+  bool CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uint64_t attributes,
+                     bool batched, bool device_memory, hsa_signal_t* signals,
+                     bool& in_device_memory) const;
+  //! True if pooled graph signals are batched in device memory
+  bool GraphDeviceSignals() const { return graph_device_signals_; }
+  //! A gate signal for a graph end marker (DEBUG_CLR_GRAPH_FAST_LAUNCH), armed; nullptr if none.
+  //! The gate comes with a reference of its own, the checkout, which the caller releases once
+  //! the command that uses the gate holds it (or at once if the gate goes unused)
+  ProfilingSignal* AcquireGateSignal();
+  //! True if queue completion signals are batched in device memory
+  bool QueueDeviceSignals() const { return queue_device_signals_; }
+  //! A batched command keeps its completion signal until the batch completes, and replacing a
+  //! device-memory signal costs a device allocation, so those queues complete batches sooner
+  size_t SubmissionBatchLimit() const override {
+    constexpr size_t kDeviceSignalBatchLimit = 256;
+    return (QueueDeviceSignals() && flagIsDefault(DEBUG_CLR_MAX_BATCH_SIZE))
+               ? kDeviceSignalBatchLimit
+               : DEBUG_CLR_MAX_BATCH_SIZE;
+  }
+  //! Makes earlier host stores to device-memory signal values visible to the GPU. When ROCr
+  //! reports that stores to device memory come over PCIe, re-store the last one and read it back.
+  //! last_stored must be in device memory, or the readback does not drain HDP.
+  void FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const;
+  //! AQL completion signal handles carry hints the CP firmware decodes
+  bool SignalHints() const { return signal_hints_; }
+  //! AQL queue ring buffers are placed in device memory. A profiler tool scans and rewrites the
+  //! packets from the host, so its queues keep system-memory rings.
+  bool AqlRingsInDeviceMemory() const {
+    return settings().aql_device_ring_buf_ && info_.largeBar_ &&
+           Hsa::amd_queue_create_available() &&
+           !amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
+  }
   virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual bool AcquireHwEvents(int count, std::vector<void*>& hw_events) const override;
+  virtual void ReturnHwEvents(std::vector<void*>& hw_events) const override;
   virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
-  virtual uint8_t* CreateBarrierPacket() const override;
+  virtual uint8_t* CreateBarrierPacket(int num_deps) const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events) const override;
+                                   const std::vector<void*>& hw_events,
+                                   bool profiled) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
@@ -547,6 +665,9 @@ class Device : public NullDevice {
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
   //! return a new device pointer accessible by the GPU agent.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
+
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override;
 
   //! Returns transfer engine object
   const device::BlitManager& xferMgr() const { return xferQueue()->blitMgr(); }
@@ -595,6 +716,9 @@ class Device : public NullDevice {
   VirtualGPUs vgpus_;  //!< The list of all running virtual gpus (lock protected)
 
   VirtualGPU* xferQueue() const;
+
+  //! Cooperative-launch queue, created on first cooperative launch
+  VirtualGPU* coopQueue() const;
 
   struct QueueExtras {
     void* metadataRingBuffer = nullptr;
@@ -746,6 +870,18 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t gpuvm_segment_;
   hsa_amd_memory_pool_t gpu_fine_grained_segment_;
   hsa_amd_memory_pool_t gpu_ext_fine_grained_segment_;
+  hsa_amd_memory_pool_t device_signal_pool_{0};  //!< Pool for signals in device memory, if any
+  bool graph_device_signals_ = false;  //!< Graph signals live in device_signal_pool_
+  std::mutex gate_lock_;                        //!< Guards the gate pool
+  std::vector<ProfilingSignal*> gate_signals_;  //!< AcquireGateSignal()'s pool
+  size_t gate_next_ = 0;                        //!< Where AcquireGateSignal() starts its search
+  bool gate_short_ = false;                     //!< The pool ran out: grow when it is not
+  bool queue_device_signals_ = false;  //!< Queue signals live in device_signal_pool_
+  //! Armed HW events that graphs take their signal sets from and give back when destroyed
+  mutable std::vector<void*> graph_hw_events_;
+  mutable std::mutex graph_hw_events_lock_;
+  bool pcie_stores_need_flush_ = true;  //!< Stores to device memory come over PCIe through HDP
+  bool signal_hints_ = false;           //!< AQL completion signal handles carry hints
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem
 
@@ -754,6 +890,8 @@ class Device : public NullDevice {
   static constexpr bool offlineDevice_ = false;
   VirtualGPU* xferQueue_;  //!< Transfer queue, created on demand
   mutable std::once_flag xferQueueOnce_;  //!< Serialises lazy creation of xferQueue_
+  VirtualGPU* coopQueue_;  //!< Cooperative-launch queue, created on demand
+  mutable std::once_flag coopQueueOnce_;  //!< Serialises lazy creation of coopQueue_
 
   std::atomic<size_t> freeMem_;       //!< Total of free memory available
   mutable std::recursive_mutex vgpusAccess_;  //!< Lock to serialise virtual gpu list access
@@ -867,10 +1005,8 @@ class Device : public NullDevice {
     return (engine_type == HwQueueEngine::SdmaD2H) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
   }
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const;
-#endif
 #endif
 };  // class roc::Device
 

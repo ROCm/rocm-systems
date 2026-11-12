@@ -12,6 +12,7 @@
 #include "nccl_net.h"
 #include "comm.h"
 #include "checks.h"
+#include "os.h"   // strcasecmp
 
 #define NCCL_UNDEF_DEV_COUNT -1
 
@@ -28,8 +29,42 @@ ncclResult_t ncclCollNetSetVirtDevCount(int netPluginIndex, int nVirtDev);
 // Test whether the current GPU support GPU Direct RDMA.
 ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport);
 
-extern ncclNet_t ncclNetIb;
-extern ncclNet_t ncclNetSocket;
+#if defined(NCCL_OS_LINUX)
+#define NCCL_NET_DATA_IMPORT
+#elif defined(NCCL_OS_WINDOWS)
+#if defined(nccl_EXPORTS)
+#define NCCL_NET_DATA_IMPORT
+#else
+#define NCCL_NET_DATA_IMPORT __declspec(dllimport)
+#endif
+#endif
+
+extern NCCL_NET_DATA_IMPORT ncclNet_t ncclNetIb;
+extern NCCL_NET_DATA_IMPORT ncclNet_t ncclNetSocket;
+extern NCCL_NET_DATA_IMPORT ncclNet_t ncclNetNd;
+
+#undef NCCL_NET_DATA_IMPORT
+
+// RCCL_IB_GDR_FLUSH_FLAG=1: whether this process can use the flag (the comm
+// enables it only when every rank can), and the comm-wide decision for an
+// ncclNetIb context, which listen copies into each listen comm. A comm sharing
+// its parent's context sets its own decision on its listen comms instead.
+bool ncclIbGdrFlushFlagLocalSupport();
+void ncclIbSetGdrFlushFlag(void* netContext, int enable);
+void ncclIbSetListenGdrFlushFlag(void* listenComm, int enable);
+// The ordering part of ncclIbGdrFlushFlagLocalSupport, over explicit settings:
+// NCCL_IB_OOO_RQ, NCCL_IB_RESILIENCY_PORT_FAILOVER,
+// NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME and the adaptive routing state of each
+// IB device.
+bool ncclIbGdrFlushFlagOrdered(int64_t oooRq, int64_t portFailover, int64_t matchingScheme, int nDevs,
+                               const int* adaptiveRouting);
+// GPU-visible per-QP flags of an ncclNetIb recv comm (NULL if this connection
+// keeps the RDMA read flush), and the packed gdrFlushSeq entry (see device.h)
+// the GPU waits on for the last completed receive.
+uint64_t* ncclIbGetGpuFlushFlag(void* recvComm);
+uint64_t ncclIbGetGpuFlushFlagSeq(void* recvComm);
+// Whether the following irecv needs the flag write (SIMPLE GDR receives only).
+void ncclIbSetGpuFlushFlagHint(void* recvComm, int need);
 
 extern ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p);
 extern int64_t ncclParamDmaBufEnable();
@@ -52,6 +87,23 @@ struct rcclIBNicInfo {
   int rate;
   int count;
 };
+
+/**
+ * @brief Map an NCCL_NET value to the plugin name it selects.
+ *
+ * Plugin selection only: ROCM-IB and IB-CAST load the same plugin but are not
+ * the same mode. The other ROCM-IB / IB-CAST comparisons (transport/net.cc,
+ * plugin/gin.cc, plugin/rma.cc) must keep matching their own literal spelling.
+ *
+ * NCCL_NET= (set but empty) is passed through, as upstream does.
+ *
+ * inline: the unit-test binaries compile init.cc without transport/net.cc.
+ */
+inline const char* rcclCanonicalNetName(const char* envNetName) {
+  if (envNetName == nullptr) return nullptr;
+  if (strcasecmp(envNetName, "ROCM-IB") == 0) return "IB-CAST";
+  return envNetName;
+}
 
 /**
  * @brief Get the primary NIC info

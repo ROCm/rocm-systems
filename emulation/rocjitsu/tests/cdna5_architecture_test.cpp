@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "util/data_types.h"
+
+#include <gtest/gtest-spi.h>
 
 #include <set>
 
@@ -14,6 +17,15 @@ namespace {
 
 using namespace rocjitsu;
 using namespace rocjitsu::test::cdna5;
+
+TEST(Gfx1250FixtureSetupTest, MalformedConfigRecordsFatalFailure) {
+  EXPECT_FATAL_FAILURE(
+      {
+        Gfx1250Sim sim;
+        sim.initialize("{");
+      },
+      "Failed to parse JSON config:");
+}
 
 template <typename T> void append_bytes(std::vector<uint8_t> &bytes, const T &value) {
   auto *src = reinterpret_cast<const uint8_t *>(&value);
@@ -223,7 +235,8 @@ std::vector<uint8_t> make_minimal_cdna5_elf(uint32_t elf_machine, std::span<cons
 }
 
 TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
-  auto loaded = config::load_config(kGfx1250ConfigPath, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(kGfx1250ConfigPath, loaded));
   auto *soc = loaded.soc();
   ASSERT_NE(soc, nullptr);
   EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA5);
@@ -321,11 +334,11 @@ TEST(Gfx1250CodeObjectTest, ProbeClobberPreservesConcreteTargetIdentity) {
   callable.body_words = {0xCC3B4004u, 0x1C421908u};
 
   std::string error;
-  EXPECT_TRUE(build_probe_clobber_summary(callable, &error).has_value()) << error;
+  EXPECT_TRUE(build_probe_clobber_summary(callable, /*wave_size=*/32, &error).has_value()) << error;
 
   callable.target = ROCJITSU_CODE_TARGET_GFX1250;
   error.clear();
-  EXPECT_FALSE(build_probe_clobber_summary(callable, &error).has_value());
+  EXPECT_FALSE(build_probe_clobber_summary(callable, /*wave_size=*/32, &error).has_value());
   EXPECT_FALSE(error.empty());
 }
 
@@ -342,7 +355,7 @@ TEST(Gfx1250DecodeTest, RejectsGfx1251VMovB64Dpp) {
   std::unique_ptr<Instruction> inst(decode_valid(*gfx1251, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_mov_b64_e32");
-  EXPECT_EQ(inst->execute, nullptr);
+  EXPECT_NE(inst->execute, nullptr);
 }
 
 TEST(Gfx1250DecodeTest, Gfx1251InstructionsAreTargetGated) {
@@ -378,7 +391,7 @@ TEST(Gfx1250DecodeTest, Gfx1251InstructionsAreTargetGated) {
     std::unique_ptr<Instruction> decoded(decode_valid(*gfx1251, words.data()));
     ASSERT_NE(decoded, nullptr) << mnemonic;
     EXPECT_EQ(decoded->mnemonic(), mnemonic);
-    EXPECT_EQ(decoded->execute, nullptr) << mnemonic;
+    EXPECT_NE(decoded->execute, nullptr) << mnemonic;
   }
 }
 
@@ -410,7 +423,7 @@ TEST(Gfx1250DecodeTest, Gfx1251ImpliedLiteralIdentifiersAreTargetGated) {
     ASSERT_NE(decoded, nullptr) << mnemonic;
     EXPECT_EQ(decoded->mnemonic(), mnemonic);
     EXPECT_EQ(decoded->size(), 12) << mnemonic;
-    EXPECT_EQ(decoded->execute, nullptr) << mnemonic;
+    EXPECT_NE(decoded->execute, nullptr) << mnemonic;
   }
 }
 
@@ -549,14 +562,14 @@ TEST(Gfx1250DecodeTest, AllLlvmGfx1251DppFormsAreTargetGated) {
       expected_mnemonic += "_e32";
     }
     EXPECT_EQ(decoded->mnemonic(), expected_mnemonic) << name;
-    EXPECT_EQ(decoded->execute, nullptr) << name;
+    EXPECT_NE(decoded->execute, nullptr) << name;
   }
 }
 
 TEST(Gfx1250DecodeTest, CommonInstructionDecodesForBothVariants) {
   constexpr uint32_t kSEndpgm[] = {0xBFB00000u};
   for (const auto &[target, expects_execution] :
-       std::array<std::pair<std::string_view, bool>, 2>{{{"gfx1250", true}, {"gfx1251", false}}}) {
+       std::array<std::pair<std::string_view, bool>, 2>{{{"gfx1250", true}, {"gfx1251", true}}}) {
     auto decoder = Decoder::create(default_isa_target_registry(), target);
     ASSERT_NE(decoder, nullptr) << target;
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, kSEndpgm));
@@ -1116,6 +1129,7 @@ TEST(Gfx1250DecodeTest, WmmaScaleRejectsIllegalScaleSources) {
 
 TEST(Gfx1250ExecutionTest, WmmaScaleExecutesAllMatrixFormatPairs) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1142,11 +1156,11 @@ TEST(Gfx1250ExecutionTest, WmmaScaleExecutesAllMatrixFormatPairs) {
         for (uint32_t row = 0; row < 16; ++row)
           for (uint32_t k = 0; k < 128; ++k)
             write_wmma_packed(*cu, vgpr_base,
-                              amdgpu::wmma_a_input_loc(16, 128, row, k, a_bits, b_bits), a_one);
+                              amdgpu::wmma_a_input_loc<16, 128>(row, k, a_bits, b_bits), a_one);
         for (uint32_t col = 0; col < 16; ++col)
           for (uint32_t k = 0; k < 128; ++k)
             write_wmma_packed(*cu, vgpr_base + 32,
-                              amdgpu::wmma_b_input_loc(16, 128, col, k, a_bits, b_bits), b_one);
+                              amdgpu::wmma_b_input_loc<16, 128>(col, k, a_bits, b_bits), b_one);
 
         const auto words =
             build_scaled_wmma_words(0x35, matrix_a_fmt, matrix_b_fmt, 0, 0, 128, 128);
@@ -1161,8 +1175,69 @@ TEST(Gfx1250ExecutionTest, WmmaScaleExecutesAllMatrixFormatPairs) {
   }
 }
 
+TEST(Gfx1250ExecutionTest, WmmaMixedFormatsPairTheSameKElements) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0xffffffffu);
+  const uint32_t base = wf->vgpr_alloc().base;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  ForceScalarGuard scalar_guard;
+
+  for (bool force_scalar : {true, false}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    for (uint32_t afmt = 0; afmt <= 4; ++afmt) {
+      for (uint32_t bfmt = 0; bfmt <= 4; ++bfmt) {
+        if ((afmt < 2) == (bfmt < 2))
+          continue;
+        SCOPED_TRACE(::testing::Message()
+                     << "scalar=" << force_scalar << " A=" << afmt << " B=" << bfmt);
+        for (uint32_t reg = 0; reg < 72; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0);
+        // A single nonzero product in each row/column isolates K pairing.
+        // These independent physical locations also cover 6-bit word crossings.
+        for (uint32_t row = 0; row < 16; ++row) {
+          const uint32_t k = 5u + 7u * row;
+          write_wmma_packed(*cu, base,
+                            manual_block_scaled_wmma_loc(16, row, k, wmma_format_bits(afmt)),
+                            encode_wmma_one(afmt));
+          write_wmma_packed(*cu, base + 32,
+                            manual_block_scaled_wmma_loc(16, row, k, wmma_format_bits(bfmt)),
+                            encode_wmma_one(bfmt));
+        }
+        for (unsigned variant : {0u, 1u, 2u}) {
+          SCOPED_TRACE(::testing::Message() << "scale variant=" << variant);
+          for (uint32_t reg = 64; reg < 72; ++reg)
+            for (uint32_t lane = 0; lane < 32; ++lane)
+              cu->write_vgpr(base + reg, lane, 0);
+          const auto words =
+              build_scaled_wmma_execution_words(16, variant == 2, afmt, bfmt, 128, 128, 0, 0);
+          // Exercise ordinary, scale32, and scale16 with neutral inline scales.
+          std::unique_ptr<Instruction> inst(
+              decode_valid(*decoder, words.data() + (variant ? 0 : 2)));
+          ASSERT_NE(inst, nullptr);
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+          for (uint32_t row = 0; row < 16; ++row)
+            for (uint32_t col = 0; col < 16; ++col) {
+              const uint32_t lane = col + 16u * (row / 8u);
+              const float expected = row == col ? 1.0f : 0.0f;
+              EXPECT_EQ(cu->read_vgpr(base + 64 + row % 8u, lane),
+                        std::bit_cast<uint32_t>(expected))
+                  << "row=" << row << " col=" << col;
+            }
+        }
+      }
+    }
+  }
+}
+
 TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1222,6 +1297,7 @@ TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources
 
 TEST(Gfx1250ExecutionTest, WmmaScale16InlineZeroAndSgprUseNeutralScaleForEveryBlock) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1255,6 +1331,7 @@ TEST(Gfx1250ExecutionTest, WmmaScale16InlineZeroAndSgprUseNeutralScaleForEveryBl
 
 TEST(Gfx1250ExecutionTest, WmmaScaleDecodesE5m3ForFp4Operand) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1262,11 +1339,11 @@ TEST(Gfx1250ExecutionTest, WmmaScaleDecodesE5m3ForFp4Operand) {
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
   for (uint32_t row = 0; row < 16; ++row)
     for (uint32_t k = 0; k < 128; ++k)
-      write_wmma_packed(*cu, vgpr_base, amdgpu::wmma_a_input_loc(16, 128, row, k, 4, 8),
+      write_wmma_packed(*cu, vgpr_base, amdgpu::wmma_a_input_loc<16, 128>(row, k, 4, 8),
                         util::f32_to_fp4_e2m1_rne(1.0f));
   for (uint32_t col = 0; col < 16; ++col)
     for (uint32_t k = 0; k < 128; ++k)
-      write_wmma_packed(*cu, vgpr_base + 32, amdgpu::wmma_b_input_loc(16, 128, col, k, 4, 8),
+      write_wmma_packed(*cu, vgpr_base + 32, amdgpu::wmma_b_input_loc<16, 128>(col, k, 4, 8),
                         util::f32_to_fp8_e4m3_rne(1.0f));
   write_wave_sgpr(*cu, *wf, 0, 0x78u);
   write_wave_sgpr(*cu, *wf, 1, 0x7fu);
@@ -1284,6 +1361,7 @@ TEST(Gfx1250ExecutionTest, WmmaScaleDecodesE5m3ForFp4Operand) {
 
 TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1315,11 +1393,11 @@ TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
             cu->write_vgpr(vgpr_base + reg, lane, 0);
         for (uint32_t row = 0; row < 16; ++row)
           for (uint32_t k = 0; k < 128; ++k)
-            write_wmma_packed(*cu, vgpr_base, amdgpu::wmma_a_input_loc(16, 128, row, k, 4, 8),
+            write_wmma_packed(*cu, vgpr_base, amdgpu::wmma_a_input_loc<16, 128>(row, k, 4, 8),
                               util::f32_to_fp4_e2m1_rne(0.5f));
         for (uint32_t col = 0; col < 16; ++col)
           for (uint32_t k = 0; k < 128; ++k)
-            write_wmma_packed(*cu, vgpr_base + 32, amdgpu::wmma_b_input_loc(16, 128, col, k, 4, 8),
+            write_wmma_packed(*cu, vgpr_base + 32, amdgpu::wmma_b_input_loc<16, 128>(col, k, 4, 8),
                               util::f32_to_fp8_e4m3_rne(1.0f));
         for (uint32_t reg = 0; reg < 8; ++reg)
           for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
@@ -1352,6 +1430,7 @@ TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
 
 TEST(Gfx1250ExecutionTest, WmmaScaledExecutionMatchesManualLayoutAndDistinctBlockScales) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1458,7 +1537,8 @@ TEST(Gfx1250ExecutionTest, WmmaScaledExecutionMatchesManualLayoutAndDistinctBloc
       output.reserve(tc.M * N);
       for (uint32_t row = 0; row < tc.M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
-          const auto loc = amdgpu::wmma_output_loc_32(tc.M, N, row, col);
+          const auto loc = tc.M == 32 ? amdgpu::wmma_output_loc_32<32, N>(row, col)
+                                      : amdgpu::wmma_output_loc_32<16, N>(row, col);
           output.push_back(cu->read_vgpr(vgpr_base + kOutput + loc.reg, loc.lane));
         }
       return output;
@@ -1552,6 +1632,8 @@ TEST(Gfx1250DecodeTest, Vopd3ConsumesThreeDwords) {
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_dual_lshlrev_b32 :: v_dual_lshrrev_b32");
   EXPECT_EQ(inst->size(), sizeof(words));
+  // The VOPD3 constructor path sets its block separately from two-dword VOPD.
+  EXPECT_EQ(inst->amdgpu_execution_block(), amdgpu::ExecutionBlock::VALU);
   EXPECT_NE(inst->disassemble().find("v_dual_lshlrev_b32"), std::string::npos);
   EXPECT_NE(inst->disassemble().find("v_dual_lshrrev_b32"), std::string::npos);
 }
@@ -1613,6 +1695,21 @@ TEST(Gfx1250DecodeTest, VopdSourceOperandsFollowPrintedSlots) {
   EXPECT_EQ(inst->src_operand(2)->name(), "s11");
   ASSERT_TRUE(inst->src_operand(2)->to_register_ref().has_value());
   EXPECT_EQ(*inst->src_operand(2)->to_register_ref(), (RegisterRef{RegClass::SGPR, 11, 1}));
+}
+
+TEST(Gfx1250DecodeTest, Vopd3CndmaskSelectorPrintsOneSgpr) {
+  const uint32_t words[] = {
+      0xCF249102u, // v_dual_cndmask_b32 v1, v2, v3, s4 :: v_dual_cndmask_b32 v6, v7, v8, s6
+      0x04030107u,
+      0x06060801u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(),
+            "v_dual_cndmask_b32 v1, v2, v3, s4 :: v_dual_cndmask_b32 v6, v7, v8, s6");
 }
 
 TEST(Gfx1250DecodeTest, VopdRejectsInvalidOpcodes) {

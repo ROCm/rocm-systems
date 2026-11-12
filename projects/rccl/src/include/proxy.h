@@ -248,14 +248,22 @@ struct ncclProxyArgs {
 #define MAX_OPS_PER_PEER (2 * MAXCHANNELS * 2 * NCCL_MAX_DEV_WORK_P2P_PER_BATCH)
 
 struct ncclProxyOpsPool {
-  struct ncclProxyOp ops[MAX_OPS_PER_PEER * NCCL_MAX_LOCAL_RANKS];
   volatile int nextOps;
   volatile int nextOpsEnd;
   volatile int freeOps[NCCL_MAX_LOCAL_RANKS];
   int syncObjectsInitialized;
   std::mutex mutex;
   std::condition_variable cond;
+  // Must stay last: the shared mapping holds only the slices of the local ranks in use.
+  struct ncclProxyOp ops[MAX_OPS_PER_PEER * NCCL_MAX_LOCAL_RANKS];
 };
+
+// The pool lives in /dev/shm and is fully allocated up front, so map MAX_OPS_PER_PEER ops for each of the
+// proxy's tpLocalnRanks local ranks rather than for NCCL_MAX_LOCAL_RANKS. The creator and every attacher must
+// pass the same size, because the shm refcount is stored right after it.
+static inline size_t ncclProxyOpsPoolSize(int tpLocalnRanks) {
+  return offsetof(struct ncclProxyOpsPool, ops) + (size_t)tpLocalnRanks * MAX_OPS_PER_PEER * sizeof(struct ncclProxyOp);
+}
 
 struct ncclProxyOps {
   ncclProxyOpsPool* pool;
@@ -271,6 +279,8 @@ struct ncclProxySharedP2p {
   int64_t size;
   char* cudaBuff;
   char* hostBuff;
+  char* hostBuffDev; // Device-side address of hostBuff
+  size_t hostBuffMapSize; // Non-zero when hostBuff is a huge-page mmap registered with cudaHostRegister
   // CUDA IPC
   ncclIpcDesc ipcDesc;
   int dmaBufFd; // DMA-BUF fd for cuMem allocations
@@ -333,6 +343,7 @@ struct ncclProxyLocalPeer {
   int tpLocalRank;
   ncclProxyAsyncOp* asyncOps;
   int asyncOpCounter;
+  uint64_t id; // Unique id per accepted peer for connection identification
 };
 
 // Common response header for all proxyOps
@@ -364,6 +375,7 @@ struct ncclProxyState {
   int p2pChunkSize;
   int nChannels;
   int buffSizes[NCCL_NUM_PROTOCOLS];
+  int p2pLl128BuffSize;
   bool allocP2pNetLLBuffers;
   bool dmaBufSupport;
   ncclNet_t* ncclNet;
@@ -433,6 +445,7 @@ struct ncclProxyConnection {
   int send, transport, shared;
   int tpLocalRank, sameProcess;
   struct ncclSocket* sock;
+  uint64_t peerId; // Initialized with peer->id, used for connection checks
   struct ncclTransportComm* tcomm;
   struct ncclProxyArgs* proxyAppend;
   struct ncclProxyArgs** proxyAppendPtr;
@@ -501,11 +514,11 @@ ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnec
                                    void* opId);
 
 // UDS support
-ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int rank, void* handle, int* convertedFd);
-ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, int localFd,
-                                            int* rmtFd);
+ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int rank, void* handle, ncclIpcFd* convertedFd);
+ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm* comm, struct ncclProxyConnector* proxyConn,
+                                            ncclIpcFd localFd, ncclIpcFd* rmtFd);
 ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm* comm, struct ncclProxyConnector* proxyConn,
-                                                 int* localFds, int* rmtFds, int numSegments);
+                                                 ncclIpcFd* localFds, ncclIpcFd* rmtFds, int numSegments);
 
 ncclResult_t ncclProxyStop(struct ncclComm* comm);
 ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm);

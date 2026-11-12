@@ -9,8 +9,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"
 #include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
@@ -473,6 +473,28 @@ public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_dpp() const;
   void append_mnemonic(std::string &out) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (has_encoded_dpp()) {
+      modifiers.dpp = true;
+      modifiers.control = dpp_ctrl_;
+      modifiers.row_mask = dpp_row_mask_;
+      modifiers.bank_mask = dpp_bank_mask_;
+      modifiers.bound_ctrl = dpp_bound_ctrl_;
+      modifiers.fi = dpp_fi_;
+      modifiers.inactive_uses_bound_ctrl = false;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
+      modifiers.sdwa = true;
+      modifiers.src0 = sdwa_src0_operand_;
+      modifiers.src1 = sdwa_src1_operand_;
+      modifiers.src0_selection = sdwa_src0_sel_;
+      modifiers.src1_selection = sdwa_src1_sel_;
+      modifiers.dst_selection = sdwa_dst_sel_;
+      modifiers.dst_unused = sdwa_dst_unused_;
+    }
+  }
   bool has_encoded_literal32() const;
   bool has_encoded_sdwa() const;
   void implicit_uses(RegisterSet &uses) const override;
@@ -512,6 +534,7 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
+  amdgpu::dpp::SourceModifiers dpp_modifiers_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -533,6 +556,15 @@ public:
 class Vopc : public IsaInstruction<Isa> {
 public:
   Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
+      modifiers.sdwa = true;
+      modifiers.src0 = sdwa_src0_operand_;
+      modifiers.src1 = sdwa_src1_operand_;
+      modifiers.src0_selection = sdwa_src0_sel_;
+      modifiers.src1_selection = sdwa_src1_sel_;
+    }
+  }
   bool has_encoded_literal32() const;
   bool has_encoded_sdwa() const;
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
@@ -565,6 +597,7 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
+  amdgpu::dpp::SourceModifiers dpp_modifiers_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -586,6 +619,28 @@ public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_dpp() const;
   void append_mnemonic(std::string &out) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (has_encoded_dpp()) {
+      modifiers.dpp = true;
+      modifiers.control = dpp_ctrl_;
+      modifiers.row_mask = dpp_row_mask_;
+      modifiers.bank_mask = dpp_bank_mask_;
+      modifiers.bound_ctrl = dpp_bound_ctrl_;
+      modifiers.fi = dpp_fi_;
+      modifiers.inactive_uses_bound_ctrl = false;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
+      modifiers.sdwa = true;
+      modifiers.src0 = sdwa_src0_operand_;
+      modifiers.src1 = sdwa_src1_operand_;
+      modifiers.src0_selection = sdwa_src0_sel_;
+      modifiers.src1_selection = sdwa_src1_sel_;
+      modifiers.dst_selection = sdwa_dst_sel_;
+      modifiers.dst_unused = sdwa_dst_unused_;
+    }
+  }
   bool has_encoded_literal32() const;
   bool has_encoded_sdwa() const;
   void implicit_uses(RegisterSet &uses) const override;
@@ -627,6 +682,7 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
+  amdgpu::dpp::SourceModifiers dpp_modifiers_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -729,6 +785,15 @@ public:
 class Mubuf : public IsaInstruction<Isa> {
 public:
   Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const MubufMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    if (inst_.lds && !(inst_.op == 0 || (inst_.op >= 16 && inst_.op <= 20) ||
+                       (inst_.op >= 22 && inst_.op <= 23))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support LDS";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
@@ -775,6 +840,20 @@ public:
 class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const FlatMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    static constexpr uint8_t segment_masks[128] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 6, 6, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+        5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5, 5, 5, 5,
+        5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 0};
+    if (!(segment_masks[inst_.op] & (1u << inst_.seg))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " has an invalid segment";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;

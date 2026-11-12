@@ -31,12 +31,6 @@ else()
   set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
 endif()
 
-# Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
-set(USING_THE_ROCK OFF)
-if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
-  set(USING_THE_ROCK ON)
-endif()
-
 # Set AMD Clang as default compiler
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
@@ -49,7 +43,7 @@ if(NOT WIN32)
 endif()
 
 # rocdecode Version
-set(VERSION "1.10.0")
+set(VERSION "1.12.1")
 
 # Set Project Version and Language
 project(rocdecode VERSION ${VERSION} LANGUAGES CXX)
@@ -160,35 +154,27 @@ if(_deps_met)
 
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
-  # LibVA - headers always needed for VA-API type definitions.
-  # On Linux TheRock builds, libva is loaded at runtime via dlopen with
+  # LibVA - headers only, needed for VA-API type definitions.
+  # On Linux, libva is loaded at runtime via dlopen with
   # RTLD_LOCAL | RTLD_DEEPBIND (see vaapi_loader.cpp) to prevent symbol
-  # collision with any system libva.so.2 in the same process; no direct
-  # link-time dependency is needed in that case.
-  #On non-TheRock builds, link directly as before.
+  # collision with any system libva.so.2 in the same process.
+  # On Windows, rocm_sysdeps_va_win32.dll and rocm_sysdeps_va.dll are likewise
+  # loaded at runtime via LoadLibraryExW (see vaapi_loader.cpp).
+  # No direct link-time dependency on libva is needed on either platform.
   include_directories(${LIBVA_INCLUDE_DIR})
-  if(NOT (USING_THE_ROCK AND UNIX))
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
-    if(NOT WIN32)
-      # FindLibva only looks for va-drm on Linux. Referencing the variable on
-      # Windows would pick up a stale LIBVA_DRM_LIBRARY-NOTFOUND left in the
-      # cache by an earlier configure and pass it to the linker.
-      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
-    endif()
-  endif()
 
   if(NOT WIN32)
     # DRM_AMDGPU
     include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
   else()
-    # vaon12: va_win32.lib instead of va-drm; d3d12/dxgi for CreateSharedHandle interop
+    # vaon12: va_win32.h header; d3d12/dxgi for CreateSharedHandle interop
     # FindLibva locates va/va_win32.h separately from va/va.h, so a staging
     # layout that splits them would satisfy Libva_FOUND above and then fail on
     # the include. Normally both resolve to the same directory and this is a
-    # no-op. Windows-only, for the same stale-cache reason as va-drm above.
+    # no-op.
     include_directories(${LIBVA_WIN32_INCLUDE_DIR})
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_WIN32_LIBRARY} d3d12 dxgi)
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} d3d12 dxgi)
   endif()
 
   # rocprofiler
@@ -227,7 +213,27 @@ if(_deps_met)
       target_compile_options(${PROJECT_NAME} PRIVATE /wd4200 /wd4018 /wd4267 /wd4244 /wd4146)
     endif()
   endif()
-  target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
+  if(NOT WIN32)
+    target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
+  else()
+    # On Windows the implementation libraries are linked PRIVATE so they stay out
+    # of the exported INTERFACE_LINK_LIBRARIES. The VA import libs
+    # (rocm_sysdeps_va*.lib) resolve to absolute build-tree paths; if propagated,
+    # a consumer relinking against the installed target (the ctest
+    # build-and-test samples, on a different machine) fails on a path that
+    # doesn't exist there. Windows-only to avoid changing the established
+    # transitive-linking behavior on Linux.
+    #
+    # hip::host stays PUBLIC: the installed public header rocdecode.h includes
+    # hip/hip_runtime.h, so it is a genuine usage requirement for consumers that
+    # link only rocdecode::rocdecode. It is an imported target (relocatable), so
+    # unlike the raw .lib paths it does not reintroduce the build-tree leak.
+    set(_PRIVATE_LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST})
+    list(REMOVE_ITEM _PRIVATE_LINK_LIBRARY_LIST hip::host)
+    target_link_libraries(${PROJECT_NAME}
+      PUBLIC hip::host
+      PRIVATE ${_PRIVATE_LINK_LIBRARY_LIST})
+  endif()
 
   set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
   set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
@@ -237,14 +243,15 @@ if(_deps_met)
     set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
   endif()
 
-  if(USING_THE_ROCK AND NOT WIN32)
+  if(NOT WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
-    if(UNIX)
-      # Enable dlopen-based VA isolation and link against libdl for dlopen/dlsym/dlclose.
-      # dlopen is Linux-only.
-      target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_USE_DLOPEN_VA)
-      target_link_libraries(${PROJECT_NAME} dl)
-    endif()
+  endif()
+  # Enable runtime-loaded VA isolation.
+  target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_USE_DLOPEN_VA)
+  if(NOT WIN32)
+    # Link against libdl for dlopen/dlsym/dlclose. On Windows,
+    # LoadLibraryExW/GetProcAddress come from kernel32, linked by default.
+    target_link_libraries(${PROJECT_NAME} dl)
   endif()
 
   # rocprofiler
@@ -293,6 +300,7 @@ if(_deps_met)
   # install rocdecode samples -- {ROCM_PATH}/share/rocdecode
   install(DIRECTORY cmake DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME})
   install(DIRECTORY utils/rocvideodecode DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
+  install(FILES samples/README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples)
   install(FILES samples/videoDecode/CMakeLists.txt samples/videoDecode/README.md samples/videoDecode/videodecode.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecode)
   install(FILES samples/videoDecodeRaw/CMakeLists.txt samples/videoDecodeRaw/README.md samples/videoDecodeRaw/videodecoderaw.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeRaw)
   install(FILES samples/videoDecodeMem/CMakeLists.txt samples/videoDecodeMem/README.md samples/videoDecodeMem/videodecodemem.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeMem)
@@ -319,6 +327,9 @@ if(_deps_met)
   install(PROGRAMS test/run_rocdecode.py DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test)
   install(DIRECTORY test/testScripts DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test)
   install(FILES test/rocDecodeNegativeApiTests/CMakeLists.txt test/rocDecodeNegativeApiTests/README.md test/rocDecodeNegativeApiTests/rocdecode_api_negative_tests.cpp test/rocDecodeNegativeApiTests/rocdecode_api_negative_tests.h test/rocDecodeNegativeApiTests/rocdecodenegativetest.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/rocDecodeNegativeApiTests)
+  if(WIN32)
+    install(FILES test/rocDecodeMissingVaLibTest/CMakeLists.txt test/rocDecodeMissingVaLibTest/rocdecodemissingvalibtest.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/rocDecodeMissingVaLibTest)
+  endif()
 
   message("-- ${White}AMD ROCm ${PROJECT_NAME} -- CMAKE_CXX_FLAGS:${CMAKE_CXX_FLAGS}${ColourReset}")
   message("-- ${White}AMD ROCm ${PROJECT_NAME} -- Link Libraries: ${LINK_LIBRARY_LIST}${ColourReset}")
@@ -370,7 +381,12 @@ if(_deps_met)
   # Option to build test binaries during the main build (without running them)
   option(BUILD_TESTS "Build test binaries and install to share/${PROJECT_NAME}/bin" OFF)
 
-  if(BUILD_TESTS)
+  # Not supported on Windows: the nested ExternalProject builds assume a
+  # single-config generator (CMAKE_BUILD_TYPE, an unsuffixed executable directly
+  # in BINARY_DIR) and $ORIGIN install RPATHs, none of which hold for the
+  # Visual Studio generator. Build the samples from share/rocdecode/samples
+  # instead, as documented in the install guide.
+  if(BUILD_TESTS AND NOT WIN32)
     include(ExternalProject)
     set(ROCDECODE_TEST_BIN_DIR ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin)
     set(ROCDECODE_STAGE_DIR ${CMAKE_BINARY_DIR}/stage)
@@ -477,6 +493,12 @@ if(_deps_met)
       rocdecode_add_test_ext(videodecodergb   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeRGB)
       rocdecode_add_test_ext(videodecodemem   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeMem)
     endif()
+  elseif(BUILD_TESTS)
+    # Reached only when BUILD_TESTS=ON and WIN32, which the branch above excludes.
+    message(WARNING "BUILD_TESTS=ON is ignored on Windows: no test binaries will be built "
+                    "or installed to ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin. "
+                    "Build the samples from ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples "
+                    "after installing instead -- see the install guide.")
   endif()
 
   # make test with CTest

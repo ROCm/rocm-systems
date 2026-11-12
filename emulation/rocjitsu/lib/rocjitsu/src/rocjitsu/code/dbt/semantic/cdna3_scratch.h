@@ -7,11 +7,16 @@
 #pragma once
 
 #include "rocjitsu/code/dbt/semantic_scratch.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 
 #include <cstdint>
 #include <vector>
 
 namespace rocjitsu {
+
+/// @brief SGPRs DBT keeps free above the ordinary registers it adds to a CDNA
+///        descriptor: the special-register tail plus two SGPRs of slack.
+inline constexpr uint32_t kDbtCdnaSpecialSgprTailReserve = kCdnaSpecialSgprTailReserve + 2;
 
 /// @brief Target-specific materializer for semantic scratch preservation.
 ///

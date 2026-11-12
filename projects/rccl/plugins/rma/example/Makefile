@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
+# Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
 # See LICENSE.txt for more license information
 #
 .DEFAULT_GOAL: build
@@ -11,12 +13,12 @@ NCCLDIR  := $(BUILDDIR)
 
 SRC_FILES := $(wildcard *.c)
 
-build: ${BUILDDIR}/libnccl-rma-example.so
+build: ${BUILDDIR}/librccl-rma-example.so
 
-${BUILDDIR}/libnccl-rma-example.so: ${SRC_FILES}
+${BUILDDIR}/librccl-rma-example.so: ${SRC_FILES} $(wildcard nccl/*.h)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${BUILDDIR}
-	$(CC) -Inccl -fPIC -shared -o $@ $^
+	$(CC) -Inccl -fPIC -shared -o $@ ${SRC_FILES}
 
 clean:
-	rm -f ${BUILDDIR}/libnccl-rma-example.so
+	rm -f ${BUILDDIR}/librccl-rma-example.so

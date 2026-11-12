@@ -9,6 +9,7 @@ instructions: V_CMP_*, V_CMPX_*, V_CMP_CLASS_*, and V_ADD_CO_U32.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute import float_compare, input_policy
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
 )
@@ -21,6 +22,19 @@ def _write_explicit_lane_mask(
     if result_writer is not None:
         return [f'  {result_writer}({value});']
     return [f'  amdgpu::write_wave_mask_scalar({dst}, wf, {value});']
+
+
+def _write_cmpx_result(
+    dst: list[str], is_vop3: bool, cmpx_writes_vcc: bool, result_writer: str | None
+) -> list[str]:
+    writes = []
+    if cmpx_writes_vcc:
+        if dst and is_vop3:
+            writes.extend(_write_explicit_lane_mask(dst[0], 'result'))
+        else:
+            writes.append('  wf.set_vcc_mask(result);')
+    writes.append(f'  {result_writer or "wf.set_exec"}(result);')
+    return writes
 
 
 def gen_vector_cmp_class(
@@ -167,12 +181,7 @@ def gen_vector_cmp_class(
         L.append('    if (match) vcc |= (1ULL << lane);')
     L.append('  }')
     if is_cmpx:
-        if cmpx_writes_vcc:
-            L.append('  wf.set_vcc_mask(result);')
-        if result_writer is not None:
-            L.append(f'  {result_writer}(result);')
-        else:
-            L.append('  wf.set_exec(result);')
+        L.extend(_write_cmpx_result(dst, is_vop3, cmpx_writes_vcc, result_writer))
     elif dst:
         L.extend(_write_explicit_lane_mask(dst[0], 'vcc', result_writer))
     else:
@@ -190,72 +199,25 @@ def _cmp_condition(
 ) -> str:
     """Emit source reads and return the C++ condition expression.
 
-    For FP types, handles ordered comparisons (eq, lt, le, gt, ge, lg),
-    unordered comparisons (neq, nge, ngt, nle, nlt, nlg), and
-    ordered/unordered predicates (o, u) per IEEE-754.
+    Floating relations read the raw encodings and return a
+    comparison::evaluate call, which applies VOP3 ABS/NEG, MODE input
+    flushing and NaN ordering; the caller declares its policy.
     """
-    is_fp = dtype in ('f32', 'f64', 'f16')
-    if is_fp:
-        if dtype == 'f64':
-            L.append(
-                f'    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane));'
-            )
-            L.append(
-                f'    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src[1]}, lane));'
-            )
-        elif dtype == 'f16':
-            if is_vop3:
-                L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src({src[0]}, wf, lane, opsel, 0)));'
-                )
-                L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src({src[1]}, wf, lane, opsel, 1)));'
-                )
+    if dtype in float_compare.FORMATS:
+        if not float_compare.is_float_relation(dtype, op):
+            raise ValueError(f'unsupported floating compare relation: {op}')
+        for i in range(2):
+            if dtype == 'f64':
+                read = f'amdgpu::RegisterAccess(wf).read_lane64({src[i]}, lane)'
+            elif dtype == 'f16' and is_vop3:
+                read = f'::rocjitsu::amdgpu::read_vop3_true16_src({src[i]}, wf, lane, opsel, {i})'
             else:
-                L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)));'
-                )
-                L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)));'
-                )
-        else:
-            L.append(
-                f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
-            )
-            L.append(
-                f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
-            )
+                read = f'amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane)'
+            L.append(f'    const {float_compare.lane_type(dtype)} s{i} = {read};')
+        modifiers = None
         if is_vop3:
-            L.extend(vop3_src_mod('s0', 0, has_abs))
-            L.extend(vop3_src_mod('s1', 1, has_abs))
-        # Ordered comparisons (false if NaN)
-        ordered_map = {
-            'eq': 's0 == s1',
-            'ne': 's0 != s1',
-            'lg': 's0 < s1 || s0 > s1',
-            'lt': 's0 < s1',
-            'le': 's0 <= s1',
-            'gt': 's0 > s1',
-            'ge': 's0 >= s1',
-        }
-        # Unordered comparisons (true if NaN)
-        unordered_map = {
-            'neq': 's0 != s1 || std::isnan(s0) || std::isnan(s1)',
-            'nge': '!(s0 >= s1)',  # true when NaN (IEEE)
-            'ngt': '!(s0 > s1)',
-            'nle': '!(s0 <= s1)',
-            'nlt': '!(s0 < s1)',
-            'nlg': '!(s0 < s1 || s0 > s1)',
-        }
-        if op in ordered_map:
-            return ordered_map[op]
-        if op in unordered_map:
-            return unordered_map[op]
-        if op == 'o':
-            return '!std::isnan(s0) && !std::isnan(s1)'
-        if op == 'u':
-            return 'std::isnan(s0) || std::isnan(s1)'
-        return f's0 == s1 /* TODO: {op} */'
+            modifiers = ('inst_.abs' if has_abs else '0u', 'inst_.neg')
+        return float_compare.evaluate_expr(dtype, op, 's0', 's1', modifiers=modifiers)
     elif dtype in ('i64',):
         L.append(
             f'    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane));'
@@ -363,6 +325,8 @@ def gen_vector_cmp(
     L.append('  uint64_t vcc = 0;')
     if _uses_vop3_true16_opsel(op, dtype, is_vop3):
         L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
+    if float_compare.is_float_relation(dtype, op):
+        L.append(input_policy.policy_decl(dtype))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
@@ -405,6 +369,8 @@ def gen_vector_cmpx(
     L.append('  uint64_t result = 0;')
     if _uses_vop3_true16_opsel(op, dtype, is_vop3):
         L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
+    if float_compare.is_float_relation(dtype, op):
+        L.append(input_policy.policy_decl(dtype))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
@@ -417,15 +383,7 @@ def gen_vector_cmpx(
         L.append(f'    if ({cond})')
         L.append('      result |= (1ULL << lane);')
     L.append('  }')
-    if cmpx_writes_vcc:
-        if dst and is_vop3:
-            L.extend(_write_explicit_lane_mask(dst[0], 'result'))
-        else:
-            L.append('  wf.set_vcc_mask(result);')
-    if result_writer is not None:
-        L.append(f'  {result_writer}(result);')
-    else:
-        L.append('  wf.set_exec(result);')
+    L.extend(_write_cmpx_result(dst, is_vop3, cmpx_writes_vcc, result_writer))
     return '\n'.join(L)
 
 

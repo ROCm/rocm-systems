@@ -94,7 +94,7 @@ struct cached_backend_methods : Base
             std::uint32_t maj    = 0;
             std::uint32_t min    = 0;
             std::uint32_t pat    = 0;
-            auto          status = Base::get_version(&maj, &min, &pat);
+            auto const    status = Base::get_version(&maj, &min, &pat);
             return std::tuple{ status, maj, min, pat };
         }();
         const auto& [status, maj, min, pat] = cached;
@@ -317,7 +317,7 @@ TEST_F(tracing_config_test, get_version_populates_major_minor_patch)
             return 0;
         });
 
-    auto ver = sut::get_version();
+    auto const ver = sut::get_version();
     EXPECT_EQ(ver.major, 1u);
     EXPECT_EQ(ver.minor, 2u);
     EXPECT_EQ(ver.patch, 3u);
@@ -354,9 +354,9 @@ TEST_F(tracing_config_test, get_version_caches_result_calling_backend_exactly_on
     // get_version() returns a fresh version_info by value each call (no cache of
     // its own in tracing_config) — the ".Times(1)" above is what proves
     // caching, via SdkBackend, not referential identity of the return value.
-    auto ver1 = sut::get_version();
-    auto ver2 = sut::get_version();
-    auto ver3 = sut::get_version();
+    auto const ver1 = sut::get_version();
+    auto const ver2 = sut::get_version();
+    auto const ver3 = sut::get_version();
 
     EXPECT_EQ(ver1.formatted(), 20000u);
     EXPECT_EQ(ver2.formatted(), 20000u);
@@ -524,7 +524,7 @@ TEST_F(tracing_config_test, operation_settings_registers_marker_api_domain_alias
 
     const auto specs = sut::get_operation_settings();
 
-    auto itr = std::ranges::find_if(specs, [](const auto& spec) {
+    auto const itr = std::ranges::find_if(specs, [](const auto& spec) {
         return spec.env_names.operations_include_env_name ==
                "ROCPROFSYS_ROCM_MARKER_API_OPERATIONS";
     });

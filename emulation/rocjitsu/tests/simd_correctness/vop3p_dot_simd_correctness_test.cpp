@@ -25,6 +25,7 @@
 /// payload divergence, same carve-out as the pk_fma slices). Default packing
 /// (op_sel = 0, op_sel_hi = 3) only — non-default modes bail to scalar.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -128,8 +129,10 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("cu_vop3p_dot_int", cfg, &gpu_mem, &l2);
-    EXPECT_NE(cu, nullptr);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_dot_int", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return {};
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
     EXPECT_NE(wf, nullptr);
@@ -158,7 +161,9 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
 
   for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
     const auto scalar_out = run_mode(/*force_scalar=*/true, rot);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const auto simd_out = run_mode(/*force_scalar=*/false, rot);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
 
     EXPECT_EQ(scalar_out, simd_out) << c.name << " clamp=" << clamp << " rot=" << rot
                                     << ": SIMD path diverged from scalar body";
@@ -195,9 +200,10 @@ TEST(Vop3pDotIntSimdCorrectness, PartialExec) {
       check_int_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL, clamp);
 }
 
-// GFX11 uses the ordinary integer CLAMP behavior for DOT4. GFX12 and gfx1250
-// explicitly ignore the same encoded bit. These fixed overflow vectors are an
-// ISA golden rather than a scalar/SIMD self-comparison.
+// The RDNA4 ISA manual says integer DOT4 ignores CLAMP, but gfx1201 hardware
+// experiments show saturation. GFX11 also saturates; gfx1250 ignores CLAMP.
+// These fixed overflow vectors check both scalar and SIMD paths against the
+// observed ISA behavior rather than only comparing the paths with each other.
 uint32_t run_modern_dot4(rj_code_arch_t arch, uint32_t opcode, uint32_t src0_value,
                          uint32_t src1_value, uint32_t accumulator, uint32_t neg,
                          bool force_scalar) {
@@ -212,8 +218,10 @@ uint32_t run_modern_dot4(rj_code_arch_t arch, uint32_t opcode, uint32_t src0_val
   cfg.sgprs_per_wf = SGPRS_PER_WF;
   cfg.vgprs_per_wf = VGPRS_PER_WF;
   cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("cu_vop3p_dot4_policy", cfg, &gpu_mem, &l2);
-  EXPECT_NE(cu, nullptr);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_dot4_policy", cfg, &gpu_mem, &l2);
+  if (!cu)
+    return {};
   auto decoder = Decoder::create(arch);
   amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   EXPECT_NE(wf, nullptr);
@@ -250,23 +258,29 @@ TEST(Vop3pDotIntSimdCorrectness, Dot4ClampPolicyMatchesArchitecture) {
     EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA3, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
                               0, force_scalar),
               std::numeric_limits<uint32_t>::max());
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA4, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
                               0, force_scalar),
-              kUnsignedWrapped);
+              std::numeric_limits<uint32_t>::max());
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_CDNA5, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
                               0, force_scalar),
               kUnsignedWrapped);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
 
     // v_dot4_i32_iu8 with both inputs signed: INT_MAX-10 + 4 * 127 * 127.
     EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA3, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
                               3, force_scalar),
               static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA4, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
                               3, force_scalar),
-              kMixedSignedWrapped);
+              static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_CDNA5, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
                               3, force_scalar),
               kMixedSignedWrapped);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
   }
 }
 
@@ -313,8 +327,10 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("cu_vop3p_dot_f16", cfg, &gpu_mem, &l2);
-    EXPECT_NE(cu, nullptr);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_dot_f16", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return {};
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
     EXPECT_NE(wf, nullptr);
@@ -347,7 +363,9 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
 
   for (uint32_t rot = 0; rot < kF16Bits.size(); ++rot) {
     const auto scalar_out = run_mode(/*force_scalar=*/true, rot);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const auto simd_out = run_mode(/*force_scalar=*/false, rot);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
 
     // Core A/B equivalence per active, non-skipped lane. NaN-input lanes carry a
     // toolchain-dependent NaN-payload divergence and are excluded identically in

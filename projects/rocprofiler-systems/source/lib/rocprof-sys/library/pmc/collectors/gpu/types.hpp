@@ -8,13 +8,7 @@
 
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace gpu
+namespace rocprofsys::pmc::collectors::gpu
 {
 
 // Data types are owned by the backend layer (the producer); re-exported here so
@@ -79,6 +73,12 @@ union enabled_metrics
         std::uint32_t mem_clock            : 1;  // current_uclk (MHz)
     } bits;
     std::uint32_t value = 0;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(value);
+    }
 };
 
 // Socket power: prefer the instantaneous "current" reading, falling back to the
@@ -104,7 +104,4 @@ socket_power_track_label(const enabled_metrics& enabled)
     return has_current_socket_power(enabled) ? "Current Power" : "Avg. Power";
 }
 
-}  // namespace gpu
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::gpu

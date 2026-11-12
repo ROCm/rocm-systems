@@ -14,6 +14,7 @@ set(TEST_SRC
   hipGraphAddEventWaitNode.cc
   hipGraph.cc
   hipSimpleGraphWithKernel.cc
+  hipGraphSdmaMemcpyOrdering.cc
   hipGraphAddMemcpyNode.cc
   hipGraphClone.cc
   hipGraphInstantiateWithFlags.cc
@@ -55,6 +56,7 @@ set(TEST_SRC
   hipGraphExecMemcpyNodeSetParams.cc
   hipGraphExecMemcpyNodeSetParams_old.cc
   hipStreamBeginCapture.cc
+  hipStreamCaptureDeviceScopedInvalidation.cc
   hipGraphAddMemcpyNode1D_old.cc
   hipStreamBeginCapture_old.cc
   hipStreamIsCapturing.cc
@@ -83,6 +85,7 @@ if(HIP_PLATFORM MATCHES "amd")
     hipStreamGetCaptureInfo_v2.cc
     hipStreamUpdateCaptureDependencies.cc
     hipGraphAddNodeBeginCapture.cc
+    hipGraphExternalSemaphoresNodes.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
@@ -90,6 +93,78 @@ endif()
 hip_add_exe_to_target(NAME GraphsTest1
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
+
+# Collapse tests need scheduling flags set before HIP init.  They live in
+# their own binary built directly (bypassing hip_add_exe_to_target) so that
+# catch_discover_tests is NOT called — avoiding duplicate env-less entries
+# that would fail.  Env vars are wired via cmake -E env in add_test instead.
+set_source_files_properties(hipGraphCollapseSmallKernels.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+add_executable(GraphsCollapseTest EXCLUDE_FROM_ALL
+  hipGraphCollapseSmallKernels.cc
+  $<TARGET_OBJECTS:Main_Object>
+  $<TARGET_OBJECTS:KERNELS>)
+set_target_properties(GraphsCollapseTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(GraphsCollapseTest Catch2::Catch2 ${GPGPU_LINKER_LIBRARIES})
+if(UNIX)
+  target_link_libraries(GraphsCollapseTest stdc++fs -ldl pthread rt)
+endif()
+add_dependencies(build_tests GraphsCollapseTest)
+add_dependencies(GraphsCollapseTest hip_tests_config)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS GraphsCollapseTest)
+
+add_test(NAME Unit_hipGraph_CollapseSmallKernels_SingleStream
+  COMMAND ${CMAKE_COMMAND} -E env
+    "DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=0"
+    "DEBUG_HIP_GRAPH_MIN_OVERLAP=2"
+    "DEBUG_HIP_GRAPH_DOT_PRINT=2"
+    $<TARGET_FILE:GraphsCollapseTest>
+    "Unit_hipGraph_CollapseSmallKernels_SingleStream")
+
+add_test(NAME Unit_hipGraph_CollapseSmallKernels_MultiStream_Mode2
+  COMMAND ${CMAKE_COMMAND} -E env
+    "DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=2"
+    "DEBUG_HIP_GRAPH_MIN_OVERLAP=2"
+    "DEBUG_HIP_GRAPH_DOT_PRINT=2"
+    $<TARGET_FILE:GraphsCollapseTest>
+    "Unit_hipGraph_CollapseSmallKernels_MultiStream_Mode2")
+
+# Multi-stream launch tests: each runs with DEBUG_CLR_GRAPH_FAST_LAUNCH=0 and =1, which, like the
+# graph scheduling flags, are read at HIP init. Same wiring as GraphsCollapseTest.
+set_source_files_properties(hipGraphFastLaunch.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+add_executable(GraphsFastLaunchTest EXCLUDE_FROM_ALL
+  hipGraphFastLaunch.cc
+  $<TARGET_OBJECTS:Main_Object>
+  $<TARGET_OBJECTS:KERNELS>)
+set_target_properties(GraphsFastLaunchTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(GraphsFastLaunchTest Catch2::Catch2 ${GPGPU_LINKER_LIBRARIES})
+if(UNIX)
+  target_link_libraries(GraphsFastLaunchTest stdc++fs -ldl pthread rt)
+endif()
+add_dependencies(build_tests GraphsFastLaunchTest)
+add_dependencies(GraphsFastLaunchTest hip_tests_config)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS GraphsFastLaunchTest)
+
+foreach(fast_launch 0 1)
+  # Multi-stream: the slack rule's gate off
+  foreach(test BackToBackChains SharedSideStream ConcurrentLaunchers EmptyNodeJoin
+                ChildGraphEdges)
+    add_test(NAME Unit_hipGraph_FastLaunch_${test}_${fast_launch}
+      COMMAND ${CMAKE_COMMAND} -E env
+        "DEBUG_CLR_GRAPH_FAST_LAUNCH=${fast_launch}"
+        "DEBUG_HIP_GRAPH_MIN_OVERLAP=0"
+        "DEBUG_HIP_GRAPH_DOT_PRINT=2"
+        $<TARGET_FILE:GraphsFastLaunchTest>
+        "Unit_hipGraph_FastLaunch_${test}")
+  endforeach()
+  # The default collapse rule decides alone: DEBUG_HIP_GRAPH_COLLAPSE_RULE and
+  # DEBUG_HIP_GRAPH_MIN_OVERLAP unset
+  add_test(NAME Unit_hipGraph_FastLaunch_UncapturedEdgeCollapse_${fast_launch}
+    COMMAND ${CMAKE_COMMAND} -E env
+      "DEBUG_CLR_GRAPH_FAST_LAUNCH=${fast_launch}"
+      "DEBUG_HIP_GRAPH_DOT_PRINT=2"
+      $<TARGET_FILE:GraphsFastLaunchTest>
+      "Unit_hipGraph_FastLaunch_UncapturedEdgeCollapse")
+endforeach()
 
 set(TEST_SRC
   hipStreamGetCaptureInfo.cc
@@ -153,6 +228,11 @@ set(TEST_SRC
 
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
+    # hipLaunchAttributePriority not available on older CUDA versions
+    hipGraphKernelNodePriority.cc
+    # wall_clock64 and __hip_atomic_* builtins are AMD-only
+    hipGraphSegmentOrdering.cc
+    hipGraphDualStreamCapture.cc
     # hipGraphAddNode, hipGraphNodeParams, hipMemcpyNodeParams are not mapped to Nvidia
     hipGraphAddNode.cc
     # hipDrvGraphAddMemsetNode, HIP_MEMSET_NODE_PARAMS are not mapped to Nvidia

@@ -56,195 +56,194 @@ Both paths should sit on a file system that supports ``O_DIRECT``. If the source
 Step-by-step walkthrough
 ===========================
 
-Define the chunk size limit
----------------------------
+The walkthrough follows a synchronous file copy through GPU memory, from
+setting the chunk size and registering file handles to copying data and
+releasing resources. It covers buffer allocation, a read/write loop with error
+handling, and trimming the destination to the source size after block-aligned
+writes.
 
-``AISCP_CHUNK_SIZE`` defaults to ``0x7ffff000``, roughly 2 GiB minus one page. That value matches the Linux kernel ``MAX_RW_COUNT`` cap on a single ``read()`` or ``write()``-sized transfer. Each loop iteration moves at most that many bytes.
+#. **Define the chunk size limit**
 
-.. code-block:: cpp
+   ``AISCP_CHUNK_SIZE`` defaults to ``0x7ffff000``, roughly 2 GiB minus one page. That value matches the Linux kernel ``MAX_RW_COUNT`` cap on a single ``read()`` or ``write()``-sized transfer. Each loop iteration moves at most that many bytes.
 
-   #ifndef AISCP_CHUNK_SIZE
-   #define AISCP_CHUNK_SIZE 0x7ffff000LU
-   #endif
+   .. code-block:: cpp
 
-You can override the macro at compile time if smaller chunks help limit GPU buffer size.
+      #ifndef AISCP_CHUNK_SIZE
+      #define AISCP_CHUNK_SIZE 0x7ffff000LU
+      #endif
 
-Open and register files
------------------------
+   You can override the macro at compile time if smaller chunks help limit GPU buffer size.
 
-Both paths use ``O_DIRECT`` so hipFile can use its direct GPU I/O fast path. Each POSIX descriptor is wrapped in a ``hipFileDescr_t`` and registered with ``hipFileHandleRegister()``. On success the call fills in an opaque ``hipFileHandle_t`` for all later hipFile I/O on that file.
+#. **Open and register files**
 
-.. code-block:: cpp
+   Both paths use ``O_DIRECT`` so hipFile can use its direct GPU I/O fast path. Each POSIX descriptor is wrapped in a ``hipFileDescr_t`` and registered with ``hipFileHandleRegister()``. On success the call fills in an opaque ``hipFileHandle_t`` for all later hipFile I/O on that file.
 
-   static int
-   open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *handle)
-   {
-       hipFileError_t hipfile_err;
-       hipFileDescr_t descr;
+   .. code-block:: cpp
 
-       *fd = open(path, flags | O_DIRECT, mode);
-       if (-1 == *fd) {
-           fprintf(stderr, "Could not open %s (%s)\n", path, strerror(errno));
-           return 1;
-       }
+      static int
+      open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *handle)
+      {
+          hipFileError_t hipfile_err;
+          hipFileDescr_t descr;
 
-       descr.type      = hipFileHandleTypeOpaqueFD;
-       descr.handle.fd = *fd;
+          *fd = open(path, flags | O_DIRECT, mode);
+          if (-1 == *fd) {
+              fprintf(stderr, "Could not open %s (%s)\n", path, strerror(errno));
+              return 1;
+          }
 
-       hipfile_err = hipFileHandleRegister(handle, &descr);
-       if (hipFileSuccess != hipfile_err.err) {
-           fprintf(stderr, "Could not register %s (%s)\n", path,
-                   hipFileGetOpErrorString(hipfile_err.err));
-           close(*fd);
-           return 1;
-       }
+          descr.type      = hipFileHandleTypeOpaqueFD;
+          descr.handle.fd = *fd;
 
-       return 0;
-   }
+          hipfile_err = hipFileHandleRegister(handle, &descr);
+          if (hipFileSuccess != hipfile_err.err) {
+              fprintf(stderr, "Could not register %s (%s)\n", path,
+                      hipFileGetOpErrorString(hipfile_err.err));
+              close(*fd);
+              return 1;
+          }
 
-Important details:
+          return 0;
+      }
 
-- ``hipFileDescr_t.type`` is ``hipFileHandleTypeOpaqueFD`` for a POSIX file descriptor.
-- ``hipFileHandleRegister()`` opens the hipFile driver automatically if it was not already opened with ``hipFileDriverOpen()``. See :doc:`/reference/hipFile-reference-count` for reference counting and lifecycle rules.
-- The error path compares ``hipfile_err.err`` to ``hipFileSuccess`` and prints with ``hipFileGetOpErrorString()`` when registration fails.
+   Important details:
 
-The destination opens with ``O_WRONLY | O_CREAT``. The source opens with ``O_RDONLY``:
+   - ``hipFileDescr_t.type`` is ``hipFileHandleTypeOpaqueFD`` for a POSIX file descriptor.
+   - ``hipFileHandleRegister()`` opens the hipFile driver automatically if it was not already opened with ``hipFileDriverOpen()``. See :doc:`/reference/hipFile-reference-count` for reference counting and lifecycle rules.
+   - The error path compares ``hipfile_err.err`` to ``hipFileSuccess`` and prints with ``hipFileGetOpErrorString()`` when registration fails.
 
-.. code-block:: cpp
+   The destination opens with ``O_WRONLY | O_CREAT``. The source opens with ``O_RDONLY``:
 
-   if (open_file(dst_path, O_WRONLY | O_CREAT, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH,
-                 &dst_fd, &dst_handle)) {
-       goto program_exit;
-   }
+   .. code-block:: cpp
 
-   if (open_file(src_path, O_RDONLY, 0, &src_fd, &src_handle)) {
-       goto close_dst;
-   }
+      if (open_file(dst_path, O_WRONLY | O_CREAT, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH,
+                    &dst_fd, &dst_handle)) {
+          goto program_exit;
+      }
 
-For a detailed procedure on registering files and GPU buffers, see :doc:`/how-to/register-file-and-buffer`.
+      if (open_file(src_path, O_RDONLY, 0, &src_fd, &src_handle)) {
+          goto close_dst;
+      }
 
-Determine file size and block size
-----------------------------------
+   For a detailed procedure on registering files and GPU buffers, see :doc:`/how-to/register-file-and-buffer`.
 
-.. code-block:: cpp
+#. **Determine file size and block size**
 
-   struct stat statbuf;
-   stat(src_path, &statbuf);
-   file_size  = static_cast<size_t>(statbuf.st_size);
-   block_size = static_cast<size_t>(statbuf.st_blksize);
+   .. code-block:: cpp
 
-The program uses ``stat()`` to obtain the source file's total size and the file system block size. The block size is critical because writes performed with ``O_DIRECT`` must be aligned to the block size.
+      struct stat statbuf;
+      stat(src_path, &statbuf);
+      file_size  = static_cast<size_t>(statbuf.st_size);
+      block_size = static_cast<size_t>(statbuf.st_blksize);
 
-If the source size is zero, the program skips the read loop and exits after closing the destination handle.
+   The program uses ``stat()`` to obtain the source file's total size and the file system block size. The block size is critical because writes performed with ``O_DIRECT`` must be aligned to the block size.
 
-Allocate a GPU buffer
----------------------
+   If the source size is zero, the program skips the read loop and exits after closing the destination handle.
 
-``hipMalloc()`` receives a buffer sized to the minimum of the source file size and ``AISCP_CHUNK_SIZE``, rounded up to the file system block size so ``O_DIRECT`` alignment rules hold.
+#. **Allocate a GPU buffer**
 
-.. code-block:: cpp
+   ``hipMalloc()`` receives a buffer sized to the minimum of the source file size and ``AISCP_CHUNK_SIZE``, rounded up to the file system block size so ``O_DIRECT`` alignment rules hold.
 
-   buffer_size = align_up(std::min(file_size, AISCP_CHUNK_SIZE), block_size);
-   hip_err     = hipMalloc(&devbuf, buffer_size);
-   if (hipSuccess != hip_err) {
-       fprintf(stderr, "Could not allocate device buffer (%d)", hip_err);
-       goto close_src;
-   }
+   .. code-block:: cpp
 
-``align_up`` is a helper in ``aiscp`` to round up to the next multiple of a power-of-two alignment:
+      buffer_size = align_up(std::min(file_size, AISCP_CHUNK_SIZE), block_size);
+      hip_err     = hipMalloc(&devbuf, buffer_size);
+      if (hipSuccess != hip_err) {
+          fprintf(stderr, "Could not allocate device buffer (%d)", hip_err);
+          goto close_src;
+      }
 
-.. code-block:: cpp
+   ``align_up`` is a helper in ``aiscp`` to round up to the next multiple of a power-of-two alignment:
 
-   static inline size_t
-   align_up(size_t value, size_t align)
-   {
-       return (value + align - 1) & ~(align - 1);
-   }
+   .. code-block:: cpp
 
-``aiscp`` does not call ``hipFileBufRegister()``. Registration is optional. When you skip it, hipFile may use an internal bounce buffer. Registering with ``hipFileBufRegister()`` can increase throughput when you reuse the same buffer for many operations. See :doc:`/reference/api-file-and-buffer` for registration and I/O entry points.
+      static inline size_t
+      align_up(size_t value, size_t align)
+      {
+          return (value + align - 1) & ~(align - 1);
+      }
 
-Read and write in a chunk loop
-------------------------------
+   ``aiscp`` does not call ``hipFileBufRegister()``. Registration is optional. When you skip it, hipFile may use an internal bounce buffer. Registering with ``hipFileBufRegister()`` can increase throughput when you reuse the same buffer for many operations. See :doc:`/reference/api-file-and-buffer` for registration and I/O entry points.
 
-The copy is a ``do`` / ``while`` loop that reads from the source into device memory, then writes from device memory to the destination. ``file_offset`` advances by the number of bytes read each iteration.
+#. **Read and write in a chunk loop**
 
-.. code-block:: cpp
+   The copy is a ``do`` / ``while`` loop that reads from the source into device memory, then writes from device memory to the destination. ``file_offset`` advances by the number of bytes read each iteration.
 
-   do {
-       nread = hipFileRead(src_handle, devbuf, buffer_size, file_offset, 0);
-       if (nread < 0) {
-           fprintf(stderr, "Could not read from %s (%zd) (%s)\n", src_path, nread,
-                   IS_HIPFILE_ERR(nread) ? HIPFILE_ERRSTR(nread) : strerror(errno));
-           goto free_devbuf;
-       }
+   .. code-block:: cpp
 
-       nwrite = 0;
-       while (nwrite < nread) {
-           nbytes =
-               hipFileWrite(dst_handle, devbuf, align_up(static_cast<size_t>(nread - nwrite), block_size),
-                            file_offset + nwrite, nwrite);
-           if (nbytes < 0) {
-               fprintf(stderr, "Could not write to %s (%zd) (%s)\n", dst_path, nbytes,
-                       IS_HIPFILE_ERR(nbytes) ? HIPFILE_ERRSTR(nbytes) : strerror(errno));
-               goto free_devbuf;
-           }
-           nwrite += nbytes;
-       }
-       file_offset += nread;
-   } while (nread > 0);
+      do {
+          nread = hipFileRead(src_handle, devbuf, buffer_size, file_offset, 0);
+          if (nread < 0) {
+              fprintf(stderr, "Could not read from %s (%zd) (%s)\n", src_path, nread,
+                      IS_HIPFILE_ERR(nread) ? HIPFILE_ERRSTR(nread) : strerror(errno));
+              goto free_devbuf;
+          }
 
-This is the core copy logic:
+          nwrite = 0;
+          while (nwrite < nread) {
+              nbytes =
+                  hipFileWrite(dst_handle, devbuf, align_up(static_cast<size_t>(nread - nwrite), block_size),
+                               file_offset + nwrite, nwrite);
+              if (nbytes < 0) {
+                  fprintf(stderr, "Could not write to %s (%zd) (%s)\n", dst_path, nbytes,
+                          IS_HIPFILE_ERR(nbytes) ? HIPFILE_ERRSTR(nbytes) : strerror(errno));
+                  goto free_devbuf;
+              }
+              nwrite += nbytes;
+          }
+          file_offset += nread;
+      } while (nread > 0);
 
-- Outer loop: reads a chunk of up to ``buffer_size`` bytes from the source file into the GPU buffer. When ``hipFileRead()`` returns ``0``, all data has been read.
-- Inner loop: writes the chunk from the GPU buffer to the destination file. A partial write is possible, so the inner loop continues until every byte from the current chunk is written.
+   This is the core copy logic:
 
-``hipFileRead()`` and ``hipFileWrite()`` return:
+   - Outer loop: reads a chunk of up to ``buffer_size`` bytes from the source file into the GPU buffer. When ``hipFileRead()`` returns ``0``, all data has been read.
+   - Inner loop: writes the chunk from the GPU buffer to the destination file. A partial write is possible, so the inner loop continues until every byte from the current chunk is written.
 
-- A non-negative byte count on success.
-- ``-1`` for a POSIX error. Check ``errno``.
-- A negative hipFile error code, the negated ``hipFileOpError_t`` value.
+   ``hipFileRead()`` and ``hipFileWrite()`` return:
 
-The sample uses ``IS_HIPFILE_ERR()`` to pick between ``HIPFILE_ERRSTR()`` and ``strerror()`` for logging:
+   - A non-negative byte count on success.
+   - ``-1`` for a POSIX error. Check ``errno``.
+   - A negative hipFile error code, the negated ``hipFileOpError_t`` value.
 
-.. code-block:: cpp
+   The sample uses ``IS_HIPFILE_ERR()`` to pick between ``HIPFILE_ERRSTR()`` and ``strerror()`` for logging:
 
-   IS_HIPFILE_ERR(nread) ? HIPFILE_ERRSTR(nread) : strerror(errno)
+   .. code-block:: cpp
 
-The ``IS_HIPFILE_ERR`` macro tests whether the absolute value of the return code falls in the hipFile error range at or above ``HIPFILE_BASE_ERR``. In the public headers, ``HIPFILE_BASE_ERR`` is 5000. When the macro matches, ``HIPFILE_ERRSTR`` converts the code to a human-readable string via ``hipFileGetOpErrorString()``. Otherwise, the program falls back to ``strerror(errno)`` for standard system errors.
+      IS_HIPFILE_ERR(nread) ? HIPFILE_ERRSTR(nread) : strerror(errno)
 
-The inner ``while`` loop handles partial writes. Each ``hipFileWrite()`` call uses ``align_up`` on the remaining byte count and passes ``nwrite`` as ``buffer_offset`` so the write starts at the correct offset inside the GPU buffer.
+   The ``IS_HIPFILE_ERR`` macro tests whether the absolute value of the return code falls in the hipFile error range at or above ``HIPFILE_BASE_ERR``. In the public headers, ``HIPFILE_BASE_ERR`` is 5000. When the macro matches, ``HIPFILE_ERRSTR`` converts the code to a human-readable string via ``hipFileGetOpErrorString()``. Otherwise, the program falls back to ``strerror(errno)`` for standard system errors.
 
-Two alignment details:
+   The inner ``while`` loop handles partial writes. Each ``hipFileWrite()`` call uses ``align_up`` on the remaining byte count and passes ``nwrite`` as ``buffer_offset`` so the write starts at the correct offset inside the GPU buffer.
 
-1. Maximum I/O size per call: because each ``hipFileRead()`` or ``hipFileWrite()`` call can transfer at most ``0x7ffff000`` bytes, the buffer is sized accordingly, and larger files are handled by iterating.
-2. Block-size alignment on writes: the write size is rounded up to the file system block size with ``align_up()``. This is required because the file is opened with ``O_DIRECT``, which mandates that offsets and sizes are aligned to the block size.
+   Two alignment details:
 
-For a full list of error codes, see :doc:`/reference/api-errors`.
+   1. Maximum I/O size per call: because each ``hipFileRead()`` or ``hipFileWrite()`` call can transfer at most ``0x7ffff000`` bytes, the buffer is sized accordingly, and larger files are handled by iterating.
+   2. Block-size alignment on writes: the write size is rounded up to the file system block size with ``align_up()``. This is required because the file is opened with ``O_DIRECT``, which mandates that offsets and sizes are aligned to the block size.
 
-Truncate to the exact size
---------------------------
+   For a full list of error codes, see :doc:`/reference/api-errors`.
 
-``O_DIRECT`` forces block-aligned transfer sizes. The last write can overshoot the true file size. ``ftruncate()`` trims the destination to match the source.
+#. **Truncate to the exact size**
 
-.. code-block:: cpp
+   ``O_DIRECT`` forces block-aligned transfer sizes. The last write can overshoot the true file size. ``ftruncate()`` trims the destination to match the source.
 
-   if (-1 == ftruncate(dst_fd, static_cast<off_t>(file_size))) {
-       fprintf(stderr, "Could not truncate %s (%zu) (%s)\n", dst_path, file_size,
-               strerror(errno));
-   }
+   .. code-block:: cpp
 
-Clean up resources
-------------------
+      if (-1 == ftruncate(dst_fd, static_cast<off_t>(file_size))) {
+          fprintf(stderr, "Could not truncate %s (%zu) (%s)\n", dst_path, file_size,
+                  strerror(errno));
+      }
 
-Teardown reverses acquisition order: ``hipFree()`` releases device memory, ``hipFileHandleDeregister()`` drops hipFile tracking for each handle, then ``close()`` closes the POSIX descriptors.
+#. **Clean up resources**
 
-.. code-block:: cpp
+   Teardown reverses acquisition order: ``hipFree()`` releases device memory, ``hipFileHandleDeregister()`` drops hipFile tracking for each handle, then ``close()`` closes the POSIX descriptors.
 
-   hipFree(devbuf);
+   .. code-block:: cpp
 
-   hipFileHandleDeregister(handle);
-   close(fd);
+      hipFree(devbuf);
 
-``hipFileHandleDeregister()`` takes the ``hipFileHandle_t`` from registration. The POSIX ``close()`` call is separate.
+      hipFileHandleDeregister(handle);
+      close(fd);
 
-There is no need to call ``hipFileDriverClose()`` explicitly. The hipFile library cleans up its internal state automatically at program exit.
+   ``hipFileHandleDeregister()`` takes the ``hipFileHandle_t`` from registration. The POSIX ``close()`` call is separate.
+
+   There is no need to call ``hipFileDriverClose()`` explicitly. The hipFile library cleans up its internal state automatically at program exit.

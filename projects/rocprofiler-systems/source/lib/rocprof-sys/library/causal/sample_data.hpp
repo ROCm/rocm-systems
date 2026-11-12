@@ -9,9 +9,7 @@
 #include <chrono>
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace causal
+namespace rocprofsys::causal
 {
 struct sample_data
 {
@@ -44,5 +42,4 @@ void add_sample(std::uint32_t, uintptr_t, std::uint64_t = 1);
 
 void
 add_samples(std::uint32_t, const std::map<uintptr_t, std::uint64_t>&);
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal

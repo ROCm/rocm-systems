@@ -49,7 +49,7 @@ typedef struct
        defined(__gfx942__)  || defined(__gfx950__)  || \
        defined(__gfx1100__) || defined(__gfx1101__) || \
        defined(__gfx1200__) || defined(__gfx1201__) || \
-       defined(__gfx1250__))
+       defined(__gfx1250__) || defined(__gfx1250_strict__))
 
 #include <hip/hip_fp8.h>
 

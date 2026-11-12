@@ -5,9 +5,13 @@
 
 #include "common/string_utility.hpp"
 #include "library/rocprofiler-sdk/buffered_domain.hpp"
+#include "library/rocprofiler-sdk/callback/code_object.hpp"
+#include "library/rocprofiler-sdk/callback/roctx/control_api.hpp"
+#include "library/rocprofiler-sdk/callback/roctx/core_api.hpp"
 #include "library/rocprofiler-sdk/callback_domain.hpp"
 #include "library/rocprofiler-sdk/domain_registry.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
+#include "library/rocprofiler-sdk/stream_stack_service.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
@@ -65,13 +69,15 @@ public:
         LOG_DEBUG("Resolved {} domain configuration(s)", m_configuration.size());
 
         m_buffered_domains.reserve(m_configuration.size());
-        m_callback_domains.reserve(m_configuration.size());
+        m_callback_domains.reserve(m_configuration.size() + k_always_on_callback_domains);
         for(const auto& config : m_configuration)
         {
             configure_domain(config);
         }
 
-        SdkBackend::start_context(context());
+        configure_pending_external_correlation_id();
+        configure_code_object_domain();
+        configure_roctx_domains();
     }
 
     void flush() const
@@ -89,7 +95,67 @@ public:
         return m_configuration;
     }
 
+    void start()
+    {
+        if(SdkBackend::context_is_valid(m_context) &&
+           !SdkBackend::context_is_active(m_context))
+        {
+            SdkBackend::start_context(m_context);
+        }
+    }
+
+    void pause()
+    {
+        if(SdkBackend::context_is_valid(m_context) &&
+           SdkBackend::context_is_active(m_context))
+        {
+            SdkBackend::stop_context(m_context);
+        }
+    }
+
+    void finalize()
+    {
+        for(auto& domain : m_callback_domains)
+        {
+            domain.finalize();
+        }
+
+        for(auto& domain : m_buffered_domains)
+        {
+            domain.finalize();
+        }
+    }
+
 private:
+    std::vector<domains::domain_info>                 m_available_domains;
+    std::vector<domains::domain_configuration>        m_configuration;
+    std::vector<domains::buffered_domain<SdkBackend>> m_buffered_domains;
+    std::vector<domains::callback_domain<SdkBackend>> m_callback_domains;
+    std::vector<typename SdkBackend::external_correlation_request_kind_t>
+                             m_correlation_domains;
+    SdkBackend::context_id_t m_context{};
+    SdkBackend::context_id_t m_code_object_context{};
+    SdkBackend::context_id_t m_roctx_context{};
+
+    // The always-on callback domains appended after the configured ones: code_object plus
+    // the roctx core and control domains.
+    static constexpr std::size_t k_always_on_callback_domains = 3;
+
+    // code_object is not in the registry, so it is never user-selectable: it always
+    // runs, on its own context, so kernel names resolve even while m_context is paused.
+    void configure_code_object_domain()
+    {
+        SdkBackend::create_context(&m_code_object_context);
+
+        m_callback_domains.emplace_back(
+            domains::callback::k_code_object<SdkBackend, Externals>,
+            m_code_object_context,
+            std::vector<typename SdkBackend::tracing_operation_t>{});
+        m_callback_domains.back().configure();
+
+        SdkBackend::start_context(m_code_object_context);
+    }
+
     [[nodiscard]] std::vector<domains::domain_configuration> resolve_configuration(
         std::span<const domain_selection> selections) const
     {
@@ -145,6 +211,11 @@ private:
         m_buffered_domains.emplace_back(definition, context(), std::move(operations));
         m_buffered_domains.back().configure();
 
+        if(definition.correlation_dependency.has_value())
+        {
+            m_correlation_domains.emplace_back(*definition.correlation_dependency);
+        }
+
         if(definition.on_configure)
         {
             definition.on_configure();
@@ -162,6 +233,51 @@ private:
                   definition.meta.name, operations.size());
 
         m_callback_domains.emplace_back(definition, context(), std::move(operations));
+        m_callback_domains.back().configure();
+
+        if(definition.correlation_dependency.has_value())
+        {
+            m_correlation_domains.emplace_back(*definition.correlation_dependency);
+        }
+
+        if(definition.on_configure)
+        {
+            definition.on_configure();
+        }
+    }
+
+    void configure_roctx_domains()
+    {
+        if(!Externals::is_roctx_enabled())
+        {
+            return;
+        }
+
+        LOG_DEBUG("Configuring roctx marker domains");
+        SdkBackend::create_context(&m_roctx_context);
+
+        configure_roctx_domain(
+            domains::callback::roctx::k_core_api<SdkBackend, Externals>, {});
+
+        if(Externals::get_roctx_pause_resume_enabled())
+        {
+            configure_roctx_domain(
+                domains::callback::roctx::k_control_api<SdkBackend, Externals>,
+                { SdkBackend::MARKER_CONTROL_API_ID_roctxProfilerPause,
+                  SdkBackend::MARKER_CONTROL_API_ID_roctxProfilerResume });
+        }
+        SdkBackend::start_context(m_roctx_context);
+    }
+
+    void configure_roctx_domain(
+        const domains::callback_domain_definition<SdkBackend>& definition,
+        std::vector<typename SdkBackend::tracing_operation_t>  operations)
+    {
+        LOG_DEBUG("Configuring roctx domain '{}' ({} operation(s))", definition.meta.name,
+                  operations.size());
+
+        m_callback_domains.emplace_back(definition, m_roctx_context,
+                                        std::move(operations));
         m_callback_domains.back().configure();
 
         if(definition.on_configure)
@@ -183,12 +299,19 @@ private:
         return m_context;
     }
 
-private:
-    std::vector<domains::domain_info>                 m_available_domains;
-    std::vector<domains::domain_configuration>        m_configuration;
-    std::vector<domains::buffered_domain<SdkBackend>> m_buffered_domains;
-    std::vector<domains::callback_domain<SdkBackend>> m_callback_domains;
-    SdkBackend::context_id_t                          m_context{};
+    void configure_pending_external_correlation_id()
+    {
+        if(m_correlation_domains.empty())
+        {
+            return;
+        }
+
+        SdkBackend::configure_external_correlation_id_request_service(
+            m_context, m_correlation_domains.data(), m_correlation_domains.size(),
+            rocprofiler_sdk::stream_stack_service<
+                SdkBackend>::request_stream_correlation_id,
+            nullptr);
+    }
 
     std::vector<domains::domain_info> filter_supported_domains(
         const auto& table, domains::collection_mode mode)
@@ -305,13 +428,10 @@ private:
     {
         std::vector<domains::operation_id_t> resolved;
 
+        // No explicit operation filter requested: leave `resolved` empty so the SDK
+        // is configured with (nullptr, 0), meaning "trace all operations".
         if(!requested.has_value())
         {
-            resolved.reserve(domain.operations.size());
-            for(const auto& operation : domain.operations)
-            {
-                resolved.push_back(operation.id);
-            }
             return resolved;
         }
 

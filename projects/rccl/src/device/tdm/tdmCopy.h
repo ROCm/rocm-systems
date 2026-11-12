@@ -62,6 +62,7 @@ THE SOFTWARE.
 
 #include "cachePolicy.h"   // shared CachePolicy encoding (same as asyncCopy.h)
 #include "syncPolicy.h"    // shared SyncPolicy encoding  (same as asyncCopy.h)
+#include "../uniform.h"    // shared wave-uniformity hints
 
 // ============================================================================
 //  AVAILABILITY
@@ -101,7 +102,7 @@ THE SOFTWARE.
 #define TDM_TOOLCHAIN_AVAILABLE 0
 #endif
 
-#if defined(__gfx1250__) && __has_builtin(__builtin_amdgcn_tensor_load_to_lds) && TDM_TOOLCHAIN_AVAILABLE
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__builtin_amdgcn_tensor_load_to_lds) && TDM_TOOLCHAIN_AVAILABLE
                                   /* extend: || (defined(__gfxNNNN__) && ...) */
 #define TDM_SUPPORTED 1
 #else
@@ -165,6 +166,13 @@ __host__ __device__ inline bool IsTdmCopySupported(int deviceId = 0) {
 #endif
 }
 
+/// \brief Smallest \p ldsBufferBytes the tdmCopy*() functions accept for any
+///        \p ldsBuffer alignment: one staging slot (two 256B chunks plus the
+///        shift's 32B slack) past the pad up to 16B, so a 16B-aligned buffer
+///        needs 15 bytes less. Smaller buffers are undefined behavior; check
+///        this at compile time where the size is fixed.
+constexpr size_t MIN_COPY_LDS_BYTES = 2 * 256 + 32 + 15;
+
 /// \brief Blocking block-collective copy of [0, sizeBytes): dst <- src.
 ///
 /// Call from ALL threads of the block with identical arguments (memcpy-style
@@ -176,6 +184,7 @@ __host__ __device__ inline bool IsTdmCopySupported(int deviceId = 0) {
 /// \param sizeBytes      Number of bytes to copy.
 /// \param ldsBuffer      Per-block LDS staging area (shared memory).
 /// \param ldsBufferBytes Size of \p ldsBuffer in bytes; subdivided among warps.
+///                       Must be at least MIN_COPY_LDS_BYTES.
 ///
 /// \tparam cp Compile-time cache policy (temporal hint + memory scope) baked into
 ///            the tensor load/store as their immediate cpol operand. Build one
@@ -216,6 +225,7 @@ __device__ TDM_API void tdmCopyAsync(void* dst, const void* src, size_t sizeByte
 /// \param sizeBytes      Number of bytes to copy.
 /// \param ldsBuffer      THIS team's LDS region (distinct per team).
 /// \param ldsBufferBytes Size of this team's LDS region, split among its warps.
+///                       Must be at least MIN_COPY_LDS_BYTES.
 /// \param startWarpId    First warp of the team (inclusive).
 /// \param stopWarpId     One past the last warp (clamped to nWarps; ~0u = end).
 ///
@@ -257,8 +267,9 @@ __device__ TDM_API void tdmCopyAsyncByTeam(void* dst, const void* src, size_t si
 ///       -- a warp cannot drain its teammates' ops. tdmCopy*()/*ByTeam() blocking
 ///       forms already do this internally.
 /// \note For BLOCK-wide visibility follow with __syncthreads(); if copied data is
-///       consumed within the block AND the vector head ran, also
-///       __threadfence_block() so those ordinary global stores are observed.
+///       consumed within the block, also __threadfence_block(): the head, and a
+///       run's last <= 256B when it would cost a whole extra chunk, go through
+///       ordinary global stores.
 __device__ TDM_API void tdmWait() TDM_DELETED;
 
 // ============================================================================
@@ -289,16 +300,20 @@ __device__ TDM_API void tdmWait() TDM_DELETED;
 /// \tparam Aligned Pass true only when \p globalSrc and \p ldsDst are both known
 ///                 to be 128-byte aligned; this compiles out the head peel.
 ///
-/// \warning \p globalSrc and \p ldsDst must share the same sub-128B alignment
-///          (the head is peeled against the global pointer and the same offset
-///          is applied to the LDS side). RCCL's LDS staging buffers are
-///          128-byte aligned, which satisfies this for an aligned source.
+/// \note Alignment is a THROUGHPUT concern here, not a correctness one. Any
+///       alignment works on either side: the head is peeled against the global
+///       pointer at byte granularity, and the bulk rows carry an unconstrained
+///       LDS byte address. Verified over 448 mismatched global/LDS sub-128B
+///       combinations, and down to a 1-byte LDS offset under the 4-byte bulk
+///       descriptor -- all byte-correct. What matching sub-128B offsets buy is
+///       bulk rows that land on 128B natural alignment, and what \p Aligned buys is one
+///       descriptor instead of head/bulk/tail.
 template <SyncPolicy sp = DEFAULT_SYNC_POLICY, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
 __device__ TDM_API void asyncLoadToLDS(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes) TDM_DELETED;
 
 /// \brief Warp-level transfer of \p sizeInBytes from LDS out to global memory.
 /// \see asyncLoadToLDS for the calling convention, template parameters and the
-///      matching-alignment requirement (peeled against \p globalDst here).
+///      alignment note (peeled against \p globalDst here).
 template <SyncPolicy sp = DEFAULT_SYNC_POLICY, CachePolicy cp = DEFAULT_CACHE_POLICY, bool Aligned = false>
 __device__ TDM_API void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalDst, size_t sizeInBytes) TDM_DELETED;
 
@@ -314,38 +329,61 @@ __device__ TDM_API void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* global
 // ############################################################################
 //
 // LAYOUT OF A COPY
-//   [ head (VECTOR) ][ ---- aligned 256B rows (TDM) ---- ][ tail (TDM 1-D) ]
-//   * Fixed choices for bandwidth: 4-byte data_size, 256B TDM row width.
-//   * `head` brings the SOURCE up to a 128B boundary (the direct-copy
-//     requirement); being the unaligned remainder, it stays a cooperative
-//     vector copy done by the team's first warp.
-//   * The aligned bulk is 2D TDM tiles (64 dwords x N rows of 256B).
-//   * `tail` (< 256B sub-row remainder) is a separate 1-D TDM op at byte
-//     granularity. TDM's out-of-bounds clamp is per-dimension (rectangular) and
-//     cannot express "N full rows + a partial row", so the partial row must be
-//     its own tile rather than riding the bulk descriptor's clamp.
+//   [ head (VECTOR) ][ chunk ][ chunk ] ... [ chunk ]   (each chunk: TDM 1-D load + store)
+//   * `head` brings the DESTINATION up to a 256B boundary (one more 256B when
+//     the source lead below would start before src); being the unaligned
+//     remainder, it stays a cooperative vector copy done by the team's first warp.
+//   * The rest is split into 256B-aligned runs, one contiguous run per issuing
+//     warp, and each run into chunks of up to a slot's size. Every chunk is one
+//     byte-granular 1-D load and one 1-D store, so the last needs no separate tail.
+//   * A chunk's store starts on a 256B destination boundary; its load starts
+//     (src - dst) % 256 bytes earlier, on a 256B source boundary, and the offset is
+//     absorbed in LDS (see issue()). Neither global leg is ever misaligned.
 //
-// HARDWARE MODEL (why the per-tile waits are REQUIRED)
+// HARDWARE MODEL (measured on gfx1250)
 //   * TDM engines: 1 per SIMD-pair -> 2 per WGP; a warp runs on 1 SIMD32 and
 //     shares its pair's engine. Bandwidth needs >=2 issuing warps/block (both
 //     engines) and many blocks (many WGPs); a lone warp is latency-bound.
-//   * Same-wave TDM ops ISSUE in order but their memory effects OVERLAP: up to 3
-//     ops are outstanding per wave (that is what TENSORcnt counts). In-order issue
-//     does NOT serialize completion, so it does NOT make LDS reuse hazard-free.
-//   * This copy is single-buffered (one LDS window per warp), so each tile is a
-//     load->store dependency chain on that window: the store reads what the load
-//     wrote (RAW), and the next tile's load overwrites the window the store is
-//     still draining (WAR). Both edges need an s_wait_tensorcnt, so issueRows()/
-//     issueRow1d() wait after the load and after the store. Consequence: with a
-//     single window the copy is effectively serialized; tdmCopyAsync() therefore
-//     overlaps very little today. Regaining overlap needs DOUBLE-BUFFERING (>=2
-//     LDS windows per warp) so a load into window B runs while window A stores.
+//   * Throughput depends on alignment, not on data_size or row width. Stores
+//     need a 128B-aligned global address (8-64B: ~4.5x slower, 1-2B: ~60x) and
+//     an 8B-aligned LDS address. Loads are fastest from 256B-aligned global
+//     addresses (128B: 10-25% slower, 4-64B: ~2x, 1-2B: ~4x) and need a
+//     4B-aligned LDS address (otherwise ~7x slower). 512B buys nothing more.
+//   * A wave's TDM ops (loads and stores alike) COMPLETE in issue order, so
+//     TENSORcnt <= n waits for every op but the last n issued. Their memory
+//     effects still overlap, so an op that reuses LDS another op touches must
+//     wait for that op to complete. TDM ops are unordered with other memory
+//     instructions, including the warp's own LDS accesses.
+//   * Each warp's window holds up to two slots. A phase waits for TENSORcnt to
+//     reach zero, then loads the next chunk into one slot and stores the previous
+//     one from the other, so a load always overlaps a store (and the shift).
+//     Zero is also the exact wait: refilling a slot needs its store complete,
+//     and that store was issued after the other slot's load. Deeper rings that
+//     keep loads in flight across the wait measured slower (up to 45% with few
+//     warps per block): they split the same window into smaller TDM ops, and
+//     bytes per op matter more than overlap.
+//     Unless the copy shifts in LDS, windows under TWO_SLOT_WINDOW use one slot
+//     instead, with a wait after each load and each store: at that size a chunk
+//     twice as large is worth more than the overlap (3-10% at 4-8KB). A shifting
+//     copy keeps two slots, so each shift overlaps a load.
+//   * shiftDown() rewrites a slot with ordinary LDS stores that the mover then
+//     reads by descriptor, so the store waits for them (DScnt) first.
+//
+// ONE-WAY LEGS (asyncLoadToLDS / asyncStoreFromLDS)
+//   * A line-aligned call of whole rows is one descriptor behind a single check:
+//     back-to-back sub-KB calls are issue-bound, and the symmetric kernels'
+//     reduce loops on 2-byte types are latency-bound per tile.
+//   * The head and tail stay TDM byte ops. Per-lane async b8/b128 ops move
+//     misaligned edges faster in isolation (up to ~2x at odd offsets), but
+//     inlined into the symmetric kernels they cost 12-15% on 2-byte AllReduce
+//     even when they never execute, and out of line the call costs more. Those
+//     kernels only pass 16B-aligned tiles anyway.
 //
 // VISIBILITY
 //   tdmWait() drains only the calling wave's TDM ops. Cross-warp / block-wide
-//   visibility is the caller's __syncthreads(); the vector head's ordinary
-//   global stores additionally want __threadfence_block() if consumed within the
-//   block. Host-after-kernel and grid dependencies are handled by the stream.
+//   visibility is the caller's __syncthreads(); the vector head's and stragglers'
+//   ordinary global stores additionally want __threadfence_block() if consumed
+//   within the block. Host-after-kernel and grid dependencies are handled by the stream.
 //
 // BUILTINS: verify names against your tree:
 //   grep -iE 'tensor_(load|store)|tensorcnt' \
@@ -397,7 +435,7 @@ __device__ inline void store(const gfx1250_TDM_GROUP0& g0, const gfx1250_TDM_GRO
 __device__ inline void waitTensor0() {
   __builtin_amdgcn_s_wait_tensorcnt(0);
 }
-
+using wave::uniform;
 // ---- cooperative vector copy of a small byte range, by one warp ------------
 // All threads of the calling warp participate. Dword-wide where possible; the
 // (<4 byte) ragged end is finished by the warp's first thread.
@@ -411,54 +449,6 @@ __device__ inline void warpVecCopy(const uint8_t* s, uint8_t* d, size_t n, uint3
     for (uint32_t b = 0; b < rem; ++b) d[nd * 4 + b] = s[nd * 4 + b];
 }
 
-// ---- issue one chunk of whole 256B rows (2D tile) through ONE LDS window. ---
-// This staging window is single-buffered, so the two TDM ops form a dependency
-// chain that MUST be enforced with TENSORcnt waits -- up to 3 TDM ops are
-// outstanding per wave (they overlap), so "same-wave in-order issue" does NOT
-// serialize their memory effects:
-//   * load -> wait: the store reads the LDS the load just wrote (RAW hazard).
-//   * store -> wait: the caller reuses this same window next iteration; the next
-//     load must not overwrite LDS the store is still draining (WAR hazard).
-template <CachePolicy cp>
-__device__ inline void issueRows(uint64_t src, uint32_t lds, uint64_t dst, uint32_t rows) {
-  gfx1250_TDM_GROUP1 g1;
-  g1.dataSize(DS4);
-  g1.tileDim0(TD0);
-  g1.tileDim1(rows);
-  g1.tensorDim0(TD0);
-  g1.tensorDim1(rows);
-  g1.tensorDim0Stride(TD0);                // rows back-to-back (contiguous)
-
-    // Higher dims (D2/D3/D4) are unused for this 2D tile -> passed as zero inside
-    // load()/store(), matching known-good example usage.
-  gfx1250_TDM_GROUP0 g0l(lds, src);
-  load<cp>(g0l, g1);
-  waitTensor0();       // RAW: fill LDS before store reads it
-  gfx1250_TDM_GROUP0 g0s(lds, dst);
-  store<cp>(g0s, g1);
-  waitTensor0();       // WAR: drain store before window reuse
-}
-
-// ---- issue a sub-row tail (<256B) as a 1-D tile at BYTE granularity. ---------
-// Same single-buffered LDS window and the same required RAW/WAR waits as above.
-template <CachePolicy cp>
-__device__ inline void issueRow1d(uint64_t src, uint32_t lds, uint64_t dst, uint32_t nbytes) {
-  gfx1250_TDM_GROUP1 g1;
-  g1.dataSize(DS1);                        // 1-byte elements: exact length
-  g1.tileDim0(nbytes);
-  g1.tileDim1(1);
-  g1.tensorDim0(nbytes);
-  g1.tensorDim1(1);
-  g1.tensorDim0Stride(nbytes);
-
-  gfx1250_TDM_GROUP0 g0l(lds, src);        // unused higher dims -> zero (see load())
-  load<cp>(g0l, g1);
-  waitTensor0();       // RAW: fill LDS before store reads it
-  gfx1250_TDM_GROUP0 g0s(lds, dst);
-  store<cp>(g0s, g1);
-  waitTensor0();       // WAR: drain store before window reuse
-}
-
 // ---- one-way global <-> LDS transfer of a byte range, by ONE warp -----------
 // Direction of a single leg: the first pointer is always the global-memory side
 // and the second the LDS side, which keeps the tile helpers below symmetric.
@@ -467,82 +457,139 @@ enum struct LdsDir {
   Store
 };
 
-constexpr uint32_t TILE_DIM_MAX = 0xFFFFu;   // tile_dim0/tile_dim1 are 16-bit fields
-constexpr uint32_t LINE = 128;       // alignment the head peel targets
-
 template <LdsDir DIR, CachePolicy cp>
 __device__ inline void ldsIssue(const gfx1250_TDM_GROUP0& g0, const gfx1250_TDM_GROUP1& g1) {
   if constexpr (DIR == LdsDir::Load) load<cp>(g0, g1);
   else store<cp>(g0, g1);
 }
 
-// One 1-D tile at BYTE granularity, for the ragged head/tail. Exact length, so
-// it works at any alignment; `nbytes` must be <= TILE_DIM_MAX.
+constexpr uint32_t TILE_DIM_MAX = 0xFFFFu;   // tile_dim0/tile_dim1 are 16-bit fields
+
+// One 1-D tile at BYTE granularity: the round trip's chunks and the one-way legs'
+// ragged head/tail. Exact length, so it works at any alignment and needs no
+// separate sub-row tail; `nbytes` must be <= TILE_DIM_MAX.
 template <LdsDir DIR, CachePolicy cp>
 __device__ inline void ldsTileBytes(uint64_t global, uint32_t lds, uint32_t nbytes) {
   gfx1250_TDM_GROUP1 g1;
   g1.dataSize(DS1);
   g1.tileDim0(nbytes);
-  g1.tileDim1(1);
   g1.tensorDim0(nbytes);
-  g1.tensorDim1(1);
-  g1.tensorDim0Stride(nbytes);
   gfx1250_TDM_GROUP0 g0(lds, global);
   ldsIssue<DIR, cp>(g0, g1);
 }
 
-// One 2-D tile of `rows` back-to-back 256B rows -- the bulk shape, chosen for
-// bandwidth exactly as in issueRows(). `rows` must be <= TILE_DIM_MAX.
+using LdsU32 = __attribute__((address_space(3))) uint32_t;
+using LdsU32x4 = __attribute__((address_space(3))) u32x4;
+
+constexpr uint32_t SHIFT_GROUP = 4;   // lane-strides of reads issued before their writes
+constexpr uint32_t SHIFT_SLACK = 32;  // bytes shiftDown() may touch past lds + n
+
+// ---- move `n` bytes at lds + r down to lds (0 < r < 4, lds 16B aligned), in place, by one warp.
+// Each lane rebuilds 16 bytes from the four words at its own offset and the next
+// lane's first word. A group's reads all precede its writes, and the next group
+// reads only above them, so every read precedes the write that clobbers it.
+// Reads and writes stay below lds + n + SHIFT_SLACK.
+__device__ inline void shiftDown(uint32_t lds, uint32_t n, uint32_t r, uint32_t warpThread, uint32_t warpThreads) {
+  const uint32_t stride = 16 * warpThreads;
+#pragma unroll 1
+  for (uint32_t base = 16 * warpThread; base < n; base += SHIFT_GROUP * stride) {
+    u32x4 w[SHIFT_GROUP];
+    uint32_t next[SHIFT_GROUP];
+#pragma unroll
+    for (uint32_t k = 0; k < SHIFT_GROUP; ++k) {
+      const uint32_t p = lds + base + k * stride;
+      if (base + k * stride < n) {
+        w[k] = *(const LdsU32x4*)p;
+        next[k] = *(const LdsU32*)(p + 16);
+      }
+    }
+#pragma unroll
+    for (uint32_t k = 0; k < SHIFT_GROUP; ++k) {
+      if (base + k * stride < n) {
+        u32x4 v;
+        v.x = __builtin_amdgcn_alignbyte(w[k].y, w[k].x, r);
+        v.y = __builtin_amdgcn_alignbyte(w[k].z, w[k].y, r);
+        v.z = __builtin_amdgcn_alignbyte(w[k].w, w[k].z, r);
+        v.w = __builtin_amdgcn_alignbyte(next[k], w[k].w, r);
+        *(LdsU32x4*)(lds + base + k * stride) = v;
+      }
+    }
+  }
+}
+
+constexpr uint32_t LINE = 128;       // alignment the head peel targets
+constexpr uint32_t ALIGN = 256;      // round-trip chunk alignment; see HARDWARE MODEL
+constexpr uint32_t MAX_CHUNK = (TILE_DIM_MAX - (ALIGN - 1)) & ~(ALIGN - 1); // a load is chunk + delta bytes
+constexpr uint32_t MIN_SLOT = 2 * ALIGN + SHIFT_SLACK; // room for o <= ALIGN, one ALIGN chunk and the shift
+static_assert(MIN_COPY_LDS_BYTES == MIN_SLOT + 15, "MIN_COPY_LDS_BYTES must cover one slot past the 16B pad");
+constexpr uint32_t TWO_SLOT_WINDOW = 16384; // see HARDWARE MODEL
+// Whole 256B rows one 1-D bulk tile can carry: tile_dim0 now holds the entire length
+// in elements, not one row's worth, so the 16-bit field is the limit (1023 x 256B).
+constexpr uint32_t MAX_ROWS = TILE_DIM_MAX / TD0;
+
+// One 1-D tile covering `rows` back-to-back 256B rows -- the bulk shape. The rows are
+// contiguous (the 2-D form this replaced used stride == TD0), so a flat run of
+// rows*TD0 elements describes exactly the same bytes and the second dimension bought
+// nothing. `rows` must be <= MAX_ROWS.
 template <LdsDir DIR, CachePolicy cp>
 __device__ inline void ldsTileRows(uint64_t global, uint32_t lds, uint32_t rows) {
+  const uint32_t elems = rows * TD0;
   gfx1250_TDM_GROUP1 g1;
   g1.dataSize(DS4);
-  g1.tileDim0(TD0);
-  g1.tileDim1(rows);
-  g1.tensorDim0(TD0);
-  g1.tensorDim1(rows);
-  g1.tensorDim0Stride(TD0);                // rows back-to-back (contiguous)
+  g1.tileDim0(elems);
+  g1.tensorDim0(elems);
   gfx1250_TDM_GROUP0 g0(lds, global);
   ldsIssue<DIR, cp>(g0, g1);
 }
 
-// Split [0, sizeInBytes) into [head][ aligned 256B rows ][tail], mirroring the
-// layout detail::issue() uses for the round trip. The pieces target disjoint LDS
-// and global ranges, so unlike the round trip they need NO waits between them --
-// the whole range is issued back-to-back and the caller drains once (or not at
-// all, under SyncPolicy::Async).
+// Split [0, sizeInBytes) into [head][ aligned 256B rows ][tail]. The pieces
+// target disjoint LDS and global ranges, so unlike the round trip they need NO
+// waits between them -- the whole range is issued back-to-back and the caller
+// drains once (or not at all, under SyncPolicy::Async).
 //
 // `head` brings the GLOBAL pointer up to a 128B boundary and the same offset is
-// applied to the LDS side, so the bulk's 4-byte elements stay naturally aligned
-// only when the two pointers start with the same sub-128B offset -- the contract
-// documented on the public entry points. `Aligned` asserts that offset is zero
-// for both and compiles the peel out entirely.
+// applied to the LDS side. When the two pointers start with the same sub-128B
+// offset the bulk rows land on a 128B natural alignment on both ends; when they
+// do not, the rows are still valid -- the LDS address field is an unconstrained
+// byte address -- they just straddle lines. A line-aligned global pointer with a
+// whole number of rows is one descriptor; `Aligned` asserts both offsets are zero
+// and compiles the head peel out.
 template <LdsDir DIR, CachePolicy cp, bool Aligned>
 __device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInBytes) {
-  if (sizeInBytes == 0) return;            // a zero-extent tile is not a valid descriptor
+  // No uniform() hints: a readfirstlane at entry puts a VALU->SALU dependency ahead of
+  // every tile's issue, and the symmetric reduce loops are latency-bound per tile.
+  // The range lives in LDS, so its size fits 32 bits; 64-bit compares go through the VALU.
+  const uint32_t n = static_cast<uint32_t>(sizeInBytes);
+  const uint32_t lineOff = static_cast<uint32_t>(global) & (LINE - 1);
+  if (n == 0) return;            // a zero-extent tile is not a valid descriptor
 
-  size_t off = 0;
+  if (((lineOff | (n & (WIDTH - 1))) == 0) && n <= MAX_ROWS * WIDTH) {
+    ldsTileRows<DIR, cp>(global, lds, n / WIDTH);
+    return;
+  }
+
+  uint32_t off = 0;
   if constexpr (!Aligned) {
-    uint32_t head = static_cast<uint32_t>((LINE - (global & (LINE - 1))) & (LINE - 1));
-    if (head > sizeInBytes) head = static_cast<uint32_t>(sizeInBytes);
+    uint32_t head = (LINE - lineOff) & (LINE - 1);
+    if (head > n) head = n;
     if (head) {
       ldsTileBytes<DIR, cp>(global, lds, head);
       off = head;
     }
   }
 
-    // Bulk: whole 256B rows, split across as many tiles as the 16-bit row count needs.
-  size_t rows = (sizeInBytes - off) / WIDTH;
+    // Bulk: whole 256B rows, split across as many tiles as the 16-bit length field needs.
+  uint32_t rows = (n - off) / WIDTH;
   while (rows) {
-    const uint32_t chunk = rows < TILE_DIM_MAX ? static_cast<uint32_t>(rows) : TILE_DIM_MAX;
-    ldsTileRows<DIR, cp>(global + off, lds + static_cast<uint32_t>(off), chunk);
-    off += static_cast<size_t>(chunk) * WIDTH;
+    const uint32_t chunk = rows < MAX_ROWS ? rows : MAX_ROWS;
+    ldsTileRows<DIR, cp>(global + off, lds + off, chunk);
+    off += chunk * WIDTH;
     rows -= chunk;
   }
 
     // Tail: the < 256B sub-row remainder, again at byte granularity.
-  const uint32_t tail = static_cast<uint32_t>(sizeInBytes - off);
-  if (tail) ldsTileBytes<DIR, cp>(global + off, lds + static_cast<uint32_t>(off), tail);
+  const uint32_t tail = n - off;
+  if (tail) ldsTileBytes<DIR, cp>(global + off, lds + off, tail);
 }
 
 // ---- core: partition + issue the whole copy for the team [start, stop). -----
@@ -555,13 +602,13 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
   const uint8_t* s = reinterpret_cast<const uint8_t*>(src);
   uint8_t* d = reinterpret_cast<uint8_t*>(dst);
   const uint32_t ldsBase = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ldsBuffer));
-  const uint32_t ldsBytes = static_cast<uint32_t>(ldsBufferBytes);  // LDS is small
+  const uint32_t ldsBytes = static_cast<uint32_t>(ldsBufferBytes); // LDS is small
 
   const uint32_t W = warpSize;
   const uint32_t nThreads = blockDim.x * blockDim.y * blockDim.z;
   const uint32_t tid = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
   const uint32_t warpThread = tid % W;               // thread index within its warp
-  const uint32_t warpId = tid / W;
+  const uint32_t warpId = uniform(tid / W);
   const uint32_t nWarps = (nThreads + W - 1) / W;
 
     // --- team membership: this warp participates iff in [start, stop) --------
@@ -573,53 +620,111 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
   // active threads in THIS warp (handles partial final warp); stride for vector.
   const uint32_t warpThreads = (nThreads - warpId * W < W) ? (nThreads - warpId * W) : W;
 
-  // --- split the range: [head][ aligned 256B rows ][tail] ------------------
-  uint64_t sAddr = reinterpret_cast<uint64_t>(s);
-  uint32_t head = static_cast<uint32_t>((128u - (sAddr & 127u)) & 127u);
-  if (head > sizeBytes) head = static_cast<uint32_t>(sizeBytes);
-  size_t bulk = sizeBytes - head; // starts 128B-aligned
-  size_t rows = bulk / WIDTH; // whole 256B rows
-  size_t tdmBytes = rows * WIDTH;
-  size_t tailOff = head + tdmBytes;
-  uint32_t tail = static_cast<uint32_t>(sizeBytes - tailOff); // < 256B
+  // --- split the range: [head (vector)][ chunks (TDM) ]; see LAYOUT --------
+  // delta = (src - dst) % ALIGN is absorbed in LDS, where the store reads
+  // 16B-aligned at slot + o: its multiple-of-4 part `sigma` by loading to
+  // slot + o - sigma (4B aligned), and its sub-dword part `r` by shiftDown().
+  // The delta bytes each load reads ahead belong to the previous chunk and are
+  // never stored from this one.
+  const uint64_t sAddr = reinterpret_cast<uint64_t>(s);
+  const uint64_t dAddr = reinterpret_cast<uint64_t>(d);
+  const uint32_t delta = static_cast<uint32_t>(sAddr - dAddr) & (ALIGN - 1);
+  const uint32_t r = delta & 3u;
+  const uint32_t sigma = delta - r;
+  const uint32_t o = (sigma + 15u) & ~15u;
+  size_t head = (ALIGN - (dAddr & (ALIGN - 1))) & (ALIGN - 1);
+  if (head < delta) head += ALIGN; // the first load must not start before src
+  if (head > sizeBytes) head = sizeBytes;
 
-  // --- edges (team's FIRST warp = rank 0): vector head, TDM tail -----------
-  if (rank == 0 && head) warpVecCopy(s, d, head, warpThread, warpThreads);
-  if (rank == 0 && tail) {
-    if (ldsBytes >= tail) // stage tail in rank 0's window
-      issueRow1d<cp>(reinterpret_cast<uint64_t>(s + tailOff), ldsBase, reinterpret_cast<uint64_t>(d + tailOff), tail);
-    else warpVecCopy(s + tailOff, d + tailOff, tail, warpThread, warpThreads);
-  }
-
-  // --- aligned bulk via TDM ------------------------------------------------
-  if (rows == 0) return; // no aligned bulk (edges done)
-  uint32_t maxByLds = ldsBytes / WIDTH; // #warps we can give a window
-  if (maxByLds == 0) { // LDS < 256B: vector fallback
-    if (rank == 0) warpVecCopy(s + head, d + head, tdmBytes, warpThread, warpThreads);
+  // The vector head is issued after the warp's first TDM load so the two overlap.
+  const bool vecHead = rank == 0 && head;
+  const size_t bulk = sizeBytes - head;
+  if (bulk == 0) {
+    if (vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
     return;
   }
-  uint32_t issuers = teamWarps < maxByLds ? teamWarps : maxByLds;
-  uint32_t window = (ldsBytes / issuers) & ~(WIDTH - 1); // per-warp 256B-multiple
-  uint32_t rowsPerChunk = window / WIDTH;
 
+  // --- LDS: one window per issuing warp, two slots per window --------------
+  const uint32_t ldsPad = (16u - (ldsBase & 15u)) & 15u; // slots must be 16B aligned
+  const uint32_t ldsUsable = ldsBytes > ldsPad ? ldsBytes - ldsPad : 0;
+  const uint32_t maxByLds = ldsUsable / MIN_SLOT;
+  // Unchecked precondition ldsBufferBytes >= MIN_COPY_LDS_BYTES: even a trap costs more than
+  // the setup it guards, because a per-lane size turns it into lane-mask bookkeeping.
+  __builtin_assume(maxByLds != 0);
+  const size_t units = (bulk + ALIGN - 1) / ALIGN;
+  uint32_t issuers = teamWarps < maxByLds ? teamWarps : maxByLds;
+  if (units < issuers) issuers = static_cast<uint32_t>(units);
   if (rank >= issuers) return; // this warp doesn't issue
 
-  // distribute `rows` across issuers by team rank (contiguous row blocks)
-  size_t base = rows / issuers;
-  size_t extra = rows % issuers;
-  size_t myRows = base + (rank < extra ? 1u : 0u);
-  size_t myStart = rank * base + (rank < extra ? rank : extra);
-  if (myRows == 0) return;
+  const uint32_t window = (ldsUsable / issuers) & ~15u;
+  const uint32_t nSlots = window >= 2 * MIN_SLOT && (r || window >= TWO_SLOT_WINDOW) ? 2 : 1;
+  const uint32_t slotBytes = (nSlots == 2 ? window >> 1 : window) & ~15u;
+  // slot + o + chunkBytes (plus the shift's slack) fits; MIN_SLOT keeps chunkBytes >= ALIGN
+  uint32_t chunkBytes = (slotBytes - o - (r ? SHIFT_SLACK : 0)) & ~(ALIGN - 1);
+  if (chunkBytes > MAX_CHUNK) chunkBytes = MAX_CHUNK;
 
-  uint32_t myLds = ldsBase + rank * window;
-  uint64_t sBase = reinterpret_cast<uint64_t>(s + head) + (uint64_t)myStart * WIDTH;
-  uint64_t dBase = reinterpret_cast<uint64_t>(d + head) + (uint64_t)myStart * WIDTH;
+  // distribute the ALIGN-byte units across issuers by team rank (contiguous). units fits
+  // 32 bits for any copy under 1 TiB, so the division skips the 64-bit expansion.
+  const uint32_t units32 = static_cast<uint32_t>(units);
+  const size_t base = units32 / issuers;
+  const size_t extra = units32 % issuers;
+  const size_t myStart = rank * base + (rank < extra ? rank : extra);
+  const size_t myUnits = base + (rank < extra ? 1u : 0u);
+  const size_t begin = head + myStart * ALIGN;
+  const size_t end = begin + myUnits * ALIGN < sizeBytes ? begin + myUnits * ALIGN : sizeBytes;
 
-  for (size_t r = 0; r < myRows; r += rowsPerChunk) {
-    uint32_t chunkRows = (myRows - r < rowsPerChunk) ? static_cast<uint32_t>(myRows - r) : rowsPerChunk;
-    uint64_t off = (uint64_t)r * WIDTH;
-    issueRows<cp>(sBase + off, myLds, dBase + off, chunkRows);
+  const uint32_t win = ldsBase + ldsPad + rank * window;
+  const uint64_t sB = sAddr + begin - delta;
+  const uint64_t dB = dAddr + begin;
+  const size_t len = end - begin;
+  auto storeChunk = [&](uint32_t slot, uint64_t global, uint32_t n) {
+    if (r) {
+      shiftDown(slot + o, n, r, warpThread, warpThreads);
+      // LDS-only fence: waits for the shift's writes, not the head's global stores.
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    }
+    ldsTileBytes<LdsDir::Store, cp>(global, slot + o, n);
+  };
+
+  if (nSlots == 1) {
+    // One slot: each chunk's store waits for its load, and the next load for the store.
+    // A run that overflows one chunk by at most ALIGN bytes (the slot lost o to the
+    // offset) would pay a whole extra load/store pair for the remainder, so the warp
+    // copies that remainder with vectors while the chunk is in flight.
+    if (len > chunkBytes && len - chunkBytes <= ALIGN) {
+      ldsTileBytes<LdsDir::Load, cp>(sB, win + o - sigma, chunkBytes + delta);
+      if (vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
+      warpVecCopy(s + begin + chunkBytes, d + begin + chunkBytes, len - chunkBytes, warpThread, warpThreads);
+      waitTensor0();
+      storeChunk(win, dB, chunkBytes);
+      waitTensor0();
+      return;
+    }
+    for (size_t off = 0; off < len; off += chunkBytes) {
+      const uint32_t n = len - off < chunkBytes ? static_cast<uint32_t>(len - off) : chunkBytes;
+      ldsTileBytes<LdsDir::Load, cp>(sB + off, win + o - sigma, n + delta);
+      if (off == 0 && vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
+      waitTensor0();
+      storeChunk(win, dB + off, n);
+      waitTensor0();
+    }
+    return;
   }
+
+  // Two slots, ping-ponged; see HARDWARE MODEL above for why the wait drains to zero.
+  uint32_t slot = 0;
+  size_t lastOff = 0;
+  for (size_t off = 0; off < len; off += chunkBytes) {
+    const uint32_t n = len - off < chunkBytes ? static_cast<uint32_t>(len - off) : chunkBytes;
+    if (off) waitTensor0();
+    ldsTileBytes<LdsDir::Load, cp>(sB + off, win + slot + o - sigma, n + delta);
+    if (off == 0 && vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
+    if (off) storeChunk(win + (slot ^ slotBytes), dB + off - chunkBytes, chunkBytes);
+    slot ^= slotBytes;
+    lastOff = off;
+  }
+  waitTensor0();
+  storeChunk(win + (slot ^ slotBytes), dB + lastOff, static_cast<uint32_t>(len - lastOff));
 }
 
 } // namespace detail

@@ -32,6 +32,7 @@ from .kpack_transform import (
     kpack_offload_binary,
     read_kpack_ref_marker,
     is_fat_binary,
+    is_kpack_processed,
     NotFatBinaryError,
 )
 
@@ -45,5 +46,6 @@ __all__ = [
     "kpack_offload_binary",
     "read_kpack_ref_marker",
     "is_fat_binary",
+    "is_kpack_processed",
     "NotFatBinaryError",
 ]

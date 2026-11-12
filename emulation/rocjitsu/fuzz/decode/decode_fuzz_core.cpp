@@ -14,7 +14,6 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
-#include <stdexcept>
 
 namespace rocjitsu::decode_fuzz {
 namespace {
@@ -73,16 +72,18 @@ void emit_string_array(std::ostringstream &out, const std::vector<std::string> &
 
 } // namespace
 
-std::unique_ptr<Decoder> create_decoder(std::string_view target) {
+util::FailureOr<std::unique_ptr<Decoder>> create_decoder(std::string_view target,
+                                                         util::DiagnosticEmitter diagnostic) {
   std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), target);
   if (!decoder)
-    throw std::invalid_argument("unsupported decoder target: " + std::string(target));
+    return diagnostic.emit() << "unsupported decoder target: " << target;
   return decoder;
 }
 
-DecodeRecord decode_window(Decoder &decoder, std::span<const uint8_t> bytes) {
+util::FailureOr<DecodeRecord> decode_window(Decoder &decoder, std::span<const uint8_t> bytes,
+                                            util::DiagnosticEmitter diagnostic) {
   if (bytes.size() != kWindowSize)
-    throw std::invalid_argument("decoder input must be exactly 16 bytes");
+    return diagnostic.emit() << "decoder input must be exactly 16 bytes";
 
   std::array<uint32_t, kWindowSize / sizeof(uint32_t)> words{};
   for (size_t word = 0; word < words.size(); ++word) {

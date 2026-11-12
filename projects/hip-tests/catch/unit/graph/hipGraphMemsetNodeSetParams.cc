@@ -90,6 +90,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Positive_Basic, uint8_t,
  * ------------------------
  *    - Verify API behaviour with invalid arguments:
  *        -# node is nullptr
+ *        -# node is not a memset node
  *        -# pNodeParams is nullptr
  *        -# pNodeParams::dst is nullptr
  *        -# pNodeParams::elementSize is different from 1, 2, and 4
@@ -124,6 +125,12 @@ HIP_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Negative_Parameters) {
 
   SECTION("node == nullptr") {
     HIP_CHECK_ERROR(hipGraphMemsetNodeSetParams(nullptr, &params), hipErrorInvalidValue);
+  }
+
+  SECTION("node is not a memset node") {
+    hipGraphNode_t empty_node = nullptr;
+    HIP_CHECK(hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0));
+    HIP_CHECK_ERROR(hipGraphMemsetNodeSetParams(empty_node, &params), hipErrorInvalidValue);
   }
 
   MemsetCommonNegative(std::bind(hipGraphMemsetNodeSetParams, node, _1), params);

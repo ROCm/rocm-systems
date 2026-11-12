@@ -25,6 +25,7 @@
 
 #include "libhsakmt.h"
 #include "kfd_ioctl.h"
+#include <time.h>
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCountersCtx(HsaKFDContext *ctx,
 					       HSAuint32 NodeId,
@@ -61,4 +62,62 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
 					       HsaClockCounters *Counters)
 {
 	return hsaKmtGetClockCountersCtx(&hsakmt_primary_kfd_ctx, NodeId, Counters);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCountersPrecise(HSAuint32 NodeId,
+						     HsaClockCounters *Counters)
+{
+	uint32_t gpu_id;
+	HSAKMT_STATUS result;
+	unsigned int samples;
+	unsigned int i;
+	HsaClockCounters best = {0};
+	uint64_t best_elapsed = UINT64_MAX;
+
+	result = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+
+	/* KFD reads the GPU counter before the CPU clocks. An interrupt or a
+	 * reschedule between those reads can displace the correlation by tens
+	 * of microseconds. Reduce that uncertainty by selecting the shortest
+	 * of a small, fixed number of queries. Keep all counters from the same
+	 * sample. CPU-only nodes have no GPU/CPU correlation to establish.
+	 */
+	samples = gpu_id ? 4 : 1;
+	for (i = 0; i < samples; i++) {
+		struct timespec before, after;
+		HsaClockCounters sample;
+		uint64_t elapsed;
+
+		/* A later read can fail after a good sample was already taken.
+		 * Return that sample instead of failing the whole call. The
+		 * caller's output stays unchanged when nothing was collected.
+		 */
+		if (clock_gettime(CLOCK_MONOTONIC_RAW, &before))
+			result = HSAKMT_STATUS_ERROR;
+		else
+			result = hsaKmtGetClockCountersCtx(&hsakmt_primary_kfd_ctx,
+							  NodeId, &sample);
+		if (result == HSAKMT_STATUS_SUCCESS &&
+		    clock_gettime(CLOCK_MONOTONIC_RAW, &after))
+			result = HSAKMT_STATUS_ERROR;
+		if (result != HSAKMT_STATUS_SUCCESS) {
+			if (best_elapsed != UINT64_MAX) {
+				*Counters = best;
+				return HSAKMT_STATUS_SUCCESS;
+			}
+			return result;
+		}
+
+		elapsed = (uint64_t)(after.tv_sec - before.tv_sec) * 1000000000 +
+			  after.tv_nsec - before.tv_nsec;
+		if (elapsed < best_elapsed) {
+			best_elapsed = elapsed;
+			best = sample;
+		}
+	}
+
+	*Counters = best;
+	return HSAKMT_STATUS_SUCCESS;
 }

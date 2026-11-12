@@ -67,8 +67,41 @@ extern union ncclSocketAddress IbCastIfAddr;
 enum ncclIbRequestMatchingScheme {
   BY_INDEX = 0,
   BY_ID = 1,
-  BY_ORDER = 2, // send requests are posted in the order they are received (CTS OFFLOAD)
+  BY_ORDER = 2, // completions matched by posted WR identity (CTS offload, or software CTS with on-demand recvs)
 };
+
+// Values of RCCL_IB_UDMA_POLICY (AINIC QP-to-uDMA pipeline assignment). With QP
+// sharing enabled, the sharing-group alternation replaces the channel affinity
+// of ChannelAffinity, and of collective QPs under P2pRoundRobin.
+enum struct ncclIbCastUDMAPolicy : int {
+  // Pin each channel's send QPs, and separately its receive QPs, to one pipeline
+  // per device, chosen alternately as each is first seen
+  ChannelAffinity = 0,
+  // Round-robin P2P QPs in creation order; collective QPs keep channel affinity
+  P2pRoundRobin = 1,
+  // Leave the PD mask unchanged so the driver picks the pipeline
+  DriverDefault = 2,
+  // Split each connection across both pipelines: channel-id popcount parity picks the
+  // starting pipeline and consecutive per-device QP indexes alternate. The default
+  // NCCL_IB_QPS_PER_CONNECTION of 2 is enough. With one QP per device per connection
+  // (NCCL_IB_QPS_PER_CONNECTION=1, or RCCL_IB_QPS_PER_P2P=1 for P2P) every QP has
+  // qpIdx 0 and this reduces to channel-id popcount parity. RMA comms also use one QP.
+  SplitConnection = 3,
+  // New values go before Count; First/Last bound the RCCL_IB_UDMA_POLICY range
+  // check, so update the static_asserts below when adding one.
+  Count,
+  First = ChannelAffinity,
+  Last = Count - 1,
+};
+static_assert(ncclIbCastUDMAPolicy::First == ncclIbCastUDMAPolicy::ChannelAffinity &&
+                (int)ncclIbCastUDMAPolicy::First == 0,
+              "ncclIbCastUDMAPolicy must start at ChannelAffinity = 0");
+static_assert(ncclIbCastUDMAPolicy::Last == ncclIbCastUDMAPolicy::SplitConnection,
+              "ncclIbCastUDMAPolicy::Last must be the last policy; update this assert when adding one");
+
+static inline bool ncclIbCastUDMAPolicyIsValid(int64_t policy) {
+  return policy >= (int64_t)ncclIbCastUDMAPolicy::First && policy <= (int64_t)ncclIbCastUDMAPolicy::Last;
+}
 
 struct ncclIbMr {
   uintptr_t addr;
@@ -103,6 +136,12 @@ enum ncclIbProvider {
   IB_PROVIDER_MAX = 2,
 };
 
+struct ncclIbGidInfo {
+  uint8_t link_layer;
+  union ibv_gid localGid;
+  int32_t localGidIndex;
+};
+
 extern int IbCastNDevs;
 struct alignas(64) ncclIbDev {
   std::mutex mutex;
@@ -127,6 +166,9 @@ struct alignas(64) ncclIbDev {
   struct ibv_port_attr portAttr;
   struct ncclIbStats stats;
   int dmaBufSupported;
+  int8_t udSupported;  // -1 not probed yet, 0 no, 1 yes
+  int8_t rdmaReadSupported;  // -1 not probed yet, 0 no, 1 yes
+  bool speedFromQuery;  // test-only: true if speed came from ibv_query_port_speed()
   int16_t railId;
   int16_t planeId;
   int16_t planeIdx;
@@ -135,7 +177,11 @@ struct alignas(64) ncclIbDev {
     struct {
       int dataDirect;
     } mlx5;
+    struct {
+      uint8_t udmaCount;
+    } ionic;
   } capsProvider;
+  struct ncclIbGidInfo gidInfo;
 };
 
 #define MAX_IB_DEVS 32
@@ -149,25 +195,75 @@ extern struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
 extern int IbCastRelaxedOrderingEnabled;
 extern bool IbCastUseInline;
 
-#define WR_ID_RX_COMM_ID_MASK  0xffff
-#define WR_ID_RX_COMM_ID_SHIFT 48
-#define WR_IMM_RX_REQ_IDX_MASK 0xff
-#define WR_IMM_RX_REQ_IDX_SHIFT 24
-#define WR_IMM_SPLIT_DATA_FLAG 0x00800000
-#define WR_IMM_SIZE_MASK 0x007fffff
-// QP sharing BY_ID imm_data layout: reqId in bits[7:0], receiver commId in bits[23:8].
-// reqId fits in 8 bits (NET_IB_MAX_REQUESTS <= 256); commId fits in 16 bits.
-#define WR_IMM_BYID_REQ_ID_MASK   0xff
-#define WR_IMM_BYID_COMM_ID_SHIFT 8
-#define WR_IMM_BYID_COMM_ID_MASK  0xffff
+/*
+ * wr_id layout (64-bit, used on receive-side CQ completions):
+ *
+ *   63            48 47                                    0
+ *  +----------------+--------------------------------------+
+ *  |    commId      |         original wr_id index         |
+ *  |   (16 bits)    |            (48 bits)                 |
+ *  +----------------+--------------------------------------+
+ *
+ * commId is non-zero only when QP sharing is enabled; otherwise the
+ * upper 16 bits are zero and the full 64-bit value is the original index.
+ */
+#define WR_ID_RX_COMM_ID_BITS  16
+#define WR_ID_RX_COMM_ID_BIT_POS 48
+#define WR_ID_RX_COMM_ID_MASK  ((uint64_t)((1u << WR_ID_RX_COMM_ID_BITS) - 1) << WR_ID_RX_COMM_ID_BIT_POS)
+
+/*
+ * imm_data layout — default (non-BY_ID) scheme (32-bit):
+ *
+ *   31       24 23  22                           0
+ *  +----------+----+-----------------------------+
+ *  |  reqIdx  | SD |           unused            |
+ *  | (8 bits) |    |                             |
+ *  +----------+----+-----------------------------+
+ *
+ *  reqIdx : receiver-side request index
+ *  SD     : split-data flag (set when data spans >1 QPs)
+ *  The receiver takes a one-request size from the completion byte count.
+ */
+#define WR_IMM_RX_REQ_IDX_BITS  8
+#define WR_IMM_RX_REQ_IDX_BIT_POS 24
+#define WR_IMM_RX_REQ_IDX_MASK  (((1u << WR_IMM_RX_REQ_IDX_BITS) - 1) << WR_IMM_RX_REQ_IDX_BIT_POS)
+#define WR_IMM_SIZE_BITS        23
+#define WR_IMM_SIZE_BIT_POS       0
+#define WR_IMM_SIZE_MASK        (((1u << WR_IMM_SIZE_BITS) - 1) << WR_IMM_SIZE_BIT_POS)
+#define WR_IMM_SPLIT_DATA_FLAG  (1u << WR_IMM_SIZE_BITS)
+
+/*
+ * imm_data layout — BY_ID scheme (32-bit, QP sharing enabled):
+ *
+ *   31    24 23             8 7              0
+ *  +--------+----------------+---------------+
+ *  | unused |    commId      |    reqId      |
+ *  |        |   (16 bits)    |   (8 bits)    |
+ *  +--------+----------------+---------------+
+ *
+ *  reqId  : receiver-side request index (NET_IB_MAX_REQUESTS <= 256)
+ *  commId : receiver commId for routing completions to the right comm
+ */
+#define WR_IMM_BYID_REQ_ID_BITS   8
+#define WR_IMM_BYID_REQ_ID_BIT_POS  0
+#define WR_IMM_BYID_REQ_ID_MASK   (((1u << WR_IMM_BYID_REQ_ID_BITS) - 1) << WR_IMM_BYID_REQ_ID_BIT_POS)
+#define WR_IMM_BYID_COMM_ID_BITS  16
+#define WR_IMM_BYID_COMM_ID_BIT_POS WR_IMM_BYID_REQ_ID_BITS
+#define WR_IMM_BYID_COMM_ID_MASK  (((1u << WR_IMM_BYID_COMM_ID_BITS) - 1) << WR_IMM_BYID_COMM_ID_BIT_POS)
 extern int IbCastGdrFlushDisable;
 extern bool IbCastAinicRoce;
+extern bool IbCastMultiplaneEnable;
 extern bool IbCastAinicCtsInlineData;
 extern bool IbCastOffloadEnabled;
 extern int64_t rcclParamIbCastP2pDisableCts();
+int64_t ncclParamIbCastOooRq();
 
 #define NCCL_IB_LLSTR(ll) \
   (((ll) == IBV_LINK_LAYER_INFINIBAND) ? "IB" : (((ll) == IBV_LINK_LAYER_ETHERNET) ? "RoCE" : "UNSPECIFIED"))
+
+// The alignment for IB writes that is required to make LL and LL128 protocols work
+#define IB_WRITE_CHUNK_ALIGNMENT 128
+#define IB_CAST_MAX_STACK_WRS 16
 
 // Per-Dev connection metadata
 struct ncclIbDevInfo {
@@ -192,13 +288,6 @@ struct ncclIbDevInfo {
   // remote dev info
   union ibv_gid remoteGid;
   int ibv_dev_index;
-};
-
-// Retain local RoCE address for error logging
-struct ncclIbGidInfo {
-  uint8_t link_layer;
-  union ibv_gid localGid;
-  int32_t localGidIndex;
 };
 
 #define MAX_QPS_PER_REQ 8
@@ -368,6 +457,12 @@ struct ncclIbNetCommDevBase {
   struct ncclIbGidInfo gidInfo;
 };
 
+// Snapshot the device-wide GID info into a comm's per-device base under a mutex.
+static inline void IbCastGidInfoSnapshot(struct ncclIbNetCommDevBase* base, struct ncclIbDev* ibDev) {
+  std::lock_guard<std::mutex> lock(ibDev->mutex);
+  base->gidInfo = ibDev->gidInfo;
+}
+
 struct alignas(64) ncclIbSendFifo {
   uint64_t addr;
   uint64_t size;
@@ -452,6 +547,22 @@ struct ncclIbQp {
 static_assert(NET_IB_MAX_REQUESTS <= 256,
               "request id are encoded in wr_id and we need up to 8 requests ids per completion");
 
+// A data send is two WRs unless the payload is split under the post cap. The
+// queue keeps two WRs for every other in-flight request plus enough room to
+// post one maximum-sized request and its possible signal/completion tail as a
+// single chain.
+static inline uint32_t IbCastDataSendQueueDepth(uint32_t maxPostSendBytes, uint32_t depthMultiplier = 1) {
+  const uint32_t splitDataWrs =
+      1u + (static_cast<uint32_t>(MAX_NET_SIZE) - 1u) / maxPostSendBytes;
+  const uint32_t splitWrs = splitDataWrs + 1u;
+  // The Ionic QP creator applies depthMultiplier to this result for shared QPs.
+  // Scale only the ordinary request slots; a shared physical QP still needs
+  // room for one maximum-length split chain, not one chain per logical comm.
+  const uint32_t splitWrsPerUnit =
+      (splitWrs + depthMultiplier - 1) / depthMultiplier;
+  return 2u * (NET_IB_MAX_REQUESTS - 1) + splitWrsPerUnit;
+}
+
 // Structure to describe the completion records on the sender side.
 struct ncclIbRemCompletionsRecords {
   // A "shadow" structure of the receiver's completion records in which the
@@ -483,6 +594,15 @@ struct ncclIbMrHandle {
 
 // Forward declaration
 struct ncclIbResiliency;
+
+struct IbCastQpSharingInfo {
+  uint16_t netIbCommId;
+  bool     isPrimary;
+  int      groupIdx;
+  int      remIbDevIdx;
+  int      groupNqps;
+  uint64_t peerProcTag;       // remote process identity, 0 = unknown
+};
 
 struct alignas(32) ncclIbNetCommBase {
   ncclNetVDeviceProps_t vProps;
@@ -520,6 +640,7 @@ struct alignas(32) ncclIbNetCommBase {
   int nRemDevs;
   bool remOooRq;
   bool localOooRq;
+  bool optRecvCompletion;
   int recvMatchingScheme;
   int nDataQps;
   struct ncclIbDevInfo remDevs[NCCL_IB_MAX_DEVS_PER_NIC];
@@ -534,13 +655,8 @@ struct alignas(32) ncclIbNetCommBase {
 #endif
   struct ncclIbResiliency* resiliency;
 
-  // QP Sharing fields
-  uint16_t commId;              // 0 = not shared
-  bool     isSharedQpPrimary;
-  int      sharedGroupIdx;      // -1 = not shared
-  int      remIbDevIdx;
-  int      sharedPrimaryNqps;
-  uint64_t peerProcTag;         // remote process identity, 0 = unknown
+  // QP Sharing fields — see qp_sharing.h for state query helpers
+  struct IbCastQpSharingInfo qpSharing;
 };
 
 struct ncclIbNetCommDevBase* IbCastGetNetCommDevBase(ncclIbNetCommBase* base, int devIndex);
@@ -739,8 +855,11 @@ static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0,
               "ncclIbRecvComm ctsFifo must be 32-byte aligned");
 
 ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend);
+void IbCastInitOptRecvCompletion(struct ncclIbNetCommBase* baseComm, bool useCtsOffload);
 ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm);
 ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm);
+
+bool IbCastByOrderRequested();
 
 struct ncclIbListenComm {
   int dev;
@@ -779,6 +898,8 @@ void IbCastAddEvent(struct ncclIbRequest* req, int devIndex);
 void IbCastAddEventCTS(struct ncclIbRequest* req, int devIndex);
 ncclResult_t IbCastGetGidIndex(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
                                int* gidIndex);
+ncclResult_t IbCastGidInfoQuery(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
+                                struct ncclIbGidInfo* gidInfo);
 ncclResult_t IbCastGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req);
 ncclResult_t IbCastFreeRequest(struct ncclIbRequest* r);
 
@@ -795,6 +916,8 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
 ncclResult_t IbCastDevices(int* ndev);
 ncclResult_t IbCastGetProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props);
+
+extern uint32_t IbCastMaxPostSendBytes;
 ncclResult_t IbCastListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
 ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                            ncclNetDeviceHandle_t** /*sendDevComm*/);
@@ -858,6 +981,7 @@ extern int64_t rcclParamIbQpSchedUpdateInterval();
 extern int64_t rcclParamIbQpSchedSplitDataMin();
 extern int64_t rcclParamIbQpSchedLogInterval();
 
+void IbCastReportMatchingScheme();
 #define QP_SCHED_WEIGHT_ENV_VAR "RCCL_IB_QP_SCHED_WEIGHT"
 #define QP_SCHED_WEIGHT_ENV_VAR_ALIAS "NCCL_IB_QP_SCHED_WEIGHT"
 #define QP_SCHED_LOG_PATH_ENV_VAR "RCCL_IB_QP_SCHED_LOG_PATH"

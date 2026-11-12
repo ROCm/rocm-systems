@@ -43,6 +43,7 @@ construct_spm_interface()
     cached->spm_stop                       = &aqlprofile_spm_stop;
     cached->spm_decode_stream_v1           = &aqlprofile_spm_decode_stream_v1;
     cached->spm_decode_query               = &aqlprofile_spm_decode_query;
+    cached->spm_decode_shader_engine       = &aqlprofile_spm_decode_shader_engine;
     cached->spm_is_event_supported         = &aqlprofile_spm_is_event_supported;
     cached->spm_query_agent_configurations = &aqlprofile_spm_query_agent_configurations;
 #endif

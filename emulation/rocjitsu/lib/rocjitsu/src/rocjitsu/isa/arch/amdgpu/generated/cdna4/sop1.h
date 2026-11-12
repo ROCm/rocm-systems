@@ -428,6 +428,7 @@ class SCbranchJoinSop1 : public Sop1 {
 public:
   SCbranchJoinSop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand ssrc0;
   Operand sdst_exec;
   Operand pc;

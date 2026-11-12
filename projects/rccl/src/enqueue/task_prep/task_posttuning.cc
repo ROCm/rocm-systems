@@ -60,7 +60,7 @@ static inline int postTuningFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   }
 }
 
-static void postTuningSetChunkSteps(struct ncclTaskColl* task) {
+static void postTuningSetChunkSteps(struct ncclComm* comm, struct ncclTaskColl* task) {
   switch (task->func) {
   case ncclFuncAllReduce:
     task->chunkSteps = ALLREDUCE_CHUNKSTEPS;
@@ -82,6 +82,12 @@ static void postTuningSetChunkSteps(struct ncclTaskColl* task) {
     task->chunkSteps = 1;
     task->sliceSteps = 1;
     break;
+  }
+  // RCCL: on one node the ring Simple kernels take one slice per chunk (rcclUseOneSlice), and one step on gfx950.
+  if (comm->rcclUseOneSlice && (task->func == ncclFuncAllReduce || task->func == ncclFuncAllGather ||
+                                task->func == ncclFuncReduceScatter)) {
+    if (IsArchMatch(comm->archName, "gfx950")) task->chunkSteps = 1;
+    task->sliceSteps = task->chunkSteps;
   }
 }
 
@@ -105,7 +111,10 @@ static ncclResult_t fillCollTaskFromRaw(struct ncclComm* comm, struct ncclTaskTu
   task->trafficBytes = task->count * elementSize * postTuningFuncTrafficPerByte(task->func, comm->nRanks);
   task->opHost = raw->opHost;
   task->opDev = raw->opDev;
-  postTuningSetChunkSteps(task);
+  task->acc = raw->acc;
+  task->opCount = raw->opCount;
+  postTuningSetChunkSteps(comm, task);
+  task->launchCompletionEvent = ncclCollConfigGetLaunchCompletionEvent(&raw->collConfig);
   task->eActivationMask = COMPILER_ATOMIC_LOAD(&ncclProfilerEventMask, std::memory_order_relaxed);
   task->groupApiEventHandle = nullptr;
   task->collApiEventHandle = nullptr;
@@ -149,7 +158,7 @@ static ncclResult_t postTuneP2pChannelBase(struct ncclComm* comm, int peer, bool
   return ncclSuccess;
 }
 
-static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer, bool isSendNotRecv,
+static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer, bool isSendNotRecv, ncclFunc_t collAPI,
                                                 bool* needPreconnect) {
   struct ncclKernelPlanner* planner = &comm->planner;
   uint8_t base;
@@ -161,9 +170,12 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
 
   // Mark channels that need pre-connect. planner->peers[peer].send/recvSeen is
-  // private to each comm, so we need to set it anyway.
-  (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
-  for (int c = 0; c < comm->p2pnChannelsPerPeer; c++) {
+  // private to each comm, so we need to set it anyway. Leave it clear when only
+  // some parts are connected, so a later task to this peer still connects the rest.
+  int nParts = rcclP2pTaskParts(comm, collAPI);
+  if (nParts == comm->p2pnChannelsPerPeer)
+    (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
+  for (int c = 0; c < nParts; c++) {
     int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
                                           comm->p2pChannelShiftSize);
 
@@ -203,6 +215,7 @@ static ncclResult_t fillP2pTaskFromRaw(struct ncclComm* comm, struct ncclTaskTun
   task->datatype = raw->datatype;
   task->root = raw->peer;
   task->bytes = raw->bytes;
+  task->launchCompletionEvent = raw->launchCompletionEvent;
   if (task->collAPI == ncclFuncAlltoAll || task->collAPI == ncclFuncScatter || task->collAPI == ncclFuncGather) {
     task->allowUB = false;
   } else {
@@ -333,6 +346,7 @@ static ncclResult_t postTuneRmaTaskAppend(struct ncclComm* comm, const struct nc
     return ncclInvalidArgument;
   }
 
+#if !defined(__HIP_PLATFORM_AMD__)
   int driverVersion;
   NCCLCHECK(ncclCudaDriverVersion(&driverVersion));
   if (driverVersion < 12050) {
@@ -340,10 +354,19 @@ static ncclResult_t postTuneRmaTaskAppend(struct ncclComm* comm, const struct nc
          (driverVersion % 1000) / 10);
     return ncclInvalidUsage;
   }
+#endif
 
   // Check if signal index is valid
   if (sigIdx < 0 || sigIdx >= comm->config.numRmaSig) {
     WARN("Signal index %d is invalid (must be in [0, %d))", sigIdx, comm->config.numRmaSig);
+    return ncclInvalidArgument;
+  }
+
+  // Check if context is valid: 0 <= ctx < numRmaCtx.
+  // WaitSignal carries ctx per descriptor (info/raw ctx is unused); those are
+  // validated in the descriptor loop below.
+  if (func != ncclFuncWaitSignal && (ctx < 0 || ctx >= comm->config.numRmaCtx)) {
+    WARN("Context %d is invalid (must be in [0, %d))", ctx, comm->config.numRmaCtx);
     return ncclInvalidArgument;
   }
 
@@ -416,6 +439,18 @@ static ncclResult_t postTuneRmaTaskAppend(struct ncclComm* comm, const struct nc
       if (signalDescs[i].sigIdx < 0 || signalDescs[i].sigIdx >= comm->config.numRmaSig) {
         WARN("ncclWaitSignal: descriptor %d has invalid sigIdx %d (must be in [0, %d))", i, signalDescs[i].sigIdx,
              comm->config.numRmaSig);
+        return ncclInvalidArgument;
+      }
+      if (signalDescs[i].ctx < 0 || signalDescs[i].ctx >= comm->config.numRmaCtx) {
+        WARN("ncclWaitSignal: descriptor %d has invalid context %d (must be in [0, %d))", i, signalDescs[i].ctx,
+             comm->config.numRmaCtx);
+        return ncclInvalidArgument;
+      }
+      // peer indexes signalsHost via ncclRmaSignalSlot(nRanks, sigIdx, peer). ArgsCheck never
+      // sees these descriptors (ncclWaitSignal passes root = 0).
+      if (signalDescs[i].peer < 0 || signalDescs[i].peer >= comm->nRanks) {
+        WARN("ncclWaitSignal: descriptor %d has invalid peer %d (must be in [0, %d))", i, signalDescs[i].peer,
+             comm->nRanks);
         return ncclInvalidArgument;
       }
     }
@@ -582,16 +617,40 @@ static ncclResult_t postTuneSymTasks(
   return ncclSuccess;
 }
 
+// RCCL: kernels are keyed on acc, pipeline and, for LL128 AllReduce/AllGather/Broadcast, buffer registration.
+static ncclResult_t postTuneSetDevFuncId(struct ncclTaskColl* task, bool regUsed = false, bool netRegUsed = false) {
+  int regMode =
+    ncclDevFuncIsLL128RegVariant(task->func, task->protocol) ? ncclDevFuncLL128RegMode(regUsed, netRegUsed) : 0;
+  int accFlag = (task->func == ncclFuncAllReduce && task->acc != nullptr) ? 1 : 0;
+  int id = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag,
+                         task->pipeline, regMode);
+  if (id < 0) {
+    WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
+    return ncclInvalidUsage;
+  }
+  task->devFuncId = id;
+  return ncclSuccess;
+}
+
 static ncclResult_t applyTuningToCollTask(struct ncclComm* comm, struct ncclTaskTuningInfo* tInfo,
                                           struct ncclTaskColl* task) {
   NCCLCHECK(fillCollTaskFromRaw(comm, tInfo, task));
-  if (!tInfo->tuningOut.valid) return ncclInternalError;
+  if (tInfo->tuningOut.valid != 1) return ncclInternalError;
 
   task->algorithm = tInfo->tuningOut.algo;
   task->protocol = tInfo->tuningOut.proto;
   task->nMaxChannels = tInfo->tuningOut.maxChannels;
   task->nWarps = tInfo->tuningOut.nWarps;
-  task->devFuncId = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol);
+  const size_t nBytes = ncclTypeSize(task->datatype) * ncclFuncMaxSendRecvCount(task->func, comm->nRanks, task->count);
+  rcclSetPipelining(comm, nBytes, task);
+  NCCLCHECK(postTuneSetDevFuncId(task));
+  if (!rcclIsArchSupportedForFunc(task, comm->archName)) {
+    WARN("%s: unsupported architecture (%s) for collective %s(%s, %s, %s, %s, Acc=%d, Pipeline=%d).", __func__,
+         comm->archName, ncclFuncToString(task->func), ncclAlgoToString(task->algorithm),
+         ncclProtoToString(task->protocol), ncclDevRedOpToString(task->opDev.op), ncclDatatypeToString(task->datatype),
+         (task->acc != nullptr), task->pipeline);
+    return ncclInvalidUsage;
+  }
   task->isCollnet = 0;
   task->isNvls = 0;
   switch (task->algorithm) {
@@ -646,6 +705,7 @@ static ncclResult_t postTuneLegacyEnqueueCollWork(
 
   devWork.sendbuff = (void*)task->sendbuff;
   devWork.recvbuff = (void*)task->recvbuff;
+  devWork.acc = (void*)task->acc;
   devWork.sendbuffOffset = task->sendbuffOffset;
   devWork.recvbuffOffset = task->recvbuffOffset;
   devWork.sendbuffRmtAddrs = task->sendbuffRmtAddrs;
@@ -655,6 +715,8 @@ static ncclResult_t postTuneLegacyEnqueueCollWork(
   devWork.redOpArg = task->opDev.scalarArg;
   devWork.redOpArgIsPtr = task->opDev.scalarArgIsPtr;
   devWork.oneNode = (comm->nNodes == 1);
+  devWork.rcclUseOneSlice = comm->rcclUseOneSlice;
+  devWork.opCount = task->opCount;
   devWork.netRegUsed = devWork.regUsed = 0;
   devWork.profilerEnabled = ncclProfilerPluginLoaded() && (task->eActivationMask & ncclProfileKernelCh);
   if (task->algorithm != NCCL_ALGO_NVLS && task->algorithm != NCCL_ALGO_NVLS_TREE) {
@@ -662,6 +724,9 @@ static ncclResult_t postTuneLegacyEnqueueCollWork(
   }
   if (task->regBufType & NCCL_NET_REG_BUFFER) devWork.netRegUsed = 1;
   if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER)) devWork.regUsed = 1;
+  if (ncclDevFuncIsLL128RegVariant(task->func, task->protocol)) {
+    NCCLCHECK(postTuneSetDevFuncId(task, devWork.regUsed, devWork.netRegUsed));
+  }
 
   if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
     struct ncclDevWorkCollReg workReg = {};
@@ -778,7 +843,7 @@ static ncclResult_t postTuneAllGatherVEnqueueBroadcastTask(struct ncclComm* comm
   void* regBufRecv[NCCL_MAX_LOCAL_RANKS];
   bool regNeedConnect = true;
   int collNetSupport = 0;
-  int nvlsSupport = 0;
+  int nvlsTransportEnabled = 0;
 
   memset(task, 0, sizeof(*task));
   task->func = ncclFuncBroadcast;
@@ -788,15 +853,15 @@ static ncclResult_t postTuneAllGatherVEnqueueBroadcastTask(struct ncclComm* comm
   task->root = root;
   task->datatype = ncclInt8;
   task->trafficBytes = task->count * postTuningFuncTrafficPerByte(task->func, comm->nRanks);
-  postTuningSetChunkSteps(task);
+  postTuningSetChunkSteps(comm, task);
   task->eActivationMask = COMPILER_ATOMIC_LOAD(&ncclProfilerEventMask, std::memory_order_relaxed);
   task->opHost = ncclSum;
 
   NCCLCHECK(ncclGetCollNetSupport(comm, task, &collNetSupport));
-  nvlsSupport =
-    comm->nvlsSupport && (ncclNvlsSupported(task->opDev.op, task->datatype) || task->func == ncclFuncAllGather);
-  NCCLCHECK(ncclGetAlgoInfo(comm, task, collNetSupport, nvlsSupport, 1, nullptr));
-  task->devFuncId = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol);
+  nvlsTransportEnabled = ncclNvlsTransportEnabled(comm) &&
+                         (ncclNvlsSupported(task->opDev.op, task->datatype) || task->func == ncclFuncAllGather);
+  NCCLCHECK(ncclGetAlgoInfo(comm, task, collNetSupport, nvlsTransportEnabled, 1, nullptr));
+  NCCLCHECK(postTuneSetDevFuncId(task));
   switch (task->algorithm) {
   case NCCL_ALGO_NVLS:
   case NCCL_ALGO_NVLS_TREE:
@@ -899,7 +964,7 @@ static ncclResult_t postTuneP2pTasks(
     struct ncclRawTaskSendRecv* raw = &tInfo->raw->sendRecv;
     bool isSendNotRecv = raw->func == ncclFuncSend;
 
-    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, &needPreconnect));
+    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, raw->collAPI, &needPreconnect));
   }
 
   if (needPreconnect) {

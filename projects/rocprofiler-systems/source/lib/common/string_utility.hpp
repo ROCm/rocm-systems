@@ -3,11 +3,20 @@
 
 #pragma once
 
+#include "common/result.hpp"
+
+#include <fmt/base.h>
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <concepts>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -100,6 +109,108 @@ equals_ignore_case(std::string_view lhs, std::string_view rhs) noexcept
     });
 }
 
+/// @brief Check whether a string is non-empty and consists only of ASCII digits.
+[[nodiscard]] constexpr bool
+is_numeric(std::string_view value) noexcept
+{
+    return !value.empty() &&
+           std::ranges::all_of(value, [](char chr) { return chr >= '0' && chr <= '9'; });
+}
+
+/// @brief Number of decimal digits needed to print @p value (0 -> 1).
+[[nodiscard]] constexpr size_t
+decimal_width(size_t value) noexcept
+{
+    constexpr std::size_t k_ten = 10;
+    size_t                width = 1;
+    for(; value >= k_ten; value /= k_ten)
+    {
+        ++width;
+    }
+    return width;
+}
+
+/// @brief Non-owning key/value views of a "KEY=VALUE" entry.
+struct key_value
+{
+    std::string_view key;
+    std::string_view value;
+};
+
+/// @brief Split a "KEY=VALUE" string at the first '='.
+/// @return The key/value views, or nullopt if @p entry has no '='.
+[[nodiscard]] constexpr std::optional<key_value>
+split_key_value(std::string_view entry) noexcept
+{
+    auto const eq_pos = entry.find('=');
+    if(eq_pos == std::string_view::npos)
+    {
+        return std::nullopt;
+    }
+    return key_value{ .key = entry.substr(0, eq_pos), .value = entry.substr(eq_pos + 1) };
+}
+
+/// @brief Check whether a "KEY=VALUE" entry belongs to @p key.
+[[nodiscard]] constexpr bool
+has_env_key(std::string_view entry, std::string_view key) noexcept
+{
+    return entry.starts_with(key) && entry.size() > key.size() &&
+           entry[key.size()] == '=';
+}
+
+/// @brief Why a string could not be parsed as a number.
+enum class parse_error
+{
+    empty,
+    not_a_number,
+    out_of_range
+};
+
+/// @brief Strictly parse a whole string as an arithmetic Tp.
+/// @return The value, or a parse_error: empty input, a partial or non-numeric string,
+///         or a value that does not fit in Tp.
+template <typename Tp>
+    requires std::integral<Tp> || std::floating_point<Tp>
+[[nodiscard]] inline result<Tp, parse_error>
+safe_from_chars(std::string_view number_str)
+{
+    using parse_result = result<Tp, parse_error>;
+
+    if(number_str.empty())
+    {
+        return parse_result{ failure{ parse_error::empty } };
+    }
+    const char* const end    = number_str.data() + number_str.size();
+    Tp                value  = 0;
+    const auto        parsed = std::from_chars(number_str.data(), end, value);
+    // Reject partial parses (e.g. "12.5" -> 12) by checking entire string was consumed.
+    // Checked before out-of-range so "99999999999x" is reported as not a number.
+    if(parsed.ptr != end ||
+       (parsed.ec != std::errc{} && parsed.ec != std::errc::result_out_of_range))
+    {
+        return parse_result{ failure{ parse_error::not_a_number } };
+    }
+    if(parsed.ec == std::errc::result_out_of_range)
+    {
+        return parse_result{ failure{ parse_error::out_of_range } };
+    }
+    return parse_result{ value };
+}
+
+/// @brief Strictly parse a whole string as an int. See safe_from_chars.
+[[nodiscard]] inline result<int, parse_error>
+safe_stoi(std::string_view number_str)
+{
+    return safe_from_chars<int>(number_str);
+}
+
+/// @brief Strictly parse a whole string as a long. See safe_from_chars.
+[[nodiscard]] inline result<long, parse_error>
+safe_stol(std::string_view number_str)
+{
+    return safe_from_chars<long>(number_str);
+}
+
 /// @brief Parse a string into a boolean.
 ///
 /// Leading and trailing whitespace is trimmed before interpretation. All-digit
@@ -166,6 +277,32 @@ clock_name(std::string_view value)
     return name;
 }
 
+/// @brief Strip ANSI escape (SGR/color) sequences from a string.
+/// @param value The string to strip, potentially containing "\033[...m" sequences.
+/// @return A copy of @p value with every "\033...m" escape sequence removed.
+[[nodiscard]] inline std::string
+strip_ansi(std::string_view value)
+{
+    std::string result;
+    result.reserve(value.size());
+    bool in_escape = false;
+    for(const char chr : value)
+    {
+        if(in_escape)
+        {
+            in_escape = (chr != 'm');
+            continue;
+        }
+        if(chr == '\033')
+        {
+            in_escape = true;
+            continue;
+        }
+        result += chr;
+    }
+    return result;
+}
+
 /// @brief Strip the "rocprofsys_" prefix from an environment/setting name.
 /// @param value The environment variable or setting name.
 /// @return The lowercased name with the "rocprofsys_" prefix removed, if present.
@@ -182,4 +319,41 @@ strip_rocprofsys_prefix(std::string_view value)
     return name;
 }
 
+inline constexpr size_t k_default_hex_width = 16;
+
+/// @brief Format an integral value as a zero-padded, "0x"-prefixed hex string.
+/// @param value The integral value to format.
+/// @param width The minimum number of hex digits to zero-pad to.
+/// @return @p value formatted as e.g. "0x0000000000000010" (width 16, value 16).
+template <typename Tp>
+[[nodiscard]] inline std::string
+hex_padded(Tp value, size_t width = k_default_hex_width)
+{
+    return fmt::format("0x{:0{}x}", value, width);
+}
+
 }  // namespace rocprofsys::utility::string
+
+/// Formats a parse_error as a short, user-facing description.
+template <>
+struct fmt::formatter<rocprofsys::utility::string::parse_error>
+: fmt::formatter<std::string_view>
+{
+    template <typename FormatContext>
+    auto format(rocprofsys::utility::string::parse_error err, FormatContext& ctx) const
+    {
+        using rocprofsys::utility::string::parse_error;
+        switch(err)
+        {
+            case parse_error::empty:
+                return fmt::formatter<std::string_view>::format("empty value", ctx);
+            case parse_error::not_a_number:
+                return fmt::formatter<std::string_view>::format("not a number", ctx);
+            case parse_error::out_of_range:
+                return fmt::formatter<std::string_view>::format("out of range", ctx);
+            default:
+                throw std::logic_error(
+                    fmt::format("parse_error {} not handled", static_cast<int>(err)));
+        }
+    }
+};

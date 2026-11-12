@@ -52,6 +52,7 @@ rocprofiler_add_integration_execute_test(
         --sys-trace --log-level warning -- $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 60
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPD_LOG_LEVEL=info")

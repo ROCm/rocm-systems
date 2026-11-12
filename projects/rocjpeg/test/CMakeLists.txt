@@ -147,7 +147,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/jpegDecode"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecode"
-            -i ${ROCM_PATH}/share/rocjpeg/images/ -crop 960,540,2880,1620
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -crop 480,270,1440,810
 )
 
 add_test(
@@ -159,7 +159,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/jpegDecode"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecode"
-            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt yuv_planar -crop 960,540,2880,1620
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt yuv_planar -crop 480,270,1440,810
 )
 
 add_test(
@@ -171,7 +171,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/jpegDecode"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecode"
-            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt y -crop 960,540,2880,1620
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt y -crop 480,270,1440,810
 )
 
 add_test(
@@ -183,7 +183,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/jpegDecode"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecode"
-            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb -crop 960,540,2880,1620
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb -crop 480,270,1440,810
 )
 
 add_test(
@@ -195,7 +195,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/jpegDecode"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecode"
-            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb_planar -crop 960,540,2880,1620
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb_planar -crop 480,270,1440,810
 )
 
 add_test(
@@ -267,7 +267,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecodebatched"
-            -i ${ROCM_PATH}/share/rocjpeg/images/ -crop 960,540,2880,1620
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -crop 480,270,1440,810
 )
 
 add_test(
@@ -279,7 +279,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecodebatched"
-            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt yuv_planar -crop 960,540,2880,1620
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt yuv_planar -crop 480,270,1440,810
 )
 
 add_test(
@@ -291,7 +291,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecodebatched"
-            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt y -crop 960,540,2880,1620
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt y -crop 480,270,1440,810
 )
 
 add_test(
@@ -303,7 +303,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecodebatched"
-            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb -crop 960,540,2880,1620
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb -crop 480,270,1440,810
 )
 
 add_test(
@@ -315,7 +315,7 @@ add_test(
                               "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecodebatched"
-            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb_planar -crop 960,540,2880,1620
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb_planar -crop 480,270,1440,810
 )
 
 add_test(
@@ -376,6 +376,17 @@ add_test(
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecodebatchedasync"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb
+)
+
+add_test(
+  NAME
+    jpeg-decode-caps
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeCaps"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeCaps"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodecaps"
 )
 
 add_test(
