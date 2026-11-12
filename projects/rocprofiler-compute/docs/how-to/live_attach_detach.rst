@@ -6,7 +6,7 @@
 Dynamic process attachment in ROCm Compute Profiler
 ***********************************************************
 
-Dynamic process attachment is a new feature of ROCm Compute Profiler that allows coupling with a workload process, without controlling its start or end. The application can already be running before the profiler application is invoked. The profiler simply attaches to the process, collects the required counters, and then detaches—without altering the lifecycle of the workload.
+Dynamic process attachment is a new feature of ROCm Compute Profiler that allows coupling with a workload process, without controlling its start or end. The application can already be running before the profiler application is invoked. The profiler simply attaches to the process, collects the required counters, and then detaches—without altering the lifecycle of the workload. The process can also run in a container while ROCm Compute Profiler runs on the host.
 
 A specific attach is not repeatable, and it can only collect the set of counters that the hardware is capable of capturing in a single run. As such, in the current implementation, you must specify a subset of counter groups that can be collected within one run. This can be done either by using the ``--block`` option (for example, --block 3.1.1 5.1.1) or by providing a predefined set through the use of single pass counter collection ``--set``.
 
@@ -19,7 +19,7 @@ Profiling options
 =================
 For using live attach and detach the configuration needed are:
 
-* ``--attach-pid``: Should be the process ID of the process of workload's application.
+* ``--attach-pid``: The process ID of the workload's application, as seen where ROCm Compute Profiler runs. For a process in a container that you profile from the host, use its process ID on the host.
 * ``--attach-duration-msec``: (Optional) This is for setting up the synchronized detach, and is optional. Its unit is in milliseconds. When setting up, the detach will happen after this time has elapsed since the profiling session started. For example, setting it to 60000 yields 1 minute.
 
 **Sample command:**
@@ -34,26 +34,6 @@ For using live attach and detach the configuration needed are:
 
    $ rocprof-compute profile -n try_live_attach_detach --set launch_stats -VVV --attach-pid <process id of workload> --attach-duration-msec <time before detach>
 
-Attaching to a process in a container
-=====================================
-
-ROCm Compute Profiler can run on the host and attach to a process in a
-different mount namespace. Before attaching, it checks whether the configured
-ROCprofiler-SDK tool library is visible through the target process's
-``/proc/<pid>/root`` view.
-
-If the configured path is not visible, ROCm Compute Profiler locates the
-target's mapped ``librocprofiler-register.so`` in ``/proc/<pid>/maps`` and
-searches that ROCm installation for ``librocprofiler-sdk-tool.so``. The path
-passed to the attach library is always expressed as the target process sees it,
-not as the host sees it. If neither location contains the tool library, the
-attach command exits before injecting anything into the target process.
-
-When using ``--rocprofiler-sdk-tool-path`` with a containerized target, provide
-the SDK tool's path on the host. ROCm Compute Profiler uses it when that path is
-also visible to the target, or automatically locates the corresponding tool in
-the target's ROCm installation.
-
 Analysis options
 ================
 
@@ -61,6 +41,7 @@ The analyze options for Dynamic process attachment are completely compatible wit
 
 .. note::
 
-  * To enable Dynamic process attachment, you need to have the correct supported version of :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` and ``rocprofiler-register``.
+  * To enable Dynamic process attachment, you need to have the correct supported version of :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` and ``rocprofiler-register``. Where ROCm Compute Profiler runs, for example on the host when the process is in a container, use the ROCprofiler-SDK from the same ROCm release as ROCm Compute Profiler or a newer one. An older ROCprofiler-SDK can abort at startup while it reads the counter definitions.
+  * Run ROCm Compute Profiler as the user that owns the workload process, or as root. To attach to a process in a container without root, start that process as your own user, for example with ``docker exec -u $(id -u):$(id -g)``. On distributions that enable the Yama security module, such as recent Ubuntu releases, a user other than root also needs ``sudo sysctl kernel.yama.ptrace_scope=0``. This setting applies to the whole system: any process can then trace other processes of the same user.
   * To make the Dynamic process attachment feature work, you must use ``--block`` or ``--set`` to limit the number of counter input files to ensure single application run. You can also use "--iteration-multiplexing" to ensure single application run.
   * Due to the limitation of ROCprofiler-SDK, the attach can now only happen before Heterogeneous System Architecture (HSA) initialization. HSA initialization happens before the execution of the first HIP kernel call. It only happens once to save all the kernels' function signature, such as the function name and other launch parameters. Attaching after this stage misses all crucial information of the HIP kernel and makes it impossible to store the output. This limitation will be solved in later releases of ROCprofiler-SDK.
