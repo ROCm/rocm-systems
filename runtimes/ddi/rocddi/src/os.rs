@@ -29,3 +29,8 @@ pub(crate) use platform::{
 };
 
 pub(crate) use platform::process_identity::{ProcessIdentity, note_runtime_image};
+
+// Exercise the placeholder ownership state machine on GPU-free Linux CI too.
+#[cfg(all(test, not(windows)))]
+#[path = "os/windows/memory/regions.rs"]
+mod placeholder_contract;
