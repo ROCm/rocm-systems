@@ -768,12 +768,19 @@ TEST_F(GraphRomeModelsMicrotest, ParseOptions_BadGdrLevelAndEmptyString) {
   EXPECT_EQ(4, system_->tuning);
 }
 
-// Options are split into at most 10 tokens, so pairs past the fifth are dropped.
-// Pins AICOMRCCL-3031; a fix flips this pin.
-TEST_F(GraphRomeModelsMicrotest, ParseOptions_KnownBug_IgnoresPairsPastTheFifth) {
+TEST_F(GraphRomeModelsMicrotest, ParseOptions_ReadsPairsPastTheFifth) {
   Use(XgmiSystem(1));
 
   parseOptions(system_.get(), "a=1,b=1,c=1,d=1,tuning=4,treeDefined=1");
+
+  EXPECT_EQ(4, system_->tuning);
+  EXPECT_TRUE(system_->treeDefined);
+}
+
+TEST_F(GraphRomeModelsMicrotest, ParseOptions_IgnoresAKeyWithoutAValue) {
+  Use(XgmiSystem(1));
+
+  parseOptions(system_.get(), "tuning=4,treeDefined");
 
   EXPECT_EQ(4, system_->tuning);
   EXPECT_FALSE(system_->treeDefined);
@@ -784,6 +791,9 @@ TEST_F(GraphRomeModelsMicrotest, CheckOption_ReadsABooleanByName) {
   EXPECT_FALSE(checkOption("noCpuCheck=0", "noCpuCheck"));
   EXPECT_FALSE(checkOption("tuning=2", "noCpuCheck"));
   EXPECT_FALSE(checkOption("", "noCpuCheck"));
+  EXPECT_TRUE(checkOption("a=0,b=0,c=0,d=0,e=0,noCpuCheck=1", "noCpuCheck"));
+  EXPECT_FALSE(checkOption("noCpuCheck=0,noCpuCheck=1", "noCpuCheck"));
+  EXPECT_FALSE(checkOption("noCpuCheck", "noCpuCheck"));
 }
 
 TEST_F(GraphRomeModelsMicrotest, SetPresetIdx_RejectsAConflictingModel) {
