@@ -7,6 +7,7 @@
 
 use super::reservation::replace_mapping;
 use super::{HostAllocation, Reservation, page_size};
+use crate::memory::constraints::{CheckedRange, RangeTail};
 use libc::{MAP_ANONYMOUS, MAP_PRIVATE, MAP_SHARED, PROT_NONE, PROT_READ, PROT_WRITE};
 #[cfg(test)]
 use std::ffi::c_void;
@@ -23,12 +24,7 @@ impl HostReservation {
             return Err(io::Error::from(io::ErrorKind::Unsupported));
         }
         let page = page_size()?;
-        if size == 0
-            || size % page != 0
-            || size > isize::MAX as usize
-            || !alignment.is_power_of_two()
-            || alignment < page
-        {
+        if !super::valid_host_layout(size, alignment, page) {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         let range = Reservation::new(size, alignment, (page as u64, usize::MAX as u64), false)?;
@@ -46,12 +42,7 @@ impl HostReservation {
         }
         let page = page_size()? as u64;
         let size = self.range.usable_size() as u64;
-        if length == 0
-            || offset % page != 0
-            || length % page != 0
-            || offset > size
-            || length > size - offset
-        {
+        if CheckedRange::new(size, offset, length, page, RangeTail::WholeUnits).is_none() {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         let offset =
@@ -74,9 +65,14 @@ impl HostReservation {
         let (source_address, source_length) = source.extent();
         let page = page_size()? as u64;
         if source_address == 0
-            || source_offset % page != 0
-            || source_offset > source_length
-            || length as u64 > source_length - source_offset
+            || CheckedRange::new(
+                source_length,
+                source_offset,
+                length as u64,
+                page,
+                RangeTail::WholeUnits,
+            )
+            .is_none()
         {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
