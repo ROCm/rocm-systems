@@ -192,6 +192,13 @@ bool Elf::Init() {
           LogElfError("failed in _elfio.load(%p, %lu)", _rawElfBytes, _rawElfSize);
           return false;
         }
+        // ELFIO loads an image whose section headers it cannot read (for example, a too
+        // small e_shentsize) as one with no sections. amd::Elf needs at least the section
+        // name table, so reject it here rather than in InitElf().
+        if (_elfio.sections.size() == 0) {
+          LogElfError("failed: no readable sections in %p", _rawElfBytes);
+          return false;
+        }
         // ELFIO keeps a section whose data could not be read (offset or size outside the
         // image) with no data but its header size. Reject the image instead, so callers
         // never see such a section.
