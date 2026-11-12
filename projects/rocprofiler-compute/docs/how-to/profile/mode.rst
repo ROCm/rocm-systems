@@ -417,8 +417,7 @@ rocprof-compute exits with an error:
 * **Blocks:** ``-b`` and its aliases ``--speed-of-light``, ``--memory-chart``,
   and ``--roofline``, in any combination.
 * **A metric set:** ``--set``. See :ref:`profiling-metric-sets`.
-* **Only the roofline benchmark:** ``--roofline-bench-only``. It also can't be used
-  with the deprecated ``--no-roof``. See :ref:`roofline-bench-only`.
+* **Only the roofline benchmark:** ``--roofline-bench-only``. See :ref:`roofline-bench-only`.
 
 Without any of these options, profile mode collects every block.
 
@@ -817,7 +816,7 @@ This is useful for:
 * Re-generating ``roofline.csv`` in an existing workload directory without re-profiling.
 * Running the microbenchmark on a system where only HIP is available (no rocprofiler-sdk needed).
 
-``--roofline-bench-only`` can't be used with ``-b``, its aliases, ``--set`` or ``--no-roof``.
+``--roofline-bench-only`` can't be used with ``-b``, its aliases or ``--set``.
 
 .. code-block:: shell-session
 

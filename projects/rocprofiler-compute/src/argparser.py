@@ -502,8 +502,8 @@ Examples:
             "Run roofline microbenchmark only.\n"
             "No application profiling or counter collection.\n"
             "No application run is required.\n"
-            "Cannot be used with -b, --speed-of-light, --memory-chart, --roofline,\n"
-            "--set or --no-roof."
+            "Cannot be used with -b, --speed-of-light, --memory-chart, --roofline\n"
+            "or --set."
         ),
     )
     roofline_group.add_argument(
