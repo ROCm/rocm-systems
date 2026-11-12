@@ -12,11 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
 
 import config
-from argparser import (
-    PROFILE_SELECTION_CONFLICT,
-    apply_panel_shortcuts,
-    build_parser,
-)
+from argparser import build_parser
 from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
@@ -275,14 +271,12 @@ class RocProfCompute:
             self.handle_analyze_args()
 
     def handle_profile_args(self) -> None:
-        apply_panel_shortcuts(self.__args, "filter_blocks")
         # True when only block 4 is selected, by --roofline or -b 4
-        self.__args.roof_only = self.__args.filter_blocks == ["4"]
+        self.__args.roof_only = set(self.__args.filter_blocks) == {"4"}
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
-        apply_panel_shortcuts(args, "filter_metrics")
         if args.list_stats and args.output_format in ("csv", "db"):
             console_error(
                 "--list-stats cannot be used with --output-format "
@@ -563,7 +557,10 @@ class RocProfCompute:
             ))
             > 1
         ):
-            console_error(PROFILE_SELECTION_CONFLICT)
+            console_error(
+                "Use only one of: blocks (-b, --speed-of-light, --memory-chart, "
+                "--roofline), --set, or --roofline-bench-only."
+            )
 
         if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
             console_error("--roofline-bench-only cannot be used with --no-roof.")

@@ -10,26 +10,6 @@ from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKEND
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
-# Panel ids selected by the --speed-of-light, --memory-chart and --roofline options
-PANEL_SHORTCUTS = {
-    "speed_of_light": "2",
-    "memory_chart": "3",
-    "roofline": "4",
-}
-
-# Profile options that choose what to collect. Options in the same group can be
-# combined; options from different groups cannot.
-PROFILE_SELECTION_GROUPS = (
-    ("--block", "--speed-of-light", "--memory-chart", "--roofline"),
-    ("--set",),
-    ("--roofline-bench-only",),
-)
-
-PROFILE_SELECTION_CONFLICT = (
-    "--set and --roofline-bench-only cannot be used with each other or with block "
-    "selection (--block, --speed-of-light, --memory-chart, --roofline)."
-)
-
 # Standard argparse actions that the CustomAction subclasses delegate to
 BASE_ACTIONS: Dict[str, Type[argparse.Action]] = {
     "store": argparse._StoreAction,
@@ -69,20 +49,6 @@ def non_negative_int(value: str) -> int:
             f"must be a non-negative integer (0 means all), got {parsed}"
         )
     return parsed
-
-
-def apply_panel_shortcuts(args: argparse.Namespace, dest: str) -> None:
-    """Add the --speed-of-light, --memory-chart, and --roofline panels to args.dest."""
-    selected = [
-        panel_id
-        for option, panel_id in PANEL_SHORTCUTS.items()
-        if getattr(args, option, False)
-    ]
-    if not selected:
-        return
-    blocks = list(getattr(args, dest, None) or [])
-    blocks.extend(panel_id for panel_id in selected if panel_id not in blocks)
-    setattr(args, dest, blocks)
 
 
 def add_general_group(
@@ -405,6 +371,7 @@ Examples:
         metavar="<ids>",
         nargs="+",
         type=block_token_or_alias,
+        action="extend",
         required=False,
         default=[],
         help=(
@@ -414,20 +381,23 @@ Examples:
             "(e.g. 12 13 14).\n"
             "Alternatively, specify block alias(es) for filtering.\n"
             "Aliases are arch-specific; run --list-metrics to see\n"
-            "all valid block ids and aliases.\n" + _cannot_be_used_with("--block")
+            "all valid block ids and aliases.\n"
+            "Cannot be used with --set or --roofline-bench-only."
         ),
     )
-    _add_panel_shortcut(
-        profile_group,
-        "speed_of_light",
-        "Profile the Speed of Light block.",
-        help_suffix="\n" + _cannot_be_used_with("--speed-of-light"),
+    profile_group.add_argument(
+        "--speed-of-light",
+        dest="filter_blocks",
+        action="append_const",
+        const="2",
+        help="Profile the System Speed-of-Light block. Same as -b 2.",
     )
-    _add_panel_shortcut(
-        profile_group,
-        "memory_chart",
-        "Profile the Memory Chart block.",
-        help_suffix="\n" + _cannot_be_used_with("--memory-chart"),
+    profile_group.add_argument(
+        "--memory-chart",
+        dest="filter_blocks",
+        action="append_const",
+        const="3",
+        help="Profile the Memory Chart block. Same as -b 3.",
     )
     profile_group.add_argument(
         "--list-sets",
@@ -442,7 +412,9 @@ Examples:
         help=(
             "Profile a set of metrics of topic of interest by collecting "
             "counters in a single pass.\n"
-            "For available sets, see --list-sets.\n" + _cannot_be_used_with("--set")
+            "For available sets, see --list-sets.\n"
+            "Cannot be used with -b, --speed-of-light, --memory-chart, --roofline\n"
+            "or --roofline-bench-only."
         ),
     )
     profile_group.add_argument(
@@ -499,14 +471,17 @@ Examples:
     )
 
     ## Roofline Command Line Options
-    _add_panel_shortcut(
-        roofline_group,
-        "roofline",
-        "Profile the roofline block.",
+    roofline_group.add_argument(
+        "--roofline",
         "--roof-only",
-        help_suffix=(
-            "\nUsed alone, only roofline data is profiled.\n"
-            + _cannot_be_used_with("--roofline")
+        dest="filter_blocks",
+        const="4",
+        action=DeprecatedAction,
+        base_action="append_const",
+        deprecated_names=["--roof-only"],
+        help=(
+            "Profile the roofline block. Same as -b 4.\n"
+            "Used alone, only roofline data is profiled."
         ),
     )
     roofline_group.add_argument(
@@ -522,7 +497,8 @@ Examples:
             "Run roofline microbenchmark only.\n"
             "No application profiling or counter collection.\n"
             "No application run is required.\n"
-            + _cannot_be_used_with("--roofline-bench-only", "--no-roof")
+            "Cannot be used with -b, --speed-of-light, --memory-chart, --roofline,\n"
+            "--set or --no-roof."
         ),
     )
     roofline_group.add_argument(
@@ -753,15 +729,32 @@ Examples:
         metavar="<ids>",
         nargs="+",
         type=block_token_or_alias,
+        action="extend",
         help=(
             "Specify metric id(s) or block alias(es) from --list-metrics for filtering."
         ),
     )
-    _add_panel_shortcut(
-        analyze_group, "speed_of_light", "Show the Speed of Light panel."
+    analyze_group.add_argument(
+        "--speed-of-light",
+        dest="filter_metrics",
+        action="append_const",
+        const="2",
+        help="Show the System Speed-of-Light panel. Same as -b 2.",
     )
-    _add_panel_shortcut(analyze_group, "memory_chart", "Show the Memory Chart panel.")
-    _add_panel_shortcut(analyze_group, "roofline", "Show the Roofline panel.")
+    analyze_group.add_argument(
+        "--memory-chart",
+        dest="filter_metrics",
+        action="append_const",
+        const="3",
+        help="Show the Memory Chart panel. Same as -b 3.",
+    )
+    analyze_group.add_argument(
+        "--roofline",
+        dest="filter_metrics",
+        action="append_const",
+        const="4",
+        help="Show the Roofline panel. Same as -b 4.",
+    )
     analyze_group.add_argument(
         "--gpu-id",
         dest="gpu_id",
@@ -895,51 +888,6 @@ def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
         if readme.is_file():
             return f"Agent Skills: see {readme} to install them."
     return None
-
-
-def _cannot_be_used_with(option: str, *extra_options: str) -> str:
-    """Help line listing the options from other profile selection groups."""
-    others = [
-        other
-        for group in PROFILE_SELECTION_GROUPS
-        if option not in group
-        for other in group
-    ]
-    others.extend(extra_options)
-    return f"Cannot be used with {', '.join(others[:-1])} or {others[-1]}."
-
-
-def _add_panel_shortcut(
-    group: argparse._ArgumentGroup,
-    dest: str,
-    description: str,
-    *old_names: str,
-    help_suffix: str = "",
-) -> None:
-    """Add the --speed-of-light, --memory-chart or --roofline option for dest."""
-    others = ["-b"] + [
-        "--" + other.replace("_", "-") for other in PANEL_SHORTCUTS if other != dest
-    ]
-    if old_names:
-        action_kwargs = {
-            "action": DeprecatedAction,
-            "base_action": "store_true",
-            "deprecated_names": list(old_names),
-        }
-    else:
-        action_kwargs = {"action": "store_true"}
-    group.add_argument(
-        "--" + dest.replace("_", "-"),
-        *old_names,
-        dest=dest,
-        default=False,
-        **action_kwargs,
-        help=(
-            f"{description} Same as -b {PANEL_SHORTCUTS[dest]}.\n"
-            f"Can be combined with {', '.join(others[:-1])}, and {others[-1]}."
-            + help_suffix
-        ),
-    )
 
 
 def _add_list_metrics_gfx_id(

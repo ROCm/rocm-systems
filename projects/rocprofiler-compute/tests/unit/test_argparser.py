@@ -12,12 +12,7 @@ from unittest.mock import call, patch
 import pytest
 from common import SUPPORTED_ARCHS, patch_console
 
-from argparser import (
-    CliHelpFormatter,
-    DeprecatedAction,
-    apply_panel_shortcuts,
-    build_parser,
-)
+from argparser import CliHelpFormatter, DeprecatedAction, build_parser
 
 HOME = Path.cwd()
 VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
@@ -340,48 +335,6 @@ def test_cli_help_formatter_shows_option_names_and_argument_once(
     parser = argparse.ArgumentParser(formatter_class=CliHelpFormatter)
     parser.add_argument(*option_strings, nargs=nargs, metavar=metavar)
     assert expected in parser.format_help()
-
-
-def test_profile_help_lists_conflicting_options(capsys):
-    with pytest.raises(SystemExit):
-        build_args(["profile", "--help"])
-    out = " ".join(capsys.readouterr().out.split())
-    # Options in the same group as --roofline are not listed
-    assert "Cannot be used with --set or --roofline-bench-only." in out
-    assert (
-        "Cannot be used with --block, --speed-of-light, --memory-chart, "
-        "--roofline, --set or --no-roof." in out
-    )
-
-
-# =============================================================================
-# --speed-of-light / --memory-chart / --roofline
-# =============================================================================
-
-
-@pytest.mark.parametrize(
-    ("argv", "dest", "expected"),
-    [
-        (
-            ["profile", "-b", "5", "sol", "--roofline"],
-            "filter_blocks",
-            ["5", "sol", "4"],
-        ),
-        (["profile", "-b", "4", "--roofline"], "filter_blocks", ["4"]),
-        (
-            ["analyze", "--roofline", "--speed-of-light", "--memory-chart"],
-            "filter_metrics",
-            ["2", "3", "4"],
-        ),
-        # analyze treats filter_metrics=None as "show everything"
-        (["analyze"], "filter_metrics", None),
-    ],
-    ids=["append_to_block", "no_duplicate", "all_three", "none_selected"],
-)
-def test_apply_panel_shortcuts(argv, dest, expected):
-    args = build_args(argv)
-    apply_panel_shortcuts(args, dest)
-    assert getattr(args, dest) == expected
 
 
 # =============================================================================

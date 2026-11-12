@@ -4,21 +4,29 @@
 """Unit tests for rocprof_compute_base.py."""
 
 import argparse
-from pathlib import Path
 from unittest.mock import Mock
 
 import common
 import pytest
-from common import SUPPORTED_ARCHS
 
-from argparser import build_parser
 from rocprof_compute_base import RocProfCompute
 
 MODULE = "rocprof_compute_base"
-SELECTION_CONFLICT = (
-    "--set and --roofline-bench-only cannot be used with each other or with block "
-    "selection (--block, --speed-of-light, --memory-chart, --roofline)."
-)
+# Profile selection fields that _validate_profile_mode_arguments reads
+PROFILE_SELECTION = {
+    "filter_blocks": [],
+    "set_selected": None,
+    "bench_only": False,
+    "no_roof": False,
+}
+# List option fields that _validate_list_option_exclusions reads
+LIST_OPTIONS = {
+    "debug_list_metrics_gfx_id": None,
+    "list_metrics": None,
+    "list_blocks": None,
+    "list_available_metrics": False,
+    "filter_blocks": [],
+}
 
 
 def build_args(
@@ -45,12 +53,6 @@ def rocprof_compute_with_args(args: argparse.Namespace) -> RocProfCompute:
     instance._RocProfCompute__args = args
     instance._RocProfCompute__mode = args.mode
     return instance
-
-
-def parse_profile_args(options: list[str]) -> argparse.Namespace:
-    argv = ["profile", *options, "--", "./app"]
-    parser = build_parser(Path.cwd(), SUPPORTED_ARCHS, {"ver_pretty": "test"}, argv)
-    return parser.parse_args(argv)
 
 
 @pytest.mark.parametrize(
@@ -102,84 +104,61 @@ def test_handle_analyze_args_operator_flags_require_stdout(
 
 
 @pytest.mark.parametrize(
-    ("options", "expected_roof_only"),
-    [(["--roofline"], True), (["--roofline", "-b", "2"], False)],
-    ids=["roofline_alone", "with_block"],
-)
-def test_handle_profile_args_roof_only(options, expected_roof_only):
-    """--roofline is applied as block 4 before roof_only is computed."""
-    args = parse_profile_args(options)
-    rocprof_compute_with_args(args).handle_profile_args()
-    assert args.roof_only is expected_roof_only
-
-
-@pytest.mark.parametrize(
-    ("options", "error"),
+    "selection, expect_error",
     [
-        (["-b", "2", "--roofline"], None),
-        (["--speed-of-light", "--memory-chart", "--roofline"], None),
-        (["--set", "launch_stats"], None),
-        (["--speed-of-light", "--set", "launch_stats"], SELECTION_CONFLICT),
-        (["--roofline", "--roofline-bench-only"], SELECTION_CONFLICT),
-        (["--set", "launch_stats", "--roofline-bench-only"], SELECTION_CONFLICT),
-        (["--roofline-bench-only", "--no-roof"],
-         "--roofline-bench-only cannot be used with --no-roof."),
+        ({"filter_blocks": ["2", "4"]}, False),
+        ({"set_selected": "launch_stats"}, False),
+        ({"bench_only": True}, False),
+        ({"filter_blocks": ["2"], "set_selected": "launch_stats"}, True),
+        ({"filter_blocks": ["4"], "bench_only": True}, True),
+        ({"set_selected": "launch_stats", "bench_only": True}, True),
+        ({"bench_only": True, "no_roof": True}, True),
     ],
     ids=[
-        "block_with_roofline",
-        "all_shortcuts",
-        "set_alone",
-        "shortcut_with_set",
-        "roofline_with_bench_only",
+        "blocks",
+        "set",
+        "bench_only",
+        "blocks_with_set",
+        "blocks_with_bench_only",
         "set_with_bench_only",
         "bench_only_with_no_roof",
     ],
-)  # fmt: skip
-def test_validate_profile_mode_arguments(options, error, caplog):
-    """Block selection, --set and --roofline-bench-only exclude each other."""
-    instance = rocprof_compute_with_args(parse_profile_args(options))
-    instance.handle_profile_args()
-    if error is None:
+)
+def test_validate_profile_mode_arguments(selection, expect_error):
+    """Blocks, --set and --roofline-bench-only exclude each other."""
+    args = argparse.Namespace(mode="profile", **{**PROFILE_SELECTION, **selection})
+    instance = rocprof_compute_with_args(args)
+    if expect_error:
+        with pytest.raises(SystemExit):
+            instance._validate_profile_mode_arguments()
+    else:
         instance._validate_profile_mode_arguments()
-        return
-    with pytest.raises(SystemExit):
-        instance._validate_profile_mode_arguments()
-    assert error in caplog.text
 
 
 @pytest.mark.parametrize(
-    ("options", "error"),
+    "options, named_option",
     [
-        (["--list-available-metrics", "--speed-of-light"],
-         "Cannot use --list-available-metrics with -b/--block, --speed-of-light, "
-         "--memory-chart or --roofline."),
-        (["--list-metrics", "sol", "--roofline"],
-         "Pass block ids or aliases to --list-metrics instead of -b/--block, "
-         "--speed-of-light, --memory-chart or --roofline, for example "
-         "--list-metrics sol."),
-        (["--list-blocks", "gfx950", "-b", "2"],
-         "Cannot use --list-blocks with -b/--block, --speed-of-light, "
-         "--memory-chart or --roofline."),
+        ({"debug_list_metrics_gfx_id": "gfx90a"}, "with --list-metrics"),
+        ({"list_metrics": ["sol"], "filter_blocks": ["2"]}, "--list-metrics"),
+        ({"list_blocks": "gfx950", "filter_blocks": ["2"]}, "--list-blocks"),
+        (
+            {"list_available_metrics": True, "filter_blocks": ["2"]},
+            "--list-available-metrics",
+        ),
     ],
-    ids=["list_available_metrics", "list_metrics", "list_blocks"],
-)  # fmt: skip
-def test_validate_list_option_exclusions(options, error, caplog):
-    """The error names the options the user can actually pass."""
-    instance = rocprof_compute_with_args(parse_profile_args(options))
-    instance.handle_profile_args()
-    with pytest.raises(SystemExit):
-        instance._validate_list_option_exclusions()
-    assert error in caplog.text
-
-
-def test_validate_list_option_exclusions_gfx_id_requires_list_metrics(monkeypatch):
-    """--debug-list-metrics-gfx-id is rejected without --list-metrics."""
+    ids=[
+        "gfx_id_requires_list_metrics",
+        "list_metrics_with_blocks",
+        "list_blocks_with_blocks",
+        "list_available_metrics_with_blocks",
+    ],
+)
+def test_validate_list_option_exclusions(monkeypatch, options, named_option):
+    """Each rejected combination names the list option in the error."""
     error = common.patch_console(
         monkeypatch, MODULE, "error", error=Mock(side_effect=SystemExit(1))
     )["error"]
-    args = argparse.Namespace(
-        mode=None, debug_list_metrics_gfx_id="gfx90a", list_metrics=None
-    )
+    args = argparse.Namespace(mode=None, **{**LIST_OPTIONS, **options})
     with pytest.raises(SystemExit):
         rocprof_compute_with_args(args)._validate_list_option_exclusions()
-    assert "with --list-metrics" in error.call_args.args[0]
+    assert named_option in error.call_args.args[0]
