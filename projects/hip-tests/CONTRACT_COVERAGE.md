@@ -13,7 +13,7 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 643
+contract_tests: 641
 contract_domains: 118
 declared_apis: 506
 covered_apis: 493
@@ -23,7 +23,7 @@ coverage_pct: 97.4
 
 - Snapshot date: 2026-11-02
 - Snapshot commit: `ed366b5359`
-- Contract tests: 643
+- Contract tests: 641
 - Contract domains: 118
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 506
 - Declared HIP runtime APIs directly exercised by contract tests: 493
@@ -55,7 +55,7 @@ plan or the full covered-API listing here.
 
 ## Current allowlisted gaps
 
-The checker currently reports these 11 uncovered declared APIs, all intentionally
+The checker currently reports these 13 uncovered declared APIs, all intentionally
 allowlisted:
 
 ### External-semaphore graph nodes
