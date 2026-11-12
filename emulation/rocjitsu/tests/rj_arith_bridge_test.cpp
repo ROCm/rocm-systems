@@ -3301,8 +3301,8 @@ TEST(ArithBridgeTest, PackedBinaryInlineRoundingAndStrictPolicy) {
                                             {.vdst = 1, .src0 = 242, .src1 = 257, .opsel_hi = 3});
           auto instruction = fixture.decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
-          // RDNA3 supports exact semantics without FP status; RDNA4 rejects both.
-          const bool rejected = policy_index == 2 || (policy_index == 1 && !is_rdna3);
+          // RDNA3 and RDNA4 support exact semantics without FP status, not with it.
+          const bool rejected = policy_index == 2;
           EXPECT_EQ(
               fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
               rejected);

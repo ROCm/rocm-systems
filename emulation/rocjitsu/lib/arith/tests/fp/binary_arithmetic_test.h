@@ -41,7 +41,7 @@ void check_binary64_rounding(Call call, uint64_t a, uint64_t b, const uint64_t (
 }
 
 // Test ADD/SUB/SUBREV/MUL, using the independent scalar reference at the call site.
-// FP32 and RDNA3 packed FP16 have exact numeric support on these inputs; other FP16/FP64
+// FP32 and packed FP16 have exact numeric support on these inputs; other FP16/FP64
 // and packed arithmetic support Loose/Compatibility but reject explicit exact modes. Reporting is
 // supported only by FP32 MUL, whose
 // named tests also exercise its literal exception cases separately.
@@ -107,7 +107,7 @@ void check_binary_arithmetic(Call call, Reference reference, bool gfx12,
               EXPECT_EQ(fp_status, 0x80000000U);
               continue;
             }
-            if (Width != 32 && !(Packed && !gfx12) &&
+            if (Width != 32 && !Packed &&
                 semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
               EXPECT_EQ(error, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
               result.expect_preserved(input, 0, 0);
