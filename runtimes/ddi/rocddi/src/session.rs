@@ -547,16 +547,37 @@ impl Session {
         self.registry.lifetime
     }
 
+    /// Queries request-specific memory guarantees without activating a device.
+    ///
+    /// # Errors
+    /// Rejects foreign endpoints, a closed session or unsupported constructions.
+    pub fn memory_capabilities(
+        &self,
+        endpoint: &Endpoint,
+        request: crate::memory::device::MemoryCapabilityRequest<'_>,
+    ) -> Result<crate::memory::device::DeviceMemoryCapabilities, Error> {
+        self.ensure_open()?;
+        self.driver_for_endpoint(endpoint)
+            .ok_or(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "foreign memory capability endpoint",
+            })?
+            .memory_capabilities(endpoint, request)
+    }
+
     /// Returns whether the endpoint's driver can register caller-owned host
     /// pages for the selected endpoint and context lifetime. This capability
     /// query does not activate the device; a registration can still
     /// fail if its caller pages cannot be bound by the driver.
     #[must_use]
     pub fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
-        self.ensure_open().is_ok()
-            && self
-                .driver_for_endpoint(endpoint)
-                .is_some_and(|driver| driver.supports_host_registration(endpoint))
+        self.memory_capabilities(
+            endpoint,
+            crate::memory::device::MemoryCapabilityRequest::Registration(
+                crate::memory::HostMappingPolicy::Fine,
+            ),
+        )
+        .is_ok()
     }
 }
 
@@ -965,6 +986,66 @@ mod tests {
         session.process = ProcessIdentity::with_pid_for_test(std::process::id().wrapping_add(1));
         assert!(!session.can_access_local_memory(&endpoint, &endpoint));
         session.process = ProcessIdentity::capture().unwrap();
+        session.destroy().unwrap();
+    }
+
+    #[test]
+    fn memory_capabilities_preserve_provider_constraints_through_activation() {
+        use crate::memory::device::MemoryCapabilityRequest;
+        let id = [0x33; 16];
+        let driver = TestDriver::new(id, EndpointKind::Cpu, DriverContextLifetime::Session)
+            .with_owned_allocation()
+            .with_host_registration();
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let endpoint = session.open_endpoint(id).unwrap();
+        let request = MemoryCapabilityRequest::Allocation(MemoryKind::System);
+        let capabilities = session.memory_capabilities(&endpoint, request).unwrap();
+        assert!(!capabilities.host_coherent);
+        assert!(!capabilities.queue_storage);
+        assert_eq!(capabilities.maximum_alignment, 1 << 20);
+        let device = session.activate(&endpoint).unwrap();
+        assert_eq!(device.memory_capabilities(request).unwrap(), capabilities);
+        assert_eq!(
+            device
+                .allocate(
+                    MemoryKind::System,
+                    capabilities.native.granularity,
+                    1 << 21,
+                    DeviceAccess::READ
+                )
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::Unsupported
+        );
+        assert_eq!(
+            device
+                .allocate(
+                    MemoryKind::System,
+                    capabilities.native.granularity,
+                    capabilities.native.alignment,
+                    DeviceAccess::READ | DeviceAccess::EXECUTE
+                )
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::Unsupported
+        );
+        let mut memory = device
+            .allocate(
+                MemoryKind::System,
+                capabilities.native.granularity,
+                capabilities.native.alignment,
+                DeviceAccess::READ,
+            )
+            .unwrap();
+        memory.free().unwrap();
+        drop(memory);
+        drop(device);
         session.destroy().unwrap();
     }
 
@@ -1523,7 +1604,8 @@ mod portable_tests {
                         target_profile: profile,
                         queues: GpuQueueCapabilities {
                             copy: transport,
-                            sdma: direct,
+                            sdma: direct
+                                .then_some(crate::topology::GpuUserQueueCapabilities::default()),
                             kernel_sdma: kernel,
                             ..GpuQueueCapabilities::default()
                         },

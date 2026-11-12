@@ -1213,16 +1213,38 @@ fn read_node(
                             _ => None,
                         }
                     },
-                    aql: supports_aql,
+                    aql: supports_aql.then_some(crate::topology::GpuUserQueueCapabilities {
+                        device_producer: true,
+                        multiple_producers: true,
+                        low_priority: true,
+                        high_priority: true,
+                        cooperative: gws_count != 0,
+                        dispatch_scratch: target_profile.scratch_encoding(wave_size).is_some(),
+                        minimum_ring_bytes: 1024,
+                        maximum_ring_bytes: 1 << 31,
+                        ring_alignment: 1024,
+                    }),
                     // GFX12 shares the AQL system-scope cache protocol.
                     aql_system_cache_control: cfg!(target_arch = "x86_64")
                         && supports_aql
                         && target_profile.supports_kernel_submission(),
-                    pm4: supports_pm4,
+                    pm4: supports_pm4.then_some(crate::topology::GpuUserQueueCapabilities {
+                        dispatch_scratch: target_profile.supports_pm4_dispatch_scratch(),
+                        minimum_ring_bytes: 4096,
+                        maximum_ring_bytes: 4096,
+                        ring_alignment: 4096,
+                        ..crate::topology::GpuUserQueueCapabilities::default()
+                    }),
                     kernel_pm4: supports_pm4,
                     // PM4 uses the GFX12 ACQUIRE_MEM GCR encoding.
                     pm4_system_cache_control: supports_pm4,
-                    sdma: sdma_qualified,
+                    sdma: sdma_qualified.then_some(crate::topology::GpuUserQueueCapabilities {
+                        device_producer: true,
+                        minimum_ring_bytes: 1024,
+                        maximum_ring_bytes: 1 << 31,
+                        ring_alignment: 1024,
+                        ..crate::topology::GpuUserQueueCapabilities::default()
+                    }),
                     kernel_sdma: cfg!(target_arch = "x86_64")
                         && sdma_qualified
                         && matches!(
@@ -1455,6 +1477,77 @@ mod tests {
     }
 
     #[test]
+    fn peer_memory_capabilities_keep_owner_capacity_and_unknown_cache_policy() -> Result<(), Error>
+    {
+        use crate::driver::{AllocationOperations, Driver};
+        use crate::memory::device::{MemoryCapabilityRequest, MemoryKind};
+        let fixture = Fixture::new();
+        let (root, drm) = fixture.roots();
+        let driver = super::super::LinuxKfdDriver::new();
+        let mut owner = open_endpoint(
+            &root,
+            &drm,
+            [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
+        )
+        .unwrap();
+        owner.driver_instance = driver.driver_instance();
+        owner.local_memory_bytes = 32 << 30;
+        owner.host_visible_local_memory_bytes = 16 << 30;
+        owner.host_local_cacheability = None;
+        let mut consumer = owner.clone();
+        consumer.id[0] = 2;
+        let crate::driver::EndpointSelector::LinuxKfd { mut native, .. } =
+            consumer.selector.clone()
+        else {
+            return Err(error(
+                ErrorKind::InvalidData,
+                "test fixture did not create a Linux selector",
+            ));
+        };
+        let target = KfdAccessTarget {
+            node: native.node,
+            gpu_id: native.gpu_id,
+        };
+        native.node += 1;
+        native.gpu_id += 1;
+        consumer.selector = crate::driver::EndpointSelector::LinuxKfd {
+            native,
+            access_targets: Some(Shared::new(vec![target]).unwrap()),
+        };
+        consumer.local_memory_bytes = 8 << 30;
+        consumer.host_visible_local_memory_bytes = 0;
+        let kind = MemoryKind::DeviceLocal {
+            host_visible: true,
+            coherent: false,
+            extended_coherent: false,
+            uncached: false,
+            contiguous: false,
+        };
+        for endpoint in [&owner, &consumer, &consumer, &owner] {
+            let cap = driver
+                .memory_capabilities(
+                    endpoint,
+                    MemoryCapabilityRequest::Access {
+                        owner: &owner,
+                        kind,
+                    },
+                )
+                .unwrap();
+            assert_eq!(cap.native.maximum_size, 16 << 30);
+            assert!(cap.host_visible && cap.host_writable);
+            assert_eq!(cap.host_cacheability, None);
+        }
+        let system = driver
+            .memory_capabilities(
+                &owner,
+                MemoryCapabilityRequest::Allocation(MemoryKind::System),
+            )
+            .unwrap();
+        assert_eq!(system.native.maximum_size, isize::MAX as u64);
+        Ok(())
+    }
+
+    #[test]
     fn memory_bus_facts_come_from_nonempty_vram_banks() {
         let fixture = Fixture::new();
         let properties = fixture.0.join("topology/nodes/1/properties");
@@ -1548,8 +1641,8 @@ mod tests {
             endpoint.host_local_cacheability,
             Some(HostCacheability::WriteCombined)
         );
-        assert!(gpu.queues.aql && gpu.queues.sdma);
-        assert_eq!(gpu.queues.pm4, cfg!(target_arch = "x86_64"));
+        assert!(gpu.queues.aql.is_some() && gpu.queues.sdma.is_some());
+        assert_eq!(gpu.queues.pm4.is_some(), cfg!(target_arch = "x86_64"));
         assert_eq!(
             gpu.queues.aql_system_cache_control,
             cfg!(target_arch = "x86_64")
@@ -2081,7 +2174,7 @@ mod tests {
             let endpoint = found.unwrap();
             let queues = endpoint.gpu().unwrap().queues;
             let supported = matches!(gfx, 120_000 | 120_001 | 120_500);
-            assert!(queues.aql);
+            assert!(queues.aql.is_some());
             assert_eq!(
                 queues.aql_system_cache_control,
                 cfg!(target_arch = "x86_64") && supported
@@ -2090,7 +2183,10 @@ mod tests {
                 queues.pm4_system_cache_control,
                 cfg!(target_arch = "x86_64") && supported
             );
-            assert_eq!(queues.pm4, cfg!(target_arch = "x86_64") && supported);
+            assert_eq!(
+                queues.pm4.is_some(),
+                cfg!(target_arch = "x86_64") && supported
+            );
         }
     }
 

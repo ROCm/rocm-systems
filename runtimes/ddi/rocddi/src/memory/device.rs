@@ -23,6 +23,7 @@
 
 mod access;
 mod allocation;
+mod capabilities;
 mod registered_host;
 mod types;
 mod virtual_memory;
@@ -30,6 +31,7 @@ mod virtual_memory;
 pub use access::DeviceAccess;
 pub(crate) use allocation::record_rollback;
 pub use allocation::{Allocation, LocalBackingIdentity, RollbackReport, with_rollback_report};
+pub use capabilities::{DeviceMemoryCapabilities, MemoryCapabilityRequest};
 pub use registered_host::{RegisteredHostAllocation, RegisteredHostMemory};
 pub use types::{
     AllocationInfo, HostCacheability, HostMappingPolicy, MemoryKind, VirtualAddressInfo,

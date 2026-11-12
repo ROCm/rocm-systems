@@ -248,14 +248,18 @@ impl DriverInstance {
         }
     }
 
-    pub(crate) fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
+    pub(crate) fn memory_capabilities(
+        &self,
+        endpoint: &Endpoint,
+        request: crate::memory::device::MemoryCapabilityRequest<'_>,
+    ) -> Result<crate::memory::device::DeviceMemoryCapabilities, Error> {
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
             #[cfg(target_os = "linux")]
-            Self::LinuxKfd(driver) => driver.supports_host_registration(endpoint),
+            Self::LinuxKfd(driver) => driver.memory_capabilities(endpoint, request),
             #[cfg(test)]
-            Self::Test(driver) => driver.supports_host_registration(endpoint),
+            Self::Test(driver) => driver.memory_capabilities(endpoint, request),
         }
     }
 }
@@ -326,14 +330,18 @@ impl DeviceDriverState {
     }
 
     /// Reports whether this driver can register host pages for an endpoint.
-    pub(crate) fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
+    pub(crate) fn memory_capabilities(
+        &self,
+        endpoint: &Endpoint,
+        request: crate::memory::device::MemoryCapabilityRequest<'_>,
+    ) -> Result<crate::memory::device::DeviceMemoryCapabilities, Error> {
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
             #[cfg(target_os = "linux")]
-            Self::LinuxKfd { driver, .. } => driver.supports_host_registration(endpoint),
+            Self::LinuxKfd { driver, .. } => driver.memory_capabilities(endpoint, request),
             #[cfg(test)]
-            Self::Test { driver, .. } => driver.supports_host_registration(endpoint),
+            Self::Test { driver, .. } => driver.memory_capabilities(endpoint, request),
         }
     }
 
