@@ -62,21 +62,13 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
             attribute,
             SYSTEM_INFO_TIMESTAMP | SYSTEM_INFO_TIMESTAMP_FREQUENCY
         ) {
-            let Some(gpu) = runtime.gpus.first() else {
-                return ERROR;
-            };
-            let Some(_call) = runtime.inflight.enter() else {
-                return OUT_OF_RESOURCES;
-            };
-            let device = gpu.device.clone();
-            drop(guard);
-            return match runtime::clock_counters(&device) {
+            if attribute == SYSTEM_INFO_TIMESTAMP_FREQUENCY {
                 // SAFETY: The caller supplied writable storage for this attribute.
-                Ok(counters) if attribute == SYSTEM_INFO_TIMESTAMP => unsafe {
-                    write_value(value, counters.system)
-                },
+                return unsafe { write_value(value, rocddi::host::clock::info().frequency_hz) };
+            }
+            return match rocddi::host::clock::read() {
                 // SAFETY: The caller supplied writable storage for this attribute.
-                Ok(counters) => unsafe { write_value(value, counters.system_frequency) },
+                Ok(timestamp) => unsafe { write_value(value, timestamp) },
                 Err(error) => map_error(error),
             };
         }
