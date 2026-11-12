@@ -23,13 +23,15 @@ inline constexpr char kHrrArchiveNoticeLines[] =
 HIP Record & Replay capture archive: confidential, read before sharing
 
 This archive is a record of a process's GPU work. It can contain:
-- host memory the process copied to or from the GPU or registered with HIP:
-  model weights, prompts, inputs and outputs, passwords, keys and session
-  tokens, and any personal, customer or third-party data among them;
-- compiled GPU code (code objects, fat binaries, linker inputs) and kernel
-  names, which can disclose proprietary software;
-- kernel arguments, strings passed to HIP such as file paths, device names and
-  process ids.
+- host buffers copied to or from the device, and host memory registered with
+  hipHostRegister: model weights, prompts, inputs and outputs, passwords, keys
+  and session tokens, and any personal, customer or third-party data among
+  them;
+- code objects, fat binary bundles and linker input buffers (the
+  application's GPU binary code) and kernel names, which can disclose
+  proprietary software;
+- kernel argument bytes, other structures passed into HIP calls, and strings
+  passed to HIP such as file paths, device names and process ids.
 HRR does not intentionally collect user names, host names, command-line
 arguments or environment variables as dedicated metadata. However, these
 values may still appear in captured memory or other recorded content. HRR does
