@@ -146,6 +146,9 @@ foreach(
     IN
     ITEMS
         integer_pack
+        bf16
+        float16_packed
+        nibble_pack
         byte
         float16
         float32

@@ -47,6 +47,8 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/sparse_matrix_i8_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_bf16_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/float16_conversion_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/nibble_pack_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/byte_conversion_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/conversion16_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/conversion32_x86_64_v3.cpp
@@ -140,6 +142,8 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/sparse_matrix_i8_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_bf16_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/cdna_dot_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/float16_conversion_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/nibble_pack_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/byte_conversion_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/conversion16_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/conversion32_x86_64_v4.cpp
