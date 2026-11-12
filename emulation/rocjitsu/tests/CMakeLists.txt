@@ -98,8 +98,9 @@ add_test(
 set_tests_properties(
     RocjitsuPaths
     PROPERTIES
-        PASS_REGULAR_EXPRESSION "runtime_dir: .*/paths-runtime"
-        FAIL_REGULAR_EXPRESSION "invocation_"
+        PASS_REGULAR_EXPRESSION
+            "runtime_dir: .*/paths-runtime[\r\n]+daemon_socket: .*/paths-runtime/daemon.sock[\r\n]+config_handoff_path: .*/paths-runtime/config_path"
+        FAIL_REGULAR_EXPRESSION "default_config_path|invocation_"
 )
 add_test(
     NAME RocjitsuPathsJson
@@ -110,8 +111,9 @@ add_test(
 set_tests_properties(
     RocjitsuPathsJson
     PROPERTIES
-        PASS_REGULAR_EXPRESSION "\"runtime_dir\": \".*/paths-runtime\""
-        FAIL_REGULAR_EXPRESSION "invocation_"
+        PASS_REGULAR_EXPRESSION
+            "\"runtime_dir\": \".*/paths-runtime\"(.|[\r\n])*\"config_handoff_path\": \".*/paths-runtime/config_path\""
+        FAIL_REGULAR_EXPRESSION "default_config_path|invocation_"
 )
 add_test(
     NAME RocjitsuPathsRejectsUnknown
