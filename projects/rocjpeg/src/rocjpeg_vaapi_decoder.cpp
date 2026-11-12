@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <climits>
 #include <cstdio>
 #include <stdlib.h>
 
@@ -494,7 +495,8 @@ static int GetKfdRenderNodeMinor(const std::string &pci_bus_id, const std::strin
             }
         }
         // Skip CPU nodes and the nodes of other devices.
-        if (properties["simd_count"] == 0 || properties["drm_render_minor"] == 0 || properties["domain"] != domain ||
+        if (properties["simd_count"] == 0 || properties["drm_render_minor"] == 0 || properties["drm_render_minor"] > INT_MAX ||
+            properties["domain"] != domain ||
             (properties["location_id"] & 0xFFFF) != location_id) {
             continue;
         }
@@ -605,8 +607,8 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(const std::string& device_n
         InfoLog(g_rocjpeg_logger, "Selected GPU UUID: " + gpu_uuid);
         InfoLog(g_rocjpeg_logger, "Selected GPU BDF: " + gpu_pci_bdf_lower);
         InfoLog(g_rocjpeg_logger, "Selected compute partition: " + std::string(partition_name(current_compute_partition)));
-        InfoLog(g_rocjpeg_logger, "KFD topology render node of " + gpu_pci_bdf + ": " +
-                (kfd_render_minor >= 0 ? "renderD" + std::to_string(kfd_render_minor) : std::string("not found")));
+        InfoLog(g_rocjpeg_logger, "KFD topology render node for " + gpu_pci_bdf + ": " +
+                (kfd_render_minor >= 0 ? "renderD" + std::to_string(kfd_render_minor) : std::string("none")));
         InfoLog(g_rocjpeg_logger, "Selected DRM node: " + drm_node);
     }
 
@@ -1212,7 +1214,7 @@ void RocJpegVappiDecoder::GetVisibleDevices(std::vector<int>& visible_devices_ve
     }
     // Parse via a helper that copies before tokenising, so the std::getenv()
     // buffer (the process environment) is never modified (mutating it is UB).
-    // Keep the list order: device N is the Nth device listed, not the Nth lowest index.
+    // Keep the list order: HIP numbers the listed devices in that order.
     visible_devices_vetor = ParseVisibleDevicesCsv(visible_devices);
 }
 
