@@ -68,6 +68,15 @@ amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status) {
 
   return amdsmi_status;
 }
+
+const char* esmi_status_message(esmi_status_t status) {
+  switch (status) {
+    case ESMI_HSMP_TIMEOUT:
+      return "HSMP message timed out";
+    default:
+      return esmi_get_err_msg(status);
+  }
+}
 #endif
 
 amdsmi_status_t ainic_to_amdsmi_status(smi_nic_status_t status) {

@@ -173,6 +173,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `--numa` was previously limited to Linux baremetal and passthrough guests.
   - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
 
+- **CPU APIs return `AMDSMI_STATUS_MAP_ERROR` instead of success for ESMI errors without a mapping** (behavior change).  
+  - Previously an unmapped ESMI status was reported as `AMDSMI_STATUS_SUCCESS`, and the output parameters were left unset. Callers now get an error they can act on.
+  - `ESMI_PRE_REQ_NOT_SAT`, `ESMI_SMU_BUSY` and `ESMI_METRICS_TABLE_NOT_SUPPORTED` now map to `AMDSMI_STATUS_API_FAILED`, `AMDSMI_STATUS_BUSY` and `AMDSMI_STATUS_NOT_SUPPORTED`. Before, the first two could reach callers as success and the third was never mapped.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
@@ -285,6 +289,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi` using the `amdsmi` Python library of another ROCm install**.  
   - When `ROCM_PATH` or `ROCM_HOME` named a different ROCm install, `amd-smi` loaded that install's library, so it either failed with an `AttributeError` or reported the other install's library and ROCm versions. `ROCM_PATH` and `ROCM_HOME` no longer redirect which `amdsmi` Python package `amd-smi` loads.
+
+- **Fixed `amdsmi_get_esmi_err_msg()` returning the wrong message**.  
+  - The lookup compared the AMD SMI status with ESMI enum values, so `AMDSMI_STATUS_INVAL` returned "Energy driver not present". It now looks up by the mapped status, and returns `AMDSMI_STATUS_MAP_ERROR` for an unknown status instead of success.
+  - The message for `ESMI_HSMP_TIMEOUT` was "Unknown error". It now reads "HSMP message timed out".
 
 ## amd_smi_lib for ROCm 10.1.0
 
