@@ -139,6 +139,16 @@ fill_catalog(reader_catalog_t& catalog, pytorch_store_t& store)
             stream->node_info    = node;
             stream->process_info = track->process_info;
             catalog.streams.push_back(stream);
+
+            // The stream's device is the agent its track already carries. There is no
+            // queue and no hardware track, which stream_hardware_link_t allows.
+            reader_types::stream_hardware_link_t link;
+            link.nid          = node->node_id;
+            link.pid          = track->db_pid;
+            link.stream_id    = source.stream_id;
+            link.agent_id     = source.agent_id;
+            link.stream_track = track;
+            catalog.stream_hardware_links.push_back(std::move(link));
         }
         else
         {
