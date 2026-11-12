@@ -225,6 +225,11 @@ class StageBothPhases(unittest.TestCase):
             staged = ctx / tm.OVERLAY_LIBS[phase] / ".kpack" / "rccl_gfx950.kpack"
             self.assertEqual(staged.read_bytes(), f"kpack {phase}".encode())
 
+    def test_kpack_references_without_a_kpack_fail(self):
+        with mock.patch.object(tm, "_rccl_uses_kpack", return_value=True), \
+             self.assertRaisesRegex(RuntimeError, "loads its GPU kernels from a .kpack"):
+            self.stage(tm.CANDIDATE)
+
     def test_maxtext(self):
         primus = self.root / "Primus"
         primus.mkdir()
