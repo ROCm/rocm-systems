@@ -3126,7 +3126,7 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
                 // Unscaled tiers keep their totals.
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), 256 * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce), 16 * MiB) << nRanks;
-                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAlltoAll), 64 * KiB) << nRanks;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAlltoAll), 128 * KiB) << nRanks;
             }
         },
         {});
@@ -3375,7 +3375,7 @@ ncclResult_t SelectA2A(ncclComm& comm, size_t totalBytes, rcclCollDecision& out,
 }
 } // namespace
 
-// gfx1250, message at the DDA-LL ceiling (ddaLLMax[A2A] = 64 KiB total):
+// gfx1250, message at the DDA-LL ceiling (ddaLLMax[A2A] = 128 KiB total):
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL.
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 {
