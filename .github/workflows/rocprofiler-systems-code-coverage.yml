@@ -89,7 +89,7 @@ jobs:
         git config --global --add safe.directory ${GITHUB_WORKSPACE}
         PR_SHA=$(git rev-parse HEAD)
         if [ "${{ github.event_name }}" = "pull_request" ]; then
-          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          BASE_REF="${GITHUB_BASE_REF}"
         else
           BASE_REF="develop"
         fi

@@ -65,7 +65,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout summary comment action
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             .github/actions/upsert-ci-summary-comment
@@ -108,7 +108,7 @@ jobs:
       rhel_has_system_deps: ${{ steps.rhel.outputs.has_system_deps }}
     steps:
       - name: Checkout matrix helper
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/.github/ci-build-matrix.json
@@ -228,7 +228,7 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/rocprofiler-systems
@@ -264,7 +264,7 @@ jobs:
           echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-gcc${{ matrix.gcc-toolset }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
@@ -358,7 +358,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout summary tooling
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/scripts/summarize-junit-results.py
@@ -366,7 +366,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Download build JUnit artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         continue-on-error: true
         with:
           pattern: junit-build-*
@@ -374,7 +374,7 @@ jobs:
           merge-multiple: false
 
       - name: Download sanitizer JUnit artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         continue-on-error: true
         with:
           pattern: junit-sanitizer-*
@@ -382,7 +382,7 @@ jobs:
           merge-multiple: false
 
       - name: Download sanitizer status artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         continue-on-error: true
         with:
           pattern: sanitizer-summary-*
