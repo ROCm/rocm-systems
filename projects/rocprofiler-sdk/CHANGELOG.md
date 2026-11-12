@@ -8,6 +8,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+  - rocprofiler-sdk sets `ROCPROFILER_REGISTER_LIBRARY` to its own path so that rocprofiler-register uses this instance of the library. That value is inherited by child processes, where rocprofiler-register also reads it as a request to load rocprofiler-sdk even though the child has no tool. Setting `ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD` now suppresses that, leaving the value in place for rocprofiler-register to use when a tool is present. Unset, the previous behavior is unchanged.
+
 ### Resolved issues
 
 ### Known issues

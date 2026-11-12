@@ -239,8 +239,14 @@ set_rocprofiler_register_library()
         ROCP_INFO << fmt::format("rocprofiler-sdk library path: '{}'", _this_library_path);
         // opt out of setting the ROCPROFILER_REGISTER_LIBRARY env var
         auto enabled = common::get_env("ROCPROFILER_SET_ROCPROFILER_REGISTER_LIBRARY", true);
+        // A library named by ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD says which
+        // rocprofiler-sdk instance to use without being a reason to load one into a process
+        // that has no tool. Setting ROCPROFILER_REGISTER_LIBRARY as well would restore the
+        // forced load the caller opted out of, so the caller's choice is left untouched.
+        auto _no_force_lib =
+            common::get_env("ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD", std::string{});
         // ensures that rocprofiler-register uses this library path
-        if(!_this_library_path.empty() && enabled)
+        if(!_this_library_path.empty() && enabled && _no_force_lib.empty())
         {
             // used to check for conflicts if already set
             auto _existing = common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});
@@ -1202,48 +1208,6 @@ initialize()
 }
 
 void
-register_late_client()
-{
-    // rocprofiler-register ordinarily loads this library only once
-    // dlsym(RTLD_DEFAULT, "rocprofiler_configure") resolves, so a client is visible by the
-    // time find_clients() runs. ROCPROFILER_REGISTER_LIBRARY, ROCPROFILER_REGISTER_FORCE_LOAD
-    // and ROCP_TOOL_LIBRARIES each bypass that check. The library can then be loaded by the
-    // first runtime API table registration while the client library is still being loaded,
-    // find nothing, and never look again: get_clients() memoizes find_clients() and
-    // initialize() runs under std::call_once.
-    //
-    // Look once more on each API table registration, for as long as the process has no
-    // client at all, and register whatever became visible in the meantime. A client found
-    // here takes the same path as one registering through rocprofiler_force_configure()
-    // after initialization, including the guards that make configuring it twice a no-op.
-    if(get_init_status() != 1 || get_fini_status() != 0) return;
-
-    auto* _clients = get_clients();
-    if(!_clients) return;
-
-    auto _lk = scoped_lock_t{get_registration_mutex()};
-
-    // client discovery found something, so the ordinary registration paths are live
-    if(!_clients->empty()) return;
-
-    decltype(::rocprofiler_configure)* _configure_func = nullptr;
-    *(void**) (&_configure_func) = dlsym(RTLD_DEFAULT, "rocprofiler_configure");
-
-    if(!_configure_func) return;
-
-    decltype(::rocprofiler_configure_attach)* _configure_attach_func = nullptr;
-    *(void**) (&_configure_attach_func) = dlsym(RTLD_DEFAULT, "rocprofiler_configure_attach");
-
-    ROCP_INFO << "registering client library which became visible after rocprofiler-sdk was "
-                 "initialized with zero clients";
-
-    auto& _client =
-        emplace_client(*_clients, "(late)", nullptr, _configure_func, _configure_attach_func);
-
-    client_initialize(_client);
-}
-
-void
 finalize()
 {
 #if defined(CODECOV) && CODECOV > 0
@@ -1497,11 +1461,6 @@ rocprofiler_set_api_table(const char* name,
 
     static auto _once = std::once_flag{};
     std::call_once(_once, rocprofiler::registration::initialize);
-
-    // Recover a client library which only became visible after this library was loaded.
-    // Runs before the per-runtime handling below so that the API wrappers installed there
-    // see the contexts that client creates.
-    rocprofiler::registration::register_late_client();
 
     // Verify that the rocattach table is always the first table registered when the attach
     // feature is in use. Any table registered before rocattach means modules may be initialized
