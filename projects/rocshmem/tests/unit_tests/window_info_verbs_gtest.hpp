@@ -40,7 +40,7 @@
 namespace rocshmem {
 
 // Exercises net::WindowInfoVerbs (the synchronous host-thread RMA/AMO policy
-// built on top of RmaEngine): put_bytes/get_bytes/amo_fadd/amo_cas/put_nbi+
+// built on top of RmaEngine): put/get/amo_fadd/amo_cas/put_nbi+
 // quiet, over a single-process 2-lane RC loopback on a real RoCE/IB device.
 // Converted from net_loopback_tests/wiv_test.cpp.
 //
@@ -120,8 +120,8 @@ class WindowInfoVerbsTestFixture : public ::testing::Test {
     rma_ = net::RmaEngine(&ibv_, &ctrl_, &mr_, lm_,
                           reinterpret_cast<uintptr_t>(heap_), local_mrs);
     win_ = std::make_unique<WindowInfoVerbs>(&rma_, &hdp_, /*ctx=*/0, heap_,
-                                             kHeapSize, scratch_,
-                                             scratch_lkey_);
+                                             kHeapSize, scratch_, scratch_lkey_,
+                                             /*sq_depth=*/64);
   }
 
   void TearDown() override {

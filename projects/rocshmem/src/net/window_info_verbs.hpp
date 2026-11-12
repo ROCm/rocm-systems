@@ -57,20 +57,26 @@ class WindowInfoVerbs : public WindowInfo {
    * @param amo_scratch      Registered 8-byte scratch for fetching-AMO results
    *                         (host-readable); may be null until AMO is wired.
    * @param amo_scratch_lkey lkey of @p amo_scratch.
+   * @param sq_depth         Send-queue depth of this context's QPs. Used as the
+   *                         ceiling on in-flight (unreaped) ops so a non-blocking
+   *                         burst can never overflow the SQ (which would make
+   *                         ibv_post_send return ENOMEM and later deadlock the
+   *                         completion wait).
    */
   WindowInfoVerbs(net::RmaEngine *rma, HdpPolicy *hdp, int ctx, void *heap_base,
                   size_t heap_size, void *amo_scratch,
-                  uint32_t amo_scratch_lkey)
+                  uint32_t amo_scratch_lkey, int sq_depth)
       : WindowInfo(heap_base, heap_size),
         rma_{rma},
         hdp_{hdp},
         ctx_{ctx},
         amo_scratch_{amo_scratch},
-        amo_scratch_lkey_{amo_scratch_lkey} {}
+        amo_scratch_lkey_{amo_scratch_lkey},
+        sq_depth_{sq_depth} {}
 
   // --- blocking RMA (local-complete on return) ----------------------------
-  void put_bytes(void *dst, const void *src, size_t n, int pe);
-  void get_bytes(void *dst, const void *src, size_t n, int pe);
+  void put(void *dst, const void *src, size_t n, int pe);
+  void get(void *dst, const void *src, size_t n, int pe);
 
   // --- non-blocking RMA (completed by quiet) ------------------------------
   void put_nbi(void *dst, const void *src, size_t n, int pe);
@@ -86,8 +92,17 @@ class WindowInfoVerbs : public WindowInfo {
   uint64_t amo_cas(void *dst, uint64_t cmp, uint64_t swp, int pe);
 
  private:
+  //! Reap up to a batch of completions from the context CQ, decrementing
+  //! outstanding_ for each (and logging any error status). Returns the count.
+  int reap();
   //! Spin the context CQ until all posted ops on it have completed.
   void wait_all();
+  //! Block until there is room in the SQ for at least one more post, so the
+  //! next ibv_post_send cannot fail with ENOMEM on a full queue.
+  void make_room();
+  //! Account for a just-attempted post: bump outstanding_ on success, or log a
+  //! post failure without bumping it (so wait_all/quiet can't hang forever).
+  void account_post(uint64_t wr_id);
   //! Lane (QP) for a given peer within this context.
   int lane_for(int pe) const { return rma_->lanes().lane(ctx_, pe); }
 
@@ -96,6 +111,7 @@ class WindowInfoVerbs : public WindowInfo {
   int ctx_{0};
   void *amo_scratch_{nullptr};
   uint32_t amo_scratch_lkey_{0};
+  int sq_depth_{0};
   uint64_t outstanding_{0};
   uint64_t next_id_{1};
 };

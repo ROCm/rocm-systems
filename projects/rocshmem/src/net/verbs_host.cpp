@@ -111,7 +111,8 @@ bool VerbsHost::init(HdpPolicy *hdp, void *heap_base, size_t heap_size,
   for (int c = 0; c < num_host_ctx; c++) {
     void *slot = static_cast<char *>(amo_scratch_) + static_cast<size_t>(c) * kAmoSlot;
     pool_.push_back(std::make_unique<WindowInfoVerbs>(
-        &rma_, hdp, c, heap_base, heap_size, slot, amo_scratch_lkey_));
+        &rma_, hdp, c, heap_base, heap_size, slot, amo_scratch_lkey_,
+        kSqDepth));
   }
 
   initialized_ = true;
@@ -122,6 +123,9 @@ bool VerbsHost::init(HdpPolicy *hdp, void *heap_base, size_t heap_size,
 }
 
 WindowInfoVerbs *VerbsHost::acquire() {
+  if (!initialized_) {
+    return nullptr;  // init() failed or was never called
+  }
   for (size_t i = 0; i < pool_.size(); i++) {
     if (avail_[i]) {
       avail_[i] = false;

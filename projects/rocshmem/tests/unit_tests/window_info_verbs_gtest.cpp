@@ -31,7 +31,7 @@ TEST_F(WindowInfoVerbsTestFixture, PutBytesLoopback) {
   size_t n = strlen(msg) + 1;
   memcpy(h + 0, msg, n);
 
-  win_->put_bytes(h + 2048, h + 0, n, /*pe=*/1);
+  win_->put(h + 2048, h + 0, n, /*pe=*/1);
   EXPECT_STREQ(h + 2048, msg);
 }
 
@@ -41,7 +41,7 @@ TEST_F(WindowInfoVerbsTestFixture, GetBytesLoopback) {
   size_t n = strlen(msg) + 1;
   memcpy(h + 2048, msg, n);
 
-  win_->get_bytes(h + 4096, h + 2048, n, /*pe=*/1);
+  win_->get(h + 4096, h + 2048, n, /*pe=*/1);
   EXPECT_STREQ(h + 4096, msg);
 }
 
@@ -70,4 +70,22 @@ TEST_F(WindowInfoVerbsTestFixture, PutNbiThenQuiet) {
   win_->put_nbi(h + 16384, h + 0, 4, /*pe=*/1);
   win_->quiet();
   EXPECT_STREQ(h + 16384, "NBI");
+}
+
+// Burst far more non-blocking puts than the send-queue depth (64 here). Without
+// the make_room() back-pressure in WindowInfoVerbs, ibv_post_send would return
+// ENOMEM once the SQ filled, the dropped post would still be counted
+// outstanding, and quiet() would hang forever. This must complete and land the
+// last write.
+TEST_F(WindowInfoVerbsTestFixture, PutNbiBurstExceedsSqDepthNoDeadlock) {
+  char *h = static_cast<char *>(heap_);
+  const uint32_t kPattern = 0xA5A5A5A5u;
+  *reinterpret_cast<uint32_t *>(h + 0) = kPattern;
+
+  // 256 == 4x the SQ depth configured in the fixture.
+  for (int i = 0; i < 256; ++i) {
+    win_->put_nbi(h + 16384, h + 0, sizeof(kPattern), /*pe=*/1);
+  }
+  win_->quiet();
+  EXPECT_EQ(*reinterpret_cast<uint32_t *>(h + 16384), kPattern);
 }
