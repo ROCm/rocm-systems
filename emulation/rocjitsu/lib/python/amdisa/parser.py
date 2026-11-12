@@ -1240,7 +1240,18 @@ class Parser:
                     opcodes.setdefault(name, set()).add(
                         int(xs.get_node_text(xs.get_node(form, xs.OPCODE)))
                     )
+        # The generic FLAT decoder serves multiple segments for a shared opcode.
+        # Preserve each segment's membership before discarding equivalent classes.
         primary = opcodes.get('ENC_FLAT', set())
+        if primary:
+            masks = self.isa_spec.flat_segments_by_opcode
+            for name, values in opcodes.items():
+                segment = (
+                    0 if name == 'ENC_FLAT' else self.profile.unique_flat_segment(name)
+                )
+                if segment is not None:
+                    for opcode in values:
+                        masks[opcode] = masks.get(opcode, 0) | (1 << segment)
         return {
             name: values - primary
             for name, values in opcodes.items()
@@ -1318,6 +1329,9 @@ class Parser:
                         )
                         opnd_type = self.profile.normalize_operand_type(
                             enc_name, field_name, opnd_type
+                        )
+                        opnd_type = self.profile.normalize_instruction_operand_type(
+                            inst_name, available_encodings, opnd_type
                         )
                         data_format_name = (
                             xs.get_node_text(data_format_name_node)

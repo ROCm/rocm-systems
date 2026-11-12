@@ -340,6 +340,7 @@ struct DispatchEntry {
   uint32_t wfs_per_workgroup = 1;
   uint32_t sgprs_per_wf = 104;
   uint32_t vgprs_per_wf = 256;
+  uint32_t accum_vgpr_base = 0;
   uint64_t kernarg_addr = 0;
   uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;

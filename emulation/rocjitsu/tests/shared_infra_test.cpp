@@ -2836,7 +2836,7 @@ TEST_P(CuFactoryTest, WorkgroupAdmissionTracksResidentSlotsAcrossFailureAndReuse
   config.num_wf_slots = 4;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 32;
-  config.lds_size_kb = 64;
+  config.lds_size_kb = 60;
   auto cu = amdgpu::ComputeUnitCore::create("admission_cu", config, &memory, &l2);
   ASSERT_NE(cu, nullptr);
   const auto capacity = [&](uint32_t free) {
@@ -2886,8 +2886,8 @@ TEST_P(CuFactoryTest, WorkgroupAdmissionTracksResidentSlotsAcrossFailureAndReuse
     cu->wf(slot)->halt();
     capacity(slot + 1);
   }
-  EXPECT_FALSE(cu->can_accept_workgroup(1, 64 * 1024 + 1));
-  EXPECT_TRUE(cu->can_accept_workgroup(4, 64 * 1024));
+  EXPECT_FALSE(cu->can_accept_workgroup(1, 60 * 1024 + 1));
+  EXPECT_TRUE(cu->can_accept_workgroup(4, 60 * 1024));
 }
 
 TEST_P(CuFactoryTest, WorkgroupAdmissionRetainsScratchPrefixAndScoreboardBounds) {
@@ -5421,8 +5421,11 @@ TEST(DecodeSizeTest, Cdna4UsesOpcodeOperandCapabilitiesForLiteralSelectors) {
   fork.ssrc1 = 255;
   fork.op = cdna4::kSCbranchGForkSop2;
   fork.encoding = cdna4::encoding::kSop2 >> 7;
-  const auto fork_words = std::bit_cast<std::array<uint32_t, 1>>(fork);
-  EXPECT_TRUE(decode_fails(*decoder, fork_words.data()));
+  const std::array fork_words{std::bit_cast<uint32_t>(fork), 0x100u};
+  EXPECT_TRUE(decoder->decode_window(std::span{fork_words}.first<1>()).failed());
+  auto fork_inst = decoder->decode_window(fork_words);
+  ASSERT_TRUE(fork_inst.succeeded());
+  EXPECT_EQ(fork_inst.value()->size(), sizeof(fork_words));
 
   cdna4::Vop1MachineInst v_nop{};
   v_nop.src0 = 255;
@@ -5650,6 +5653,17 @@ TEST(DppPermuteTest, Rdna4GeneratedVop1F64PreservesInactiveDestination) {
   rdna4_generated_vop1_64_preserves_inactive_destination();
 }
 
+TEST(DppPermuteTest, Cdna2DoublePrecisionFmacDppSelectsOnlyRowBroadcasts) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+  for (uint32_t lane = 0; lane < 16; ++lane) {
+    const std::array words{0x080008fau, 0xff015004u | (lane << 8)};
+    EXPECT_TRUE(decoder->decode_window(words).succeeded());
+  }
+  const std::array shift{0x080008fau, 0xff011104u};
+  EXPECT_TRUE(decoder->decode_window(shift).failed());
+}
+
 TEST(DppPermuteTest, Cdna4GeneratedVop1Dpp64InputPermutesBothWords) {
   generated_vop1_dpp64_input_permutes_both_words<Cdna4DppTraits>();
 }
@@ -5845,6 +5859,20 @@ TEST(DppPermuteTest, RdnaGeneratedVop3SdstDppMasksVectorAndScalarDestinations) {
   wave32_generated_vop3_sdst_dpp_masks_vector_and_scalar_destinations<Rdna3DppTraits>();
   wave32_generated_vop3_sdst_dpp_masks_vector_and_scalar_destinations<Rdna3_5DppTraits>();
   wave32_generated_vop3_sdst_dpp_masks_vector_and_scalar_destinations<Rdna4DppTraits>();
+}
+
+TEST(DppPermuteTest, Rdna4CompactDpp16RetainsSourceModifiers) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  auto check = [&](std::array<uint32_t, 2> words, std::string_view operands) {
+    auto inst = decoder->decode_window(words);
+    ASSERT_TRUE(inst.succeeded());
+    EXPECT_EQ(inst.value()->disassemble(),
+              std::string(operands) + " quad_perm:[0,1,2,3] row_mask:0xf bank_mask:0xf");
+  };
+  check({0x060004fa, 0xff70e401}, "v_add_f32_dpp v0, -|v1|, -v2");
+  check({0x640004fa, 0xff90e481}, "v_add_f16_dpp v0.l, -v1.h, |v2.l|");
+  check({0x7e0066fa, 0xff20e401}, "v_sqrt_f32_dpp v0, |v1|");
+  check({0x7c0404fa, 0xff10e481}, "v_cmp_eq_f16 -v1.h, v2.l");
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop3SdstDppMasksVectorAndScalarDestinations) {

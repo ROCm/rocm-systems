@@ -839,7 +839,7 @@ class _ScalarSaveexec(_ScalarDeriver):
         stmts: list[SemaNode] = []
         is_b32 = sem.data_type == 'b32'
         src_ty = SemaType.U32 if is_b32 else SemaType.U64
-        exec_id = 'EXEC' if is_b32 else 'EXEC_RAW'
+        exec_id = 'EXEC_LO' if is_b32 else 'EXEC_RAW'
 
         # Cache source and EXEC before any writes (prevents aliasing).
         src0 = _cast(_src(0), src_ty)
@@ -2795,7 +2795,7 @@ class _ScalarWrexec(_ScalarDeriver):
     def derive(sem: InstructionSemantics) -> SemaBlock:
         is_b32 = sem.data_type == 'b32'
         src_ty = SemaType.U32 if is_b32 else SemaType.U64
-        exec_id = 'EXEC' if is_b32 else 'EXEC_RAW'
+        exec_id = 'EXEC_LO' if is_b32 else 'EXEC_RAW'
         stmts = [
             _assign(_id('src', SemaType.U64), _cast(_src(0), src_ty)),
             _assign(_id('old_exec', SemaType.U64), _id(exec_id, SemaType.U64)),

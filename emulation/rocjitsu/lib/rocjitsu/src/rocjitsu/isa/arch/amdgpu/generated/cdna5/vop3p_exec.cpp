@@ -196,8 +196,8 @@ void VPkMulLoU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1, negations);
     const auto b_lo = static_cast<uint16_t>(b);
     const auto b_hi = static_cast<uint16_t>(b >> 16);
-    uint16_t rlo = static_cast<uint16_t>(static_cast<uint32_t>(a_lo) * b_lo);
-    uint16_t rhi = static_cast<uint16_t>(static_cast<uint32_t>(a_hi) * b_hi);
+    uint16_t rlo = static_cast<uint16_t>(amdgpu::vop3_integer_mul<uint16_t, 16>(a_lo, b_lo, false));
+    uint16_t rhi = static_cast<uint16_t>(amdgpu::vop3_integer_mul<uint16_t, 16>(a_hi, b_hi, false));
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }
@@ -1884,9 +1884,8 @@ void VWmmaF3216x16x128F8f6f4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto registers_for = [](uint32_t fmt) { return fmt < 2 ? 16u : fmt < 4 ? 12u : 8u; };
   amdgpu::arith::exec_dense_fp_matrix<16, 8, 32>(
       wf, rj_arith_v_wmma_f32_16x16x128_f8f6f4_w32, cu.arithmetic_flags(), controls, dst, src0_base,
-      src1_base, s2,
-      const_acc != amdgpu::ACC_FROM_VGPR ? std::optional<uint32_t>(const_acc) : std::nullopt,
-      0xffffffffULL, 0xffffffffULL, registers_for(matrix_a_fmt) * 1, registers_for(matrix_b_fmt));
+      src1_base, s2, !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt, 0xffffffffULL,
+      0xffffffffULL, registers_for(matrix_a_fmt) * 1, registers_for(matrix_b_fmt));
 }
 
 void VPkMinimum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -4091,9 +4090,8 @@ void VWmmaF3232x16x128F4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto registers_for = [](uint32_t fmt) { return fmt < 2 ? 16u : fmt < 4 ? 12u : 8u; };
   amdgpu::arith::exec_dense_fp_matrix<16, 16, 32>(
       wf, rj_arith_v_wmma_f32_32x16x128_f4_w32, cu.arithmetic_flags(), controls, dst, src0_base,
-      src1_base, s2,
-      const_acc != amdgpu::ACC_FROM_VGPR ? std::optional<uint32_t>(const_acc) : std::nullopt,
-      0xffffffffULL, 0xffffffffULL, registers_for(matrix_a_fmt) * 2, registers_for(matrix_b_fmt));
+      src1_base, s2, !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt, 0xffffffffULL,
+      0xffffffffULL, registers_for(matrix_a_fmt) * 2, registers_for(matrix_b_fmt));
 }
 
 void VPkFmaF64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -4502,13 +4500,13 @@ void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
   if (wide) {
     amdgpu::arith::exec_dense_fp_matrix<16, 16, 32>(
         wf, invoke, cu.arithmetic_flags(), controls, dst, src0_base, src1_base, s2,
-        const_acc != amdgpu::ACC_FROM_VGPR ? std::optional<uint32_t>(const_acc) : std::nullopt,
-        0xffffffffULL, 0xffffffffULL, 16, 8);
+        !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt, 0xffffffffULL, 0xffffffffULL,
+        16, 8);
   } else {
     amdgpu::arith::exec_dense_fp_matrix<16, 8, 32>(
         wf, invoke, cu.arithmetic_flags(), controls, dst, src0_base, src1_base, s2,
-        const_acc != amdgpu::ACC_FROM_VGPR ? std::optional<uint32_t>(const_acc) : std::nullopt,
-        0xffffffffULL, 0xffffffffULL, registers_for(matrix_a_fmt), registers_for(matrix_b_fmt));
+        !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt, 0xffffffffULL, 0xffffffffULL,
+        registers_for(matrix_a_fmt), registers_for(matrix_b_fmt));
   }
 }
 

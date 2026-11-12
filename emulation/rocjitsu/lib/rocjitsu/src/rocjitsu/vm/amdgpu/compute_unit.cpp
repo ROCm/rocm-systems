@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
@@ -13,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
@@ -77,7 +79,30 @@ uint32_t InstructionComputeUnitView::fetch_instruction_word(uint64_t address,
              : 0;
 }
 
+// The logical register access has already been observed. Accessing the
+// shared physical storage here must not synthesize a second notification.
+uint64_t Wavefront::read_backed_sgpr_pair(const SgprPair &pair) const {
+  const uint32_t lo = cu_.read_sgpr_storage(pair.physical_base);
+  const uint64_t hi =
+      pair.backed_words == 2 ? cu_.read_sgpr_storage(pair.physical_base + 1) : pair.local >> 32;
+  return (hi << 32) | lo;
+}
+
+void Wavefront::write_backed_sgpr_pair(SgprPair &pair, uint64_t value) {
+  cu_.sgpr_file_[pair.physical_base] = static_cast<uint32_t>(value);
+  if (pair.backed_words == 2)
+    cu_.sgpr_file_[pair.physical_base + 1] = static_cast<uint32_t>(value >> 32);
+  else
+    pair.local = value;
+}
+
+uint32_t Wavefront::debug_sgpr_capacity() const {
+  return sgpr_alloc_.count ? cu_.sgpr_allocation_block_size() : 0;
+}
+
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
+  if (reg > UINT32_MAX - sgpr_alloc_.base)
+    return 0;
   return cu_.read_sgpr_storage(sgpr_alloc_.base + reg);
 }
 
@@ -86,7 +111,8 @@ uint32_t Wavefront::debug_read_vgpr(uint32_t reg, uint32_t lane) const {
 }
 
 void Wavefront::debug_write_sgpr(uint32_t reg, uint32_t value) {
-  cu_.write_sgpr(sgpr_alloc_.base + reg, value);
+  if (reg <= UINT32_MAX - sgpr_alloc_.base)
+    cu_.write_sgpr(sgpr_alloc_.base + reg, value);
 }
 
 void Wavefront::debug_write_vgpr(uint32_t reg, uint32_t lane, uint32_t value) {
@@ -143,6 +169,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "unimplemented instruction";
   case InstructionExecutionError::DecodeFailure:
     return "instruction decode failure";
+  case InstructionExecutionError::IllegalInstruction:
+    return "illegal instruction";
   }
   return "unknown instruction execution error";
 }
@@ -380,6 +408,13 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
 Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
                                            uint32_t num_sgprs, uint32_t num_vgprs,
                                            uint32_t wave_size) {
+  return dispatch_wf_at(wf_id, wg_id, pc, num_sgprs, num_vgprs, wave_size, std::nullopt);
+}
+
+Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
+                                           uint32_t num_sgprs, uint32_t num_vgprs,
+                                           uint32_t wave_size,
+                                           std::optional<uint32_t> register_block) {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
   if (wf_id >= config_.num_wf_slots || (wfs_[wf_id] && !wfs_[wf_id]->is_halted()))
@@ -394,11 +429,12 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
       dispatched_wave_size > wf->max_wf_size_)
     return nullptr;
 
-  int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
+  int32_t sgpr_base = sgpr_file_.allocate(num_sgprs, register_block);
   if (sgpr_base < 0)
     return nullptr;
 
-  int32_t vgpr_base = allocate_vgprs(num_vgprs);
+  int32_t vgpr_base =
+      register_block ? allocate_vgprs_at(num_vgprs, *register_block) : allocate_vgprs(num_vgprs);
   if (vgpr_base < 0) {
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
@@ -416,9 +452,23 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), num_vgprs};
   wf->num_sgprs_ = num_sgprs;
   wf->num_vgprs_ = num_vgprs;
+  wf->set_accum_vgpr_base(0);
   wf->exec_ = wf->lane_mask();
   wf->vgpr_write_mask_ = wf->lane_mask();
-  wf->vcc_ = 0;
+  wf->vcc_ = {};
+  wf->scratch_base_ = {};
+  if (arch() == ROCJITSU_CODE_ARCH_CDNA3) {
+    const uint32_t end = cdna3::sgpr_alias_end(num_sgprs);
+    auto bind_pair = [&](Wavefront::SgprPair &pair, uint32_t first) {
+      if (first < config_.sgprs_per_wf) {
+        pair.physical_base = wf->sgpr_alloc_.base + first;
+        pair.backed_words = std::min(2u, config_.sgprs_per_wf - first);
+      }
+    };
+    bind_pair(wf->vcc_, cdna3::vcc_base(end));
+    bind_pair(wf->scratch_base_, cdna3::flat_scratch_base(end));
+    wf->memory_wait_shadow_.set_sgpr_alias_end(end);
+  }
   wf->m0_ = 0;
   wf->set_shader_engine_id(shader_engine_id_);
   wf->set_scratch_scoreboard_id(scratch_scoreboard_base_ + wf_id);
@@ -1331,8 +1381,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
       assert(inst.num_dst_operands() == 1);
       const auto &operand = *inst.dst_operand(0);
       if (scalar) {
-        if (const auto range = resolve_scalar_register_range(wf, operand.encoding_value(),
-                                                             std::max(1, operand.size_bits() / 32)))
+        if (const auto range = resolve_scalar_destination_range(
+                wf, operand.encoding_value(), std::max(1, operand.size_bits() / 32)))
           if (const auto reg = range->register_ref())
             scoreboard.add(
                 {sequence, wf.pc, lanes, *reg, counter, MemoryWaitScoreboard::kFullDwordByteMask});
@@ -1409,6 +1459,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   std::array<Destination, kBlockDwordCount> destinations;
   size_t num_destinations = 0;
   auto append = [&](RegisterRef reg, uint64_t lanes, uint8_t bytes) {
+    if (reg.cls == RegClass::TTMP && !wf.shader_can_write_ttmp())
+      return;
     assert(num_destinations < destinations.size());
     destinations[num_destinations++] = {reg, lanes, bytes};
   };

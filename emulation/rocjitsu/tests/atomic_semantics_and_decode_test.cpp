@@ -112,7 +112,7 @@ public:
   }
   template <size_t N>
   util::FailureOr<uint32_t> global(const std::array<uint32_t, N> &words, uint32_t old, uint32_t src,
-                                   bool buffer) {
+                                   bool buffer, bool returns = true) {
     memory.write32(0x1000, old);
     const uint32_t scalar = wave->sgpr_alloc().base;
     cu->write_sgpr(scalar + 4, 0x1000);
@@ -126,7 +126,7 @@ public:
     util::FailureOr<uint32_t> returned = run(words, src, 0, 0, 0xf0, true, buffer);
     if (returned.failed())
       return util::Result::failure();
-    EXPECT_EQ(returned.value(), old);
+    EXPECT_EQ(returned.value(), returns ? old : (buffer ? src : 0xfacebeef));
     return memory.read32(0x1000);
   }
   amdgpu::GpuMemory memory;
@@ -421,38 +421,71 @@ TEST(AtomicSemanticsAndDecode, GlobalOnlyPackedHalfAndScalarFloatAtomics) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    const bool returns = arch != ROCJITSU_CODE_ARCH_CDNA1; // MI100 forbids GLC on floating atomics.
     // Both opcodes are GLOBAL-only on these targets; FLAT and SCRATCH must reject them.
     for (uint16_t opcode : {uint16_t{77}, uint16_t{78}}) {
       for (uint8_t segment : {uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{3}}) {
         const std::array<uint32_t, 2> words = cdna1::build_flat(
-            opcode, {.seg = segment, .glc = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+            opcode, {.seg = segment, .glc = returns, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
         EXPECT_EQ(machine.decoder->decode(words.data()).failed(), segment != 2);
         if (segment != 2)
           continue;
         if (opcode == 78) {
           {
-            util::FailureOr<uint32_t> result = machine.global(words, 0x3c004000, 0x42004400, false);
+            util::FailureOr<uint32_t> result =
+                machine.global(words, 0x3c004000, 0x42004400, false, returns);
             ASSERT_TRUE(result.succeeded());
             EXPECT_EQ(result.value(), 0x44004600u);
           }
           {
-            util::FailureOr<uint32_t> result = machine.global(words, 0x00010001, 0x00010001, false);
+            util::FailureOr<uint32_t> result =
+                machine.global(words, 0x00010001, 0x00010001, false, returns);
             ASSERT_TRUE(result.succeeded());
             EXPECT_EQ(result.value(), 0x00020002u);
           }
           {
-            util::FailureOr<uint32_t> result = machine.global(words, 0x7bff7bff, 0x7bff7bff, false);
+            util::FailureOr<uint32_t> result =
+                machine.global(words, 0x7bff7bff, 0x7bff7bff, false, returns);
             ASSERT_TRUE(result.succeeded());
             EXPECT_EQ(result.value(), 0x7c007c00u);
           }
         } else {
           {
-            util::FailureOr<uint32_t> result = machine.global(words, 1, 1, false);
+            util::FailureOr<uint32_t> result = machine.global(words, 1, 1, false, returns);
             ASSERT_TRUE(result.succeeded());
             EXPECT_EQ(result.value(), 0u);
           }
         }
       }
+    }
+  }
+}
+
+TEST(AtomicSemanticsAndDecode, CdnaFlatOpcodesRespectSegment) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                              ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (uint8_t segment = 0; segment < 4; ++segment) {
+      SCOPED_TRACE(::testing::Message() << "architecture " << arch << ", segment " << +segment);
+      const auto load = cdna3::build_flat(cdna3::kFlatLoadDwordFlat, {.seg = segment});
+      const auto atomic = cdna3::build_flat(cdna3::kFlatAtomicAddFlat, {.seg = segment});
+      EXPECT_EQ(decoder->decode(load.data()).succeeded(), segment != 3);
+      EXPECT_EQ(decoder->decode(atomic.data()).succeeded(), segment == 0 || segment == 2);
+    }
+  }
+}
+TEST(AtomicSemanticsAndDecode, FlatOpcodeGapsAndIllegalSegmentsHaveDistinctDiagnostics) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA2}) {
+    auto decoder = Decoder::create(arch);
+    // FLAT_LOAD_UBYTE uses opcode 16 on CDNA3 and 8 on RDNA2. Segment 3 is reserved.
+    const uint32_t load = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 0xdc400000u : 0xdc200000u;
+    for (auto [word, expected] : {std::pair{0xdc000000u, "Invalid instruction opcode"},
+                                  std::pair{load | 0xc000u, "invalid segment"}}) {
+      const std::array<uint32_t, 2> words = {word, 0x007f0000};
+      util::StringDiagnostic error;
+      EXPECT_TRUE(decoder->decode_window(words, 0, error.emitter()).failed());
+      EXPECT_NE(error.message().find(expected), std::string::npos) << error.message();
     }
   }
 }
@@ -520,22 +553,26 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
                               ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    const std::array<uint32_t, 2> buffer =
-        cdna1::build_mubuf(78, {.glc = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
+    const bool returns = arch != ROCJITSU_CODE_ARCH_CDNA1; // MI100 forbids GLC on floating atomics.
+    const std::array<uint32_t, 2> buffer = cdna1::build_mubuf(
+        78, {.glc = returns, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
     {
-      util::FailureOr<uint32_t> result = machine.global(buffer, 0x3c004000, 0x42004400, true);
+      util::FailureOr<uint32_t> result =
+          machine.global(buffer, 0x3c004000, 0x42004400, true, returns);
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), 0x44004600u);
     }
     {
-      util::FailureOr<uint32_t> result = machine.global(buffer, 0x00010001, 0x00010001, true);
+      util::FailureOr<uint32_t> result =
+          machine.global(buffer, 0x00010001, 0x00010001, true, returns);
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), 0x00020002u);
     }
     const rocjitsu::test::RestoreRounding restore_rounding;
     std::fesetround(FE_UPWARD);
     {
-      util::FailureOr<uint32_t> result = machine.global(buffer, 0x3c003c00, 0x10001000, true);
+      util::FailureOr<uint32_t> result =
+          machine.global(buffer, 0x3c003c00, 0x10001000, true, returns);
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), 0x3c003c00u);
     }
@@ -549,12 +586,14 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
       const uint32_t three_four = bf16 ? 0x40404080u : 0x42004400u;
       const uint32_t four_six = bf16 ? 0x408040c0u : 0x44004600u;
       {
-        util::FailureOr<uint32_t> result = machine.global(global, one_two, three_four, false);
+        util::FailureOr<uint32_t> result =
+            machine.global(global, one_two, three_four, false, returns);
         ASSERT_TRUE(result.succeeded());
         EXPECT_EQ(result.value(), four_six);
       }
       {
-        util::FailureOr<uint32_t> result = machine.global(global, 0x00010001, 0x00010001, false);
+        util::FailureOr<uint32_t> result =
+            machine.global(global, 0x00010001, 0x00010001, false, returns);
         ASSERT_TRUE(result.succeeded());
         EXPECT_EQ(result.value(), 0x00020002u);
       }
@@ -734,11 +773,10 @@ protected:
     case ROCJITSU_CODE_ARCH_CDNA1:
       if (buffer)
         words = cdna1::build_mubuf(cdna1::kBufferAtomicAddF32Mubuf,
-                                   {.glc = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
+                                   {.vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
       else
-        words =
-            cdna1::build_flat(cdna1::kGlobalAtomicAddF32Flat,
-                              {.seg = 2, .glc = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+        words = cdna1::build_flat(cdna1::kGlobalAtomicAddF32Flat,
+                                  {.seg = 2, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
       break;
     case ROCJITSU_CODE_ARCH_CDNA2:
       if (buffer)
@@ -866,7 +904,10 @@ protected:
     wave_->set_mode_raw(mode ^ 0xf0);
     amdgpu::GlobalMemPipeline pipeline(nullptr, &cache_);
     pipeline.issue(instruction.release(), *wave_);
-    EXPECT_EQ(compute_unit_->read_vgpr(base_ + (buffer ? 0 : 6), 0), old_bits);
+    // MI100 floating atomics only support the non-returning encoding.
+    const auto expected =
+        GetParam() == ROCJITSU_CODE_ARCH_CDNA1 ? (buffer ? source_bits : 0xbadu) : old_bits;
+    EXPECT_EQ(compute_unit_->read_vgpr(base_ + (buffer ? 0 : 6), 0), expected);
     return memory_.read32(kAddress);
   }
 

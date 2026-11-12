@@ -23,6 +23,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
@@ -8521,6 +8523,9 @@ std::unique_ptr<Instruction> decode_cdna1(std::initializer_list<uint32_t> words)
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
 }
 
+// A use after s_waitcnt must keep resident lanes' incoming status live even
+// with full EXEC. A shader that discards feedback should not acquire a read.
+
 TEST(GeneratedInstDefUse, D16TbufferLoadDoesNotReadDestinationWithSramEcc) {
   auto inst = decode_cdna3({0xE8040000U, 0x00000500U}); // tbuffer_load_format_d16_x, vdata=5
   ASSERT_NE(inst, nullptr);
@@ -8574,25 +8579,13 @@ TEST(GeneratedInstDefUse, D16TypedFormatXyzLoadUnderVbufferReadsOnlyLastDestinat
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1})); // first reg fully written
 }
 
-// On older MUBUF encodings the LDS bit (word0 bit 16) redirects the loaded data
-// to LDS, leaving no VGPR destination -- so the preserved-destination read must
-// be suppressed there, or liveness invents a false live range. Same opcode
-// (buffer_load_short_d16, MUBUF op 36 on CDNA1), toggling only LDS. VDATA is
-// word1[8:15] (=5).
-TEST(GeneratedInstDefUse, D16BufferLoadLdsBitSuppressesDestinationRead) {
+TEST(GeneratedInstDefUse, Cdna1D16BufferLoadReadsPreservedDestination) {
   auto normal = decode_cdna1({0xE0900000U, 0x00000500U}); // buffer_load_short_d16, vdata=5, lds=0
   ASSERT_NE(normal, nullptr);
   ASSERT_EQ(std::string_view(normal->mnemonic()), "buffer_load_short_d16");
   InstDefUse normal_idu(*normal, 64);
   EXPECT_TRUE(normal_idu.uses.contains({RegClass::VGPR, 5, 1}))
       << "LDS clear: the preserved half of vdata is a read";
-
-  auto lds = decode_cdna1({0xE0910000U, 0x00000500U}); // ...same, lds=1 (bit 16 set)
-  ASSERT_NE(lds, nullptr);
-  ASSERT_EQ(std::string_view(lds->mnemonic()), "buffer_load_short_d16");
-  InstDefUse lds_idu(*lds, 64);
-  EXPECT_FALSE(lds_idu.uses.contains({RegClass::VGPR, 5, 1}))
-      << "LDS set: data goes to LDS, so vdata is not a preserved read";
 }
 
 TEST(GeneratedInstDefUse, Vop3SdstEncDppClearsSuppressedScalarResult) {

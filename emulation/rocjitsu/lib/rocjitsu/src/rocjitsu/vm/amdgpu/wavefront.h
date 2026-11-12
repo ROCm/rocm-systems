@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/base/api.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
@@ -17,6 +18,7 @@
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 #include "rocjitsu/vm/thread_context.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -29,6 +31,9 @@
 
 namespace rocjitsu {
 class ExecutionPluginGroup;
+namespace config {
+class Gfx10CheckpointResources;
+} // namespace config
 
 namespace amdgpu {
 
@@ -59,6 +64,7 @@ enum class InstructionExecutionError : uint8_t {
   InvalidRegisterAccess,
   UnimplementedInstruction,
   DecodeFailure,
+  IllegalInstruction,
 };
 
 /// @brief Allocation slice within a register file.
@@ -125,9 +131,38 @@ public:
   /// @returns Per-dispatch SGPR allocation count.
   uint32_t num_sgprs() const { return num_sgprs_; }
 
+  /// CDNA1–4 allocate ordinary SGPRs in 16-register blocks.
+  static constexpr uint32_t rounded_sgpr_count(uint32_t requested, uint32_t capacity) {
+    const uint64_t rounded = (uint64_t{requested} + 15) & ~uint64_t{15};
+    return static_cast<uint32_t>(std::min<uint64_t>(rounded, capacity));
+  }
+
+  bool exceeds_rounded_sgpr_allocation(uint32_t index, uint32_t width = 1) const {
+    if (!arch_is_cdna_4_or_lower(cu().arch()))
+      return false;
+    const auto count = rounded_sgpr_count(num_sgprs_, cu().sgprs_per_wf());
+    return !RegAllocation{0, count}.contains(index, width);
+  }
+
   /// @brief Return the number of allocated vector registers.
   /// @returns Per-dispatch VGPR allocation count.
   uint32_t num_vgprs() const { return num_vgprs_; }
+  uint32_t accum_vgpr_base() const { return accum_vgpr_base_; }
+  void set_accum_vgpr_base(uint32_t base) { accum_vgpr_base_ = base; }
+
+  /// GFX90A places AccVGPRs after this many ordinary VGPRs in the unified allocation.
+  void set_accum_offset(uint32_t offset) { set_accum_vgpr_base(offset); }
+  /// Architectural VGPR or AccVGPR range in the wave's logical register file. CDNA2–4
+  /// descriptors split the total allocation at ACCUM_OFFSET; direct dispatch can omit it.
+  RegAllocation vgpr_bank(bool acc) const {
+    const auto ordinary = accum_vgpr_base_ ? std::min(num_vgprs_, accum_vgpr_base_) : num_vgprs_;
+    const auto count = acc && accum_vgpr_base_ ? num_vgprs_ - ordinary : ordinary;
+    return {acc ? ACC_VGPR_OFFSET : 0u, std::min(count, ACC_VGPR_OFFSET)};
+  }
+  bool unified_vgpr_range_is_allocated(uint32_t index, uint32_t words) const {
+    return vgpr_bank(index >= ACC_VGPR_OFFSET).contains(index, words);
+  }
+  bool memory_destination_out_of_range(const Instruction &inst) const;
 
   /// @brief Read the raw status register value.
   /// @returns Status register as a raw uint32_t.
@@ -415,6 +450,18 @@ public:
   /// @brief Return the VGPR register file allocation.
   /// @returns Const reference to the VGPR allocation slice.
   const RegAllocation &vgpr_alloc() const { return vgpr_alloc_; }
+  /// Check vector destination tuples against the dispatched wave's logical register count.
+  bool valu_destinations_allocated(const Instruction &inst) const;
+
+  /// Whether every decoded VGPR result lies in the dispatched wave's allocation.
+  bool vgpr_destinations_allocated(const Instruction &inst) const;
+
+  /// VALU issue, including any scalar side results, depends on its destination allocation.
+  bool discards_valu_result(const Instruction &inst) const;
+
+  /// Active lanes for memory planning, including GFX10 destination suppression.
+  uint64_t memory_exec(const Instruction &inst) const;
+  void observe_lds_direct_read(uint32_t address, uint32_t bytes, uint32_t lane) const;
 
   /// @brief Return the instruction-facing compute-unit service view.
   /// @returns Narrow view over the owning compute unit.
@@ -444,7 +491,13 @@ public:
   /// @brief Write both architectural EXEC words as a scalar instruction result.
   void write_exec(uint64_t val) { exec_ = val; }
 
-  /// @brief Set the raw architectural EXEC register pair.
+  /// Write only EXEC_LO, including when both halves contain active lanes.
+  void write_exec_lo(uint32_t val) { exec_ = (exec_ & 0xffffffff00000000ULL) | val; }
+
+  /// Write only EXEC_HI, including when it is scalar scratch in wave32.
+  void write_exec_hi(uint32_t val) { exec_ = (exec_ & 0xffffffffu) | (uint64_t{val} << 32); }
+
+  /// Restore raw EXEC without recording an instruction write.
   void set_exec_raw(uint64_t val) { exec_ = val; }
 
   /// @brief Return the execution-local mask applied to VGPR write effects.
@@ -459,21 +512,23 @@ public:
 
   /// @brief Return the raw architectural VCC register pair.
   /// @returns Raw VCC register value, including non-lane bits in wave32 mode.
-  uint64_t vcc() const { return vcc_; }
+  uint64_t vcc() const { return read_sgpr_pair(vcc_); }
 
   /// @brief Return the active-lane portion of the VCC register pair.
   /// @returns VCC mask with non-lane bits cleared.
-  uint64_t vcc_mask() const { return vcc_ & lane_mask(); }
+  uint64_t vcc_mask() const { return vcc() & lane_mask(); }
 
   /// @brief Set the active-lane portion of the VCC register pair.
   /// @param val New VCC mask value.
   ///
   /// Wave32 leaves VCC_HI available as scalar state. Mask-producing writes
   /// must therefore preserve the non-lane bits, matching set_exec().
-  void set_vcc(uint64_t val) { vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask()); }
+  void set_vcc(uint64_t val) {
+    set_vcc_raw(wf_size_ == 64 ? val : (vcc() & ~lane_mask()) | (val & lane_mask()));
+  }
 
   /// @brief Set the raw architectural VCC register pair.
-  void set_vcc_raw(uint64_t val) { vcc_ = val; }
+  void set_vcc_raw(uint64_t val) { write_sgpr_pair(vcc_, val); }
 
   /// @brief Commit a wave-sized implicit VCC result.
   /// @details Vector mask-producing instructions write only the lanes present
@@ -506,6 +561,9 @@ public:
 
   /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT
   /// in each arch's isa.h, which all spell it member<13, 13>.
+  static constexpr uint32_t kStatusInTgMask = 1u << 11;
+  static constexpr uint32_t kStatusPrivMask = 1u << 5;
+  static constexpr uint32_t kStatusFatalHaltMask = 1u << 23;
   static constexpr uint32_t kStatusHaltMask = 1u << 13;
 
   bool dx10_clamp() const { return (mode_raw_ & DX10_CLAMP_BIT) != 0; }
@@ -545,11 +603,11 @@ public:
 
   /// @brief Return the per-wavefront scratch (private segment) base address.
   /// @returns Byte address in GPU memory where this wavefront's scratch starts.
-  uint64_t scratch_base() const { return scratch_base_; }
+  uint64_t scratch_base() const { return read_sgpr_pair(scratch_base_); }
 
   /// @brief Set the per-wavefront scratch base address.
   /// @param val Scratch base byte address (set at dispatch by CP).
-  void set_scratch_base(uint64_t val) { scratch_base_ = val; }
+  void set_scratch_base(uint64_t val) { write_sgpr_pair(scratch_base_, val); }
 
   /// @brief Return the per-lane private scratch allocation size in bytes.
   uint32_t scratch_lane_size() const { return scratch_lane_size_; }
@@ -823,6 +881,8 @@ public:
     instruction_execution_error_detail_ = nullptr;
   }
 
+  void begin_instruction_execution() { clear_instruction_execution_error(); }
+
   // -- KFD debugger (trap) state --
   //
   // These model the wave-level state the AMD trap handler maintains for
@@ -851,6 +911,18 @@ public:
   /// @brief Whether the wave is currently fetching from its configured TBA.
   bool in_trap_handler() const { return in_trap_handler_; }
   void set_in_trap_handler(bool value) { in_trap_handler_ = value; }
+  bool shader_can_write_ttmp() const {
+    return in_trap_handler() || (status_raw() & kStatusPrivMask);
+  }
+  bool shader_can_access_ttmp() const {
+    const auto arch = cu().arch();
+    return (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4 &&
+            arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
+           in_trap_handler() || (status_raw() & kStatusPrivMask);
+  }
+  void set_user_priority(uint32_t priority) {
+    set_status_raw((status_raw() & ~(3u << 3)) | ((priority & 3u) << 3));
+  }
 
   bool trap_interrupt_sent() const { return trap_interrupt_sent_; }
   void set_trap_interrupt_sent(bool value) { trap_interrupt_sent_ = value; }
@@ -977,6 +1049,9 @@ public:
   /// when the resulting index is outside the physical register file.
   uint32_t debug_read_sgpr(uint32_t reg) const;
 
+  /// Number of physical SGPRs backed by this live wave's simulator block.
+  uint32_t debug_sgpr_capacity() const;
+
   /// @brief Read a VGPR lane relative to this wave's physical register base.
   /// @details Reads storage without notifying execution plugins. Returns zero
   /// for an index outside the physical register file or a lane outside the
@@ -1100,12 +1175,13 @@ public:
     cluster_size_ = 1;
     num_sgprs_ = 0;
     num_vgprs_ = 0;
+    accum_vgpr_base_ = 0;
     sgpr_alloc_ = {};
     vgpr_alloc_ = {};
     wf_size_ = default_wf_size_;
     exec_ = lane_mask();
     vgpr_write_mask_ = lane_mask();
-    vcc_ = 0;
+    vcc_ = {};
     m0_ = 0;
     set_mode_raw(0);
     setreg_vgpr_msb_hazard_ = false;
@@ -1114,7 +1190,7 @@ public:
     gfx12_trap_ctrl_raw_ = 0;
     gfx1250_xnack_state_priv_raw_ = 0;
     gfx1250_xnack_mask_raw_ = 0;
-    scratch_base_ = 0;
+    scratch_base_ = {};
     scratch_lane_size_ = 0;
     scratch_scoreboard_id_ = 0;
     shader_engine_id_ = 0;
@@ -1207,6 +1283,7 @@ protected:
   uint32_t default_wf_size_ = 0; ///< ISA default wavefront width.
   uint32_t max_wf_size_ = 0;     ///< Maximum wavefront width supported by the ISA.
   uint32_t num_sgprs_ = 0;       ///< Allocated scalar registers (set at dispatch).
+  uint32_t accum_vgpr_base_ = 0; ///< CDNA4 descriptor split. Zero for descriptor-less waves.
   uint32_t num_vgprs_ = 0;       ///< Allocated vector registers (set at dispatch).
   uint32_t max_sgprs_ = 0;       ///< ISA maximum SGPRs per wavefront.
   uint32_t max_vgprs_ = 0;       ///< ISA maximum VGPRs per wavefront.
@@ -1225,8 +1302,27 @@ private:
 
   uint64_t exec_ = ~0ULL;            ///< EXEC mask -- one bit per lane (1 = active).
   uint64_t vgpr_write_mask_ = ~0ULL; ///< Execution-local architectural and plugin write mask.
-  uint64_t vcc_ = 0;                 ///< Vector condition code (per-lane comparison result).
-  uint32_t m0_ = 0;                  ///< M0 special register (misc addressing).
+  // A synthetic CU's register block can end within or before an alias.
+  // Keep the unbacked part of that register in the wave itself.
+  struct SgprPair {
+    uint64_t local = 0;
+    uint32_t physical_base = 0;
+    uint8_t backed_words = 0;
+  };
+  uint64_t read_sgpr_pair(const SgprPair &pair) const {
+    return pair.backed_words ? read_backed_sgpr_pair(pair) : pair.local;
+  }
+  void write_sgpr_pair(SgprPair &pair, uint64_t value) {
+    if (pair.backed_words)
+      write_backed_sgpr_pair(pair, value);
+    else
+      pair.local = value;
+  }
+  uint64_t read_backed_sgpr_pair(const SgprPair &pair) const;
+  void write_backed_sgpr_pair(SgprPair &pair, uint64_t value);
+  SgprPair vcc_;
+  uint32_t m0_ = 0; ///< M0 special register (misc addressing).
+  uint32_t ib_sts2_gfx11_ = 0;
   uint32_t status_raw_ = 0;          ///< STATUS register state.
   uint32_t mode_raw_ = 0;            ///< MODE register state.
   bool mode_has_gpr_idx_en_ = false; ///< True when MODE[27] is GPR_IDX_EN.
@@ -1240,7 +1336,7 @@ private:
   uint32_t gfx12_trap_ctrl_raw_ = 0;
   uint32_t gfx1250_xnack_state_priv_raw_ = 0;
   uint32_t gfx1250_xnack_mask_raw_ = 0;
-  uint64_t scratch_base_ = 0;      ///< Per-wavefront scratch (private segment) base address.
+  SgprPair scratch_base_;          ///< Per-wavefront scratch (private segment) base address.
   uint32_t scratch_lane_size_ = 0; ///< Per-lane private scratch allocation size in bytes.
   /// Scratch slot within @ref shader_engine_id_ (debugger private-memory mapping).
   uint32_t scratch_scoreboard_id_ = 0;
@@ -1327,9 +1423,11 @@ private:
   std::vector<uint8_t> hot_hook_subscriptions_;
   uint32_t hot_hook_observer_count_ = 0;
   bool hot_hook_subscriptions_valid_ = false;
+  mutable bool observing_lds_direct_read_ = false;
   uint64_t ready_cycle_ = 0;
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
+  friend class ::rocjitsu::config::Gfx10CheckpointResources;
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
   friend class GwsDevice;       // Device-global GWS store parks/wakes this wave.
   friend class ::rocjitsu::ExecutionPluginGroup;
@@ -1343,6 +1441,22 @@ private:
   friend class ScalarMemPipeline;
 };
 
+template <typename Inst> inline void execute_with_empty_memory_mask(Inst &inst, Wavefront &wf) {
+  // The normal memory issue path captures the empty mask, addressing mode and counter.
+  class RestoreExec {
+  public:
+    explicit RestoreExec(Wavefront &wave) : wave_(wave), saved_(wave.exec_raw()) {
+      wave_.set_exec_raw(0);
+    }
+    ~RestoreExec() { wave_.set_exec_raw(saved_); }
+
+  private:
+    Wavefront &wave_;
+    uint64_t saved_;
+  } restore(wf);
+  inst.execute_impl(wf);
+}
+
 /// @brief Return whether an M0 GPR_IDX selector enables one operand role.
 [[nodiscard]] constexpr bool gpr_idx_role_enabled(uint32_t mode, VgprMsbRole role) {
   const std::optional<size_t> index = vgpr_msb_role_index(role);
@@ -1351,9 +1465,19 @@ private:
 
 /// @brief Apply the wave's GPR_IDX offset to one logical VALU operand role.
 inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, VgprMsbRole role) {
-  if (wf.gpr_idx_en() && gpr_idx_role_enabled(wf.gpr_idx_mode(), role))
-    return vgpr_off + wf.gpr_idx_offset();
-  return vgpr_off;
+  const bool cdna2 = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA2;
+  // Relative indexing applies to architectural VGPRs. Accumulator selectors
+  // retain their register number, including on ACCVGPR_MOV/READ/WRITE.
+  if (cdna2 && vgpr_off >= ACC_VGPR_OFFSET)
+    return vgpr_off;
+  const uint32_t offset = wf.gpr_idx_en() && gpr_idx_role_enabled(wf.gpr_idx_mode(), role)
+                              ? vgpr_off + wf.gpr_idx_offset()
+                              : vgpr_off;
+  // MI200 §3.6.1 redirects an out-of-allocation source to v0.
+  if (cdna2 && role != VgprMsbRole::Dst && role != VgprMsbRole::None &&
+      (offset >= ACC_VGPR_OFFSET || !wf.unified_vgpr_range_is_allocated(offset, 1)))
+    return 0;
+  return offset;
 }
 
 /// @brief ISA-parameterized concrete wavefront with fixed register limits.
