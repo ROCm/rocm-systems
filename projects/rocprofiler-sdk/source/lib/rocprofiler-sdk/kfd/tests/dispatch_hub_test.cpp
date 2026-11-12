@@ -147,13 +147,13 @@ register_win(hub_t& hub, correlation_key key, window_ptr window, uint64_t corr_i
 std::optional<hub_t::proven>
 end_start(hub_t& hub, correlation_key key, uint64_t start, uint64_t end)
 {
-    return hub.record_kernel_end(key, std::optional<uint64_t>{start}, end);
+    return hub.record_kernel_end(key, std::optional<uint64_t>{start}, end, /*region=*/0);
 }
 
 std::optional<hub_t::proven>
 end_nostart(hub_t& hub, correlation_key key, uint64_t end)
 {
-    return hub.record_kernel_end(key, std::nullopt, end);
+    return hub.record_kernel_end(key, std::nullopt, end, /*region=*/0);
 }
 }  // namespace
 
@@ -404,16 +404,18 @@ TEST(DispatchHub, recycle_maps_each_start_to_its_own_window)
     EXPECT_EQ(hub.pending_count(), 2u) << "both recycled owners live at once";
 
     // START 150 lies in the OLD window only -> old payload/correlation.
-    auto _old = hub.record_kernel_end(K, std::optional<uint64_t>{150}, 180);
+    auto _old = hub.record_kernel_end(K, std::optional<uint64_t>{150}, 180, /*region=*/1);
     ASSERT_TRUE(_old.has_value());
     EXPECT_EQ(_old->correlation_id, 10u) << "150 in [100,200) selects the old owner";
     EXPECT_EQ(_old->payload.id, 1u) << "must be the OLD payload, not the new one";
+    EXPECT_EQ(_old->region, 1u) << "the proven carries the region of the EOP that proved it";
 
     // START 250 lies in the NEW window only -> new payload/correlation.
-    auto _new = hub.record_kernel_end(K, std::optional<uint64_t>{250}, 280);
+    auto _new = hub.record_kernel_end(K, std::optional<uint64_t>{250}, 280, /*region=*/3);
     ASSERT_TRUE(_new.has_value());
     EXPECT_EQ(_new->correlation_id, 20u) << "250 in [200,300) selects the new owner";
     EXPECT_EQ(_new->payload.id, 2u) << "must be the NEW payload, not the old one";
+    EXPECT_EQ(_new->region, 3u) << "the proven carries the region of the EOP that proved it";
     EXPECT_EQ(hub.pending_count(), 0u);
 }
 
@@ -798,7 +800,7 @@ all_entry_points_short_circuit()
 {
     bool ok = true;
     ok      = ok && !register_win(forked_hub(), key_of(40, 99), mk_window(40, 100));
-    ok      = ok && !forked_hub().record_kernel_end(key_of(40, 1), std::nullopt, 1).has_value();
+    ok      = ok && !forked_hub().record_kernel_end(key_of(40, 1), std::nullopt, 1, 0).has_value();
     ok      = ok && forked_hub().pending_count() == 0;
     ok      = ok && !forked_hub().is_ledgered(500);
     ok      = ok && forked_hub().mode() == session_mode::child_stale;

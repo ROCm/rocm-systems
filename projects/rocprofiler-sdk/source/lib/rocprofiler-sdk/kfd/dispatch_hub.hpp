@@ -156,6 +156,7 @@ public:
         uint64_t                correlation_id = 0;
         std::optional<uint64_t> start_ticks    = {};  // absent -> COMPLETED_NO_TIMING
         uint64_t                end_ticks      = 0;
+        uint32_t                region         = 0;  // ring region the EOP arrived on
         PayloadT                payload        = {};
     };
 
@@ -280,7 +281,8 @@ public:
     // its kernel finished. A key with no live entry is REJECTED, never cached.
     std::optional<proven> record_kernel_end(const correlation_key&         key,
                                             const std::optional<uint64_t>& start_ticks_opt,
-                                            uint64_t                       end_ticks)
+                                            uint64_t                       end_ticks,
+                                            uint32_t                       region)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return std::nullopt;
 
@@ -295,6 +297,7 @@ public:
             out.correlation_id = it->second.correlation_id;
             out.start_ticks    = start_ticks_opt;
             out.end_ticks      = end_ticks;
+            out.region         = region;
             out.payload        = std::move(it->second.payload);
             erase_entry_locked(it);
             return out;

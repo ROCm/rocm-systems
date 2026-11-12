@@ -669,7 +669,8 @@ process_batch(processor_state& proc, const record_batch& batch)
 
             // Signal-less: this EOP IS the completion event. The hub selects the
             // entry whose window contains the START tick.
-            if(auto _proven = signal_less_hub().record_kernel_end(key, _start, rec.end_ticks))
+            if(auto _proven =
+                   signal_less_hub().record_kernel_end(key, _start, rec.end_ticks, rec.region))
             {
                 note_signal_less(signal_less_counter::eop_proven);
                 hand_off_proven(std::move(*_proven));
