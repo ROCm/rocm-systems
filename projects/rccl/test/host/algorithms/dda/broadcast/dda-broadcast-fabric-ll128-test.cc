@@ -362,6 +362,7 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_PassesAllKernelArgs) {
   EXPECT_EQ(launch.Arg<int>(6), root);
   EXPECT_EQ(launch.Arg<uint32_t*>(7), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(8), comm().ddaLLEpochLen);
+  EXPECT_EQ(launch.Arg<size_t>(11), 2048u);  // bankSize = ddaBankSize(4096 + 40)
   EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(12).flag, comm().abortFlagDev);
 }
 
@@ -417,12 +418,15 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Blocks_MatchesGridXTimesGridY) {
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Blocks_SizedOnBytesNotElements) {
-  // fp16 and fp32 at same element count -> same byte count -> same block count
-  EXPECT_EQ(ncclBroadcastDdaFabricLL128Blocks(mock_.get(), 4, ncclFloat16),
-            ncclBroadcastDdaFabricLL128Blocks(mock_.get(), 4, ncclFloat16));
   // fp32 count=8 is 32 bytes; fp16 count=16 is also 32 bytes -> same blocks
   EXPECT_EQ(ncclBroadcastDdaFabricLL128Blocks(mock_.get(), 8, ncclFloat32),
             ncclBroadcastDdaFabricLL128Blocks(mock_.get(), 16, ncclFloat16));
+  // 49 slices worth of data: fp32 and fp16 element counts differ but byte
+  // counts are equal, so the block count must match. A buggy element-based
+  // sizer would see half as many slices for fp32 and return a different count.
+  constexpr size_t bytes = 49 * kSliceData;
+  EXPECT_EQ(ncclBroadcastDdaFabricLL128Blocks(mock_.get(), bytes / sizeof(float), ncclFloat32),
+            ncclBroadcastDdaFabricLL128Blocks(mock_.get(), bytes / sizeof(uint16_t), ncclFloat16));
 }
 
 }  // namespace
