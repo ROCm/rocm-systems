@@ -4,15 +4,10 @@
 # -----------------------------------------------------------------------------
 # benchmark_gfx1201.py
 #
-# Benchmarking class for gfx1201 products: Navi 48 RDNA4 dGPUs such as the
-# AMD Radeon RX 9070 XT and Radeon AI PRO R9700.
+# Benchmarking class for gfx1201 products: Navi 48 (RDNA4).
 #
-# Navi 48: 64 CUs, 8 MB L2, 64 MB Infinity Cache, 640 GB/s of VRAM.
-#
-# The gfx12 base class targets gfx1250, whose WMMA builtins (16x16x32,
-# 16x16x64, 16x16x128) do not exist on RDNA4. This class therefore replaces the
-# matrix kernel sources with the wave32 16x16x16 gfx12 builtins and narrows the
-# supported precisions to what RDNA4 actually implements.
+# The gfx1250 WMMA builtins are replaced here with the wave32 16x16x16
+# builtins this class supplies.
 # -----------------------------------------------------------------------------
 
 from functools import partial
@@ -26,21 +21,22 @@ from .benchmark_gfx12_base import ResidentReadRoof
 WMMA_ACC = 8
 WMMA_FLOPS_PER_INSTRUCTION = 8192
 
-# Navi 48 Infinity Cache capacity (public RDNA 4 docs), used when AMD-SMI reports
-# no level-3 cache.
+# Full Navi 48 Infinity Cache size, used only when AMD-SMI omits cache level 3.
+# A reported MALL size replaces it.
 INFINITY_CACHE_BYTES = 64 * 1024 * 1024
 
-# The Infinity Cache benchmark streams half the Infinity Cache capacity: four times
-# the 8 MB L2, so repeated passes miss in L2 and hit in the Infinity Cache.
+# Half the reported Infinity Cache. The stream is large enough to miss GL2 and
+# hit the Infinity Cache.
 MALL_WORKING_SET_DIVISOR = 2
 
 # Navi 48 cache pipes from the gfx1201 cache-hierarchy spec.
 # GL0 is 32 KB per TCP, 64 TCPs, and the read return is 128 B per clock.
-# GL2 is 8 MB across 32 banks, and the GL2-to-GL1 read return is 128 B per
-# bank per clock. GL1 is a buffer with no tags and no capacity, so a read
-# stream has no GL1-resident roof. The 8 x 128 B GL1 port is narrower than
-# the traffic a GL2 hit actually returns, and scoring a GL2-resident kernel
-# against it reports more than 100 percent.
+# GL2_CAPACITY_BYTES is not the buffer size. L2_WORKING_SET_BYTES is 4 MB,
+# which still fits a 6 MB GL2. The 32 banks and 128 B/clock are full-chip
+# ceilings used by pipe_bandwidth_gbps. GL1 is a buffer with no tags and no
+# capacity, so a read stream has no GL1-resident roof. The 8 x 128 B GL1
+# port is narrower than the traffic a GL2 hit actually returns, and scoring
+# a GL2-resident kernel against it reports more than 100 percent.
 GL0_INSTANCES = 64
 GL0_READ_BYTES_PER_CLOCK = 128
 GL0_CAPACITY_BYTES = 32 * 1024
@@ -48,18 +44,13 @@ GL2_BANKS = 32
 GL2_HIT_RETURN_BYTES_PER_CLOCK = 128
 GL2_CAPACITY_BYTES = 8 * 1024 * 1024
 
-# L0 is one whole TCP. L1 and L2 both miss GL0 and still fit in GL2, so both
-# are GL2-hit roofs. L2 is the larger of the two resident sets. The full 8 MB
-# L2 does not fit: it misses into the Infinity Cache and measures the fill
-# path instead of the GL2 return.
+# L0 is one whole TCP. The 4 MB set misses GL0 and still fits GL2, including
+# a 6 MB GL2. L1 and L2 are GL2-hit roofs. L2 is the larger resident set.
 L0_WORKING_SET_BYTES = 32 * 1024
 L1_WORKING_SET_BYTES = 1 * 1024 * 1024
 L2_WORKING_SET_BYTES = 4 * 1024 * 1024
-# On the RX 9070 XT, 8 workgroups per multiprocessor and 4 loads in flight
-# reached 95-97 percent of the GL2 return. The same launch only filled about
-# 60 percent of the GL0 return. GL0 holds the whole working set, so extra
-# waves hide load latency instead of thrashing: 128 workgroups and 8 loads
-# in flight reached about 75 percent, and stayed under the 128 B return.
+# The counts were chosen so a GL2-resident read approaches the GL2 return
+# and a GL0-resident read stays under the 128 B return.
 CACHE_WORKGROUPS_PER_CU = 8
 CACHE_LOADS_IN_FLIGHT = 4
 L0_WORKGROUPS_PER_CU = 128
@@ -87,8 +78,7 @@ L1_ROOF = ResidentReadRoof(
 )
 L2_ROOF = L1_ROOF._replace(working_set_bytes=L2_WORKING_SET_BYTES)
 
-# Navi 48 device memory: 256-bit VRAM interface at 20 Gbps per pin (AMD RX 9070 XT
-# spec). A read-only stream cannot exceed the pin rate.
+# Full 256-bit Navi 48 reference. The stored VRAMBw value is the measured read.
 DRAM_BUS_BITS = 256
 DRAM_GBPS_PER_PIN = 20
 
@@ -101,7 +91,8 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         super().__init__(device_id, cache_sizes)
 
         # VRAM is the device-memory roofline test (CSV column VRAMBw). It runs
-        # the DRAM_bw kernel and prints the share of the pin rate it reached.
+        # the DRAM_bw kernel and returns the measured bandwidth. The printed
+        # line is the full Navi 48 pin-rate reference, not every board.
         # Infinity Cache uses the MALL column. mi_gpu_spec.yaml lists no
         # F4/F6/F32/F64/I8 matrix path, so those tests are marked unsupported
         # by apply_roofline_spec. VRAM keeps HBM's place in the CSV column order.
@@ -120,8 +111,8 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
                 ordered_tests[name] = func
         self.tests = ordered_tests
         # The gfx12 base stored the shared scalar cache benchmarks. Rebind
-        # them: those kernels use the whole reported cache and a 4-byte load,
-        # so L2 misses out of the 8 MB GL2 and L0 cannot reach the 128 B return.
+        # them onto the resident-read roofs. A set larger than GL2 misses
+        # into the Infinity Cache. L2_ROOF stays at 4 MB.
         self.tests["L0"] = partial(self.cache_resident_bw, label="L0", roof=L0_ROOF)
         self.tests["L1"] = partial(self.cache_resident_bw, label="L1", roof=L1_ROOF)
         self.tests["L2"] = partial(self.cache_resident_bw, label="L2", roof=L2_ROOF)
