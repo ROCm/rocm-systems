@@ -17,7 +17,6 @@ use std::cell::Cell;
 use std::ffi::c_void;
 use std::fmt::Arguments;
 use std::io::Write;
-use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};

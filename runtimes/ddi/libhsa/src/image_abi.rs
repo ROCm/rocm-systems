@@ -11,7 +11,7 @@ use std::sync::atomic::{Ordering, fence};
 use rocaddr3::{ResourceType, SurfaceLayout, SurfaceRequest};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
 use crate::api::image::*;
 use crate::ffi::*;
 use crate::image_gfx12::{self, Format, Layout};
@@ -1744,7 +1744,7 @@ pub(crate) unsafe fn hsa_ext_image_clear_impl(
 }
 
 /// Function table in the exact order of `hsa_ext_images_1_pfn_t`.
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
 #[repr(C)]
 pub(crate) struct ImageExtensionTable {
     /// Queries format and geometry capabilities.
@@ -1841,11 +1841,11 @@ pub(crate) struct ImageExtensionTable {
     ) -> Status,
 }
 
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
 const _: () =
     assert!(std::mem::size_of::<ImageExtensionTable>() == 14 * std::mem::size_of::<usize>());
 
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
 /// Builds the image extension table from this frontend’s entry points.
 pub(crate) fn image_extension_table() -> ImageExtensionTable {
     ImageExtensionTable {

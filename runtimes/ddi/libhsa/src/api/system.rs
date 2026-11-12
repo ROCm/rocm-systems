@@ -98,13 +98,31 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
                         runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported),
                     ),
                 ),
-                AMD_SYSTEM_INFO_SVM_SUPPORTED => write_value(value, true),
+                AMD_SYSTEM_INFO_SVM_SUPPORTED => write_value(
+                    value,
+                    runtime
+                        .session()
+                        .is_some_and(|session| session.memory_advice().is_ok()),
+                ),
                 AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT => write_value(value, false),
                 AMD_SYSTEM_INFO_MWAITX_ENABLED => write_value(value, false),
-                AMD_SYSTEM_INFO_DMABUF_SUPPORTED => write_value(value, true),
+                AMD_SYSTEM_INFO_DMABUF_SUPPORTED => write_value(
+                    value,
+                    !runtime.gpus.is_empty()
+                        && runtime
+                            .gpus
+                            .iter()
+                            .all(|gpu| crate::platform::memory::supports_dma_buf(&gpu.endpoint)),
+                ),
                 AMD_SYSTEM_INFO_EXT_VERSION_MAJOR => write_value(value, 1_u16),
                 AMD_SYSTEM_INFO_EXT_VERSION_MINOR => write_value(value, 36_u16),
-                AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED => write_value(value, true),
+                AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED => write_value(
+                    value,
+                    !runtime.gpus.is_empty()
+                        && runtime.gpus.iter().all(|gpu| {
+                            crate::platform::memory::supports_virtual_memory(&gpu.endpoint)
+                        }),
+                ),
                 AMD_SYSTEM_INFO_XNACK_ENABLED => write_value(
                     value,
                     runtime.gpus.first().is_some_and(|gpu| gpu.xnack_enabled),
