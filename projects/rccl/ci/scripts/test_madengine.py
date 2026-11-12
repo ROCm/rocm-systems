@@ -1443,7 +1443,12 @@ def stage_rccl_overlay(
             log.info("Found %d kpack file(s): %s",
                      len(kpack_files), [f.name for f in kpack_files])
         else:
-            log.warning("RCCL .so has kpack references but no .kpack files found in artifacts")
+            # The image keeps its own RCCL's .kpack under the same kernel name,
+            # so the library would load and run the base image's kernels.
+            raise RuntimeError(
+                f"{rccl_lib} loads its GPU kernels from a .kpack, and none was "
+                f"found next to it or under {rccl_lib.parent.parent}"
+            )
 
     if family == "maxtext":
         if primus_dir is None or not (primus_dir / "primus-cli").is_file():
