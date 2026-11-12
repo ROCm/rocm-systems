@@ -25,6 +25,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
   * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
 
+* Added `--speed-of-light`, `--memory-chart`, and `--roofline` options to profile and analyze modes.
+  * They are aliases of `-b 2`, `-b 3`, and `-b 4`.
+  * They can be combined with each other and with `-b`. For example, `--speed-of-light --roofline` is the same as `-b 2 4`.
+
 * Added debug options for troubleshooting ROCm Compute Profiler itself. `--help` lists them only with `--debug`.
   * `--debug-list-metrics-gfx-id <arch>`: with `--list-metrics`, list the blocks and metrics of another GPU.
   * `analyze --debug-metric-expression`: print each metric's expression and inputs.

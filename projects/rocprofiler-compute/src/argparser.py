@@ -217,6 +217,7 @@ def _omniarg_parser(
 Examples:
 \trocprof-compute profile -n vcopy_all -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_blocks -b sol -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n vcopy_sol --speed-of-light -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_iter --kernel-iteration-range 1 -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_roof --roofline -- ./vcopy -n 1048576 -b 256
@@ -370,6 +371,7 @@ Examples:
         metavar="<ids>",
         nargs="+",
         type=block_token_or_alias,
+        action="extend",
         required=False,
         default=[],
         help=(
@@ -380,8 +382,22 @@ Examples:
             "Alternatively, specify block alias(es) for filtering.\n"
             "Aliases are arch-specific; run --list-metrics to see\n"
             "all valid block ids and aliases.\n"
-            "Cannot be used with --set, --roofline or --roofline-bench-only."
+            "Cannot be used with --set or --roofline-bench-only."
         ),
+    )
+    profile_group.add_argument(
+        "--speed-of-light",
+        dest="filter_blocks",
+        action="append_const",
+        const="2",
+        help="Profile the System Speed-of-Light block. Same as -b 2.",
+    )
+    profile_group.add_argument(
+        "--memory-chart",
+        dest="filter_blocks",
+        action="append_const",
+        const="3",
+        help="Profile the Memory Chart block. Same as -b 3.",
     )
     profile_group.add_argument(
         "--list-sets",
@@ -397,7 +413,8 @@ Examples:
             "Profile a set of metrics of topic of interest by collecting "
             "counters in a single pass.\n"
             "For available sets, see --list-sets.\n"
-            "Cannot be used with --block, --roofline or --roofline-bench-only."
+            "Cannot be used with -b, --speed-of-light, --memory-chart, --roofline\n"
+            "or --roofline-bench-only."
         ),
     )
     profile_group.add_argument(
@@ -457,15 +474,14 @@ Examples:
     roofline_group.add_argument(
         "--roofline",
         "--roof-only",
-        dest="roof_only",
-        required=False,
-        default=False,
+        dest="filter_blocks",
+        const="4",
         action=DeprecatedAction,
-        base_action="store_true",
+        base_action="append_const",
         deprecated_names=["--roof-only"],
         help=(
-            "Profile roofline data only.\n"
-            "Cannot be used with --block, --set or --roofline-bench-only."
+            "Profile the roofline block. Same as -b 4.\n"
+            "Used alone, only roofline data is profiled."
         ),
     )
     roofline_group.add_argument(
@@ -481,7 +497,8 @@ Examples:
             "Run roofline microbenchmark only.\n"
             "No application profiling or counter collection.\n"
             "No application run is required.\n"
-            "Cannot be used with --block, --set, --roofline or --no-roof."
+            "Cannot be used with -b, --speed-of-light, --memory-chart, --roofline,\n"
+            "--set or --no-roof."
         ),
     )
     roofline_group.add_argument(
@@ -595,6 +612,7 @@ rocprof-compute analyze --path <workload_path> [analyze options]
 Examples:
 \trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics
 \trocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12 34 --decimal 3
+\trocprof-compute analyze -p workloads/vcopy/mi200/ --speed-of-light --roofline
 -----------------------------------------------------------------------------------
         """,
         prog="rocprof-compute",
@@ -711,9 +729,31 @@ Examples:
         metavar="<ids>",
         nargs="+",
         type=block_token_or_alias,
+        action="extend",
         help=(
             "Specify metric id(s) or block alias(es) from --list-metrics for filtering."
         ),
+    )
+    analyze_group.add_argument(
+        "--speed-of-light",
+        dest="filter_metrics",
+        action="append_const",
+        const="2",
+        help="Show the System Speed-of-Light panel. Same as -b 2.",
+    )
+    analyze_group.add_argument(
+        "--memory-chart",
+        dest="filter_metrics",
+        action="append_const",
+        const="3",
+        help="Show the Memory Chart panel. Same as -b 3.",
+    )
+    analyze_group.add_argument(
+        "--roofline",
+        dest="filter_metrics",
+        action="append_const",
+        const="4",
+        help="Show the Roofline panel. Same as -b 4.",
     )
     analyze_group.add_argument(
         "--gpu-id",

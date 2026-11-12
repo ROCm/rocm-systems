@@ -18,8 +18,10 @@ carries the same numbers in readable form.
 Collect only the roofline block:
 
 ```bash
-rocprof-compute profile --name <workload_name> -b roof -- <application> <args>
+rocprof-compute profile --name <workload_name> --roofline -- <application> <args>
 ```
+
+On ROCm 10.2 and earlier, use `-b roof` instead of `--roofline`.
 
 Collecting it runs microbenchmarks in addition to profiling the application,
 which takes extra time. An existing profile already has roofline unless it was
@@ -38,7 +40,7 @@ choose which GPU the application runs on; use `HIP_VISIBLE_DEVICES` for that.
 
 See [standalone roofline](../../docs/how-to/profile/mode.rst) for two more options:
 
-- `--roofline` collects only roofline data.
+- `--roofline` selects the roofline block; used alone, it collects only roofline data.
 - `--roofline-bench-only` runs only the microbenchmarks, without an application.
 
 On ROCm 10.2 and earlier, these options are named `--device`, `--roof-only` and
@@ -69,7 +71,7 @@ also runs the roofline benchmarks.
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> --roofline
 ```
 
 Always pass one kernel id. The table gives the kernel's arithmetic intensity in
