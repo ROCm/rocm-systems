@@ -538,6 +538,8 @@ private:
   std::unique_ptr<Decoder> decoder_;
   std::vector<std::unique_ptr<BasicBlock>> blocks_;
   std::unique_ptr<LivenessAnalysis> liveness_;
+  class CallableStateAnalysis;
+  std::unique_ptr<CallableStateAnalysis> callable_state_analysis_;
   // .text-relative byte offset -> decoded Instruction. Populated alongside
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).

@@ -40,6 +40,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -287,135 +288,6 @@ bool storage_is_preserved_in_closed_text(std::span<const std::unique_ptr<BasicBl
       return false;
   }
   return true;
-}
-
-bool callable_state_may_be_unsafe(const Instruction &anchor, bool after,
-                                  std::span<const std::unique_ptr<BasicBlock>> blocks,
-                                  std::span<const KernelDescriptorInfo> kernels,
-                                  std::span<const uint8_t> text, rj_code_arch_t arch,
-                                  CallableState state) {
-  if (!has_callable_state(arch, state))
-    return false;
-  std::unordered_set<const Instruction *> preserving_calls;
-  std::unordered_set<const Instruction *> known_returns;
-  for (const std::unique_ptr<BasicBlock> &block : blocks) {
-    if (block->successor_issue() != BasicBlock::SuccessorIssue::None || block->call_edges().empty())
-      continue;
-    if (std::ranges::all_of(block->call_edges(), [&](const BasicBlock::CallEdge &edge) {
-          return callee_preserves_state(edge, text, arch, state);
-        })) {
-      preserving_calls.insert(block->terminator());
-    }
-  }
-  std::unordered_set<const BasicBlock *> reachable;
-  std::vector<const BasicBlock *> work;
-  for (const std::unique_ptr<BasicBlock> &block : blocks) {
-    if (std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &kernel) {
-          return kernel.entry_text_offset == block->start_offset();
-        }))
-      work.push_back(block.get());
-  }
-  while (!work.empty()) {
-    const BasicBlock *block = work.back();
-    work.pop_back();
-    if (!reachable.insert(block).second)
-      continue;
-    work.insert(work.end(), block->successors().begin(), block->successors().end());
-    for (const BasicBlock::CallEdge &edge : block->call_edges())
-      if (edge.callee != nullptr)
-        work.push_back(edge.callee);
-  }
-  for (const BasicBlock *block : reachable) {
-    if (preserving_calls.contains(block->terminator()))
-      for (const BasicBlock::CallEdge &edge : block->call_edges())
-        known_returns.insert(edge.callee->terminator());
-  }
-  // An unresolved transfer can bypass a local MODE clear/storage release or
-  // add an incoming path absent from predecessors(). Fail closed for these proofs.
-  if (after || state == CallableState::UnavailableStorage) {
-    for (const BasicBlock *block : reachable) {
-      const BasicBlock::SuccessorIssue issue = block->successor_issue();
-      // Falling off the original text cannot transfer back into an earlier
-      // storage observation. Keep the existing stricter AfterInst MODE gate.
-      if (state == CallableState::UnavailableStorage &&
-          issue == BasicBlock::SuccessorIssue::MissingFallthrough)
-        continue;
-      if (issue != BasicBlock::SuccessorIssue::None &&
-          !known_returns.contains(block->terminator())) {
-        if (state == CallableState::UnavailableStorage &&
-            storage_is_preserved_in_closed_text(blocks, kernels, text, arch)) {
-          return !std::ranges::any_of(reachable, [&](const BasicBlock *candidate) {
-            return std::ranges::any_of(candidate->instructions(),
-                                       [&](const Instruction &inst) { return &inst == &anchor; });
-          });
-        }
-        return true;
-      }
-    }
-  }
-  const BasicBlock *owner = nullptr;
-  StateWrite last_write = StateWrite::Unchanged;
-  for (const std::unique_ptr<BasicBlock> &block : blocks) {
-    last_write = StateWrite::Unchanged;
-    for (const Instruction &inst : block->instructions()) {
-      if (&inst == &anchor) {
-        if (after) {
-          const StateWrite write = callable_state_write(inst, text, arch, state, &preserving_calls);
-          if (write != StateWrite::Unchanged)
-            last_write = write;
-        }
-        owner = block.get();
-        break;
-      }
-      const StateWrite write = callable_state_write(inst, text, arch, state, &preserving_calls);
-      if (write != StateWrite::Unchanged)
-        last_write = write;
-    }
-    if (owner != nullptr)
-      break;
-  }
-  if (owner == nullptr || !reachable.contains(owner))
-    return true;
-  if (last_write != StateWrite::Unchanged)
-    return last_write == StateWrite::Unsafe;
-
-  // Kernel entries start with both modes disabled and descriptor-backed storage.
-  // Other roots (including unmodelled indirect entries) are unknown. Backedges still
-  // participate; the partial anchor block is not marked visited as a full block.
-  const auto is_entry = [&](const BasicBlock *block) {
-    return std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &kernel) {
-      return kernel.entry_text_offset == block->start_offset();
-    });
-  };
-  std::vector<const BasicBlock *> pending(owner->predecessors().begin(),
-                                          owner->predecessors().end());
-  if (pending.empty())
-    return !is_entry(owner);
-  bool found_safe_source = is_entry(owner);
-  std::unordered_set<const BasicBlock *> visited;
-  while (!pending.empty()) {
-    const BasicBlock *block = pending.back();
-    pending.pop_back();
-    if (!reachable.contains(block) || !visited.insert(block).second)
-      continue;
-    found_safe_source |= is_entry(block);
-    last_write = StateWrite::Unchanged;
-    for (const Instruction &inst : block->instructions()) {
-      const StateWrite write = callable_state_write(inst, text, arch, state, &preserving_calls);
-      if (write != StateWrite::Unchanged)
-        last_write = write;
-    }
-    if (last_write != StateWrite::Unchanged) {
-      if (last_write == StateWrite::Unsafe)
-        return true;
-      found_safe_source = true;
-      continue;
-    }
-    if (block->predecessors().empty() && !is_entry(block))
-      return true;
-    pending.insert(pending.end(), block->predecessors().begin(), block->predecessors().end());
-  }
-  return !found_safe_source;
 }
 
 // PC-reading / PC-relative instructions to reject as anchors: relocating any of
@@ -1297,6 +1169,170 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   return patch;
 }
 
+// The object and decoded blocks stay unchanged while points are queued. Compute
+// their observation states once, independently of the requested instrumentation.
+class Instrumentor::CallableStateAnalysis {
+public:
+  CallableStateAnalysis(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                        std::span<const KernelDescriptorInfo> kernels,
+                        std::span<const uint8_t> text, rj_code_arch_t arch) {
+    std::unordered_set<uint64_t> entries;
+    for (const KernelDescriptorInfo &kernel : kernels)
+      entries.insert(kernel.entry_text_offset);
+    std::unordered_set<const BasicBlock *> reachable;
+    std::vector<const BasicBlock *> work;
+    for (const std::unique_ptr<BasicBlock> &block : blocks) {
+      if (entries.contains(block->start_offset()))
+        work.push_back(block.get());
+      for (const Instruction &inst : block->instructions()) {
+        states_.try_emplace(&inst);
+        has_cdna5_producer_ |=
+            arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+            ((inst.flags() & MATRIX_REGISTER_ACCESSES) != 0 || inst.is_transcendental());
+      }
+    }
+    while (!work.empty()) {
+      const BasicBlock *block = work.back();
+      work.pop_back();
+      if (!reachable.insert(block).second)
+        continue;
+      work.insert(work.end(), block->successors().begin(), block->successors().end());
+      for (const BasicBlock::CallEdge &edge : block->call_edges())
+        if (edge.callee != nullptr)
+          work.push_back(edge.callee);
+    }
+    for (const CallableState state :
+         {CallableState::GprIndexing, CallableState::Vskip, CallableState::UnavailableStorage}) {
+      if (has_callable_state(arch, state))
+        analyze_state(blocks, kernels, text, arch, state, entries, reachable);
+    }
+  }
+
+  [[nodiscard]] bool has_cdna5_producer() const { return has_cdna5_producer_; }
+
+  [[nodiscard]] bool may_be_unsafe(const Instruction &anchor, bool after,
+                                   CallableState state) const {
+    const std::unordered_map<const Instruction *, PointState>::const_iterator found =
+        states_.find(&anchor);
+    return found == states_.end() ||
+           ((after ? found->second.after : found->second.before) & state_bit(state)) != 0;
+  }
+
+private:
+  struct PointState {
+    uint8_t before = 0;
+    uint8_t after = 0;
+  };
+  struct BlockState {
+    StateWrite last_write = StateWrite::Unchanged;
+    uint8_t incoming = 0;
+    uint8_t outgoing = 0;
+  };
+  std::unordered_map<const Instruction *, PointState> states_;
+  bool has_cdna5_producer_ = false;
+
+  static uint8_t state_bit(CallableState state) { return 1u << static_cast<unsigned>(state); }
+
+  void analyze_state(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                     std::span<const KernelDescriptorInfo> kernels, std::span<const uint8_t> text,
+                     rj_code_arch_t arch, CallableState state,
+                     const std::unordered_set<uint64_t> &entries,
+                     const std::unordered_set<const BasicBlock *> &reachable) {
+    std::unordered_set<const Instruction *> preserving_calls;
+    std::unordered_set<const Instruction *> known_returns;
+    for (const std::unique_ptr<BasicBlock> &block : blocks) {
+      if (block->successor_issue() != BasicBlock::SuccessorIssue::None ||
+          block->call_edges().empty())
+        continue;
+      if (std::ranges::all_of(block->call_edges(), [&](const BasicBlock::CallEdge &edge) {
+            return callee_preserves_state(edge, text, arch, state);
+          })) {
+        preserving_calls.insert(block->terminator());
+        if (reachable.contains(block.get()))
+          for (const BasicBlock::CallEdge &edge : block->call_edges())
+            known_returns.insert(edge.callee->terminator());
+      }
+    }
+    // MODE completeness constrains AfterInst; storage completeness constrains
+    // every ordinary observation. Preserve the closed-text storage exception.
+    const bool storage = state == CallableState::UnavailableStorage;
+    bool incomplete = false;
+    for (const BasicBlock *block : reachable) {
+      const BasicBlock::SuccessorIssue issue = block->successor_issue();
+      if (storage && issue == BasicBlock::SuccessorIssue::MissingFallthrough)
+        continue;
+      incomplete |=
+          issue != BasicBlock::SuccessorIssue::None && !known_returns.contains(block->terminator());
+    }
+    const bool closed_storage =
+        storage && incomplete && storage_is_preserved_in_closed_text(blocks, kernels, text, arch);
+
+    // Each bit denotes a possible incoming state; zero has no proven source.
+    // Constant writes seed the worklist even inside cycles. Ordinary edges join
+    // possibilities, including backedges into descriptor entries.
+    constexpr uint8_t kSafe = 1;
+    constexpr uint8_t kUnsafe = 2;
+    const auto transfer = [](uint8_t incoming, StateWrite write) -> uint8_t {
+      if (write == StateWrite::Safe)
+        return kSafe;
+      if (write == StateWrite::Unsafe)
+        return kUnsafe;
+      return incoming;
+    };
+    std::unordered_map<const BasicBlock *, BlockState> summaries;
+    std::vector<const BasicBlock *> work(reachable.begin(), reachable.end());
+    std::unordered_set<const BasicBlock *> queued = reachable;
+    for (const BasicBlock *block : reachable) {
+      BlockState &summary = summaries[block];
+      for (const Instruction &inst : block->instructions()) {
+        const StateWrite write = callable_state_write(inst, text, arch, state, &preserving_calls);
+        if (write != StateWrite::Unchanged)
+          summary.last_write = write;
+      }
+    }
+    while (!work.empty()) {
+      const BasicBlock *block = work.back();
+      work.pop_back();
+      queued.erase(block);
+      BlockState &summary = summaries.at(block);
+      summary.incoming = entries.contains(block->start_offset())
+                             ? kSafe
+                             : (block->predecessors().empty() ? kUnsafe : 0);
+      for (const BasicBlock *predecessor : block->predecessors())
+        if (reachable.contains(predecessor))
+          summary.incoming |= summaries.at(predecessor).outgoing;
+      const uint8_t outgoing = transfer(summary.incoming, summary.last_write);
+      if (outgoing == summary.outgoing)
+        continue;
+      summary.outgoing = outgoing;
+      for (const BasicBlock *successor : block->successors())
+        if (reachable.contains(successor) && queued.insert(successor).second)
+          work.push_back(successor);
+    }
+    const uint8_t bit = state_bit(state);
+    for (const std::unique_ptr<BasicBlock> &block : blocks) {
+      const bool is_reachable = reachable.contains(block.get());
+      uint8_t current = is_reachable ? summaries.at(block.get()).incoming : 0;
+      const auto unsafe = [&](uint8_t value, bool after) {
+        if (!is_reachable)
+          return true;
+        if (incomplete && (storage || after))
+          return !closed_storage;
+        return value == 0 || (value & kUnsafe) != 0;
+      };
+      for (const Instruction &inst : block->instructions()) {
+        PointState &point = states_.at(&inst);
+        if (unsafe(current, false))
+          point.before |= bit;
+        current =
+            transfer(current, callable_state_write(inst, text, arch, state, &preserving_calls));
+        if (unsafe(current, true))
+          point.after |= bit;
+      }
+    }
+  }
+};
+
 Instrumentor::Instrumentor(const AmdGpuCodeObject &obj, rj_code_arch_t arch,
                            InstrumentationOptions options)
     : obj_(obj), arch_(arch), options_(options) {}
@@ -1667,10 +1703,22 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       // Dispatch enters a separate stub once. Guest backedges to the original
       // entry do not revisit this callback and cannot change its initial state.
       if (pt.kind != InstrumentationKind::KernelEntry) {
+        if (!callable_state_analysis_)
+          callable_state_analysis_ =
+              std::make_unique<CallableStateAnalysis>(blocks_, out.kernels, text_bytes, arch_);
+        // A scalar anchor does not discharge dependencies left by earlier VALUs.
+        // Until spacing is proven, exclude the entire decoded object, including
+        // unreachable producers and helper bodies rather than guessing ownership.
+        if (pt.kind == InstrumentationKind::AfterInst &&
+            callable_state_analysis_->has_cdna5_producer()) {
+          out.errors.emplace_back("AfterInst requires proven VALU spacing in a CDNA5 code object "
+                                  "containing matrix or transcendental producers");
+          continue;
+        }
         for (const CallableState state : {CallableState::GprIndexing, CallableState::Vskip,
                                           CallableState::UnavailableStorage}) {
-          if (callable_state_may_be_unsafe(*anchor, pt.kind == InstrumentationKind::AfterInst,
-                                           blocks_, out.kernels, text_bytes, arch_, state)) {
+          if (callable_state_analysis_->may_be_unsafe(
+                  *anchor, pt.kind == InstrumentationKind::AfterInst, state)) {
             const std::string reason =
                 state == CallableState::UnavailableStorage
                     ? "cannot prove the VGPR allocation and scratch storage"
