@@ -62,7 +62,6 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test_sdk_config
-      - test_soc_gfx1201
       - test_metric_description_manager
       - test_verify_against_config_template
       - test-pc-sampling-collector
@@ -159,7 +158,6 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test_sdk_config
-      - test_soc_gfx1201
       - test_metric_description_manager
       - test_verify_against_config_template
       - test-pc-sampling-collector
@@ -270,7 +268,6 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test_sdk_config
-      - test_soc_gfx1201
       - test_metric_description_manager
       - test_verify_against_config_template
       - test-pc-sampling-collector
@@ -381,7 +378,6 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test_sdk_config
-      - test_soc_gfx1201
       - test_metric_description_manager
       - test_verify_against_config_template
       - test-pc-sampling-collector

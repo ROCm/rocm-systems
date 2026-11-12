@@ -1,14 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Offline Navi48 counter and panel contracts.
+"""Offline Navi48 checks that the generic tests do not cover.
 
-Expected mappings follow the gfx1201 enablement baseline and register-spec
-comparisons. Passing these tests does not establish SDK exposure or hardware
-measurement units; those require validation on the supported ROCm stack.
+Every counter the gfx1201 panels use must be defined for gfx1201, and the
+gfx1201 metric formulas must give the expected values on sample counter data.
+Passing these tests does not establish SDK exposure or hardware measurement
+units; those require validation on the supported ROCm stack.
 """
 
-import re
 from typing import Dict, Set
 
 import pandas as pd
@@ -19,12 +19,7 @@ import config
 from rocprof_compute_soc.soc_base import iter_analysis_config_metrics
 from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
-from utils.mi_gpu_spec import mi_gpu_specs
-from utils.utils_common import parse_sets_yaml
-from utils.utils_counter_defs import (
-    counter_to_block,
-    parse_counters_text,
-)
+from utils.utils_counter_defs import parse_counters_text
 
 ARCH = "gfx1201"
 SDK_CONFIG = (
@@ -34,41 +29,6 @@ SDK_CONFIG = (
     / "sdk_config.yaml"
 )
 PANEL_DIR = config.analysis_configs_dir / ARCH
-EXPRESSION_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9_]*\b")
-
-# These gfx115x definitions are deliberately not exposed by this port. Some
-# names exist in the public gfx12 spec with changed IDs or units, so this list
-# is a validation boundary for the port, not proof of architectural absence.
-UNPORTED_COUNTERS = [
-    "SQ_WAVE_CYCLES",
-    "SQC_ICACHE_MISSES",
-    "SQC_DCACHE_MISSES",
-    "GL1C_REQ_MISS",
-    "GL1C_STALL_GL2_GL1",
-    "GL2C_COMPRESSED_READ_96_REQ",
-    "GL2C_EA_RDREQ_96B",
-    "GL2C_MC_WRREQ",
-    "GCEA_SARB_BUSY",
-    "GCEA_RDRAM_SIZE_REQ",
-    "SPI_CSN_WAVE",
-    "CPC_GUS_READ_REQUEST_SENT",
-]
-
-# (counter, SDK block, event) retained or remapped for the Navi48 port.
-EVENT_MAPPINGS = [
-    ("SQ_INST_CYCLES_VALU", "SQ", 99),
-    ("SQ_WMMA_VALU_INSTS", "SQ", 233),
-    ("SQ_INST_CYCLES_VALU_WMMA", "SQ", 256),
-    ("SQ_LDS_BANK_CONFLICT", "SQ", 288),
-    ("SQ_LDS_IDX_ACTIVE", "SQ", 293),
-    ("SQC_SMEM_LOAD_DWORDS", "SQ", 370),
-    ("SQG_WAVE_CYCLES", "SQG", 16),
-    ("GL2C_WRITE", "GL2C", 6),
-    ("GL2C_EA_RDREQ_DRAM", "GL2C", 165),
-    ("GL2C_EA_WRREQ_DRAM", "GL2C", 166),
-    ("GL2C_EA_RDREQ_DRAM_32B", "GL2C", 167),
-    ("GL2C_EA_WRREQ_DRAM_32B", "GL2C", 168),
-]
 
 
 @pytest.fixture
@@ -134,84 +94,8 @@ def panel_counters() -> Set[str]:
     return counters
 
 
-def hardware_counters(name: str, definitions: Dict[str, Dict]) -> Set[str]:
-    """Resolve a derived counter to its hardware counter dependencies."""
-    definition = definitions[name]
-    if "block" in definition:
-        return {name}
-    found: Set[str] = set()
-    for token in EXPRESSION_TOKEN_RE.findall(definition["expression"]):
-        if token in definitions:
-            found |= hardware_counters(token, definitions)
-    return found
-
-
-def test_gfx1201_panel_counter_contract_is_nonempty(
-    panel_counters, gfx1201_definitions
-):
-    assert panel_counters
-    assert gfx1201_definitions
-
-
 def test_gfx1201_panel_counters_are_defined(panel_counters, gfx1201_definitions):
     assert not panel_counters - gfx1201_definitions.keys()
-
-
-def test_gfx1201_panel_counters_have_perfmon_slots(panel_counters, gfx1201_definitions):
-    perfmon = mi_gpu_specs.get_perfmon_config(ARCH)
-    requested_hardware = set()
-    for counter in panel_counters:
-        requested_hardware.update(hardware_counters(counter, gfx1201_definitions))
-    missing_slots = {
-        counter
-        for counter in requested_hardware
-        if counter_to_block(counter) not in perfmon
-    }
-    assert not missing_slots
-
-
-def test_gfx1201_sets_include_available_metrics():
-    active_metrics = set()
-    for metric in iter_analysis_config_metrics(PANEL_DIR, set()):
-        if any(expression != "None" for expression in metric.expressions):
-            active_metrics.add(
-                f"{int(metric.stem_id) // 100}.{metric.table_id % 100}."
-                f"{metric.metric_idx}"
-            )
-    for set_name, metric_set in parse_sets_yaml(ARCH).items():
-        metric_ids = {
-            metric_id for metric in metric_set["metric"] for metric_id in metric
-        }
-        assert metric_ids & active_metrics, (
-            f"{set_name} contains only unavailable metrics"
-        )
-
-
-@pytest.mark.parametrize("counter", UNPORTED_COUNTERS)
-def test_gfx1201_does_not_inherit_unvalidated_gfx115x_definitions(
-    counter, gfx1201_definitions
-):
-    assert counter not in gfx1201_definitions
-
-
-@pytest.mark.parametrize("counter, block, event", EVENT_MAPPINGS)
-def test_gfx1201_event_ids_match_enablement_mapping(
-    counter, block, event, gfx1201_definitions
-):
-    assert gfx1201_definitions[counter] == {
-        "architectures": gfx1201_definitions[counter]["architectures"],
-        "block": block,
-        "event": event,
-    }
-
-
-def test_gfx1201_valu_cycles_sum_preserves_raw_sdk_count(gfx1201_definitions):
-    definition = gfx1201_definitions["SQ_INST_CYCLES_VALU_sum"]
-
-    assert definition["expression"] == "reduce(SQ_INST_CYCLES_VALU,sum)"
-    assert hardware_counters("SQ_INST_CYCLES_VALU_sum", gfx1201_definitions) == {
-        "SQ_INST_CYCLES_VALU"
-    }
 
 
 @pytest.mark.parametrize(

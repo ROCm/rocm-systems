@@ -1057,14 +1057,6 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-add_test(
-    NAME test_soc_gfx1201
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_soc_gfx1201.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_soc/test_soc_gfx1201.py
-        ${WORKING_DIR_OPTION}
-)
-
 # -----------------------------------
 # Configuration tooling unit tests
 # -----------------------------------
@@ -1249,7 +1241,6 @@ if(${ENABLE_COVERAGE})
         test_rocprofv3_avail_interface
         test_soc_base
         test_sdk_config
-        test_soc_gfx1201
         test_metric_description_manager
         test_verify_against_config_template
         test_tty

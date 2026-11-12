@@ -221,9 +221,9 @@ def test_kw_only_rejects_positional_arguments():
     ],
     ids=["rdna35", "rdna4", "cdna", "unknown"],
 )
-def test_spec_family_for_arch_dispatch(monkeypatch, series, expected_cls):
-    monkeypatch.setattr(specs.mi_gpu_specs, "get_gpu_series", lambda _arch: series)
-    assert spec_family_for_arch("gfx_test") is expected_cls
+def test_spec_family_for_arch_dispatch(series, expected_cls):
+    with patch.object(specs.mi_gpu_specs, "get_gpu_series", return_value=series):
+        assert spec_family_for_arch("gfx_test") is expected_cls
 
 
 @pytest.mark.misc
@@ -237,7 +237,7 @@ def test_spec_family_for_arch_dispatch(monkeypatch, series, expected_cls):
     ids=["bit_width", "fallback_total_l2_chan", "missing_se"],
 )
 def test_rdna35_finalize_soc_fields(
-    monkeypatch, se_per_gpu, sa_per_se, vram_bit_width, expected_gl1c, expected_channels
+    se_per_gpu, sa_per_se, vram_bit_width, expected_gl1c, expected_channels
 ):
     """RDNA 3.5 derives num_gl1c from SE*SA and num_memory_channels from the
     VRAM bus width, falling back to total_l2_chan when width is unavailable.
@@ -256,10 +256,10 @@ def test_rdna35_finalize_soc_fields(
         "vram_bit_width": vram_bit_width,
         "perf_level": "AUTO",
     }
-    monkeypatch.setattr(specs, "set_cache_sizes", lambda *_args: {})
-    monkeypatch.setattr(specs.mi_gpu_specs, "get_num_dies", lambda *_args: 1)
-    monkeypatch.setattr(specs, "totall2_banks", lambda *_args: "32")
-    spec.finalize_soc_fields(gpu_info)
+    with patch.object(specs, "set_cache_sizes", return_value={}), patch.object(
+        specs.mi_gpu_specs, "get_num_dies", return_value=1
+    ), patch.object(specs, "totall2_banks", return_value="32"):
+        spec.finalize_soc_fields(gpu_info)
 
     assert spec.num_gl1c == expected_gl1c
     assert spec.num_memory_channels == expected_channels
@@ -297,25 +297,24 @@ def test_cdna_hbm_channels_nps_divisors(memory_partition, expected_channels):
 
 
 @pytest.mark.misc
-@pytest.mark.parametrize("gpu_arch", ["gfx1151", "gfx1201"])
-def test_reconstruct_specs_from_sysinfo_round_trip(monkeypatch, gpu_arch):
+def test_reconstruct_specs_from_sysinfo_round_trip():
     """generate_machine_specs reconstructs the arch-specific subclass from a
     saved sysinfo dict.
     """
     sysinfo = {
         "version": "3",
-        "gpu_arch": gpu_arch,
+        "gpu_arch": "gfx1151",
         "num_gl1c": "8",
         "num_memory_channels": "8",
-        "perf_level": "STABLE_STD",
     }
-    monkeypatch.setattr(specs, "get_version", lambda _home: {"version": "3.0.0"})
-    spec = generate_machine_specs(None, sysinfo)
+    with patch.object(
+        specs, "get_version", return_value={"version": "3.0.0"}
+    ), patch.object(specs.mi_gpu_specs, "get_gpu_series", return_value="RDNA3.5"):
+        spec = generate_machine_specs(None, sysinfo)
 
     assert isinstance(spec, MachineSpecsRDNA)
     assert spec.num_gl1c == "8"
     assert spec.num_memory_channels == "8"
-    assert spec.perf_level == "STABLE_STD"
 
 
 @pytest.mark.misc

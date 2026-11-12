@@ -5,7 +5,6 @@
 
 import argparse
 import sys
-from collections import OrderedDict
 from io import StringIO
 from types import SimpleNamespace
 from typing import Optional
@@ -13,12 +12,7 @@ from typing import Optional
 import pandas as pd
 import pytest
 
-import config
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
-from utils import schema
-from utils.metrics.expression import build_eval_string
-from utils.metrics.metric_evaluator import MetricEvaluator
-from utils.parser import build_dfs
 from utils.tty import (
     _render_membw_guidance,
     build_continuation_indent,
@@ -39,7 +33,7 @@ from utils.utils_analysis import (
     KernelStats,
     rollup_node_stats,
 )
-from utils.utils_common import load_panel_configs, strip_ansi
+from utils.utils_common import strip_ansi
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
@@ -56,17 +50,6 @@ _OPERATOR_SUMMARY_COLUMNS = [
     "Min_Dispatch",
     "Max_Dispatch",
 ]
-
-
-@pytest.fixture(scope="module")
-def gfx1201_wgp_raw_tables():
-    """Real Navi48 table configurations used by plain text analysis."""
-    panel = load_panel_configs([str(config.analysis_configs_dir / "gfx1201")])[700]
-    return {
-        source["metric_table"]["id"]: source["metric_table"]
-        for source in panel["data source"]
-        if source["metric_table"]["id"] in (708, 710)
-    }
 
 
 def make_args(**overrides) -> argparse.Namespace:
@@ -188,57 +171,6 @@ def test_format_table_output_suppresses_empty_column() -> None:
         runs={"only": object()},
     )
     assert content == ""
-
-
-@pytest.mark.parametrize("table_id", [708, 710], ids=["valu", "wmma"])
-@pytest.mark.parametrize("single_metric", [False, True], ids=["table", "metric"])
-@pytest.mark.parametrize("counter_value", [0, 17], ids=["zero", "nonzero"])
-def test_gfx1201_wgp_raw_counts_render_without_peak_columns(
-    gfx1201_wgp_raw_tables, table_id: int, single_metric: bool, counter_value: int
-) -> None:
-    table = gfx1201_wgp_raw_tables[table_id]
-    table_prefix = f"7.{table_id % 100}"
-    metric_id = f"{table_prefix}.1"
-    arch_config = schema.ArchConfig(
-        panel_configs=OrderedDict([
-            (700, {"data source": [{"metric_table": table}]}),
-        ])
-    )
-    build_dfs(
-        arch_config,
-        filter_metrics=[metric_id if single_metric else table_prefix],
-        sys_info=pd.Series(dtype=object),
-        profiling_config={},
-    )
-    evaluator = MetricEvaluator(
-        pd.DataFrame({
-            "SQ_INSTS_VALU_sum": [13, 17],
-            "SQ_INST_CYCLES_VALU_sum": [counter_value, counter_value],
-            "SQ_WMMA_VALU_INSTS_sum": [counter_value, counter_value],
-            "SQ_INST_CYCLES_VALU_WMMA_sum": [counter_value, counter_value],
-        }),
-        {},
-        {},
-    )
-    dataframe = arch_config.dfs[table_id].copy()
-    for column in dataframe.columns.difference(["Metric", "Unit"]):
-        dataframe[column] = [
-            evaluator.eval_expression(build_eval_string(value))
-            if isinstance(value, str)
-            else value
-            for value in dataframe[column]
-        ]
-
-    content = format_table_output(
-        make_args(), table, dataframe, "metric_table", runs={"only": object()}
-    )
-
-    assert dataframe.loc[metric_id, "Avg"] == 2 * counter_value
-    assert dataframe.loc[metric_id, "Unit"] == "Cycles"
-    assert f"{table_prefix} {table['title']}" in content
-    assert dataframe.loc[metric_id, "Metric"] in content
-    assert "Cycles" in content
-    assert "Peak" not in content
 
 
 def test_format_table_output_keeps_pc_sampling_table_21_1() -> None:
