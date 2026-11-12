@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 635 | 635 | 0 |
-| **total** | **635** | **635** | **0** |
+| `contract` | 640 | 640 | 0 |
+| **total** | **640** | **640** | **0** |
 
 ## Tier: `contract`
 
@@ -418,12 +418,17 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_GraphCapture_HipStreamGetCaptureInfo_Default_ReturnsActiveState` | hipStreamGetCaptureInfo | reports Active status and a nonzero capture id while a stream is capturing |
 | `Contract_GraphCapture_HipStreamIsCapturing_Default_ReportsActiveDuringCapture` | hipStreamIsCapturing | reports capture status Active on a stream between begin and end capture |
 
-### `graph_child` (3 cases)
+### `graph_child` (8 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_GraphChild_HipGraphAddChildGraphNode_Default_ExecutesEmbeddedMemcpy` | hipGraphAddChildGraphNode | launching a parent graph executes the embedded child graph's memcpy nodes end to end |
+| `Contract_GraphChild_HipGraphAddNode_EmbeddedSourceMove_ReturnsError` | hipGraphAddNode | rejects an ownership move of a graph that is already embedded in another child graph node |
+| `Contract_GraphChild_HipGraphAddNode_OwnershipClone_ReturnsDistinctEmbeddedGraph` | hipGraphAddNode | a child graph added with ownership clone leaves the caller's handle distinct from the node's embedded graph |
+| `Contract_GraphChild_HipGraphAddNode_OwnershipMove_ReturnsCallerGraphAsEmbedded` | hipGraphAddNode | a child graph added with ownership move is reported by hipGraphChildGraphNodeGetGraph as the caller's own graph handle |
+| `Contract_GraphChild_HipGraphAddNode_RejectedMove_LeavesCallerGraphDestroyable` | hipGraphAddNode | a move rejected for bad dependencies leaves the caller's graph intact and still destroyable |
 | `Contract_GraphChild_HipGraphChildGraphNodeGetGraph_Default_ReturnsHandle` | hipGraphChildGraphNodeGetGraph | returns a non-null embedded graph handle whose node count matches the child graph |
+| `Contract_GraphChild_HipGraphDestroy_MovedChildGraph_ReturnsError` | hipGraphDestroy | a graph moved into a child graph node is owned by its parent and can no longer be destroyed on its own |
 | `Contract_GraphChild_HipGraphNodeGetType_NodeType_ReportsGraph` | hipGraphNodeGetType | a child-graph node reports node type hipGraphNodeTypeGraph |
 
 ### `graph_clone` (3 cases)

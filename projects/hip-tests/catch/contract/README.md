@@ -58,7 +58,7 @@ The first domains are:
 - `graph_update`: graph exec whole-graph update and memcpy, memset, host, child graph, and event node parameter update contracts
 - `graph_exec_lifecycle`: executable graph instantiate-with-flags, upload, and flag query contracts
 - `graph_node_types`: graph node type introspection and dependency edit contracts
-- `graph_child`: child graph node creation, introspection, and embedded execution contracts
+- `graph_child`: child graph node creation, introspection, and embedded execution contracts, plus clone-versus-move ownership contracts covering moved-graph lifetime, rejected-move recovery, and embedded-source move rejection
 - `graph_host`: host graph node callback, parameter, and node-type contracts
 - `graph_mem_nodes`: graph memory allocation/free node and graph memory attribute contracts
 - `graph_generic_node`: unified generic graph node add and pre/post-instantiation parameter setter contracts
