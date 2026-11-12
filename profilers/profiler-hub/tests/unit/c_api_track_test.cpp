@@ -279,7 +279,7 @@ TEST(c_api_create_test, a_directory_is_not_a_trace)
 
     EXPECT_EQ(ph_ctx_create(
                   &ctx, std::filesystem::temp_directory_path().string().c_str(), nullptr),
-              PH_RESULT_CONTEXT_ALLOCATION_FAILED);
+              PH_RESULT_UNSUPPORTED_FILE);
 
     EXPECT_EQ(ctx, nullptr);
 }
