@@ -265,7 +265,7 @@ pub(crate) mod query;
 
 use code_object::map_loader_error;
 
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
 /// Returns the loader extension functions in public ABI table order.
 pub(crate) fn loader_extension_table() -> [usize; 7] {
     [

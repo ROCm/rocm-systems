@@ -8,7 +8,9 @@ mod fork;
 pub(crate) mod tooling;
 pub(crate) use fork::{bind_process, process_is_current};
 
-pub(crate) use rocddi::memory::interop::linux as memory;
+pub(crate) mod ais;
+pub(crate) use ais::ais_file_io;
+pub(crate) use rocddi::memory::interop::linux::AisFileOperation as AisOperation;
 use rocddi::topology::platform::linux::kfd_drm_info;
 use rocddi::topology::{Endpoint, NativeNodeId, TopologyNode};
 
@@ -32,11 +34,6 @@ pub(crate) fn driver_uid(endpoint: Option<&Endpoint>) -> u32 {
     endpoint
         .and_then(kfd_drm_info)
         .map_or(0, |info| info.gpu_id)
-}
-
-/// File descriptor support for this frontend.
-pub(crate) mod fd {
-    pub(crate) use std::os::fd::{AsFd, IntoRawFd};
 }
 
 /// Loader URI for a snapshotted code object supplied through a Linux descriptor.

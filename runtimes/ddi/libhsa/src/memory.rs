@@ -25,7 +25,6 @@ pub(crate) use copy_svm::image_device_address;
 use copy_svm::*;
 pub(crate) mod virtual_memory;
 
-use crate::platform::fd::{AsFd, IntoRawFd};
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_void;
 use std::mem::{align_of, size_of};
@@ -35,8 +34,8 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::platform::memory as linux_interop;
-use crate::platform::memory::AisFileOperation as AisOperation;
+use crate::platform::memory as native_memory;
+
 use rocddi::device::Device;
 use rocddi::device::gpu::{
     CopyRect, GpuCopyOptions, GpuCopySequence, GpuCopySignal, GpuCopySignalOperation,
@@ -128,8 +127,6 @@ const ALLOC_FLAGS: u32 = ALLOC_PCIE | ALLOC_CONTIGUOUS | ALLOC_EXECUTABLE | ALLO
 pub(crate) const SVM_MAX_MIGRATION_GRANULARITY: u64 = 18;
 /// Maximum number of SVM attributes accepted in one request.
 pub(crate) const SVM_MAX_ATTRIBUTES: usize = 2044;
-/// Linux I/O error number used when native cleanup cannot be proved.
-const EIO: i32 = 5;
 
 /// Accepts only the HSA virtual-memory access bits implemented here.
 pub(crate) fn valid_access_permissions(access: u32) -> bool {
@@ -281,7 +278,7 @@ impl PointerDescription {
     }
 
     /// Translates a device address to its host mapping when available.
-    fn host_address(&self, address: usize) -> Option<usize> {
+    pub(crate) fn host_address(&self, address: usize) -> Option<usize> {
         if self
             .host_base
             .is_some_and(|host| contains(host, self.size, address))
@@ -301,7 +298,7 @@ impl PointerDescription {
     }
 
     /// Returns the offset of a complete range within this allocation.
-    fn offset_range(&self, address: usize, size: usize) -> Option<usize> {
+    pub(crate) fn offset_range(&self, address: usize, size: usize) -> Option<usize> {
         let base = if contains(self.agent_base, self.size, address) {
             self.agent_base
         } else if self
@@ -601,7 +598,7 @@ impl VmemHandle {
             VmemBacking::Fabric { token, imports } => {
                 if !imports.contains_key(&gpu_index) {
                     imports.try_reserve(1).map_err(|_| OUT_OF_RESOURCES)?;
-                    let memory = linux_interop::import_fabric_virtual_memory(device, *token)
+                    let memory = native_memory::import_fabric_virtual_memory(device, *token)
                         .map_err(map_error)?;
                     imports.insert(gpu_index, memory);
                 }
