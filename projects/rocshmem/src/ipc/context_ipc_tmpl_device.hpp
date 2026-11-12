@@ -847,7 +847,7 @@ __device__ void IPCContext::broadcast_wg(rocshmem_team_t team, T *dst,
 #else
   if (sizeof(T) * nelems < 512)
 #endif
-    broadcastmem_wg_linear_thread_puts(team, dst, src, nelems * sizeof(T), pe_root);
+    broadcastmem_linear_thread_puts_wg(team, dst, src, nelems * sizeof(T), pe_root);
   else {
     IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 

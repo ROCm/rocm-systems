@@ -456,7 +456,7 @@ class IPCContext : public Context {
   __device__ void broadcastmem_linear_thread_puts_wave(rocshmem_team_t team, void *dst,
                                                        const void *src, int nelems, int PE_root);
 
-  __device__ void broadcastmem_wg_linear_thread_puts(rocshmem_team_t team, void *dst,
+  __device__ void broadcastmem_linear_thread_puts_wg(rocshmem_team_t team, void *dst,
                                                       const void *src, int nelems, int PE_root);
 
   template <typename T>
@@ -476,10 +476,7 @@ class IPCContext : public Context {
   __device__ void fcollect_linear_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems);
 
-  __device__ void fcollectmem_linear_wg(rocshmem_team_t team, void *dest,
-                                  const void *source, int nelems);
-
- template <typename T>
+  template <typename T>
   __device__ void alltoall_linear_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems);
   template <typename T>

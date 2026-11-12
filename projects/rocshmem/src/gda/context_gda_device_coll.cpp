@@ -436,7 +436,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
   }
 
   // wait until everyone has obtained their designated data
-  for (int j = tid; j < pe_size; j+= step_size) {
+  for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
     long *sync_flags = &pSync[alltoall_pSync_offset + j];
@@ -446,7 +446,6 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
 
     pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
-
 
   __syncthreads();
   if (is_thread_zero_in_block()) {
@@ -521,7 +520,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   }
 
   // wait until everyone has obtained their designated data
-  for (int j = tid; j < pe_size; j+= step_size) {
+  for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
     long *sync_flags = &pSync[alltoall_pSync_offset + j];
@@ -542,8 +541,9 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
 __device__ void GDAContext::fcollectmem_wg(rocshmem_team_t team, void *dst,
                                      const void *src, int nelems) {
   GDATeam *team_obj_dispatch = reinterpret_cast<GDATeam *>(team);
-  size_t pe_size_dispatch = team_obj_dispatch->num_pes;
-  if (nelems < 512 && 2 * pe_size_dispatch <= ROCSHMEM_ALLTOALL_SYNC_SIZE)
+  // Size the fast path needs: 2 double-buffered slots per PE.
+  size_t fcollect_pSync_slots_needed = 2 * team_obj_dispatch->num_pes;
+  if (nelems < 512 && fcollect_pSync_slots_needed <= ROCSHMEM_ALLTOALL_SYNC_SIZE)
     fcollectmem_linear_thread_puts_wg(team, dst, src, nelems);
   else
     fcollectmem_linear_wg(team, dst, src, nelems);
@@ -584,8 +584,9 @@ __device__ int GDAContext::fcollectmem_wave(rocshmem_team_t team, void *dst,
     return ROCSHMEM_ERROR;
 
   GDATeam *team_obj_dispatch = reinterpret_cast<GDATeam *>(team);
-  size_t pe_size_dispatch = team_obj_dispatch->num_pes;
-  if (nelems < 512 && 2 * pe_size_dispatch <= ROCSHMEM_ALLTOALL_SYNC_SIZE)
+  // Size the fast path needs: 2 double-buffered slots per PE.
+  size_t fcollect_pSync_slots_needed = 2 * team_obj_dispatch->num_pes;
+  if (nelems < 512 && fcollect_pSync_slots_needed <= ROCSHMEM_ALLTOALL_SYNC_SIZE)
     fcollectmem_linear_thread_puts_wave(team, dst, src, nelems);
   else
     fcollectmem_linear_wave(team, dst, src, nelems);
@@ -697,7 +698,6 @@ __device__ void GDAContext::fcollectmem_linear_thread_puts_wg(rocshmem_team_t te
 
     pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
-
 
   __syncthreads();
   if (is_thread_zero_in_block()) {

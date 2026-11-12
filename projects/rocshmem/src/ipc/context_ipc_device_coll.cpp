@@ -300,7 +300,7 @@ __device__ void IPCContext::alltoallmem_wg_linear_thread_puts(rocshmem_team_t te
   }
 
   // wait until everyone has obtained their designated data
-  for (int j = tid; j < pe_size; j+= step_size) {
+  for (int j = tid; j < pe_size; j += step_size) {
 
     long *sync_flag = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flag) != 1) { }
@@ -309,7 +309,6 @@ __device__ void IPCContext::alltoallmem_wg_linear_thread_puts(rocshmem_team_t te
 
     pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
-
 
   __syncthreads();
   if (is_thread_zero_in_block()) {
@@ -448,7 +447,7 @@ __device__ void IPCContext::internal_broadcastmem_wg(void *dst, const void *src,
   internal_sync_wg(my_pe, pe_start, stride, pe_size, p_sync);
 }
 
-__device__ void IPCContext::broadcastmem_wg_linear_thread_puts(
+__device__ void IPCContext::broadcastmem_linear_thread_puts_wg(
     rocshmem_team_t team, void *dst, const void *src, int nelems, int PE_root) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int pe_size = team_obj->num_pes;
@@ -475,7 +474,6 @@ __device__ void IPCContext::broadcastmem_wg_linear_thread_puts(
       ipcImpl_.ipcAMOAdd(reinterpret_cast<long*>(wrk_sync_pool_bases_[dest_pe] + L_offset), 1L);
     }
   }
-
 
   __syncthreads();
   if (is_thread_zero_in_block()) {
@@ -504,7 +502,7 @@ __device__ void IPCContext::broadcastmem_wg(rocshmem_team_t team,
 #else
   if (nelems < 512)
 #endif
-    broadcastmem_wg_linear_thread_puts(team, dest, source, nelems, PE_root);
+    broadcastmem_linear_thread_puts_wg(team, dest, source, nelems, PE_root);
   else
     internal_broadcastmem_wg(dest, source, nelems, pe_root_world,
                                 pe_start, stride, pe_size, p_sync);
@@ -524,7 +522,7 @@ __device__ void IPCContext::internal_alltoallmem_wave(rocshmem_team_t team, void
   if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
   if (nelems < 512)
-  #endif
+#endif
     alltoallmem_linear_thread_puts_wave(team, dest, source, nelems);
   else
     alltoallmem_linear_wave(team, dest, source, nelems);
@@ -582,7 +580,7 @@ __device__ void IPCContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   }
 
   // wait until everyone has obtained their designated data
-  for (int j = tid; j < pe_size; j+= step_size) {
+  for (int j = tid; j < pe_size; j += step_size) {
 
     long *sync_flag = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flag) != 1) { }
@@ -741,7 +739,6 @@ __device__ void IPCContext::fcollectmem_wg_linear_thread_puts(rocshmem_team_t te
 
     pSync[fcollect_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
-
 
   __syncthreads();
   if (is_thread_zero_in_block()) {
