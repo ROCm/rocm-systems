@@ -74,6 +74,47 @@ than report. A failure from one means it has already rewritten the file in your
 working tree, so there is nothing to go and edit by hand — `git diff` to see
 what it did, then `git add` the result and commit again.
 
+## `apply-formatting-sweep.sh`
+
+Reformats the whole tree in one go and lands it as two commits: the sweep, and
+an entry for it in `.git-blame-ignore-revs`.
+
+```sh
+projects/rccl/maint/apply-formatting-sweep.sh
+projects/rccl/maint/apply-formatting-sweep.sh --no-commit   # leave it unstaged
+projects/rccl/maint/apply-formatting-sweep.sh --check       # verify only
+```
+
+This is not a routine tool. A sweep is for the one-off occasion when a
+formatting rule changes, or a hook is adopted and its backlog has to be cleared
+in a single reviewable commit rather than dribbling into unrelated pull
+requests. Day to day the hooks fix the files you touch, which is enough.
+
+The working tree must be clean, because every check works by comparing a file
+against its committed version.
+
+It does not restate what gets formatted. The `clang-format` hook's `files:`
+pattern in `.pre-commit-config.yaml` owns that, and the script reads it, along
+with the `clang-format` version pinned by the hook's `rev:`, which it installs
+into a virtualenv so the result does not depend on whichever `clang-format`
+happens to be on `PATH`. Set `CLANG_FORMAT` to override that, and own the
+difference.
+
+Do not reach for `run-clang-format.sh` instead. It is NVIDIA's, and its `find`
+covers `.cc .cu .cuh .h` only — not the `.c`, `.cpp` and `.hpp` that the hook
+also claims. A sweep driven from it silently leaves those files unformatted,
+and the `clang-format` hook will not tell you, because it is advisory and exits
+0 whatever it finds.
+
+That last point is why the script verifies rather than trusting the tools. Each
+changed file must be either byte-identical to `clang-format`'s output for its
+previous content, or different in whitespace alone; the expected output is
+captured from the pristine tree beforehand, so it is an independent
+expectation and not a rerun of the command being checked. Anything meeting
+neither standard stops the script before a commit exists. Finally the hooks are
+re-run against the result, since a sweep that is not a fixed point just leaves
+the remainder for the next pull request.
+
 ## `ci-pre-commit.sh`
 
 The CI wrapper around the ordinary-stage hooks, used by the `pre-commit` job in
