@@ -3435,8 +3435,10 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
     if base in _PLAYBACK_HANDLE_TRANSLATE:
         fn = _PLAYBACK_HANDLE_TRANSLATE[base]
         return f"({t}){fn}(a->{name})"
-    # hipArray_const_t and hipMipmappedArray_const_t
-    if 'hipArray' in base:
+    # hipArray_const_t and hipMipmappedArray_const_t. Match the handle types
+    # exactly: a substring test also catches struct types such as
+    # hipArraySparseProperties, which are output parameters, not handles.
+    if base in ('hipArray_t', 'hipArray_const_t'):
         return f"(hipArray_t)ctx.translate_array(a->{name})"
     if 'hipMipmappedArray' in base:
         return f"(hipMipmappedArray_t)ctx.translate_mipmapped(a->{name})"

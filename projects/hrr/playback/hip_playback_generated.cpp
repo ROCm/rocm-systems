@@ -5571,7 +5571,8 @@ static hipError_t playback_hipMemcpy3DWithAttributesAsync(PlaybackContext& ctx, 
 
 static hipError_t playback_hipArrayGetSparseProperties(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipArrayGetSparseProperties*>(payload);
-  hipError_t _r = (hipError_t)hipArrayGetSparseProperties((hipArray_t)ctx.translate_array(a->sparseProperties), (hipArray_t)ctx.translate_array(a->array));
+  hipArraySparseProperties _out_sparseProperties{};
+  hipError_t _r = (hipError_t)hipArrayGetSparseProperties(&_out_sparseProperties, (hipArray_t)ctx.translate_array(a->array));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipArrayGetSparseProperties", a->ret);
     return hipSuccess;
