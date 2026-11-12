@@ -64,7 +64,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@2ec58f0bff50bdf24dda63fab6edae1d16052be7 # TheRock#9887
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@d74de801ab460985d45955ddf25d94d9464161a1 # TheRock#9887
     with:
       build_variant: "host-asan"
       # Required by TheRock#9887. Without it a pull request clears the test runner.
@@ -83,7 +83,7 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: 2ec58f0bff50bdf24dda63fab6edae1d16052be7 # TheRock#9887
+      ref: d74de801ab460985d45955ddf25d94d9464161a1 # TheRock#9887
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -103,7 +103,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@2ec58f0bff50bdf24dda63fab6edae1d16052be7 # TheRock#9887
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@d74de801ab460985d45955ddf25d94d9464161a1 # TheRock#9887
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -113,7 +113,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: 2ec58f0bff50bdf24dda63fab6edae1d16052be7 # TheRock#9887
+      ref: d74de801ab460985d45955ddf25d94d9464161a1 # TheRock#9887
     permissions:
       contents: read
       id-token: write
@@ -131,7 +131,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 2ec58f0bff50bdf24dda63fab6edae1d16052be7 # TheRock#9887
+          ref: d74de801ab460985d45955ddf25d94d9464161a1 # TheRock#9887
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
