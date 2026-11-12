@@ -371,15 +371,18 @@ __device__ void IPCContext::broadcastmem_linear_thread_puts_wave(
     for (int j = tid; j < pe_size; j += step_size) {
       int dest_pe = team_obj->get_pe_in_world(j);
       fence(dest_pe);
-      // Signal slot 0 on each dest PE — receivers poll this slot.
-      ptrdiff_t L_offset = reinterpret_cast<char*>(&pSync[pe_size])
+      // Signal the dedicated broadcast slot on each dest PE — the
+      // barrier algorithms never touch BCAST_SYNC_SIZE - 1, unlike
+      // pe_size, which a >=BCAST_SYNC_SIZE-PE team would alias into
+      // the next pool index's slot 0.
+      ptrdiff_t L_offset = reinterpret_cast<char*>(&pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1])
                            - wrk_sync_pool_bases_[my_pe];
       ipcImpl_.ipcAMOAdd(reinterpret_cast<long*>(wrk_sync_pool_bases_[dest_pe] + L_offset), 1L);
     }
   }
 
-  // All PEs (including root, which signals itself) poll slot PE_root.
-  long *sync_flag = &pSync[pe_size];
+  // All PEs (including root, which signals itself) poll that slot.
+  long *sync_flag = &pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1];
   while (uncached_load(sync_flag) < expected) { }
 
   if (is_thread_zero_in_wave()) {
@@ -468,8 +471,11 @@ __device__ void IPCContext::broadcastmem_linear_thread_puts_wg(
     for (int j = tid; j < pe_size; j += step_size) {
       int dest_pe = team_obj->get_pe_in_world(j);
       fence(dest_pe);
-      // Signal slot 0 on each dest PE - receivers poll this slot.
-      ptrdiff_t L_offset = reinterpret_cast<char*>(&pSync[pe_size])
+      // Signal the dedicated broadcast slot on each dest PE — the
+      // barrier algorithms never touch BCAST_SYNC_SIZE - 1, unlike
+      // pe_size, which a >=BCAST_SYNC_SIZE-PE team would alias into
+      // the next pool index's slot 0.
+      ptrdiff_t L_offset = reinterpret_cast<char*>(&pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1])
                            - wrk_sync_pool_bases_[my_pe];
       ipcImpl_.ipcAMOAdd(reinterpret_cast<long*>(wrk_sync_pool_bases_[dest_pe] + L_offset), 1L);
     }
@@ -477,7 +483,7 @@ __device__ void IPCContext::broadcastmem_linear_thread_puts_wg(
 
   __syncthreads();
   if (is_thread_zero_in_block()) {
-    long *sync_flag = &pSync[pe_size];
+    long *sync_flag = &pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1];
     while (uncached_load(sync_flag) < expected) { }
     team_obj->bcast_sequence_number++;
   }

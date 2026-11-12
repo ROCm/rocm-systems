@@ -434,12 +434,16 @@ __device__ void GDAContext::broadcastmem_linear_thread_puts_wave(rocshmem_team_t
     for (int j = tid; j < pe_size; j += step_size) {
       int dest_pe = team_obj->get_pe_in_world(j);
       qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
-      qps[dest_pe].atomic_add_single(&pSync[pe_size], 1);
+      qps[dest_pe].atomic_add_single(&pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1], 1);
     }
   }
 
-  // All PEs (including root, which signals itself) poll slot pe_size.
-  long *sync_flag = &pSync[pe_size];
+  // All PEs (including root, which signals itself) poll that slot.
+  // BCAST_SYNC_SIZE - 1 is used instead of pe_size because the
+  // barrier algorithms never touch it, unlike pe_size, which a
+  // >=BCAST_SYNC_SIZE-PE team would alias into the next pool
+  // index's slot 0.
+  long *sync_flag = &pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1];
   while (uncached_load(sync_flag) < expected) { }
 
   if (is_thread_zero_in_wave()) {
@@ -466,13 +470,13 @@ __device__ void GDAContext::broadcastmem_linear_thread_puts_wg(rocshmem_team_t t
     for (int j = tid; j < pe_size; j += step_size) {
       int dest_pe = team_obj->get_pe_in_world(j);
       qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
-      qps[dest_pe].atomic_add_single(&pSync[pe_size], 1);
+      qps[dest_pe].atomic_add_single(&pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1], 1);
     }
   }
 
   __syncthreads();
   if (is_thread_zero_in_block()) {
-    long *sync_flag = &pSync[pe_size];
+    long *sync_flag = &pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1];
     while (uncached_load(sync_flag) < expected) { }
     team_obj->bcast_sequence_number++;
   }
