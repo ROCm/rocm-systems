@@ -2553,6 +2553,10 @@ hipError_t hipGraphClone(hipGraph_t* pGraphClone, hipGraph_t originalGraph) {
   if (!hip::Graph::isGraphValid(g)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+  // A moved graph's nodes live in the child graph node that adopted them. Read those rather
+  // than the empty shell the caller is still holding, so the unsupported node check sees the
+  // real contents and the clone is a copy of them.
+  g = g->ResolveMoved();
   for (auto n : g->GetNodes()) {
     if (n->GetType() == hipGraphNodeTypeMemAlloc || n->GetType() == hipGraphNodeTypeMemFree) {
       HIP_RETURN(hipErrorNotSupported);
