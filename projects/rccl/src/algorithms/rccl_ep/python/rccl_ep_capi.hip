@@ -490,9 +490,10 @@ int ep_plan(void* handle, uintptr_t topk_idx, int num_tokens,
   REQUIRE_PTR(fn, out_list, num_tokens > 0);
   REQUIRE_PTR(fn, out_sendc, true);
   hipStream_t s = (hipStream_t)stream;
-  hipLaunchKernelGGL(k_ep_plan, dim3(h->cfg.num_ranks), dim3(kWarpSize), 0, s,
-                     h->cfg, (const int32_t*)topk_idx, num_tokens,
-                     (int32_t*)out_slot, (int32_t*)out_list, (int32_t*)out_sendc);
+  // A full block per destination; k_ep_plan sizes its per-wave scan from blockDim.
+  static_assert(kEpWaves <= kPlanMaxWaves, "k_ep_plan's wave scan is sized by kPlanMaxWaves");
+  hipLaunchKernelGGL(k_ep_plan, dim3(h->cfg.num_ranks), dim3(kEpWaves * kWarpSize), 0, s, h->cfg,
+                     (const int32_t*)topk_idx, num_tokens, (int32_t*)out_slot, (int32_t*)out_list, (int32_t*)out_sendc);
   HC(hipStreamSynchronize(s));
   return 0;
 }
@@ -546,36 +547,31 @@ int ep_dispatch(void* handle,
   HC(hipMemsetAsync((uint8_t*)h->win_buf + h->lay.off_counts, 0, c.num_ranks * sizeof(int32_t), s));
 
   hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, s, h->devComm);
+  const dim3 grid(c.num_ranks, cta), block(kEpWaves * kWarpSize);
   if (use_fp8) {
-    hipLaunchKernelGGL(dispatch_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s,
-                       c, (const fp8_t*)x, (const float*)x_sf, (const int32_t*)topk_idx,
-                       (const float*)topk_w, num_tokens, (const int32_t*)send_list,
+    hipLaunchKernelGGL(dispatch_impl<fp8_t>, grid, block, 0, s, c, (const fp8_t*)x, (const float*)x_sf,
+                       (const int32_t*)topk_idx, (const float*)topk_w, num_tokens, (const int32_t*)send_list,
                        (const int32_t*)sendc, h->d_views);
   } else {
-    hipLaunchKernelGGL(dispatch_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s,
-                       c, (const bf16_t*)x, (const int32_t*)topk_idx, (const float*)topk_w,
-                       num_tokens, (const int32_t*)send_list, (const int32_t*)sendc, h->d_views);
+    hipLaunchKernelGGL(dispatch_impl<bf16_t>, grid, block, 0, s, c, (const bf16_t*)x, (const float*)nullptr,
+                       (const int32_t*)topk_idx, (const float*)topk_w, num_tokens, (const int32_t*)send_list,
+                       (const int32_t*)sendc, h->d_views);
   }
   hipLaunchKernelGGL(k_ep_lsa_barrier, dim3(kEpBarrierCtas), dim3(kWarpSize), 0, s, h->devComm);
   hipLaunchKernelGGL(k_ep_scan_counts, dim3(1), dim3(1), 0, s,
                      c, h->self_view, h->d_recvoff, h->d_total);
 
-  // The receive total has to reach the host to size the epilogue's output, so
-  // this one sync is structural rather than incidental. The copy is already
-  // ordered behind k_ep_scan_counts on `s`, so it needs no separate barrier.
+  // The epilogue reads the receive offsets on the device, so it follows the scan on `s` without
+  // the host knowing the receive total; one sync after it returns the total.
+  if (use_fp8) {
+    hipLaunchKernelGGL(dispatch_copy_epilogue_impl<fp8_t>, grid, block, 0, s, c, h->self_view, h->d_recvoff,
+                       (fp8_t*)out_x, (float*)out_sf, (int32_t*)out_topk, (float*)out_tw, (int32_t*)out_src);
+  } else {
+    hipLaunchKernelGGL(dispatch_copy_epilogue_impl<bf16_t>, grid, block, 0, s, c, h->self_view, h->d_recvoff,
+                       (bf16_t*)out_x, (float*)nullptr, (int32_t*)out_topk, (float*)out_tw, (int32_t*)out_src);
+  }
   int total = 0;
   HC(hipMemcpyAsync(&total, h->d_total, sizeof(int32_t), hipMemcpyDeviceToHost, s));
-  HC(hipStreamSynchronize(s));
-
-  if (use_fp8) {
-    hipLaunchKernelGGL(dispatch_copy_epilogue_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s,
-                       c, h->self_view, h->d_recvoff, (fp8_t*)out_x, (float*)out_sf,
-                       (int32_t*)out_topk, (float*)out_tw, (int32_t*)out_src);
-  } else {
-    hipLaunchKernelGGL(dispatch_copy_epilogue_impl, dim3(c.num_ranks, cta), dim3(kEpWaves * kWarpSize), 0, s,
-                       c, h->self_view, h->d_recvoff, (bf16_t*)out_x,
-                       (int32_t*)out_topk, (float*)out_tw, (int32_t*)out_src);
-  }
   HC(hipStreamSynchronize(s));
   return total;
 }
@@ -686,14 +682,13 @@ int ep_expand_scatter(void* handle, int use_fp8,
   const int cta = sms_or(num_sms, 64);
 
   if (use_fp8) {
-    hipLaunchKernelGGL(k_expand_scatter_fp8, dim3(cta), dim3(kEpWaves * kWarpSize), 0, s,
-                       c, (const fp8_t*)src_x, (const float*)src_sf, (const float*)src_w,
-                       (const int32_t*)row_map, num_recv, (fp8_t*)out_x, (float*)out_sf,
-                       sf_row_stride, sf_col_stride, (float*)out_w);
+    hipLaunchKernelGGL(k_expand_scatter<fp8_t>, dim3(cta), dim3(kEpWaves * kWarpSize), 0, s, c, (const fp8_t*)src_x,
+                       (const float*)src_sf, (const float*)src_w, (const int32_t*)row_map, num_recv, (fp8_t*)out_x,
+                       (float*)out_sf, sf_row_stride, sf_col_stride, (float*)out_w);
   } else {
-    hipLaunchKernelGGL(k_expand_scatter, dim3(cta), dim3(kEpWaves * kWarpSize), 0, s,
-                       c, (const bf16_t*)src_x, (const float*)src_w,
-                       (const int32_t*)row_map, num_recv, (bf16_t*)out_x, (float*)out_w);
+    hipLaunchKernelGGL(k_expand_scatter<bf16_t>, dim3(cta), dim3(kEpWaves * kWarpSize), 0, s, c, (const bf16_t*)src_x,
+                       (const float*)nullptr, (const float*)src_w, (const int32_t*)row_map, num_recv, (bf16_t*)out_x,
+                       (float*)nullptr, 0, 0, (float*)out_w);
   }
   if (zero_pad) {
     hipLaunchKernelGGL(k_expand_zero_pad, dim3(c.experts_per_rank()), dim3(kEpWaves * kWarpSize), 0, s,
