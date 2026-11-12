@@ -188,8 +188,7 @@ Panel Config:
       indexed accesses.
     LDS Bandwidth: >-
       LDS byte-access rate from load, store, and atomic dword counters, using
-      four bytes per dword. Counter exposure and hardware normalization remain
-      subject to Navi48 qualification.
+      four bytes per dword.
     GL2 Hit Rate: >-
       Percentage of L2 lookups that hit.
     Memory Read Requests: >-

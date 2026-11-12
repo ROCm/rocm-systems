@@ -104,8 +104,8 @@ Memory chart - LDS (Local Data Share):
     rst: LDS cycles stalled by bank conflicts, as a percentage of cycles LDS spent on indexed accesses.
     unit: Percent
   LDS Bandwidth:
-    plain: LDS byte-access rate from load, store, and atomic dword counters, using four bytes per dword. Counter exposure and hardware normalization remain subject to Navi48 qualification.
-    rst: LDS byte-access rate from load, store, and atomic dword counters, using four bytes per dword. Counter exposure and hardware normalization remain subject to Navi48 qualification.
+    plain: LDS byte-access rate from load, store, and atomic dword counters, using four bytes per dword.
+    rst: LDS byte-access rate from load, store, and atomic dword counters, using four bytes per dword.
     unit: Bytes/s
 Memory chart - GL2 Cache (L2):
   GL2 Hit Rate:
@@ -293,13 +293,13 @@ WGP VALU Instruction Mix:
     rst: Raw vector arithmetic instruction count. This includes integer and floating-point instructions and is not a FLOP count.
     unit: Instructions
   SQ_INST_CYCLES_VALU:
-    plain: SDK-reported aggregate SIMD execution-cycle count for VALU operations. Overlapping V_OP32_1 and V_OP32_T instructions count separately. The counted instance and wave population still require qualification; this is not elapsed GPU time, a FLOP count, or a utilization percentage.
-    rst: SDK-reported aggregate SIMD execution-cycle count for VALU operations. Overlapping V_OP32_1 and V_OP32_T instructions count separately. The counted instance and wave population still require qualification; this is not elapsed GPU time, a FLOP count, or a utilization percentage.
+    plain: Cycles needed to execute VALU operations, counting overlapping V_OP32_1 and V_OP32_T instructions separately.
+    rst: Cycles needed to execute VALU operations, counting overlapping V_OP32_1 and V_OP32_T instructions separately.
     unit: Cycles
 WGP WMMA Instruction FLOPs and IOPs Counting:
   SQ_INST_CYCLES_VALU_WMMA:
-    plain: Raw count of work cycles sent for WMMA reported by the SDK counter. Its conversion to instruction counts or FLOPs requires validation.
-    rst: Raw count of work cycles sent for WMMA reported by the SDK counter. Its conversion to instruction counts or FLOPs requires validation.
+    plain: Cycles of work sent for WMMA.
+    rst: Cycles of work sent for WMMA.
     unit: Cycles
   SQ_WMMA_VALU_INSTS:
     plain: Number of WMMA instructions issued.

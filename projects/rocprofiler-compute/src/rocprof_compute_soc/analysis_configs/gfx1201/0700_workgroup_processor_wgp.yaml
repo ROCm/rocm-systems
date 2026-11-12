@@ -355,13 +355,10 @@ Panel Config:
       Raw vector arithmetic instruction count. This includes integer and
       floating-point instructions and is not a FLOP count.
     SQ_INST_CYCLES_VALU: >-
-      SDK-reported aggregate SIMD execution-cycle count for VALU operations.
-      Overlapping V_OP32_1 and V_OP32_T instructions count separately. The
-      counted instance and wave population still require qualification; this
-      is not elapsed GPU time, a FLOP count, or a utilization percentage.
+      Cycles needed to execute VALU operations, counting overlapping V_OP32_1
+      and V_OP32_T instructions separately.
     SQ_INST_CYCLES_VALU_WMMA: >-
-      Raw count of work cycles sent for WMMA reported by the SDK counter.
-      Its conversion to instruction counts or FLOPs requires validation.
+      Cycles of work sent for WMMA.
     SQ_WMMA_VALU_INSTS: >-
       Number of WMMA instructions issued.
     Scratch Allocation: >-
