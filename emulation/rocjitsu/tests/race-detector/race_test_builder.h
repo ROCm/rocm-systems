@@ -362,6 +362,13 @@ public:
     detector_->validateRead(addr, WaveId{wave}, lane, bytes, memoryOrder);
   }
 
+  /// A synchronous instruction reads `bytes` of LDS at `addr` as an operand.
+  /// The read completes at once; other waves still need a barrier to order it.
+  void ldsOperandRead(int wave, int lane, int addr, int bytes) {
+    waves_[wave]->recordLdsOperandRead(testInstruction(pc_++), static_cast<uint32_t>(addr),
+                                       static_cast<uint32_t>(bytes), static_cast<uint32_t>(lane));
+  }
+
   void checkLdsWrite(int wave, int lane, int addr, int bytes,
                      MemoryOrderClass memoryOrder = MemoryOrderClass::LDS) {
     detector_->validateWrite(addr, WaveId{wave}, lane, bytes, memoryOrder);

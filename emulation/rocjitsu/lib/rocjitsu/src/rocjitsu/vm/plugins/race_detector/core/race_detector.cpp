@@ -22,6 +22,12 @@ RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workg
   for (int i = 0; i < nWaves; ++i) {
     waveRaceStates.emplace_back(vgprCount, sgprCount, WaveId{i}, this, counterCapacities);
   }
+  acquired_.assign(static_cast<size_t>(nWaves) * nWaves, 0);
+  // Each wave starts in epoch 1, so 0 means nothing acquired.
+  for (int i = 0; i < nWaves; ++i)
+    acquired(WaveId{i}, WaveId{i}) = 1;
+  exitClock_.assign(nWaves, 0);
+  ended_.assign(nWaves, false);
 }
 
 WaveRaceState &RaceDetector::getWaveRaceState(int waveIndex) {
@@ -35,9 +41,11 @@ EventId RaceDetector::allocateEventId(
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
     MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask, LdsAccess ldsAccess) {
   bool hasLds = !ldsIntervals.empty();
+  // An event with no counter obligation is complete now, in its wave's
+  // current barrier epoch.
   EventId eid = events_.add(waveId, instruction, type, std::move(registers), execMask, byteMask,
                             std::move(ldsIntervals), counterObligations, memoryOrder,
-                            lastRegisterByteMask, ldsAccess);
+                            lastRegisterByteMask, ldsAccess, acquired(waveId, waveId));
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
     const WaveId orderedWave = memoryOrder == MemoryOrderClass::LDS ? waveId : WaveId{-1};
@@ -53,7 +61,106 @@ EventId RaceDetector::allocateEventId(
   return eid;
 }
 
-void RaceDetector::markEventWaveComplete(EventId eventId) { events_.markComplete(eventId); }
+void RaceDetector::markEventWaveComplete(EventId eventId) {
+  const WaveId owner = events_.waveId(eventId);
+  events_.markComplete(eventId, acquired(owner, owner));
+}
+
+namespace {
+
+/// Join `from` into `into`, element-wise maximum.
+void joinClock(std::span<uint32_t> into, std::span<const uint32_t> from) {
+  for (size_t index = 0; index < into.size(); ++index)
+    into[index] = std::max(into[index], from[index]);
+}
+
+} // namespace
+
+RaceDetector::BarrierRoundState &RaceDetector::roundState(BarrierRoundId round) {
+  auto [it, inserted] = rounds_.try_emplace(round);
+  if (inserted)
+    it->second.clock.assign(waveCount(), 0);
+  return it->second;
+}
+
+void RaceDetector::barrierSignaled(WaveId wave, BarrierRoundId round) {
+  BarrierRoundState &state = roundState(round);
+  const auto row =
+      std::span(acquired_).subspan(static_cast<size_t>(wave.value) * waveCount(), waveCount());
+  joinClock(state.clock, row);
+  // Events the wave completes from now on wait for its next signal.
+  ++acquired(wave, wave);
+}
+
+void RaceDetector::barrierRoundCompleted(BarrierRoundId round, std::span<const WaveId> members,
+                                         bool wholeWorkgroup) {
+  BarrierRoundState &state = roundState(round);
+  if (wholeWorkgroup)
+    joinClock(state.clock, exitClock_);
+  state.completed = true;
+  state.awaiting.assign(waveCount(), false);
+  bool anyAwaiting = false;
+  for (WaveId member : members) {
+    if (!ended_[member.value]) {
+      state.awaiting[member.value] = true;
+      anyAwaiting = true;
+    }
+  }
+  if (!anyAwaiting)
+    rounds_.erase(round);
+}
+
+void RaceDetector::barrierWaitPassed(WaveId wave, BarrierRoundId round) {
+  if (auto it = rounds_.find(round); it != rounds_.end() && it->second.completed) {
+    const auto row =
+        std::span(acquired_).subspan(static_cast<size_t>(wave.value) * waveCount(), waveCount());
+    joinClock(row, it->second.clock);
+  }
+  // The wave's completion bit is now clear. It never waits for another round
+  // of this barrier that has already completed: one that completed while the
+  // bit was set left the bit unchanged (CDNA5 ISA 5.6.1).
+  stopAwaiting(wave, round.barrier);
+  retireOrdered();
+}
+
+void RaceDetector::waveEnded(WaveId wave) {
+  ended_[wave.value] = true;
+  const auto row =
+      std::span(acquired_).subspan(static_cast<size_t>(wave.value) * waveCount(), waveCount());
+  joinClock(exitClock_, row);
+  stopAwaiting(wave, std::nullopt);
+  retireOrdered();
+}
+
+void RaceDetector::stopAwaiting(WaveId wave, std::optional<uint8_t> barrier) {
+  for (auto it = rounds_.begin(); it != rounds_.end();) {
+    BarrierRoundState &state = it->second;
+    if (!state.completed || (barrier && it->first.barrier != *barrier)) {
+      ++it;
+      continue;
+    }
+    state.awaiting[wave.value] = false;
+    if (std::ranges::none_of(state.awaiting, [](bool awaiting) { return awaiting; }))
+      it = rounds_.erase(it);
+    else
+      ++it;
+  }
+}
+
+void RaceDetector::retireOrdered() {
+  for (int owner = 0; owner < waveCount(); ++owner) {
+    uint32_t covered = std::numeric_limits<uint32_t>::max();
+    for (int accessor = 0; accessor < waveCount(); ++accessor)
+      if (accessor != owner && !ended_[accessor])
+        covered = std::min(covered, acquired(WaveId{accessor}, WaveId{owner}));
+    waveRaceStates[owner].retireReleasedThrough(covered);
+  }
+}
+
+bool RaceDetector::ordered(WaveId accessor, EventId eventId) const {
+  return events_.status(eventId) == EventStatus::WAVE_COMPLETE &&
+         acquired(accessor, events_.waveId(eventId)) >= events_.releaseEpoch(eventId);
+}
 
 bool RaceDetector::satisfyEventWaitCounter(EventId eventId, amdgpu::WaitCounterType waitCounter) {
   return events_.satisfyWaitCounter(eventId, waitCounter);
@@ -85,13 +192,15 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
     if (wave == events_.waveId(eventId)) {
       // Operations in the same non-UNORDERED class complete in issue order.
       // A completed event is safe for its owning wave regardless of class, but
-      // remains live for cross-wave checks until a barrier retires it.
+      // other waves need a barrier to order it.
       const MemoryOrderClass pendingMemoryOrder = events_.memoryOrder(eventId);
       const bool orderedWithCurrent = currentMemoryOrder != MemoryOrderClass::UNORDERED &&
                                       pendingMemoryOrder == currentMemoryOrder;
       if (orderedWithCurrent || events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
         continue;
       }
+    } else if (ordered(wave, eventId)) {
+      continue;
     }
     // Report a byte both accesses touch, not the start of this access.
     if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
@@ -123,6 +232,8 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
                                       pendingMemoryOrder == currentMemoryOrder;
       if (orderedWithCurrent || events_.status(eventId) == EventStatus::WAVE_COMPLETE)
         continue;
+    } else if (ordered(wave, eventId)) {
+      continue;
     }
     // Report a byte both accesses touch, not the start of this access.
     if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {

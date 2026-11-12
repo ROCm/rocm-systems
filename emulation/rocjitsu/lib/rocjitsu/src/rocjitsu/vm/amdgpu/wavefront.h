@@ -1327,6 +1327,7 @@ public:
     aperture_override_ = false;
     named_barrier_id_ = 0;
     barrier_complete_.fill(false);
+    barrier_complete_generation_.fill(0);
     waiting_barrier_bit_ = kNoBarrierWait;
     gws_wait_rid_ = kNoGwsWait;
     gws_wait_is_barrier_ = false;
@@ -1485,6 +1486,9 @@ private:
   uint32_t named_barrier_id_ = 0; ///< Currently joined named barrier.
   /// Completion bits: named, workgroup, workgroup trap, cluster, cluster trap.
   std::array<bool, 5> barrier_complete_{};
+  /// Generation of the round that set each completion bit; valid while the bit
+  /// is set. A bit is a flag, so a later round leaves it unchanged.
+  std::array<uint64_t, 5> barrier_complete_generation_{};
   uint8_t waiting_barrier_bit_ = kNoBarrierWait; ///< Completion bit awaited by split wait.
   static constexpr uint32_t kNoGwsWait = 0xffffffff;
   uint32_t gws_wait_rid_ = kNoGwsWait; ///< GWS resource id this wave is parked on.

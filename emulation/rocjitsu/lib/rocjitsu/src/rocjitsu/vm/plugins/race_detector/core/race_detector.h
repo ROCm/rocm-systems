@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -26,10 +28,25 @@ namespace rocjitsu::plugins::race_detector {
 ///      ordered counter-capacity backpressure satisfies all of the event's
 ///      wait-counter obligations.
 ///   3. retireEvent() — removes from live lists, decrements byte counts,
-///      marks RETIRED. LDS events are retired at s_barrier via
-///      flushBarrierPendingEvents, since other waves can still race with a
-///      completed event until then. In a single-wave workgroup there is no other
-///      wave, so an LDS event is retired as soon as it completes.
+///      marks RETIRED. A completed LDS event is retired once every other live
+///      wave has acquired it through a barrier (see Barrier ordering). In a
+///      single-wave workgroup there is no other wave, so an LDS event is
+///      retired as soon as it completes.
+///
+/// Barrier ordering: a barrier orders an access before it only if the issuing
+/// wave completed the access before its own signal, and orders an access after
+/// it only if the accessing wave issued it after its own wait. Each round of a
+/// barrier is a release/acquire channel, tracked with a vector clock over the
+/// workgroup's waves:
+///   - Each wave has an epoch, advanced by each of its signals. An event that
+///     completes records its wave's current epoch (EventRegistry::releaseEpoch).
+///   - A signal releases into the round everything the wave has completed or
+///     acquired; passing the wait of a round acquires everything released into
+///     it. A wave that ends releases into every later workgroup round, which
+///     cannot complete without it (CDNA5 ISA 5.6).
+///   - Another wave's completed event is ordered for a wave that has acquired
+///     its epoch; it is retired once every live wave has.
+/// A single s_barrier is reported as a round whose signals and waits coincide.
 ///
 /// LDS race validation uses a two-level approach:
 ///   - Fast path: per-chunk byte counts (byteWriteCounts / byteReadCounts)
@@ -124,44 +141,61 @@ public:
   /// with an event its own wave has completed.
   bool hasSingleWave() const { return waveRaceStates.size() == 1; }
 
-  /// A workgroup barrier covers all waves, including those that ended before
-  /// it resolved. Retire their WAVE_COMPLETE events; ACTIVE events stay pending.
-  void flushWorkgroupBarrierEvents() {
-    for (auto &wave : waveRaceStates)
-      wave.flushBarrierPendingEvents();
-  }
+  // -- Barrier ordering --
 
-  // -- Split barriers --
-  //
-  // A signal releases the events its wave has completed; passing the wait of
-  // the round acquires every release made into that round.
-
-  /// `wave`'s signal was counted toward `round`.
-  void barrierSignaled(WaveId /*wave*/, BarrierRoundId /*round*/) {}
+  /// `wave`'s signal was counted toward `round`: release into the round
+  /// everything the wave has completed or acquired.
+  void barrierSignaled(WaveId wave, BarrierRoundId round);
 
   /// `round` completed, notifying `members`. `wholeWorkgroup` is true for the
   /// workgroup barriers, which cannot complete until every wave has signalled
-  /// or ended, so they also order the events of waves that ended.
-  void barrierRoundCompleted(BarrierRoundId /*round*/, std::span<const WaveId> members,
-                             bool wholeWorkgroup) {
-    if (wholeWorkgroup) {
-      flushWorkgroupBarrierEvents();
-      return;
-    }
-    for (WaveId member : members)
-      getWaveRaceState(member.value).flushBarrierPendingEvents();
-  }
+  /// or ended, so they also release the events of waves that ended.
+  void barrierRoundCompleted(BarrierRoundId round, std::span<const WaveId> members,
+                             bool wholeWorkgroup);
 
-  /// `wave` passed its wait for `round`.
-  void barrierWaitPassed(WaveId /*wave*/, BarrierRoundId /*round*/) {}
+  /// `wave` passed its wait for `round`: acquire everything released into it.
+  void barrierWaitPassed(WaveId wave, BarrierRoundId round);
 
   /// `wave` ended. Its implicit end-of-program wait has already been applied.
-  void waveEnded(WaveId /*wave*/) {}
+  void waveEnded(WaveId wave);
 
-  /// Rounds with a member that has not yet passed its wait.
-  size_t openBarrierRounds() const { return 0; }
+  /// Rounds that have not completed, or that a member has yet to wait for.
+  size_t openBarrierRounds() const { return rounds_.size(); }
 
 private:
+  struct BarrierRoundState {
+    /// Per wave, the highest epoch released into the round.
+    std::vector<uint32_t> clock;
+    /// Members that have not yet passed the round's wait.
+    std::vector<bool> awaiting;
+    bool completed = false;
+  };
+
+  int waveCount() const { return static_cast<int>(waveRaceStates.size()); }
+
+  /// Highest epoch of `owner` that `accessor` has acquired. A wave's own
+  /// entry is its current epoch.
+  uint32_t &acquired(WaveId accessor, WaveId owner) {
+    return acquired_[static_cast<size_t>(accessor.value) * waveCount() + owner.value];
+  }
+  uint32_t acquired(WaveId accessor, WaveId owner) const {
+    return acquired_[static_cast<size_t>(accessor.value) * waveCount() + owner.value];
+  }
+
+  /// Whether another wave's completed event is ordered before `accessor`'s
+  /// access.
+  bool ordered(WaveId accessor, EventId) const;
+
+  BarrierRoundState &roundState(BarrierRoundId round);
+
+  /// `wave` will not wait for any completed round of `barrier`, or of any
+  /// barrier when `barrier` is empty. Rounds no member waits for are dropped.
+  void stopAwaiting(WaveId wave, std::optional<uint8_t> barrier);
+
+  /// Retire each wave's completed events that every other live wave has
+  /// acquired.
+  void retireOrdered();
+
   struct LdsChunkCounts {
     int bytes = 0;
     /// When bytes > 0, a nonnegative owner proves that every counted event
@@ -202,6 +236,13 @@ private:
 
   /// One WaveRaceState per wave, indexed by wave ID.
   std::vector<WaveRaceState> waveRaceStates;
+
+  /// waveCount() x waveCount() vector clock, row-major by acquiring wave.
+  std::vector<uint32_t> acquired_;
+  /// The join of the clocks of the waves that ended.
+  std::vector<uint32_t> exitClock_;
+  std::vector<bool> ended_;
+  std::map<BarrierRoundId, BarrierRoundState> rounds_;
 };
 
 } // namespace rocjitsu::plugins::race_detector

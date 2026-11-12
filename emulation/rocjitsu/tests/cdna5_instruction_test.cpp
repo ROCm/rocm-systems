@@ -1166,13 +1166,21 @@ TEST_F(Gfx1250SplitBarrierHookTest, ResolvedHookUnchangedForLeave) {
             (std::vector<Event>{resolved({wf0}, BarrierKind::Named)}));
 }
 
-// One signal from each workgroup counts toward a cluster barrier (CDNA5 ISA
-// 5.6.6), so a second signal from the same workgroup reports nothing. Every
-// wave of the cluster is notified and passes its wait.
-TEST(Gfx1250SimulationTest, ClusterSignalCountsOncePerWorkgroup) {
+// A cluster round counts one signal per workgroup (CDNA5 ISA 5.6.6). As the
+// ISA recommends, one wave per workgroup signals; every wave of the cluster is
+// notified and passes its wait.
+TEST(Gfx1250SimulationTest, ClusterRoundReportsOneSignalPerWorkgroupAndEveryWait) {
+  constexpr auto read_first_workitem =
+      cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 256, .vdst = 4});
+  constexpr auto is_first_wave =
+      cdna5::build_sopc(cdna5::kSCmpEqU32Sopc, {.ssrc0 = 4, .ssrc1 = 128});
+  constexpr auto skip_signal = cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 1});
   const uint32_t code[] = {
-      0xBE804EC3u, // s_barrier_signal -3
-      0xBF94FFFDu, // s_barrier_wait -3
+      read_first_workitem[0], // v_readfirstlane_b32 s4, v0
+      is_first_wave[0],       // s_cmp_eq_u32 s4, 0
+      skip_signal[0],         // s_cbranch_scc0 wait
+      0xBE804EC3u,            // s_barrier_signal -3
+      0xBF94FFFDu,            // s_barrier_wait -3
       S_ENDPGM_GFX12,
   };
 
@@ -1181,7 +1189,8 @@ TEST(Gfx1250SimulationTest, ClusterSignalCountsOncePerWorkgroup) {
   auto plugin = std::make_unique<BarrierHookRecorder>();
   auto *recorder = plugin.get();
   ASSERT_TRUE(sim.plugin_group->add(std::move(plugin)));
-  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false,
+                                            false, false, 0, 0, 0, 0, 0, 1);
   test::AqlQueue queue(sim.memory, sim.cp());
   // Two workgroups of two wave32 waves each.
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,

@@ -2118,16 +2118,23 @@ void CommandProcessor::drain_pending_cluster_barrier_completions() {
     completions.swap(pending_cluster_barrier_completions_);
   }
 
-  for (auto &completion : completions) {
-    std::vector<Wavefront *> members;
-    for (auto [cu, peer_wg_id] : completion.peers) {
-      auto peer_members =
-          cu->complete_barrier(completion.dispatch_id, peer_wg_id, completion.completion_bit);
-      members.insert(members.end(), peer_members.begin(), peer_members.end());
-    }
-    if (!members.empty())
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members), BarrierKind::Cluster);
+  for (auto &completion : completions)
+    complete_cluster_barrier_round(completion.dispatch_id, completion.completion_bit,
+                                   completion.generation, completion.peers);
+}
+
+void CommandProcessor::complete_cluster_barrier_round(
+    uint32_t dispatch_id, uint8_t completion_bit, uint64_t generation,
+    std::span<const std::pair<ComputeUnitCore *, uint32_t>> peers) {
+  ComputeUnitCore::BarrierCompletion completion;
+  for (auto [cu, peer_wg_id] : peers) {
+    auto peer = cu->complete_barrier(dispatch_id, peer_wg_id, completion_bit, generation);
+    completion.members.insert(completion.members.end(), peer.members.begin(), peer.members.end());
+    completion.woken.insert(completion.woken.end(), peer.woken.begin(), peer.woken.end());
   }
+  ComputeUnitCore::notify_barrier_complete(
+      *plugin_group_, completion,
+      ComputeUnitCore::barrier_round(completion_bit, /*named_barrier_id=*/0, generation));
 }
 
 void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
@@ -2217,6 +2224,8 @@ uint32_t CommandProcessor::cluster_barrier_state(const Wavefront &wf, int32_t ba
 bool CommandProcessor::cluster_barrier_signal(Wavefront &wf, int32_t barrier_id) {
   bool is_first = false;
   const uint8_t completion_bit = static_cast<uint8_t>(-barrier_id);
+  uint64_t signaled_generation = 0;
+  bool completes = false;
   {
     std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
     ClusterWorkgroupPlacement *placement = nullptr;
@@ -2229,20 +2238,30 @@ bool CommandProcessor::cluster_barrier_signal(Wavefront &wf, int32_t barrier_id)
     if (!inserted)
       return false;
     is_first = barriers->signaled_workgroups[index].size() == 1;
-    if (barriers->signaled_workgroups[index].size() < barriers->member_count)
-      return is_first;
-
-    barriers->signaled_workgroups[index].clear();
-    PendingClusterBarrierCompletion completion{wf.dispatch_id(), completion_bit, {}};
-    auto &peers = completion.peers;
-    peers.reserve(placement->peer_wg_ids.size());
-    for (uint32_t peer_wg_id : placement->peer_wg_ids) {
-      auto peer = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), peer_wg_id));
-      if (peer != cluster_wg_placements_.end() && peer->second.cu)
-        peers.emplace_back(peer->second.cu, peer_wg_id);
+    signaled_generation = barriers->generation[index];
+    if (barriers->signaled_workgroups[index].size() >= barriers->member_count) {
+      completes = true;
+      barriers->signaled_workgroups[index].clear();
+      ++barriers->generation[index];
+      PendingClusterBarrierCompletion completion{
+          wf.dispatch_id(), completion_bit, signaled_generation, {}};
+      auto &peers = completion.peers;
+      peers.reserve(placement->peer_wg_ids.size());
+      for (uint32_t peer_wg_id : placement->peer_wg_ids) {
+        auto peer = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), peer_wg_id));
+        if (peer != cluster_wg_placements_.end() && peer->second.cu)
+          peers.emplace_back(peer->second.cu, peer_wg_id);
+      }
+      pending_cluster_barrier_completions_.push_back(std::move(completion));
     }
-    pending_cluster_barrier_completions_.push_back(std::move(completion));
   }
+  // Plugins are called outside the lock (see cluster_placements_mutex_). The
+  // signal precedes the round's completion, which a pool worker leaves queued
+  // until the fan-out rejoins.
+  plugin_group_->onAmdgpuBarrierSignaled(
+      wf, ComputeUnitCore::barrier_round(completion_bit, 0, signaled_generation));
+  if (!completes)
+    return is_first;
 
   // In serial mode this instruction already runs on the CP/engine thread, so
   // preserve immediate barrier resolution. Pool workers leave the compact
@@ -2257,6 +2276,7 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
   // both reach into a CU. Collect them under the lock and act after it is
   // dropped -- see cluster_placements_mutex_.
   std::array<std::vector<std::pair<ComputeUnitCore *, uint32_t>>, 2> resolved_peers;
+  std::array<uint64_t, 2> resolved_generation{};
   std::vector<std::pair<ComputeUnitCore *, uint64_t>> unpin;
   {
     std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
@@ -2277,6 +2297,7 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
             barriers.signaled_workgroups[index].size() < barriers.member_count)
           continue;
         barriers.signaled_workgroups[index].clear();
+        resolved_generation[index] = barriers.generation[index]++;
         for (uint32_t peer_wg_id : peer_wg_ids) {
           auto peer = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
           if (peer != cluster_wg_placements_.end() && !peer->second.completed && peer->second.cu)
@@ -2300,16 +2321,9 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
     }
   }
 
-  for (uint32_t index = 0; index < resolved_peers.size(); ++index) {
-    std::vector<Wavefront *> members;
-    const uint8_t completion_bit = static_cast<uint8_t>(kClusterBarrierBit + index);
-    for (auto [cu, peer_wg_id] : resolved_peers[index]) {
-      auto peer_members = cu->complete_barrier(dispatch_id, peer_wg_id, completion_bit);
-      members.insert(members.end(), peer_members.begin(), peer_members.end());
-    }
-    if (!members.empty())
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members), BarrierKind::Cluster);
-  }
+  for (uint32_t index = 0; index < resolved_peers.size(); ++index)
+    complete_cluster_barrier_round(dispatch_id, static_cast<uint8_t>(kClusterBarrierBit + index),
+                                   resolved_generation[index], resolved_peers[index]);
 
   release_cluster_lds_pins(unpin);
 }

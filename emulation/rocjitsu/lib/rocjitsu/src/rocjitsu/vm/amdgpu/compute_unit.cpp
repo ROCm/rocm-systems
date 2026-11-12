@@ -927,7 +927,9 @@ void ComputeUnitCore::named_barrier_init(Wavefront &wf, int32_t barrier_id, uint
   auto &barrier = group->second.named[static_cast<uint32_t>(barrier_id)];
   if (member_count != 0)
     barrier.member_count = member_count & 0x7fu;
+  // Discarding the counted signals starts a new round.
   barrier.signal_count = 0;
+  ++barrier.generation;
 }
 
 void ComputeUnitCore::named_barrier_join(Wavefront &wf, int32_t barrier_id) {
@@ -981,44 +983,18 @@ bool ComputeUnitCore::barrier_signal(Wavefront &wf, int32_t barrier_id, uint32_t
     return false;
   const bool is_first = barrier->signal_count == 0;
   barrier->signal_count = std::min(barrier->signal_count + 1, 0x7fu);
+  plugin_group_->onAmdgpuBarrierSignaled(
+      wf, barrier_round(completion_bit, named_id, barrier->generation));
   if (barrier->signal_count < barrier->member_count)
     return is_first;
 
-  barrier->signal_count = 0;
-  auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), completion_bit, named_id);
-  notify_barrier_complete(members, completion_bit);
+  finish_barrier_round(*barrier, wf.dispatch_id(), wf.wg_id(), completion_bit, named_id);
   return is_first;
 }
 
-std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id, uint32_t wg_id,
-                                                           uint8_t completion_bit,
-                                                           uint32_t named_barrier_id) {
-  std::vector<Wavefront *> members;
-  for (const auto &candidate : wfs_) {
-    if (!candidate || candidate->is_halted() || candidate->dispatch_id() != dispatch_id ||
-        candidate->wg_id() != wg_id)
-      continue;
-    if (completion_bit == kNamedBarrierBit && candidate->named_barrier_id_ != named_barrier_id)
-      continue;
-    candidate->barrier_complete_[completion_bit] = true;
-    members.push_back(candidate.get());
-  }
-  for (auto *member : members) {
-    if (member->state() == WfState::BARRIER && member->waiting_barrier_bit_ == completion_bit) {
-      member->barrier_complete_[completion_bit] = false;
-      member->waiting_barrier_bit_ = Wavefront::kNoBarrierWait;
-      member->set_state(WfState::RUNNING);
-      member->set_ready_cycle(cycle_counter_);
-    }
-  }
-  return members;
-}
-
-void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members,
-                                              uint8_t completion_bit) {
-  if (members.empty())
-    return;
-  BarrierKind kind;
+BarrierRound ComputeUnitCore::barrier_round(uint8_t completion_bit, uint32_t named_barrier_id,
+                                            uint64_t generation) {
+  BarrierKind kind = BarrierKind::Workgroup;
   switch (completion_bit) {
   case kNamedBarrierBit:
     kind = BarrierKind::Named;
@@ -1033,9 +1009,64 @@ void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members,
     break;
   default:
     assert(false && "unknown barrier completion bit");
-    return;
+    break;
   }
-  plugin_group_->onAmdgpuBarrierResolved(members, kind);
+  return {.kind = kind,
+          .completion_bit = completion_bit,
+          .named_id = kind == BarrierKind::Named ? named_barrier_id : 0,
+          .generation = generation};
+}
+
+ComputeUnitCore::BarrierCompletion
+ComputeUnitCore::complete_barrier(uint32_t dispatch_id, uint32_t wg_id, uint8_t completion_bit,
+                                  uint64_t generation, uint32_t named_barrier_id) {
+  BarrierCompletion completion;
+  for (const auto &candidate : wfs_) {
+    if (!candidate || candidate->is_halted() || candidate->dispatch_id() != dispatch_id ||
+        candidate->wg_id() != wg_id)
+      continue;
+    if (completion_bit == kNamedBarrierBit && candidate->named_barrier_id_ != named_barrier_id)
+      continue;
+    // The bit is a flag: a wave that has not yet waited on an earlier round
+    // keeps that round (CDNA5 ISA 5.6.1).
+    if (!candidate->barrier_complete_[completion_bit])
+      candidate->barrier_complete_generation_[completion_bit] = generation;
+    candidate->barrier_complete_[completion_bit] = true;
+    completion.members.push_back(candidate.get());
+  }
+  for (auto *member : completion.members) {
+    if (member->state() == WfState::BARRIER && member->waiting_barrier_bit_ == completion_bit) {
+      member->barrier_complete_[completion_bit] = false;
+      member->waiting_barrier_bit_ = Wavefront::kNoBarrierWait;
+      member->set_state(WfState::RUNNING);
+      member->set_ready_cycle(cycle_counter_);
+      completion.woken.push_back(member);
+    }
+  }
+  return completion;
+}
+
+void ComputeUnitCore::notify_barrier_complete(ExecutionPluginGroup &plugins,
+                                              const BarrierCompletion &completion,
+                                              const BarrierRound &round) {
+  if (completion.members.empty())
+    return;
+  std::vector<Wavefront *> members = completion.members;
+  plugins.onAmdgpuBarrierResolved(members, round.kind);
+  plugins.onAmdgpuBarrierRoundCompleted(members, round);
+  for (auto *member : completion.woken)
+    plugins.onAmdgpuBarrierWaitPassed(*member, round);
+}
+
+void ComputeUnitCore::finish_barrier_round(BarrierCounter &barrier, uint32_t dispatch_id,
+                                           uint32_t wg_id, uint8_t completion_bit,
+                                           uint32_t named_barrier_id) {
+  barrier.signal_count = 0;
+  const BarrierRound round = barrier_round(completion_bit, named_barrier_id, barrier.generation);
+  ++barrier.generation;
+  const BarrierCompletion completion =
+      complete_barrier(dispatch_id, wg_id, completion_bit, round.generation, named_barrier_id);
+  notify_barrier_complete(*plugin_group_, completion, round);
 }
 
 uint32_t ComputeUnitCore::barrier_state(const Wavefront &wf, int32_t barrier_id) const {
@@ -1089,6 +1120,11 @@ void ComputeUnitCore::barrier_wait(Wavefront &wf, int32_t barrier_id) {
 
   if (wf.barrier_complete_[completion_bit]) {
     wf.barrier_complete_[completion_bit] = false;
+    // The joined named barrier is the one that set the named bit: joining or
+    // leaving clears it.
+    plugin_group_->onAmdgpuBarrierWaitPassed(
+        wf, barrier_round(completion_bit, wf.named_barrier_id_,
+                          wf.barrier_complete_generation_[completion_bit]));
     return;
   }
   wf.waiting_barrier_bit_ = completion_bit;
@@ -1112,11 +1148,8 @@ bool ComputeUnitCore::named_barrier_leave(Wavefront &wf) {
   auto &barrier = group->second.named[id];
   if (barrier.member_count != 0)
     --barrier.member_count;
-  if (barrier.signal_count >= barrier.member_count) {
-    barrier.signal_count = 0;
-    auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), kNamedBarrierBit, id);
-    notify_barrier_complete(members, kNamedBarrierBit);
-  }
+  if (barrier.signal_count >= barrier.member_count)
+    finish_barrier_round(barrier, wf.dispatch_id(), wf.wg_id(), kNamedBarrierBit, id);
   return barrier.member_count == 0;
 }
 
@@ -1165,9 +1198,7 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
       --barrier.member_count;
       if (barrier.member_count == 0 || barrier.signal_count < barrier.member_count)
         return;
-      barrier.signal_count = 0;
-      auto members = complete_barrier(dispatch_id, wg_id, completion_bit, joined_id);
-      notify_barrier_complete(members, completion_bit);
+      finish_barrier_round(barrier, dispatch_id, wg_id, completion_bit, joined_id);
     };
 
     retire_member(group->second.workgroup[0], kWorkgroupBarrierBit);
@@ -2212,16 +2243,26 @@ void ComputeUnitCore::update_wf_states() {
       }
     }
     if (all_at_barrier) {
-      std::vector<Wavefront *> barrier_wfs;
+      BarrierCompletion completion;
       for (uint32_t other = 0; other < active_slot_limit_; ++other) {
         auto &other_wf = wfs_[other];
         if (other_wf && other_wf->dispatch_id() == did && other_wf->wg_id() == wg &&
             other_wf->state() == WfState::BARRIER &&
             other_wf->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
-          barrier_wfs.push_back(other_wf.get());
+          completion.members.push_back(other_wf.get());
       }
-      notify_barrier_complete(barrier_wfs, kWorkgroupBarrierBit);
-      for (auto *bwf : barrier_wfs) {
+      // A single-instruction barrier is a split barrier whose signal and wait
+      // coincide: every member signals, the round completes, and every member
+      // passes its wait.
+      completion.woken = completion.members;
+      auto group = barrier_wgs_.find(wg_key(did, wg));
+      const uint64_t generation =
+          group == barrier_wgs_.end() ? 0 : group->second.workgroup[0].generation++;
+      const BarrierRound round = barrier_round(kWorkgroupBarrierBit, 0, generation);
+      for (auto *bwf : completion.members)
+        plugin_group_->onAmdgpuBarrierSignaled(*bwf, round);
+      notify_barrier_complete(*plugin_group_, completion, round);
+      for (auto *bwf : completion.members) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
       }

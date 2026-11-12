@@ -2916,3 +2916,50 @@ TEST(RaceDetector, SplitBarrier_LoopDoesNotAccumulate) {
   EXPECT_EQ(b.events().trimmedCount(), kIterations - 1);
   EXPECT_EQ(b.events().size(), 1);
 }
+
+// An LDS operand read completes when its instruction executes, so its wave's
+// next signal releases it; a read between the signal and the wait is not
+// released by that round.
+TEST(RaceDetector, SplitBarrier_OperandReadBeforeSignalIsOrdered) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8, kWave32);
+  const BarrierRoundId round = RaceTestBuilder::workgroupRound(0);
+  b.ldsOperandRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4);
+  signalAndComplete(b, round, {1, 0});
+  b.waitPassed(0, round);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, kX, /*bytes=*/4);
+  EXPECT_EQ(b.raceCount(), 0);
+}
+
+TEST(RaceDetector, SplitBarrier_OperandReadAfterSignalRaces) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8, kWave32);
+  const BarrierRoundId round = RaceTestBuilder::workgroupRound(0);
+  b.signal(1, round);
+  b.ldsOperandRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4);
+  b.signal(0, round);
+  b.completeRound(round, {1, 0});
+  b.waitPassed(0, round);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, kX, /*bytes=*/4);
+  expectOneLdsRace(b, /*wave=*/0, kX, /*isWrite=*/true);
+}
+
+// Once a wave's operand read of a DWORD retires, a later read of the same
+// DWORD is recorded again, so a write racing with it is reported.
+TEST(RaceDetector, SplitBarrier_OperandReadAfterRetirementIsRecordedAgain) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8, kWave32);
+  const BarrierRoundId round0 = RaceTestBuilder::workgroupRound(0);
+  const BarrierRoundId round1 = RaceTestBuilder::workgroupRound(1);
+  b.ldsOperandRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4);
+  signalAndComplete(b, round0, {1, 0});
+  b.waitPassed(0, round0);
+  b.waitPassed(1, round0);
+  EXPECT_EQ(b.ldsReadEventCount(), 0u);
+  // Wave 1 reads the DWORD again in round 1's window.
+  b.signal(1, round1);
+  b.ldsOperandRead(/*wave=*/1, /*lane=*/0, kX, /*bytes=*/4);
+  EXPECT_EQ(b.ldsReadEventCount(), 1u);
+  b.signal(0, round1);
+  b.completeRound(round1, {1, 0});
+  b.waitPassed(0, round1);
+  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, kX, /*bytes=*/4);
+  expectOneLdsRace(b, /*wave=*/0, kX, /*isWrite=*/true);
+}

@@ -142,8 +142,12 @@ public:
   void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) override;
   void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf, const amdgpu::WaitFields &fields) override;
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
-                               BarrierKind kind) override;
+  void onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf, const BarrierRound &round) override;
+
+  void onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> wavefronts,
+                                     const BarrierRound &round) override;
+
+  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) override;
 
   std::string getSummary() const;
 

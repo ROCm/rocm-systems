@@ -1879,15 +1879,38 @@ protected:
   struct BarrierCounter {
     uint32_t member_count = 0;
     uint32_t signal_count = 0;
+    /// The current round. Advances when a round completes and on
+    /// S_BARRIER_INIT, which discards the signals counted so far.
+    uint64_t generation = 0;
   };
   struct WorkgroupBarriers {
     uint32_t allocated_count = 0;
     std::array<BarrierCounter, kMaxNamedBarriers + 1> named{};
     std::array<BarrierCounter, 2> workgroup{};
   };
-  std::vector<Wavefront *> complete_barrier(uint32_t dispatch_id, uint32_t wg_id,
-                                            uint8_t completion_bit, uint32_t named_barrier_id = 0);
-  void notify_barrier_complete(std::span<Wavefront *> members, uint8_t completion_bit);
+  /// The waves a completed round notified, and those it released from a
+  /// pending s_barrier_wait.
+  struct BarrierCompletion {
+    std::vector<Wavefront *> members;
+    std::vector<Wavefront *> woken;
+  };
+  /// The round `generation` of the barrier with `completion_bit`.
+  static BarrierRound barrier_round(uint8_t completion_bit, uint32_t named_barrier_id,
+                                    uint64_t generation);
+  /// Set the completion bit of every member of the workgroup's barrier and
+  /// release the members waiting on it. Plugins are not notified.
+  BarrierCompletion complete_barrier(uint32_t dispatch_id, uint32_t wg_id, uint8_t completion_bit,
+                                     uint64_t generation, uint32_t named_barrier_id = 0);
+  /// Report a completed round: onAmdgpuBarrierResolved(), then
+  /// onAmdgpuBarrierRoundCompleted(), then onAmdgpuBarrierWaitPassed() for each
+  /// woken member.
+  static void notify_barrier_complete(ExecutionPluginGroup &plugins,
+                                      const BarrierCompletion &completion,
+                                      const BarrierRound &round);
+  /// Complete the current round of `barrier`, advance its generation and
+  /// report the round.
+  void finish_barrier_round(BarrierCounter &barrier, uint32_t dispatch_id, uint32_t wg_id,
+                            uint8_t completion_bit, uint32_t named_barrier_id = 0);
   std::unordered_map<uint64_t, WorkgroupBarriers> barrier_wgs_;
 
   /// @brief CU-private fallback GWS store, used when no shared store is injected.

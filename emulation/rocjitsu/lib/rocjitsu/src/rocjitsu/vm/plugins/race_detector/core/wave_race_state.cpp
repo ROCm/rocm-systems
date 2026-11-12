@@ -262,7 +262,7 @@ void WaveRaceState::satisfyOldestCounterObligations(int count, amdgpu::WaitCount
         retireEventRegisters(eventId);
         detector->markEventWaveComplete(eventId);
         // Trimmable WAVE_COMPLETE events may be removed from the registry
-        // immediately. Only keep non-trimmable events for later barrier retire;
+        // immediately. Only keep non-trimmable events for later retirement;
         // otherwise a later barrier could try to retire stale EventIds. A
         // completed LDS event is kept only so that other waves can still race
         // with it, so a single-wave workgroup retires it now.
@@ -374,12 +374,22 @@ void WaveRaceState::recordLdsOperandRead(InstructionSnapshot instruction, uint32
   covered = bytes;
 }
 
-void WaveRaceState::flushBarrierPendingEvents() {
-  for (EventId eventId : barrierPendingEvents) {
+void WaveRaceState::retireReleasedThrough(uint32_t epoch) {
+  size_t retired = 0;
+  bool retiredOperandRead = false;
+  while (retired < barrierPendingEvents.size() &&
+         detector->events().releaseEpoch(barrierPendingEvents[retired]) <= epoch) {
+    const EventId eventId = barrierPendingEvents[retired++];
+    retiredOperandRead |= detector->events().type(eventId) == MemoryEventType::LDS_OPERAND_READ;
     detector->retireEvent(eventId);
   }
-  barrierPendingEvents.clear();
-  directLdsReadWidths.clear();
+  barrierPendingEvents.erase(barrierPendingEvents.begin(),
+                             barrierPendingEvents.begin() + static_cast<std::ptrdiff_t>(retired));
+  // A DWORD recorded as read must have a live operand-read event, or a later
+  // read of it would go unrecorded. Forget every recorded width once any of
+  // those events retires; a still-live DWORD only gains a redundant event.
+  if (retiredOperandRead)
+    directLdsReadWidths.clear();
 }
 
 void WaveRaceState::checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const {

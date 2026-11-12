@@ -155,8 +155,9 @@ public:
   void recordLdsOperandRead(InstructionSnapshot instruction, uint32_t address, uint32_t bytes,
                             uint32_t lane);
 
-  /// Retire non-trimmable events whose owning wave completed them before a workgroup barrier.
-  void flushBarrierPendingEvents();
+  /// Retire the completed LDS events this wave completed in barrier epochs up
+  /// to `epoch`. Events are kept in completion order, so these are a prefix.
+  void retireReleasedThrough(uint32_t epoch);
 
   /// Check a VGPR read by a set of lanes for races. Calls the RaceHandler on violation.
   void checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const;

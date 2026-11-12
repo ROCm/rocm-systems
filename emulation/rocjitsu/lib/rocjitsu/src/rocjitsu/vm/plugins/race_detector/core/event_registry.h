@@ -24,12 +24,13 @@ namespace rocjitsu::plugins::race_detector {
 /// periodically trims a prefix of dead events to bound memory growth.
 ///
 /// An event is trimmable when it can never be accessed again:
-///   - RETIRED events (explicitly retired at s_barrier via retireEvent).
+///   - RETIRED events (retired via retireEvent once every other wave has
+///     acquired them through a barrier).
 ///   - WAVE_COMPLETE events without LDS intervals: non-LDS events, and LDS
 ///     events that touch no LDS bytes, such as a tensor transfer that moves no
 ///     data. These have left all per-wave and per-register lists and were never
 ///     added to ldsWriteEvents/ldsReadEvents; retireEvent is a no-op for them,
-///     so they don't need to wait for s_barrier.
+///     so they don't need to wait for a barrier.
 ///   - WAVE_COMPLETE LDS events with intervals are NOT trimmable until
 ///     retired, because retireEvent must still remove them from
 ///     ldsWriteEvents/ldsReadEvents and adjust byte counts.
@@ -54,16 +55,21 @@ class EventRegistry {
     std::vector<uint32_t> registers;
     IntervalSet ldsIntervals;
     LdsAccess ldsAccess;
+    /// The owning wave's barrier epoch when the event became WAVE_COMPLETE.
+    /// The wave's next barrier signal releases the event to other waves.
+    uint32_t releaseEpoch;
   };
 
 public:
   /// Allocate an event with its producing instruction and every counter obligation.
+  /// An event with no obligations is complete from the start, in the owning
+  /// wave's barrier epoch `releaseEpoch`.
   EventId add(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
               std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
               IntervalSet ldsIntervals,
               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
               MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
-              LdsAccess ldsAccess = {}) {
+              LdsAccess ldsAccess = {}, uint32_t releaseEpoch = 0) {
     int id = base_offset_ + static_cast<int>(entries_.size());
     assert(!counterObligations.empty() ||
            (isFromLds(type) && registers.empty() && !ldsIntervals.empty()));
@@ -81,7 +87,8 @@ public:
                     execMask,
                     std::move(registers),
                     std::move(ldsIntervals),
-                    ldsAccess};
+                    ldsAccess,
+                    releaseEpoch};
     std::ranges::copy(counterObligations, event.counterObligations.begin());
     entries_.push_back(std::move(event));
 
@@ -92,14 +99,16 @@ public:
     return EventId{id};
   }
 
-  /// Transition ACTIVE → WAVE_COMPLETE after every counter obligation is satisfied.
-  void markComplete(EventId id) {
+  /// Transition ACTIVE → WAVE_COMPLETE after every counter obligation is
+  /// satisfied, in the owning wave's barrier epoch `releaseEpoch`.
+  void markComplete(EventId id, uint32_t releaseEpoch) {
     assert(entries_[index(id)].status == EventStatus::ACTIVE);
     assert(allWaitCountersSatisfied(id));
     entries_[index(id)].status = EventStatus::WAVE_COMPLETE;
+    entries_[index(id)].releaseEpoch = releaseEpoch;
   }
 
-  /// Transition → RETIRED (s_barrier flushed this event).
+  /// Transition → RETIRED (no wave can still race with this event).
   void markRetired(EventId id) { entries_[index(id)].status = EventStatus::RETIRED; }
 
   // -- Typed accessors (all inline) --
@@ -173,6 +182,7 @@ public:
   }
   uint64_t execMask(EventId id) const { return entries_[index(id)].execMask; }
   WaveId waveId(EventId id) const { return entries_[index(id)].waveId; }
+  uint32_t releaseEpoch(EventId id) const { return entries_[index(id)].releaseEpoch; }
 
   std::span<const uint32_t> registers(EventId id) const { return entries_[index(id)].registers; }
 

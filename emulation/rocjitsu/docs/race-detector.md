@@ -190,7 +190,7 @@ races. Some examples:
 - **LDS races**: an LDS byte is read by one wave while another wave has an
   outstanding write to the same byte, or written by one wave while another
   wave has an outstanding read of the same byte, without an intervening
-  `s_barrier`;
+  barrier that orders them (see Barriers below);
   or a wave reads bytes targeted by its own outstanding direct-to-LDS operation
   before the required `s_waitcnt vmcnt`. A direct-to-LDS write over bytes of
   the same wave's pending DS read is also reported, on every target with
@@ -241,9 +241,10 @@ following lifecycle:
    event. This means the event is no longer in flight from the perspective of
    the wave that issued the operation, but is still in flight from the
    perspective of other waves in the same workgroup.
-1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
-   retired and, from the perspective of all threads in all wavefronts, the
-   operation is complete. A workgroup with a single wave has no other wave to
+1. **RETIRED** — every other live wave of the workgroup has passed a barrier
+   that orders the event (see Barriers below). The event is fully retired and,
+   from the perspective of all threads in all wavefronts, the operation is
+   complete. A workgroup with a single wave has no other wave to
    race with, so its LDS events are retired as soon as they are wave-complete,
    without a barrier. They then leave the LDS lists that race checks scan, so
    those checks do not slow down as completed events add up in long
@@ -251,6 +252,46 @@ following lifecycle:
    trims them, and it trims only from the oldest event: an older event that is
    still pending, such as a global load waiting on `loadcnt`, keeps every
    later retired event in the registry.
+
+### Barriers
+
+On gfx1250 a barrier is split into `s_barrier_signal`, which does not block and
+waits for no memory counter, and `s_barrier_wait`, which blocks until every
+member has signalled or ended (CDNA5 ISA 5.6 and 15.3). A barrier therefore
+orders a completed event before another wave's access only when:
+
+- the issuing wave completed the event (by a wait or counter-capacity
+  backpressure) before its own signal, and
+- the accessing wave issued the access after its own wait.
+
+The detector models each round of a barrier as a release/acquire channel. A
+signal releases what the wave has completed, and what it has acquired from
+earlier rounds; passing the wait acquires everything released into the round
+that set the wave's completion bit. Ordering is transitive, so waves can pass
+ordering through named barriers, and an LDS event is retired once every other
+live wave has acquired it. A wave that ends releases its completed events into
+every later workgroup round, because a workgroup barrier cannot complete until
+each wave has signalled or ended; named and cluster rounds, which can complete
+without it, do not. A named round orders events only for the waves that joined
+it. A cluster round orders events among the waves of each workgroup; ordering
+between workgroups is not modeled. The simulator reports each counted signal,
+each completed round and each passed wait to plugins.
+
+Targets with a single `s_barrier` instruction are handled the same way, with
+every member's signal and wait at the point where the barrier resolves.
+
+The detector reports an access in the window between a wave's signal and its
+wait, and an event completed after its wave's signal, on every interleaving of
+the waves:
+
+```asm
+; wave 0                         ; wave 1
+ds_store_b32 v0, v1
+s_barrier_signal -1              s_barrier_signal -1
+s_wait_dscnt 0                   s_barrier_wait -1
+s_barrier_wait -1                ds_load_b32 v2, v0   ; race: the store
+                                                      ; completed after the signal
+```
 
 Generic `FLAT_*` instructions select counter domains from their resolved memory
 requests. Global and scratch requests use the vector-memory counter; LDS
@@ -381,7 +422,7 @@ events are split by direction so that RAW and WAR hazards are checked
 independently. Chunks containing only ordinary LDS accesses from the accessing
 wave can bypass the interval scan because those operations are ordered. A
 mixed chunk uses the scan until its count drains. The history remains available
-for checks by other waves until a barrier retires it. Direct-to-LDS and unordered
+for checks by other waves until a barrier orders it for all of them. Direct-to-LDS and unordered
 memory operations still require their own completion checks.
 For a DS or FLAT instruction, the plugin first merges the active lanes' byte
 ranges into intervals and checks the chunk counts under them. When no chunk can

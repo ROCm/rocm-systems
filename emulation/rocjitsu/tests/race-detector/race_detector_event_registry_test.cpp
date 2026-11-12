@@ -6,7 +6,9 @@
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <gtest/gtest.h>
+#include <limits>
 #include <memory>
 #include <span>
 #include <vector>
@@ -53,7 +55,7 @@ TEST(RaceDetector, EventRegistry_TrimmedWaveLocalEventsAreNotBarrierQueued) {
   // If wave-local events were incorrectly queued for barrier retirement, this
   // would be non-empty. Flushing it after trimming would then touch stale ids.
   EXPECT_TRUE(wave.getBarrierPendingEvents().empty());
-  wave.flushBarrierPendingEvents();
+  wave.retireReleasedThrough(std::numeric_limits<uint32_t>::max());
 }
 
 namespace {
@@ -216,7 +218,7 @@ TEST(RaceDetector, MultiWave_CompletedLdsEventsStayLiveUntilABarrier) {
   detector->validateWrite(/*addr=*/0, WaveId{1}, /*lane=*/0, /*nBytes=*/4, MemoryOrderClass::LDS);
   EXPECT_EQ(violations.size(), 1u);
 
-  wave.flushBarrierPendingEvents();
+  wave.retireReleasedThrough(std::numeric_limits<uint32_t>::max());
   EXPECT_EQ(detector->events().status(EventId{0}), EventStatus::RETIRED);
   EXPECT_EQ(detector->events().status(EventId{1}), EventStatus::RETIRED);
   EXPECT_TRUE(detector->getLdsReadEvents().empty());
