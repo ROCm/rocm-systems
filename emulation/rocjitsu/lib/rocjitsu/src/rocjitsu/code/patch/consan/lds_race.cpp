@@ -7,6 +7,7 @@
 
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
@@ -155,8 +156,9 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
   const amdgpu::Operation operation = instruction.amdgpu_operation();
   const amdgpu::MemoryAddressing addressing = instruction.amdgpu_memory_addressing();
   const uint64_t offset = instruction.src_loc();
-  if (arch == rocjitsu::IsaFamily::Cdna5 && (operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
-                                             operation == amdgpu::Operation::S_BARRIER_WAIT))
+  if ((uses_split_workgroup_barrier(arch) && (operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
+                                              operation == amdgpu::Operation::S_BARRIER_WAIT)) ||
+      (!uses_split_workgroup_barrier(arch) && operation == amdgpu::Operation::S_BARRIER))
     return Result::success(); // The complete original group/CFG is qualified below.
   if ((instruction.flags() & BARRIER) != 0 ||
       instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic ||
@@ -207,46 +209,77 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
                                 InputError &error) {
   std::vector<const BasicBlock *> barrier_blocks;
   uint32_t members = 0;
+  const rocjitsu::IsaFamily arch = program.target->arch;
+  const bool split = uses_split_workgroup_barrier(arch);
   for (BasicBlock *block : blocks) {
     std::vector<const Instruction *> instructions;
     for (const Instruction &instruction : block->instructions()) {
       instructions.push_back(&instruction);
-      if (instruction.amdgpu_operation() == amdgpu::Operation::S_BARRIER_SIGNAL ||
+      if (instruction.amdgpu_operation() == amdgpu::Operation::S_BARRIER ||
+          instruction.amdgpu_operation() == amdgpu::Operation::S_BARRIER_SIGNAL ||
           instruction.amdgpu_operation() == amdgpu::Operation::S_BARRIER_WAIT)
         ++members;
     }
     for (size_t index = 0; index < instructions.size(); ++index) {
-      if (instructions[index]->amdgpu_operation() != amdgpu::Operation::S_BARRIER_SIGNAL)
+      if (instructions[index]->amdgpu_operation() !=
+          (split ? amdgpu::Operation::S_BARRIER_SIGNAL : amdgpu::Operation::S_BARRIER))
         continue;
-      const uint32_t signal =
-          cdna5::build_sop1(cdna5::kSBarrierSignalSop1, {.ssrc0 = cdna5::OPR_SSRC_NEG_INT_MIN})[0];
-      const uint32_t wait =
-          build_sopp_encoding(rocjitsu::IsaFamily::Cdna5, cdna5::kSBarrierWaitSopp, 0xffff).value();
-      const uint32_t drain =
-          build_sopp_encoding(rocjitsu::IsaFamily::Cdna5, cdna5::kSWaitDscntSopp, 0).value();
-      size_t wait_index = index + 1;
+      size_t wait_index = index;
       bool intervening_memory_or_barrier = false;
-      while (wait_index < instructions.size() &&
-             instructions[wait_index]->amdgpu_operation() != amdgpu::Operation::S_BARRIER_WAIT) {
-        const Instruction &instruction = *instructions[wait_index];
-        if (instruction.is_memory_op() || instruction.is_barrier())
-          intervening_memory_or_barrier = true;
+      if (split) {
         ++wait_index;
+        while (wait_index < instructions.size() &&
+               instructions[wait_index]->amdgpu_operation() != amdgpu::Operation::S_BARRIER_WAIT) {
+          const Instruction &instruction = *instructions[wait_index];
+          if (instruction.is_memory_op() || instruction.is_barrier())
+            intervening_memory_or_barrier = true;
+          ++wait_index;
+        }
       }
       // Require the original guest drain: DBI envelopes add their own waits,
-      // which must not make a store/signal/wait group without s_wait_dscnt 0
-      // qualify as guest synchronization.
-      if (program.target->id != 1250 || program.wave_size != 32 || index == 0 ||
-          wait_index == instructions.size() || intervening_memory_or_barrier ||
+      // which must not make an undrained guest barrier qualify.
+      if (index == 0 || wait_index == instructions.size() || intervening_memory_or_barrier ||
           instructions[index - 1]->size() != 4 || instructions[index]->size() != 4 ||
-          instructions[wait_index]->size() != 4 ||
-          instructions[index - 1]->raw_encoding()[0] != drain ||
-          instructions[index]->raw_encoding()[0] != signal ||
-          instructions[wait_index]->raw_encoding()[0] != wait)
+          instructions[wait_index]->size() != 4)
         return reject_instruction(
             error, InputErrorCode::UnsupportedSynchronization,
-            "requires original LDS drain/signal -1/wait -1 groups without intervening memory "
+            "requires original LDS drain/barrier groups without intervening memory "
             "operations or barriers",
+            instructions[index]->src_loc());
+      const Instruction &drain = *instructions[index - 1];
+      bool valid_group = false;
+      if (split) {
+        const uint32_t signal = arch == rocjitsu::IsaFamily::Rdna4
+                                    ? rdna4::build_sop1(rdna4::kSBarrierSignalSop1,
+                                                        {.ssrc0 = rdna4::OPR_SSRC_NEG_INT_MIN})[0]
+                                    : cdna5::build_sop1(cdna5::kSBarrierSignalSop1,
+                                                        {.ssrc0 = cdna5::OPR_SSRC_NEG_INT_MIN})[0];
+        const uint32_t wait_opcode = arch == rocjitsu::IsaFamily::Rdna4 ? rdna4::kSBarrierWaitSopp
+                                                                        : cdna5::kSBarrierWaitSopp;
+        const uint32_t drain_opcode =
+            arch == rocjitsu::IsaFamily::Rdna4 ? rdna4::kSWaitDscntSopp : cdna5::kSWaitDscntSopp;
+        valid_group =
+            drain.raw_encoding()[0] == build_sopp_encoding(arch, drain_opcode, 0).value() &&
+            instructions[index]->raw_encoding()[0] == signal &&
+            instructions[wait_index]->raw_encoding()[0] ==
+                build_sopp_encoding(arch, wait_opcode, 0xffff).value();
+      } else {
+        const uint32_t opcode = arch == rocjitsu::IsaFamily::Rdna3
+                                    ? rdna3::kSBarrierSopp
+                                    : (arch == rocjitsu::IsaFamily::Cdna3 ? cdna3::kSBarrierSopp
+                                                                          : cdna4::kSBarrierSopp);
+        // LGKM's bit positions differ on gfx9 and gfx11. Decode the original
+        // field so stronger waits (including s_waitcnt 0) also qualify.
+        valid_group =
+            drain.amdgpu_operation() == amdgpu::Operation::S_WAITCNT &&
+            amdgpu::decode_legacy_waitcnt(drain.raw_encoding()[0] & 0xffff, arch).lgkmcnt == 0 &&
+            instructions[index]->raw_encoding()[0] == build_sopp_encoding(arch, opcode, 0).value();
+      }
+      if (!valid_group)
+        return reject_instruction(
+            error, InputErrorCode::UnsupportedSynchronization,
+            "requires an original zero LDS drain and canonical full-workgroup "
+            "barrier identity",
             instructions[index]->src_loc());
       barrier_blocks.push_back(block);
       program.barriers.push_back(
@@ -261,8 +294,7 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
   for (const BasicBlock *block : blocks)
     for (const BasicBlock *successor : block->successors())
       if (successor == block) {
-        if (loop || block->successors().size() != 2 || program.target->id != 1250 ||
-            program.wave_size != 32 || members == 0)
+        if (loop || block->successors().size() != 2 || members == 0)
           return reject_instruction(error, InputErrorCode::UnsupportedFlow,
                                     "requires one conditional single-block barrier loop");
         loop = block;
@@ -279,7 +311,7 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
     return reject_instruction(
         error, InputErrorCode::UnsupportedEntry,
         "barrier profile requires a maximum workgroup size permitting two waves");
-  if (members != 2 * program.barriers.size() || program.barriers.empty() ||
+  if (members != (split ? 2u : 1u) * program.barriers.size() || program.barriers.empty() ||
       program.barriers.size() > kSyncCapacity)
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
                               "incomplete or repeated workgroup barrier group");
@@ -332,7 +364,8 @@ Result validate_lds_race_accesses(const InputProgram &program, const PreparedArt
   for (BasicBlock *block : blocks)
     for (const Instruction &instruction : block->instructions()) {
       const amdgpu::Operation operation = instruction.amdgpu_operation();
-      if (operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
+      if (operation == amdgpu::Operation::S_BARRIER ||
+          operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
           operation == amdgpu::Operation::S_BARRIER_WAIT)
         barrier_offsets.insert(instruction.src_loc());
       if (native_lds_width(instruction) != 0)

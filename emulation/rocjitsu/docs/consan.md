@@ -170,8 +170,8 @@ gfx1250 wave32.
 ### Analysis and admission
 
 Preparation accepts a limited instruction/access subset with no synchronization,
-or multiple qualified full-workgroup barriers on **gfx1250 wave32**. Other barrier
-forms and atomics are rejected. Exact
+or qualified full-workgroup barriers on the supported target/wave profiles.
+Other barrier forms and atomics are rejected. Exact
 conditions are defined by [compiler qualification](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp)
 and [runtime admission](../lib/rocjitsu/src/rocjitsu/hooks/consan/hsa_plugin.cpp).
 
@@ -213,8 +213,9 @@ including partial final waves. Multi-group launches require the original
 kernel's workgroup-X input, which entry snapshots preserve before guest
 instructions can overwrite it.
 
-Barrier qualification recognizes an original LDS drain followed by a matching
-full-workgroup signal/wait pair. It requires at least two waves per workgroup.
+Barrier qualification recognizes an original LDS drain followed by a
+full-workgroup barrier: `s_barrier` on gfx942/gfx950/gfx1100, or a matching
+signal/wait pair on gfx1201/gfx1250. It requires at least two waves per workgroup.
 In acyclic flow, every path to an exit must pass through each barrier group.
 A barrier loop may instead use one basic block with a conditional self-backedge
 and a forward exit, with all barrier groups inside that block. A preheader may
