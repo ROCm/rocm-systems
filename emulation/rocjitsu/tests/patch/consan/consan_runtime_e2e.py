@@ -177,7 +177,9 @@ class Driver:
         fixture_name = {
             'repeat': 'disjoint',
             'repeat_race': 'race',
-            'grouped_repeat': 'grouped_barrier',
+            'grouped_repeat': (
+                'grouped_barrier' if args.target == 'gfx1250' else 'grouped_disjoint'
+            ),
             'grouped_oversized': 'grouped_disjoint',
             'grouped_edge': 'grouped_disjoint',
             'single_missing_id': 'disjoint',
@@ -663,7 +665,7 @@ class Driver:
 
     def assert_workgroup_observations(self, decoded, fixture):
         groups = self.args.workgroups
-        waves = (self.args.threads + 31) // 32
+        waves = (self.args.threads + self.args.wave_size - 1) // self.args.wave_size
         for index, execution in enumerate(decoded['executions']):
             assert execution['serial'] == index + 1
             assert execution['argument_u32'] == 7 + 16 * index

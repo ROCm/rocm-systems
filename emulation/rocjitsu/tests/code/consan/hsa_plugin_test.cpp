@@ -870,11 +870,55 @@ TEST_F(ConSanHsaPlugin, FailedProxyAllocationNeverPublishesTheKernel) {
 TEST_F(ConSanHsaPlugin, InvalidGeometryFailsBeforeAllocation) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal());
-  submit(128);
+  submit(129);
   EXPECT_EQ(published_packets_, 0u);
   EXPECT_EQ(allocation_calls_, 0u);
   EXPECT_EQ(load_signal(signal_), -1);
   EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, CompleteWorkgroupsPublishAllRowsAndCaptureTheirFullExtent) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  ASSERT_EQ(facts_.target, 1100u);
+  const LaunchDimensions dimensions = {.grid = {128, 1, 1}, .workgroup = {64, 1, 1}};
+  const FailureOr<LaunchLayout> layout = plan_launch(facts_, dimensions, 8, 0);
+  ASSERT_TRUE(layout.succeeded());
+  ASSERT_EQ(layout.value().workgroup_count, 2u);
+  ASSERT_EQ(layout.value().waves_per_workgroup, 2u);
+  ASSERT_EQ(layout.value().wave_count, 4u);
+  auto_complete_ = false;
+  submit(128);
+  ASSERT_EQ(published_packets_, 1u);
+  EXPECT_EQ(published_.grid_size_x, 128u);
+  EXPECT_EQ(published_.workgroup_size_x, 64u);
+  EXPECT_EQ(report_capacity(), layout.value().report_bytes);
+  EXPECT_EQ(report_bytes_, layout.value().report_bytes);
+  EXPECT_EQ(statistics_().submitted, 1u);
+  EXPECT_EQ(statistics_().forwarded, 0u);
+  EXPECT_EQ(statistics_().copied, 0u);
+  store_signal(published_.completion_signal, 0);
+  ASSERT_EQ(drain_(), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  ASSERT_EQ(finish_(), 0);
+  EXPECT_EQ(statistics_().forwarded, 1u);
+  EXPECT_EQ(statistics_().copied, 1u);
+  EXPECT_EQ(statistics_().written, 1u);
+  const FailureOr<Capture> captured = decode_capture(read_capture());
+  ASSERT_TRUE(captured.succeeded());
+  ASSERT_EQ(captured.value().executions.size(), 1u);
+  const CapturedExecution &execution = captured.value().executions[0];
+  EXPECT_EQ(execution.dimensions.grid, dimensions.grid);
+  EXPECT_EQ(execution.dimensions.workgroup, dimensions.workgroup);
+  ASSERT_EQ(execution.report.size(), layout.value().report_bytes);
+  EXPECT_EQ(wire::read_u64(execution.context, wire::kContextReportBytes),
+            layout.value().report_bytes);
+  EXPECT_EQ(wire::read_u32(execution.report, wire::kReportRows), 4u);
+  for (uint32_t row = 0; row < 4; ++row) {
+    const size_t offset = kReportHeaderBytes + row * layout.value().row_stride;
+    EXPECT_EQ(wire::read_u32(execution.report, offset + wire::kRowWave), row % 2);
+    EXPECT_EQ(wire::read_u32(execution.report, offset + wire::kRowWorkgroupX), row / 2);
+  }
 }
 
 TEST_F(ConSanHsaPlugin, AmdSignalsCompleteAdmittedDispatches) {
@@ -913,7 +957,7 @@ TEST_F(ConSanHsaPlugin, AmdSignalCreationPreservesArgumentsAndFailedOutputsRemai
   ASSERT_EQ(create_signal(1, 0, nullptr, &extra), HSA_STATUS_SUCCESS);
   amd_signal_status_ = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   EXPECT_EQ(amd_.hsa_amd_signal_create_fn(1, 0, nullptr, 0, &extra), amd_signal_status_);
-  submit(128);
+  submit(129);
   hsa_barrier_and_packet_t barrier{};
   barrier.header = HSA_PACKET_TYPE_BARRIER_AND;
   barrier.completion_signal = extra;
@@ -926,7 +970,7 @@ TEST_F(ConSanHsaPlugin, AmdSignalCreationPreservesArgumentsAndFailedOutputsRemai
 TEST_F(ConSanHsaPlugin, RejectedAmdDispatchNotifiesItsCompletion) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal(true));
-  submit(128);
+  submit(129);
   EXPECT_EQ(load_signal(signal_), -1);
   EXPECT_EQ(published_packets_, 0u);
   EXPECT_EQ(allocation_calls_, 0u);
@@ -960,7 +1004,7 @@ TEST_F(ConSanHsaPlugin, RejectedBatchesNotifyAmdDispatchAndBarrierCompletions) {
 TEST_F(ConSanHsaPlugin, AmdBarriersAfterADispatchRejectionReceiveFailureNotifications) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal(true));
-  submit(128);
+  submit(129);
   for (const bool batch : {false, true}) {
     std::array<hsa_barrier_and_packet_t, 2> packets{};
     packets[0].header = HSA_PACKET_TYPE_BARRIER_AND;
@@ -1010,7 +1054,7 @@ TEST_F(ConSanHsaPlugin, RejectedAmdBarrierCannotOverwritePendingDispatchCompleti
 TEST_F(ConSanHsaPlugin, UntrackedBarriersAfterARejectionRetainTheirSignalsWithoutPublication) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal());
-  submit(128);
+  submit(129);
   for (const uint16_t type : {HSA_PACKET_TYPE_BARRIER_AND, HSA_PACKET_TYPE_BARRIER_OR}) {
     hsa_barrier_and_packet_t barrier{};
     barrier.header = type;
@@ -1245,7 +1289,7 @@ TEST_F(ConSanHsaPlugin, IndividualBarriersStillPassThroughWithoutDispatchAdmissi
 TEST_F(ConSanHsaPlugin, BarriersAfterADispatchRejectionReceiveFailureNotifications) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal());
-  submit(128);
+  submit(129);
   ASSERT_EQ(load_signal(signal_), -1);
   for (const bool batch : {false, true}) {
     std::array<hsa_barrier_and_packet_t, 2> packets{};

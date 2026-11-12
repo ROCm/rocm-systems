@@ -1,90 +1,152 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#ifndef CONSAN_TARGET
 #define CONSAN_TARGET "amdgcn-amd-amdhsa--gfx1250"
+#endif
 #define CONSAN_METADATA_TARGET CONSAN_TARGET
 #define CONSAN_KERNEL lds_producer_consumer
+#ifndef CONSAN_WAVE_SIZE
 #define CONSAN_WAVE_SIZE 32
+#endif
+#ifndef CONSAN_LEGACY
 #define CONSAN_LEGACY 0
+#endif
+#ifndef CONSAN_GFX12
+#define CONSAN_GFX12 1
+#endif
+#if CONSAN_LEGACY
+#define LOAD32 s_load_dword
+#define LOAD64 s_load_dwordx2
+#define DS_STORE ds_write_b32
+#define DS_LOAD ds_read_b32
+#define GLOBAL_STORE global_store_dword
+#define VECTOR_ADD v_add_u32
+#else
+#define LOAD32 s_load_b32
+#define LOAD64 s_load_b64
+#define DS_STORE ds_store_b32
+#define DS_LOAD ds_load_b32
+#define GLOBAL_STORE global_store_b32
+#define VECTOR_ADD v_add_nc_u32
+#endif
+#if CONSAN_WAVE_SIZE == 64
+#define MASK_EXEC exec
+#define MASK_VCC vcc
+#define MASK_SAVE s[8:9]
+#define MASK_MOVE s_mov_b64
+#define MASK_AND_SAVE s_and_saveexec_b64
+#define WAVE_SHIFT 6
+#else
+#define MASK_EXEC exec_lo
+#define MASK_VCC vcc_lo
+#define MASK_SAVE s8
+#define MASK_MOVE s_mov_b32
+#define MASK_AND_SAVE s_and_saveexec_b32
+#define WAVE_SHIFT 5
+#endif
 #define GROUP_BYTES 128
 #define CONSAN_MAX_WORKGROUP 1024
 
 .amdgcn_target CONSAN_TARGET
+.macro consan_wait_all
+#if CONSAN_GFX12
+  s_wait_kmcnt 0
+  s_wait_dscnt 0
+  s_wait_loadcnt 0
+#else
+  s_waitcnt lgkmcnt(0)
+#endif
+.endm
+.macro consan_wait_stores
+#if CONSAN_GFX12
+  s_wait_storecnt 0
+#elif CONSAN_LEGACY
+  s_waitcnt vmcnt(0)
+#else
+  s_waitcnt_vscnt null, 0
+#endif
+.endm
 .text
 .globl CONSAN_KERNEL
 .type CONSAN_KERNEL,@function
 .p2align 8
 CONSAN_KERNEL:
-  // gfx1250 supplies workgroup X in TTMP9. Keep a guest copy for the
-  // final-state oracle and use it even after instrumentation callbacks.
-  s_mov_b32 s15, ttmp9
-  s_load_b32 s4, s[0:1], 0
-  s_load_b32 s5, s[0:1], 4
-  s_load_b64 s[6:7], s[0:1], 8
-  s_wait_kmcnt 0
-  s_mul_i32 s10, s15, s5
-  v_lshrrev_b32 v4, 5, v0
-  v_add_nc_u32 v5, s10, v4
+  // Keep an independent guest identity oracle. Earlier targets receive X
+  // in s15; overwrite that input so callbacks must use their entry snapshot.
+#if CONSAN_GFX12
+  s_mov_b32 s14, ttmp9
+#else
+  s_mov_b32 s14, s15
+#endif
+  s_mov_b32 s15, 99
+  LOAD32 s4, s[0:1], 0
+  LOAD32 s5, s[0:1], 4
+  LOAD64 s[6:7], s[0:1], 8
+  consan_wait_all
+  s_mul_i32 s10, s14, s5
+  v_lshrrev_b32 v4, WAVE_SHIFT, v0
+  VECTOR_ADD v5, s10, v4
   v_lshlrev_b32 v5, 2, v5
-  v_mov_b32 v6, s15
+  v_mov_b32 v6, s14
   v_lshlrev_b32 v6, 4, v6
-  v_add_nc_u32 v2, s4, v4
-  v_add_nc_u32 v2, v6, v2
+  VECTOR_ADD v2, s4, v4
+  VECTOR_ADD v2, v6, v2
   v_mov_b32 v1, 0
-  v_and_b32 v7, 31, v0
+  v_and_b32 v7, (CONSAN_WAVE_SIZE-1), v0
 #if CONSAN_GROUP_CASE == 1 || CONSAN_GROUP_CASE == 2 || CONSAN_GROUP_CASE == 5
   v_lshlrev_b32 v1, 2, v4
-  v_cmp_eq_u32 vcc_lo, 0, v7
-  s_and_saveexec_b32 s8, vcc_lo
-  ds_store_b32 v1, v2
+  v_cmp_eq_u32 MASK_VCC, 0, v7
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_STORE v1, v2
 #if CONSAN_GROUP_CASE == 2 || CONSAN_GROUP_CASE == 5
-  s_mov_b32 exec_lo, s8
+  MASK_MOVE MASK_EXEC, MASK_SAVE
 #if CONSAN_GROUP_CASE == 5
-  s_mov_b32 exec_lo, 0
+  MASK_MOVE MASK_EXEC, 0
 #endif
   s_wait_dscnt 0
   s_barrier_signal -1
   s_barrier_wait -1
-  s_mov_b32 exec_lo, s8
-  v_cmp_eq_u32 vcc_lo, 0, v7
-  s_and_saveexec_b32 s8, vcc_lo
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+  v_cmp_eq_u32 MASK_VCC, 0, v7
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
   v_mov_b32 v1, 0
 #else
-  s_wait_dscnt 0
+  consan_wait_all
 #endif
-  ds_load_b32 v3, v1
+  DS_LOAD v3, v1
 #elif CONSAN_GROUP_CASE == 6
   // Different waves in different workgroups share numeric offsets, not LDS.
-  s_cmp_eq_u32 s15, 0
+  s_cmp_eq_u32 s14, 0
   s_cbranch_scc0 .Lreader
-  v_cmp_eq_u32 vcc_lo, 0, v0
-  s_and_saveexec_b32 s8, vcc_lo
-  ds_store_b32 v1, v2
-  s_mov_b32 exec_lo, s8
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_STORE v1, v2
+  MASK_MOVE MASK_EXEC, MASK_SAVE
   s_branch .Ldone
 .Lreader:
-  v_cmp_eq_u32 vcc_lo, 32, v0
-  s_and_saveexec_b32 s8, vcc_lo
-  ds_load_b32 v3, v1
+  v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_LOAD v3, v1
 #else
-  v_cmp_eq_u32 vcc_lo, 0, v0
-  s_and_saveexec_b32 s8, vcc_lo
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
 #if CONSAN_GROUP_CASE == 4
-  ds_load_b32 v2, v1
+  DS_LOAD v2, v1
 #else
-  ds_store_b32 v1, v2
+  DS_STORE v1, v2
 #endif
-  s_mov_b32 exec_lo, s8
-  v_cmp_eq_u32 vcc_lo, 32, v0
-  s_and_saveexec_b32 s8, vcc_lo
-  ds_load_b32 v3, v1
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+  v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_LOAD v3, v1
 #endif
-  s_wait_dscnt 0
-  global_store_b32 v5, v3, s[6:7]
-  s_mov_b32 exec_lo, s8
+  consan_wait_all
+  GLOBAL_STORE v5, v3, s[6:7]
+  MASK_MOVE MASK_EXEC, MASK_SAVE
 .Ldone:
-  s_wait_dscnt 0
-  s_wait_storecnt 0
+  consan_wait_all
+  consan_wait_stores
   s_endpgm
 .Lkernel_end:
 .size CONSAN_KERNEL, .Lkernel_end-CONSAN_KERNEL
@@ -96,8 +158,8 @@ CONSAN_KERNEL:
   .amdhsa_private_segment_fixed_size 0
   .amdhsa_kernarg_size 16
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
-  // Keep the conventional kernarg pointer at s[0:1] and reserve s15 for
-  // the guest copy of the TTMP9 workgroup-X input used by the state oracle.
+  // The kernarg pointer stays at s[0:1]. Earlier targets receive workgroup X
+  // at s15; s14 retains the guest oracle after that entry input is overwritten.
   .amdhsa_user_sgpr_count 15
   .amdhsa_system_sgpr_workgroup_id_x 1
   .amdhsa_system_vgpr_workitem_id 0

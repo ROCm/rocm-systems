@@ -167,8 +167,7 @@ int run(int argc, char **argv) {
       threads > 1024 || workgroups == 0 || workgroups > 32)
     return 3;
   const uint32_t wave_count = (threads + wave_size - 1) / wave_size;
-  const uint32_t output_words =
-      std::max((wide_width ? 4u : 1u) * wave_count * (grouped ? workgroups : 1u), 2u);
+  const uint32_t output_words = std::max((wide_width ? 4u : 1u) * wave_count * workgroups, 2u);
   const size_t output_bytes = output_words * sizeof(uint32_t);
   if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics || barrier_type))
     return 3;

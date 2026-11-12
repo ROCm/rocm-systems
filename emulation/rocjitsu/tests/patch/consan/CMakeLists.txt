@@ -436,6 +436,37 @@ if(TARGET consan_hsa_runner)
                         ${_width_case} ${_width_threads} production analysis
                     )
                 endforeach()
+                foreach(_groups IN ITEMS 1 4 16)
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        grouped_disjoint ${_width_threads} production analysis ${_groups}
+                    )
+                endforeach()
+                foreach(_groups IN ITEMS 4 16)
+                    foreach(
+                        _scenario
+                        IN
+                        ITEMS grouped_race grouped_read_read grouped_isolation
+                    )
+                        consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                            ${_scenario} ${_width_threads} production analysis ${_groups}
+                        )
+                    endforeach()
+                endforeach()
+                consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                    grouped_repeat ${_width_threads} testable analysis 4
+                )
+                consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                    grouped_oversized ${_width_threads} testable analysis 17
+                )
+                consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                    grouped_edge ${_width_threads} testable analysis 4
+                )
+                consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                    grouped_missing_id ${_width_threads} testable analysis 4
+                )
+                consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                    single_missing_id ${_width_threads} production analysis 1
+                )
                 if(_gpu STREQUAL "gfx1250")
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                         mixed_barrier ${_width_threads} production analysis
@@ -444,32 +475,13 @@ if(TARGET consan_hsa_runner)
                         foreach(
                             _scenario
                             IN
-                            ITEMS grouped_disjoint grouped_barrier grouped_empty
+                            ITEMS grouped_barrier grouped_empty
                         )
                             consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                                 ${_scenario} 65 production analysis ${_groups}
                             )
                         endforeach()
                     endforeach()
-                    foreach(_groups IN ITEMS 4 16)
-                        foreach(
-                            _scenario
-                            IN
-                            ITEMS
-                                grouped_race
-                                grouped_read_read
-                                grouped_isolation
-                        )
-                            consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
-                                ${_scenario} 65 production analysis ${_groups}
-                            )
-                        endforeach()
-                    endforeach()
-                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly grouped_repeat 65 testable analysis 4)
-                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly grouped_oversized 65 testable analysis 17)
-                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly grouped_edge 65 testable analysis 4)
-                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly grouped_missing_id 65 testable analysis 4)
-                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly single_missing_id 65 production analysis 1)
                     foreach(
                         _barrier_case
                         IN
