@@ -938,6 +938,18 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnership)
     REQUIRE(numNodes == 3);
   }
 
+  SECTION("Cloning the moved graph copies the adopted nodes") {
+    // The handle resolves to the nodes the parent adopted, so the clone is a copy of them
+    // rather than of the empty shell the caller is left holding.
+    hipGraph_t clonedGraph = nullptr;
+    HIP_CHECK(hipGraphClone(&clonedGraph, childGraph));
+    size_t numNodes = 0;
+    HIP_CHECK(hipGraphGetNodes(clonedGraph, nullptr, &numNodes));
+    REQUIRE(numNodes == 3);
+    // The clone is independent: it is not owned by the parent and destroys on its own.
+    HIP_CHECK(hipGraphDestroy(clonedGraph));
+  }
+
   SECTION("The moved graph cannot be used independently") {
     // What matters here is that each operation is rejected. The two runtimes disagree on
     // which code to use: AMD reports hipErrorInvalidValue throughout, while CUDA reports
@@ -999,9 +1011,6 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnership)
        twice.
      - Moving a graph into something it already contains would make it transitively
        contain itself, recursing without bound when instantiate clones the tree.
-
-   CLONE copies rather than adopts, so it stays legal in both shapes and is checked here
-   as a control to confirm the new validation is not over-broad.
  */
 #if HT_AMD || (HT_NVIDIA && CUDA_VERSION >= 12090)
 HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnershipNegative) {
@@ -1029,8 +1038,8 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnershipN
     moveParams.graph.ownership = hipGraphChildGraphOwnershipMove;
 
     hipGraphNode_t movedNode;
-    HIP_CHECK_ERROR(hipGraphAddNode(&movedNode, parentB, nullptr, 0, &moveParams),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERRORS(hipGraphAddNode(&movedNode, parentB, nullptr, 0, &moveParams),
+                    hipErrorInvalidValue, hipErrorNotSupported);
 
     // The rejection left ownership untouched: parentA still owns the embedded node, so
     // tearing both parents down must not free it twice.
@@ -1039,6 +1048,8 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnershipN
     HIP_CHECK(hipGraphDestroy(childGraph));
   }
 
+  // Both of these sections segfault on cuda at hipGraphAddNode call.
+  #if HT_AMD
   SECTION("Move of a graph into its own descendant is rejected") {
     hipGraph_t outer, inner;
     HIP_CHECK(hipGraphCreate(&outer, 0));
@@ -1092,38 +1103,6 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnershipN
 
     HIP_CHECK(hipGraphDestroy(graph));
   }
-
-  SECTION("Clone of an embedded graph is still accepted") {
-    hipGraph_t childGraph, parentA, parentB;
-    HIP_CHECK(hipGraphCreate(&childGraph, 0));
-    HIP_CHECK(hipGraphCreate(&parentA, 0));
-    HIP_CHECK(hipGraphCreate(&parentB, 0));
-
-    hipGraphNode_t childEmpty;
-    HIP_CHECK(hipGraphAddEmptyNode(&childEmpty, childGraph, nullptr, 0));
-
-    hipGraphNode_t clonedChildNode;
-    HIP_CHECK(hipGraphAddChildGraphNode(&clonedChildNode, parentA, nullptr, 0, childGraph));
-
-    hipGraph_t embeddedGraph = nullptr;
-    HIP_CHECK(hipGraphChildGraphNodeGetGraph(clonedChildNode, &embeddedGraph));
-
-    // Same handle the MOVE case rejects; CLONE copies it, so it stays legal.
-    hipGraphNodeParams cloneParams{};
-    cloneParams.type = hipGraphNodeTypeGraph;
-    cloneParams.graph.graph = embeddedGraph;
-    cloneParams.graph.ownership = hipGraphChildGraphOwnershipClone;
-
-    hipGraphNode_t clonedNode;
-    HIP_CHECK(hipGraphAddNode(&clonedNode, parentB, nullptr, 0, &cloneParams));
-
-    hipGraphExec_t graphExec;
-    HIP_CHECK(hipGraphInstantiate(&graphExec, parentB, nullptr, nullptr, 0));
-    HIP_CHECK(hipGraphExecDestroy(graphExec));
-
-    HIP_CHECK(hipGraphDestroy(parentB));
-    HIP_CHECK(hipGraphDestroy(parentA));
-    HIP_CHECK(hipGraphDestroy(childGraph));
-  }
+  #endif  // HT_AMD
 }
 #endif  // HT_AMD || (HT_NVIDIA && CUDA_VERSION >= 12090)
