@@ -1148,9 +1148,12 @@ util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *ro
   auto visit = [&](auto &&self, const fb::ComponentDef *node, uint64_t copies) -> util::Result {
     if (!copies)
       return util::Result::success();
-    if (type(node) == "xcd" && checked_capacity(result.xcds + copies, result.xcds).failed())
+    const auto node_type = type(node);
+    if (node_type == "xcd" && checked_capacity(result.xcds + copies, result.xcds).failed())
       return util::Result::failure();
-    if (!node->children())
+    // Match build_children: leaf components do not instantiate declared children.
+    if (!node->children() || node_type == "gpu_memory" || node_type == "l2_cache" ||
+        node_type == "memory_side_cache" || node_type == "command_processor")
       return util::Result::success();
     bool has_cp = false, has_se = false;
     uint64_t direct_cus = 0, se_cus = 0;

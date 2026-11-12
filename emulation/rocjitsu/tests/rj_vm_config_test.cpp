@@ -212,6 +212,66 @@ TEST(VmConfigApi, MetadataMatchesIndependentLocalAndDaemonVms) {
   }
 }
 
+TEST(VmConfigApi, SelectedNodeSurvivesInputLifetimeAndVmCreation) {
+  for (const auto mode : {RJ_VM_MODE_LOCAL, RJ_VM_MODE_DAEMON}) {
+    SCOPED_TRACE(mode);
+    rj_vm_config_t *raw = nullptr;
+    {
+      const std::string json = small_config(false, kTwoNodes);
+      const std::string node = "tray9";
+      ASSERT_EQ(rj_vm_config_create_from_string_for_node(json.c_str(), node.c_str(), &raw),
+                ROCJITSU_STATUS_SUCCESS);
+    }
+    Config config(raw, rj_vm_config_destroy);
+    rj_vm_gpu_info_t expected{};
+    ASSERT_EQ(rj_vm_config_gpu_info_at(config.get(), 0, &expected), ROCJITSU_STATUS_SUCCESS);
+    ASSERT_EQ(expected.gpu_id, 909u);
+    rj_vm_t *raw_vm = nullptr;
+    ASSERT_EQ(rj_vm_create_from_config(config.get(), mode, &raw_vm), ROCJITSU_STATUS_SUCCESS);
+    Vm vm(raw_vm, rj_vm_destroy);
+    config.reset();
+    uint32_t count = 0;
+    ASSERT_EQ(rj_vm_gpu_count(vm.get(), &count), ROCJITSU_STATUS_SUCCESS);
+    ASSERT_EQ(count, 1u);
+    rj_vm_gpu_info_t actual{};
+    ASSERT_EQ(rj_vm_gpu_info_at(vm.get(), 0, &actual), ROCJITSU_STATUS_SUCCESS);
+    expect_same_info(actual, expected);
+  }
+}
+
+TEST(VmConfigApi, IgnoresChildrenOfLeafComponentsLikeVmCreation) {
+  for (const char *leaf_type :
+       {"gpu_memory", "l2_cache", "memory_side_cache", "command_processor"}) {
+    SCOPED_TRACE(leaf_type);
+    std::string json = small_config(false);
+    if (std::string_view(leaf_type) == "memory_side_cache") {
+      const std::string memory = R"({"name":"vram","type":"gpu_memory"})";
+      const auto position = json.find(memory);
+      ASSERT_NE(position, std::string::npos);
+      json.insert(position + memory.size(), R"(,{"name":"msc","type":"memory_side_cache"})");
+    }
+    const std::string leaf = std::string(R"("type":")") + leaf_type + '"';
+    const auto position = json.find(leaf);
+    ASSERT_NE(position, std::string::npos);
+    json.insert(position + leaf.size(), R"(,"children":[{"name":"ignored[0:3]","type":"xcd"}])");
+    rj_vm_config_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_config_create_from_string(json.c_str(), &raw), ROCJITSU_STATUS_SUCCESS);
+    Config config(raw, rj_vm_config_destroy);
+    rj_vm_gpu_info_t expected{};
+    ASSERT_EQ(rj_vm_config_gpu_info_at(config.get(), 0, &expected), ROCJITSU_STATUS_SUCCESS);
+    EXPECT_EQ(expected.num_xcc, 2u);
+    for (const auto mode : {RJ_VM_MODE_LOCAL, RJ_VM_MODE_DAEMON}) {
+      SCOPED_TRACE(mode);
+      rj_vm_t *raw_vm = nullptr;
+      ASSERT_EQ(rj_vm_create_from_config(config.get(), mode, &raw_vm), ROCJITSU_STATUS_SUCCESS);
+      Vm vm(raw_vm, rj_vm_destroy);
+      rj_vm_gpu_info_t actual{};
+      ASSERT_EQ(rj_vm_gpu_info_at(vm.get(), 0, &actual), ROCJITSU_STATUS_SUCCESS);
+      expect_same_info(actual, expected);
+    }
+  }
+}
+
 TEST(VmConfigApi, SelectsNodesWithTheVmCreationRules) {
   const std::string ambiguous = small_config(false, kTwoNodes);
   const std::string configured =
