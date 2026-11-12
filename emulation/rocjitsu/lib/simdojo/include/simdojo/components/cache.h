@@ -359,12 +359,18 @@ public:
   /// @brief Invalidate clean cache lines, preserving unpublished dirty state.
   /// @details The caller must exclude concurrent accesses during this traversal.
   void invalidate_clean() {
+    invalidate_clean_if([](const CacheTag &) { return true; });
+  }
+
+  /// Invalidate clean lines matching a controller's maintenance policy.
+  /// The caller must exclude concurrent accesses during this traversal.
+  template <typename Predicate> void invalidate_clean_if(Predicate matches) {
     for (uint32_t set = 0; set < NumSets; ++set) {
       if (!touched_sets_[set])
         continue;
       for (uint32_t way = 0; way < Associativity; ++way) {
         CacheTag &tag = tag_at(set, way);
-        if (tag.valid && !tag.dirty) {
+        if (tag.valid && !tag.dirty && matches(tag)) {
           tag.coherence_epoch = 0;
           tag.valid = false;
           tag.coherence = CoherenceState::INVALID;

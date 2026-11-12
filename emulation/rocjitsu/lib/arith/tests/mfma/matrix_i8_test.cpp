@@ -121,6 +121,45 @@ template <int M, int K, int Batch, bool Wmma = false> void arithmetic(Entry entr
   EXPECT_EQ(entry(RJ_ARITH_SEMANTICS_LOOSE, 1ULL << 63, nullptr, nullptr, nullptr, nullptr),
             RJ_ARITH_ERROR_INVALID_FLAGS);
 }
+TEST(DenseIntegerMatrix, MfmaOverflowModeSaturatesSignedResults) {
+  std::array<uint32_t, 64> a, b;
+  std::array<std::array<uint32_t, 64>, 4> result;
+  const uint32_t *src_a[] = {a.data(), a.data()}, *src_b[] = {b.data(), b.data()};
+  uint32_t *dst[] = {result[0].data(), result[1].data(), result[2].data(), result[3].data()};
+  const uint32_t *acc[] = {dst[0], dst[1], dst[2], dst[3]};
+  b.fill(0x01010101u);
+  struct Case {
+    uint32_t first, second, initial, wrapped, saturated;
+  };
+  for (const Case test : {
+           Case{0x01010101u, 0x01010101u, 0x7fffffffu, 0x8000001fu, 0x7fffffffu},
+           Case{0xffffffffu, 0xffffffffu, 0x80000000u, 0x7fffffe0u, 0x80000000u},
+           // The model saturates the final sum: the last 16 products cancel the first 16.
+           Case{0x01010101u, 0xffffffffu, 0x7ffffffcu, 0x7ffffffcu, 0x7ffffffcu},
+           Case{0xffffffffu, 0x01010101u, 0x80000004u, 0x80000004u, 0x80000004u},
+       }) {
+    for (unsigned lane = 0; lane < a.size(); ++lane) {
+      a[lane] = lane < 32 ? test.first : test.second;
+    }
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (bool saturate : {false, true}) {
+        for (auto &reg : result) {
+          reg.fill(test.initial);
+        }
+        const uint64_t flags =
+            cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | (saturate ? RJ_ARITH_FP16_OVFL : 0);
+        ASSERT_EQ(rj_arith_v_mfma_i32_16x16x32_i8_w64(flags, 0, dst, src_a, src_b, acc),
+                  RJ_ARITH_SUCCESS);
+        for (const auto &reg : result) {
+          for (uint32_t value : reg) {
+            EXPECT_EQ(value, saturate ? test.saturated : test.wrapped);
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(DenseIntegerMatrix, mfma_i32_32x32x4_2b_i8_w64) {
   arithmetic<32, 4, 2>(rj_arith_v_mfma_i32_32x32x4_2b_i8_w64);
 }

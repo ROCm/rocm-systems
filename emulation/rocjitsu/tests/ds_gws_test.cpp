@@ -705,7 +705,7 @@ TEST_P(DsGwsTest, SemaphoreBulkReleaseWakesWaiters) {
     wf->halt();
 }
 
-// ds_gws_sema_release_all wakes every parked waiter and clears the credits.
+// ds_gws_sema_release_all wakes every parked semaphore waiter.
 TEST_P(DsGwsTest, SemaphoreReleaseAllWakesWaiters) {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   ASSERT_NO_FATAL_FAILURE(make_cu(cu));
@@ -1872,7 +1872,26 @@ TEST_P(DsGwsTest, SemaphoreSignalsAreVisibleToBarrier) {
   }
 }
 
-TEST_P(DsGwsTest, ReleaseAllClearsCounterBeforeBarrier) {
+TEST_P(DsGwsTest, SemaphoreReleaseAllPreservesBankedCreditsOnGfx11) {
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
+  std::array<amdgpu::Wavefront *, 2> waves;
+  ASSERT_NO_FATAL_FAILURE(setup_workgroup(*cu, waves));
+  auto [first, second] = waves;
+  run_gws(*cu, GwsOp::kSemaBr, *first, /*count=*/1);
+  run_gws(*cu, GwsOp::kReleaseAll, *first, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *first, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *second, /*count=*/0);
+  const bool preserves_credits =
+      arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+  EXPECT_EQ(first->state(),
+            preserves_credits ? amdgpu::WfState::RUNNING : amdgpu::WfState::GWS_WAIT);
+  EXPECT_EQ(second->state(), amdgpu::WfState::GWS_WAIT);
+  first->halt();
+  second->halt();
+}
+
+TEST_P(DsGwsTest, ReleaseAllUsesTargetCreditPolicyBeforeBarrier) {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   ASSERT_NO_FATAL_FAILURE(make_cu(cu));
   std::array<amdgpu::Wavefront *, 1> wave_waves;
@@ -1881,7 +1900,10 @@ TEST_P(DsGwsTest, ReleaseAllClearsCounterBeforeBarrier) {
   run_gws(*cu, GwsOp::kInit, *wave, /*count=*/3);
   run_gws(*cu, GwsOp::kReleaseAll, *wave, /*count=*/0);
   run_gws(*cu, GwsOp::kBarrier, *wave, /*count=*/0);
-  EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
+  const bool preserves_credits =
+      arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+  EXPECT_EQ(wave->state(),
+            preserves_credits ? amdgpu::WfState::GWS_WAIT : amdgpu::WfState::RUNNING);
   wave->halt();
 }
 
