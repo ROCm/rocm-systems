@@ -87,6 +87,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **`amdsmi_get_esmi_err_msg()` now looks up the message by the `amdsmi_status_t` passed in**.  
+  - Previously the lookup matched the ESMI status key, so an unrelated status could return another status's message, and unmapped statuses returned `AMDSMI_STATUS_SUCCESS`.
+  - Messages now come from `amdsmi_status_code_to_string()`, so text reads e.g. `AMDSMI_STATUS_INVAL: Invalid parameters.`.
+  - Statuses with no ESMI mapping now return `AMDSMI_STATUS_NOT_SUPPORTED`.
+
 - **Use fwupd daemon to read and write UMA carveout information**.  
   - `amdsmi_get_gpu_uma_carveout_info()` / `amdsmi_set_gpu_uma_carveout()` (and therefore `amd-smi static/set --mem-carveout`) now read and write the carveout through the fwupd BIOS-settings interface on integrated GPUs and fallback to amdgpu `.../device/uma/carveout` sysfs node when the fwupd daemon is absent.
   - Implemented in the AMD SMI library over the fwupd daemon's D-Bus BIOS-settings interface; the fwupd path is used only for the integrated (APU) GPU, and PolicyKit brokers authorization instead of requiring explicit root. Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+).

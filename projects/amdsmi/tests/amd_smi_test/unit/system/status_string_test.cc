@@ -24,6 +24,18 @@ TEST(SystemUnit, StatusCodeToStringValidOutPtr) {
 TEST(SystemUnit, EsmiErrMsgRejectsNullOutPtr) {
   EXPECT_EQ(amdsmi_get_esmi_err_msg(AMDSMI_STATUS_SUCCESS, nullptr), AMDSMI_STATUS_INVAL);
 }
+
+TEST(SystemUnit, EsmiErrMsgLooksUpByAmdsmiStatus) {
+  const char* msg = nullptr;
+  EXPECT_EQ(amdsmi_get_esmi_err_msg(AMDSMI_STATUS_INVAL, &msg), AMDSMI_STATUS_SUCCESS);
+  ASSERT_NE(msg, nullptr);
+  EXPECT_STREQ(msg, "AMDSMI_STATUS_INVAL: Invalid parameters.");
+}
+
+TEST(SystemUnit, EsmiErrMsgUnmappedStatusIsNotSupported) {
+  const char* msg = nullptr;
+  EXPECT_EQ(amdsmi_get_esmi_err_msg(AMDSMI_STATUS_NOT_FOUND, &msg), AMDSMI_STATUS_NOT_SUPPORTED);
+}
 #endif
 
 }  // namespace

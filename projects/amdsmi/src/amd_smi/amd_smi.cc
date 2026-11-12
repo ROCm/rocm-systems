@@ -8683,13 +8683,12 @@ amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char** sta
     return AMDSMI_STATUS_INVAL;
   }
   for (const auto& iter : amd::smi::esmi_status_map) {
-    const amdsmi_status_t _status = status;
-    if (static_cast<int>(iter.first) == static_cast<int>(_status)) {
-      *status_string = esmi_get_err_msg(static_cast<esmi_status_t>(iter.first));
-      return iter.second;
-    }
+    if (iter.second != status) continue;
+    return amdsmi_status_code_to_string(status, status_string) == AMDSMI_STATUS_SUCCESS
+               ? AMDSMI_STATUS_SUCCESS
+               : AMDSMI_STATUS_MAP_ERROR;
   }
-  return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t amdsmi_set_cpu_xgmi_pstate_range(amdsmi_processor_handle processor_handle,

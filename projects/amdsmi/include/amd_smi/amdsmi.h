@@ -9930,6 +9930,7 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
  *
  *  @details Set the provided pointer to a const char *, @p status_string, to
  *  a string containing a description of the provided error code @p status.
+ *  A status with no ESMI mapping returns ::AMDSMI_STATUS_NOT_SUPPORTED.
  *
  *  @param[in]    status - The error status for which a description is desired.
  *
