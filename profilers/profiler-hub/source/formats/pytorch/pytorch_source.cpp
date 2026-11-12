@@ -5,6 +5,7 @@
 
 #include "cached_track_reader.hpp"
 #include "debug.hpp"
+#include "profiler-hub/c/profiler_hub_types.h"
 #include "pytorch_catalog.hpp"
 
 #include <nlohmann/json.hpp>
@@ -43,6 +44,14 @@ struct copy_fields_t
     std::optional<std::uint64_t> src;
     std::optional<std::uint64_t> dst;
     std::string                  kind;
+};
+
+// What a stream wait event says about the event it waits on and the stream that recorded
+// it.
+struct hip_fields_t
+{
+    std::optional<std::uint64_t> event;
+    std::optional<std::uint64_t> stream;
 };
 
 enum class arg_scope_t
@@ -160,6 +169,22 @@ copy_fields_of(std::string_view args_json)
     if(const auto it = args.find("kind"); it != args.end() && it->is_string())
     {
         out.kind = it->get<std::string>();
+    }
+    return out;
+}
+
+hip_fields_t
+hip_fields_of(std::string_view args_json)
+{
+    const auto   args = parse_object(args_json);
+    hip_fields_t out;
+    if(const auto it = args.find("wait_on_cuda_event_id"); it != args.end())
+    {
+        out.event = as_unsigned(*it);
+    }
+    if(const auto it = args.find("wait_on_stream"); it != args.end())
+    {
+        out.stream = as_unsigned(*it);
     }
     return out;
 }
@@ -380,12 +405,12 @@ pytorch_source::load_catalog(common::thread_pool& /*workers*/,
              store.diag.gunzip_ms,
              store.diag.parse_ms,
              store.derive_ms);
-    const std::size_t first_name_id = fill_catalog(*m_catalog, store);
+    m_first_name_id = fill_catalog(*m_catalog, store);
 
     for(const auto& [id, text] : m_catalog->strings_by_id)
     {
-        auto&        table = id < first_name_id ? m_cats : m_names;
-        const size_t index = id < first_name_id ? id - 1 : id - first_name_id;
+        auto&        table = id < m_first_name_id ? m_cats : m_names;
+        const size_t index = id < m_first_name_id ? id - 1 : id - m_first_name_id;
         if(index >= table.size()) table.resize(index + 1);
         table[index] = text;
     }
@@ -873,15 +898,9 @@ records_work_items(std::string_view call)
 
 }  // namespace
 
-std::optional<reader_types::kernel_dispatch_data_t>
-pytorch_source::kernel_dispatch_details(const reader_types::timeline_event_t& event)
+pytorch_source::kernel_shape_t
+pytorch_source::kernel_shape_of(const event_t& stored) const
 {
-    const auto at = locate(event.unique_identifier);
-    if(!at || at->row->type != event_type_t::kernel_dispatch) return std::nullopt;
-    const auto& row    = *at->row;
-    const auto& stored = m_events[row.event];
-    const auto& track  = *m_catalog->tracks[at->track];
-
     // The grid is in blocks, so the dispatch's work-item grid is its product with the
     // block size, unless the launch call is one that already records work-items. A kernel
     // whose launch call is not in the file has no such call to go by.
@@ -907,25 +926,43 @@ pytorch_source::kernel_dispatch_details(const reader_types::timeline_event_t& ev
         }
     }
 
-    const auto                           geometry = launch_geometry_of(args_of(stored));
-    reader_types::kernel_dispatch_data_t data;
-    data.dispatch_id     = at->id;
-    data.start_timestamp = row.start;
-    data.end_timestamp   = row.end;
-    if(geometry.block)
-    {
-        data.workgroup_size_x = geometry.block->at(0);
-        data.workgroup_size_y = geometry.block->at(1);
-        data.workgroup_size_z = geometry.block->at(2);
-    }
+    const auto     geometry = launch_geometry_of(args_of(stored));
+    kernel_shape_t shape;
+    if(geometry.block) shape.workgroup = *geometry.block;
     if(geometry.grid)
     {
         const bool multiply = geometry.block.has_value() && !totals;
-        data.grid_size_x = geometry.grid->at(0) * (multiply ? geometry.block->at(0) : 1);
-        data.grid_size_y = geometry.grid->at(1) * (multiply ? geometry.block->at(1) : 1);
-        data.grid_size_z = geometry.grid->at(2) * (multiply ? geometry.block->at(2) : 1);
+        for(std::size_t axis = 0; axis < 3; ++axis)
+        {
+            shape.grid[axis] =
+                geometry.grid->at(axis) * (multiply ? geometry.block->at(axis) : 1);
+        }
     }
-    data.group_segment_size = geometry.shared_memory;
+    shape.group_segment = geometry.shared_memory;
+    return shape;
+}
+
+std::optional<reader_types::kernel_dispatch_data_t>
+pytorch_source::kernel_dispatch_details(const reader_types::timeline_event_t& event)
+{
+    const auto at = locate(event.unique_identifier);
+    if(!at || at->row->type != event_type_t::kernel_dispatch) return std::nullopt;
+    const auto& row    = *at->row;
+    const auto& stored = m_events[row.event];
+    const auto& track  = *m_catalog->tracks[at->track];
+
+    const auto                           shape = kernel_shape_of(stored);
+    reader_types::kernel_dispatch_data_t data;
+    data.dispatch_id        = at->id;
+    data.start_timestamp    = row.start;
+    data.end_timestamp      = row.end;
+    data.workgroup_size_x   = shape.workgroup[0];
+    data.workgroup_size_y   = shape.workgroup[1];
+    data.workgroup_size_z   = shape.workgroup[2];
+    data.grid_size_x        = shape.grid[0];
+    data.grid_size_y        = shape.grid[1];
+    data.grid_size_z        = shape.grid[2];
+    data.group_segment_size = shape.group_segment;
     data.name               = std::string{ m_names[row.name_id] };
     data.extdata            = extdata_of(row);
     data.event              = event_data_of(row);
@@ -998,6 +1035,373 @@ pytorch_source::memory_alloc_details(const reader_types::timeline_event_t& event
         data.agent_info = agent_info(agent_of(*sample));
     }
     return data;
+}
+
+namespace
+{
+
+// The reader type a table query's event type reads, and false for the sample types, which
+// a Kineto file has none of.
+std::optional<event_type_t>
+table_type_of(uint32_t event_type)
+{
+    switch(event_type)
+    {
+        case PH_EVENT_TYPE_REGION:
+        case PH_EVENT_TYPE_REGION_SAMPLE: return event_type_t::region;
+        case PH_EVENT_TYPE_KERNEL_DISPATCH: return event_type_t::kernel_dispatch;
+        case PH_EVENT_TYPE_MEMORY_COPY: return event_type_t::memory_copy;
+        case PH_EVENT_TYPE_MEMORY_ALLOCATE: return event_type_t::memory_allocate;
+        case PH_EVENT_TYPE_HIP_EVENT: return event_type_t::hip_event;
+        default: return std::nullopt;
+    }
+}
+
+bool
+asks_for(const resolved_event_query& query, uint32_t event_type)
+{
+    return query.event_types.empty() ||
+           std::find(query.event_types.begin(), query.event_types.end(), event_type) !=
+               query.event_types.end();
+}
+
+}  // namespace
+
+std::uint64_t
+pytorch_source::copy_agent_of(const located_t& at) const
+{
+    const auto kind = copy_fields_of(args_of(m_events[at.row->event])).kind;
+    return kind == "DtoH" ? 0 : m_catalog->tracks[at.track]->agent_id;
+}
+
+// The filter has the meaning the rocpd v3 table queries give it. pid and tid are the
+// process and thread row ids; a region has no agent, so an agent filter excludes it; the
+// name of a memory allocation is not searched.
+bool
+pytorch_source::table_match(const resolved_event_query& query,
+                            event_type_t                type,
+                            const located_t&            at) const
+{
+    const auto& row   = *at.row;
+    const auto& track = *m_catalog->tracks[at.track];
+    if(query.time && !(row.start <= query.time->end && row.end >= query.time->start))
+    {
+        return false;
+    }
+    if(query.node_id && track.node_info && *query.node_id != track.node_info->node_id)
+    {
+        return false;
+    }
+    if(query.process_id &&
+       (!track.process_info || *query.process_id != track.process_info->id))
+    {
+        return false;
+    }
+    if(query.thread_id &&
+       (!track.thread_info || *query.thread_id != track.thread_info->id))
+    {
+        return false;
+    }
+    if(!query.tracks.empty() &&
+       std::find(query.tracks.begin(), query.tracks.end(), at.track) ==
+           query.tracks.end())
+    {
+        return false;
+    }
+    if(query.agent_id)
+    {
+        std::uint64_t agent = 0;
+        switch(type)
+        {
+            case event_type_t::kernel_dispatch:
+            case event_type_t::hip_event: agent = track.agent_id; break;
+            case event_type_t::memory_copy: agent = copy_agent_of(at); break;
+            case event_type_t::memory_allocate:
+                if(const auto* sample = sample_of(row.event)) agent = agent_of(*sample);
+                break;
+            default: return false;
+        }
+        if(agent != *query.agent_id) return false;
+    }
+    if(query.has_string_filter)
+    {
+        const auto holds = [&query](std::size_t id) {
+            return std::find(query.string_ids.begin(), query.string_ids.end(), id) !=
+                   query.string_ids.end();
+        };
+        const bool by_name =
+            type != event_type_t::memory_allocate && holds(m_first_name_id + row.name_id);
+        const auto cat_id      = m_events[row.event].cat_id;
+        const bool by_category = query.include_category && !m_cats[cat_id].empty() &&
+                                 holds(static_cast<std::size_t>(cat_id) + 1);
+        if(!by_name && !by_category) return false;
+    }
+    return true;
+}
+
+void
+pytorch_source::publish_row(event_type_t     type,
+                            const located_t& at,
+                            ph_table_event&  out) const
+{
+    const auto& row    = *at.row;
+    const auto& stored = m_events[row.event];
+    const auto& track  = *m_catalog->tracks[at.track];
+    out                = ph_table_event{};
+    out.id             = at.id;
+    out.start          = row.start;
+    out.end            = row.end;
+    if(type != event_type_t::memory_allocate) out.name_id = m_first_name_id + row.name_id;
+    if(!m_cats[stored.cat_id].empty()) out.category_id = stored.cat_id + 1;
+    if(track.node_info) out.nid = track.node_info->node_id;
+    if(track.process_info)
+    {
+        out.process_id = track.process_info->id;
+        out.pid        = track.process_info->pid;
+    }
+    if(track.thread_info)
+    {
+        out.thread_id = track.thread_info->id;
+        out.tid       = track.thread_info->thread_id;
+    }
+    if(track.category == reader_types::track_kind_t::stream)
+        out.stream_id = track.stream_id;
+
+    switch(type)
+    {
+        case event_type_t::kernel_dispatch:
+        {
+            const auto shape       = kernel_shape_of(stored);
+            out.agent_id           = track.agent_id;
+            out.grid_size_x        = shape.grid[0];
+            out.grid_size_y        = shape.grid[1];
+            out.grid_size_z        = shape.grid[2];
+            out.workgroup_size_x   = shape.workgroup[0];
+            out.workgroup_size_y   = shape.workgroup[1];
+            out.workgroup_size_z   = shape.workgroup[2];
+            out.group_segment_size = shape.group_segment.value_or(0);
+            break;
+        }
+        case event_type_t::memory_copy:
+        {
+            const auto copy  = copy_fields_of(args_of(stored));
+            out.agent_id     = copy.kind == "DtoH" ? 0 : track.agent_id;
+            out.src_agent_id = copy.kind == "DtoH" ? track.agent_id : 0;
+            out.size         = copy.bytes.value_or(0);
+            out.address      = copy.dst.value_or(0);
+            out.src_address  = copy.src.value_or(0);
+            break;
+        }
+        case event_type_t::memory_allocate:
+            if(const auto* sample = sample_of(row.event))
+            {
+                const std::string_view kind = sample->bytes > 0   ? "ALLOC"
+                                              : sample->bytes < 0 ? "FREE"
+                                                                  : "";
+                std::copy(kind.begin(), kind.end(), out.mem_type);
+                out.agent_id = agent_of(*sample);
+                out.size = static_cast<std::uint64_t>(sample->bytes < 0 ? -sample->bytes
+                                                                        : sample->bytes);
+                out.address = sample->address;
+            }
+            break;
+        case event_type_t::hip_event:
+        {
+            const auto hip = hip_fields_of(args_of(stored));
+            out.agent_id   = track.agent_id;
+            out.size       = hip.event.value_or(0);
+            out.address    = hip.stream.value_or(0);
+            break;
+        }
+        default: break;
+    }
+}
+
+uint32_t
+pytorch_source::read_table_events(const resolved_event_query& query,
+                                  uint32_t                    event_type,
+                                  uint64_t                    after_id,
+                                  uint64_t                    last_id,
+                                  ph_table_event*             rows,
+                                  uint32_t                    capacity)
+{
+    if(rows == nullptr || capacity == 0) return 0;
+    if(event_type == PH_EVENT_TYPE_MEMORY_ACTIVITY)
+    {
+        // The memory tracks' points, in id order across the tracks the query names.
+        struct cursor_t
+        {
+            const std::vector<memory_activity_point_t>* points;
+            std::size_t                                 index;
+        };
+        std::vector<cursor_t> cursors;
+        for(const auto track_id : query.tracks)
+        {
+            const auto points = m_catalog->memory_activity_points(track_id);
+            if(points == nullptr) continue;
+            if(query.agent_id && m_catalog->tracks[track_id]->agent_id != *query.agent_id)
+            {
+                continue;
+            }
+            const auto begin =
+                std::lower_bound(points->begin(),
+                                 points->end(),
+                                 after_id,
+                                 [](const memory_activity_point_t& point,
+                                    std::uint64_t id) { return point.id <= id; });
+            cursors.push_back(
+                { points, static_cast<std::size_t>(begin - points->begin()) });
+        }
+        uint32_t filled = 0;
+        while(filled < capacity)
+        {
+            const memory_activity_point_t* best        = nullptr;
+            cursor_t*                      best_cursor = nullptr;
+            for(auto& cursor : cursors)
+            {
+                while(cursor.index < cursor.points->size())
+                {
+                    const auto& point = (*cursor.points)[cursor.index];
+                    if(point.id > last_id)
+                    {
+                        cursor.index = cursor.points->size();
+                        break;
+                    }
+                    if(query.time && !(point.start <= query.time->end &&
+                                       point.end >= query.time->start))
+                    {
+                        ++cursor.index;
+                        continue;
+                    }
+                    if(best == nullptr || point.id < best->id)
+                    {
+                        best        = &point;
+                        best_cursor = &cursor;
+                    }
+                    break;
+                }
+            }
+            if(best == nullptr) break;
+            rows[filled]       = ph_table_event{};
+            rows[filled].id    = best->id;
+            rows[filled].start = best->start;
+            rows[filled].end   = best->end;
+            rows[filled].value = best->value;
+            ++filled;
+            ++best_cursor->index;
+        }
+        return filled;
+    }
+
+    const auto type = table_type_of(event_type);
+    if(!type || event_type == PH_EVENT_TYPE_REGION_SAMPLE || !asks_for(query, event_type))
+    {
+        return 0;
+    }
+    if(query.agent_id && *type == event_type_t::region) return 0;
+    if(query.has_string_filter && query.string_ids.empty()) return 0;
+
+    uint32_t filled = 0;
+    for(const auto& run : m_runs)
+    {
+        if(run.type != *type) continue;
+        const std::uint64_t run_last = run.first_id + run.count - 1;
+        if(run_last <= after_id) continue;
+        const auto& held = m_tracks[run.track];
+        const auto& by   = held.by_type.at(static_cast<std::size_t>(*type));
+        for(std::uint64_t id = std::max<std::uint64_t>(run.first_id, after_id + 1);
+            id <= std::min<std::uint64_t>(run_last, last_id);
+            ++id)
+        {
+            const located_t at{ run.track, &held.rows[by.rows[id - run.first_id]], id };
+            if(!table_match(query, *type, at)) continue;
+            publish_row(*type, at, rows[filled]);
+            if(++filled == capacity) return filled;
+        }
+    }
+    return filled;
+}
+
+bool
+pytorch_source::table_event_id_span(uint32_t  event_type,
+                                    uint64_t& first_id,
+                                    uint64_t& last_id)
+{
+    first_id = 0;
+    last_id  = 0;
+    if(event_type == PH_EVENT_TYPE_MEMORY_ACTIVITY)
+    {
+        return m_catalog->memory_activity_id_span(first_id, last_id);
+    }
+    const auto type = table_type_of(event_type);
+    if(!type) return false;
+
+    bool found = false;
+    for(const auto& run : m_runs)
+    {
+        if(run.type != *type) continue;
+        if(!found) first_id = run.first_id;
+        last_id = std::max<std::uint64_t>(last_id, run.first_id + run.count - 1);
+        found   = true;
+    }
+    return found;
+}
+
+bool
+pytorch_source::summarize_name_durations(const resolved_event_query&           query,
+                                         uint32_t                              event_type,
+                                         std::vector<name_duration_summary_t>& rows)
+{
+    rows.clear();
+    const auto type = table_type_of(event_type);
+    if(!type || event_type == PH_EVENT_TYPE_REGION_SAMPLE || !asks_for(query, event_type))
+    {
+        return true;
+    }
+    if(query.agent_id && *type == event_type_t::region) return true;
+    if(query.has_string_filter && query.string_ids.empty()) return true;
+
+    std::map<std::string, name_duration_summary_t> groups;
+    for(const auto& run : m_runs)
+    {
+        if(run.type != *type) continue;
+        const auto& held = m_tracks[run.track];
+        const auto& by   = held.by_type.at(static_cast<std::size_t>(*type));
+        for(std::size_t index = 0; index < run.count; ++index)
+        {
+            const located_t at{ run.track,
+                                &held.rows[by.rows[index]],
+                                run.first_id + index };
+            if(!table_match(query, *type, at)) continue;
+
+            std::string name;
+            if(*type == event_type_t::memory_allocate)
+            {
+                const auto* sample = sample_of(at.row->event);
+                name               = sample != nullptr && sample->bytes > 0   ? "ALLOC"
+                                     : sample != nullptr && sample->bytes < 0 ? "FREE"
+                                                                              : "";
+            }
+            else
+            {
+                name = std::string{ m_names[at.row->name_id] };
+            }
+            const std::uint64_t duration = at.row->end - at.row->start;
+            auto&               group    = groups[name];
+            group.min_duration =
+                group.count == 0 ? duration : std::min(group.min_duration, duration);
+            group.max_duration = std::max(group.max_duration, duration);
+            group.total_duration += duration;
+            ++group.count;
+        }
+    }
+    rows.reserve(groups.size());
+    for(auto& [name, group] : groups)
+    {
+        group.name = name;
+        rows.push_back(std::move(group));
+    }
+    return true;
 }
 
 }  // namespace profiler_hub::pytorch
