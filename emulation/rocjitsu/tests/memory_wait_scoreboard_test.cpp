@@ -2806,7 +2806,8 @@ TEST(MemoryWaitExecutionTest, BarrierSccReadAndOverwriteNeedTheKmWait) {
 }
 
 TEST(MemoryWaitExecutionTest, SccHwregWritesCheckOnlyPermittedOverlappingFields) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
     for (bool write : {false, true}) {
       for (bool privileged : {false, true}) {
         for (bool scc_field : {false, true}) {
@@ -2843,7 +2844,7 @@ TEST(MemoryWaitExecutionTest, SccHwregWritesCheckOnlyPermittedOverlappingFields)
                      0xf});
           const bool modern = arch == ROCJITSU_CODE_ARCH_CDNA5;
           const uint16_t field = (modern ? 4 : 2) | (((modern ? 9 : 0) + (scc_field ? 0 : 1)) << 6);
-          const bool permitted = !write || (privileged && arch != ROCJITSU_CODE_ARCH_RDNA3);
+          const bool permitted = !write || privileged;
           uint32_t value = 0;
           HwregAccessResult result;
           {

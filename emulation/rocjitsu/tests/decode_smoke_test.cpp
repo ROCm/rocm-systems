@@ -479,13 +479,14 @@ TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampTrapAndDebugBranchBlocks) {
     uint32_t word;
     const char *mnemonic;
     ExecutionBlock block;
+    std::optional<int64_t> direct_offset = std::nullopt;
   };
   constexpr TestCase cases[] = {
       // SMEM-encoded and returned through the scalar memory path.
       {0xC0900000u, "s_memtime", ExecutionBlock::SMEM},
       {0xBF920000u, "s_trap", ExecutionBlock::BRANCH},
       {0xBE801F00u, "s_rfe_b64", ExecutionBlock::BRANCH},
-      // Modelled as never taken, but architecturally a conditional PC update.
+      // STATUS.COND_DBG_SYS controls the signed PC-relative branch.
       {0xBF970001u, "s_cbranch_cdbgsys", ExecutionBlock::BRANCH},
   };
 
@@ -499,9 +500,8 @@ TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampTrapAndDebugBranchBlocks) {
     EXPECT_TRUE(inst->mnemonic().starts_with(test_case.mnemonic));
     EXPECT_EQ(inst->amdgpu_execution_block(), test_case.block);
     EXPECT_EQ(inst->writes_pc(), test_case.block == ExecutionBlock::BRANCH);
-    // None of these carries a CFG branch flag: s_cbranch_cdbgsys is modelled as
-    // falling through and has no decoded branch offset.
-    EXPECT_FALSE(inst->is_branch());
+    EXPECT_EQ(inst->is_branch(), test_case.direct_offset.has_value());
+    EXPECT_EQ(inst->branch_offset_bytes(), test_case.direct_offset);
   }
 }
 

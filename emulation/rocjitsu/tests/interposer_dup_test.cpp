@@ -2448,30 +2448,49 @@ TEST(InterposerDrmTest, PrimeHandleToFdReturnsTheBuffer) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-TEST(InterposerDrmTest, TimestampUsesAdvertisedNanosecondClock) {
+TEST(InterposerDrmTest, TimestampUsesAdvertisedDeviceClock) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
   int drm = open_drm_render();
   ASSERT_GE(drm, 0);
+  uint32_t gpu_id = 0;
+  ASSERT_TRUE(read_gpu_id(gpu_id));
+  std::ifstream properties("/sys/class/kfd/kfd/topology/nodes/1/properties");
+  std::string key;
+  uint32_t target = 0;
+  while (properties >> key) {
+    if (key == "gfx_target_version") {
+      properties >> target;
+      break;
+    }
+    std::string ignored;
+    properties >> ignored;
+  }
+  ASSERT_NE(target, 0u);
+  const uint32_t clock_khz = target == 90008 || target == 90010                        ? 25'000u
+                             : (target >= 90400 && target <= 90402) || target == 90500 ? 100'000u
+                                                                                       : 1'000'000u;
   drm_amdgpu_info_device device{};
   ASSERT_TRUE(query_drm_device_info(drm, &device));
-  EXPECT_EQ(device.gpu_counter_freq, 1000000u);
+  EXPECT_EQ(device.gpu_counter_freq, clock_khz);
+  const uint64_t ns_per_tick = 1'000'000u / clock_khz;
+  kfd_ioctl_get_clock_counters_args before{}, after{};
+  before.gpu_id = after.gpu_id = gpu_id;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_GET_CLOCK_COUNTERS, &before), 0);
   uint64_t timestamp = 0;
   drm_amdgpu_info query{};
   query.query = AMDGPU_INFO_TIMESTAMP;
   query.return_pointer = reinterpret_cast<uint64_t>(&timestamp);
   query.return_size = sizeof(timestamp);
-  const auto before = std::chrono::steady_clock::now();
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_INFO, &query), 0);
-  const auto after = std::chrono::steady_clock::now();
-  EXPECT_GE(
-      timestamp,
-      static_cast<uint64_t>(
-          std::chrono::duration_cast<std::chrono::nanoseconds>(before.time_since_epoch()).count()));
-  EXPECT_LE(
-      timestamp,
-      static_cast<uint64_t>(
-          std::chrono::duration_cast<std::chrono::nanoseconds>(after.time_since_epoch()).count()));
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_GET_CLOCK_COUNTERS, &after), 0);
+  for (const auto &sample : {before, after}) {
+    EXPECT_EQ(sample.system_clock_freq, 1'000'000'000u);
+    EXPECT_EQ(sample.cpu_clock_counter, sample.system_clock_counter);
+    EXPECT_EQ(sample.gpu_clock_counter, sample.system_clock_counter / ns_per_tick);
+  }
+  EXPECT_LE(before.gpu_clock_counter, timestamp);
+  EXPECT_LE(timestamp, after.gpu_clock_counter);
   EXPECT_EQ(close(drm), 0);
   EXPECT_EQ(close(kfd), 0);
 }

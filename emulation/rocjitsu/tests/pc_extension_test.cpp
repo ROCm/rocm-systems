@@ -138,7 +138,9 @@ protected:
 };
 
 INSTANTIATE_TEST_SUITE_P(Architectures, PcExtensionTest,
-                         ::testing::Values(PcArchitecture{ROCJITSU_CODE_ARCH_RDNA3, "Gfx1100"},
+                         ::testing::Values(PcArchitecture{ROCJITSU_CODE_ARCH_RDNA1, "Gfx1010"},
+                                           PcArchitecture{ROCJITSU_CODE_ARCH_RDNA2, "Gfx1030"},
+                                           PcArchitecture{ROCJITSU_CODE_ARCH_RDNA3, "Gfx1100"},
                                            PcArchitecture{ROCJITSU_CODE_ARCH_RDNA4, "Gfx1201"},
                                            PcArchitecture{ROCJITSU_CODE_ARCH_CDNA4, "Gfx950"},
                                            PcArchitecture{ROCJITSU_CODE_ARCH_CDNA5, "Gfx1250"}),

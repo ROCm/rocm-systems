@@ -525,6 +525,26 @@ public:
     });
   }
 
+  void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_) {
+        if (auto *observer = dynamic_cast<AmdgpuTrapEntryObserver *>(entry.plugin.get()))
+          observer->onAmdgpuTrapEntered(wf);
+      }
+    });
+  }
+
+  void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf, const amdgpu::WaitFields &fields) {
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto *observer =
+            dynamic_cast<AmdgpuImplicitMemoryWaitObserver *>(plugins_[index].plugin.get());
+        if (observer && plugin_observes_hot_hooks(index, &wf, cached))
+          observer->onAmdgpuImplicitMemoryWait(wf, fields);
+      }
+    });
+  }
+
   void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts, BarrierKind kind) {
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)

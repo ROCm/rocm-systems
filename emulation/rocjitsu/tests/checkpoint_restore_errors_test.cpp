@@ -1,16 +1,23 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "config_test_util.h"
 #include "scoped_temp.h"
 
 #include "checkpoint_generated.h"
 #include "rocjitsu/config/checkpoint.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/vm/rj_vm.h"
+#include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
 #include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <string>
@@ -59,14 +66,25 @@ struct InvalidCheckpoint {
   uint32_t wf_id = 0;
   uint8_t vgpr_lane_count = 64;
   size_t vgpr_bytes = 0;
-  bool halted = false;
-  std::optional<fb::GraphicsWait> graphics_wait = std::nullopt;
-  std::optional<Gfx10WaveResources> gfx10_resources = std::nullopt;
   std::optional<uint32_t> rdna2_process_id = std::nullopt;
   bool rdna2_internal_address_space = false;
-  std::optional<std::vector<uint32_t>> rdna2_register_blocks = std::nullopt;
+  std::optional<Gfx10WaveResources> gfx10_resources = std::nullopt;
+  bool halted = false;
   std::vector<uint32_t> sgprs = {};
   uint8_t kernel_wave_size = 0;
+  std::optional<std::vector<uint32_t>> register_blocks = std::nullopt;
+  std::vector<uint32_t> program = {};
+  uint32_t status = 0;
+  bool has_cp_cursor = false;
+  bool has_lds_cursor = false;
+  std::optional<fb::GraphicsWait> graphics_wait = std::nullopt;
+  uint32_t sleep_cycles = 0;
+  bool sleep_wakeup = false;
+  uint32_t dispatch_id = 0;
+  uint8_t waiting_barrier = 0;
+  uint8_t barrier_complete_mask = 0;
+  std::optional<uint32_t> dispatch_cursor = std::nullopt;
+  std::vector<fb::Rdna4CheckpointGroup> groups = {};
   std::optional<uint32_t> num_vgprs = std::nullopt;
   uint32_t accum_vgpr_base = 0;
   std::optional<uint32_t> num_sgprs = std::nullopt;
@@ -86,7 +104,7 @@ struct InvalidCheckpoint {
   flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<fb::ComputeUnitState>>> cus;
   if (input.wavefront) {
     auto vgprs = builder.CreateVector(std::vector<uint8_t>(input.vgpr_bytes));
-    const bool cdna3 = std::string_view(input.arch) == "cdna3";
+    const bool has_lds = input.has_lds_state || std::string_view(input.arch) == "cdna3";
     const fb::LdsWindow empty_window(0, 0);
     const auto sgprs = input.sgprs.empty() ? 0 : builder.CreateVector(input.sgprs);
     const fb::Gfx10Apertures apertures;
@@ -100,20 +118,31 @@ struct InvalidCheckpoint {
             : 0;
     fb::WavefrontStateBuilder wave(builder);
     wave.add_gfx10_resources(wave_resources);
+
     wave.add_kernel_wave_size(input.kernel_wave_size);
-    wave.add_halted(input.halted);
-    if (input.graphics_wait)
-      wave.add_graphics_wait(*input.graphics_wait);
     if (input.rdna2_process_id)
       wave.add_rdna2_process_id(*input.rdna2_process_id);
     wave.add_rdna2_internal_address_space(input.rdna2_internal_address_space);
-    if (cdna3 || input.has_lds_state)
+    wave.add_halted(input.halted);
+    if (has_lds)
       wave.add_lds_window(&empty_window);
     if (sgprs.o)
       wave.add_sgprs(sgprs);
     if (input.num_sgprs)
       wave.add_num_sgprs(*input.num_sgprs);
+    if (!input.program.empty()) {
+      wave.add_pc(0x1000);
+      wave.add_exec(1);
+    }
+    if (input.graphics_wait)
+      wave.add_graphics_wait(*input.graphics_wait);
+    wave.add_status(input.status);
     wave.add_wf_id(input.wf_id);
+    wave.add_sleep_cycles(input.sleep_cycles);
+    wave.add_sleep_wakeup(input.sleep_wakeup);
+    wave.add_dispatch_id(input.dispatch_id);
+    wave.add_waiting_barrier(input.waiting_barrier);
+    wave.add_barrier_complete_mask(input.barrier_complete_mask);
     wave.add_vgpr_lane_count(input.vgpr_lane_count);
     wave.add_vgprs(vgprs);
     if (input.num_vgprs)
@@ -121,22 +150,36 @@ struct InvalidCheckpoint {
     wave.add_accum_vgpr_base(input.accum_vgpr_base);
     auto wave_offset = wave.Finish();
     auto waves = builder.CreateVector(&wave_offset, 1);
-    const auto lds =
-        cdna3 || input.has_lds_state ? builder.CreateVector(std::vector<uint8_t>{}) : 0;
-    const auto blocks =
-        input.rdna2_register_blocks ? builder.CreateVector(*input.rdna2_register_blocks) : 0;
+    const auto groups = input.dispatch_cursor ? builder.CreateVectorOfStructs(input.groups) : 0;
+    const auto blocks = input.register_blocks ? builder.CreateVector(*input.register_blocks) : 0;
+    const auto lds = has_lds ? builder.CreateVector(std::vector<uint8_t>{}) : 0;
     const auto cu_resources = resources ? fb::CreateGfx10CuResources(builder, &apertures) : 0;
     fb::ComputeUnitStateBuilder state(builder);
     state.add_gfx10_resources(cu_resources);
-    if (blocks.o)
-      state.add_rdna2_register_blocks(blocks);
+
     state.add_wavefronts(waves);
     state.add_lds(lds);
+    if (input.has_lds_cursor)
+      state.add_lds_cursor(0);
+    state.add_rdna2_register_blocks(blocks);
+    state.add_rdna4_workgroups(groups);
     auto cu = state.Finish();
     cus = builder.CreateVector(&cu, 1);
   }
-  auto checkpoint =
-      fb::CreateSimulationCheckpoint(builder, 0, input.missing_config ? 0 : simulation, cus);
+  flatbuffers::Offset<fb::GpuMemoryState> memory;
+  if (!input.program.empty()) {
+    std::vector<uint8_t> bytes(4096);
+    std::memcpy(bytes.data(), input.program.data(), input.program.size() * sizeof(uint32_t));
+    auto page = fb::CreateMemoryPage(builder, 0x1000, builder.CreateVector(bytes));
+    memory = fb::CreateGpuMemoryState(builder, builder.CreateVector(&page, 1));
+  }
+  flatbuffers::Offset<fb::CommandProcessorState> cp;
+  if (input.has_cp_cursor || input.dispatch_cursor)
+    cp = fb::CreateCommandProcessorState(
+        builder, 0, 0, 0,
+        builder.CreateVector(std::vector<uint32_t>{input.dispatch_cursor.value_or(1)}));
+  auto checkpoint = fb::CreateSimulationCheckpoint(
+      builder, 0, input.missing_config ? 0 : simulation, cus, cp, memory);
   builder.Finish(checkpoint);
   if (testing::AssertionResult result = file.initialize("rocjitsu-restore-errors-"); !result)
     return result;
@@ -183,6 +226,128 @@ TEST(CheckpointRestoreErrorsTest, RejectsLegacyActiveWavesWithoutLdsResources) {
     test::ScopedTempFile file;
     ASSERT_TRUE(write_checkpoint(file, {.arch = arch, .wavefront = true}));
     expect_restore_failure(file.path(), "Cannot restore active wave without saved LDS state");
+  }
+}
+
+TEST(CheckpointRestoreErrorsTest, RejectsUnsupportedSplitBarriersAndGraphicsWaits) {
+  for (std::string_view arch : {"cdna1", "cdna2", "cdna3", "cdna4", "rdna1", "rdna2", "rdna3",
+                                "rdna3_5", "rdna4", "cdna5"}) {
+    SCOPED_TRACE(arch);
+    InvalidCheckpoint record;
+    record.arch = arch.data();
+    record.wavefront = true;
+    const bool split_barriers = arch == "rdna4" || arch == "cdna5";
+    const bool gfx10 = arch == "rdna1" || arch == "rdna2";
+    if (!split_barriers && !gfx10) {
+      record.dispatch_cursor = 1;
+      record.dispatch_id = 8;
+      record.groups = {fb::Rdna4CheckpointGroup(8, 0, 1, 0, 0, true)};
+    }
+    const auto check = [&] {
+      test::ScopedTempFile file;
+      ASSERT_TRUE(write_checkpoint(file, record));
+      util::StringDiagnostic error;
+      ASSERT_TRUE(config::restore_checkpoint(file.path(), error.emitter()).failed());
+      EXPECT_NE(error.message().find("checkpoint wave barrier"), std::string::npos)
+          << error.message();
+    };
+    record.waiting_barrier = 1;
+    check();
+    record.waiting_barrier = 0;
+    record.barrier_complete_mask = split_barriers ? 4 : 1;
+    check();
+  }
+  for (const auto wait : {fb::GraphicsWait_Export, fb::GraphicsWait_Parameters}) {
+    InvalidCheckpoint record;
+    record.arch = "rdna3_5";
+    record.has_lds_state = true;
+    record.wavefront = true;
+    record.vgpr_lane_count = record.kernel_wave_size = 32;
+    record.vgpr_bytes = 256 * 32 * sizeof(uint32_t);
+    record.graphics_wait = wait;
+    test::ScopedTempFile file;
+    ASSERT_TRUE(write_checkpoint(file, record));
+    expect_restore_failure(file.path(), "Unsupported checkpoint graphics wait");
+  }
+}
+
+TEST(CheckpointRestoreErrorsTest, Rdna4ValidatesWorkgroupGraphBeforeRestoringWaves) {
+  InvalidCheckpoint record;
+  record.arch = "rdna4";
+  record.wavefront = true;
+  record.vgpr_lane_count = 32;
+  record.dispatch_id = 8;
+  record.dispatch_cursor = 8;
+  {
+    test::ScopedTempFile invalid_file;
+    ASSERT_TRUE(write_checkpoint(invalid_file, record));
+    expect_restore_failure(invalid_file.path(),
+                           "RDNA4 checkpoint dispatch cursor aliases a live wave");
+  }
+  record.dispatch_cursor = 1;
+  record.waiting_barrier = 1;
+  {
+    test::ScopedTempFile invalid_file;
+    ASSERT_TRUE(write_checkpoint(invalid_file, record));
+    expect_restore_failure(invalid_file.path(),
+                           "Invalid RDNA4 checkpoint wave barrier or wake state");
+  }
+  record.waiting_barrier = 0;
+  record.groups = {fb::Rdna4CheckpointGroup(7, 0, 1, 0, 0, true)};
+  {
+    test::ScopedTempFile invalid_file;
+    ASSERT_TRUE(write_checkpoint(invalid_file, record));
+    expect_restore_failure(invalid_file.path(),
+                           "RDNA4 checkpoint workgroup member count differs from saved waves");
+  }
+  record.groups = {fb::Rdna4CheckpointGroup(8, 0, 1, 1, 0, true)};
+  {
+    test::ScopedTempFile invalid_file;
+    ASSERT_TRUE(write_checkpoint(invalid_file, record));
+    expect_restore_failure(invalid_file.path(),
+                           "Invalid RDNA4 checkpoint workgroup count or duplicate identity");
+  }
+}
+
+TEST(CheckpointRestoreErrorsTest,
+     LegacyRdna4AcceptsOrdinaryWaveAndDiagnosesMissingSleepMembership) {
+  InvalidCheckpoint record;
+  record.arch = "rdna4";
+  record.wavefront = true;
+  record.has_lds_state = true;
+  record.vgpr_lane_count = 32;
+  record.vgpr_bytes = 256 * 32 * sizeof(uint32_t); // A complete wave32 block.
+  test::ScopedTempFile ordinary;
+  ASSERT_TRUE(write_checkpoint(ordinary, record));
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(ordinary.path(), restored));
+  record.sleep_cycles = UINT32_MAX;
+  {
+    test::ScopedTempFile invalid_file;
+    ASSERT_TRUE(write_checkpoint(invalid_file, record));
+    expect_restore_failure(invalid_file.path(),
+                           "Legacy RDNA4 checkpoint lacks workgroup identity for sleeping wave");
+  }
+}
+
+TEST(CheckpointRestoreErrorsTest, LegacyCdna5RestoresWaveLocalSleepWithoutAGroupTable) {
+  InvalidCheckpoint record;
+  record.arch = "cdna5";
+  record.wavefront = true;
+  record.has_lds_state = true;
+  record.vgpr_lane_count = 32;
+  record.vgpr_bytes = 256 * 32 * sizeof(uint32_t);
+  for (uint32_t delay : {0u, 127u, UINT32_MAX}) {
+    record.sleep_cycles = delay;
+    record.sleep_wakeup = !delay;
+    config::LoadedConfig copy;
+    test::ScopedTempFile file;
+    ASSERT_TRUE(write_checkpoint(file, record));
+    ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), copy));
+    const auto *wave = copy.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(wave->sleep_cycles(), delay);
+    EXPECT_EQ(wave->sleep_wakeup(), !delay);
   }
 }
 
@@ -241,68 +406,21 @@ TEST(CheckpointRestoreErrorsTest, TotalCapacityOverflowReturnsFailure) {
   expect_restore_failure(file.path(), "Checkpoint execution capacity exceeds uint32 range");
 }
 
-TEST(CheckpointRestoreErrorsTest, RejectsActiveRdna1WaveWithoutItsResourceRecord) {
-  test::ScopedTempFile file;
-  ASSERT_TRUE(write_checkpoint(file, {.arch = "rdna1", .wavefront = true}));
-  expect_restore_failure(
-      file.path(),
-      "Cannot restore active RDNA1 wave: checkpoint omitted its VGPR and LDS allocations");
-}
-
-TEST(CheckpointRestoreErrorsTest, LegacyGfx10CheckpointCanRestoreWithoutAnActiveWave) {
-  for (const char *arch : {"rdna1", "rdna2"}) {
-    for (bool halted_record : {false, true}) {
-      SCOPED_TRACE(arch);
-      InvalidCheckpoint input{.arch = arch, .wavefront = halted_record, .halted = halted_record};
-      test::ScopedTempFile file;
-      ASSERT_TRUE(write_checkpoint(file, input));
-      util::StringDiagnostic diagnostic;
-      EXPECT_TRUE(config::restore_checkpoint(file.path(), diagnostic.emitter()).succeeded())
-          << diagnostic.message();
-    }
-  }
-}
-
-TEST(CheckpointRestoreErrorsTest, ResourceReaderChecksActiveWaveSchedulerState) {
-  InvalidCheckpoint running{.arch = "rdna3_5",
-                            .has_lds_state = true,
-                            .wavefront = true,
-                            .vgpr_lane_count = 32,
-                            .vgpr_bytes = 256 * 32 * sizeof(uint32_t),
-                            .kernel_wave_size = 32};
-  for (const auto grant : {std::optional<fb::GraphicsWait>{}, std::optional{fb::GraphicsWait_None},
-                           std::optional{fb::GraphicsWait_LaunchDefaults}}) {
-    running.graphics_wait = grant;
-    test::ScopedTempFile file;
-    ASSERT_TRUE(write_checkpoint(file, running));
-    util::StringDiagnostic diagnostic;
-    ASSERT_TRUE(config::restore_checkpoint(file.path(), diagnostic.emitter()).succeeded())
-        << diagnostic.message();
-  }
-  for (const auto grant : {fb::GraphicsWait_Export, fb::GraphicsWait_Parameters}) {
-    running.graphics_wait = grant;
-    test::ScopedTempFile invalid_file;
-    ASSERT_TRUE(write_checkpoint(invalid_file, running));
-    expect_restore_failure(invalid_file.path(),
-                           "Cannot restore an active wave requiring scheduler state");
-  }
-}
-
 TEST(CheckpointRestoreErrorsTest, Rdna2RestoresSharedResourcesAndRegisterBlockPlacement) {
   InvalidCheckpoint input{.arch = "rdna2",
                           .num_wf_slots = 2,
                           .wavefront = true,
                           .vgpr_lane_count = 32,
                           .vgpr_bytes = 256 * 32 * sizeof(uint32_t),
-                          .gfx10_resources = Gfx10WaveResources{16, 256, 0x34000, 0x20},
                           .rdna2_process_id = 17,
                           .rdna2_internal_address_space = true,
+                          .gfx10_resources = Gfx10WaveResources{16, 256, 0x34000, 0x20},
                           .sgprs = std::vector<uint32_t>(104),
                           .kernel_wave_size = 32,
                           .num_sgprs = 96};
   for (bool explicit_block : {false, true}) {
     if (explicit_block)
-      input.rdna2_register_blocks = std::vector<uint32_t>{1};
+      input.register_blocks = std::vector<uint32_t>{1};
     test::ScopedTempFile file;
     ASSERT_TRUE(write_checkpoint(file, input));
     auto loaded = config::restore_checkpoint(file.path(), {});
@@ -321,13 +439,13 @@ TEST(CheckpointRestoreErrorsTest, Rdna2RestoresSharedResourcesAndRegisterBlockPl
     EXPECT_EQ(wf->vgpr_alloc().base, explicit_block ? cu->vgpr_allocation_block_size() : 0u);
     EXPECT_EQ(wf->sgpr_alloc().base, explicit_block ? cu->sgpr_allocation_block_size() : 0u);
   }
-  input.rdna2_register_blocks->clear();
+  input.register_blocks->clear();
   {
     test::ScopedTempFile invalid_file;
     ASSERT_TRUE(write_checkpoint(invalid_file, input));
     expect_restore_failure(invalid_file.path(), "Invalid RDNA2 checkpoint register block count");
   }
-  input.rdna2_register_blocks->push_back(2);
+  input.register_blocks->push_back(2);
   {
     test::ScopedTempFile invalid_file;
     ASSERT_TRUE(write_checkpoint(invalid_file, input));
@@ -375,6 +493,21 @@ TEST(CheckpointRestoreErrorsTest, Rdna2ValidatesLogicalAllocationAndPhysicalPayl
   input.vgpr_bytes = 4 * 32 * sizeof(uint32_t);
   reject("Invalid VGPR checkpoint payload size");
 }
+TEST(CheckpointRestoreErrorsTest, LegacyCheckpointCanRestoreWithoutAnActiveRdna2Wave) {
+  for (auto input :
+       {InvalidCheckpoint{.arch = "rdna1"}, InvalidCheckpoint{.arch = "rdna2"},
+        InvalidCheckpoint{.arch = "rdna1", .wavefront = true, .halted = true},
+        InvalidCheckpoint{.arch = "rdna2", .wavefront = true, .halted = true},
+        InvalidCheckpoint{
+            .arch = "cdna3", .wavefront = true, .vgpr_bytes = 512 * 64 * sizeof(uint32_t)}}) {
+    test::ScopedTempFile file;
+    ASSERT_TRUE(write_checkpoint(file, input));
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(config::restore_checkpoint(file.path(), diagnostic.emitter()).succeeded())
+        << input.arch << ": " << diagnostic.message();
+  }
+}
+
 TEST(CheckpointRestoreErrorsTest, UnavailableWavefrontSlotReturnsFailure) {
   test::ScopedTempFile file;
   ASSERT_TRUE(write_checkpoint(file, {.wavefront = true, .wf_id = 1}));
@@ -386,6 +519,15 @@ TEST(CheckpointRestoreErrorsTest, InvalidVgprLaneCountReturnsFailure) {
   ASSERT_TRUE(write_checkpoint(file, {.wavefront = true, .vgpr_lane_count = 16}));
   expect_restore_failure(file.path(), "Invalid VGPR checkpoint lane count");
 }
+
+TEST(CheckpointRestoreErrorsTest, RejectsActiveRdna1WaveWithoutItsResourceRecord) {
+  test::ScopedTempFile file;
+  ASSERT_TRUE(write_checkpoint(file, {.arch = "rdna1", .wavefront = true}));
+  expect_restore_failure(
+      file.path(),
+      "Cannot restore active RDNA1 wave: checkpoint omitted its VGPR and LDS allocations");
+}
+
 TEST(CheckpointRestoreErrorsTest, Cdna4RejectsInvalidRegisterBoundsBeforeAllocating) {
   for (uint32_t total : {0u, 513u}) {
     test::ScopedTempFile file;
@@ -408,6 +550,7 @@ TEST(CheckpointRestoreErrorsTest, Cdna4RejectsInvalidRegisterBoundsBeforeAllocat
       {.arch = "cdna4", .has_lds_state = true, .wavefront = true, .accum_vgpr_base = 8}));
   expect_restore_failure(missing_total.path(), "Invalid CDNA4 checkpoint AccVGPR boundary");
 }
+
 TEST(CheckpointRestoreErrorsTest, Cdna4RejectsTruncatedRoundedSgprPayload) {
   test::ScopedTempFile file;
   ASSERT_TRUE(write_checkpoint(file, {.arch = "cdna4",
@@ -417,6 +560,7 @@ TEST(CheckpointRestoreErrorsTest, Cdna4RejectsTruncatedRoundedSgprPayload) {
                                       .num_sgprs = 40}));
   expect_restore_failure(file.path(), "Invalid CDNA4 checkpoint SGPR allocation");
 }
+
 TEST(CheckpointRestoreErrorsTest, Cdna4LegacyRecordUsesConfiguredVgprCount) {
   test::ScopedTempFile file;
   ASSERT_TRUE(write_checkpoint(file, {.arch = "cdna4",
@@ -432,6 +576,7 @@ TEST(CheckpointRestoreErrorsTest, Cdna4LegacyRecordUsesConfiguredVgprCount) {
   EXPECT_EQ(wave->accum_vgpr_base(), 0u);
   EXPECT_EQ(wave->num_sgprs(), cu->config().sgprs_per_wf);
 }
+
 TEST(CheckpointRestoreErrorsTest, Cdna4LegacySgprPayloadCarriesItsRequestedCount) {
   std::vector<uint32_t> values(40);
   values.back() = 0xbeefu;

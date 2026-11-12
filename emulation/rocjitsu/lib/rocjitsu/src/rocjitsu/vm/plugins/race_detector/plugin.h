@@ -82,7 +82,9 @@ struct RaceWavefrontState : WavefrontState {
   std::optional<LdsOperandRead> lds_operand_read;
 };
 
-class RaceDetectorPlugin : public ExecutionPlugin {
+class RaceDetectorPlugin : public ExecutionPlugin,
+                           public AmdgpuTrapEntryObserver,
+                           public AmdgpuImplicitMemoryWaitObserver {
 public:
   /// @param config_json Plugin configuration object as a JSON string (unused;
   ///        this plugin takes no configuration). May be null.
@@ -136,6 +138,9 @@ public:
 
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        amdgpu::Wavefront &wf) override;
+
+  void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) override;
+  void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf, const amdgpu::WaitFields &fields) override;
 
   void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
                                BarrierKind kind) override;

@@ -486,9 +486,7 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     # code is only visible to the fetcher once this instruction retires.
     if name == 'S_ICACHE_INV':
         return InstructionSemantics(name, 'icache_inv')
-    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_INCPERFLEVEL,
-    # S_DECPERFLEVEL — all are either no-ops or system/debug instructions that
-    # don't affect compute simulation correctness.
+    # Remaining scalar control instructions use target-specific execution hooks.
     return InstructionSemantics(name, 'true_nop')
 
 
