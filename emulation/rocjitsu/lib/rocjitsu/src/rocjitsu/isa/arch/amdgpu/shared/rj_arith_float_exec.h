@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu::amdgpu::arith {
 
@@ -445,14 +446,16 @@ inline void execute_mixed_fma(Wavefront &wave, FloatTernaryWave32Function wave32
                               FloatTernaryWave64Function wave64, uint64_t flags, uint64_t modifiers,
                               const Operand &destination, const Operand &lhs, const Operand &rhs,
                               const Operand &third, unsigned narrow_sources,
-                              uint8_t destination_bytes, bool rdna3) {
+                              uint8_t destination_bytes, bool rdna3, bool cdna5 = false) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   if (!wave.exec())
     return;
   const unsigned half_sources = unsigned((modifiers >> 13) & 7);
-  const unsigned denorm32 = wave.fp_denorm_mode_f32();
-  const unsigned denorm16 = wave.fp_denorm_mode_f16_f64();
   const bool half_output = destination_bytes != 0xF;
+  // The inherited gfx1250 mixed model preserves half inputs and half results.
+  // Its FP32-result form still applies MODE to FP32 inputs and outputs.
+  const unsigned denorm32 = cdna5 && half_output ? 3u : wave.fp_denorm_mode_f32();
+  const unsigned denorm16 = cdna5 ? 3u : wave.fp_denorm_mode_f16_f64();
   const unsigned rounding = half_output ? wave.fp_round_mode_f16_f64() : wave.fp_round_mode_f32();
   flags |= uint64_t(rounding) << 24;
   if (rdna3 && !wave.dx10_clamp())
@@ -520,6 +523,89 @@ inline void execute_byte_pack(Wavefront &wave, FloatTernaryWave32Function wave32
                             state)
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data, state);
       });
+  if (success) {
+    wave.set_trapsts(wave.trapsts() | causes);
+    wave.raise_alu_causes(causes);
+  }
+}
+
+// gfx1250 BF16 mixed inputs select raw halves, including inline FP32 encodings.
+// The inherited model preserves denormals and uses guest rounding only for BF16
+// results. Register observations retain selected source/destination byte masks.
+inline void execute_mixed_bf16(Wavefront &wave, FloatTernaryWave32Function function, uint64_t flags,
+                               uint64_t modifiers, const Operand &destination, const Operand &lhs,
+                               const Operand &rhs, const Operand &third,
+                               uint8_t destination_bytes) {
+  if (!wave.exec())
+    return;
+  flags |=
+      uint64_t(destination_bytes == 0xF ? wave.fp_round_mode_f32() : wave.fp_round_mode_f16_f64())
+      << 24;
+  const auto source_bytes = [&](unsigned source) -> uint8_t {
+    if (!(modifiers & (RJ_ARITH_MIX_BF16_A << source)))
+      return 0xF;
+    return modifiers & (RJ_ARITH_ALU_HIGH_A << source) ? 0xC : 0x3;
+  };
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, lhs, wave.exec(), source_bytes(0));
+  VectorInput32 b(registers, wave, rhs, wave.exec(), source_bytes(1));
+  VectorInput32 c(registers, wave, third, wave.exec(), source_bytes(2));
+  uint32_t causes = 0;
+  const bool success = write_vector32_result(
+      wave, registers, destination, wave.exec() & wave.vgpr_write_mask(),
+      [&](uint32_t *const *d, uint64_t write_mask) {
+        return function(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, &c.data,
+                        &causes);
+      },
+      destination_bytes == 0xF, destination_bytes);
+  if (success) {
+    wave.set_trapsts(wave.trapsts() | causes);
+    wave.raise_alu_causes(causes);
+  }
+}
+
+// Packed BF16 consumes raw words and only MODE.FP16_OVFL affects arithmetic.
+// Stage sources before writes; each independent 32-lane block reuses one API.
+template <bool Ternary, typename Function>
+inline void execute_packed_bf16(Wavefront &wave, Function function, uint64_t modifiers,
+                                const Operand &destination, const Operand &lhs, const Operand &rhs,
+                                const Operand *third) {
+  if (!wave.exec()) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, lhs, wave.exec());
+  VectorInput32 b(registers, wave, rhs, wave.exec());
+  std::optional<VectorInput32> c;
+  if constexpr (Ternary) {
+    c.emplace(registers, wave, *third, wave.exec());
+  }
+  uint64_t flags = wave.cu().arithmetic_flags();
+  if (wave.fp16_ovfl()) {
+    flags |= RJ_ARITH_FP16_OVFL;
+  }
+  uint32_t causes = 0;
+  const bool success =
+      write_vector32_result(wave, registers, destination, wave.exec() & wave.vgpr_write_mask(),
+                            [&](uint32_t *const *d, uint64_t write_mask) {
+                              for (uint32_t first = 0; first < wave.wf_size(); first += 32) {
+                                uint32_t *out = d[0] + first;
+                                const uint32_t *x = a.data + first, *y = b.data + first;
+                                int error;
+                                if constexpr (Ternary) {
+                                  const uint32_t *z = c->data + first;
+                                  error = function(flags, uint32_t(write_mask >> first), modifiers,
+                                                   &out, &x, &y, &z, &causes);
+                                } else {
+                                  error = function(flags, uint32_t(write_mask >> first), modifiers,
+                                                   &out, &x, &y, &causes);
+                                }
+                                if (error != RJ_ARITH_SUCCESS) {
+                                  return error;
+                                }
+                              }
+                              return RJ_ARITH_SUCCESS;
+                            });
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);

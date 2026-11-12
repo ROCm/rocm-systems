@@ -1158,7 +1158,7 @@ def test_fma64_pair_layout_modifiers_and_policy(arch):
     assert 'amdgpu::execute_v_' not in match[1]
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna5'])
 def test_mixed_fma_formats_abs_partial_outputs_and_routing(arch):
     from amdisa.codegen.execute.rj_arith_float import MIXED_FMA_NAMES, gen_mixed_fma
 
@@ -1480,3 +1480,147 @@ def test_fp8_to_f16_vop1_true16_selection():
             assert 'inst_.opsel' not in body
             assert 'ALU_CLAMP' not in body
             assert 'rj_arith_' + name.lower() + '_w32' in generated
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize(
+    'name', ['V_MAD_MIX_F32', 'V_MAD_MIXLO_F16', 'V_MAD_MIXHI_F16']
+)
+def test_cdna_mixed_mad_bridge(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_mixed_fma
+
+    body = gen_mixed_fma(
+        context(
+            arch,
+            name,
+            ['dst'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+            op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        )
+    )
+    assert f'rj_arith_{name.lower()}_w32' in body
+    assert f'rj_arith_{name.lower()}_w64' in body
+    assert 'is_inline_float_src' in body
+
+
+@pytest.mark.parametrize(
+    'name', ['V_FMA_MIX_F32_BF16', 'V_FMA_MIXLO_BF16', 'V_FMA_MIXHI_BF16']
+)
+def test_cdna_mixed_bf16_preserves_raw_inline_halves(name):
+    from amdisa.codegen.execute.rj_arith_float import gen_mixed_fma
+
+    body = gen_mixed_fma(
+        context(
+            'cdna5',
+            name,
+            ['d'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('low', 'high'),
+            op_sel_hi_2_expr='high_c',
+        )
+    )
+    assert 'execute_mixed_bf16' in body
+    assert 'rj_arith_' + name.lower() + '_w32' in body
+    assert 'narrow_sources' not in body and 'is_inline_float_src' not in body
+    for source in 'ABC':
+        assert 'RJ_ARITH_MIX_BF16_' + source in body
+        assert 'RJ_ARITH_ALU_ABS_' + source in body
+    for arch in ('cdna3', 'cdna4'):
+        assert (
+            gen_mixed_fma(
+                context(
+                    arch,
+                    name,
+                    ['d'],
+                    ['a', 'b', 'c'],
+                    enc_name='ENC_VOP3P',
+                    opsel_exprs=('low', 'high'),
+                    op_sel_hi_2_expr='high_c',
+                )
+            )
+            is None
+        )
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+def test_cdna_float_dot_bindings(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_dot32
+
+    for fmt in ('F16', 'BF16'):
+        for accumulate in (False, True):
+            name = f'V_DOT2{"C" if accumulate else ""}_F32_{fmt}'
+            for encoding in (
+                ('ENC_VOP2', 'ENC_VOP3') if accumulate else ('ENC_VOP3P',)
+            ):
+                body = gen_float_dot32(
+                    context(
+                        arch,
+                        name,
+                        ['d'],
+                        ['a', 'b'] if accumulate else ['a', 'b', 'c'],
+                        enc_name=encoding,
+                        opsel_exprs=('low', 'high'),
+                    )
+                )
+                if arch == 'cdna3' and fmt == 'BF16':
+                    assert body is None
+                    continue
+                suffix = 'gfx942' if fmt == 'F16' else 'gfx950'
+                assert f'rj_arith_v_dot2_f32_{fmt.lower()}_w64_{suffix},' in body
+                assert 'const unsigned replicate_sources = 0;' in body
+                if accumulate:
+                    assert 'const unsigned narrow_sources = 0;' in body
+                    assert 'const uint64_t modifiers = 0;' in body
+                    assert ', d, ' in body
+                else:
+                    assert 'pk16_src_needs_narrowing' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_packed_f32_fma_pair_selectors(arch):
+    from amdisa.codegen.execute.rj_arith_packed_f32 import gen_packed_f32
+
+    body = gen_packed_f32(
+        context(
+            arch,
+            'V_PK_FMA_F32',
+            ['dst'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+            op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        )
+    )
+    assert 'dst, a, b, c' in body
+    assert 'inst_.op_sel_hi_2 ? 0u : RJ_ARITH_PK_HI_C_LOW' in body
+    assert 'RJ_ARITH_PK_NEG_HI_C' in body
+    assert (
+        'rj_arith_v_pk_fma_f32_w32_' + ('gfx1250' if arch == 'cdna5' else 'gfx942')
+        in body
+    )
+    assert ('rj_arith_v_pk_fma_f32_w64_gfx942' in body) == (arch != 'cdna5')
+    assert (
+        gen_packed_f32(context(arch, 'V_PK_FMA_F32', ['dst'], ['a', 'b', 'c'])) is None
+    )
+
+
+@pytest.mark.parametrize('operation', ['Add', 'Mul', 'Fma', 'MinNum', 'MaxNum'])
+def test_cdna_packed_bf16_uses_raw_word_adapter(operation):
+    root = Path(__file__).resolve().parents[3] / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu'
+    source = (root / 'generated/cdna5/vop3p_exec.cpp').read_text()
+    body = re.search(
+        rf'void VPk{operation}Bf16Vop3p::execute_impl\([^)]*\)\s*\{{(.*?)\n\}}',
+        source,
+        re.S,
+    )[1]
+    assert f'execute_packed_bf16<{str(operation == "Fma").lower()}>' in body
+    mnemonic = operation.lower().replace('num', '_num')
+    assert f'rj_arith_v_pk_{mnemonic}_bf16_w32' in body
+    for operand in 'ABC' if operation == 'Fma' else 'AB':
+        for flag in ('LO_{}_HIGH', 'HI_{}_LOW', 'NEG_LO_{}', 'NEG_HI_{}'):
+            assert 'RJ_ARITH_PK_' + flag.format(operand) in body
+    assert 'RJ_ARITH_PK_CLAMP' in body
+    assert 'fp_mode::' not in body

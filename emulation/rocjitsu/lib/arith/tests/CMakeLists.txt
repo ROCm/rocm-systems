@@ -109,6 +109,7 @@ foreach(
         v_fma_dx9_zero
         v_fma
         v_fma_mix
+        v_fma_mix_bf16
         v_fmaak
         v_fmac
         v_fmamk
@@ -124,8 +125,12 @@ foreach(
         v_minmax_maxmin_num
         v_mul_dx9_zero_f32
         v_mul
+        v_mad_mix
         v_pk_add_mul_f16
+        v_pk_add_mul_f32
+        v_pk_bf16
         v_pk_fma_f16
+        v_pk_fma_f32
         v_pk_fmac_f16
         v_pk_selection_f16
         v_rcp_rsq_sqrt_f64
@@ -155,7 +160,11 @@ foreach(
 endforeach()
 
 # Dot-product formats retain family-specific arithmetic and status expectations.
-foreach(family IN ITEMS integer fp8 half dot2)
+foreach(
+    family
+    IN
+    ITEMS integer fp8 half dot2 cdna
+)
     set(target "rj_arith_dot_${family}_test")
     rj_arith_add_test(${target} dot/${family}_test.cpp)
 endforeach()
