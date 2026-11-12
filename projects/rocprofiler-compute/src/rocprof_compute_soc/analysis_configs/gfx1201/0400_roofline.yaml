@@ -70,11 +70,11 @@ Panel Config:
       per lane, 32 lanes per wave32 instruction, so it is an estimate rather
       than a precision-specific FLOP count.
     WMMA FLOPs (F16->F32): >-
-      Matrix operations per second at 8192 FLOPs per 16x16x16 WMMA instruction,
-      counted by SQ_WMMA_VALU_INSTS (SQ event 233). The counter does not
-      separate FP16, BF16, FP8, and BF8. The peak is the measured FP16 WMMA
-      rate. BF8 has its own measured roof, V_WMMA_F32_16X16X16_BF8_BF8, at the
-      same 8192 FLOPs per instruction.
+      Matrix operations per second scored against the measured FP16 roof.
+      The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts
+      every WMMA issue, and the counter does not separate FP16, BF16, FP8,
+      and BF8, so the achieved rate is not FP16-only.
+      V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
     VALU FLOPs (F64): >-
       64-bit floating-point operations per second on the VALU.
     GL0 Cache BW (TCP Cache): >-
@@ -89,17 +89,16 @@ Panel Config:
       32-byte granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and
       GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and
       EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte through 128-byte
-      requests, so a fixed 256 bytes per request would overstate them. Navi 48
-      has a 256-bit VRAM interface at 20 Gbps. These requests are also served
-      by the Infinity Cache, so a working set that fits in it can exceed this
-      peak.
+      requests, so a fixed 256 bytes per request would overstate them. These
+      requests are also served by the Infinity Cache, so a working set that
+      fits in it can exceed this measured peak.
     DRAM-Destined BW (Infinity Cache Peak): >-
       Bandwidth of GL2C/EA read and write requests destined for DRAM, compared
       with the measured Infinity Cache bandwidth (MALL column of roofline.csv).
-      Uses the same 32-byte request counters as VRAM BW. On Navi 48 (64 CUs),
-      requests pass through GL0 (TCP), GL1, the 8 MB GL2, and the 64 MB
-      Infinity Cache before VRAM. No counter separates Infinity Cache hits
-      from DRAM traffic.
+      Uses the same 32-byte request counters as VRAM BW. Requests pass through
+      GL0 (TCP), GL1, the GL2, and the Infinity Cache before VRAM. The measured
+      peak uses the device's reported Infinity Cache size. No counter separates
+      Infinity Cache hits from DRAM traffic.
     AI L0: >-
       Arithmetic intensity relative to GL0 (TCP) requests, at 128 bytes per
       TCP_REQ as an upper bound on GL0 bytes. The FLOP numerator is the VALU
