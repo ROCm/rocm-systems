@@ -150,6 +150,9 @@ struct rcclArchThresholds {
   size_t ddaA2aLL128MaxBlocksMinBytes;
   size_t ddaA2aLL128MaxBlocksMaxBytes;
 
+  // DDA LL128 ReduceScatter block size at every size. 0 keeps 512 threads.
+  int ddaRsLL128Threads;
+
   // Ring / Tree crossovers that replace the tuning model's ranges on single-node
   // comms (nNodes == 1). Sizes are per rank as rcclGetSizePerRank() reports them
   // (AllReduce: the whole message, hence nRanks x the entry). 0 = keep the
