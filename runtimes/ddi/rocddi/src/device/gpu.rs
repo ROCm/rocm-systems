@@ -72,11 +72,20 @@ pub struct GpuDevice<'a> {
 /// will access the image; topology names alone do not determine its tiling.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GpuSurfaceConfig {
+    /// Provider-resolved ASIC family for the same activated GPU.
+    pub asic_family_id: u32,
     /// Hardware `GB_ADDR_CONFIG` register value.
     pub gb_addr_config: u32,
 }
 
 impl GpuDevice<'_> {
+    /// Returns the provider-resolved ASIC family captured at activation.
+    /// This performs no native query and leaves discovery metadata unchanged.
+    #[must_use]
+    pub fn asic_family_id(&self) -> u32 {
+        self.driver.asic_family_id()
+    }
+
     /// Queries the active KFD process's recoverable page-fault mode.
     ///
     /// # Errors

@@ -477,6 +477,7 @@ impl Fixture {
                 public_memory_bytes: 1 << 28,
                 ..node()
             },
+            asic_family_id: 0,
             gpu_counter_frequency_hz: 0,
         };
         super::super::LinuxKfdDriver::with_context_lifetime(
@@ -774,6 +775,7 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
             },
             ..node()
         },
+        asic_family_id: 0,
         gpu_counter_frequency_hz: 0,
     };
     let driver = super::super::LinuxKfdDriver::new();

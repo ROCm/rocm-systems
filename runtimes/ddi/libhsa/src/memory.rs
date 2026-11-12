@@ -628,6 +628,10 @@ impl VmemHandle {
 }
 
 /// Native device mapping owner; CPU accesses share the host map on `VmemMapping`.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "device mapping owners stay inline in the preallocated access transaction"
+)]
 pub(crate) enum VmemAccessOwner {
     /// Native mapping in an activated device VM.
     Device(VirtualDeviceMapping),
