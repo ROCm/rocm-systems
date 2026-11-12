@@ -40,7 +40,8 @@ public:
   [[nodiscard]] bool
   attach_engine(amdgpu::MesEngine &engine,
                 std::shared_ptr<amdgpu::SdmaQueueBindingFactory> sdma_queue_binding_factory,
-                amdgpu::InterruptSink interrupt_sink);
+                amdgpu::InterruptSink interrupt_sink,
+                std::function<amdgpu::InterruptSubscription()> make_vm_fault_subscription);
   /// @brief Disconnect the adapter after its queues and retry journals have drained.
   [[nodiscard]] bool detach_engine();
   /// @brief Request destruction of all queues created through this adapter.
