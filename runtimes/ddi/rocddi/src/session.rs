@@ -337,36 +337,39 @@ impl Session {
     /// # Errors
     /// Reports `Busy` while any session or driver owner remains live.
     pub fn preflight_destroy(&mut self) -> Result<(), Error> {
-        self.preflight_destroy_allowing(None)
+        self.preflight_destroy_with_internal_allocations(&[])
     }
 
-    /// Preflights while accounting for the exact allocation retained by a
-    /// frontend's signal-event service. Only that one driver reference is
-    /// exempt; callers must release the page before invoking `destroy`.
-    pub(crate) fn preflight_destroy_allowing(
+    /// Preflights while accounting for exact internal service allocations.
+    /// Only those driver references are exempt; their owners must release them
+    /// before invoking `destroy`. Repeated allocation references are rejected.
+    pub(crate) fn preflight_destroy_with_internal_allocations(
         &mut self,
-        page: Option<&Allocation>,
+        internal: &[&Allocation],
     ) -> Result<(), Error> {
         self.ensure_process()?;
         let registry = Shared::get_mut(&mut self.registry).ok_or(Error::Operation {
             kind: ErrorKind::Busy,
             detail: "another owner still borrows this session",
         })?;
-        if page.is_some_and(|page| {
-            !registry
-                .drivers
+        if internal.iter().enumerate().any(|(index, allocation)| {
+            internal[..index]
                 .iter()
-                .any(|driver| driver.owns_allocation(page))
+                .any(|previous| std::ptr::eq(*previous, *allocation))
+                || !registry
+                    .drivers
+                    .iter()
+                    .any(|driver| driver.owns_allocation(allocation))
         }) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
-                detail: "signal event page belongs to another session driver",
+                detail: "internal allocation is repeated or belongs to another session driver",
             });
         }
         if registry
             .drivers
             .iter()
-            .any(|driver| driver.has_other_owners_except(page))
+            .any(|driver| driver.has_other_owners_except(internal))
         {
             return Err(Error::Operation {
                 kind: ErrorKind::Busy,
@@ -651,7 +654,7 @@ mod tests {
         // the registered allocation is identified as the internal page.
         assert_eq!(
             session
-                .preflight_destroy_allowing(Some(&registration))
+                .preflight_destroy_with_internal_allocations(&[&registration])
                 .unwrap_err()
                 .kind(),
             ErrorKind::Busy
@@ -659,7 +662,7 @@ mod tests {
         let mut foreign = Session::new(DriverContextLifetime::Session).unwrap();
         assert_eq!(
             foreign
-                .preflight_destroy_allowing(Some(&registration))
+                .preflight_destroy_with_internal_allocations(&[&registration])
                 .unwrap_err()
                 .kind(),
             ErrorKind::InvalidArgument
@@ -667,7 +670,7 @@ mod tests {
         foreign.destroy().unwrap();
         drop(driver);
         session
-            .preflight_destroy_allowing(Some(&registration))
+            .preflight_destroy_with_internal_allocations(&[&registration])
             .unwrap();
         assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Busy);
         registration.free().unwrap();
