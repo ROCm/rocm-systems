@@ -4507,41 +4507,73 @@ static bool permuteGpuIds(int* g, int n, int last, struct rcclRomeModel* ref, st
   return false;
 }
 
-static bool permuteNetIds(int* n, int* g, int s, int last, struct rcclRomeModel* ref, struct rcclRomeModel* topo,
-                          int* time, bool ignore_numa) {
-  (*time)++;
-  if (s == last) {
-    int i, j;
-    // match NET numa
-    if (!ignore_numa) {
-      for (i = 0; i < ref->nNics; i++) {
-        if (ref->nicNuma[i] != topo->nicNuma[n[i]]) break;
-      }
-      if (i < ref->nNics) return false;
-    }
-    // match gdr level
-    for (i = 0; i < ref->nNics; i++) {
-      for (j = 0; j < ref->nGpus; j++) {
-        // enabling PXN override paths over PHB and SYS
-        if (topo->gdrLevel[n[i] * ref->nGpus + g[j]] == PATH_PXN) continue;
-        // treat PIX and PXB as same
-        if ((ref->gdrLevel[i * ref->nGpus + j] == PATH_PXB && topo->gdrLevel[n[i] * ref->nGpus + g[j]] == PATH_PIX) ||
-            (ref->gdrLevel[i * ref->nGpus + j] == PATH_PIX && topo->gdrLevel[n[i] * ref->nGpus + g[j]] == PATH_PXB))
-          continue;
-        if (ref->gdrLevel[i * ref->nGpus + j] != topo->gdrLevel[n[i] * ref->nGpus + g[j]]) break;
-      }
-      if (j < ref->nGpus) break;
-    }
-    if (i < ref->nNics) return false;
-    return true;
-  } else {
-    for (int i = s; i <= last; i++) {
-      std::swap(n[s], n[i]);
-      if (permuteNetIds(n, g, s + 1, last, ref, topo, time, ignore_numa)) return true;
-      std::swap(n[s], n[i]);
+// Whether topo NIC k can stand in for model NIC i, given the GPU mapping g.
+static bool netIdFits(int i, int k, const int* g, struct rcclRomeModel* ref, struct rcclRomeModel* topo,
+                      bool ignore_numa) {
+  // match NET numa
+  if (!ignore_numa && ref->nicNuma[i] != topo->nicNuma[k]) return false;
+  // match gdr level
+  for (int j = 0; j < ref->nGpus; j++) {
+    int refLevel = ref->gdrLevel[i * ref->nGpus + j], topoLevel = topo->gdrLevel[k * ref->nGpus + g[j]];
+    // enabling PXN override paths over PHB and SYS
+    if (topoLevel == PATH_PXN) continue;
+    // treat PIX and PXB as same
+    if ((refLevel == PATH_PXB && topoLevel == PATH_PIX) || (refLevel == PATH_PIX && topoLevel == PATH_PXB)) continue;
+    if (refLevel != topoLevel) return false;
+  }
+  return true;
+}
+
+// Kuhn's augmenting path: try to give model NIC i one of the topo NICs n[s..last].
+static bool assignNetId(int i, const int* n, int s, int last, const std::vector<char>& fits, std::vector<char>& seen,
+                        std::vector<int>& owner) {
+  const int nNets = last + 1;
+  for (int q = s; q <= last; q++) {
+    int k = n[q];
+    if (!fits[i * nNets + k] || seen[k]) continue;
+    seen[k] = 1;
+    if (owner[k] < 0 || assignNetId(owner[k], n, s, last, fits, seen, owner)) {
+      owner[k] = i;
+      return true;
     }
   }
   return false;
+}
+
+// Whether model NICs s..last can each be given a distinct topo NIC from n[s..last].
+static bool netIdsAssignable(const int* n, int s, int last, const std::vector<char>& fits) {
+  const int nNets = last + 1;
+  std::vector<int> owner(nNets, -1);
+  std::vector<char> seen(nNets);
+  for (int i = s; i <= last; i++) {
+    std::fill(seen.begin(), seen.end(), 0);
+    if (!assignNetId(i, n, s, last, fits, seen, owner)) return false;
+  }
+  return true;
+}
+
+// Swap-permutation order, descending only into subtrees that still hold a fitting ordering.
+static bool permuteFittingNetIds(int* n, int s, int last, const std::vector<char>& fits, int* time) {
+  (*time)++;
+  if (!netIdsAssignable(n, s, last, fits)) return false;
+  if (s == last) return true;
+  const int nNets = last + 1;
+  for (int i = s; i <= last; i++) {
+    std::swap(n[s], n[i]);
+    if (fits[s * nNets + n[s]] && permuteFittingNetIds(n, s + 1, last, fits, time)) return true;
+    std::swap(n[s], n[i]);
+  }
+  return false;
+}
+
+static bool permuteNetIds(int* n, int* g, int s, int last, struct rcclRomeModel* ref, struct rcclRomeModel* topo,
+                          int* time, bool ignore_numa) {
+  const int nNets = last + 1;
+  std::vector<char> fits(nNets * nNets);
+  for (int i = 0; i < nNets; i++) {
+    for (int k = 0; k < nNets; k++) fits[i * nNets + k] = netIdFits(i, k, g, ref, topo, ignore_numa);
+  }
+  return permuteFittingNetIds(n, s, last, fits, time);
 }
 
 int checkAlltoallWidth(struct rcclRomeModel* romeTopo) {
