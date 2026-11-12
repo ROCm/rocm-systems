@@ -156,7 +156,7 @@ GFX1201_PANEL_ID_TO_SECTION: dict[int, str] = {
     306: "Memory chart - GL1 Cache (L1)",
     307: "Memory chart - GL1-GL2 Interface",
     308: "Memory chart - GL2 Cache (L2)",
-    309: "Memory chart - EA to DRAM",
+    309: "Memory chart - L2 to Memory",
     310: "Memory chart - Workgroup Processors (WGPs)",
     311: "Memory chart - Infinity Cache and VRAM",
     602: "Wave Dispatch Statistics",

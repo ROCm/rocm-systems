@@ -33,12 +33,12 @@ Panel Config:
           min: MIN(GL2C_ATOMIC_sum / $denom)
           max: MAX(GL2C_ATOMIC_sum / $denom)
           unit: (Count + $normUnit)
-        EA Read Requests (DRAM):
+        EA Read Requests (Memory):
           avg: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
           min: MIN(GL2C_EA_RDREQ_DRAM_sum / $denom)
           max: MAX(GL2C_EA_RDREQ_DRAM_sum / $denom)
           unit: (Count + $normUnit)
-        EA Write Requests (DRAM):
+        EA Write Requests (Memory):
           avg: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
           min: MIN(GL2C_EA_WRREQ_DRAM_sum / $denom)
           max: MAX(GL2C_EA_WRREQ_DRAM_sum / $denom)
@@ -77,10 +77,10 @@ Panel Config:
       L2 write requests, normalized by the chosen unit.
     Atomic Requests: >-
       L2 atomic requests, normalized by the chosen unit.
-    EA Read Requests (DRAM): >-
+    EA Read Requests (Memory): >-
       L2 read requests over EA destined for memory. Infinity Cache can serve
       these requests before they reach VRAM.
-    EA Write Requests (DRAM): >-
+    EA Write Requests (Memory): >-
       L2 write requests over EA destined for memory. Infinity Cache can absorb
       these requests before they reach VRAM.
     GL2 Cache Hit Rate: >-
