@@ -81,6 +81,8 @@ pub struct HostReservationInfo {
     pub address: usize,
     /// Reserved bytes.
     pub size: u64,
+    /// Selected replacement unit; the final unit may end at the reservation end.
+    pub mapping_granularity: u64,
 }
 
 /// Owns a host address range whose page tables can be replaced independently
@@ -92,10 +94,12 @@ pub struct HostReservation {
 
 impl HostReservation {
     /// Reserves inaccessible host addresses without allocating backing.
+    /// Zero mapping granularity selects OS policy; nonzero requests select an
+    /// exact replacement unit. The returned information records that choice.
     ///
     /// # Errors
     /// Rejects invalid page geometry or reports native address exhaustion.
-    pub fn reserve(size: u64, alignment: u64) -> Result<Self, Error> {
+    pub fn reserve(size: u64, alignment: u64, mapping_granularity: u64) -> Result<Self, Error> {
         let size = usize::try_from(size).map_err(|_| Error::Operation {
             kind: ErrorKind::InvalidArgument,
             detail: "host reservation length exceeds address width",
@@ -104,14 +108,22 @@ impl HostReservation {
             kind: ErrorKind::InvalidArgument,
             detail: "host reservation alignment exceeds address width",
         })?;
-        let inner = os::HostReservation::create(size, alignment, std::process::id())
-            .map_err(|source| os::native_error("host address reservation", source))?;
+        let mapping_granularity =
+            usize::try_from(mapping_granularity).map_err(|_| Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "mapping granularity exceeds address width",
+            })?;
+        let inner =
+            os::HostReservation::create(size, alignment, mapping_granularity, std::process::id())
+                .map_err(|source| os::native_error("host address reservation", source))?;
         let (address, size) = inner.extent();
+        let mapping_granularity = inner.mapping_granularity() as u64;
         Ok(Self {
             inner,
             info: HostReservationInfo {
                 address,
                 size: size as u64,
+                mapping_granularity,
             },
         })
     }
