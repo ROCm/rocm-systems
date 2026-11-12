@@ -4,6 +4,7 @@
 // Dense and sparse matrix workload registration across CPU and semantics modes.
 
 #include "benchmark/workloads.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 
 namespace rocjitsu::arith::test {
 
