@@ -12,29 +12,22 @@ from unittest.mock import patch
 import pytest
 from common import SUPPORTED_ARCHS
 
-from argparser import omniarg_parser
+from argparser import CliHelpFormatter, build_parser
 
 HOME = Path.cwd()
 VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
 
 
 def build_args(argv, experimental=False):
-    """Construct the argument parser."""
-    parser = argparse.ArgumentParser(
-        prog="tool", usage="rocprof-compute [mode] [options]"
-    )
-    omniarg_parser(parser, HOME, SUPPORTED_ARCHS, VERSION, experimental)
-    return parser.parse_args(argv)
+    """Parse argv with the rocprof-compute parser."""
+    if experimental:
+        argv = ["--experimental", *argv]
+    return build_parser(HOME, SUPPORTED_ARCHS, VERSION, argv).parse_args(argv)
 
 
 def help_text(home, argv, capsys):
     """Return the help output for argv with the given rocprof-compute home."""
-    parser = argparse.ArgumentParser(
-        prog="tool",
-        description="CLI",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    omniarg_parser(parser, home, SUPPORTED_ARCHS, VERSION)
+    parser = build_parser(home, SUPPORTED_ARCHS, VERSION, argv)
     with pytest.raises(SystemExit):
         parser.parse_args([*argv, "--help"])
     return capsys.readouterr().out
@@ -258,6 +251,29 @@ def test_ml_api_options_reject_unknown_values(argv, capsys):
 
 
 # =============================================================================
+# Help notation
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("option_strings", "nargs", "metavar", "expected"),
+    [
+        (["-b", "--block"], "+", "<ids>", "-b, --block <ids>..."),
+        (["--operator"], "*", "patterns", "--operator [patterns]..."),
+        (["-t", "--time-unit"], None, "<unit>", "-t, --time-unit <unit>"),
+        (["--view"], "?", "view", "--view [view]"),
+    ],
+    ids=["one_or_more", "zero_or_more", "one_value", "optional_value"],
+)
+def test_cli_help_formatter_shows_option_names_and_argument_once(
+    option_strings, nargs, metavar, expected
+):
+    parser = argparse.ArgumentParser(formatter_class=CliHelpFormatter)
+    parser.add_argument(*option_strings, nargs=nargs, metavar=metavar)
+    assert expected in parser.format_help()
+
+
+# =============================================================================
 # Experimental Feature Tests
 # =============================================================================
 
@@ -324,77 +340,19 @@ def test_experimental_feature_with_flag_succeeds(monkeypatch, caplog):
 
 
 @pytest.mark.experimental_feature
-def test_experimental_flag_parsing_before_separator(monkeypatch, caplog):
-    """Test that prelim parser correctly detects --experimental
-    before '--' separator."""
-    import argparse
-
-    from argparser import ExperimentalAction
-
-    # Monkeypatch sys.argv with --experimental before separator
-    monkeypatch.setattr(
-        "sys.argv",
-        ["rocprof-compute", "--experimental", "profile", "-n", "test", "--", "./app"],
-    )
-
-    # Create a self-contained prelim parser
-    prelim_parser = argparse.ArgumentParser(add_help=False)
-    prelim_parser.add_argument("--experimental", action="store_true", default=False)
-    prelim_parser.parse_known_args()
-
-    # Create full parser with experimental feature
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--experimental", action="store_true", default=False)
-    parser.add_argument(
-        "--test-exp-feature",
-        action=ExperimentalAction,
-        experimental_enabled=True,
-        feature_label="Test experimental feature",
-        base_action="store_true",
-        help="Custom Help",
-    )
-
-    # Parse with just the experimental feature flag
-    monkeypatch.setattr("sys.argv", ["rocprof-compute", "--test-exp-feature"])
-    parser.parse_args()
-
-    assert "experimental" in caplog.text.lower()
+def test_experimental_option_works_with_experimental_before_workload():
+    argv = ["--experimental", "profile", "--pc-sampling", "-n", "test", "--", "./app"]
+    args = build_parser(HOME, SUPPORTED_ARCHS, VERSION, argv).parse_args(argv)
+    assert args.pc_sampling
 
 
 @pytest.mark.experimental_feature
-def test_experimental_flag_parsing_after_separator(monkeypatch, capsys):
-    """Test that prelim parser ignores --experimental after '--' separator."""
-    import argparse
-
-    from argparser import ExperimentalAction
-
-    # Monkeypatch sys.argv with --experimental after separator
-    monkeypatch.setattr(
-        "sys.argv",
-        ["rocprof-compute", "profile", "-n", "test", "--", "./app", "--experimental"],
-    )
-
-    # Create a self-contained prelim parser
-    prelim_parser = argparse.ArgumentParser(add_help=False)
-    prelim_parser.add_argument("--experimental", action="store_true", default=False)
-    prelim_parser.parse_known_args()
-
-    # Create full parser with experimental feature
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--test-exp-feature",
-        action=ExperimentalAction,
-        experimental_enabled=False,
-        feature_label="Test experimental feature",
-        base_action="store_true",
-        help="Custom Help",
-    )
-
-    with pytest.raises(SystemExit):
-        parser.parse_args()
-
-    captured = capsys.readouterr()
-    assert "use --experimental" not in captured.err.lower()
+def test_experimental_option_fails_with_experimental_in_workload(capsys):
+    argv = ["profile", "--pc-sampling", "-n", "test", "--", "./app", "--experimental"]
+    with pytest.raises(SystemExit) as exc:
+        build_parser(HOME, SUPPORTED_ARCHS, VERSION, argv).parse_args(argv)
+    assert exc.value.code == 2
+    assert "experimental feature" in capsys.readouterr().err.lower()
 
 
 @pytest.mark.experimental_feature
