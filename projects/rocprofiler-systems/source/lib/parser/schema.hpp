@@ -29,7 +29,6 @@ enum class param_level : std::uint8_t
 {
     basic = 0,
     advanced,
-    expert,
 };
 
 using value_map_t = std::map<std::string, std::string, std::less<>>;
