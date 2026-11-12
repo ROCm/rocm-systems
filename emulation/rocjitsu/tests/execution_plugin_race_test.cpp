@@ -22,6 +22,7 @@
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
+#include "util/result.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -3538,7 +3539,7 @@ TEST(RaceDetectorPluginTest, DirectToLdsLoadsDoNotInferTheirSourceMemorySpace) {
                 scratch ? "scratch_load_lds_dword" : "global_load_lds_dword");
       fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *load.value(), *wave);
       ASSERT_TRUE(cu->execute_instruction(load.value().get(), *wave).succeeded());
-      test::ComputeUnitTestAccess::route_memory_inst(*cu, load.value().release(), *wave);
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(load.value()), *wave);
       EXPECT_EQ(cu->lds().read32(wave->lds_base() + 16), input);
       if (wait)
         execute_wait(*fixture.plugin_group_, *wave, legacy_wait_word(cu->arch(), 0, 15));
@@ -3549,7 +3550,7 @@ TEST(RaceDetectorPluginTest, DirectToLdsLoadsDoNotInferTheirSourceMemorySpace) {
       ASSERT_TRUE(read.succeeded());
       fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *read.value(), *wave);
       ASSERT_TRUE(cu->execute_instruction(read.value().get(), *wave).succeeded());
-      test::ComputeUnitTestAccess::route_memory_inst(*cu, read.value().release(), *wave);
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(read.value()), *wave);
       if (wait) {
         EXPECT_EQ(sink.str().find("RACE "), std::string::npos) << sink.str();
       } else {
@@ -5023,11 +5024,11 @@ TEST(FormatTraceTest, WaveLaneAnnotations) {
   EXPECT_NE(result.value().find("; <-- wave 3"), std::string::npos);
   EXPECT_NE(result.value().find("; <-- wave 0 lane 5"), std::string::npos);
   EXPECT_EQ(result.value(), "       PC     Instruction\n"
-                    "  ==>  0x100  ds_write_b32 v9, v12  ; <-- wave 3\n"
-                    "       Execution trace below is for wave 0.\n"
-                    "       0x100  ds_write_b32 v9, v12\n"
-                    "       0x108  s_nop 0\n"
-                    "  ==>  0x10c  ds_read_b32 v8, v9  ; <-- wave 0 lane 5\n");
+                            "  ==>  0x100  ds_write_b32 v9, v12  ; <-- wave 3\n"
+                            "       Execution trace below is for wave 0.\n"
+                            "       0x100  ds_write_b32 v9, v12\n"
+                            "       0x108  s_nop 0\n"
+                            "  ==>  0x10c  ds_read_b32 v8, v9  ; <-- wave 0 lane 5\n");
   EXPECT_NE(result.value().find("0x108  s_nop 0"), std::string::npos);
 }
 
@@ -5098,11 +5099,11 @@ TEST(FormatTraceTest, IdenticalEncodingsKeepTheFirstProducerAndLastAccess) {
       formatTrace(trace, resolve, MarkedInstruction{trace[3], 0, -1}, {trace[4], 0, 0});
   ASSERT_TRUE(report.succeeded());
   EXPECT_EQ(report.value(), "       PC     Instruction\n"
-                    "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
-                    "       0x104  s_nop 0\n"
-                    "       0x108  s_nop 0\n"
-                    "       0x100  s_nop 0\n"
-                    "  ==>  0x104  s_nop 0  ; <-- wave 0 lane 0\n");
+                            "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
+                            "       0x104  s_nop 0\n"
+                            "       0x108  s_nop 0\n"
+                            "       0x100  s_nop 0\n"
+                            "  ==>  0x104  s_nop 0  ; <-- wave 0 lane 0\n");
 }
 
 TEST(FormatTraceTest, RepeatedPcKeepsEachCapturedEncoding) {
@@ -5123,10 +5124,10 @@ TEST(FormatTraceTest, RepeatedPcKeepsEachCapturedEncoding) {
                   MarkedInstruction{load, 0, -1}, {trace[3], 0, 0});
   ASSERT_TRUE(report.succeeded());
   EXPECT_EQ(report.value(), "       PC     Instruction\n"
-                    "  ==>  0x100  ds_read_b32 v8, v0  ; <-- wave 0\n"
-                    "       0x104  s_nop 0\n"
-                    "       0x100  s_nop 0\n"
-                    "  ==>  0x108  s_nop 0  ; <-- wave 0 lane 0\n");
+                            "  ==>  0x100  ds_read_b32 v8, v0  ; <-- wave 0\n"
+                            "       0x104  s_nop 0\n"
+                            "       0x100  s_nop 0\n"
+                            "  ==>  0x108  s_nop 0  ; <-- wave 0 lane 0\n");
 }
 
 TEST(FormatTraceTest, RewrittenReadPcDoesNotTrimAtAnEarlierEncoding) {
@@ -5143,9 +5144,9 @@ TEST(FormatTraceTest, RewrittenReadPcDoesNotTrimAtAnEarlierEncoding) {
                   MarkedInstruction{producer, 0, -1}, {read, 0, 0});
   ASSERT_TRUE(report.succeeded());
   EXPECT_EQ(report.value(), "       PC     Instruction\n"
-                    "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
-                    "       0x104  s_nop 0\n"
-                    "  ==>  0x100  s_nop 7  ; <-- wave 0 lane 0\n");
+                            "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
+                            "       0x104  s_nop 0\n"
+                            "  ==>  0x100  s_nop 7  ; <-- wave 0 lane 0\n");
 }
 
 TEST(FormatTraceTest, DifferentEncodingAtConflictPcIsNotTheProducer) {
@@ -5161,10 +5162,10 @@ TEST(FormatTraceTest, DifferentEncodingAtConflictPcIsNotTheProducer) {
                   MarkedInstruction{producer, 1, -1}, {trace[1], 0, 0});
   ASSERT_TRUE(report.succeeded());
   EXPECT_EQ(report.value(), "       PC     Instruction\n"
-                    "  ==>  0x100  s_nop 7  ; <-- wave 1\n"
-                    "       Execution trace below is for wave 0.\n"
-                    "       0x100  s_nop 0\n"
-                    "  ==>  0x104  s_nop 0  ; <-- wave 0 lane 0\n");
+                            "  ==>  0x100  s_nop 7  ; <-- wave 1\n"
+                            "       Execution trace below is for wave 0.\n"
+                            "       0x100  s_nop 0\n"
+                            "  ==>  0x104  s_nop 0  ; <-- wave 0 lane 0\n");
 }
 
 TEST(FormatTraceTest, PropagatesDisassemblyFailures) {
@@ -5174,6 +5175,9 @@ TEST(FormatTraceTest, PropagatesDisassemblyFailures) {
   };
   EXPECT_TRUE(
       formatTrace(trace, fail, MarkedInstruction{trace[0], 1, -1}, {trace[1], 0, 0}).failed());
+  EXPECT_TRUE(
+      formatTrace(trace, fail, MarkedInstruction{trace[0], 0, -1}, {trace[1], 0, 0}).failed());
+  EXPECT_TRUE(formatTrace({}, fail, std::nullopt, {trace[1], 0, 0}).failed());
 }
 
 TEST(RaceDisassemblyTest, SnapshotsOwnShortLiteralAndMaximumWidthEncodings) {
@@ -5552,7 +5556,10 @@ TEST(RaceDetectorPluginOutputTest, KeepsDecodedBarrierOperationsInsideElidedSpan
     const MarkedInstruction access{state->trace[134], 0, 0};
     for (size_t context : {size_t{2}, kDefaultTraceContext, kTraceHistorySize}) {
       SCOPED_TRACE(context);
-      const std::string report = formatTrace(state->trace, disassemble, producer, access, context);
+      const util::FailureOr<std::string> report_result =
+          formatTrace(state->trace, disassemble, producer, access, context);
+      ASSERT_TRUE(report_result.succeeded());
+      const std::string &report = report_result.value();
       EXPECT_EQ(report.find("instructions elided") != std::string::npos,
                 context < state->trace.size())
           << report;

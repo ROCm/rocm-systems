@@ -180,10 +180,11 @@ util::FailureOr<MarkedInstruction> findConflict(const RaceViolation &v, RaceDete
                            detector.events().waveId(event_id).value, -1};
 }
 
-util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, kTraceHistorySize> &trace,
-                        const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
-                        std::optional<MarkedInstruction> conflict, MarkedInstruction access,
-                        size_t context_instructions) {
+util::FailureOr<std::string> formatTrace(
+    const RingBuffer<InstructionSnapshot, kTraceHistorySize> &trace,
+    const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
+    std::optional<MarkedInstruction> conflict, MarkedInstruction access,
+    size_t context_instructions) {
   assert(context_instructions >= 2 && context_instructions <= kTraceHistorySize);
   const size_t trace_size = trace.size();
   std::optional<size_t> access_index;
@@ -253,7 +254,8 @@ util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, k
     return util::Result::success();
   };
   if (conflict && !conflict_index) {
-    if (external(*conflict, conflict->wave == access.wave ? "  (before trace window)" : "").failed())
+    if (external(*conflict, conflict->wave == access.wave ? "  (before trace window)" : "")
+            .failed())
       return util::Result::failure();
     if (conflict->wave == access.wave) {
       oss << "       ... earlier instructions not recorded ...\n";
@@ -273,8 +275,8 @@ util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, k
     util::FailureOr<std::string> text = disassemble(instruction);
     if (text.failed())
       return util::Result::failure();
-    oss << ((is_conflict || is_access) ? "  ==>  " : "       ") << format_pc(instruction.pc()) << "  "
-        << text.value();
+    oss << ((is_conflict || is_access) ? "  ==>  " : "       ") << format_pc(instruction.pc())
+        << "  " << text.value();
     if (is_conflict)
       annotation(*conflict);
     if (is_access)
