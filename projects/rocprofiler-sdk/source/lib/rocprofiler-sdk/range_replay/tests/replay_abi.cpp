@@ -221,6 +221,17 @@ TEST(range_replay_abi, callback_signatures_are_pinned)
         (std::is_same<decltype(range_data_t{}.replay_local_stop_context_cb), toggle_fn>::value));
 }
 
+// The host_run body is called by the SDK and supplied by applications in any language, so its
+// signature and host_run's own are pinned the same way.
+TEST(range_replay_abi, host_run_signatures_are_pinned)
+{
+    using body_fn     = void (*)(uint64_t, void*);
+    using host_run_fn = rocprofiler_status_t (*)(uint64_t, body_fn, void*);
+
+    EXPECT_TRUE((std::is_same<rocprofiler_range_replay_body_t, body_fn>::value));
+    EXPECT_TRUE((std::is_same<decltype(&rocprofiler_range_replay_host_run), host_run_fn>::value));
+}
+
 // A zeroed record must mean "do not replay this range". The header documents a NULL pass_count_cb
 // as the per-range opt-out, so zero-initialization has to produce it: a tool that ignores the
 // CONFIG callback entirely gets the safe behaviour.
@@ -327,7 +338,8 @@ TEST(range_replay_abi, status_enum_values_are_stable)
     EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_UNSUPPORTED_QUEUE_PATH), 13);
     EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE), 14);
     EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET), 15);
-    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_LAST), 16);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_BODY_EXCEPTION), 16);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_LAST), 17);
 }
 
 // Every decline reason must be distinguishable from REPLAYED, since that is the single comparison

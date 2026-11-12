@@ -37,7 +37,8 @@
 // unmodified in every case; a decline only means the SDK will not re-execute the recording.
 //
 // A host-replay range (host_range_state_t::enabled) records nothing: the extra passes re-run the
-// application's code via siglongjmp, so note_submission only counts its dispatches, and the
+// application's code (via siglongjmp, or by calling the body passed to
+// rocprofiler_range_replay_host_run again), so note_submission only counts its dispatches, and the
 // packet-recording declines (queue/agent binding, graphs, copies from the owner thread, budget,
 // kernarg layout) do not apply. See host_replay.hpp.
 
@@ -231,6 +232,10 @@ struct range_context_t
     uint64_t thread_id        = 0;
     uint64_t internal_corr_id = 0;
     uint64_t ancestor_corr_id = 0;
+
+    // Opened by rocprofiler_range_replay_host_run, which alone closes it: an end() called from the
+    // body would close the range under the running pass, and there is no jump target to return to.
+    bool opened_by_host_run = false;
 
     host_range_state_t host = {};
 };

@@ -85,6 +85,38 @@ memory and registered host memory, then ``siglongjmp``\ s back for each extra pa
 effects stay on pass 0. See :ref:`range-replay-host` for the contract (no C++ objects with
 destructors live across the jump, ``volatile`` for modified locals, balanced allocations).
 
+Run a range body once per pass
+------------------------------
+
+``rocprofiler_range_replay_host_run()`` takes the range body as a function and calls it once per
+pass, with no ``sigsetjmp`` or ``siglongjmp``: the body's C++ objects are destroyed at the end of
+every pass, its locals need no ``volatile``, and any language that can pass a C function pointer can
+call it. It returns after ``CLOSE``.
+
+.. code-block:: cpp
+
+    static void time_steps(uint64_t pass, void* user_data)
+    {
+        // ... kernels, copies, host computation; pass is 0..N-1 ...
+        hipDeviceSynchronize();  // all GPU work complete before returning
+    }
+
+    rocprofiler_range_replay_host_track_memory(&host_state, sizeof(host_state));
+    rocprofiler_range_replay_host_run(iteration_index, time_steps, &solver);  // CONFIG once
+
+    // C++17: any callable, invoked as f(pass) or f(), by reference
+    rocprofiler::range_replay::host_run(iteration_index, [&](uint64_t pass) {
+        // ... the same body, with captures ...
+    });
+
+With ``host_replay`` set during ``CONFIG``, the SDK restores device memory and registered host memory
+before each extra call. Without it the body runs once and its dispatches are packet-replayed, as
+between begin and end. If the range cannot be opened, the body still runs once and the begin error
+is returned. ``begin``, ``end`` and ``host_run`` called from inside the body return
+``ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT``. A body that throws closes the range with
+``ROCPROFILER_RANGE_REPLAY_STATUS_BODY_EXCEPTION`` and the exception propagates. See
+:ref:`range-replay-host`.
+
 Operations and payload
 ----------------------
 
@@ -104,7 +136,8 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_range_replay_data_t*``
    * - ``ROCPROFILER_RANGE_REPLAY_CONFIG``
      - ``PHASE_EXIT``
      - Configuration exchange complete. Both phases run inside
-       ``rocprofiler_range_replay_begin()``; the range has not executed yet.
+       ``rocprofiler_range_replay_begin()`` (or ``rocprofiler_range_replay_host_run()``, before the
+       first call of the body); the range has not executed yet.
    * - ``ROCPROFILER_RANGE_REPLAY_PASS``
      - ``PHASE_ENTER``
      - Read ``current_pass`` / ``total_passes``. Optionally call
@@ -173,5 +206,6 @@ See also
 * :ref:`range-replay-conceptual` — the model and its carve-outs
 * :ref:`range-replay-callback-api` — API contract
 * :ref:`range-replay-soundness` — what makes a range replayable
-* :ref:`range-replay-host` — host replay with ``sigsetjmp`` / ``siglongjmp``
+* :ref:`range-replay-host` — host replay with ``sigsetjmp`` / ``siglongjmp`` or
+  ``rocprofiler_range_replay_host_run``
 * :ref:`kernel-replay-sdk-api` — the single-dispatch counterpart

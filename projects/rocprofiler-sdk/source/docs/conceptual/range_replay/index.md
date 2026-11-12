@@ -69,8 +69,15 @@ restores device memory on every GPU agent plus the host regions registered with
 again for every pass, so copies, memsets, multiple streams, graph launches, balanced allocations and
 host calls are all part of each pass.
 
-See [Host range replay](range_replay_host.md) for the protocol, the application's contract, what is
-restored, and what still declines.
+Alternatively, the application passes the range body as a function to
+`rocprofiler_range_replay_host_run`, which opens the range, calls the body once per pass, and
+restores the same state between calls, with no jump. C++ destructors in the body run on every pass,
+its locals need no `volatile`, and any language that can pass a C function pointer can use it. A C++
+wrapper in the header accepts lambdas. The tool still chooses: without `host_replay` the body runs
+once and is packet-replayed.
+
+See [Host range replay](range_replay_host.md) for both protocols, the application's contract, what
+is restored, and what still declines.
 
 ## Soundness is checked, not enforced
 
@@ -178,9 +185,9 @@ interesting counters are.
 - **[Soundness and declining](range_replay_soundness.md)** — what makes a range replayable, the
   decline decision table and why each condition is checked, the cross-thread decline channel, the
   kernarg-recycling problem, the interceptor passthrough gate, and the optional divergence check.
-- **[Host range replay](range_replay_host.md)** — the `sigsetjmp` / `siglongjmp` path that re-runs
-  the application's own code per pass: the begin macro, registered host memory, the application's
-  contract, and the time-stepping integration test.
+- **[Host range replay](range_replay_host.md)** — the path that re-runs the application's own code
+  per pass, through the `sigsetjmp` / `siglongjmp` begin macro or `rocprofiler_range_replay_host_run`:
+  registered host memory, the application's contract, and the integration tests.
 - **[Performance](range_replay_performance.md)** — the two-term cost model, why the fixed window
   cost is paid once per range rather than once per dispatch, what the two nightly perf tests
   measure, and why a declined range must never be timed.

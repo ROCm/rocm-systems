@@ -549,6 +549,20 @@ finish_pass(range_context_t& ctx)
 
     return step_result_t{next, ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, 0};
 }
+
+void
+abandon_pass(range_context_t& ctx)
+{
+    auto& host = ctx.host;
+    if(host.snapshot_taken) fence_all(host.agents);
+    if(host.pass > 0)
+        execute_pass_phase_exit(ctx.plan,
+                                host.pass,
+                                ctx.agent_id,
+                                static_cast<uint64_t>(ctx.record.observed_dispatch_count()),
+                                host.pass_state);
+    host.local_context.reset();
+}
 }  // namespace host
 }  // namespace range_replay
 }  // namespace rocprofiler
