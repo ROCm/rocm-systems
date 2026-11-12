@@ -37,7 +37,9 @@
 #include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/builders/smem_builders.h"
 #include "rocjitsu/code/builders/vector_builders.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
@@ -51,6 +53,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <string>
@@ -585,6 +588,103 @@ TEST(DbiAfterInstSim, VskipEnableRejectsAfterInstWhileBeforeInstPreservesScalarS
     ASSERT_EQ(values.size(), 64u);
     for (const uint32_t value : values)
       EXPECT_EQ(value, 7u);
+  }
+}
+
+TEST(DbiAfterInstSim, UnknownIncomingVskipRejectsInstructionAndExitObservations) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint64_t kObservationOffset = 36;
+  constexpr uint64_t kExitOffset = 48;
+  constexpr uint32_t kGuestScalar = 7;
+  constexpr uint32_t kProbeMarker = 5;
+  const util::FailureOr<std::array<uint32_t, 2>> load = build_s_load_dwordx2(4, 0, 0, kArch);
+  const util::FailureOr<uint32_t> guest_scalar =
+      build_s_mov_b32(8, scalar_positive_inline_u32(kGuestScalar), kArch);
+  const util::FailureOr<uint32_t> clobber =
+      build_s_mov_b32(8, scalar_positive_inline_u32(11), kArch);
+  const util::FailureOr<uint32_t> jump = build_s_setpc_b64(4, kArch);
+  const util::FailureOr<uint32_t> direct_jump = build_s_branch(0, kArch);
+  const util::FailureOr<uint32_t> readback = build_v_mov_b32_src(2, 8, kArch);
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(load.succeeded() && guest_scalar.succeeded() && clobber.succeeded() &&
+              jump.succeeded() && direct_jump.succeeded() && readback.succeeded() &&
+              ret.succeeded());
+  const uint32_t clear = cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 128, .ssrc1 = 128})[0];
+  const std::vector<uint8_t> body =
+      test::make_gfx950_probe_elf("incoming_vskip", {test::make_mov_vgpr_inline(3, kProbeMarker),
+                                                     clobber.value(), ret.value()});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  // DbiSim places the code immediately after its descriptor at address 0x1000.
+  // Loading the destination from kernargs keeps it unknown to static discovery.
+  const uint64_t target = 0x1000 + sizeof(amdhsa::kernel_descriptor_t) + kObservationOffset;
+  std::vector<uint8_t> kernarg(sizeof(target));
+  std::memcpy(kernarg.data(), &target, sizeof(target));
+  for (const bool enables_vskip : {false, true}) {
+    SCOPED_TRACE(enables_vskip);
+    const std::vector<uint32_t> guest = {
+        guest_scalar.value(), test::make_mov_vgpr_inline(3, 0), load.value()[0], load.value()[1],
+        cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0})[0],
+        cdna4::build_sopc(cdna4::kSCmpEqU32Sopc, {.ssrc0 = 128, .ssrc1 = 129})[0],
+        // The visible safe edge reaches the observation, but SCC=0 takes the
+        // other path at runtime: set VSKIP, then jump through the loaded target.
+        cdna4::build_sopp(cdna4::kSCbranchScc1Sopp, {.simm16 = 2})[0],
+        enables_vskip ? cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 129, .ssrc1 = 128})[0]
+                      : clear,
+        enables_vskip ? jump.value() : direct_jump.value(), cdna4::build_sopp(cdna4::kSNopSopp)[0],
+        clear, readback.value(), cdna4::build_sopp(cdna4::kSEndpgmSopp)[0]};
+    test::DbiSim baseline;
+    ASSERT_NO_FATAL_FAILURE(baseline.initialize("cdna4", 64));
+    baseline.set_kernarg(kernarg);
+    const std::vector<std::vector<uint32_t>> original =
+        baseline.run_and_read_vgprs(guest, 64, {2, 3});
+    ASSERT_EQ(original.size(), 2u);
+    EXPECT_EQ(original[0], std::vector<uint32_t>(64, kGuestScalar));
+    EXPECT_EQ(original[1], std::vector<uint32_t>(64, 0));
+
+    const std::vector<uint8_t> image =
+        test::with_descriptor_metadata(test::make_gfx950_kernel_elf(guest, 64), kArch);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    for (const InstrumentationKind kind :
+         {InstrumentationKind::BeforeInst, InstrumentationKind::AfterInst,
+          InstrumentationKind::KernelExit}) {
+      SCOPED_TRACE(static_cast<int>(kind));
+      // The clear-only execution control uses a resolved direct edge so it
+      // does not require a separate proof for arbitrary indirect destinations.
+      if (!enables_vskip && kind != InstrumentationKind::BeforeInst)
+        continue;
+      Instrumentor instrumentor(object, kArch);
+      instrumentor.add_point({.anchor_offset = kind == InstrumentationKind::KernelExit
+                                                   ? kExitOffset
+                                                   : kObservationOffset,
+                              .kind = kind,
+                              .probe_obj = &probe,
+                              .probe_symbol = "incoming_vskip",
+                              .probe_args = {}});
+      const InstrumentedCodeObject result = instrumentor.patch();
+      if (enables_vskip) {
+        EXPECT_EQ(result.errors.size(), 1u);
+        if (!result.errors.empty()) {
+          EXPECT_NE(result.errors.front().find("may inherit enabled"), std::string::npos)
+              << result.errors.front();
+        }
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+        continue;
+      }
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      EXPECT_GT(test::patched_private_segment_size(patched), 64u)
+          << "the live probe-clobbered s8 must exercise the scalar spill restore";
+      test::DbiSim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna4", 64));
+      sim.set_kernarg(kernarg);
+      const std::vector<std::vector<uint32_t>> values =
+          sim.run_and_read_vgprs(test::section_words(patched, ".text"),
+                                 test::patched_private_segment_size(patched), {2, 3});
+      ASSERT_EQ(values.size(), 2u);
+      EXPECT_EQ(values[0], std::vector<uint32_t>(64, kGuestScalar));
+      EXPECT_EQ(values[1], std::vector<uint32_t>(64, kProbeMarker));
+    }
   }
 }
 
