@@ -12,6 +12,21 @@ import pytest
 from rocprof_compute_base import RocProfCompute
 
 MODULE = "rocprof_compute_base"
+# Profile selection fields that _validate_profile_mode_arguments reads
+PROFILE_SELECTION = {
+    "filter_blocks": [],
+    "set_selected": None,
+    "bench_only": False,
+    "no_roof": False,
+}
+# List option fields that _validate_list_option_exclusions reads
+LIST_OPTIONS = {
+    "debug_list_metrics_gfx_id": None,
+    "list_metrics": None,
+    "list_blocks": None,
+    "list_available_metrics": False,
+    "filter_blocks": [],
+}
 
 
 def build_args(
@@ -88,14 +103,62 @@ def test_handle_analyze_args_operator_flags_require_stdout(
         instance.handle_analyze_args()
 
 
-def test_validate_list_option_exclusions_gfx_id_requires_list_metrics(monkeypatch):
-    """--debug-list-metrics-gfx-id is rejected without --list-metrics."""
+@pytest.mark.parametrize(
+    "selection, expect_error",
+    [
+        ({"filter_blocks": ["2", "4"]}, False),
+        ({"set_selected": "launch_stats"}, False),
+        ({"bench_only": True}, False),
+        ({"filter_blocks": ["2"], "set_selected": "launch_stats"}, True),
+        ({"filter_blocks": ["4"], "bench_only": True}, True),
+        ({"set_selected": "launch_stats", "bench_only": True}, True),
+        ({"bench_only": True, "no_roof": True}, True),
+    ],
+    ids=[
+        "blocks",
+        "set",
+        "bench_only",
+        "blocks_with_set",
+        "blocks_with_bench_only",
+        "set_with_bench_only",
+        "bench_only_with_no_roof",
+    ],
+)
+def test_validate_profile_mode_arguments(selection, expect_error):
+    """Blocks, --set and --roofline-bench-only exclude each other."""
+    args = argparse.Namespace(mode="profile", **{**PROFILE_SELECTION, **selection})
+    instance = rocprof_compute_with_args(args)
+    if expect_error:
+        with pytest.raises(SystemExit):
+            instance._validate_profile_mode_arguments()
+    else:
+        instance._validate_profile_mode_arguments()
+
+
+@pytest.mark.parametrize(
+    "options, named_option",
+    [
+        ({"debug_list_metrics_gfx_id": "gfx90a"}, "with --list-metrics"),
+        ({"list_metrics": ["sol"], "filter_blocks": ["2"]}, "--list-metrics"),
+        ({"list_blocks": "gfx950", "filter_blocks": ["2"]}, "--list-blocks"),
+        (
+            {"list_available_metrics": True, "filter_blocks": ["2"]},
+            "--list-available-metrics",
+        ),
+    ],
+    ids=[
+        "gfx_id_requires_list_metrics",
+        "list_metrics_with_blocks",
+        "list_blocks_with_blocks",
+        "list_available_metrics_with_blocks",
+    ],
+)
+def test_validate_list_option_exclusions(monkeypatch, options, named_option):
+    """Each rejected combination names the list option in the error."""
     error = common.patch_console(
         monkeypatch, MODULE, "error", error=Mock(side_effect=SystemExit(1))
     )["error"]
-    args = argparse.Namespace(
-        mode=None, debug_list_metrics_gfx_id="gfx90a", list_metrics=None
-    )
+    args = argparse.Namespace(mode=None, **{**LIST_OPTIONS, **options})
     with pytest.raises(SystemExit):
         rocprof_compute_with_args(args)._validate_list_option_exclusions()
-    assert "with --list-metrics" in error.call_args.args[0]
+    assert named_option in error.call_args.args[0]

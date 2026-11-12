@@ -15,8 +15,10 @@ Run `rocprof-compute analyze --help` before choosing flags.
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b sol
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> --speed-of-light
 ```
+
+On ROCm 10.2 and earlier, use `-b sol` instead of `--speed-of-light`.
 
 `--path` points at the directory containing `profiling_config.yaml`. Always
 pass `-k` with one kernel id from `--list-stats`; a Speed-of-Light table
@@ -26,7 +28,7 @@ If there is no workload yet, or the panel is missing or empty, collect
 Speed-of-Light alone:
 
 ```bash
-rocprof-compute profile --name <workload_name> -b sol -- <application> <args>
+rocprof-compute profile --name <workload_name> --speed-of-light -- <application> <args>
 ```
 
 ### Collect only what the question needs
