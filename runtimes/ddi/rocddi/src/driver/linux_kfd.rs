@@ -680,13 +680,24 @@ impl Driver for LinuxKfdDriver {
         snapshot: &mut crate::topology::TopologyGraphSnapshot,
     ) -> Result<(), Error> {
         self.ensure_open()?;
+        let start = snapshot.endpoints.len();
         sysfs::contribute_topology_graph(
             Self::TOPOLOGY_ROOT,
             Self::DRM_ROOT,
             self.driver_instance,
             snapshot,
-        )
+        )?;
+        // DRM NUMA attachment is an independent OS locality observation. It
+        // does not identify a KFD node or qualify peer memory access.
+        for index in start..snapshot.endpoints.len() {
+            let endpoint = &snapshot.endpoints[index];
+            if let Some(numa) = crate::topology::platform::linux::host_numa_node(endpoint) {
+                snapshot.attach_host_locality(endpoint.id, self.driver_instance, numa)?;
+            }
+        }
+        Ok(())
     }
+
     fn can_access_local_memory(&self, consumer: &Endpoint, owner: &Endpoint) -> bool {
         sysfs::can_access_local_memory(consumer, owner)
     }
