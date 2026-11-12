@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "rocjitsu/vm/amdgpu/lds_allocation.h"
 #include "rocjitsu/vm/plugins/race_detector/core/event_registry.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -93,9 +93,7 @@ public:
   /// Bytes in complete elements that fit the LDS backing. Vector transfers
   /// can retain a valid prefix when later elements are dropped as out of bounds.
   uint64_t ldsBytesInRange(uint64_t address, uint64_t bytes, uint64_t elementBytes) const {
-    if (elementBytes == 0 || !validLdsRange(address, elementBytes))
-      return 0;
-    return std::min(bytes, ldsSizeBytes_ - address) / elementBytes * elementBytes;
+    return amdgpu::whole_element_bytes_in_range(address, bytes, elementBytes, ldsSizeBytes_);
   }
 
   const EventRegistry &events() const { return events_; }
