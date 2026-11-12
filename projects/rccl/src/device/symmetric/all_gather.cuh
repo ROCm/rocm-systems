@@ -317,10 +317,31 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_TmaST(ncclSymkDevWorkArgs 
   ncclSymkRun_AllGather_ST_impl<EnableProfiler, /*EnableTma=*/true>(args);
 }
 
+// Spins until `word` reaches `value`. One thread calls it.
+__device__ __forceinline__ void agHierWait(ncclSymkArgsHandler const& handler, uint64_t* word, uint64_t value) {
+  cuda::atomic_ref<uint64_t> ref(*word);
+  uint32_t steps = 0;
+  while (ref.load(cuda::memory_order_relaxed) < value) {
+    if (nccl::utility::testAbort(handler.comm.abortFlag, steps)) break;
+  }
+  cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
+}
+
+// Spins until word `index` of hierPushFlags reaches `value` on every other rank of the package.
+__device__ __forceinline__ void agHierWaitPackage(ncclSymkArgsHandler const& handler, ncclDevResourceHandle flagsBuf,
+                                                  ncclTeam scaleIn, size_t index, uint64_t value) {
+  for (int r = 0; r < scaleIn.nRanks; r++) {
+    if (r == scaleIn.rank) continue;
+    int peer = ncclTeamRankToLsa(handler.comm, scaleIn, r);
+    agHierWait(handler, (uint64_t*)ncclGetResourceBufferLsaPointer(handler.comm, flagsBuf, peer) + index, value);
+  }
+}
+
 static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBarrierSession<ncclCoopCta>& bar,
                                   int block, int nBlocks, ncclTeam scaleIn, ncclTeam scaleUp,
-                                  ncclDevResourceHandle flagsBuf, uint64_t& seq, size_t nElts, size_t nAllElts,
-                                  ncclSymPtr<char> input, ncclSymPtr<char> output, size_t maxChunkBytes) {
+                                  ncclDevResourceHandle flagsBuf, uint64_t& seq, uint64_t launch, size_t nElts,
+                                  size_t nAllElts, ncclSymPtr<char> input, ncclSymPtr<char> output,
+                                  size_t maxChunkBytes) {
   int const& rank = handler.comm.rank;
   int lane = threadIdx.x % WARP_SIZE;
   int warp = threadIdx.x / WARP_SIZE;
@@ -347,12 +368,20 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
   size_t nBlockChunksMax = max(size_t(1), divUp(divUp(nElts, size_t(nGroupBlocks)), maxChunkBytes));
   size_t chunkBytes = roundUp(divUp(nElts, nBlockChunksMax * nGroupBlocks), chunkAlign);
   size_t nChunks = chunkBytes == 0 ? 0 : divUp(nElts, chunkBytes);
-  size_t flagRow = size_t(blockIdx.x) * nGroups;
+  size_t flagRow = size_t(blockIdx.x) * ncclSymkAgHierFlagStride(nGroups);
+  size_t arriveWord = flagRow + ncclSymkAgHierArriveWord(nGroups);
+  uint64_t* localFlags = (uint64_t*)ncclGetResourceBufferLocalPointer(handler.comm, flagsBuf);
+
+  // A unit writes only into the other ranks of the package and into the rank it pushes to, so it
+  // waits for those to enter the launch instead of for the whole team.
+  if (threadIdx.x == 0) cuda::atomic_ref<uint64_t>(localFlags[arriveWord]).store(launch, cuda::memory_order_relaxed);
 
   for (int unit = block; unit < nUnits; unit += nBlocks) {
     int group = unit < nRows ? unit % nGroups : 1 + (unit - nRows) % (nGroups - 1);
     int groupBlock = unit < nRows ? unit / nGroups : nG0Blocks + (unit - nRows) / (nGroups - 1);
     if (group == 0) {
+      if (threadIdx.x == 0) agHierWaitPackage(handler, flagsBuf, scaleIn, arriveWord, launch);
+      ncclCoopCta().sync();
       int bt = flattenIx(lane, WARP_SIZE, groupBlock, nG0Blocks, warp, nBlockWarps);
       bcast<char, /*EnableTma=*/false, /*Deep=*/true>(handler, nG0Blocks * blockDim.x, bt, /*nBlocks=*/1,
                                                       /*waitNeeded=*/false, bar, input, mySlot, nElts, scaleIn);
@@ -365,12 +394,21 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
     if (from < 0) from += nGroups;
     int toSlot = ncclTeamRankToLsa(handler.comm, scaleUp, to);
     ncclSymPtr<char> fromSlot = output + ncclTeamRankToWorld(handler.comm, scaleUp, from) * nAllElts;
+    if (threadIdx.x == 0) {
+      int fromLsa = ncclTeamRankToLsa(handler.comm, scaleUp, from);
+      uint64_t* fromFlags = (uint64_t*)ncclGetResourceBufferLsaPointer(handler.comm, flagsBuf, fromLsa);
+      cuda::atomic_ref<uint64_t>(fromFlags[flagRow + ncclSymkAgHierTargetWord(nGroups, group)])
+          .store(launch, cuda::memory_order_relaxed);
+    }
 
     // The block's chunk i is chunk i * nGroupBlocks + groupBlock of the slot.
     int nBlockChunks = groupBlock < nChunks ? int(divUp(nChunks - groupBlock, size_t(nGroupBlocks))) : 0;
     if (pusher) {
       uint64_t* flags = (uint64_t*)ncclGetResourceBufferLsaPointer(handler.comm, flagsBuf, toSlot);
       cuda::atomic_ref<uint64_t> flag(flags[flagRow + group]);
+      if (t == 0 && nBlockChunks > 0)
+        agHierWait(handler, localFlags + flagRow + ncclSymkAgHierTargetWord(nGroups, group), launch);
+      half.sync();
       for (int i = 0; i < nBlockChunks; i++) {
         size_t lo = (size_t(i) * nGroupBlocks + groupBlock) * chunkBytes;
         bcast<char, false, /*Deep=*/true>(handler, tn, t, 1, false, bar, input + lo, mySlot + lo,
@@ -383,10 +421,10 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
         }
       }
     } else if (forwarder) {
-      uint64_t* flags = (uint64_t*)ncclGetResourceBufferLocalPointer(handler.comm, flagsBuf);
-      cuda::atomic_ref<uint64_t> flag(flags[flagRow + group]);
+      cuda::atomic_ref<uint64_t> flag(localFlags[flagRow + group]);
       for (int i = 0; i < nBlockChunks; i++) {
         if (t == 0) {
+          if (i == 0) agHierWaitPackage(handler, flagsBuf, scaleIn, arriveWord, launch);
           uint32_t steps = 0;
           while (flag.load(cuda::memory_order_relaxed) < seq + i + 1) {
             if (nccl::utility::testAbort(handler.comm.abortFlag, steps)) break;
@@ -414,26 +452,35 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_HierLsaST(ncclSymkDevWorkA
   ncclTeam lsa = ncclTeamLsa(handler.comm);
   ncclTeam scaleIn = ncclTeamInnerFactor(lsa, args->kcomm.hierScaleInSize);
   ncclTeam scaleUp = ncclTeamOuterFactor(lsa, args->kcomm.hierScaleInSize);
-  // Group 0 raises no flag, so its slot in our row keeps the block's chunk count across launches.
-  uint64_t* seqSlot = (uint64_t*)ncclGetResourceBufferLocalPointer(handler.comm, args->kcomm.hierPushFlags) +
-                      size_t(blockIdx.x) * scaleUp.nRanks;
+  size_t flagRow = size_t(blockIdx.x) * ncclSymkAgHierFlagStride(scaleUp.nRanks);
+  size_t closeWord = flagRow + ncclSymkAgHierCloseWord(scaleUp.nRanks);
+  uint64_t* localFlags = (uint64_t*)ncclGetResourceBufferLocalPointer(handler.comm, args->kcomm.hierPushFlags);
+  uint64_t* seqSlot = localFlags + flagRow;
   uint64_t seq = *seqSlot;
+  uint64_t launch = localFlags[closeWord] + 1;
 
   ncclCoopNamedBarrierInit();
-  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
   if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
 
   size_t maxChunkBytes =
       args->kcomm.hierMaxChunkBytes != 0 ? args->kcomm.hierMaxChunkBytes : ncclSymkAgHierMaxChunkBytes;
   handler.forEachWork<char>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
                                            ncclSymPtr<char> input, ncclSymPtr<char> output) {
-    agHierPush(handler, bar, block, nBlocks, scaleIn, scaleUp, args->kcomm.hierPushFlags, seq, nElts, nAllElts, input,
-               output, maxChunkBytes);
+    agHierPush(handler, bar, block, nBlocks, scaleIn, scaleUp, args->kcomm.hierPushFlags, seq, launch, nElts,
+               nAllElts, input, output, maxChunkBytes);
   });
   if (threadIdx.x == 0) *seqSlot = seq;
 
   if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
-  bar.sync(ncclCoopCta(), cuda::memory_order_release);
+  // Remote slots are already published by their push flags. This block still has to publish its
+  // local copy and its forwards, and those land only in the other ranks of this package.
+  ncclCoopCta().sync();
+  if (threadIdx.x == 0) {
+    cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+    cuda::atomic_ref<uint64_t>(localFlags[closeWord]).store(launch, cuda::memory_order_relaxed);
+    agHierWaitPackage(handler, args->kcomm.hierPushFlags, scaleIn, closeWord, launch);
+  }
+  ncclCoopCta().sync();
 }
 
 template <bool EnableProfiler, bool EnableTma>

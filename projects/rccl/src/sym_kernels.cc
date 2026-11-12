@@ -355,7 +355,8 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
 
     struct ncclDevResourceRequirements hierPushFlagsReq = {};
     if (agHierGroups > 0) {
-      hierPushFlagsReq.bufferSize = size_t(agHierBlocks) * agHierGroups * sizeof(uint64_t);
+      hierPushFlagsReq.bufferSize =
+          size_t(agHierBlocks) * ncclSymkAgHierFlagStride(agHierGroups) * sizeof(uint64_t);
       hierPushFlagsReq.bufferAlign = 128;
       hierPushFlagsReq.outBufferHandle = &symk->kcomm.hierPushFlags;
       hierPushFlagsReq.next = reqs.resourceRequirementsList;

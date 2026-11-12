@@ -383,7 +383,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .symMaxR2 = {
     0,                    // [0] Broadcast      -- not used on gfx1250
     0,                    // [1] Reduce          -- not used on gfx1250
-    2ULL*1024*1024,       // [2] AllGather
+    kThreshUnlimited,     // [2] AllGather       -- the hierarchical kernel beats DDA LL128 and CE
+                          //                        1.2-2.2x from 16M to 1G at 16 ranks (DPX)
     kThreshUnlimited,     // [3] ReduceScatter
     0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
@@ -410,7 +411,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .symMinR2 = {
     kThreshUnlimited,     // [0] Broadcast      -- not used on gfx1250
     kThreshUnlimited,     // [1] Reduce          -- not used on gfx1250
-    128ULL*1024,          // [2] AllGather
+    16ULL*1024*1024,      // [2] AllGather       -- DDA LL/LL128 beats symk 1.7-3.3x from 128K to 2M and
+                          //                        ties it at 4M-8M at 16 ranks (DPX)
     2ULL*1024*1024,       // [3] ReduceScatter
     8ULL*1024*1024,       // [4] AllReduce
     kThreshUnlimited,     // [5] SendRecv        -- not used on gfx1250

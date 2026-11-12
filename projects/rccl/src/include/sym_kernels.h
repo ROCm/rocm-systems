@@ -52,6 +52,23 @@ constexpr __host__ __device__ int ncclSymkAgHierGroupBlocks(int nBlocks, int nGr
   return n > 1 ? n : 1;
 }
 
+// One block's row of hierPushFlags. Words [0, nGroups) are the push flags; group 0 raises none, so its
+// word keeps the block's chunk count across launches. The rest count launches: the close word those
+// whose local copy and forwards this block has finished, the arrive word those this rank has entered,
+// and target word g those entered by the rank this block pushes to for group g.
+constexpr __host__ __device__ int ncclSymkAgHierCloseWord(int nGroups) {
+  return nGroups;
+}
+constexpr __host__ __device__ int ncclSymkAgHierArriveWord(int nGroups) {
+  return nGroups + 1;
+}
+constexpr __host__ __device__ int ncclSymkAgHierTargetWord(int nGroups, int group) {
+  return nGroups + 2 + group;
+}
+constexpr __host__ __device__ int ncclSymkAgHierFlagStride(int nGroups) {
+  return 2 * nGroups + 2;
+}
+
 // [RCCL] Launch width for the GIN and Tma symmetric kernels. The rest default to ncclSymkMaxThreads.
 // This was tuned for TDM, so if you need to change it, please add a constexpr function that 
 // selects an appropriate value for the architecture and method of transfer (TDM or non-TDM).
