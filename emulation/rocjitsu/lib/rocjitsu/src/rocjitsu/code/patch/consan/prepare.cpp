@@ -187,9 +187,11 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
     if (mapping == output.sites.end() || mapping->guest_size != 4)
       return reject(error, "callable DBI lowering omitted a barrier completion mapping");
     BarrierFacts facts = barrier;
-    // The signal stays in original text; the wait moves into its AfterInst
-    // trampoline. Keep both mappings instead of assuming adjacency survives.
-    facts.prepared_signal = barrier.original_signal;
+    // Split signals stay in original text. A legacy barrier both signals and
+    // waits, so its two facts refer to the same relocated guest instruction.
+    facts.prepared_signal = barrier.original_signal == barrier.original_wait
+                                ? mapping->guest_offset
+                                : barrier.original_signal;
     facts.prepared_wait = mapping->guest_offset;
     facts.completion_probe = mapping->instrumentation_offset;
     facts.probe_size = mapping->instrumentation_size;

@@ -121,15 +121,19 @@ TEST_P(ConSanTargetStatic, QualifyOnlyWholeRegisterSingleRangeForms) {
   }
 }
 
-TEST(ConSanBarrierStatic, QualifiedGfx1250PairPreservesOriginalOperations) {
+TEST_P(ConSanTargetStatic, QualifiedBarriersPreserveOriginalOperations) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  const bool split =
+      target.arch == ROCJITSU_CODE_ARCH_RDNA4 || target.arch == ROCJITSU_CODE_ARCH_CDNA5;
   for (const char *fixture : {"native-15", "native-16", "native-20", "native-21", "native-24"}) {
     SCOPED_TRACE(fixture);
     const std::vector<uint8_t> original =
-        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, fixture));
+        test::read_fixture(test::target_fixture_path(mode, fixture));
     ASSERT_FALSE(original.empty());
     InputError error;
     const FailureOr<PreparedArtifact> artifact =
-        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+        prepare(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(artifact.succeeded()) << error.message;
     EXPECT_EQ(artifact.value().manifest.scope, ScopeKind::NativeLdsWorkgroupBarrier);
     EXPECT_EQ(artifact.value().manifest.sites.size(),
@@ -144,28 +148,38 @@ TEST(ConSanBarrierStatic, QualifiedGfx1250PairPreservesOriginalOperations) {
     ASSERT_TRUE(decoded.succeeded()) << contract_error.message;
     EXPECT_EQ(decoded.value(), artifact.value().manifest);
     for (const BarrierFacts &barrier : artifact.value().manifest.barriers) {
-      // The shared instrumentor leaves the signal at its original PC and moves
-      // the completing wait to the start of an AfterInst trampoline.
-      EXPECT_EQ(barrier.prepared_signal, barrier.original_signal);
       EXPECT_EQ(barrier.completion_probe, barrier.prepared_wait + 4);
-      EXPECT_NE(barrier.prepared_wait - barrier.prepared_signal,
-                barrier.original_wait - barrier.original_signal);
+      if (split) {
+        // Only the completing wait moves to the AfterInst trampoline.
+        EXPECT_EQ(barrier.prepared_signal, barrier.original_signal);
+        EXPECT_NE(barrier.prepared_wait - barrier.prepared_signal,
+                  barrier.original_wait - barrier.original_signal);
+      } else {
+        // The single legacy barrier both signals and completes the group.
+        EXPECT_EQ(barrier.original_signal, barrier.original_wait);
+        EXPECT_EQ(barrier.prepared_signal, barrier.prepared_wait);
+        EXPECT_NE(barrier.prepared_wait, barrier.original_wait);
+      }
     }
     EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
   }
 }
 
-TEST(ConSanBarrierStatic, BarrierFactsRequireQualifiedMappingsScopeAndLaunch) {
+TEST_P(ConSanTargetStatic, BarrierFactsRequireQualifiedMappingsScopeAndLaunch) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
   const std::vector<uint8_t> original =
-      test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "native-15"));
+      test::read_fixture(test::target_fixture_path(mode, "native-15"));
   ASSERT_FALSE(original.empty());
   InputError error;
   const FailureOr<PreparedArtifact> artifact =
-      prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+      prepare(original, target, "lds_producer_consumer", error);
   ASSERT_TRUE(artifact.succeeded()) << error.message;
   const Manifest &manifest = artifact.value().manifest;
   ContractError contract_error;
-  EXPECT_TRUE(plan_launch(manifest, {{32, 1, 1}, {32, 1, 1}}, 128, 0, &contract_error).failed());
+  EXPECT_TRUE(plan_launch(manifest, {{mode.wave_size, 1, 1}, {mode.wave_size, 1, 1}}, 128, 0,
+                          &contract_error)
+                  .failed());
   EXPECT_EQ(contract_error.code, ContractErrorCode::UnsupportedLaunch);
   Manifest invalid = manifest;
   invalid.barriers.front().original_signal += 4;
@@ -174,35 +188,73 @@ TEST(ConSanBarrierStatic, BarrierFactsRequireQualifiedMappingsScopeAndLaunch) {
   invalid.scope = ScopeKind::NativeLdsNoSynchronization;
   EXPECT_TRUE(validate_manifest(invalid).failed());
   invalid = manifest;
-  invalid.target = 1201;
+  const bool split =
+      target.arch == ROCJITSU_CODE_ARCH_RDNA4 || target.arch == ROCJITSU_CODE_ARCH_CDNA5;
+  invalid.target = split ? 1100 : 1201;
   EXPECT_TRUE(validate_manifest(invalid).failed());
 }
 
-TEST(ConSanBarrierStatic, RejectMismatchedMissingDrainAndNonconvergentGroups) {
+TEST_P(ConSanTargetStatic, RejectMismatchedMissingDrainAndNonconvergentGroups) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
   for (const char *fixture : {"native-17", "native-18", "native-19", "native-22", "native-23"}) {
     SCOPED_TRACE(fixture);
     const std::vector<uint8_t> original =
-        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, fixture));
+        test::read_fixture(test::target_fixture_path(mode, fixture));
     ASSERT_FALSE(original.empty());
     InputError error;
-    EXPECT_TRUE(
-        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error).failed());
+    EXPECT_TRUE(prepare(original, target, "lds_producer_consumer", error).failed());
     EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization) << error.message;
   }
 }
 
-TEST(ConSanBarrierStatic, MaximumWorkgroupMustPermitTwoWavesBeforePreparation) {
-  const TargetProfile &target = *target_profile("gfx1250");
-  for (const uint32_t maximum : {31u, 32u, 33u}) {
+TEST_P(ConSanTargetStatic, OriginalDrainMustWaitForAllPriorLds) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  const bool split =
+      target.arch == ROCJITSU_CODE_ARCH_RDNA4 || target.arch == ROCJITSU_CODE_ARCH_CDNA5;
+  const std::vector<uint8_t> original =
+      test::read_fixture(test::target_fixture_path(mode, "native-15"));
+  ASSERT_FALSE(original.empty());
+  InputError error;
+  const FailureOr<InputProgram> input =
+      build_input_program(original, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(input.succeeded()) << error.message;
+  ASSERT_EQ(input.value().barriers.size(), 1u);
+  const BarrierFacts &barrier = input.value().barriers.front();
+  const uint64_t drain_offset = input.value().text_file_offset + barrier.original_drain;
+  const uint32_t drain = *wire::read_u32(original, drain_offset);
+  // The split DS counter is the immediate. Legacy LGKM starts at bit four on
+  // RDNA3 and bit eight on CDNA3/4; increasing that threshold leaves LDS pending.
+  const uint32_t pending =
+      split ? 1u : (target.arch == ROCJITSU_CODE_ARCH_RDNA3 ? 1u << 4 : 1u << 8);
+  std::vector<uint8_t> changed = original;
+  ASSERT_TRUE(wire::write_u32(changed, drain_offset, drain | pending));
+  EXPECT_TRUE(build_input_program(changed, target, "lds_producer_consumer", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization) << error.message;
+  EXPECT_EQ(error.text_offset, barrier.original_signal);
+  if (!split) {
+    // Waiting for every counter is stronger than waiting only for LGKM.
+    changed = original;
+    ASSERT_TRUE(wire::write_u32(changed, drain_offset, drain & 0xffff0000u));
+    EXPECT_TRUE(prepare(changed, target, "lds_producer_consumer", error).succeeded())
+        << error.message;
+  }
+}
+
+TEST_P(ConSanTargetStatic, MaximumWorkgroupMustPermitTwoWavesBeforePreparation) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  for (const uint32_t maximum : {mode.wave_size - 1, mode.wave_size, mode.wave_size + 1}) {
     SCOPED_TRACE(maximum);
     const std::string fixture = "native-barrier-max" + std::to_string(maximum);
     const std::vector<uint8_t> original =
-        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, fixture));
+        test::read_fixture(test::target_fixture_path(mode, fixture));
     ASSERT_FALSE(original.empty());
     InputError error;
     const FailureOr<InputProgram> input =
         build_input_program(original, target, "lds_producer_consumer", error);
-    if (maximum <= 32) {
+    if (maximum <= mode.wave_size) {
       EXPECT_TRUE(input.failed());
       EXPECT_EQ(error.code, InputErrorCode::UnsupportedEntry) << error.message;
       EXPECT_TRUE(prepare(original, target, "lds_producer_consumer", error).failed());
@@ -214,13 +266,13 @@ TEST(ConSanBarrierStatic, MaximumWorkgroupMustPermitTwoWavesBeforePreparation) {
           prepare(original, target, "lds_producer_consumer", error);
       ASSERT_TRUE(artifact.succeeded()) << error.message;
       EXPECT_EQ(artifact.value().manifest.entry.maximum_workgroup_size, maximum);
-      EXPECT_TRUE(
-          plan_launch(artifact.value().manifest, {{33, 1, 1}, {33, 1, 1}}, 128, 0).succeeded());
+      EXPECT_TRUE(plan_launch(artifact.value().manifest, {{maximum, 1, 1}, {maximum, 1, 1}}, 128, 0)
+                      .succeeded());
     }
   }
   // The minimum only belongs to barrier scope: one-wave no-sync kernels remain valid.
-  const std::vector<uint8_t> no_barrier =
-      test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "native-no-barrier-max32"));
+  const std::vector<uint8_t> no_barrier = test::read_fixture(
+      test::target_fixture_path(mode, "native-no-barrier-max" + std::to_string(mode.wave_size)));
   ASSERT_FALSE(no_barrier.empty());
   InputError error;
   EXPECT_TRUE(prepare(no_barrier, target, "lds_producer_consumer", error).succeeded())
@@ -290,22 +342,25 @@ TEST(ConSanBarrierStatic, DiagnoseInterveningBarrierWithoutMemoryOperations) {
       << error.message;
 }
 
-TEST(ConSanBarrierStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles) {
-  for (const char *name : {"native-25", "native-26", "native-27", "native-30", "native-31"}) {
+TEST_P(ConSanTargetStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  for (const char *name :
+       {"native-25", "native-26", "native-27", "native-30", "native-31", "native-40"}) {
     SCOPED_TRACE(name);
-    std::vector<uint8_t> original =
-        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, name));
+    std::vector<uint8_t> original = test::read_fixture(test::target_fixture_path(mode, name));
     InputError error;
     const FailureOr<InputProgram> input =
-        build_input_program(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+        build_input_program(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(input.succeeded()) << error.message;
     ASSERT_TRUE(input.value().repeated);
     const AmdGpuCodeObject object(original.data(), original.size());
-    const std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    const std::unique_ptr<Decoder> decoder =
+        Decoder::create(default_isa_target_registry(), target.public_id);
     ASSERT_TRUE(decoder);
     const std::array entries{input.value().kernel.entry_text_offset};
     const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
-        BasicBlock::build_reachable(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, entries);
+        BasicBlock::build_reachable(object, *decoder, target.arch, entries);
     ASSERT_TRUE(blocks.succeeded());
     const Instruction *backedge = nullptr;
     for (const std::unique_ptr<BasicBlock> &block : blocks.value())
@@ -318,7 +373,7 @@ TEST(ConSanBarrierStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles)
       }
     ASSERT_NE(backedge, nullptr);
     const FailureOr<PreparedArtifact> artifact =
-        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+        prepare(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(artifact.succeeded()) << error.message;
     EXPECT_EQ(artifact.value().manifest.scope, ScopeKind::NativeLdsWorkgroupBarrierLoop);
     EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
@@ -334,8 +389,7 @@ TEST(ConSanBarrierStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles)
                           4;
     wire::write_u32(original, input.value().text_file_offset + backedge->src_loc(),
                     (backedge->raw_encoding()[0] & 0xffff0000u) | static_cast<uint16_t>(delta));
-    EXPECT_TRUE(
-        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error).failed());
+    EXPECT_TRUE(prepare(original, target, "lds_producer_consumer", error).failed());
     EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow) << error.message;
   }
 }
