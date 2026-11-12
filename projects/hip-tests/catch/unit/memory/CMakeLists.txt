@@ -205,7 +205,8 @@ set(TEST_SRC
     hipHostAlloc.cc
     hipMemSetMemPool.cc
     hipMemGetMemPool.cc
-    hipMemGetDefaultMemPool.cc)
+    hipMemGetDefaultMemPool.cc
+    hipArrayGetSparseProperties.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
@@ -215,8 +216,7 @@ if(HIP_PLATFORM MATCHES "amd")
       # Below 3 tests should be compiled for NVIDIA as well after EXSWHTEC-349 is addressed
       hipArrayGetInfo.cc
       hipArrayGetDescriptor.cc
-      hipArray3DGetDescriptor.cc
-      hipArrayGetSparseProperties.cc)
+      hipArray3DGetDescriptor.cc)
 endif()
 
 set(NOT_FOR_gfx90a_AND_ABOVE_TEST hipMallocArray.cc hipArrayCreate.cc) # tests not for gfx90a+
