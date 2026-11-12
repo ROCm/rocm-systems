@@ -819,7 +819,7 @@ def test_fp8_widen_selectors_and_pair_result(packed):
             assert 'rj_arith_' + name.lower() + '_w64' in body
             assert ('execute_widen32_to_pair' if packed else 'execute_unary32') in body
             assert 'arithmetic_flags()' in body
-            assert ('inst_.opsel' in body) == vop3
+            assert ('amdgpu::vop3_opsel(inst_)' in body) == vop3
             assert 'source_bytes' in body
             assert 'arithmetic_reports_fp_status' not in body
             assert 'inst_.clamp' not in body
@@ -827,10 +827,22 @@ def test_fp8_widen_selectors_and_pair_result(packed):
             gen_fp8_widen(context('rdna3', name, ['dst'], ['src'], is_vop3=True))
             is None
         )
-        assert (
-            gen_fp8_widen(context('cdna5', name, ['dst'], ['src'], is_vop3=True))
-            is None
-        )
+        for arch, suffix in [
+            ('cdna3', 'gfx942'),
+            ('cdna4', 'gfx950'),
+            ('cdna5', 'gfx950'),
+        ]:
+            if arch == 'cdna5' and name == 'V_CVT_F32_FP8':
+                suffix = 'gfx1250'
+            for vop3 in (False, True):
+                body = gen_fp8_widen(
+                    context(arch, name, ['dst'], ['src'], is_vop3=vop3)
+                )
+                assert f'rj_arith_{name.lower()}_w64_{suffix}' in body
+                assert ('inst_.clamp' in body) == (vop3 and suffix == 'gfx1250')
+                assert ('execute_fp8_widen_sdwa' in body) == (
+                    not packed and not vop3 and arch != 'cdna5'
+                )
         assert gen_fp8_widen(context('rdna4', name, ['dst'], [], is_vop3=True)) is None
 
 
@@ -855,10 +867,19 @@ def test_fp8_narrow_modes_and_partial_destination(stochastic):
             gen_fp8_narrow(context('rdna3', name, ['dst'], ['a', 'b'], is_vop3=True))
             is None
         )
-        assert (
-            gen_fp8_narrow(context('cdna5', name, ['dst'], ['a', 'b'], is_vop3=True))
-            is None
-        )
+        for arch, suffix in [
+            ('cdna3', 'gfx942'),
+            ('cdna4', 'gfx950'),
+            ('cdna5', 'gfx950'),
+        ]:
+            if arch == 'cdna5':
+                suffix = 'gfx1250'
+            body = gen_fp8_narrow(
+                context(arch, name, ['dst'], ['a', 'b'], is_vop3=True)
+            )
+            assert f'rj_arith_{name.lower()}_w64_{suffix}' in body
+            assert 'amdgpu::vop3_opsel(inst_)' in body
+            assert ('inst_.clamp' in body) == (suffix == 'gfx1250' and kind == 'FP8')
         assert (
             gen_fp8_narrow(context('rdna4', name, ['dst'], ['a', 'b'], is_vop3=False))
             is None
@@ -1393,3 +1414,69 @@ def test_pseudo_scalar_routing_and_semantics(arch):
         for body in bodies:
             assert 'execute_pseudo_scalar' in body
             assert 'transcendental::' not in body and 'amdgpu::execute_v_' not in body
+
+
+@pytest.mark.parametrize('arch', ['rdna4', 'cdna3', 'cdna4', 'cdna5'])
+def test_f16_to_fp8_migration(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_fp8_narrow
+
+    for stochastic in (False, True):
+        for kind in ('FP8', 'BF8'):
+            name = 'V_CVT_' + ('SR_' if stochastic else 'PK_') + kind + '_F16'
+            body = gen_fp8_narrow(
+                context(
+                    arch,
+                    name,
+                    ['d'],
+                    ['a', 'seed'] if stochastic else ['a'],
+                    is_vop3=True,
+                )
+            )
+            if arch != 'cdna5':
+                assert body is None
+                continue
+            assert 'FP16_OVFL' not in body
+            assert 'rj_arith_' + name.lower() + '_w64' in body
+            assert ('execute_binary32' in body) == stochastic
+            assert ('execute_unary32' in body) == (not stochastic)
+            assert ('ALU_HIGH_A' in body) == stochastic
+            assert ('ALU_CLAMP' in body) == (kind == 'FP8')
+            assert 'destination_bytes' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_fp8_to_f16_migration(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_fp8_widen
+
+    for packed in (False, True):
+        for kind in ('FP8', 'BF8'):
+            name = 'V_CVT_' + ('PK_' if packed else '') + 'F16_' + kind
+            body = gen_fp8_widen(context(arch, name, ['d'], ['a'], is_vop3=True))
+            if arch != 'cdna5':
+                assert body is None
+                continue
+            assert 'execute_unary32' in body
+            assert 'FP16_OVFL' in body
+            assert 'rj_arith_' + name.lower() + '_w32' in body
+            assert ('ALU_HIGH_D' in body) == (not packed)
+            assert ('ALU_CLAMP' in body) == (not packed and kind == 'FP8')
+            assert ('source_bytes, (selector & 8) ? 0xC : 0x3' in body) == (not packed)
+
+
+def test_fp8_to_f16_vop1_true16_selection():
+    from amdisa.codegen.execute.rj_arith_float import gen_fp8_widen
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna5/vop1_exec.cpp'
+    ).read_text()
+    for packed in (False, True):
+        for kind in ('FP8', 'BF8'):
+            name = 'V_CVT_' + ('PK_' if packed else '') + 'F16_' + kind
+            body = gen_fp8_widen(context('cdna5', name, ['d'], ['a']))
+            assert 'e32_word_operand(a)' in body
+            assert 'e32_word_operand(d)' in body
+            assert f'e32_packed_vgpr_operand({"a" if packed else "d"})' in body
+            assert 'inst_.opsel' not in body
+            assert 'ALU_CLAMP' not in body
+            assert 'rj_arith_' + name.lower() + '_w32' in generated
