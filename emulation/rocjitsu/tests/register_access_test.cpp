@@ -658,9 +658,6 @@ TEST(RegisterAccessTest, UnobservedScalarReadReturnsStorageWithoutObservation) {
   EXPECT_TRUE(fx.plugin->scalar_reads.empty());
 }
 
-// An SGPR range the wave does not own is not read, as an unowned write is
-// dropped by write_scalar_unobserved(), even when the neighbouring wave holds a
-// nonzero value there.
 // VCC and FLAT_SCRATCH read the same through the unobserved path as through
 // the wave's accessors, whether they alias physical SGPRs (CDNA3, when inside
 // the wave's SGPR block) or are wave state (CDNA5, or past the block). M0 and
@@ -720,6 +717,9 @@ TEST(RegisterAccessTest, UnobservedScalarReadMatchesWaveScalarState) {
   }
 }
 
+// An SGPR range the wave does not own is not read, as an unowned write is
+// dropped by write_scalar_unobserved(), even when the neighbouring wave holds a
+// nonzero value there.
 TEST(RegisterAccessTest, UnobservedScalarReadRejectsUnownedSgprs) {
   Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
   ASSERT_NE(fx.wf, nullptr);
