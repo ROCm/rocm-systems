@@ -362,6 +362,11 @@ amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char*
     case AMDSMI_STATUS_DRIVER_NOT_LOADED:
       *status_string = "AMDSMI_STATUS_DRIVER_NOT_LOADED: Processor driver not loaded.";
       break;
+    case AMDSMI_STATUS_MORE_DATA:
+      *status_string =
+          "AMDSMI_STATUS_MORE_DATA: There is more data than the buffer size"
+          " the user passed.";
+      break;
     case AMDSMI_STATUS_NO_DATA:
       *status_string = "AMDSMI_STATUS_NO_DATA: No data was found for a given input.";
       break;
