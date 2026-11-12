@@ -860,7 +860,7 @@ def snapshot_server_logs(run_dir: Path, slurm_job_id: str) -> list[Path]:
                 continue
             dest = dest_dir / path.name
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-            with os.fdopen(os.open(dest, flags, 0o644), "wb") as dst:
+            with os.fdopen(os.open(dest, flags, 0o600), "wb") as dst:
                 shutil.copyfileobj(src, dst)
         copies.append(dest)
     return copies

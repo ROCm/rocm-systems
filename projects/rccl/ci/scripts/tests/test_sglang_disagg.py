@@ -247,6 +247,7 @@ class PlantedServerLogsTest(unittest.TestCase):
         snapshot = self.run_dir / "slurm_output" / tm.SERVER_LOGS
         self.assertEqual((snapshot / "decode_NODE1.log").read_text(), self.BANNER)
         self.assertEqual(stat.S_IMODE(snapshot.stat().st_mode) & 0o022, 0)
+        self.assertEqual(stat.S_IMODE((snapshot / "decode_NODE1.log").stat().st_mode), 0o600)
 
     def test_another_jobs_logs_are_ignored(self):
         self.write_logs("11111")
