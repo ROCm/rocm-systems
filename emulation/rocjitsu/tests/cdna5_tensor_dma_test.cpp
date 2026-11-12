@@ -183,6 +183,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaDescriptorReadPropagatesFailure) {
 TEST(Gfx1250ExecutionTest, TensorDmaFailureSkipsCopyAndBarrierAndCanRecover) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto &observer = install_tensor_dma_issue_observer(sim);
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
@@ -210,6 +211,41 @@ TEST(Gfx1250ExecutionTest, TensorDmaFailureSkipsCopyAndBarrierAndCanRecover) {
   EXPECT_EQ(cu->lds().read32(wf->lds_base()), 0x12345678u);
   EXPECT_NE(cu->lds().read64(wf->lds_base() + kBarrierAddr), 0u);
   EXPECT_TRUE(wf->wait_counters().empty());
+
+  for (bool store : {false, true}) {
+    SCOPED_TRACE(store);
+    write_global_u32(*sim.memory, kGlobal, 0x12345678u);
+    cu->lds().write32(wf->lds_base(), 0xabcdef00u);
+    cu->lds().write64(wf->lds_base() + kBarrierAddr, 0);
+    const std::array<uint32_t, 3> encoding = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
+                                              0x7c7c0c00u};
+    auto transfer =
+        decode_gfx1250(encoding, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
+    ASSERT_NE(transfer, nullptr);
+    observer.issues.clear();
+    observer.inspect = [](const amdgpu::TensorDmaIssueObservation &,
+                          const amdgpu::Wavefront &wave) {
+      wave.report_instruction_execution_error(amdgpu::InstructionExecutionError::PluginFailure,
+                                              "tensor issue hook failed");
+    };
+    EXPECT_TRUE(cu->execute_instruction(transfer.get(), *wf).failed());
+    EXPECT_EQ(wf->instruction_execution_error(), amdgpu::InstructionExecutionError::PluginFailure);
+    ASSERT_EQ(observer.issues.size(), 1u);
+    EXPECT_EQ(observer.issues[0].is_load, !store);
+    EXPECT_EQ(transfer->data(), nullptr);
+    EXPECT_EQ(cu->lds().read32(wf->lds_base()), 0xabcdef00u);
+    EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), 0x12345678u);
+    EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierAddr), 0u);
+    EXPECT_TRUE(wf->wait_counters().empty());
+
+    observer.inspect = {};
+    EXPECT_TRUE(cu->execute_instruction(transfer.get(), *wf).succeeded());
+    EXPECT_FALSE(wf->instruction_execution_failed());
+    EXPECT_EQ(cu->lds().read32(wf->lds_base()), store ? 0xabcdef00u : 0x12345678u);
+    EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), store ? 0xabcdef00u : 0x12345678u);
+    EXPECT_NE(cu->lds().read64(wf->lds_base() + kBarrierAddr), 0u);
+    EXPECT_TRUE(wf->wait_counters().empty());
+  }
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaRejectsElementCountOverflow) {

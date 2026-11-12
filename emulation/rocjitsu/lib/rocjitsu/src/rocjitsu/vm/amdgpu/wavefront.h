@@ -17,6 +17,7 @@
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 #include "rocjitsu/vm/thread_context.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
@@ -68,6 +69,7 @@ enum class InstructionExecutionError : uint8_t {
   UnimplementedInstruction,
   DecodeFailure,
   IllegalInstruction,
+  PluginFailure,
 };
 
 /// @brief Allocation slice within a register file.
@@ -482,9 +484,10 @@ public:
   /// decoder through this virtual call. It is pure virtual because an out-of-line
   /// definition would become Wavefront's key function, and plugins could then no
   /// longer emit Wavefront's type information themselves.
-  /// @throws std::logic_error if the encoding is empty, truncated, or undecodable.
-  virtual std::string disassemble_instruction(std::span<const uint32_t> encoding,
-                                              uint64_t pc) const = 0;
+  /// Returns failure and emits a diagnostic if the encoding is empty, truncated, or undecodable.
+  virtual util::FailureOr<std::string>
+  disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                          util::DiagnosticEmitter diagnostic = {}) const = 0;
 
   /// @brief Read GPU memory in this wave's process address space.
   [[nodiscard]] VmAccessOutcome read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
@@ -954,9 +957,19 @@ public:
     return instruction_execution_error_ != InstructionExecutionError::None;
   }
 
+  /// @brief Preserve the diagnostic name before a failed pipeline destroys its instruction.
+  void preserve_instruction_execution_error_mnemonic(std::string_view mnemonic) const {
+    instruction_execution_error_mnemonic_ = mnemonic;
+  }
+
+  std::string_view instruction_execution_error_mnemonic() const {
+    return instruction_execution_error_mnemonic_;
+  }
+
   void clear_instruction_execution_error() {
     instruction_execution_error_ = InstructionExecutionError::None;
     instruction_execution_error_detail_ = nullptr;
+    instruction_execution_error_mnemonic_.clear();
   }
 
   void begin_instruction_execution() { clear_instruction_execution_error(); }
@@ -1374,6 +1387,7 @@ public:
     pending_memory_trap_ = MemoryTrapDelivery::None;
     instruction_execution_error_ = InstructionExecutionError::None;
     instruction_execution_error_detail_ = nullptr;
+    instruction_execution_error_mnemonic_.clear();
     sleep_cycles_ = 0;
     sleep_wakeup_ = false;
     in_trap_handler_ = false;
@@ -1436,6 +1450,7 @@ protected:
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
   mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
   mutable const char *instruction_execution_error_detail_ = nullptr;
+  mutable std::string instruction_execution_error_mnemonic_;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
@@ -1667,8 +1682,9 @@ public:
       : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::WF_SIZE_MAX, Isa::MAX_SGPRS_PER_WF,
                   Isa::MAX_VGPRS_PER_WF, Isa::MODE_HAS_GPR_IDX_EN) {}
 
-  std::string disassemble_instruction(std::span<const uint32_t> encoding,
-                                      uint64_t pc) const override;
+  util::FailureOr<std::string>
+  disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                          util::DiagnosticEmitter diagnostic = {}) const override;
 };
 
 } // namespace amdgpu

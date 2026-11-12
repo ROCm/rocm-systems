@@ -66,12 +66,6 @@ constexpr InstructionSnapshot kInstruction{0x1234, kWords};
 constexpr std::array kObligations{
     MemoryCounterObligation{WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED}};
 
-TEST(InstructionSnapshotTest, RejectsEmptyAndOversizedEncodings) {
-  const std::array<uint32_t, InstructionSnapshot::kMaxWords + 1> words{};
-  EXPECT_THROW(InstructionSnapshot(0x10, std::span(words).first(0)), std::logic_error);
-  EXPECT_THROW(InstructionSnapshot(0x10, words), std::logic_error);
-}
-
 TEST(InstructionSnapshotTest, CopiesEveryEncodingWidth) {
   constexpr std::array<uint32_t, 5> expected{1, 2, 3, 4, 5};
   static_assert(expected.size() == InstructionSnapshot::kMaxWords);

@@ -712,6 +712,8 @@ TEST(GpuVmPipeline, InvalidAtomicReportsOneExecutionFailureBeforeBackingOrSucces
       context.cu->step();
       context.cu->step();
       const std::string diagnostic = testing::internal::GetCapturedStderr();
+      EXPECT_NE(diagnostic.find("could not execute global_load_b32"), std::string::npos)
+          << diagnostic;
       const std::string reason = "unsupported atomic operation for this width or memory domain";
       const auto warning = diagnostic.find(reason);
       EXPECT_NE(warning, std::string::npos) << diagnostic;
@@ -3612,6 +3614,80 @@ TEST(GpuVmPipeline, DeferredTensorLoadIssuesOnceAndCompletesAtItsInstructionPc) 
   EXPECT_EQ(observer->issues, 1);
   EXPECT_EQ(context.wf->lds().read32(lds_address), kValue);
   EXPECT_EQ(observer->completion_pcs, (std::vector<uint64_t>{kCodeAddress}));
+}
+
+TEST(GpuVmPipeline, TensorLoadCompletionFailureStopsResidentAndDeferredExecution) {
+  class FailingCompletionObserver final : public ExecutionPlugin {
+  public:
+    explicit FailingCompletionObserver(amdgpu::Wavefront &wave)
+        : ExecutionPlugin("failing-tensor-completion"), wave_(wave) {}
+    bool observes_tensor_dma_memory_access() const override { return true; }
+    void
+    onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
+      ++completions;
+      EXPECT_EQ(access.pc, 0x1000u);
+      wave_.report_instruction_execution_error(amdgpu::InstructionExecutionError::PluginFailure,
+                                               "tensor completion failed");
+    }
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
+                                          amdgpu::Wavefront &) override {
+      if (pc == 0x100c)
+        ++successors;
+    }
+    uint32_t completions = 0;
+    uint32_t successors = 0;
+
+  private:
+    amdgpu::Wavefront &wave_;
+  };
+
+  for (bool deferred : {false, true}) {
+    SCOPED_TRACE(deferred);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    context.wf->set_lds_base(context.cu->allocate_lds(256));
+    context.wf->set_lds_size(256);
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto plugin = std::make_unique<FailingCompletionObserver>(*context.wf);
+    auto *observer = plugin.get();
+    ASSERT_TRUE(group->add(std::move(plugin)));
+    context.sim.soc->set_plugin_group(group);
+    context.external->store(
+        0x1000, std::array<uint32_t, 4>{0xd0710001u, 0x7c000000u, 0x7c7c0c00u, S_ENDPGM_GFX12});
+    context.external->store(0x2000, uint32_t{0x12345678});
+    const uint32_t sgprs = context.wf->sgpr_alloc().base;
+    const std::array<uint32_t, 4> group0{1, 0, 0x2000, 0x80000000u};
+    const std::array<uint32_t, 8> group1{2u << 16, 1u << 16, 0, 1u << 16, 0, 0, 0, 0};
+    for (uint32_t reg = 0; reg < group0.size(); ++reg)
+      context.cu->write_sgpr(sgprs + reg, group0[reg]);
+    for (uint32_t reg = 0; reg < group1.size(); ++reg)
+      context.cu->write_sgpr(sgprs + 12 + reg, group1[reg]);
+    context.wf->pc = 0x1000;
+    context.wf->set_exec(1);
+    uint32_t failures = 0;
+    context.cu->set_execution_failure_handler([&](amdgpu::Wavefront &wf) {
+      ++failures;
+      EXPECT_EQ(wf.instruction_execution_error(), amdgpu::InstructionExecutionError::PluginFailure);
+      return true;
+    });
+    if (deferred)
+      context.external->unavailable_read_call = 2;
+    testing::internal::CaptureStderr();
+    static_cast<void>(context.cu->step());
+    if (deferred) {
+      EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+      EXPECT_EQ(failures, 0u);
+    }
+    static_cast<void>(context.cu->step());
+    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    EXPECT_NE(diagnostic.find("at pc=0x1000"), std::string::npos) << diagnostic;
+    EXPECT_EQ(failures, 1u);
+    EXPECT_EQ(observer->completions, 1u);
+    EXPECT_EQ(observer->successors, 0u);
+    EXPECT_TRUE(context.wf->is_halted());
+    EXPECT_EQ(context.wf->lds().read32(context.wf->lds_base()), 0x12345678u);
+  }
 }
 
 TEST(GpuVmPipeline, TranslatedTensorStoreRetriesWithoutReplayingOrResnapshottingLds) {
