@@ -235,7 +235,7 @@ __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindo
     gin.put(ncclTeamWorld(devComm), root,
         recvwin, recvoffset + (size_t)devComm.rank * chunkBytes,
         sendwin, sendoffset,
-        chunkBytes, ncclGin_SignalInc{signalIndex});
+        chunkBytes, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
   }
   __syncthreads();
 
