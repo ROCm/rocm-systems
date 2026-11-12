@@ -476,7 +476,7 @@ class OmniSoC_Base:
 
         # File id dict
         config_arch = canonical_config_arch(self.__arch) or self.__arch
-        config_root_dir = f"{args.config_dir}/{config_arch}"
+        config_root_dir = str(config.analysis_configs_dir / config_arch)
         config_filename_dict = {
             filename.name.split("_")[0]: str(filename)
             for filename in Path(config_root_dir).glob("*.yaml")
@@ -618,7 +618,7 @@ class OmniSoC_Base:
         if not args.membw_analysis:
             exclude.add(str(MEMBW_ANALYSIS_PANEL_ID))
         yield from iter_analysis_config_metrics(
-            Path(args.config_dir) / (canonical_config_arch(arch) or arch), exclude
+            config.analysis_configs_dir / (canonical_config_arch(arch) or arch), exclude
         )
 
     def get_rocprof_supported_counters(self) -> Set[str]:
