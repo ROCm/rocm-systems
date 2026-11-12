@@ -143,8 +143,8 @@ TEST(MultiplexerFuzzTest, ExecutionWorkUnitsCountMigratedInstructionsOnce) {
   ASSERT_TRUE(maybe_focused.succeeded());
   const execution_fuzz::RunStats focused = maybe_focused.value();
   ASSERT_EQ(focused.executed, 6u);
-  // The seed now includes a still-eligible FP4 operation as well as issuer-only FP8.
-  ASSERT_EQ(focused.async_executed, 1u);
+  // All matrix operations now execute on the issuer.
+  ASSERT_EQ(focused.async_executed, 0u);
   const util::FailureOr<std::optional<DispatchResult>> maybe_dispatched = run_input(input);
   ASSERT_TRUE(maybe_dispatched.succeeded());
   const std::optional<DispatchResult> dispatched = maybe_dispatched.value();

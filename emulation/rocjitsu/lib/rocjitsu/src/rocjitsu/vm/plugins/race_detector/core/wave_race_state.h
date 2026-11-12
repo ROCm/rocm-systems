@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -39,10 +40,9 @@ struct CounterCapacities {
 /// race checking. Holds a pointer to the workgroup level RaceDetector for
 /// event allocation and lifecycle transitions.
 ///
-/// Every event registration method (registerEvent, registerScalarLoad,
-/// registerLdsEvent and registerLdsRangeEvent) takes the producing instruction
-/// as an InstructionSnapshot; the event's PC comes from the snapshot. The
-/// encoding is decoded only if a plugin report needs its disassembly.
+/// Every event registration method takes the producing instruction as an
+/// InstructionSnapshot; the event's PC comes from the snapshot. The encoding
+/// is decoded only if a plugin report needs its disassembly.
 class WaveRaceState {
 public:
   WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
@@ -92,15 +92,13 @@ public:
   /// Bits outside execMask are ignored; zero records no LDS intervals.
   /// elementBytes selects the execution granularity at the backing boundary;
   /// zero treats the whole per-lane access as one element.
-  /// allocationEnd additionally clips complete elements to a captured workgroup
-  /// allocation without reducing register or counter participation.
   void registerLdsEvent(InstructionSnapshot instruction, MemoryEventType type,
                         std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
                         std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                         MemoryOrderClass memoryOrder, uint64_t ldsLaneMask = ~uint64_t{0},
-                        int elementBytes = 0, std::optional<uint64_t> allocationEnd = std::nullopt);
+                        int elementBytes = 0, LdsAccess ldsAccess = {});
   /// Register two LDS address sets per lane. elementBytes selects the granularity
   /// of complete elements retained at the backing boundary; zero treats the
   /// whole per-lane access in each address set as one element.
@@ -110,7 +108,8 @@ public:
                         std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                        MemoryOrderClass memoryOrder, int elementBytes = 0);
+                        MemoryOrderClass memoryOrder, int elementBytes = 0,
+                        LdsAccess ldsAccess = {});
 
   /// Register an LDS event described by byte ranges rather than lanes, such as
   /// a tensor DMA transfer. The event has no registers. Each range is retained
@@ -138,8 +137,25 @@ public:
                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                              MemoryOrderClass memoryOrder);
 
+  /// @brief Register an event using the caller's finalized LDS intervals.
+  /// @details Intervals must contain only accessed bytes within the LDS backing
+  /// and, for FLAT, the workgroup allocation, with endpoints that fit in int.
+  /// This does not clip ranges or validate conflicts; validate before registering.
+  /// Empty intervals retain the event's register and counter dependencies.
+  void registerEventWithIntervals(InstructionSnapshot instruction, MemoryEventType,
+                                  std::vector<uint32_t> registers, uint64_t execMask,
+                                  uint8_t byteMask, IntervalSet ldsIntervals,
+                                  std::span<const amdgpu::MemoryCounterObligation>,
+                                  MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
+                                  LdsAccess ldsAccess = {});
+
   /// Dispatch the counter thresholds changed by one wait instruction.
   void dispatch(const PendingWaitCount &);
+
+  /// Check a synchronous VALU source against older writers and remember the
+  /// completed read until a barrier publishes it to peer waves.
+  void recordLdsOperandRead(InstructionSnapshot instruction, uint32_t address, uint32_t bytes,
+                            uint32_t lane);
 
   /// Retire non-trimmable events whose owning wave completed them before a workgroup barrier.
   void flushBarrierPendingEvents();
@@ -176,11 +192,6 @@ public:
   WaveId getWaveId() const { return waveId; }
 
 private:
-  void registerEventWithIntervals(InstructionSnapshot instruction, MemoryEventType,
-                                  std::vector<uint32_t> registers, uint64_t execMask,
-                                  uint8_t byteMask, IntervalSet ldsIntervals,
-                                  std::span<const amdgpu::MemoryCounterObligation>,
-                                  MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
   void retireEventRegisters(EventId);
   void checkScalarAccess(RegisterRef reg, bool isWrite) const;
 
@@ -196,6 +207,7 @@ private:
   std::vector<std::vector<EventId>> ttmpMemoryEvents;
 
   std::vector<EventId> waveMemoryEvents;
+  std::unordered_map<uint32_t, uint8_t> directLdsReadWidths;
   std::vector<EventId> barrierPendingEvents;
 
   CounterCapacities counterCapacities;

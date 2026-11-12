@@ -614,16 +614,13 @@ TEST(ExecutionFuzzInputTest, GeneratedInputsSelectSyncAsyncAndConcurrentExecutio
         run_input(maybe_input.value(), FuzzTarget::Gfx1250, resources);
     ASSERT_TRUE(maybe_stats.succeeded());
     const RunStats stats = maybe_stats.value();
-    EXPECT_EQ(stats.async_capable_inputs, 1u);
-    EXPECT_EQ(stats.async_enabled_inputs, async);
+    EXPECT_EQ(bool(maybe_input.value()[1] & kAsyncSelectBit), async);
+    EXPECT_EQ(stats.async_capable_inputs, 0u);
+    EXPECT_EQ(stats.async_enabled_inputs, 0u);
     EXPECT_EQ(stats.concurrent_inputs, concurrent);
     EXPECT_EQ(stats.issuer_executions, concurrent ? 2u : 1u);
-    // Odd rounds use the FP4 prefix; even rounds keep migrated FP8 on the issuer.
-    if (async) {
-      EXPECT_GT(stats.async_executed, 0u);
-    } else {
-      EXPECT_EQ(stats.async_executed, 0u);
-    }
+    // The requested mode remains recorded, but migrated WMMA stays on the issuer.
+    EXPECT_EQ(stats.async_executed, 0u);
   }
 }
 
@@ -700,7 +697,7 @@ TEST(ExecutionFuzzInputTest, ExplicitModesOverrideInputSelection) {
       run_input(synchronous_input, FuzzTarget::Gfx1250, resources, AsyncMode::Enabled, 1);
   ASSERT_TRUE(maybe_asynchronous.succeeded());
   const RunStats asynchronous = maybe_asynchronous.value();
-  EXPECT_EQ(asynchronous.async_enabled_inputs, 1u);
+  EXPECT_EQ(asynchronous.async_enabled_inputs, 0u);
   EXPECT_EQ(asynchronous.async_executed, 0u);
   EXPECT_EQ(asynchronous.concurrent_inputs, 0u);
   EXPECT_EQ(asynchronous.issuer_executions, 1u);
@@ -759,7 +756,7 @@ TEST(ExecutionFuzzInputTest, HarnessModesPreserveInitialScalarCondition) {
   EXPECT_TRUE(saw_fallthrough);
 }
 
-TEST(ExecutionFuzzInputTest, ThreadedInputsShareAsyncWmmaHelpers) {
+TEST(ExecutionFuzzInputTest, ThreadedInputsKeepMigratedWmmaOnIssuers) {
   constexpr uint64_t kThreads = 8;
   constexpr uint64_t kInputsPerThread = 2;
   const util::FailureOr<std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>>
@@ -780,10 +777,8 @@ TEST(ExecutionFuzzInputTest, ThreadedInputsShareAsyncWmmaHelpers) {
             run_input(maybe_input.value(), FuzzTarget::Gfx1250, resources, AsyncMode::Enabled);
         ASSERT_TRUE(maybe_stats.succeeded());
         const RunStats stats = maybe_stats.value();
-        EXPECT_EQ(stats.async_enabled_inputs, 1u);
-        if (!(seed & 16)) {
-          EXPECT_EQ(stats.async_executed, 0u);
-        }
+        EXPECT_EQ(stats.async_enabled_inputs, 0u);
+        EXPECT_EQ(stats.async_executed, 0u);
         results[worker].executed += stats.executed;
         results[worker].async_executed += stats.async_executed;
         results[worker].inputs += stats.inputs;
@@ -799,7 +794,7 @@ TEST(ExecutionFuzzInputTest, ThreadedInputsShareAsyncWmmaHelpers) {
     EXPECT_EQ(stats.inputs_executed, kInputsPerThread);
     async_executed += stats.async_executed;
   }
-  EXPECT_GT(async_executed, 0u);
+  EXPECT_EQ(async_executed, 0u);
 }
 
 } // namespace

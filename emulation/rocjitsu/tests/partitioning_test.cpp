@@ -487,8 +487,9 @@ TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
   ASSERT_TRUE(test::load_valid_config_from_string(json, loaded, 64));
   EXPECT_EQ(loaded.execution_threads.engines, 8u);
   EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{17}));
-  EXPECT_EQ(loaded.execution_threads.helpers, 8u);
-  EXPECT_EQ(loaded.async_resources->helpers(), 8u);
+  EXPECT_EQ(loaded.execution_threads.helpers, 0u);
+  ASSERT_NE(loaded.async_resources, nullptr);
+  EXPECT_EQ(loaded.async_resources->helpers(), 0u);
   json.insert(json.find('{') + 1, R"("cpu_dispatch_threads":1,"async_helper_threads":0,)");
   config::LoadedConfig serial;
   ASSERT_TRUE(test::load_valid_config_from_string(json, serial, 64));
@@ -519,7 +520,7 @@ TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
   EXPECT_EQ(untouched.cpu_thread_budget, 32u);
   EXPECT_EQ(untouched.execution_threads.engines, 8u);
   EXPECT_EQ(untouched.execution_threads.dispatch, (std::vector<uint32_t>{17}));
-  EXPECT_EQ(untouched.execution_threads.helpers, 8u);
+  EXPECT_EQ(untouched.execution_threads.helpers, 0u);
 }
 
 TEST(ExecutionThreadBudgetTest, PresetsKeepSiblingTablesConsistent) {
@@ -648,7 +649,7 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
   }
 }
 
-TEST(ExecutionThreadBudgetTest, ServerPresetsAddHelpersWithoutDisplacingCpuWorkers) {
+TEST(ExecutionThreadBudgetTest, ServerPresetsDoNotReserveUnusedHelpers) {
   for (const char *name : {"gfx950_mi350x.json", "gfx950_mi350x_kmd.json", "gfx1250_mi455x.json"}) {
     SCOPED_TRACE(name);
     const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
@@ -666,7 +667,7 @@ TEST(ExecutionThreadBudgetTest, ServerPresetsAddHelpersWithoutDisplacingCpuWorke
       const auto cpu = plan.engines + plan.dispatch[0] - 1;
       EXPECT_LE(cpu, std::min(affinity, max_cpu));
       EXPECT_LE(cpu + plan.helpers, std::min(affinity, max_cpu + 8));
-      EXPECT_EQ(plan.helpers, affinity >= max_cpu + 8 ? 8u : 0u);
+      EXPECT_EQ(plan.helpers, 0u);
       if (affinity >= 24) {
         EXPECT_EQ(plan.engines, 8u);
         const uint32_t expected_cpu = cdna5 && affinity >= 32 ? (affinity >= 40 ? 40 : 32) : 24;
@@ -680,8 +681,8 @@ TEST(ExecutionThreadBudgetTest, ServerPresetsAddHelpersWithoutDisplacingCpuWorke
     settings.request.budget = max_cpu + 8;
     config::ExecutionThreadAllocation helper_budget;
     ASSERT_TRUE(resolve_valid_execution_threads(helper_budget, settings, 128));
-    EXPECT_EQ(helper_budget.helpers, 8u);
-    settings.request.helpers = 0;
+    EXPECT_EQ(helper_budget.helpers, 0u);
+    settings.request.helpers = 8; // Explicit requests also remain inactive.
     config::ExecutionThreadAllocation disabled;
     ASSERT_TRUE(resolve_valid_execution_threads(disabled, settings, 128));
     EXPECT_EQ(disabled.engines, 8u);

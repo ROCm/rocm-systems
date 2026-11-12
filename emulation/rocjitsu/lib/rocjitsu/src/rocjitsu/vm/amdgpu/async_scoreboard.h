@@ -108,13 +108,7 @@ public:
     while (!empty())
       retire(0);
   }
-  std::optional<Failure> take_error() {
-    if (!error_)
-      return std::nullopt;
-    Failure failure = std::move(*error_);
-    error_.reset();
-    return failure;
-  }
+  std::optional<Failure> take_error() { return std::exchange(error_, std::nullopt); }
 
 private:
   struct Entry {

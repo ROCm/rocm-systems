@@ -19,66 +19,67 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
+  const bool clamp = Wmma ? (controls & RJ_ARITH_WMMA_CLAMP) : (flags & RJ_ARITH_FP16_OVFL);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    matrix_i8_x86_64_v4<M, K, Batch, Wmma>(controls, d, a, b, c);
+    matrix_i8_x86_64_v4<M, K, Batch, Wmma>(controls, clamp, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    matrix_i8_x86_64_v3<M, K, Batch, Wmma>(controls, d, a, b, c);
+    matrix_i8_x86_64_v3<M, K, Batch, Wmma>(controls, clamp, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  matrix_i8_kernel<M, K, Batch, Wmma>(controls, d, a, b, c);
+  matrix_i8_kernel<M, K, Batch, Wmma>(controls, clamp, d, a, b, c);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace
 
-// Multiply signed bytes with wrapping 32-bit accumulation.
+// Multiply signed bytes with optional signed saturation.
 int rj_arith_v_mfma_i32_32x32x4_2b_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                           const uint32_t *const *a, const uint32_t *const *b,
                                           const uint32_t *const *c) {
   return evaluate<32, 4, 2, false>(flags, controls, d, a, b, c);
 }
 
-// Multiply signed bytes with wrapping 32-bit accumulation.
+// Multiply signed bytes with optional signed saturation.
 int rj_arith_v_mfma_i32_16x16x4_4b_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                           const uint32_t *const *a, const uint32_t *const *b,
                                           const uint32_t *const *c) {
   return evaluate<16, 4, 4, false>(flags, controls, d, a, b, c);
 }
 
-// Multiply signed bytes with wrapping 32-bit accumulation.
+// Multiply signed bytes with optional signed saturation.
 int rj_arith_v_mfma_i32_4x4x4_16b_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          const uint32_t *const *c) {
   return evaluate<4, 4, 16, false>(flags, controls, d, a, b, c);
 }
 
-// Multiply signed bytes with wrapping 32-bit accumulation.
+// Multiply signed bytes with optional signed saturation.
 int rj_arith_v_mfma_i32_32x32x16_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c) {
   return evaluate<32, 16, 1, false>(flags, controls, d, a, b, c);
 }
 
-// Multiply signed bytes with wrapping 32-bit accumulation.
+// Multiply signed bytes with optional signed saturation.
 int rj_arith_v_mfma_i32_16x16x32_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c) {
   return evaluate<16, 32, 1, false>(flags, controls, d, a, b, c);
 }
 
-// Multiply signed bytes with wrapping 32-bit accumulation.
+// Multiply signed bytes with optional signed saturation.
 int rj_arith_v_mfma_i32_16x16x64_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c) {
   return evaluate<16, 64, 1, false>(flags, controls, d, a, b, c);
 }
 
-// Multiply signed bytes with wrapping 32-bit accumulation.
+// Multiply signed bytes with optional signed saturation.
 int rj_arith_v_mfma_i32_32x32x32_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c) {
