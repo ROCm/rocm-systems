@@ -573,7 +573,7 @@ std::optional<ImageAddressing> ImageAddressing::prepare(const ImageAddressConfig
   if (!arch_has_image_memory_instructions(config.arch) || layout.dimensions < 1 ||
       layout.dimensions > 3 || !layout.width || !layout.height || !layout.depth ||
       layout.width > 65536 || layout.height > 65536 || layout.depth > 16384 || !layout.mip_levels ||
-      layout.mip_levels > 17 || mip >= layout.mip_levels ||
+      layout.mip_levels > kMaxImageMipLevels || mip >= layout.mip_levels ||
       layout.mip_levels >
           static_cast<uint32_t>(std::bit_width(std::max(
               {layout.width, layout.height, layout.dimensions == 3 ? layout.depth : 1u}))) ||

@@ -30,6 +30,7 @@ from utils.utils_common import (
     convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
     format_table_id,
+    metric_ids_by_name,
     normalize_filter_to_str_list,
 )
 from utils.utils_counter_defs import metric_expressions, metric_value_keys
@@ -214,9 +215,9 @@ def _build_metric_table_df(
 
     rows: list[list[Any]] = []
     expressions: list[str] = []
-    metric_entries = data_config["metric"]
-    for i, (key, entries) in enumerate(metric_entries.items()):
-        metric_idx = f"{table_data_source_idx}.{i}"
+    metric_ids = metric_ids_by_name(data_config)
+    for key, entries in data_config["metric"].items():
+        metric_idx = metric_ids[key]
 
         if not _metric_passes_filter(
             metric_id=metric_idx,
@@ -601,8 +602,8 @@ def load_table_data(
         dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
-        apply_filters(workload, args.debug),
-        args.debug,
+        apply_filters(workload, args.debug_metric_expression),
+        args.debug_metric_expression,
     )
 
 

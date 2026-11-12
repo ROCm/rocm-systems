@@ -27,8 +27,10 @@ namespace rocjitsu::plugins::race_detector {
 ///      ordered counter-capacity backpressure satisfies all of the event's
 ///      wait-counter obligations.
 ///   3. retireEvent() — removes from live lists, decrements byte counts,
-///      marks RETIRED (for LDS events, called at s_barrier via
-///      flushBarrierPendingEvents).
+///      marks RETIRED. LDS events are retired at s_barrier via
+///      flushBarrierPendingEvents, since other waves can still race with a
+///      completed event until then. In a single-wave workgroup there is no other
+///      wave, so an LDS event is retired as soon as it completes.
 ///
 /// LDS race validation uses a two-level approach:
 ///   - Fast path: per-chunk byte counts (byteWriteCounts / byteReadCounts)
@@ -119,6 +121,17 @@ public:
                                 std::function<std::string_view(int)> getSourceLine) const;
 
   WaveRaceState &getWaveRaceState(int waveIndex);
+
+  /// Whether the workgroup has a single wave, so that no other wave can race
+  /// with an event its own wave has completed.
+  bool hasSingleWave() const { return waveRaceStates.size() == 1; }
+
+  /// A workgroup barrier covers all waves, including those that ended before
+  /// it resolved. Retire their WAVE_COMPLETE events; ACTIVE events stay pending.
+  void flushWorkgroupBarrierEvents() {
+    for (auto &wave : waveRaceStates)
+      wave.flushBarrierPendingEvents();
+  }
 
 private:
   void setProfiler(ProfilerInterface &);

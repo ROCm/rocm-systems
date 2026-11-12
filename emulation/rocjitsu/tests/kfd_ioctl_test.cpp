@@ -79,6 +79,7 @@ RJ_DIAGNOSTIC_POP
 #include <shared_mutex>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <tuple>
 #include <vector>
@@ -411,6 +412,7 @@ class KfdIoctlTest : public ::testing::Test {
 protected:
   void SetUp() override { SetUpWithConfig(CONFIG_PATH); }
   void check_debug_resume_across_active_xcc_areas();
+  void check_daemon_queue_startup_failure(bool sdma);
 
   // Split out so a fixture can bring up a different part. Uses ASSERT_*, so it
   // has to stay void-returning and be called directly from SetUp().
@@ -1607,14 +1609,30 @@ TEST_P(KfdNativePm4Test, NativePm4PauseResumeRejectsInvalidRingAndTerminalFault)
   ring[14] = 0xabcdef01;
   std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
       .store(15, std::memory_order_release);
-  pump();
+  const auto pump_until = [&](const auto &ready) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!ready() && std::chrono::steady_clock::now() < deadline) {
+      (void)engine_->step();
+      std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+    return ready();
+  };
+  ASSERT_TRUE(pump_until([&] {
+    return std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire) == 15;
+  }));
   EXPECT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire), 15u);
   EXPECT_EQ(pointers[2], 0xabcdef01u);
 
   ring[15] = 0; // Invalid type: the queue enters terminal failure.
   std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
       .store(16, std::memory_order_release);
-  pump();
+  ASSERT_TRUE(pump_until([&] {
+    bool faulted = false;
+    soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+      faulted |= cp->queue_faulted_for_test(queue.queue_id, driver_->local_process_id());
+    });
+    return faulted;
+  }));
   EXPECT_EQ(std::atomic_ref<uint32_t>(read_pointer).load(std::memory_order_acquire), 15u);
   update.queue_percentage = 0;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), -EINVAL);
@@ -3996,6 +4014,95 @@ TEST_F(KfdIoctlTest, GetTileConfigReturnsUnsupportedInDaemonMode) {
   EXPECT_EQ(daemon_driver.close(process_id), 0);
 }
 
+void KfdIoctlTest::check_daemon_queue_startup_failure(bool sdma) {
+  rocjitsu::SimulatedKfd daemon_driver(*soc_, /*daemon_mode=*/true);
+  const uint32_t process_id = daemon_driver.open_process(/*client_pid=*/4242);
+  ASSERT_NE(process_id, 0u);
+  constexpr uint64_t kQueueVa = 0x400000000ULL;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = kQueueVa;
+  allocation.size = 4096;
+  allocation.gpu_id = 0;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                     KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE | KFD_IOC_ALLOC_MEM_FLAGS_AQL_QUEUE_MEM |
+                     KFD_IOC_ALLOC_MEM_FLAGS_COHERENT;
+  ASSERT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t device_id = 0;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&device_id);
+  map.n_devices = 1;
+  ASSERT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = 0;
+  create.queue_type = sdma ? KFD_IOC_QUEUE_TYPE_SDMA : KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = 0x500000000ULL;
+  create.ring_size = 4096;
+  create.read_pointer_address = kQueueVa + offsetof(amd_queue_t, read_dispatch_id);
+  create.write_pointer_address = kQueueVa + offsetof(amd_queue_t, write_dispatch_id);
+  create.queue_percentage = 100;
+  if (sdma) {
+    soc_->sdma_queue_scheduler().fail_next_worker_start_for_testing();
+  } else {
+    auto *cp = soc_->assign_queue_owner_cp(0);
+    const std::optional<rocjitsu::amdgpu::GpuVmAccess> access =
+        soc_->gpu_vm().snapshot_vmid(process_id);
+    ASSERT_TRUE(access);
+    const rocjitsu::amdgpu::ComputeQueueConfig config{
+        .address_space = access->cache_namespace().address_space,
+        .process_id = process_id,
+        .queue_id = 123,
+        .ring_base_va = create.ring_base_address,
+        .ring_size = create.ring_size,
+        .read_ptr_va = create.read_pointer_address,
+        .write_ptr_va = create.write_pointer_address,
+        .doorbell_mode = rocjitsu::amdgpu::QueueDoorbellMode::HostPolled,
+        .xcd_fanout = true,
+    };
+    cp->fail_next_doorbell_monitor_start_for_testing();
+    EXPECT_THROW((void)cp->register_queue(config), std::system_error);
+    const uint64_t retry = cp->register_queue(config);
+    ASSERT_NE(retry, 0u) << "the same identity must be reusable after rollback";
+    ASSERT_TRUE(cp->unregister_queue_registration(retry));
+    cp->fail_next_doorbell_monitor_start_for_testing();
+  }
+  EXPECT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_CREATE_QUEUE, &create), -EIO);
+  EXPECT_EQ(create.queue_id, 0u);
+  EXPECT_EQ(create.doorbell_offset, 0u);
+  EXPECT_EQ(soc_->sdma_queue_scheduler().active_queues(), 0u);
+  for (uint32_t rank = 0; rank < soc_->num_xcds(); ++rank) {
+    auto *cp = soc_->xcd(rank)->command_processor();
+    EXPECT_EQ(cp->registered_queue_count_for_test(), 0u) << rank;
+    EXPECT_FALSE(cp->doorbell_monitor_running_for_test()) << rank;
+    EXPECT_FALSE(cp->doorbell_monitor_joinable_for_test()) << rank;
+  }
+  ASSERT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+  EXPECT_EQ(create.doorbell_offset & ((1ULL << rocjitsu::KFD_MMAP_GPU_ID_SHIFT) - 1), 0u)
+      << "the failed startup must release the first doorbell";
+  if (sdma) {
+    EXPECT_EQ(soc_->sdma_queue_scheduler().active_queues(), 1u);
+  } else {
+    for (uint32_t rank = 0; rank < soc_->num_xcds(); ++rank)
+      EXPECT_EQ(soc_->xcd(rank)->command_processor()->registered_queue_count_for_test(), 1u);
+  }
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = create.queue_id;
+  EXPECT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(daemon_driver.close(process_id), 0);
+}
+
+TEST_F(KfdIoctlTest, DaemonComputeMonitorStartupFailureReleasesReplicasAndDoorbell) {
+  ASSERT_NO_FATAL_FAILURE(check_daemon_queue_startup_failure(/*sdma=*/false));
+}
+
+TEST_F(KfdIoctlTest, DaemonSdmaWorkerStartupFailureReleasesDoorbell) {
+  ASSERT_NO_FATAL_FAILURE(check_daemon_queue_startup_failure(/*sdma=*/true));
+}
+
 // ROCr places its queue object in a USERPTR allocation that KFD must update
 // directly. In daemon mode both sides map the backing descriptor returned by allocation, so
 // queue-pointer publication must use the daemon's retained alias of that same
@@ -5150,7 +5257,8 @@ TEST_F(KfdIoctlTest, DbgTrapFifoNotifierWritesOneBytePerEvent) {
   create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
 
-  rocjitsu::test::ScopedTempFile fifo_path("rocjitsu-debug-notifier-");
+  rocjitsu::test::ScopedTempFile fifo_path;
+  ASSERT_TRUE(fifo_path.initialize("rocjitsu-debug-notifier-"));
   ASSERT_EQ(::unlink(fifo_path.path().c_str()), 0);
   ASSERT_EQ(::mkfifo(fifo_path.path().c_str(), 0600), 0);
   const int notifier = ::open(fifo_path.path().c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);

@@ -4,7 +4,7 @@
 import argparse
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
@@ -14,6 +14,18 @@ from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 DEPRECATED_OPTIONS: Dict[str, Tuple[str, str]] = {
     "list_blocks": ("--list-blocks", "--list-metrics"),
     "list_available_metrics": ("--list-available-metrics", "--list-metrics"),
+}
+
+# Standard argparse actions that ExperimentalAction and DebugAction delegate to
+BASE_ACTIONS: Dict[str, Type[argparse.Action]] = {
+    "store": argparse._StoreAction,
+    "store_const": argparse._StoreConstAction,
+    "store_true": argparse._StoreTrueAction,
+    "store_false": argparse._StoreFalseAction,
+    "append": argparse._AppendAction,
+    "append_const": argparse._AppendConstAction,
+    "count": argparse._CountAction,
+    "extend": argparse._ExtendAction,
 }
 
 
@@ -94,17 +106,6 @@ def add_general_group(
         ),
     )
     general_group.add_argument(
-        "--list-metrics-gfx-id",
-        dest="list_metrics_gfx_id",
-        metavar="<arch>",
-        choices=supported_archs.keys(),
-        help=(
-            "List the blocks of GPU <arch> instead of the current GPU.\n"
-            "Add --list-metrics [ids]... to list their metrics.\n"
-            "Values: %(choices)s"
-        ),
-    )
-    general_group.add_argument(
         "--list-blocks",
         dest="list_blocks",
         metavar="<arch>",
@@ -141,6 +142,16 @@ def add_general_group(
             "--pc-sampling-interval)\n"
         ),
     )
+    general_group.add_argument(
+        "--debug",
+        action="store_true",
+        help=(
+            "Show the debug options in --help:\n"
+            "   Top level and profile: --debug-list-metrics-gfx-id\n"
+            "   Analyze: --debug-metric-expression, --debug-table-view, "
+            "--debug-verify-deps\n"
+        ),
+    )
 
 
 def build_parser(
@@ -150,9 +161,10 @@ def build_parser(
     argv: List[str],
 ) -> argparse.ArgumentParser:
     """Return the rocprof-compute command-line parser for argv."""
-    # Experimental options work only with --experimental before the workload's "--"
+    # --experimental and --debug count only before the workload's "--"
     workload_start = argv.index("--") if "--" in argv else len(argv)
     experimental_enabled = "--experimental" in argv[:workload_start]
+    debug_enabled = "--debug" in argv[:workload_start]
     parser = argparse.ArgumentParser(
         description=(
             "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
@@ -168,6 +180,7 @@ def build_parser(
         supported_archs,
         rocprof_compute_version,
         experimental_enabled,
+        debug_enabled,
     )
     return parser
 
@@ -178,6 +191,7 @@ def _omniarg_parser(
     supported_archs: Dict[str, str],
     rocprof_compute_version: Dict[str, Optional[str]],
     experimental_enabled: bool = False,
+    debug_enabled: bool = False,
 ) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)
@@ -191,6 +205,8 @@ def _omniarg_parser(
         supported_archs,
         rocprof_compute_version,
     )
+    debug_group = parser.add_argument_group("Debug Options")
+    _add_list_metrics_gfx_id(debug_group, supported_archs, debug_enabled)
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
     skills_note = _skills_note(rocprof_compute_home)
@@ -233,6 +249,8 @@ Examples:
         supported_archs,
         rocprof_compute_version,
     )
+    profile_debug_group = profile_parser.add_argument_group("Debug Options")
+    _add_list_metrics_gfx_id(profile_debug_group, supported_archs, debug_enabled)
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Roofline Options")
 
@@ -517,12 +535,10 @@ Examples:
         dest="membw_analysis",
         required=False,
         default=False,
-        base_action="store_const",
+        base_action="store_true",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="Memory Bandwidth Analysis",
-        nargs=0,
-        const=True,
         help="Enable Memory Bandwidth Analysis counters (block 30).",
     )
 
@@ -531,12 +547,10 @@ Examples:
         dest="pc_sampling",
         required=False,
         default=False,
-        base_action="store_const",
+        base_action="store_true",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="PC Sampling",
-        nargs=0,
-        const=True,
         help="Enable PC sampling (block 21) for profile mode.",
     )
     profile_group.add_argument(
@@ -605,6 +619,7 @@ Examples:
         supported_archs,
         rocprof_compute_version,
     )
+    analyze_debug_group = analyze_parser.add_argument_group("Debug Options")
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
 
@@ -617,12 +632,6 @@ Examples:
         nargs="+",
         action="append",
         help="Specify the raw data root dirs or desired results directory.",
-    )
-    analyze_group.add_argument(
-        "--verify-deps",
-        dest="verify_deps",
-        action="store_true",
-        help="Check the Python dependencies analyze mode needs, then exit.",
     )
     analyze_group.add_argument(
         "--list-stats",
@@ -802,20 +811,26 @@ Examples:
         default=2,
         help="Specify desired decimal precision of analysis results (Default: 2).",
     )
-    analyze_advanced_group.add_argument(
-        "-g", dest="debug", action="store_true", help="Debug single metric."
+    analyze_debug_group.add_argument(
+        "--debug-metric-expression",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
+        help="Print the counter data, and each metric's expression and inputs.",
     )
-    analyze_advanced_group.add_argument(
-        "--view",
-        dest="view",
-        metavar="<view>",
-        choices=["table"],  # future: e.g. "bar" for additional TTY views
-        default=None,
-        help=(
-            "Show the terminal output as plain tables, including the memory chart\n"
-            "and roofline (Default: each panel's own layout).\n"
-            "Values: %(choices)s"
-        ),
+    analyze_debug_group.add_argument(
+        "--debug-table-view",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
+        help="Force plain tables and ignore cli_style from YAML.",
+    )
+    analyze_debug_group.add_argument(
+        "--debug-verify-deps",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
+        help="Check the Python dependencies analyze mode needs, then exit.",
     )
     analyze_advanced_group.add_argument(
         "--specs-correction",
@@ -846,7 +861,71 @@ def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
     return None
 
 
-class ExperimentalAction(argparse.Action):
+def _add_list_metrics_gfx_id(
+    debug_group: argparse._ArgumentGroup,
+    supported_archs: Dict[str, str],
+    debug_enabled: bool,
+) -> None:
+    """Add --debug-list-metrics-gfx-id, which analyze doesn't take: it lists the
+    metrics of the -p workload's GPU."""
+    debug_group.add_argument(
+        "--debug-list-metrics-gfx-id",
+        metavar="<arch>",
+        choices=supported_archs.keys(),
+        action=DebugAction,
+        base_action="store",
+        debug_enabled=debug_enabled,
+        help=(
+            "With --list-metrics, list the blocks and metrics of GPU <arch>\n"
+            "instead of the current GPU.\n"
+            "Values: %(choices)s"
+        ),
+    )
+
+
+class CustomAction(argparse.Action):
+    """Parse an option like the standard argparse action named by base_action.
+
+    Subclasses change the help text or check the option before it is stored.
+    """
+
+    def __init__(
+        self,
+        option_strings: List[str],
+        dest: str,
+        base_action: str,
+        **kwargs: Any,
+    ) -> None:
+        if base_action not in BASE_ACTIONS:
+            raise ValueError(
+                f"Unsupported base_action: {base_action}. "
+                f"Specify one of: {', '.join(BASE_ACTIONS)}"
+            )
+        self._base_action = BASE_ACTIONS[base_action](option_strings, dest, **kwargs)
+        super().__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=self._base_action.nargs,
+            const=self._base_action.const,
+            default=self._base_action.default,
+            type=self._base_action.type,
+            choices=self._base_action.choices,
+            required=self._base_action.required,
+            help=self._base_action.help,
+            metavar=self._base_action.metavar,
+        )
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: Optional[str] = None,
+    ) -> None:
+        self._base_action(parser, namespace, values, option_string)
+
+
+class ExperimentalAction(CustomAction):
     """
     Custom action that enforces experimental feature gating.
     - Suppresses help text when experimental mode is disabled
@@ -858,56 +937,30 @@ class ExperimentalAction(argparse.Action):
     def __init__(
         self,
         option_strings: List[str],
+        dest: str,
+        base_action: str,
+        experimental_enabled: bool,
+        feature_label: str,
         help: str,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
-        self.experimental_enabled = kwargs.pop("experimental_enabled", False)
-        self.feature_label = kwargs.pop("feature_label", None)
+        self.experimental_enabled = experimental_enabled
+        self.feature_label = feature_label
 
-        # Extract the base_action
-        base_action = kwargs.pop("base_action", None)
-        if base_action is None:
-            raise ValueError(
-                "base_action is required for ExperimentalAction. "
-                "Specify one of: store, store_const, store_true, store_false, "
-                "append, append_const, count, extend"
-            )
-
-        if self.experimental_enabled:
+        if experimental_enabled:
             leading_whitespace = help[: len(help) - len(help.lstrip())]
             help_content = help.lstrip()
             help = f"{leading_whitespace}EXPERIMENTAL: {help_content}"
         else:
             help = argparse.SUPPRESS
 
-        super().__init__(
-            option_strings=option_strings,
-            help=help,
-            **kwargs,
-        )
-
-        # Map of action types to their __call__ methods
-        action_map = {
-            "store": argparse._StoreAction.__call__,
-            "store_const": argparse._StoreConstAction.__call__,
-            "store_true": argparse._StoreTrueAction.__call__,
-            "store_false": argparse._StoreFalseAction.__call__,
-            "append": argparse._AppendAction.__call__,
-            "append_const": argparse._AppendConstAction.__call__,
-            "count": argparse._CountAction.__call__,
-            "extend": argparse._ExtendAction.__call__,
-        }
-
-        if base_action not in action_map:
-            raise ValueError(f"Unsupported base_action: {base_action}")
-
-        self._base_action_call = action_map[base_action]
+        super().__init__(option_strings, dest, base_action, help=help, **kwargs)
 
     def __call__(
         self,
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
-        values,  # noqa: ANN001
+        values: object,
         option_string: Optional[str] = None,
     ) -> None:
         # Error if experimental feature used without --experimental flag
@@ -921,7 +974,32 @@ class ExperimentalAction(argparse.Action):
             f"{self.feature_label} is experimental and may change in future releases."
         )
 
-        self._base_action_call(self, parser, namespace, values, option_string)
+        super().__call__(parser, namespace, values, option_string)
+
+
+class DebugAction(CustomAction):
+    """
+    Custom action for debug options.
+    - Suppresses help text unless --debug is given
+    - Delegates to inner action for proper value storage
+    """
+
+    def __init__(
+        self,
+        option_strings: List[str],
+        dest: str,
+        base_action: str,
+        debug_enabled: bool,
+        help: str,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            option_strings,
+            dest,
+            base_action,
+            help=help if debug_enabled else argparse.SUPPRESS,
+            **kwargs,
+        )
 
 
 class CliHelpFormatter(argparse.RawTextHelpFormatter):
