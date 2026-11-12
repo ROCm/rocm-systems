@@ -44,7 +44,9 @@ class WorkflowScopeTests(unittest.TestCase):
         scopes = WORKFLOW["jobs"]["pre-commit"]["strategy"]["matrix"]["include"]
         names = [scope["check-name"] for scope in scopes]
         self.assertEqual(len(names), len(set(names)))
-        self.assertLessEqual(set(names), set(POLICY.required_checks))
+        self.assertLessEqual(
+            set(names), {check.name for check in POLICY.required_checks}
+        )
         self.assertEqual(
             WORKFLOW["jobs"]["pre-commit"]["strategy"]["fail-fast"], "false"
         )
@@ -52,10 +54,10 @@ class WorkflowScopeTests(unittest.TestCase):
             self.assertTrue(scope["sparse-checkout"].strip(), scope["scope"])
 
     def test_each_scope_failure_is_enforced_by_the_actual_bot(self) -> None:
-        for name in POLICY.required_checks:
+        for name in (check.name for check in POLICY.required_checks):
             runs = [
                 {"name": check, "conclusion": "failure" if check == name else "success"}
-                for check in POLICY.required_checks
+                for check in (check.name for check in POLICY.required_checks)
             ]
             with self.subTest(check=name):
                 missing, failing, _ = policy_check.summarize_required_checks(
@@ -70,14 +72,14 @@ class WorkflowScopeTests(unittest.TestCase):
                 self.assertFalse(rows[name].passed)
 
     def test_missing_and_running_checks_remain_pending(self) -> None:
-        for name in POLICY.required_checks:
+        for name in (check.name for check in POLICY.required_checks):
             for conclusion in ("missing", None):
                 runs = [
                     {
                         "name": check,
                         "conclusion": conclusion if check == name else "success",
                     }
-                    for check in POLICY.required_checks
+                    for check in (check.name for check in POLICY.required_checks)
                     if check != name or conclusion != "missing"
                 ]
                 with self.subTest(check=name, conclusion=conclusion):
@@ -95,13 +97,13 @@ class WorkflowScopeTests(unittest.TestCase):
 
     def test_metadata_results_do_not_override_failed_or_running_checks(self) -> None:
         for conclusion in ("failure", None):
-            for name in POLICY.required_checks:
+            for name in (check.name for check in POLICY.required_checks):
                 runs = [
                     {
                         "name": check,
                         "conclusion": conclusion if check == name else "success",
                     }
-                    for check in POLICY.required_checks
+                    for check in (check.name for check in POLICY.required_checks)
                 ]
                 runs.append(
                     {"name": "metadata-only / pre-commit", "conclusion": "skipped"}
