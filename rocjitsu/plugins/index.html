@@ -2896,8 +2896,12 @@ four-word encoding limit.</p>
 <span class="w">  </span><span class="k">auto</span><span class="w"> </span><span class="o">&amp;</span><span class="n">last</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">*</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">LastInstruction</span><span class="w"> </span><span class="o">*&gt;</span><span class="p">(</span><span class="n">wf</span><span class="p">.</span><span class="n">plugin_state</span><span class="p">(</span><span class="n">slot_index</span><span class="p">()));</span>
 <span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">inst</span><span class="p">.</span><span class="n">size</span><span class="p">();</span>
 <span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">inst</span><span class="p">.</span><span class="n">raw_encoding</span><span class="p">()</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="o">||</span>
-<span class="w">      </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">size_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">bytes</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">last</span><span class="p">.</span><span class="n">words</span><span class="p">))</span>
-<span class="w">    </span><span class="k">throw</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">logic_error</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">format</span><span class="p">(</span><span class="s">"instruction at PC {:#x} has no valid encoding"</span><span class="p">,</span><span class="w"> </span><span class="n">pc</span><span class="p">));</span>
+<span class="w">      </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">size_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">bytes</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">last</span><span class="p">.</span><span class="n">words</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">wf</span><span class="p">.</span><span class="n">instruction_execution_failed</span><span class="p">())</span>
+<span class="w">      </span><span class="n">wf</span><span class="p">.</span><span class="n">report_instruction_execution_error</span><span class="p">(</span>
+<span class="w">          </span><span class="n">amdgpu</span><span class="o">::</span><span class="n">InstructionExecutionError</span><span class="o">::</span><span class="n">PluginFailure</span><span class="p">,</span><span class="w"> </span><span class="s">"instruction has no valid encoding"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="p">;</span>
+<span class="w">  </span><span class="p">}</span>
 <span class="w">  </span><span class="n">last</span><span class="p">.</span><span class="n">pc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pc</span><span class="p">;</span>
 <span class="w">  </span><span class="n">last</span><span class="p">.</span><span class="n">word_count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">);</span>
 <span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">copy_n</span><span class="p">(</span><span class="n">inst</span><span class="p">.</span><span class="n">raw_encoding</span><span class="p">(),</span><span class="w"> </span><span class="n">last</span><span class="p">.</span><span class="n">word_count</span><span class="p">,</span><span class="w"> </span><span class="n">last</span><span class="p">.</span><span class="n">words</span><span class="p">.</span><span class="n">begin</span><span class="p">());</span>
@@ -2905,23 +2909,46 @@ four-word encoding limit.</p>
 
 <span class="c1">// Later, when a report about this wave needs text:</span>
 <span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">last</span><span class="p">.</span><span class="n">word_count</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">text</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">wf</span><span class="p">.</span><span class="n">disassemble_instruction</span><span class="p">(</span>
+<span class="w">  </span><span class="n">util</span><span class="o">::</span><span class="n">FailureOr</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">&gt;</span><span class="w"> </span><span class="n">text</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">wf</span><span class="p">.</span><span class="n">disassemble_instruction</span><span class="p">(</span>
 <span class="w">      </span><span class="n">std</span><span class="o">::</span><span class="n">span</span><span class="p">(</span><span class="n">last</span><span class="p">.</span><span class="n">words</span><span class="p">).</span><span class="n">first</span><span class="p">(</span><span class="n">last</span><span class="p">.</span><span class="n">word_count</span><span class="p">),</span><span class="w"> </span><span class="n">last</span><span class="p">.</span><span class="n">pc</span><span class="p">);</span>
-<span class="w">  </span><span class="c1">// ...</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">text</span><span class="p">.</span><span class="n">failed</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">wf</span><span class="p">.</span><span class="n">instruction_execution_failed</span><span class="p">())</span>
+<span class="w">      </span><span class="n">wf</span><span class="p">.</span><span class="n">report_instruction_execution_error</span><span class="p">(</span>
+<span class="w">          </span><span class="n">amdgpu</span><span class="o">::</span><span class="n">InstructionExecutionError</span><span class="o">::</span><span class="n">PluginFailure</span><span class="p">,</span><span class="w"> </span><span class="s">"cannot disassemble instruction"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">return</span><span class="p">;</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="w">  </span><span class="c1">// Use text.value().</span>
 <span class="p">}</span>
 </code></pre></div>
 <p><code>Wavefront::disassemble_instruction</code> decodes the copy with the wave's CU target
 decoder, so a standalone plugin module can use it without linking the
 simulator. Call it on the CU execution thread, for example from one of that
-wave's synchronous hooks. It throws <code>std::logic_error</code> if the encoding is empty,
-truncated, or cannot be decoded. Because the text comes from the copied bytes,
+wave's synchronous hooks. It returns <code>FailureOr&lt;std::string&gt;</code> and emits a diagnostic
+through the optional <code>DiagnosticEmitter</code> if the encoding is empty, truncated, or
+cannot be decoded. Because the text comes from the copied bytes,
 it describes the instruction that executed even if the code was later
 overwritten or unmapped. The race detector formats its instruction traces this
 way.</p>
+<p>Plugin callbacks, policy queries, constructors, destructors, and output sinks must
+not throw. This is a semantic contract; callback signatures do not require
+<code>noexcept</code>. From synchronous instruction hooks, report expected instruction or
+reporting failures through
+<code>Wavefront::report_instruction_execution_error()</code> and preserve any error already
+recorded on the wave. Every accepted asynchronous instruction must still receive
+its normal completion accounting before cancellation or shutdown.</p>
+<p><code>onAmdgpuWavefrontHalted</code> is a terminal notification. The wave's instruction-error
+state is discarded when this hook returns. Use <code>sink().write()</code> to report problems
+from this hook.</p>
 <h2 id="adding-a-new-plugin">Adding a new plugin<a class="headerlink" href="#adding-a-new-plugin" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Implement <code>ExecutionPlugin</code> in a new subdirectory. The plugin class
-   must be constructible from <code>const char *config_json</code>.</li>
+<li>Implement <code>ExecutionPlugin</code> in a new subdirectory. The plugin class can
+   provide a <code>const char *config_json</code> constructor, or a default constructor and
+   <code>util::Result initialize(const char *, util::DiagnosticEmitter)</code>.
+   The export macro uses the <code>const char *</code> constructor when available; it uses
+   the checked initializer only when that constructor is absent. A constructor
+   taking <code>const char * = nullptr</code> still takes precedence, so remove it when
+   migrating to the checked form. If initialization fails, the factory logs
+   <code>create failed: &lt;diagnostic&gt;</code>, destroys the candidate, and returns a null handle.</li>
 <li>Add a <code>plugin_export.cpp</code> that calls
    <code>ROCJITSU_DEFINE_PLUGIN(MyPlugin, "myname", schema)</code>.</li>
 <li>In <code>CMakeLists.txt</code>, add the object library and a
@@ -2960,6 +2987,12 @@ not register values: even a source can alias a destination being written.
 Callbacks must not retain instruction or wave references. There is no completion
 notification. Holding the callback mutex does not provide a complete
 architectural snapshot.</p>
+<p>Plugins that need to report instruction failures from register hooks must keep
+<code>supports_async_instructions()</code> false. Helper register hooks can run while the
+issuer clears the same wave's instruction error field for its next instruction;
+neither reading nor writing that field from a helper is safe. Issuer-thread issue
+callbacks may report failures. The CU checks the retained error after the full
+issue callback fanout and drains accepted jobs before cancelling the wave.</p>
 <p>Throughput, instruction mix, and kernel logging support this contract. The
 <a href="../race-detector/">simulator race detector</a> keeps synchronous execution until
 its dependency-event access and diagnostic context support concurrent register
