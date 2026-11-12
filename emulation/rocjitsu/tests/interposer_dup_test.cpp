@@ -2548,9 +2548,10 @@ protected:
   }
 
   int submit(uint32_t dwords, bool wait_input, uint64_t *sequence,
-             uint32_t engine = AMDGPU_HW_IP_COMPUTE, uint64_t point = 0,
-             uint32_t fence_handle = 0) {
+             uint32_t engine = AMDGPU_HW_IP_COMPUTE, uint64_t point = 0, uint32_t fence_handle = 0,
+             uint32_t ib_flags = 0) {
     drm_amdgpu_cs_chunk_ib ib{};
+    ib.flags = ib_flags;
     ib.va_start = kAddress;
     ib.ib_bytes = dwords * 4;
     ib.ip_type = engine;
@@ -2730,6 +2731,19 @@ protected:
     return rc;
   }
 };
+
+TEST_F(InterposerPm4Test, UnsupportedGdsResetLeavesQueueUsable) {
+  memory_[0] = 0xffff1000; // PM4 NOP.
+  uint64_t sequence = 0;
+  EXPECT_EQ(
+      submit(1, false, &sequence, AMDGPU_HW_IP_COMPUTE, 0, 0, AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID),
+      -1);
+  EXPECT_EQ(errno, EINVAL);
+
+  ASSERT_EQ(submit(1, false, &sequence), 0);
+  EXPECT_EQ(sequence, 1u);
+  EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
+}
 
 TEST_F(InterposerPm4Test, SubmissionFenceQueryPollsAndWaitsForCompletion) {
   uint64_t busy = 99;

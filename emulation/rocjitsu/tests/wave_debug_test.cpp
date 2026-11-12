@@ -72,6 +72,270 @@ struct WaveDebugFixture {
   }
 };
 
+TEST(WaveDebugTest, FlatB64AtomicPreservesPrivateDwordsAndNeighboringLane) {
+  constexpr uint64_t private_base = uint64_t{4} << 32;
+  constexpr uint64_t scratch = 0x20000;
+  constexpr unsigned pid = 9;
+  constexpr unsigned shift = amdgpu::GpuMemory::PAGE_SHIFT;
+  constexpr unsigned size = amdgpu::GpuMemory::PAGE_SIZE;
+  // flat_atomic_add_x2 (flat_atomic_add_u64 on GFX11/GFX12) returning v[8:9].
+  constexpr std::array cdna{0xdd890000u, 0x08000402u, 0u};
+  constexpr std::array gfx10{0xdd490000u, 0x087d0402u, 0u};
+  constexpr std::array gfx11{0xdd0c4000u, 0x087c0402u, 0u};
+  constexpr std::array gfx12{0xec10c07cu, 0x02100000u, 2u};
+  for (const auto &[arch, words] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA2, cdna}, std::pair{ROCJITSU_CODE_ARCH_RDNA2, gfx10},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA3, gfx11}, std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, gfx11},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA4, gfx12}, std::pair{ROCJITSU_CODE_ARCH_CDNA5, gfx12}}) {
+    const bool private_memviol =
+        arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+        arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+    const bool encoded_scratch = arch == ROCJITSU_CODE_ARCH_CDNA5;
+    const uint64_t global = encoded_scratch ? 0x200050000ull : 0x50000;
+    for (bool private_lane : {false, true}) {
+      for (const auto &[global_mapped, shader] : {std::pair{false, false}, std::pair{true, false},
+                                                  std::pair{false, true}, std::pair{true, true}}) {
+        if (shader && (!private_memviol || !private_lane))
+          continue;
+        SCOPED_TRACE(testing::Message()
+                     << "arch=" << arch << " private_lane=" << private_lane
+                     << " global_mapped=" << global_mapped << " shader=" << shader);
+        WaveDebugFixture fx(arch);
+        ASSERT_NE(fx.cu, nullptr);
+        fx.l2.set_backing_memory(&fx.gpu_mem);
+        fx.cu->set_apertures(0, 0, private_base, private_base + UINT32_MAX);
+        KfdProcess::PageTable pages;
+        util::DistributedSharedMutex mutex;
+        std::vector<uint8_t> code(size), scratch_page(size), global_page(size);
+        pages[kKernelAddr >> shift] = {code.data(), amdgpu::Mtype::RW};
+        pages[scratch >> shift] = {scratch_page.data(), amdgpu::Mtype::RW};
+        if (global_mapped)
+          pages[global >> shift] = {global_page.data(), amdgpu::Mtype::RW};
+        fx.gpu_mem.register_process(pid, &pages, &mutex);
+        for (unsigned i = 0; i < words.size(); ++i)
+          fx.gpu_mem.write32(kKernelAddr + 4 * i, words[i], pid);
+        fx.gpu_mem.write32(scratch, 41, pid);
+        if (global_mapped)
+          fx.gpu_mem.write32(global, 37, pid);
+        auto *wf = fx.dispatch(kKernelAddr);
+        ASSERT_NE(wf, nullptr);
+        const uint64_t second_dword = scratch + wf->wf_size() * sizeof(uint32_t);
+        fx.gpu_mem.write32(second_dword, 73, pid);
+        fx.gpu_mem.write32(scratch + 4, 53, pid);
+        wf->set_process_id(pid);
+        wf->set_apertures(0, 0, private_base, private_base + UINT32_MAX,
+                          /*override_launch=*/true);
+        wf->set_scratch_base(scratch);
+        wf->set_scratch_lane_size(256);
+        wf->set_exec(private_lane ? 3 : 2);
+        for (unsigned lane = 0; lane < 2; ++lane) {
+          const uint64_t address = lane ? global : (encoded_scratch ? scratch : private_base);
+          const auto base = wf->vgpr_alloc().base;
+          fx.cu->write_vgpr(base + 2, lane, uint32_t(address));
+          fx.cu->write_vgpr(base + 3, lane, uint32_t(address >> 32));
+          fx.cu->write_vgpr(base + 4, lane, 1 + lane);
+          fx.cu->write_vgpr(base + 5, lane, lane == 0 ? 1 : 0);
+          fx.cu->write_vgpr(base + 8, lane, 0xdeadbeef);
+          fx.cu->write_vgpr(base + 9, lane, 0xabcdef01);
+        }
+        using Fault = std::pair<uint64_t, bool>;
+        std::vector<Fault> faults;
+        fx.cu->set_debug_active(true);
+        std::vector<uint64_t> watched;
+        fx.cu->set_watchpoint_handler([&](auto &, uint64_t address, uint32_t, bool, bool) {
+          watched.push_back(address);
+          return false;
+        });
+        fx.cu->set_memory_violation_handler(
+            [&](auto &wave, uint64_t address, bool write, uint64_t) {
+              faults.emplace_back(address, write);
+              wave.debug_trap(0);
+              return true;
+            });
+        unsigned step_stops = 0;
+        wf->set_debug_single_step(global_mapped && (!private_lane || private_memviol));
+        fx.cu->set_single_step_handler([&](auto &wave) {
+          ++step_stops;
+          wave.debug_trap(0);
+          return true;
+        });
+        unsigned aperture_stops = 0;
+        fx.cu->set_aperture_violation_handler([&](auto &wave) {
+          ++aperture_stops;
+          wave.debug_trap(0);
+          return true;
+        });
+        if (shader)
+          fx.cu->set_trap_handler_resolver([](const auto &) {
+            return amdgpu::ComputeUnitCore::TrapHandlerConfig{.tba = kTrapHandlerAddr};
+          });
+        fx.cu->step();
+        EXPECT_EQ(step_stops, unsigned(global_mapped && !private_lane));
+        if (private_lane && private_memviol) {
+          ASSERT_TRUE(wf->memory_trap_pending());
+          fx.cu->step();
+          EXPECT_FALSE(wf->memory_trap_pending());
+          EXPECT_EQ(wf->in_trap_handler(), shader);
+          EXPECT_EQ(wf->debug_halted(), !shader);
+          EXPECT_EQ(aperture_stops, unsigned(!shader));
+          EXPECT_EQ(step_stops, 0u);
+          if (shader) {
+            EXPECT_EQ(wf->pc, kTrapHandlerAddr);
+            EXPECT_EQ(wf->ttmp(0), kKernelAddr + (words == gfx12 ? 12u : 8u));
+          }
+        }
+        EXPECT_EQ(fx.gpu_mem.read32(scratch, pid), 41u);
+        EXPECT_EQ(fx.gpu_mem.read32(scratch + 4, pid), 53u);
+        EXPECT_EQ(fx.gpu_mem.read32(second_dword, pid), 73u);
+        // The older targets have no qualified trap or global-lane result
+        // when the same instruction also addresses private storage.
+        if (!private_lane || private_memviol) {
+          const auto expected = !private_lane && !global_mapped ? std::vector<Fault>{{global, true}}
+                                                                : std::vector<Fault>{};
+          EXPECT_EQ(faults, expected);
+          EXPECT_EQ(bool(wf->trapsts() & (1u << 8)), private_lane);
+          EXPECT_EQ(watched, (!private_lane && global_mapped ? std::vector<uint64_t>{global}
+                                                             : std::vector<uint64_t>{}));
+          EXPECT_EQ(fx.cu->read_vgpr(wf->vgpr_alloc().base + 8, 0), 0xdeadbeefu);
+          EXPECT_EQ(fx.cu->read_vgpr(wf->vgpr_alloc().base + 9, 0), 0xabcdef01u);
+          if (global_mapped) {
+            EXPECT_EQ(fx.gpu_mem.read32(global, pid), private_lane ? 37u : 39u);
+          }
+        }
+        wf->halt();
+        fx.gpu_mem.unregister_process(pid);
+      }
+    }
+  }
+}
+
+TEST(WaveDebugTest, MisalignedFlatLdsAtomicPrecedesGlobalFaultAndWatchpoint) {
+  constexpr uint64_t shared = uint64_t{3} << 32, global = 0x50000;
+  constexpr uint32_t pid = 9, shift = amdgpu::GpuMemory::PAGE_SHIFT;
+  constexpr uint32_t size = amdgpu::GpuMemory::PAGE_SIZE;
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    const bool gfx11 = arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+    const std::array code =
+        gfx11 ? std::array{0xdcd44000u, 0x007c0402u, 0u} : std::array{0xec0d407cu, 0x02100000u, 2u};
+    for (unsigned offset : {4u, 5u, 0x80000004u}) {
+      if (offset >= 0x80000000u && arch != ROCJITSU_CODE_ARCH_CDNA5)
+        continue;
+      for (bool mapped : {false, true}) {
+        SCOPED_TRACE(testing::Message()
+                     << arch << " LDS offset=" << offset << " mapped=" << mapped);
+        WaveDebugFixture fx(arch);
+        ASSERT_NE(fx.cu, nullptr);
+        fx.l2.set_backing_memory(&fx.gpu_mem);
+        fx.cu->set_apertures(shared, shared + UINT32_MAX, 0, 0);
+        std::vector<uint8_t> kernel(size), data(size);
+        KfdProcess::PageTable pages;
+        util::DistributedSharedMutex mutex;
+        pages[kKernelAddr >> shift] = {kernel.data(), amdgpu::Mtype::RW};
+        if (mapped)
+          pages[global >> shift] = {data.data(), amdgpu::Mtype::RW};
+        fx.gpu_mem.register_process(pid, &pages, &mutex);
+        for (unsigned i = 0; i < code.size(); ++i)
+          fx.gpu_mem.write32(kKernelAddr + 4 * i, code[i], pid);
+        if (mapped)
+          fx.gpu_mem.write32(global, 37, pid);
+        auto *wf = fx.dispatch(kKernelAddr);
+        ASSERT_NE(wf, nullptr);
+        wf->set_process_id(pid);
+        wf->set_exec(3);
+        wf->set_lds_size(1024);
+        wf->lds().write32(4, 41);
+        for (unsigned lane = 0; lane < 2; ++lane) {
+          const uint64_t address = lane ? global : shared + offset;
+          const auto base = wf->vgpr_alloc().base;
+          fx.cu->write_vgpr(base + 2, lane, uint32_t(address));
+          fx.cu->write_vgpr(base + 3, lane, uint32_t(address >> 32));
+          fx.cu->write_vgpr(base + 4, lane, 1 + lane);
+        }
+        std::vector<uint64_t> watched;
+        std::vector<uint64_t> faults;
+        fx.cu->set_debug_active(true);
+        fx.cu->set_watchpoint_handler(
+            [&](auto &, uint64_t address, uint32_t bytes, bool write, bool atomic) {
+              EXPECT_EQ(bytes, 4u);
+              EXPECT_TRUE(write && atomic);
+              watched.push_back(address);
+              return false;
+            });
+        fx.cu->set_memory_violation_handler(
+            [&](auto &wave, uint64_t address, bool write, uint64_t) {
+              // The synchronous memory violation has no translated address.
+              EXPECT_EQ(write, address == global);
+              faults.push_back(address);
+              wave.debug_trap(0);
+              return true;
+            });
+        fx.cu->step();
+        if (offset != 4) {
+          EXPECT_EQ(faults, (std::vector<uint64_t>{0}));
+        } else if (!mapped) {
+          EXPECT_EQ(faults, (std::vector<uint64_t>{global}));
+        } else {
+          EXPECT_TRUE(faults.empty());
+        }
+        if (mapped && offset == 4) {
+          EXPECT_EQ(watched, (std::vector<uint64_t>{shared + 4, global}));
+          EXPECT_EQ(wf->lds().read32(4), 42u);
+        } else {
+          EXPECT_TRUE(watched.empty());
+          EXPECT_EQ(wf->lds().read32(4), 41u);
+        }
+        wf->halt();
+        fx.gpu_mem.unregister_process(pid);
+      }
+    }
+  }
+}
+
+TEST(WaveDebugTest, ScalarBufferProbesOnlyInBoundsDwords) {
+  constexpr uint64_t page = amdgpu::GpuMemory::PAGE_SIZE, data = 0x10000, addr = data + page - 4;
+  constexpr uint32_t pid = 9, value = 0x12345678u, sentinel = 0xdeadbeefu;
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    for (unsigned bound : {0u, 4u, 8u}) {
+      SCOPED_TRACE(bound);
+      WaveDebugFixture fx(arch);
+      fx.l2.set_backing_memory(&fx.gpu_mem);
+      std::vector<uint8_t> code(page), payload(page);
+      KfdProcess::PageTable pages;
+      util::DistributedSharedMutex mutex;
+      pages[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {code.data(), amdgpu::Mtype::RW};
+      pages[data >> amdgpu::GpuMemory::PAGE_SHIFT] = {payload.data(), amdgpu::Mtype::RW};
+      fx.gpu_mem.register_process(pid, &pages, &mutex);
+      // s_buffer_load_b64 s[4:5], s[0:3], null
+      fx.gpu_mem.write32(kKernelAddr, arch == ROCJITSU_CODE_ARCH_RDNA4 ? 0xf4022100u : 0xf4240100u,
+                         pid);
+      fx.gpu_mem.write32(kKernelAddr + 4, 0xf8000000u, pid);
+      fx.gpu_mem.write32(addr, value, pid);
+      auto *wf = fx.dispatch(kKernelAddr);
+      ASSERT_NE(wf, nullptr);
+      wf->set_process_id(pid);
+      const uint32_t sb = wf->sgpr_alloc().base;
+      const std::array<uint32_t, 6> registers{uint32_t{addr}, 0, bound, 0, sentinel, sentinel};
+      for (size_t i = 0; i < registers.size(); ++i)
+        fx.cu->write_sgpr(sb + i, registers[i]);
+      unsigned faults = 0;
+      fx.cu->set_debug_active(true);
+      fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &w, uint64_t, bool, uint64_t) {
+        ++faults;
+        w.debug_trap(0);
+        return true;
+      });
+      fx.cu->step();
+      EXPECT_EQ(faults, bound == 8);
+      EXPECT_EQ(wf->debug_read_sgpr(4), bound == 8 ? sentinel : bound ? value : 0u);
+      EXPECT_EQ(wf->debug_read_sgpr(5), bound == 8 ? sentinel : 0u);
+      wf->halt();
+      fx.gpu_mem.unregister_process(pid);
+    }
+  }
+}
+
 TEST(WaveDebugTest, DebuggerReadsPreservePhysicalStorageBoundsAtNonzeroOffsets) {
   const auto check = []<GpuIsa Isa>(rj_code_arch_t arch) {
     SCOPED_TRACE(arch);
@@ -1055,6 +1319,45 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
 // A multi-byte access that starts on a mapped page can still run off the end of
 // it. Checking only the first byte let such an access through with no
 // EC_QUEUE_WAVE_MEMORY_VIOLATION, so the whole touched range is validated.
+TEST(WaveDebugTest, FlatFaultUsesTheOriginalSegmentAtAnApertureBoundary) {
+  constexpr uint64_t shared = uint64_t{3} << 32;
+  for (bool starts_in_lds : {false, true}) {
+    WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    constexpr unsigned process = 9;
+    constexpr uint64_t page_size = amdgpu::GpuMemory::PAGE_SIZE;
+    std::vector<uint8_t> code(page_size);
+    KfdProcess::PageTable pages;
+    util::DistributedSharedMutex mutex;
+    pages[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {code.data(), amdgpu::Mtype::RW};
+    fx.gpu_mem.register_process(process, &pages, &mutex);
+    const std::array words{0xec05007cu, 0u, 0x402u}; // flat_load_b32 v0, v[2:3] offset:4
+    for (unsigned i = 0; i < words.size(); ++i)
+      fx.gpu_mem.write32(kKernelAddr + 4 * i, words[i], process);
+    fx.cu->set_apertures(shared, shared + UINT32_MAX, 0, 0);
+    auto *wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(wave, nullptr);
+    wave->set_process_id(process);
+    wave->set_exec(1);
+    wave->set_lds_size(512);
+    const uint64_t pointer = starts_in_lds ? shared + 0xfffffffc : shared - 4;
+    const auto base = wave->vgpr_alloc().base;
+    fx.cu->write_vgpr(base + 2, 0, static_cast<uint32_t>(pointer));
+    fx.cu->write_vgpr(base + 3, 0, static_cast<uint32_t>(pointer >> 32));
+    fx.cu->set_debug_active(true);
+    std::optional<uint64_t> fault;
+    fx.cu->set_memory_violation_handler(
+        [&](amdgpu::Wavefront &stopped, uint64_t addr, bool, uint64_t) {
+          fault = addr;
+          stopped.debug_trap(0);
+          return true;
+        });
+    fx.cu->step();
+    EXPECT_EQ(fault, starts_in_lds ? std::nullopt : std::optional(shared));
+    fx.gpu_mem.unregister_process(process);
+  }
+}
+
 TEST(WaveDebugTest, ScalarLoadStraddlingIntoUnmappedPageReportsMemoryViolation) {
   WaveDebugFixture fx;
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -1503,6 +1806,7 @@ TEST(WaveDebugTest, TrapRegistersRoundTripAndReset) {
 // -----------------------------------------------------------------------------
 
 struct ParsedWave {
+  uint64_t sgprs_addr = 0;
   uint64_t pc = 0, exec = 0, vcc = 0, wave_id = 0;
   uint32_t status = 0, trapsts = 0, mode = 0, m0 = 0, ttmp6 = 0, ttmp11 = 0;
   bool first = false, last = false;
@@ -1561,6 +1865,7 @@ std::vector<ParsedWave> parse_cwsr(const std::map<uint64_t, uint32_t> &mem, uint
     const uint64_t vgprs_addr = accv - static_cast<uint64_t>(vgpr_count) * 256;
 
     ParsedWave pw;
+    pw.sgprs_addr = sgprs_addr;
     pw.last = rl & (1u << 16);
     pw.first = rl & (1u << 17);
     pw.m0 = rd(hwregs + 0 * 4);
@@ -1945,6 +2250,42 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
 
 // rocm-dbgapi applies each COMPUTE_RELAUNCH state to following wave words.
 // A large LDS group must not make unrelated groups consume the same stride.
+TEST(WaveDebugTest, Cdna3CwsrUsesEachWavesPhysicalSgprAllocation) {
+  constexpr uint64_t base = 0x400000000ULL;
+  constexpr uint32_t bytes = 0x40000;
+  const std::array<uint32_t, 3> encoded{16, 24, 106}, physical{16, 32, 112}, vcc_slot{14, 30, 106};
+  std::vector<kmd::CwsrWaveState> waves;
+  for (uint32_t i = 0; i < encoded.size(); ++i) {
+    auto wave = make_wave(i + 1, 0x2000 + 4 * i);
+    wave.num_sgprs = encoded[i];
+    wave.sgprs.resize(encoded[i], 0x01020304);
+    wave.vcc = 0x123456789abcdef0ull + i;
+    wave.flat_scratch = 0x23456789abcdef00ull + i;
+    waves.push_back(wave);
+  }
+  std::map<uint64_t, uint32_t> image;
+  auto write32 = [&](uint64_t address, uint32_t value) { image[address] = value; };
+  auto read32 = [&](uint64_t address) { return image.at(address); };
+  auto layout = kmd::serialize_queue_cwsr(base, bytes, waves, write32, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(layout.ok);
+  const auto parsed = parse_cwsr(image, base, 512);
+  ASSERT_EQ(parsed.size(), waves.size());
+  for (size_t i = 0; i < waves.size(); ++i) {
+    ASSERT_EQ(parsed[i].sgprs.size(), physical[i]);
+    EXPECT_EQ(parsed[i].vcc, waves[i].vcc);
+    const uint64_t vcc = parsed[i].sgprs_addr + vcc_slot[i] * 4;
+    const uint64_t flat = vcc - 4 * sizeof(uint32_t);
+    EXPECT_EQ(read32(flat), static_cast<uint32_t>(waves[i].flat_scratch));
+    EXPECT_EQ(read32(flat + 4), static_cast<uint32_t>(waves[i].flat_scratch >> 32));
+    write32(flat, 0x87654321u);
+    write32(vcc + 4, 0xfedcba98u);
+  }
+  ASSERT_TRUE(kmd::deserialize_queue_cwsr(base, bytes, waves, read32, ROCJITSU_CODE_ARCH_CDNA3));
+  for (uint32_t i = 0; i < waves.size(); ++i) {
+    EXPECT_EQ(waves[i].flat_scratch, 0x2345678987654321ull);
+    EXPECT_EQ(waves[i].vcc, 0xfedcba989abcdef0ull + i);
+  }
+}
 TEST(WaveDebugTest, CwsrUsesGroupLdsStateChanges) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x4000;
