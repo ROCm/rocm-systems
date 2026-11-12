@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -75,6 +76,78 @@ sorted_rows(loaded_trace_t& t, const std::vector<std::uint32_t>& idxs)
     return rows;
 }
 
+// Each flow end binds to the innermost event of its lane that holds its time: the event
+// with the latest start among those that started and have not ended. Ends with no such
+// event are left out and counted.
+void
+bind_flows(loaded_trace_t&                           trace,
+           pytorch_store_t&                          store,
+           const std::map<track_key_t, std::size_t>& host_track_of,
+           const std::map<track_key_t, std::size_t>& gpu_track_of)
+{
+    struct pending_t
+    {
+        std::uint64_t ts;
+        std::size_t   flow;
+    };
+    std::map<std::size_t, std::vector<pending_t>> by_track;
+    for(std::size_t i = 0; i < trace.flows.size(); ++i)
+    {
+        const auto&                flow = trace.flows[i];
+        const track_key_t          key{ flow.pid, flow.tid };
+        std::optional<std::size_t> track;
+        if(const auto it = host_track_of.find(key); it != host_track_of.end())
+        {
+            track = it->second;
+        }
+        else if(const auto lane = gpu_track_of.find(key); lane != gpu_track_of.end())
+        {
+            track = lane->second;
+        }
+        if(!track)
+        {
+            ++trace.diag.flow_unbound;
+            continue;
+        }
+        bool clamped = false;
+        by_track[*track].push_back({ to_ns(trace.base_time_ns, flow.ts_ns, clamped), i });
+    }
+
+    for(auto& [track, flows] : by_track)
+    {
+        const auto& rows = store.tracks[track].rows;
+        std::stable_sort(
+            flows.begin(), flows.end(), [](const pending_t& a, const pending_t& b) {
+                return a.ts < b.ts;
+            });
+        std::vector<std::size_t> open;
+        std::size_t              next = 0;
+        for(const auto& pending : flows)
+        {
+            while(next < rows.size() && rows[next].start <= pending.ts)
+                open.push_back(next++);
+            while(!open.empty() && rows[open.back()].end < pending.ts)
+                open.pop_back();
+            if(open.empty())
+            {
+                ++trace.diag.flow_unbound;
+                continue;
+            }
+            const auto& flow = trace.flows[pending.flow];
+            store.flows.push_back({ rows[open.back()].event,
+                                    flow.phase,
+                                    flow.id,
+                                    flow.category,
+                                    flow.args_off,
+                                    flow.args_len });
+        }
+    }
+    std::stable_sort(
+        store.flows.begin(),
+        store.flows.end(),
+        [](const bound_flow_t& a, const bound_flow_t& b) { return a.event < b.event; });
+}
+
 }  // namespace
 
 pytorch_store_t
@@ -92,6 +165,8 @@ load_store(const std::string& path, std::function<bool()> cancelled)
 
     std::map<track_key_t, std::vector<std::uint32_t>> host_groups;
     std::map<track_key_t, std::vector<std::uint32_t>> gpu_groups;
+    std::map<track_key_t, std::size_t>                host_track_of;
+    std::map<track_key_t, std::size_t>                gpu_track_of;
     std::map<std::int64_t, std::uint64_t>             host_events_by_pid;
     std::unordered_map<std::int64_t, std::int64_t>    launcher_pid_by_link;
     for(std::size_t i = 0; i < trace.events.size(); ++i)
@@ -145,6 +220,7 @@ load_store(const std::string& path, std::function<bool()> cancelled)
         track.tid      = key.second;
         track.rows     = sorted_rows(trace, idxs);
         std::vector<std::uint32_t>{}.swap(idxs);
+        host_track_of.emplace(key, store.tracks.size());
         store.tracks.push_back(std::move(track));
     }
 
@@ -173,8 +249,10 @@ load_store(const std::string& path, std::function<bool()> cancelled)
         track.stream_id = static_cast<std::uint64_t>(key.second);
         track.rows      = sorted_rows(trace, idxs);
         std::vector<std::uint32_t>{}.swap(idxs);
+        gpu_track_of.emplace(key, store.tracks.size());
         store.tracks.push_back(std::move(track));
     }
+    bind_flows(trace, store, host_track_of, gpu_track_of);
 
     for(auto& track : store.tracks)
     {

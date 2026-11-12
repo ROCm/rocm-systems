@@ -173,12 +173,13 @@ pytorch_source::load_catalog(common::thread_pool& /*workers*/,
         events += track.rows.size();
     }
     LOG_INFO("[Profiler-Hub] source: events={} tracks={} dropped_without_ts_dur={} "
-             "clamped_timestamps={} other_phases={} gunzip_ms={} parse_ms={} "
-             "derive_ms={}",
+             "clamped_timestamps={} unbound_flows={} other_phases={} gunzip_ms={} "
+             "parse_ms={} derive_ms={}",
              events,
              store.tracks.size(),
              store.diag.bad_events,
              store.diag.clamped_events,
+             store.diag.flow_unbound,
              store.diag.other_events,
              store.diag.gunzip_ms,
              store.diag.parse_ms,

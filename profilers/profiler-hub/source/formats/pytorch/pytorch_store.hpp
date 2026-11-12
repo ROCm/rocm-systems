@@ -25,6 +25,17 @@ struct store_row_t
     std::uint32_t              event{};  // index into pytorch_store_t::events
 };
 
+// A flow arrow end, bound to the event that encloses it.
+struct bound_flow_t
+{
+    std::uint32_t event{};  // index into pytorch_store_t::events
+    char          phase{};  // 's' or 'f'
+    std::int64_t  id{};
+    std::string   category;
+    std::uint64_t args_off{};
+    std::uint32_t args_len{};
+};
+
 struct store_track_t
 {
     std::uint32_t              id{};
@@ -46,6 +57,7 @@ struct pytorch_store_t
     std::vector<store_track_t>   tracks;
     std::vector<event_t>         events;  // file order
     std::vector<memory_sample_t> memory;  // by event index
+    std::vector<bound_flow_t>    flows;   // by event index
     std::uint64_t
         cpu_agent_id{};  // set by fill_catalog; 0 when no memory event is on the CPU
     std::string                                                   args;

@@ -554,8 +554,10 @@ private:
         std::int64_t    corr = -1, ext = -1;
         bool            has_args = false;
         memory_sample_t memory;
-        std::int64_t    sort_index = 0;
-        bool            has_sort   = false;
+        std::int64_t    sort_index  = 0;
+        bool            has_sort    = false;
+        std::int64_t    flow_id     = 0;
+        bool            has_flow_id = false;
     };
 
     enum class capture_t
@@ -637,6 +639,11 @@ private:
             else if(m_k3 == "tid")
             {
                 m_cur.tid = i;
+            }
+            else if(m_k3 == "id")
+            {
+                m_cur.flow_id     = i;
+                m_cur.has_flow_id = true;
             }
         }
         else if(m_depth == 4 && m_in_event && m_k3 == "args")
@@ -754,6 +761,23 @@ private:
         return where;
     }
 
+    void add_flow()
+    {
+        const bool wanted = m_cur.cat == "fwdbwd" || m_cur.cat == "forward_backward" ||
+                            m_cur.cat == "critical_path" ||
+                            m_cur.cat.starts_with("async_");
+        if(!wanted || !m_cur.has_flow_id || !m_cur.has_ts) return;
+        flow_t flow;
+        flow.phase                             = m_cur.ph;
+        flow.id                                = m_cur.flow_id;
+        flow.ts_ns                             = m_cur.ts_ns;
+        flow.pid                               = m_cur.pid;
+        flow.tid                               = m_cur.tid;
+        flow.category                          = m_cur.cat;
+        std::tie(flow.args_off, flow.args_len) = keep_args();
+        m_t.flows.push_back(std::move(flow));
+    }
+
     void add_marker()
     {
         marker_t marker;
@@ -819,8 +843,14 @@ private:
                     if(m_cur.has_ts) add_marker();
                 }
                 break;
-            case 's': ++d.flow_s; break;
-            case 'f': ++d.flow_f; break;
+            case 's':
+                ++d.flow_s;
+                add_flow();
+                break;
+            case 'f':
+                ++d.flow_f;
+                add_flow();
+                break;
             case 'M':
                 ++d.meta_events;
                 if(m_cur.name == "thread_name")
