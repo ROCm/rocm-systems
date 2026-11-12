@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_allocation.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
@@ -23,6 +24,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+
+#include <limits>
 
 namespace {
 
@@ -45,6 +48,23 @@ class TestScalarMemPipeline : public ScalarMemPipeline {
 public:
   using ScalarMemPipeline::ScalarMemPipeline;
 };
+
+TEST(LdsByteRangeTest, WholeElementsRespectExclusiveBounds) {
+  struct Case {
+    uint64_t address, bytes, element_bytes, end, retained;
+  };
+  constexpr auto max = std::numeric_limits<uint64_t>::max();
+  const Case cases[] = {
+      {64, 16, 4, 80, 16}, {64, 16, 4, 79, 12},     {64, 16, 1, 79, 15},
+      {80, 16, 4, 80, 0},  {81, 16, 4, 80, 0},      {64, 16, 0, 80, 0},
+      {64, 0, 4, 80, 0},   {max - 3, 8, 2, max, 2}, {max, 8, 1, max, 0},
+  };
+  for (const auto &c : cases) {
+    SCOPED_TRACE(testing::Message()
+                 << c.address << ", " << c.bytes << ", " << c.element_bytes << ", " << c.end);
+    EXPECT_EQ(whole_element_bytes_in_range(c.address, c.bytes, c.element_bytes, c.end), c.retained);
+  }
+}
 
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite) {
   PluginFixture f;
