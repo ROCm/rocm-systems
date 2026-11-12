@@ -265,6 +265,7 @@ load_store(const std::string& path, std::function<bool()> cancelled)
 
     store.events        = std::move(trace.events);
     store.memory        = std::move(trace.memory);
+    store.cat_classes   = std::move(trace.cat_classes);
     store.args          = std::move(trace.args);
     store.names         = std::move(trace.names);
     store.cats          = std::move(trace.cats);

@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -38,6 +39,19 @@ public:
 
     [[nodiscard]] reader_types::histogram_t histogram(
         const histogram_grid_t& grid) override;
+
+    [[nodiscard]] reader_types::timeline_event_list_t correlated_events(
+        const reader_types::timeline_event_t& event) override;
+    [[nodiscard]] reader_types::call_stack_t call_stack(
+        const reader_types::timeline_event_t& event) override;
+    [[nodiscard]] std::optional<reader_types::region_data_t> region_details(
+        const reader_types::timeline_event_t& event) override;
+    [[nodiscard]] std::optional<reader_types::kernel_dispatch_data_t>
+    kernel_dispatch_details(const reader_types::timeline_event_t& event) override;
+    [[nodiscard]] std::optional<reader_types::memory_copy_data_t> memory_copy_details(
+        const reader_types::timeline_event_t& event) override;
+    [[nodiscard]] std::optional<reader_types::memory_alloc_data_t> memory_alloc_details(
+        const reader_types::timeline_event_t& event) override;
 
 private:
     friend class pytorch_row_reader;
@@ -83,6 +97,33 @@ private:
     [[nodiscard]] const track_rows_t& track_rows(
         const reader_types::track_info_t& track) const;
 
+    // Where an event's row is: its track and its place in that track's rows.
+    struct located_t
+    {
+        std::size_t        track{};
+        const store_row_t* row{};
+        std::size_t        id{};
+    };
+
+    // One event that has a correlation, for the join correlated_events makes.
+    struct correlation_t
+    {
+        std::int64_t link{};
+        std::size_t  id{};
+        std::uint8_t type{};
+    };
+
+    [[nodiscard]] std::optional<located_t> locate(
+        const reader_types::unique_timeline_event_id_t& id) const;
+    [[nodiscard]] std::string_view               args_of(const event_t& event) const;
+    [[nodiscard]] std::string                    extdata_of(const store_row_t& row) const;
+    [[nodiscard]] reader_types::event_data_ptr_t event_data_of(
+        const store_row_t& row) const;
+    [[nodiscard]] reader_types::timeline_event_t timeline_event_of(
+        const located_t&           at,
+        reader_types::event_type_t type) const;
+    [[nodiscard]] reader_types::agent_info_ptr_t agent_info(std::uint64_t agent) const;
+
     // The agent a memory event is on: the CPU agent, a GPU's, or 0 when its device is
     // unknown.
     [[nodiscard]] std::uint64_t          agent_of(const memory_sample_t& sample) const;
@@ -96,6 +137,11 @@ private:
     std::vector<event_t>          m_events;  // file order; store_row_t::event indexes it
     std::string                   m_args;    // the args text of m_events
     std::vector<memory_sample_t>  m_memory;  // by event index
+    std::vector<bound_flow_t>     m_flows;   // by event index
+    std::vector<category_class_t> m_cat_classes;   // by category index
+    std::vector<correlation_t>    m_correlations;  // by link, then type, then id
+    std::vector<reader_types::stream_info_ptr_t>
+                                  m_streams;  // by track id; null off stream tracks
     std::uint64_t                 m_cpu_agent_id{};
     std::vector<std::string_view> m_names;  // by name id
     std::vector<std::string_view> m_cats;   // by category index

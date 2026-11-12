@@ -7,11 +7,17 @@
 #include "debug.hpp"
 #include "pytorch_catalog.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
+#include <array>
+#include <charconv>
+#include <cmath>
 #include <iterator>
 #include <limits>
 #include <map>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <utility>
 
@@ -20,6 +26,196 @@ namespace profiler_hub::pytorch
 
 namespace
 {
+
+// What an event's args object says about a kernel launch. Missing keys leave a field
+// unset.
+struct launch_geometry_t
+{
+    std::optional<std::array<std::uint64_t, 3>> grid;
+    std::optional<std::array<std::uint64_t, 3>> block;
+    std::optional<std::uint64_t>                shared_memory;
+};
+
+// What an event's args object says about a copy.
+struct copy_fields_t
+{
+    std::optional<std::uint64_t> bytes;
+    std::optional<std::uint64_t> src;
+    std::optional<std::uint64_t> dst;
+    std::string                  kind;
+};
+
+enum class arg_scope_t
+{
+    host_span,      // operator inputs, Module Hierarchy, Python ids
+    runtime_call,   // also the call's dst, src, bytes, kind, ptr and size
+    profiler_range  // also the smsp__ counters of a CUDA profiler range
+};
+
+using json_t = nlohmann::ordered_json;
+
+json_t
+parse_object(std::string_view text)
+{
+    if(text.empty()) return json_t::object();
+    auto parsed = json_t::parse(text.begin(), text.end(), nullptr, false);
+    return parsed.is_object() ? parsed : json_t::object();
+}
+
+// A number, or a string holding one ("0x7fda0e810200" or "4096").
+std::optional<std::uint64_t>
+as_unsigned(const json_t& value)
+{
+    if(value.is_number_unsigned()) return value.get<std::uint64_t>();
+    if(value.is_number_integer())
+    {
+        const auto v = value.get<std::int64_t>();
+        return v < 0 ? std::nullopt
+                     : std::optional<std::uint64_t>{ static_cast<std::uint64_t>(v) };
+    }
+    if(value.is_number_float())
+    {
+        const auto v = value.get<double>();
+        return v < 0 || !std::isfinite(v)
+                   ? std::nullopt
+                   : std::optional<std::uint64_t>{ static_cast<std::uint64_t>(v) };
+    }
+    if(!value.is_string()) return std::nullopt;
+
+    const auto& text = value.get_ref<const std::string&>();
+    int         base = 10;
+    auto        from = text.data();
+    if(text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+    {
+        base = 16;
+        from += 2;
+    }
+    std::uint64_t number = 0;
+    const auto    to     = text.data() + text.size();
+    const auto    result = std::from_chars(from, to, number, base);
+    if(result.ec != std::errc{} || result.ptr != to) return std::nullopt;
+    return number;
+}
+
+std::optional<std::array<std::uint64_t, 3>>
+as_triple(const json_t& value)
+{
+    if(!value.is_array() || value.empty() || value.size() > 3) return std::nullopt;
+    std::array<std::uint64_t, 3> out{ 1, 1, 1 };
+    for(std::size_t i = 0; i < value.size(); ++i)
+    {
+        const auto number = as_unsigned(value[i]);
+        if(!number) return std::nullopt;
+        out[i] = *number;
+    }
+    return out;
+}
+
+bool
+named_in(std::string_view key, arg_scope_t scope)
+{
+    constexpr std::array<std::string_view, 7> k_span{
+        "Input Dims",       "Input type", "Input Strides",   "Concrete Inputs",
+        "Module Hierarchy", "Python id",  "Python parent id"
+    };
+    constexpr std::array<std::string_view, 6> k_call{ "dst",  "src", "bytes",
+                                                      "kind", "ptr", "size" };
+    if(std::find(k_span.begin(), k_span.end(), key) != k_span.end()) return true;
+    if(scope == arg_scope_t::runtime_call)
+    {
+        return std::find(k_call.begin(), k_call.end(), key) != k_call.end();
+    }
+    return scope == arg_scope_t::profiler_range && key.starts_with("smsp__");
+}
+
+// @p args_json is the args object as the loader kept it; empty or not an object reads as
+// no args.
+launch_geometry_t
+launch_geometry_of(std::string_view args_json)
+{
+    const auto        args = parse_object(args_json);
+    launch_geometry_t out;
+    if(const auto it = args.find("grid"); it != args.end()) out.grid = as_triple(*it);
+    if(const auto it = args.find("block"); it != args.end()) out.block = as_triple(*it);
+    if(const auto it = args.find("shared memory"); it != args.end())
+    {
+        out.shared_memory = as_unsigned(*it);
+    }
+    return out;
+}
+
+copy_fields_t
+copy_fields_of(std::string_view args_json)
+{
+    const auto    args = parse_object(args_json);
+    copy_fields_t out;
+    if(const auto it = args.find("bytes"); it != args.end()) out.bytes = as_unsigned(*it);
+    if(!out.bytes)
+    {
+        if(const auto it = args.find("size"); it != args.end())
+            out.bytes = as_unsigned(*it);
+    }
+    if(const auto it = args.find("src"); it != args.end()) out.src = as_unsigned(*it);
+    if(const auto it = args.find("dst"); it != args.end()) out.dst = as_unsigned(*it);
+    if(const auto it = args.find("kind"); it != args.end() && it->is_string())
+    {
+        out.kind = it->get<std::string>();
+    }
+    return out;
+}
+
+// The named values of a host span, as rocpd's argument table has them: type empty,
+// position the order in the file.
+std::vector<reader_types::arg_data_t>
+named_args_of(std::string_view args_json, arg_scope_t scope)
+{
+    const auto                            args = parse_object(args_json);
+    std::vector<reader_types::arg_data_t> out;
+    for(const auto& [key, value] : args.items())
+    {
+        if(!named_in(key, scope)) continue;
+        reader_types::arg_data_t arg;
+        arg.position = out.size();
+        arg.name     = key;
+        arg.value    = value.is_string() ? value.get<std::string>() : value.dump();
+        arg.extdata  = "{}";
+        out.push_back(std::move(arg));
+    }
+    return out;
+}
+
+// The args object with a "flows" member added for the ends in @p flows, or "{}" when
+// there are neither.
+std::string
+extdata_with_flows(std::string_view              args_json,
+                   std::span<const bound_flow_t> flows,
+                   std::string_view              flow_args_arena)
+{
+    std::string text{ args_json.empty() ? std::string_view{ "{}" } : args_json };
+    if(flows.empty()) return text;
+
+    std::string list = "\"flows\":[";
+    for(std::size_t i = 0; i < flows.size(); ++i)
+    {
+        const auto& flow = flows[i];
+        if(i != 0) list.push_back(',');
+        list += "{\"category\":";
+        append_json_string(list, flow.category);
+        list += ",\"id\":" + std::to_string(flow.id) +
+                ",\"end\":" + (flow.phase == 's' ? "\"start\"" : "\"finish\"");
+        if(flow.args_len != 0)
+        {
+            list += ",\"args\":";
+            list.append(flow_args_arena.substr(flow.args_off, flow.args_len));
+        }
+        list.push_back('}');
+    }
+    list.push_back(']');
+
+    text.pop_back();  // the closing brace
+    if(text.size() > 1) text.push_back(',');
+    return text + list + "}";
+}
 
 // cached_track_reader only asks for whole tracks. A filter this reader would ignore is
 // refused, so a later caller cannot get unfiltered rows without knowing it.
@@ -215,6 +411,8 @@ pytorch_source::load_catalog(common::thread_pool& /*workers*/,
     m_events       = std::move(store.events);
     m_args         = std::move(store.args);
     m_memory       = std::move(store.memory);
+    m_flows        = std::move(store.flows);
+    m_cat_classes  = std::move(store.cat_classes);
     m_cpu_agent_id = store.cpu_agent_id;
 
     for(std::size_t track = 0; track < m_tracks.size(); ++track)
@@ -233,6 +431,41 @@ pytorch_source::load_catalog(common::thread_pool& /*workers*/,
         if(a.type != b.type) return a.type < b.type;
         return a.first_id < b.first_id;
     });
+
+    m_streams.resize(m_catalog->tracks.size());
+    std::size_t next_stream = 0;
+    for(std::size_t track = 0; track < m_catalog->tracks.size(); ++track)
+    {
+        if(m_catalog->tracks[track]->category == reader_types::track_kind_t::stream)
+        {
+            m_streams[track] = m_catalog->streams[next_stream++];
+        }
+    }
+
+    for(std::size_t track = 0; track < m_tracks.size(); ++track)
+    {
+        const auto& held = m_tracks[track];
+        for(std::size_t slot = 0; slot < k_type_slots; ++slot)
+        {
+            const auto& run = held.by_type.at(slot);
+            for(std::size_t index = 0; index < run.rows.size(); ++index)
+            {
+                const auto link = m_events[held.rows[run.rows[index]].event].corr;
+                if(link > 0)
+                {
+                    m_correlations.push_back(
+                        { link, run.first_id + index, static_cast<std::uint8_t>(slot) });
+                }
+            }
+        }
+    }
+    std::sort(m_correlations.begin(),
+              m_correlations.end(),
+              [](const correlation_t& a, const correlation_t& b) {
+                  if(a.link != b.link) return a.link < b.link;
+                  if(a.type != b.type) return a.type < b.type;
+                  return a.id < b.id;
+              });
 
     add_memory_tracks();
     m_catalog->publish_memory_activity_pmc_infos();
@@ -345,20 +578,92 @@ pytorch_source::track_reads()
 reader_types::track_info_ptr_t
 pytorch_source::track_of(const reader_types::timeline_event_t& event)
 {
-    const auto type  = event.unique_identifier.type;
-    const auto id    = event.unique_identifier.id;
+    const auto at = locate(event.unique_identifier);
+    return at ? m_catalog->tracks[at->track] : nullptr;
+}
+
+std::optional<pytorch_source::located_t>
+pytorch_source::locate(const reader_types::unique_timeline_event_id_t& id) const
+{
+    const auto slot = static_cast<std::size_t>(id.type);
+    if(slot >= k_type_slots) return std::nullopt;
     const auto after = std::upper_bound(
         m_runs.begin(),
         m_runs.end(),
-        event.unique_identifier,
+        id,
         [](const reader_types::unique_timeline_event_id_t& wanted, const run_t& run) {
             if(wanted.type != run.type) return wanted.type < run.type;
             return wanted.id < run.first_id;
         });
-    if(after == m_runs.begin()) return nullptr;
+    if(after == m_runs.begin()) return std::nullopt;
     const run_t& run = *std::prev(after);
-    if(run.type != type || id >= run.first_id + run.count) return nullptr;
-    return m_catalog->tracks[run.track];
+    if(run.type != id.type || id.id >= run.first_id + run.count) return std::nullopt;
+    const auto& held = m_tracks[run.track];
+    const auto  row  = held.by_type[slot].rows[id.id - run.first_id];
+    return located_t{ run.track, &held.rows[row], id.id };
+}
+
+std::string_view
+pytorch_source::args_of(const event_t& event) const
+{
+    return event.args_len == 0
+               ? std::string_view{}
+               : std::string_view{ m_args }.substr(event.args_off, event.args_len);
+}
+
+std::string
+pytorch_source::extdata_of(const store_row_t& row) const
+{
+    const auto first = std::lower_bound(
+        m_flows.begin(),
+        m_flows.end(),
+        row.event,
+        [](const bound_flow_t& flow, std::uint32_t event) { return flow.event < event; });
+    const auto last = std::upper_bound(
+        first,
+        m_flows.end(),
+        row.event,
+        [](std::uint32_t event, const bound_flow_t& flow) { return event < flow.event; });
+    return extdata_with_flows(args_of(m_events[row.event]),
+                              std::span<const bound_flow_t>{ first, last },
+                              m_args);
+}
+
+reader_types::event_data_ptr_t
+pytorch_source::event_data_of(const store_row_t& row) const
+{
+    const auto& event = m_events[row.event];
+    auto        data  = std::make_shared<reader_types::event_data_t>();
+    // Kineto's correlation plays the part of the rocpd stack id, which is the link
+    // correlated_events joins on; the parent is its own copy, as for an event with no
+    // ancestor. External id is the correlation id.
+    data->stack_id = static_cast<std::size_t>(std::max<std::int64_t>(event.corr, 0));
+    data->parent_stack_id = data->stack_id;
+    data->correlation_id = static_cast<std::size_t>(std::max<std::int64_t>(event.ext, 0));
+    data->event_category = std::string{ m_cats[event.cat_id] };
+    data->extdata        = "{}";
+    return data;
+}
+
+reader_types::timeline_event_t
+pytorch_source::timeline_event_of(const located_t&           at,
+                                  reader_types::event_type_t type) const
+{
+    const auto& row = *at.row;
+    return reader_types::timeline_event_t{ .unique_identifier = { .id   = at.id,
+                                                                  .type = type },
+                                           .start_timestamp   = row.start,
+                                           .end_timestamp     = row.end,
+                                           .display_name      = m_names[row.name_id],
+                                           .category = m_cats[m_events[row.event].cat_id],
+                                           .track    = m_catalog->tracks[at.track] };
+}
+
+reader_types::agent_info_ptr_t
+pytorch_source::agent_info(std::uint64_t agent) const
+{
+    const auto found = m_catalog->agents_by_id.find(agent);
+    return found == m_catalog->agents_by_id.end() ? nullptr : found->second;
 }
 
 reader_types::histogram_t
@@ -409,6 +714,290 @@ const pytorch_source::track_rows_t&
 pytorch_source::track_rows(const reader_types::track_info_t& track) const
 {
     return m_tracks.at(track.id);
+}
+
+namespace
+{
+
+using reader_types::event_type_t;
+
+// The event types an event of @p source reaches through a shared stack id, as the rocpd
+// v3 reader joins them.
+bool
+reaches(event_type_t source, event_type_t target)
+{
+    if(target == event_type_t::region) return true;
+    switch(source)
+    {
+        case event_type_t::region:
+            return target == event_type_t::kernel_dispatch ||
+                   target == event_type_t::memory_copy ||
+                   target == event_type_t::memory_allocate;
+        case event_type_t::kernel_dispatch:
+            return target == event_type_t::kernel_dispatch;
+        case event_type_t::memory_copy: return target == event_type_t::memory_copy;
+        default: return false;
+    }
+}
+
+}  // namespace
+
+reader_types::timeline_event_list_t
+pytorch_source::correlated_events(const reader_types::timeline_event_t& event)
+{
+    const auto at = locate(event.unique_identifier);
+    if(!at) return {};
+    const auto link = m_events[at->row->event].corr;
+    if(link <= 0) return {};
+
+    const auto first =
+        std::lower_bound(m_correlations.begin(),
+                         m_correlations.end(),
+                         link,
+                         [](const correlation_t& entry, std::int64_t wanted) {
+                             return entry.link < wanted;
+                         });
+    reader_types::timeline_event_list_t found;
+    for(auto it = first; it != m_correlations.end() && it->link == link; ++it)
+    {
+        const auto type = static_cast<event_type_t>(it->type);
+        if(type == event.unique_identifier.type && it->id == event.unique_identifier.id)
+        {
+            continue;
+        }
+        if(!reaches(event.unique_identifier.type, type)) continue;
+        const auto other = locate({ it->id, type });
+        if(other) found.push_back(timeline_event_of(*other, type));
+    }
+    return found;
+}
+
+// The rocpd v3 nesting rule: the regions of the event's track are walked in start order,
+// each one is nested under the open regions it falls inside, and the stack is the event
+// and its ancestors, innermost first.
+reader_types::call_stack_t
+pytorch_source::call_stack(const reader_types::timeline_event_t& event)
+{
+    if(event.unique_identifier.type != event_type_t::region) return {};
+    const auto at = locate(event.unique_identifier);
+    if(!at) return {};
+
+    struct active_t
+    {
+        const store_row_t* row;
+        std::size_t        id;
+        std::size_t        level;
+    };
+    const auto& held = m_tracks[at->track];
+    const auto& run  = held.by_type.at(static_cast<std::size_t>(event_type_t::region));
+    std::vector<active_t> active;
+    for(std::size_t index = 0; index < run.rows.size(); ++index)
+    {
+        const store_row_t& region = held.rows[run.rows[index]];
+        const std::size_t  id     = run.first_id + index;
+        active.erase(std::remove_if(active.begin(),
+                                    active.end(),
+                                    [&](const active_t& open) {
+                                        return region.start >= open.row->end;
+                                    }),
+                     active.end());
+
+        std::size_t level = 0;
+        for(const auto& ancestor : active)
+        {
+            if(region.end < ancestor.row->start) continue;
+            if(level < ancestor.level) break;
+            level = ancestor.level + 1;
+        }
+
+        if(id == event.unique_identifier.id)
+        {
+            reader_types::call_stack_t stack;
+            const auto add_frame = [&](const store_row_t& row, std::size_t frame_id) {
+                reader_types::stack_frame_t          frame;
+                reader_types::program_counter_info_t counter;
+                counter.event_id      = frame_id;
+                counter.function      = std::string{ m_names[row.name_id] };
+                frame.program_counter = std::move(counter);
+                stack.push_back(std::move(frame));
+            };
+            add_frame(region, id);
+            for(auto ancestor = active.rbegin(); ancestor != active.rend(); ++ancestor)
+            {
+                if(ancestor->level >= level) continue;
+                add_frame(*ancestor->row, ancestor->id);
+            }
+            return stack;
+        }
+
+        active.push_back({ &region, id, level });
+        std::stable_sort(
+            active.begin(), active.end(), [](const active_t& a, const active_t& b) {
+                return a.level < b.level;
+            });
+    }
+    return {};
+}
+
+std::optional<reader_types::region_data_t>
+pytorch_source::region_details(const reader_types::timeline_event_t& event)
+{
+    const auto at = locate(event.unique_identifier);
+    if(!at || at->row->type != event_type_t::region) return std::nullopt;
+    const auto& row    = *at->row;
+    const auto& stored = m_events[row.event];
+
+    reader_types::region_data_t data;
+    data.event           = event_data_of(row);
+    data.start_timestamp = row.start;
+    data.end_timestamp   = row.end;
+    data.name            = std::string{ m_names[row.name_id] };
+    data.extdata         = extdata_of(row);
+    const auto scope =
+        m_cats[stored.cat_id] == "cuda_profiler_range" ? arg_scope_t::profiler_range
+        : m_cat_classes[stored.cat_id].launch_site     ? arg_scope_t::runtime_call
+                                                       : arg_scope_t::host_span;
+    data.args = named_args_of(args_of(stored), scope);
+    return data;
+}
+
+namespace
+{
+
+// A launch call that already records the grid in work-items, not in blocks.
+bool
+records_work_items(std::string_view call)
+{
+    return call == "hipExtModuleLaunchKernel" || call == "hipHccModuleLaunchKernel";
+}
+
+}  // namespace
+
+std::optional<reader_types::kernel_dispatch_data_t>
+pytorch_source::kernel_dispatch_details(const reader_types::timeline_event_t& event)
+{
+    const auto at = locate(event.unique_identifier);
+    if(!at || at->row->type != event_type_t::kernel_dispatch) return std::nullopt;
+    const auto& row    = *at->row;
+    const auto& stored = m_events[row.event];
+    const auto& track  = *m_catalog->tracks[at->track];
+
+    // The grid is in blocks, so the dispatch's work-item grid is its product with the
+    // block size, unless the launch call is one that already records work-items. A kernel
+    // whose launch call is not in the file has no such call to go by.
+    bool totals = false;
+    if(stored.corr > 0)
+    {
+        const auto first =
+            std::lower_bound(m_correlations.begin(),
+                             m_correlations.end(),
+                             stored.corr,
+                             [](const correlation_t& entry, std::int64_t wanted) {
+                                 return entry.link < wanted;
+                             });
+        for(auto it = first; it != m_correlations.end() && it->link == stored.corr; ++it)
+        {
+            if(it->type != static_cast<std::uint8_t>(event_type_t::region)) continue;
+            const auto call = locate({ it->id, event_type_t::region });
+            if(!call) continue;
+            const auto& launch = m_events[call->row->event];
+            if(!m_cat_classes[launch.cat_id].launch_site) continue;
+            totals = records_work_items(m_names[call->row->name_id]);
+            break;
+        }
+    }
+
+    const auto                           geometry = launch_geometry_of(args_of(stored));
+    reader_types::kernel_dispatch_data_t data;
+    data.dispatch_id     = at->id;
+    data.start_timestamp = row.start;
+    data.end_timestamp   = row.end;
+    if(geometry.block)
+    {
+        data.workgroup_size_x = geometry.block->at(0);
+        data.workgroup_size_y = geometry.block->at(1);
+        data.workgroup_size_z = geometry.block->at(2);
+    }
+    if(geometry.grid)
+    {
+        const bool multiply = geometry.block.has_value() && !totals;
+        data.grid_size_x = geometry.grid->at(0) * (multiply ? geometry.block->at(0) : 1);
+        data.grid_size_y = geometry.grid->at(1) * (multiply ? geometry.block->at(1) : 1);
+        data.grid_size_z = geometry.grid->at(2) * (multiply ? geometry.block->at(2) : 1);
+    }
+    data.group_segment_size = geometry.shared_memory;
+    data.name               = std::string{ m_names[row.name_id] };
+    data.extdata            = extdata_of(row);
+    data.event              = event_data_of(row);
+    data.node_info          = track.node_info;
+    data.process_info       = track.process_info;
+    data.thread_info        = track.thread_info;
+    data.agent_info         = agent_info(track.agent_id);
+    data.stream_info        = m_streams[at->track];
+    return data;
+}
+
+std::optional<reader_types::memory_copy_data_t>
+pytorch_source::memory_copy_details(const reader_types::timeline_event_t& event)
+{
+    const auto at = locate(event.unique_identifier);
+    if(!at || at->row->type != event_type_t::memory_copy) return std::nullopt;
+    const auto& row   = *at->row;
+    const auto& track = *m_catalog->tracks[at->track];
+    const auto  copy  = copy_fields_of(args_of(m_events[row.event]));
+
+    reader_types::memory_copy_data_t data;
+    data.start_timestamp = row.start;
+    data.end_timestamp   = row.end;
+    data.dst_address     = copy.dst;
+    data.src_address     = copy.src;
+    data.size            = copy.bytes.value_or(0);
+    data.name            = std::string{ m_names[row.name_id] };
+    data.extdata         = extdata_of(row);
+    data.event           = event_data_of(row);
+    // The event's device is one end of the copy. The host has no agent here, so the other
+    // end stays unset.
+    if(copy.kind == "HtoD" || copy.kind == "DtoD")
+    {
+        data.dst_agent_id = agent_info(track.agent_id);
+    }
+    else if(copy.kind == "DtoH")
+    {
+        data.src_agent_id = agent_info(track.agent_id);
+    }
+    data.node_info    = track.node_info;
+    data.process_info = track.process_info;
+    data.thread_info  = track.thread_info;
+    data.stream_info  = m_streams[at->track];
+    return data;
+}
+
+std::optional<reader_types::memory_alloc_data_t>
+pytorch_source::memory_alloc_details(const reader_types::timeline_event_t& event)
+{
+    const auto at = locate(event.unique_identifier);
+    if(!at || at->row->type != event_type_t::memory_allocate) return std::nullopt;
+    const auto& row    = *at->row;
+    const auto& track  = *m_catalog->tracks[at->track];
+    const auto* sample = sample_of(row.event);
+
+    reader_types::memory_alloc_data_t data;
+    data.start_timestamp = row.start;
+    data.end_timestamp   = row.end;
+    data.extdata         = extdata_of(row);
+    data.event           = event_data_of(row);
+    data.node_info       = track.node_info;
+    data.process_info    = track.process_info;
+    data.thread_info     = track.thread_info;
+    if(sample != nullptr)
+    {
+        data.type    = sample->bytes > 0 ? "ALLOC" : sample->bytes < 0 ? "FREE" : "";
+        data.address = static_cast<std::size_t>(sample->address);
+        data.size =
+            static_cast<std::size_t>(sample->bytes < 0 ? -sample->bytes : sample->bytes);
+        data.agent_info = agent_info(agent_of(*sample));
+    }
+    return data;
 }
 
 }  // namespace profiler_hub::pytorch
