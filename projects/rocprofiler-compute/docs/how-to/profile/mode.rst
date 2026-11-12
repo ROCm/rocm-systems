@@ -206,8 +206,8 @@ Notice the two main stages in ROCm Compute Profiler's **default** profiling rout
 1. The first stage collects all the counters needed for ROCm Compute Profiler analysis
    (omitting any filters you have provided).
 
-2. The second stage collects data for the roofline analysis (this stage is
-   skipped when ``-b`` or ``--set`` selects blocks that do not include block 4).
+2. The second stage runs the roofline benchmark to measure the roofline ceilings
+   (skipped when ``-b`` or ``--set`` selects blocks that do not include block 4).
 
 At the end of profiling, you can find all resulting ``csv`` files in a
 :ref:`SoC <def-soc>`-specific target directory; for
@@ -394,7 +394,6 @@ Raw performance counter data produced by the underlying
 
    Intermediate CSV generation (``results_*.csv``) in ``rocpd`` mode and
    ``--retain-rocpd-output`` are deprecated and will be removed in a future release.
-   ``.db`` files will be retained by default and the analyze step will read them directly.
 
 
 .. _filtering:
@@ -423,30 +422,24 @@ rocprof-compute exits with an error:
 
 Without any of these options, profile mode collects every block.
 
-.. _profile-filtering-options:
-
 Filtering options
 -----------------
 
-``-b``, ``--block <block-id|block-alias|metric-id>``
+``-b``, ``--block``
    Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
-   Give all values after one ``-b``, for example ``-b 2 5``. A repeated ``-b``
-   keeps only its own values.
-   See :ref:`profile-selection-options` for the options it can be combined with.
 
 ``--speed-of-light``, ``--memory-chart``, ``--roofline``
    Aliases of ``-b 2``, ``-b 3``, and ``-b 4``. They profile the
    Speed-of-Light, Memory Chart, and Roofline blocks.
-   See :ref:`profile-selection-options` for the options they can be combined with.
 
-``-k``, ``--kernel <kernel-substr>``
+``-k``, ``--kernel``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
 
-``--kernel-iteration-range <iteration>``
+``--kernel-iteration-range``
    Allows for kernel iteration filtering. See :ref:`profiling-kernel-iteration-range`.
 
-``--set <metric-set>``
+``--set``
    Allows for single pass counter collection of sets of metrics with minimized profiling overhead.
    See :ref:`profiling-metric-sets` and :ref:`profile-selection-options`.
 
@@ -639,6 +632,7 @@ Metric sets filtering
 A metrics set contains a subset of metrics that can be collected in a single pass. This filtering option minimizes profiling overhead by only collecting counters of interest.
 The `--set` filter option provides a convenient way to group related metrics for common profiling scenarios, eliminating the need to manually specify individual metrics for typical analysis workflows.
 See :ref:`profile-selection-options` for the options it can be combined with.
+``--set`` can't be used with ``--pc-sampling``.
 
 .. code-block:: shell-session
 
@@ -739,11 +733,11 @@ that contains both ``roofline.csv`` and application performance counters
 Roofline options (profile)
 --------------------------
 
-``--roofline-device <gpu_id>``
+``--roofline-device``
    Allows you to specify a device ID to collect performance data from when
    running a roofline benchmark on your system.
 
-``-k``, ``--kernel <kernel-substr>``
+``-k``, ``--kernel``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
 
 .. note::
@@ -823,7 +817,7 @@ This is useful for:
 * Re-generating ``roofline.csv`` in an existing workload directory without re-profiling.
 * Running the microbenchmark on a system where only HIP is available (no rocprofiler-sdk needed).
 
-See :ref:`profile-selection-options` for the options it can be combined with.
+``--roofline-bench-only`` can't be used with ``-b``, its aliases, ``--set`` or ``--no-roof``.
 
 .. code-block:: shell-session
 
@@ -1186,6 +1180,7 @@ process, which exits normally and writes its counter data. For example:
    $ VLLM_ENABLE_V1_MULTIPROCESSING=0 \
        rocprof-compute profile \
        --iteration-multiplexing \
+       --speed-of-light \
        --name vllm-offline -- \
        python offline_inference.py
 

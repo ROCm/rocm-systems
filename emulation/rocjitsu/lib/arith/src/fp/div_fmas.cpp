@@ -31,7 +31,7 @@ scalar(uint32_t exec_mask, uint32_t mode, uint32_t *const *d, const uint32_t *co
     }
     result[lane] = rocjitsu::arith::division_fmas<Width>(
         av, bv, cv, (condition >> lane) & 1, mode, ((exec_mask >> lane) & 1) ? exceptions : nullptr,
-        rounding, dx10_clamp_off, quiet_nan);
+        rounding, dx10_clamp_off, quiet_nan, flush_output);
   }
   if (flush_output) {
     for (auto &value : result) {

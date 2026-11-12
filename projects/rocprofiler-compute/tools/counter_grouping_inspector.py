@@ -260,16 +260,10 @@ def generate_bucket_metrics(
 
     gpu_series = mi_gpu_specs.get_gpu_series(arch)
     config_arch = canonical_config_arch(arch)
-    for (
-        file_id,
-        panel_id,
-        metric_idx,
-        metric_name,
-        expressions,
-    ) in iter_analysis_config_metrics(config_dir / config_arch, set()):
+    for metric in iter_analysis_config_metrics(config_dir / config_arch, set()):
         total_metrics += 1
         hardware_counters, _unused_builtin_vars = extract_counters_and_variables(
-            "\n".join(expressions), gpu_series, include_supported_denom=False
+            "\n".join(metric.expressions), gpu_series, include_supported_denom=False
         )
         buckets: set[str] = set()
         for formula_counter in hardware_counters:
@@ -277,23 +271,23 @@ def generate_bucket_metrics(
             if bucket_label is not None:
                 buckets.add(bucket_label)
 
-        panel_label = str(panel_id) if panel_id is not None else "-"
+        panel_label = str(metric.table_id) if metric.table_id is not None else "-"
         bucket_count = len(buckets)
         if bucket_count > 1:
             multi_rows.append((
-                file_id,
+                metric.stem_id,
                 panel_label,
-                metric_idx,
-                metric_name,
+                metric.metric_idx,
+                metric.metric_name,
                 bucket_count,
                 ", ".join(sorted(buckets)),
             ))
         elif bucket_count == 1:
             single_rows.append((
-                file_id,
+                metric.stem_id,
                 panel_label,
-                metric_idx,
-                metric_name,
+                metric.metric_idx,
+                metric.metric_name,
                 next(iter(buckets)),
             ))
 

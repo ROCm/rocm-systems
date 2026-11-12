@@ -3,66 +3,24 @@
 
 import argparse
 import os
-import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
-# A --specs-correction pair starts with a spec name and ":"
-SPEC_PAIR_RE = re.compile(r"\s*[A-Za-z_]\w*\s*:")
-
-# Panel ids selected by the --speed-of-light, --memory-chart and --roofline options
-PANEL_SHORTCUTS = {
-    "speed_of_light": "2",
-    "memory_chart": "3",
-    "roofline": "4",
+# Standard argparse actions that the CustomAction subclasses delegate to
+BASE_ACTIONS: Dict[str, Type[argparse.Action]] = {
+    "store": argparse._StoreAction,
+    "store_const": argparse._StoreConstAction,
+    "store_true": argparse._StoreTrueAction,
+    "store_false": argparse._StoreFalseAction,
+    "append": argparse._AppendAction,
+    "append_const": argparse._AppendConstAction,
+    "count": argparse._CountAction,
+    "extend": argparse._ExtendAction,
 }
-
-# Profile options that choose what to collect. Options in the same group can be
-# combined; options from different groups cannot.
-PROFILE_SELECTION_GROUPS = (
-    ("--block", "--speed-of-light", "--memory-chart", "--roofline"),
-    ("--set",),
-    ("--roofline-bench-only",),
-)
-
-PROFILE_SELECTION_CONFLICT = (
-    "--set and --roofline-bench-only cannot be used with each other or with block "
-    "selection (--block, --speed-of-light, --memory-chart, --roofline)."
-)
-
-# Deprecated options and what to do instead. A renamed option keeps its old
-# name as an extra option string until the old name is removed.
-DEPRECATED_OPTIONS: Dict[str, str] = {
-    "--list-blocks": "Use --list-metrics instead.",
-    "--list-available-metrics": "Use --list-metrics instead.",
-    "--roof-only": "Use --roofline instead.",
-    "--bench-only": "Use --roofline-bench-only instead.",
-    "--device": "Use --roofline-device instead.",
-    "--retain-rocpd-output": ".db files will be retained automatically.",
-    "--no-roof": (
-        "To skip roofline, select blocks with -b or --set that do not include block 4."
-    ),
-    "--config-dir": (
-        "Custom panel configs will be replaced by user-defined metric sets and views."
-    ),
-}
-
-
-def warn_deprecated_options(argv: List[str]) -> None:
-    """Warn about each deprecated option in argv, up to the "--" before the workload."""
-    for arg in argv:
-        if arg == "--":
-            break
-        option = arg.split("=", 1)[0]
-        if option in DEPRECATED_OPTIONS:
-            console_warning(
-                f"{option} is deprecated and will be removed in a future release. "
-                f"{DEPRECATED_OPTIONS[option]}"
-            )
 
 
 def validate_block(value: str) -> str:
@@ -93,26 +51,6 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
-def spec_correction_pair(value: str) -> str:
-    if not SPEC_PAIR_RE.match(value):
-        raise argparse.ArgumentTypeError(f"expected name:value, got {value!r}")
-    return value
-
-
-def apply_panel_shortcuts(args: argparse.Namespace, dest: str) -> None:
-    """Add the --speed-of-light, --memory-chart, and --roofline panels to args.dest."""
-    selected = [
-        panel_id
-        for option, panel_id in PANEL_SHORTCUTS.items()
-        if getattr(args, option, False)
-    ]
-    if not selected:
-        return
-    blocks = list(getattr(args, dest, None) or [])
-    blocks.extend(panel_id for panel_id in selected if panel_id not in blocks)
-    setattr(args, dest, blocks)
-
-
 def add_general_group(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
@@ -137,15 +75,14 @@ def add_general_group(
     general_group.add_argument(
         "-q", "--quiet", action="store_true", help="Reduce output and run quietly."
     )
-    arch_values = ", ".join(supported_archs)
     general_group.add_argument(
         "--list-metrics",
         dest="list_metrics",
-        metavar="id",
+        metavar="ids",
         nargs="*",
         help=(
             "List the blocks of the current GPU.\n"
-            "Add block or metric [id]s or aliases to list their metrics with units\n"
+            "Add block or metric [ids] or aliases to list their metrics with units\n"
             'and descriptions, or "all" to list every metric. Each id or alias adds\n'
             "to the list: --list-metrics sol 12.1 lists all of block 2 (sol) and\n"
             "table 12.1.\n"
@@ -153,34 +90,29 @@ def add_general_group(
         ),
     )
     general_group.add_argument(
-        "--list-metrics-gfx-id",
-        dest="list_metrics_gfx_id",
-        metavar="<arch>",
-        choices=supported_archs.keys(),
-        help=(
-            "List the blocks of GPU <arch> instead of the current GPU.\n"
-            "Add --list-metrics [id]... to list their metrics.\n"
-            f"Values: {arch_values}"
-        ),
-    )
-    general_group.add_argument(
         "--list-blocks",
         dest="list_blocks",
         metavar="<arch>",
         choices=supported_archs.keys(),
+        action=DeprecatedAction,
+        base_action="store",
+        advice="Use --list-metrics instead.",
         help=(
-            "DEPRECATED: use --list-metrics instead.\n"
             "List available blocks and their aliases for specified GPU <arch>.\n"
-            f"Values: {arch_values}"
+            "Values: %(choices)s"
         ),
     )
     general_group.add_argument(
         "--config-dir",
         dest="config_dir",
         metavar="<dir>",
+        action=DeprecatedAction,
+        base_action="store",
+        advice=(
+            "Custom panel configs will be replaced by user-defined metric sets and "
+            "views."
+        ),
         help=(
-            "DEPRECATED: custom panel configs will be replaced by user-defined "
-            "metric sets and views in a future release.\n"
             "Specify the directory of customized report section configs "
             "(Default: built-in configs)."
         ),
@@ -202,22 +134,29 @@ def add_general_group(
             "--pc-sampling-interval)\n"
         ),
     )
-
-
-def experimental_requested(argv: List[str]) -> bool:
-    """Return True if --experimental comes before the "--" that starts the workload."""
-    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-    parser.add_argument("--experimental", action="store_true")
-    return parser.parse_known_args(argv)[0].experimental
+    general_group.add_argument(
+        "--debug",
+        action="store_true",
+        help=(
+            "Show the debug options in --help:\n"
+            "   Top level and profile: --debug-list-metrics-gfx-id\n"
+            "   Analyze: --debug-metric-expression, --debug-table-view, "
+            "--debug-verify-deps\n"
+        ),
+    )
 
 
 def build_parser(
     rocprof_compute_home: Path,
     supported_archs: Dict[str, str],
     rocprof_compute_version: Dict[str, Optional[str]],
-    experimental_enabled: bool = False,
+    argv: List[str],
 ) -> argparse.ArgumentParser:
-    """Return the rocprof-compute command-line parser."""
+    """Return the rocprof-compute command-line parser for argv."""
+    # --experimental and --debug count only before the workload's "--"
+    workload_start = argv.index("--") if "--" in argv else len(argv)
+    experimental_enabled = "--experimental" in argv[:workload_start]
+    debug_enabled = "--debug" in argv[:workload_start]
     parser = argparse.ArgumentParser(
         description=(
             "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
@@ -227,22 +166,24 @@ def build_parser(
         formatter_class=lambda prog: CliHelpFormatter(prog, max_help_position=30),
         usage="rocprof-compute [mode] [options]",
     )
-    omniarg_parser(
+    _omniarg_parser(
         parser,
         rocprof_compute_home,
         supported_archs,
         rocprof_compute_version,
         experimental_enabled,
+        debug_enabled,
     )
     return parser
 
 
-def omniarg_parser(
+def _omniarg_parser(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
     supported_archs: Dict[str, str],
     rocprof_compute_version: Dict[str, Optional[str]],
     experimental_enabled: bool = False,
+    debug_enabled: bool = False,
 ) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)
@@ -256,6 +197,8 @@ def omniarg_parser(
         supported_archs,
         rocprof_compute_version,
     )
+    debug_group = parser.add_argument_group("Debug Options")
+    _add_list_metrics_gfx_id(debug_group, supported_archs, debug_enabled)
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
     skills_note = _skills_note(rocprof_compute_home)
@@ -299,6 +242,8 @@ Examples:
         supported_archs,
         rocprof_compute_version,
     )
+    profile_debug_group = profile_parser.add_argument_group("Debug Options")
+    _add_list_metrics_gfx_id(profile_debug_group, supported_archs, debug_enabled)
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Roofline Options")
 
@@ -412,19 +357,18 @@ Examples:
             "unique kernel names.)\n"
             "   kernel_launch_params (i.e. Round robin counters over "
             "kernel calls with unique kernel and launch parameters)\n"
-            "(Default when given without a value: kernel_launch_params)\n"
-            "Values: kernel, kernel_launch_params"
+            "With no value, uses kernel_launch_params.\n"
+            "Values: %(choices)s"
         ),
     )
 
     profile_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
-        help=(
-            "DEPRECATED: use --list-metrics instead.\n"
-            "List all available metrics for analysis on current arch."
-        ),
-        action="store_true",
+        action=DeprecatedAction,
+        base_action="store_true",
+        advice="Use --list-metrics instead.",
+        help="List all available metrics for analysis on current arch.",
     )
     profile_group.add_argument(
         "-b",
@@ -433,6 +377,7 @@ Examples:
         metavar="<ids>",
         nargs="+",
         type=block_token_or_alias,
+        action="extend",
         required=False,
         default=[],
         help=(
@@ -443,21 +388,22 @@ Examples:
             "Alternatively, specify block alias(es) for filtering.\n"
             "Aliases are arch-specific; run --list-metrics to see\n"
             "all valid block ids and aliases.\n"
-            "Give all ids after one -b; a repeated -b keeps only the last list.\n"
-            + _cannot_be_used_with("--block")
+            "Cannot be used with --set or --roofline-bench-only."
         ),
     )
-    _add_panel_shortcut(
-        profile_group,
-        "speed_of_light",
-        "Profile the Speed of Light block.",
-        help_suffix="\n" + _cannot_be_used_with("--speed-of-light"),
+    profile_group.add_argument(
+        "--speed-of-light",
+        dest="filter_blocks",
+        action="append_const",
+        const="2",
+        help="Profile the System Speed-of-Light block. Same as -b 2.",
     )
-    _add_panel_shortcut(
-        profile_group,
-        "memory_chart",
-        "Profile the Memory Chart block.",
-        help_suffix="\n" + _cannot_be_used_with("--memory-chart"),
+    profile_group.add_argument(
+        "--memory-chart",
+        dest="filter_blocks",
+        action="append_const",
+        const="3",
+        help="Profile the Memory Chart block. Same as -b 3.",
     )
     profile_group.add_argument(
         "--list-sets",
@@ -472,19 +418,22 @@ Examples:
         help=(
             "Profile a set of metrics of topic of interest by collecting "
             "counters in a single pass.\n"
-            "For available sets, see --list-sets.\n" + _cannot_be_used_with("--set")
+            "For available sets, see --list-sets.\n"
+            "Cannot be used with -b, --speed-of-light, --memory-chart, --roofline\n"
+            "or --roofline-bench-only."
         ),
     )
     profile_group.add_argument(
         "--no-roof",
         required=False,
         default=False,
-        action="store_true",
-        help=(
-            "DEPRECATED: to skip roofline, select blocks with -b or --set that "
-            "do not include block 4.\n"
-            "Profile without collecting roofline data."
+        action=DeprecatedAction,
+        base_action="store_true",
+        advice=(
+            "To skip roofline, select blocks with -b or --set that do not include "
+            "block 4."
         ),
+        help="Profile without collecting roofline data.",
     )
     profile_group.add_argument(
         "remaining",
@@ -493,17 +442,18 @@ Examples:
         nargs=argparse.REMAINDER,
         help="Provide command for profiling after double dash.",
     )
-    default_sdk_tool_path = (
-        Path(os.getenv("ROCM_PATH", "/opt/rocm"))
-        / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
-    )
     profile_group.add_argument(
         "--rocprofiler-sdk-tool-path",
         type=resolve_rocm_library_path,
         dest="rocprofiler_sdk_tool_path",
         metavar="<path>",
         required=False,
-        default=resolve_rocm_library_path(str(default_sdk_tool_path)),
+        default=resolve_rocm_library_path(
+            str(
+                Path(os.getenv("ROCM_PATH", "/opt/rocm"))
+                / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+            )
+        ),
         help=(
             "Set the path to rocprofiler-sdk tool.\n"
             "(Default: $ROCM_PATH/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so)"
@@ -526,24 +476,23 @@ Examples:
         "--retain-rocpd-output",
         required=False,
         default=False,
-        action="store_true",
-        help=(
-            "DEPRECATED: .db files will be retained automatically in a "
-            "future release.\n"
-            "Retain the large raw rocpd database in workload directory."
-        ),
+        action=DeprecatedAction,
+        base_action="store_true",
+        help="Retain the large raw rocpd database in workload directory.",
     )
 
     ## Roofline Command Line Options
-    _add_panel_shortcut(
-        roofline_group,
-        "roofline",
-        "Profile the roofline block.",
+    roofline_group.add_argument(
+        "--roofline",
         "--roof-only",
-        help_suffix=(
-            "\nUsed alone, only roofline data is profiled.\n"
-            + _cannot_be_used_with("--roofline")
-            + "\nDeprecated alias: --roof-only."
+        dest="filter_blocks",
+        const="4",
+        action=DeprecatedAction,
+        base_action="append_const",
+        deprecated_names=["--roof-only"],
+        help=(
+            "Profile the roofline block. Same as -b 4.\n"
+            "Used alone, only roofline data is profiled."
         ),
     )
     roofline_group.add_argument(
@@ -552,13 +501,15 @@ Examples:
         dest="bench_only",
         required=False,
         default=False,
-        action="store_true",
+        action=DeprecatedAction,
+        base_action="store_true",
+        deprecated_names=["--bench-only"],
         help=(
             "Run roofline microbenchmark only.\n"
             "No application profiling or counter collection.\n"
             "No application run is required.\n"
-            + _cannot_be_used_with("--roofline-bench-only", "--no-roof")
-            + "\nDeprecated alias: --bench-only."
+            "Cannot be used with -b, --speed-of-light, --memory-chart, --roofline,\n"
+            "--set or --no-roof."
         ),
     )
     roofline_group.add_argument(
@@ -569,11 +520,10 @@ Examples:
         required=False,
         default=0,
         type=int,
-        help=(
-            "Target GPU device ID per amd-smi for roofline benchmarking "
-            "(Default: 0).\n"
-            "Deprecated alias: --device."
-        ),
+        action=DeprecatedAction,
+        base_action="store",
+        deprecated_names=["--device"],
+        help="Target GPU device ID per amd-smi for roofline benchmarking (Default: 0).",
     )
 
     ## ----------------------------
@@ -587,7 +537,7 @@ Examples:
         default=None,
         nargs="*",
         choices=KNOWN_ML_API_BACKENDS,
-        metavar="framework",
+        metavar="frameworks",
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
@@ -595,7 +545,7 @@ Examples:
         help=(
             "Trace ML APIs. User ROCTx regions are always included.\n"
             f"With no arguments, traces {' and '.join(KNOWN_ML_API_BACKENDS)}.\n"
-            f"Values: {', '.join(KNOWN_ML_API_BACKENDS)}"
+            "Values: %(choices)s"
         ),
     )
     profile_group.add_argument(
@@ -603,12 +553,10 @@ Examples:
         dest="membw_analysis",
         required=False,
         default=False,
-        base_action="store_const",
+        base_action="store_true",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="Memory Bandwidth Analysis",
-        nargs=0,
-        const=True,
         help="Enable Memory Bandwidth Analysis counters (block 30).",
     )
 
@@ -617,12 +565,10 @@ Examples:
         dest="pc_sampling",
         required=False,
         default=False,
-        base_action="store_const",
+        base_action="store_true",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="PC Sampling",
-        nargs=0,
-        const=True,
         help="Enable PC sampling (block 21) for profile mode.",
     )
     profile_group.add_argument(
@@ -637,9 +583,9 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="PC Sampling",
         help=(
-            "Set the method of pc sampling. stochastic requires MI300 or newer "
+            "Set the PC sampling method. The stochastic method needs MI300 or newer "
             "(Default: stochastic).\n"
-            "Values: stochastic, host_trap"
+            "Values: %(choices)s"
         ),
     )
     profile_group.add_argument(
@@ -692,6 +638,7 @@ Examples:
         supported_archs,
         rocprof_compute_version,
     )
+    analyze_debug_group = analyze_parser.add_argument_group("Debug Options")
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
 
@@ -706,12 +653,6 @@ Examples:
         help="Specify the raw data root dirs or desired results directory.",
     )
     analyze_group.add_argument(
-        "--verify-deps",
-        dest="verify_deps",
-        action="store_true",
-        help="Check the Python dependencies analyze mode needs, then exit.",
-    )
-    analyze_group.add_argument(
         "--list-stats",
         action="store_true",
         help=(
@@ -724,11 +665,10 @@ Examples:
     analyze_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
-        help=(
-            "DEPRECATED: use --list-metrics instead.\n"
-            "List all available metrics for analysis on the workload arch."
-        ),
-        action="store_true",
+        action=DeprecatedAction,
+        base_action="store_true",
+        advice="Use --list-metrics instead.",
+        help="List all available metrics for analysis on the workload arch.",
     )
     analyze_group.add_argument(
         "--list-operators",
@@ -736,7 +676,7 @@ Examples:
         default=None,
         nargs="*",
         choices=OPERATOR_BACKENDS,
-        metavar="framework",
+        metavar="frameworks",
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
@@ -745,12 +685,12 @@ Examples:
             "List collected operators as a call tree.\n"
             "With no arguments, lists every collected operator.\n"
             "Ignores --operator.\n"
-            f"Values: {', '.join(OPERATOR_BACKENDS)}"
+            "Values: %(choices)s"
         ),
     )
     analyze_group.add_argument(
         "--operator",
-        metavar="pattern",
+        metavar="patterns",
         type=str,
         dest="operator",
         nargs="*",
@@ -800,17 +740,32 @@ Examples:
         metavar="<ids>",
         nargs="+",
         type=block_token_or_alias,
+        action="extend",
         help=(
-            "Specify metric id(s) or block alias(es) from --list-metrics "
-            "for filtering.\n"
-            "Give all ids after one -b; a repeated -b keeps only the last list."
+            "Specify metric id(s) or block alias(es) from --list-metrics for filtering."
         ),
     )
-    _add_panel_shortcut(
-        analyze_group, "speed_of_light", "Show the Speed of Light panel."
+    analyze_group.add_argument(
+        "--speed-of-light",
+        dest="filter_metrics",
+        action="append_const",
+        const="2",
+        help="Show the System Speed-of-Light panel. Same as -b 2.",
     )
-    _add_panel_shortcut(analyze_group, "memory_chart", "Show the Memory Chart panel.")
-    _add_panel_shortcut(analyze_group, "roofline", "Show the Roofline panel.")
+    analyze_group.add_argument(
+        "--memory-chart",
+        dest="filter_metrics",
+        action="append_const",
+        const="3",
+        help="Show the Memory Chart panel. Same as -b 3.",
+    )
+    analyze_group.add_argument(
+        "--roofline",
+        dest="filter_metrics",
+        action="append_const",
+        const="4",
+        help="Show the Roofline panel. Same as -b 4.",
+    )
     analyze_group.add_argument(
         "--gpu-id",
         dest="gpu_id",
@@ -825,7 +780,7 @@ Examples:
         choices=["stdout", "txt", "csv", "db"],
         default="stdout",
         help=(
-            "Format of the analysis output:\n"
+            "Format of the analysis output (Default: stdout):\n"
             "   stdout - print report to the terminal (no file/folder created).\n"
             "            Required by --list-operators and --operator.\n"
             "   txt    - write report to <name>.txt; disables terminal output.\n"
@@ -836,9 +791,8 @@ Examples:
             "            database schema in the docs). Requires profiles\n"
             "            collected in rocpd format.\n"
             "            Disables terminal output.\n"
-            "<name> is rocprof_compute_<uuid> unless --output-name is given "
-            "(Default: stdout).\n"
-            "Values: stdout, txt, csv, db"
+            "<name> is rocprof_compute_<uuid> unless --output-name is given.\n"
+            "Values: %(choices)s"
         ),
     )
     analyze_group.add_argument(
@@ -879,7 +833,7 @@ Examples:
         default="per_kernel",
         choices=["per_wave", "per_cycle", "per_second", "per_kernel"],
         help="Specify the normalization unit (Default: per_kernel).\n"
-        "Values: per_wave, per_cycle, per_second, per_kernel",
+        "Values: %(choices)s",
     )
     analyze_advanced_group.add_argument(
         "-t",
@@ -888,7 +842,7 @@ Examples:
         metavar="<unit>",
         default="ns",
         choices=["s", "ms", "us", "ns"],
-        help="Specify display time unit (Default: ns).\nValues: s, ms, us, ns",
+        help="Specify display time unit (Default: ns).\nValues: %(choices)s",
     )
     analyze_advanced_group.add_argument(
         "--decimal",
@@ -897,34 +851,35 @@ Examples:
         default=2,
         help="Specify desired decimal precision of analysis results (Default: 2).",
     )
-    analyze_advanced_group.add_argument(
-        "-g", dest="debug", action="store_true", help="Debug single metric."
+    analyze_debug_group.add_argument(
+        "--debug-metric-expression",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
+        help="Print the counter data, and each metric's expression and inputs.",
     )
-    analyze_advanced_group.add_argument(
-        "--view",
-        dest="view",
-        metavar="<view>",
-        choices=["table"],  # future: e.g. "bar" for additional TTY views
-        default=None,
-        help=(
-            "TTY output view. "
-            "table: force plain tables and ignore cli_style from YAML\n"
-            "(e.g. mem_chart, per-kernel Roofline layout as tables). "
-            "Additional views may be added in future releases\n"
-            "(Default: use cli_style from the analysis config).\n"
-            "Values: table"
-        ),
+    analyze_debug_group.add_argument(
+        "--debug-table-view",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
+        help="Force plain tables and ignore cli_style from YAML.",
+    )
+    analyze_debug_group.add_argument(
+        "--debug-verify-deps",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
+        help="Check the Python dependencies analyze mode needs, then exit.",
     )
     analyze_advanced_group.add_argument(
         "--specs-correction",
         metavar="<name:value>",
         nargs="+",
-        type=spec_correction_pair,
         help=(
-            "Correct system specs, given as name:value pairs separated by spaces.\n"
-            "Quote a value that contains spaces.\n"
-            "For example: --specs-correction num_xcd:4 cu_per_gpu:64.\n"
-            "Run -s/--specs to see the spec names."
+            "Correct the workload's system specs with name:value pairs.\n"
+            "The spec names are the column names in the workload's sysinfo.csv.\n"
+            "For example: --specs-correction num_xcd:4 cu_per_gpu:64"
         ),
     )
 
@@ -946,44 +901,71 @@ def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
     return None
 
 
-def _cannot_be_used_with(option: str, *extra_options: str) -> str:
-    """Help line listing the options from other profile selection groups."""
-    others = [
-        other
-        for group in PROFILE_SELECTION_GROUPS
-        if option not in group
-        for other in group
-    ]
-    others.extend(extra_options)
-    return f"Cannot be used with {', '.join(others[:-1])} or {others[-1]}."
-
-
-def _add_panel_shortcut(
-    group: argparse._ArgumentGroup,
-    dest: str,
-    description: str,
-    *old_names: str,
-    help_suffix: str = "",
+def _add_list_metrics_gfx_id(
+    debug_group: argparse._ArgumentGroup,
+    supported_archs: Dict[str, str],
+    debug_enabled: bool,
 ) -> None:
-    """Add the --speed-of-light, --memory-chart or --roofline option for dest."""
-    others = ["-b"] + [
-        "--" + other.replace("_", "-") for other in PANEL_SHORTCUTS if other != dest
-    ]
-    group.add_argument(
-        "--" + dest.replace("_", "-"),
-        *old_names,
-        dest=dest,
-        default=False,
-        action="store_true",
+    """Add --debug-list-metrics-gfx-id, which analyze doesn't take: it lists the
+    metrics of the -p workload's GPU."""
+    debug_group.add_argument(
+        "--debug-list-metrics-gfx-id",
+        metavar="<arch>",
+        choices=supported_archs.keys(),
+        action=DebugAction,
+        base_action="store",
+        debug_enabled=debug_enabled,
         help=(
-            f"{description} Same as -b {PANEL_SHORTCUTS[dest]}.\n"
-            f"Can be combined with {', '.join(others[:-1])}, and {others[-1]}."
-            + help_suffix
+            "With --list-metrics, list the blocks and metrics of GPU <arch>\n"
+            "instead of the current GPU.\n"
+            "Values: %(choices)s"
         ),
     )
 
 
-class ExperimentalAction(argparse.Action):
+class CustomAction(argparse.Action):
+    """Parse an option like the standard argparse action named by base_action.
+
+    Subclasses change the help text or check the option before it is stored.
+    """
+
+    def __init__(
+        self,
+        option_strings: List[str],
+        dest: str,
+        base_action: str,
+        **kwargs: Any,
+    ) -> None:
+        if base_action not in BASE_ACTIONS:
+            raise ValueError(
+                f"Unsupported base_action: {base_action}. "
+                f"Specify one of: {', '.join(BASE_ACTIONS)}"
+            )
+        self._base_action = BASE_ACTIONS[base_action](option_strings, dest, **kwargs)
+        super().__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=self._base_action.nargs,
+            const=self._base_action.const,
+            default=self._base_action.default,
+            type=self._base_action.type,
+            choices=self._base_action.choices,
+            required=self._base_action.required,
+            help=self._base_action.help,
+            metavar=self._base_action.metavar,
+        )
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: Optional[str] = None,
+    ) -> None:
+        self._base_action(parser, namespace, values, option_string)
+
+
+class ExperimentalAction(CustomAction):
     """
     Custom action that enforces experimental feature gating.
     - Suppresses help text when experimental mode is disabled
@@ -995,56 +977,30 @@ class ExperimentalAction(argparse.Action):
     def __init__(
         self,
         option_strings: List[str],
+        dest: str,
+        base_action: str,
+        experimental_enabled: bool,
+        feature_label: str,
         help: str,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
-        self.experimental_enabled = kwargs.pop("experimental_enabled", False)
-        self.feature_label = kwargs.pop("feature_label", None)
+        self.experimental_enabled = experimental_enabled
+        self.feature_label = feature_label
 
-        # Extract the base_action
-        base_action = kwargs.pop("base_action", None)
-        if base_action is None:
-            raise ValueError(
-                "base_action is required for ExperimentalAction. "
-                "Specify one of: store, store_const, store_true, store_false, "
-                "append, append_const, count, extend"
-            )
-
-        if self.experimental_enabled:
+        if experimental_enabled:
             leading_whitespace = help[: len(help) - len(help.lstrip())]
             help_content = help.lstrip()
             help = f"{leading_whitespace}EXPERIMENTAL: {help_content}"
         else:
             help = argparse.SUPPRESS
 
-        super().__init__(
-            option_strings=option_strings,
-            help=help,
-            **kwargs,
-        )
-
-        # Map of action types to their __call__ methods
-        action_map = {
-            "store": argparse._StoreAction.__call__,
-            "store_const": argparse._StoreConstAction.__call__,
-            "store_true": argparse._StoreTrueAction.__call__,
-            "store_false": argparse._StoreFalseAction.__call__,
-            "append": argparse._AppendAction.__call__,
-            "append_const": argparse._AppendConstAction.__call__,
-            "count": argparse._CountAction.__call__,
-            "extend": argparse._ExtendAction.__call__,
-        }
-
-        if base_action not in action_map:
-            raise ValueError(f"Unsupported base_action: {base_action}")
-
-        self._base_action_call = action_map[base_action]
+        super().__init__(option_strings, dest, base_action, help=help, **kwargs)
 
     def __call__(
         self,
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
-        values,  # noqa: ANN001
+        values: object,
         option_string: Optional[str] = None,
     ) -> None:
         # Error if experimental feature used without --experimental flag
@@ -1058,17 +1014,89 @@ class ExperimentalAction(argparse.Action):
             f"{self.feature_label} is experimental and may change in future releases."
         )
 
-        self._base_action_call(self, parser, namespace, values, option_string)
+        super().__call__(parser, namespace, values, option_string)
+
+
+class DebugAction(CustomAction):
+    """
+    Custom action for debug options.
+    - Suppresses help text unless --debug is given
+    - Delegates to inner action for proper value storage
+    """
+
+    def __init__(
+        self,
+        option_strings: List[str],
+        dest: str,
+        base_action: str,
+        debug_enabled: bool,
+        help: str,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            option_strings,
+            dest,
+            base_action,
+            help=help if debug_enabled else argparse.SUPPRESS,
+            **kwargs,
+        )
+
+
+class DeprecatedAction(CustomAction):
+    """
+    Custom action for deprecated option names.
+    - deprecated_names lists the old names of a renamed option; without it, the
+      whole option is deprecated
+    - advice says what to use instead; a rename defaults to the new name
+    - Adds the deprecation to the help text and warns when a deprecated name is used
+    """
+
+    def __init__(
+        self,
+        option_strings: List[str],
+        dest: str,
+        base_action: str,
+        help: str,
+        deprecated_names: Optional[List[str]] = None,
+        advice: str = "",
+        **kwargs: Any,
+    ) -> None:
+        self.deprecated_names = deprecated_names or option_strings
+        new_names = [
+            name for name in option_strings if name not in self.deprecated_names
+        ]
+        self.advice = advice or (f"Use {new_names[0]} instead." if new_names else "")
+        if new_names:
+            help = f"{help}\nDeprecated alias: {', '.join(self.deprecated_names)}."
+        else:
+            first_line = self.advice or "Will be removed in a future release."
+            help = f"DEPRECATED: {first_line}\n{help}"
+        super().__init__(option_strings, dest, base_action, help=help, **kwargs)
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: Optional[str] = None,
+    ) -> None:
+        if option_string in self.deprecated_names:
+            warning = (
+                f"{option_string} is deprecated and will be removed in a future "
+                "release."
+            )
+            console_warning(f"{warning} {self.advice}" if self.advice else warning)
+        super().__call__(parser, namespace, values, option_string)
 
 
 class CliHelpFormatter(argparse.RawTextHelpFormatter):
-    """Show options as "-b, --block <ids>...", per .ai/rules/cli-options.md."""
+    """Show options as "-b, --block <ids>...", per CONTRIBUTING.md."""
 
     def __init__(self, prog: str, max_help_position: int = 40) -> None:
         super().__init__(prog, max_help_position=max_help_position)
 
     def _format_args(self, action: argparse.Action, default_metavar: str) -> str:
-        metavar = self._metavar_formatter(action, default_metavar)(1)[0]
+        metavar = action.metavar or default_metavar
         if action.nargs == argparse.ONE_OR_MORE:
             return f"{metavar}..."
         if action.nargs == argparse.ZERO_OR_MORE:

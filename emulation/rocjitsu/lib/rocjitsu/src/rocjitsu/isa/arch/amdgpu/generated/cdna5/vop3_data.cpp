@@ -16,8 +16,8 @@ namespace cdna5 {
 VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
     : Vop3("v_mov_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -96,8 +96,8 @@ DecodeResult decodeVReadfirstlaneB32Vop3(const MachineInst *opcode,
 VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
     : Vop3("v_mov_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovB16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -169,8 +169,8 @@ void VMovB16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *>
 VMovB64Vop3::VMovB64Vop3(const MachineInst *inst)
     : Vop3("v_mov_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovB64Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -221,8 +221,8 @@ DecodeResult decodeVMovB64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst)
     : Vop3("v_movreld_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovreldB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -276,7 +276,7 @@ DecodeResult decodeVMovreldB32Vop3(const MachineInst *opcode,
 VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
     : Vop3("v_movrels_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovrelsB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
@@ -327,7 +327,7 @@ DecodeResult decodeVMovrelsB32Vop3(const MachineInst *opcode,
 VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
     : Vop3("v_movrelsd_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovrelsdB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
@@ -378,7 +378,7 @@ DecodeResult decodeVMovrelsdB32Vop3(const MachineInst *opcode,
 VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
     : Vop3("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovrelsd2B32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
@@ -429,7 +429,7 @@ DecodeResult decodeVMovrelsd2B32Vop3(const MachineInst *opcode,
 VPermlane16SwapB32Vop3::VPermlane16SwapB32Vop3(const MachineInst *inst)
     : Vop3("v_permlane16_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlane16SwapB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &src0;
@@ -456,9 +456,9 @@ DecodeResult decodeVPermlane16SwapB32Vop3(const MachineInst *opcode,
 VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
     : Vop3("v_cndmask_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCndmaskB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -519,10 +519,10 @@ DecodeResult decodeVCndmaskB32Vop3(const MachineInst *opcode,
 VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
     : Vop3("v_cubeid_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCubeidF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -585,10 +585,10 @@ DecodeResult decodeVCubeidF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
     : Vop3("v_cubesc_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCubescF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -651,10 +651,10 @@ DecodeResult decodeVCubescF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
     : Vop3("v_cubetc_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCubetcF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -717,10 +717,10 @@ DecodeResult decodeVCubetcF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
     : Vop3("v_cubema_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCubemaF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -783,10 +783,10 @@ DecodeResult decodeVCubemaF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 VPermPk16B4U4Vop3::VPermPk16B4U4Vop3(const MachineInst *inst)
     : Vop3("v_perm_pk16_b4_u4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermPk16B4U4Vop3)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -831,10 +831,10 @@ DecodeResult decodeVPermPk16B4U4Vop3(const MachineInst *opcode,
 VPermPk16B6U4Vop3::VPermPk16B6U4Vop3(const MachineInst *inst)
     : Vop3("v_perm_pk16_b6_u4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermPk16B6U4Vop3)),
-      vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(96, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -880,10 +880,10 @@ DecodeResult decodeVPermPk16B6U4Vop3(const MachineInst *opcode,
 VPermPk16B8U4Vop3::VPermPk16B8U4Vop3(const MachineInst *inst)
     : Vop3("v_perm_pk16_b8_u4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermPk16B8U4Vop3)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -930,10 +930,10 @@ DecodeResult decodeVPermPk16B8U4Vop3(const MachineInst *opcode,
 VPermB32Vop3::VPermB32Vop3(const MachineInst *inst)
     : Vop3("v_perm_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      src2(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -996,7 +996,7 @@ DecodeResult decodeVPermB32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
     : Vop3("v_permlane16_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlane16B32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -1037,7 +1037,7 @@ DecodeResult decodeVPermlane16B32Vop3(const MachineInst *opcode,
 VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
     : Vop3("v_permlanex16_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlanex16B32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -1078,9 +1078,9 @@ DecodeResult decodeVPermlanex16B32Vop3(const MachineInst *opcode,
 VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
     : Vop3("v_cndmask_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCndmaskB16Vop3)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      vdst(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(16, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->src2) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -1164,7 +1164,7 @@ void VCndmaskB16Vop3::implicit_use_operands(
 VPermlaneBcastB32Vop3::VPermlaneBcastB32Vop3(const MachineInst *inst)
     : Vop3("v_permlane_bcast_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlaneBcastB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -1205,7 +1205,7 @@ DecodeResult decodeVPermlaneBcastB32Vop3(const MachineInst *opcode,
 VPermlaneUpB32Vop3::VPermlaneUpB32Vop3(const MachineInst *inst)
     : Vop3("v_permlane_up_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlaneUpB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -1246,7 +1246,7 @@ DecodeResult decodeVPermlaneUpB32Vop3(const MachineInst *opcode,
 VPermlaneDownB32Vop3::VPermlaneDownB32Vop3(const MachineInst *inst)
     : Vop3("v_permlane_down_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlaneDownB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -1287,7 +1287,7 @@ DecodeResult decodeVPermlaneDownB32Vop3(const MachineInst *opcode,
 VPermlaneXorB32Vop3::VPermlaneXorB32Vop3(const MachineInst *inst)
     : Vop3("v_permlane_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlaneXorB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
@@ -1328,7 +1328,7 @@ DecodeResult decodeVPermlaneXorB32Vop3(const MachineInst *opcode,
 VPermlane16VarB32Vop3::VPermlane16VarB32Vop3(const MachineInst *inst)
     : Vop3("v_permlane16_var_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlane16VarB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -1360,7 +1360,7 @@ DecodeResult decodeVPermlane16VarB32Vop3(const MachineInst *opcode,
 VPermlanex16VarB32Vop3::VPermlanex16VarB32Vop3(const MachineInst *inst)
     : Vop3("v_permlanex16_var_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlanex16VarB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -1392,7 +1392,7 @@ DecodeResult decodeVPermlanex16VarB32Vop3(const MachineInst *opcode,
 VPermlaneIdxGenB32Vop3::VPermlaneIdxGenB32Vop3(const MachineInst *inst)
     : Vop3("v_permlane_idx_gen_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlaneIdxGenB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
@@ -1457,7 +1457,7 @@ DecodeResult decodeVReadlaneB32Vop3(const MachineInst *opcode,
 VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
     : Vop3("v_writelane_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VWritelaneB32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC_LANESEL, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;

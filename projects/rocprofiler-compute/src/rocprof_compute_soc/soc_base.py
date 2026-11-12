@@ -1,16 +1,24 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from __future__ import annotations
 
 import argparse
 import functools
 import os
 import shutil
 from abc import abstractmethod
-from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Optional
+from typing import (
+    Any,
+    Dict,
+    FrozenSet,
+    Iterator,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+)
 
 import config
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
@@ -50,7 +58,7 @@ from vendored import yaml
 def _same_bucket_priority_ids_from_policy_value(
     arch_name: str,
     ids: object,
-) -> tuple[str, ...] | None:
+) -> Optional[Tuple[str, ...]]:
     """
     Normalize ``same_bucket_priority_metric_ids`` from YAML: list of ids, or
     mapping id -> { name: ... } (id is the key; order preserved).
@@ -61,7 +69,7 @@ def _same_bucket_priority_ids_from_policy_value(
     if isinstance(ids, list):
         return tuple(str(x) for x in ids)
     if isinstance(ids, dict):
-        ordered: list[str] = []
+        ordered: List[str] = []
         for key, meta in ids.items():
             token = str(key).strip()
             if not token:
@@ -82,7 +90,7 @@ def _same_bucket_priority_ids_from_policy_value(
 
 
 @functools.lru_cache(maxsize=1)
-def _load_same_bucket_priority_policy_map() -> dict[str, tuple[str, ...]]:
+def _load_same_bucket_priority_policy_map() -> Dict[str, Tuple[str, ...]]:
     """Load counter grouping policy YAML into arch -> metric id tuple."""
     path = config.analysis_configs_dir / "profiling_counter_grouping_policy.yaml"
     if not path.is_file():
@@ -98,7 +106,7 @@ def _load_same_bucket_priority_policy_map() -> dict[str, tuple[str, ...]]:
     archs = raw.get("architectures")
     if not isinstance(archs, dict):
         return {}
-    out: dict[str, tuple[str, ...]] = {}
+    out: Dict[str, Tuple[str, ...]] = {}
     for arch_name, cfg in archs.items():
         if not isinstance(cfg, dict):
             continue
@@ -118,6 +126,18 @@ def _load_same_bucket_priority_policy_map() -> dict[str, tuple[str, ...]]:
     return out
 
 
+class AnalysisConfigMetric(NamedTuple):
+    """One metric of an analysis config metric_table."""
+
+    stem_id: str  # file id, e.g. "0200" from "0200_system_speed_of_light.yaml"
+    table_id: int
+    metric_idx: int  # zero-based position of the metric in its table
+    metric_name: str
+    expressions: List[str]  # metric_expressions of the metric
+    table: Dict[str, Any]
+    metric: Dict[str, Any]
+
+
 class OmniSoC_Base:
     def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         # new info field will contain rocminfo or sysinfo to populate properties
@@ -126,7 +146,7 @@ class OmniSoC_Base:
         self.__arch: Optional[str] = None
         self._mspec = mspec
         # Per IP block, max number of simultaneous counters. GFX IP Blocks.
-        self.__perfmon_config: dict[str, int] = {}
+        self.__perfmon_config: Dict[str, int] = {}
         self.populate_mspec()
 
     def __hash__(self) -> int:
@@ -137,7 +157,7 @@ class OmniSoC_Base:
             return NotImplemented
         return self.__arch == other.get_soc()
 
-    def set_perfmon_config(self, config: dict[str, int]) -> None:
+    def set_perfmon_config(self, config: Dict[str, int]) -> None:
         self.__perfmon_config = config
 
     def set_arch(self, arch: str) -> None:
@@ -279,9 +299,9 @@ class OmniSoC_Base:
     def _append_expressions_for_filter_token(
         self,
         raw_token: str,
-        config_filename_dict: dict[str, str],
+        config_filename_dict: Dict[str, str],
         config_root_dir: str,
-        expressions: list[str],
+        expressions: List[str],
     ) -> None:
         block_id = raw_token
         if METRIC_ID_RE.match(block_id):
@@ -339,7 +359,7 @@ class OmniSoC_Base:
             metric_expressions(panel_dict[panel_id], metric_dict[metric_id])
         )
 
-    def _same_bucket_priority_metric_ids(self) -> tuple[str, ...]:
+    def _same_bucket_priority_metric_ids(self) -> Tuple[str, ...]:
         """Metric ids whose PMCs get tier-0 priority in the greedy coalescing pass.
 
         Loaded from profiling_counter_grouping_policy.yaml for the current arch.
@@ -355,10 +375,10 @@ class OmniSoC_Base:
 
     def _metric_aware_coalesce_pass(
         self,
-        work_set: set[str],
-        output_files: list[CounterFile],
+        work_set: Set[str],
+        output_files: List["CounterFile"],
         file_count: int,
-    ) -> tuple[set[str], list[CounterFile], int]:
+    ) -> Tuple[Set[str], List["CounterFile"], int]:
         """Greedy heuristic: place each metric's counters into the first feasible
         pmc_perf bucket, else open a new one. Overflow stays for first-fit.
 
@@ -377,7 +397,7 @@ class OmniSoC_Base:
         files = list(output_files)
 
         # -- Build priority keys from grouping policy YAML --
-        priority_keys: set[tuple[str, Any, int]] = set()
+        priority_keys: Set[Tuple[str, Any, int]] = set()
         for token in self._same_bucket_priority_metric_ids():
             tid = token.strip()
             if not METRIC_ID_RE.match(tid):
@@ -388,16 +408,10 @@ class OmniSoC_Base:
             priority_keys.add((file_id, panel_id, metric_idx))
 
         # -- Scan arch YAML metrics and collect (sort_key, counters, label) rows --
-        rows: list[tuple[tuple, frozenset[str], str]] = []
-        for (
-            stem_id,
-            panel_id,
-            metric_idx,
-            metric_name,
-            expressions,
-        ) in self._iter_arch_analysis_yaml_metrics():
+        rows: List[Tuple[tuple, FrozenSet[str], str]] = []
+        for metric in self._iter_arch_analysis_yaml_metrics():
             formula_hw, _ = extract_counters_and_variables(
-                "\n".join(expressions),
+                "\n".join(metric.expressions),
                 self._mspec.gpu_series,
                 include_supported_denom=False,
             )
@@ -405,10 +419,19 @@ class OmniSoC_Base:
             counters = frozenset(hw & remaining)
             if not counters:
                 continue
-            tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
-            panel_s = str(panel_id) if panel_id is not None else ""
-            sort_key = (tier, -len(counters), stem_id, panel_s, metric_idx)
-            label = f"{stem_id}.{panel_s}.{metric_idx} ({metric_name})"
+            metric_key = (metric.stem_id, metric.table_id, metric.metric_idx)
+            tier = 0 if metric_key in priority_keys else 1
+            panel_s = str(metric.table_id) if metric.table_id is not None else ""
+            sort_key = (
+                tier,
+                -len(counters),
+                metric.stem_id,
+                panel_s,
+                metric.metric_idx,
+            )
+            label = (
+                f"{metric.stem_id}.{panel_s}.{metric.metric_idx} ({metric.metric_name})"
+            )
             rows.append((sort_key, counters, label))
         rows.sort(key=lambda r: r[0])
 
@@ -444,7 +467,7 @@ class OmniSoC_Base:
         return remaining, files, file_count
 
     @demarcate
-    def detect_counters(self) -> tuple[set[str], list[str]]:
+    def detect_counters(self) -> Tuple[Set[str], List[str]]:
         """
         Create a set of counters required for the selected report sections,
         from the metric expressions of those sections.
@@ -472,11 +495,11 @@ class OmniSoC_Base:
                 for metric in sets_info[args.set_selected]["metric"]
             ]
 
-        expressions: list[str] = []
+        expressions: List[str] = []
         if not filter_blocks:
             # Select all sections by default; block 30 only with --membw-analysis
-            for *_, metric_exprs in self._iter_arch_analysis_yaml_metrics():
-                expressions.extend(metric_exprs)
+            for metric in self._iter_arch_analysis_yaml_metrics():
+                expressions.extend(metric.expressions)
 
         for block_id in filter_blocks:
             self._append_expressions_for_filter_token(
@@ -490,7 +513,7 @@ class OmniSoC_Base:
 
         return counters, filter_blocks
 
-    def _expand_tcc_template_counters(self, counters: set[str]) -> set[str]:
+    def _expand_tcc_template_counters(self, counters: Set[str]) -> Set[str]:
         """
         Expand TCC channel templates (name ending with '[') into indexed channel
         counters, matching perfmon allocation.
@@ -507,7 +530,7 @@ class OmniSoC_Base:
         return out
 
     @demarcate
-    def perfmon_filter(self) -> list[str]:
+    def perfmon_filter(self) -> List[str]:
         """Filter default performance counter set based on user arguments"""
         counters, filter_blocks = self.detect_counters()
 
@@ -524,8 +547,8 @@ class OmniSoC_Base:
         return filter_blocks
 
     def _allocate_perfmon_counter_files(
-        self, counters: set[str]
-    ) -> tuple[list[CounterFile], int, int]:
+        self, counters: Set[str]
+    ) -> Tuple[List["CounterFile"], int, int]:
         """Bin-pack counters into perfmon buckets.
 
         Returns (output_files, file_count, accu_file_count).
@@ -534,7 +557,7 @@ class OmniSoC_Base:
         If the arch has priority metrics in profiling_counter_grouping_policy.yaml,
         a metric-aware greedy pass runs before the final per-counter first-fit.
         """
-        output_files: list[CounterFile] = []
+        output_files: List[CounterFile] = []
         accu_file_count = 0
         work = sorted(list(counters))
         for counter in work.copy():
@@ -549,7 +572,7 @@ class OmniSoC_Base:
                 accu_file_count += 1
 
         file_count = 0
-        tcc_channel_counter_file_map: dict[str, CounterFile] = {}
+        tcc_channel_counter_file_map: Dict[str, CounterFile] = {}
 
         work_set = set(work)
         if self._same_bucket_priority_metric_ids():
@@ -581,9 +604,7 @@ class OmniSoC_Base:
 
         return output_files, file_count, accu_file_count
 
-    def _iter_arch_analysis_yaml_metrics(
-        self,
-    ) -> Iterator[tuple[str, int, int, str, list[str]]]:
+    def _iter_arch_analysis_yaml_metrics(self) -> Iterator[AnalysisConfigMetric]:
         """Iterate the metrics of this arch's analysis configs.
 
         Block 30 is skipped unless --membw-analysis is set. See
@@ -593,16 +614,16 @@ class OmniSoC_Base:
         arch = self.__arch
         if not arch:
             return
-        exclude: set[str] = set()
+        exclude: Set[str] = set()
         if not args.membw_analysis:
             exclude.add(str(MEMBW_ANALYSIS_PANEL_ID))
         yield from iter_analysis_config_metrics(
             Path(args.config_dir) / (canonical_config_arch(arch) or arch), exclude
         )
 
-    def get_rocprof_supported_counters(self) -> set[str]:
+    def get_rocprof_supported_counters(self) -> Set[str]:
         args = self.get_args()
-        rocprof_counters: set[str] = set()
+        rocprof_counters: Set[str] = set()
 
         # Point to counter definition
         old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
@@ -638,7 +659,7 @@ class OmniSoC_Base:
         return rocprof_counters
 
     @demarcate
-    def perfmon_coalesce(self, counters: set[str]) -> None:
+    def perfmon_coalesce(self, counters: Set[str]) -> None:
         """
         Sort and bucket all related performance counters to minimize required
         application passes
@@ -681,7 +702,7 @@ class OmniSoC_Base:
             counter_def_filename = workload_perfmon_dir / f"counter_def_{f.name}.yaml"
 
             pmc = []
-            counter_def: dict[str, Any] = {}
+            counter_def: Dict[str, Any] = {}
 
             for ctr in [
                 ctr for block_name in f.blocks for ctr in f.blocks[block_name].elements
@@ -722,7 +743,7 @@ class OmniSoC_Base:
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
     @abstractmethod
-    def profiling_setup(self) -> Optional[list[str]]:
+    def profiling_setup(self) -> Optional[List[str]]:
         """Perform any SoC-specific setup prior to profiling."""
         console_debug("profiling", f"perform SoC profiling setup for {self.__arch}")
 
@@ -786,7 +807,7 @@ class OmniSoC_Base:
 class LimitedSet:
     def __init__(self, maxsize: int) -> None:
         self.avail: int = maxsize
-        self.elements: list[str] = []
+        self.elements: List[str] = []
 
     def add(self, element: str) -> bool:
         if element in self.elements:
@@ -811,9 +832,9 @@ class LimitedSet:
 # Represents a file that lists PMC counters. Number of counters for each
 # block limited according to perfmon config.
 class CounterFile:
-    def __init__(self, name: str, perfmon_config: dict[str, int]) -> None:
+    def __init__(self, name: str, perfmon_config: Dict[str, int]) -> None:
         self.name: str = name
-        self.blocks: dict[str, LimitedSet] = {
+        self.blocks: Dict[str, LimitedSet] = {
             block: LimitedSet(capacity) for block, capacity in perfmon_config.items()
         }
 
@@ -826,9 +847,9 @@ class CounterFile:
 
 def _trial_counter_file_with_extra(
     basis: CounterFile,
-    perfmon_config: dict[str, int],
-    extra_counters_sorted: list[str],
-) -> CounterFile | None:
+    perfmon_config: Dict[str, int],
+    extra_counters_sorted: List[str],
+) -> Optional[CounterFile]:
     """Clone basis, try appending extras; None if any won't fit."""
     trial = CounterFile(basis.name, perfmon_config)
     for ctr in flat_counters_in_perfmon_file(basis):
@@ -847,10 +868,10 @@ def _trial_counter_file_with_extra(
 
 
 def _rebuild_tcc_channel_file_map(
-    output_files: list[CounterFile],
-) -> dict[str, CounterFile]:
+    output_files: List[CounterFile],
+) -> Dict[str, CounterFile]:
     """Map TCC counter base name to the bucket that holds its channel instances."""
-    result: dict[str, CounterFile] = {}
+    result: Dict[str, CounterFile] = {}
     for bucket in output_files:
         for ctr in flat_counters_in_perfmon_file(bucket):
             if is_tcc_channel_counter(ctr):
@@ -858,7 +879,7 @@ def _rebuild_tcc_channel_file_map(
     return result
 
 
-def flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
+def flat_counters_in_perfmon_file(counter_file: CounterFile) -> List[str]:
     """Ordered list of PMC counter names assigned to one perfmon bucket file."""
     return [
         ctr
@@ -867,7 +888,7 @@ def flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
     ]
 
 
-def _table_expressions(table: dict[str, Any]) -> list[str]:
+def _table_expressions(table: Dict[str, Any]) -> List[str]:
     """Expressions of every metric in one metric_table."""
     return [
         expression
@@ -877,18 +898,10 @@ def _table_expressions(table: dict[str, Any]) -> list[str]:
 
 
 def iter_analysis_config_metrics(
-    config_root: Path, exclude_file_ids: set[str]
-) -> Iterator[tuple[str, int, int, str, list[str]]]:
-    """Iterate the metrics of the analysis config files in config_root,
-    skipping files whose id is in exclude_file_ids.
-
-    Yields:
-        stem_id     file id, e.g. "0200" from "0200_system_speed_of_light.yaml"
-        table_id    metric_table id
-        metric_idx  zero-based index of the metric within its table
-        metric_name metric key string
-        expressions metric_expressions of the metric
-    """
+    config_root: Path, exclude_file_ids: Set[str]
+) -> Iterator[AnalysisConfigMetric]:
+    """Iterate the metrics of the analysis config files in config_root, skipping files
+    whose id is in exclude_file_ids."""
     for config_path in sorted(config_root.glob("*.yaml")):
         stem_id = config_path.name.split("_")[0]
         if stem_id in exclude_file_ids:
@@ -901,10 +914,12 @@ def iter_analysis_config_metrics(
                 continue
             metrics = table["metric"] or {}
             for idx, (metric_name, metric) in enumerate(metrics.items()):
-                yield (
+                yield AnalysisConfigMetric(
                     stem_id,
                     table["id"],
                     idx,
                     metric_name,
                     metric_expressions(table, metric),
+                    table,
+                    metric,
                 )

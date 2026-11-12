@@ -5,7 +5,7 @@ import argparse
 from typing import List, Optional
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.logger import console_warning, demarcate
+from utils.logger import console_error, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
 from utils.utils_common import selects_roofline
@@ -33,12 +33,9 @@ class gfx908_soc(OmniSoC_Base):
 
         # Perfmon filtering
         filter_blocks = self.perfmon_filter()
-        # A full profile skips the unsupported benchmark without a warning
+        # A full profile skips the unsupported benchmark without an error
         if filter_blocks and selects_roofline(filter_blocks):
-            console_warning(
-                f"{self.get_arch()} does not support the roofline benchmark, so it "
-                "is skipped. The roofline counters are still collected."
-            )
+            console_error(f"{self.get_arch()} does not support roofline analysis")
         return filter_blocks
 
     @demarcate

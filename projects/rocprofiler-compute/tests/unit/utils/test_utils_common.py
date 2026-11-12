@@ -1309,7 +1309,7 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
         (None, True),
         ([], True),
         (["4"], True),
-        (["roofline"], True),
+        (["roof"], True),
         (["4.1.1"], True),
         (["2", "4"], True),
         (["2", "sol"], False),
@@ -1327,5 +1327,5 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
     ],
 )
 def test_roofline_selection(filter_blocks, selects):
-    """4, 4.x and the roofline alias all count as roofline."""
+    """4, 4.x and the roof alias all count as roofline."""
     assert utils_common.selects_roofline(filter_blocks) is selects

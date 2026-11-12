@@ -14,7 +14,7 @@
         "opens the generated roofline HTML chart instead of reading the table",
         "calculates a peak instead of using the measured one"
       ],
-      "logs_contain": ["-b roofline"]
+      "logs_contain": ["--roofline"]
     },
     {
       "id": "roof-arithmetic-intensity",

@@ -71,6 +71,31 @@ def _setup_test_files(tmp_path, remaining, setup):
     return remaining
 
 
+def run_pre_processing(tmp_path, selected_blocks, no_roof=False, trace_ml_api=None):
+    """Run pre_processing on a rocprofv3 profiler whose SoC selects the given blocks.
+
+    Returns the gen_sysinfo mock.
+    """
+    profiling_args = argparse.Namespace(
+        attach_pid=None,
+        config_dir=tmp_path / "analysis_configs",
+        filter_blocks=[],
+        no_roof=no_roof,
+        output_directory=str(tmp_path),
+        remaining="./app",
+        trace_ml_api=trace_ml_api,
+    )
+    mock_soc = Mock()
+    mock_soc._mspec = SimpleNamespace()
+    mock_soc.profiling_setup.return_value = selected_blocks
+    profiler = rocprof_v3_profiler(
+        profiling_args, profiler_mode="rocprofv3", soc=mock_soc
+    )
+    with patch("rocprof_compute_profile.profiler_base.gen_sysinfo") as gen_sysinfo:
+        profiler.pre_processing()
+    return gen_sysinfo
+
+
 @pytest.mark.parametrize(
     "gpu_arch, compute_partition, memory_partition, expected",
     [
@@ -578,6 +603,7 @@ def _make_rpc_args(
     pc_sampling_interval=None,
     membw_analysis=False,
     experimental=False,
+    set_selected=None,
     mode="profile",
     list_stats=False,
     output_format="stdout",
@@ -586,7 +612,7 @@ def _make_rpc_args(
     return argparse.Namespace(
         mode=mode,
         list_metrics=None,
-        list_metrics_gfx_id=None,
+        debug_list_metrics_gfx_id=None,
         list_blocks=None,
         list_available_metrics=False,
         list_sets=False,
@@ -598,7 +624,7 @@ def _make_rpc_args(
         pc_sampling_interval=pc_sampling_interval,
         membw_analysis=membw_analysis,
         experimental=experimental,
-        set_selected=None,
+        set_selected=set_selected,
         bench_only=False,
         no_roof=False,
         name="unit-test",
@@ -669,6 +695,17 @@ def _fake_pc_sampling_limits(method: str, _sdk_tool_path=None) -> PCSamplingLimi
             False,
             ["21"],
             id="pc_sampling_with_experimental_injects_21",
+        ),
+        pytest.param(
+            _make_rpc_args(
+                pc_sampling=True,
+                experimental=True,
+                filter_blocks=[],
+                set_selected="launch_stats",
+            ),
+            True,
+            None,
+            id="pc_sampling_with_set_errors",
         ),
         pytest.param(
             _make_rpc_args(filter_blocks=["21"], pc_sampling=True, experimental=True),
@@ -753,15 +790,6 @@ def test_sanitize_membw_analysis_injects_block_30(
     assert args.filter_blocks == expected_filter_blocks
 
 
-def test_sanitize_pc_sampling_rejects_set(caplog):
-    """--set would replace the PC sampling block, so the pair is rejected."""
-    args = _make_rpc_args(pc_sampling=True, experimental=True, filter_blocks=[])
-    args.set_selected = "launch_stats"
-    with pytest.raises(SystemExit):
-        _make_profiler_with_args(args).sanitize()
-    assert "--pc-sampling cannot be used with --set." in caplog.text
-
-
 # ---------------------------------------------------------------------------
 # pre_processing(): memory-bandwidth configuration persistence
 # ---------------------------------------------------------------------------
@@ -807,7 +835,7 @@ def test_pre_processing_persists_membw_analysis_config(
 )
 def test_pre_processing_persists_traced_frameworks(tmp_path, trace_ml_api, expected):
     """A bare --trace-ml-api is saved as every framework."""
-    _run_pre_processing(tmp_path, [], no_roof=True, trace_ml_api=trace_ml_api)
+    run_pre_processing(tmp_path, [], no_roof=True, trace_ml_api=trace_ml_api)
 
     profiling_config = yaml.safe_load(
         (tmp_path / "profiling_config.yaml").read_text(encoding="utf-8")
@@ -825,7 +853,7 @@ def test_pre_processing_records_roofline_in_sysinfo_only_when_selected(
     tmp_path: Path, selected_blocks, no_roof, skip_roof
 ) -> None:
     """sysinfo.csv lists roofline only when the selected blocks collect it."""
-    gen_sysinfo = _run_pre_processing(tmp_path, selected_blocks, no_roof=no_roof)
+    gen_sysinfo = run_pre_processing(tmp_path, selected_blocks, no_roof=no_roof)
     assert gen_sysinfo.call_args.kwargs["skip_roof"] is skip_roof
 
 
@@ -876,31 +904,6 @@ def test_pre_processing_pmc_power_gating_warning(
 # ---------------------------------------------------------------------------
 # run_profiling(): PC sampling gating / increment / delegation
 # ---------------------------------------------------------------------------
-def _run_pre_processing(tmp_path, selected_blocks, no_roof=False, trace_ml_api=None):
-    """Run pre_processing on a rocprofv3 profiler whose SoC selects the given blocks.
-
-    Returns the gen_sysinfo mock.
-    """
-    profiling_args = argparse.Namespace(
-        attach_pid=None,
-        config_dir=tmp_path / "analysis_configs",
-        filter_blocks=[],
-        no_roof=no_roof,
-        output_directory=str(tmp_path),
-        remaining="./app",
-        trace_ml_api=trace_ml_api,
-    )
-    mock_soc = Mock()
-    mock_soc._mspec = SimpleNamespace()
-    mock_soc.profiling_setup.return_value = selected_blocks
-    profiler = rocprof_v3_profiler(
-        profiling_args, profiler_mode="rocprofv3", soc=mock_soc
-    )
-    with patch("rocprof_compute_profile.profiler_base.gen_sysinfo") as gen_sysinfo:
-        profiler.pre_processing()
-    return gen_sysinfo
-
-
 def _make_run_profiling_profiler(tmp_path, filter_blocks, perfmon_files=0):
     """Build a RocProfCompute_Base ready to drive run_profiling() in isolation.
 

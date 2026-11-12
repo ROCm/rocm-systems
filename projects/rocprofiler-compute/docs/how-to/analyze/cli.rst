@@ -49,8 +49,9 @@ There are three high-level GPU analysis views:
 
 .. tip::
 
-   ``--speed-of-light``, ``--memory-chart``, and ``--roofline`` work the same as in
-   profile mode. See :ref:`profile-filtering-options`.
+   ``--speed-of-light``, ``--memory-chart`` and ``--roofline`` show only the System
+   Speed-of-Light, Memory Chart and Roofline panels, the same as ``-b 2``, ``-b 3``
+   and ``-b 4``.
 
 .. image:: ../../data/analyze/cli/system_speed_of_light.png
    :align: left
@@ -142,7 +143,8 @@ You can also send the output to an editor, for example Visual Studio Code:
 The chart is colored only when it is printed straight to a terminal, so it is
 plain text in both of the preceding commands.
 
-To print the block as tables instead of the diagram, see :ref:`cli-view-table`.
+To print the block as tables instead of the diagram, use ``--debug-table-view``
+(see :ref:`cli-debug-options`).
 
 **Empirical hierarchical roofline:**
 
@@ -232,8 +234,7 @@ Open the saved HTML file in a browser for the interactive roofline plot. See :re
    for how those fields affect metric normalization.
 
 3. Choose your own customized subset of metrics with the ``-b`` (or ``--block``)
-   option. Pass all ids after one ``-b``, for example ``-b 2 5``; a repeated ``-b``
-   keeps only the last list. Or, build your own configuration following
+   option. Or, build your own configuration following
    `config_template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_
    and pass its directory with ``--config-dir``.
 
@@ -456,16 +457,6 @@ More analysis options
 .. code-block:: shell
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics sol 12
-
-.. _cli-view-table:
-
-**TTY output view (plain tables)**
-
-Use ``--view table`` to force plain tabular output for all sections and ignore ``cli_style`` from the analysis YAML (for example, memory charts and the per-kernel Roofline layout are shown as tables). Additional ``--view`` values may be added in future releases.
-
-.. code-block:: shell
-
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 --view table
 
 **Show System Speed-of-Light and CS_Busy blocks only**
 
@@ -951,3 +942,33 @@ After profiling with ``--experimental --trace-ml-api triton`` (see
 :ref:`triton-trace`), use ``--list-operators triton`` and
 ``--operator 'triton:PATTERN'``, such as ``--operator 'triton:*rmsnorm_kernel*'``.
 They show only Triton kernels.
+
+
+.. _cli-debug-options:
+
+Debug options
+=============
+
+Debug options help you troubleshoot ROCm Compute Profiler itself, rather than
+analyze your workload. They are hidden from the help output. To list them, run:
+
+.. code-block:: shell
+
+   $ rocprof-compute analyze --debug --help
+
+To use a debug option, pass it on its own; ``--debug`` is not required:
+
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 --debug-table-view
+
+Analyze mode has these debug options:
+
+* ``--debug-metric-expression``: Print the counter data, and each metric's
+  expression and inputs.
+
+* ``--debug-table-view``: Print every block as plain tables, including blocks
+  that are normally drawn as a memory chart or a per-kernel roofline layout.
+
+* ``--debug-verify-deps``: Check that the Python dependencies of analyze mode are
+  installed, then exit. It doesn't need ``--path``.

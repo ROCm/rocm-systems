@@ -64,7 +64,7 @@ panels:
 - file: roofline.yaml
   panel_id: 4
   panel_title: Roofline
-  panel_alias: roofline
+  panel_alias: roof
   data_sources:
   - type: metric_table
     id: 1

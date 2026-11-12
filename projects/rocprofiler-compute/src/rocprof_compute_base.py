@@ -12,13 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
 
 import config
-from argparser import (
-    PROFILE_SELECTION_CONFLICT,
-    apply_panel_shortcuts,
-    build_parser,
-    experimental_requested,
-    warn_deprecated_options,
-)
+from argparser import build_parser
 from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
@@ -263,31 +257,20 @@ class RocProfCompute:
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
 
     def parse_args(self) -> None:
-        # The help shows experimental options only when --experimental is given
         self.__parser = build_parser(
             config.rocprof_compute_home,
             self.__supported_archs,
             self.__version,
-            experimental_requested(sys.argv[1:]),
+            sys.argv[1:],
         )
         self.__args = self.__parser.parse_args()
-        warn_deprecated_options(sys.argv[1:])
-        # --list-metrics-gfx-id <arch> on its own lists the blocks of <arch>
-        if self.__args.list_metrics_gfx_id and self.__args.list_metrics is None:
-            self.__args.list_metrics = []
 
-        if self.__args.mode == "profile":
-            self.handle_profile_args()
-        elif self.__args.mode == "analyze":
+        if self.__args.mode == "analyze":
             self.handle_analyze_args()
-
-    def handle_profile_args(self) -> None:
-        apply_panel_shortcuts(self.__args, "filter_blocks")
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
-        apply_panel_shortcuts(args, "filter_metrics")
         if args.list_stats and args.output_format in ("csv", "db"):
             console_error(
                 "--list-stats cannot be used with --output-format "
@@ -319,7 +302,7 @@ class RocProfCompute:
             print(generate_machine_specs(self.__args))
             sys.exit(0)
         elif self.__args.list_metrics is not None and self.__mode != "analyze":
-            arch = self.__args.list_metrics_gfx_id
+            arch = self.__args.debug_list_metrics_gfx_id
             if arch is None:
                 self.generate_machine_specs()
                 arch = self.__mspec.gpu_arch
@@ -568,7 +551,10 @@ class RocProfCompute:
             ))
             > 1
         ):
-            console_error(PROFILE_SELECTION_CONFLICT)
+            console_error(
+                "Use only one of: blocks (-b, --speed-of-light, --memory-chart, "
+                "--roofline), --set, or --roofline-bench-only."
+            )
 
         if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
             console_error("--roofline-bench-only cannot be used with --no-roof.")
@@ -616,10 +602,10 @@ class RocProfCompute:
     def _validate_list_option_exclusions(self) -> None:
         """Check which options the list options can be combined with."""
         args = self.__args
-        if args.list_metrics_gfx_id is not None and self.__mode == "analyze":
+        if args.debug_list_metrics_gfx_id is not None and args.list_metrics is None:
             console_error(
-                "--list-metrics-gfx-id can't be used in analyze mode, which "
-                "lists the metrics of the -p workload's GPU."
+                "Use --debug-list-metrics-gfx-id with --list-metrics, for example "
+                "--list-metrics sol --debug-list-metrics-gfx-id gfx90a."
             )
 
         block_active = bool(
@@ -648,12 +634,9 @@ class RocProfCompute:
         promoted to the workload directory after passing validation.
         """
         if self.__mspec.gpu_arch not in BENCHMARKING_SUPPORTED:
-            console_log(
-                "roofline",
-                f"Skipping benchmark: roofline benchmarking not supported on "
-                f"{self.__mspec.gpu_arch}",
+            console_error(
+                f"{self.__mspec.gpu_arch} does not support the roofline benchmark."
             )
-            return
 
         output_dir = Path(self.__args.output_directory)
         if not output_dir.exists():

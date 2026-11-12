@@ -26,11 +26,125 @@ All pull requests must pass CI checks before merging. For `rocprofiler-compute`,
 > [!TIP]
 > Run our pre-commit hooks locally before pushing to catch formatting issues early. See [Using Pre-Commit Hooks](#using-pre-commit-hooks) below for setup instructions.
 
-## Adding Experimental Features
+## Adding or Changing Command-Line Options
+
+Follow these rules for every new or changed option in
+[`src/argparser.py`](src/argparser.py) and any other user-facing CLI.
+
+### Filtering
+
+Filter options match with **glob patterns** by default (`fnmatch`), not regex.
+Glob covers most filtering cases and is much easier for users to write.
+
+```console
+rocprof-compute --select-kernel '*my-kernel*'
+```
+
+Regex may be offered **in addition** to glob where it is genuinely needed, never
+as the replacement.
+
+### Naming
+
+An option that is only valid together with another option must be named with
+that option as a prefix.
+
+```text
+--pc-sampling --pc-sampling-method stochastic
+```
+
+If an option already exists with the same meaning in another mode,
+keep its name. Don't add a prefix. For example, an `--example-ids`
+filter in `profile` is also `--example-ids` in `analyze`.
+
+Options that belong to one feature share its name as a prefix even when they can
+be used on their own, such as `--roofline-device`.
+
+Frequently used options get a short alias: a single lowercase letter with a
+single dash, such as `-v`.
+
+Options are named for what they enable, not what they disable: use
+`--roofline`, not `--no-roofline`.
+
+### Arguments
+
+To pass several values, list them after the flag, separated by spaces:
+
+```text
+--example-ids 0 1 2
+```
+
+Don't split values on commas, so that a value can contain a comma.
+
+### Help Messages
+
+Always set `metavar` so the help shows what the option takes. Never leave it
+empty (`metavar=""`).
+
+- If the value is required, use `metavar="<arg>"`.
+- If the value is optional (`nargs="?"` or `nargs="*"`), use `metavar="arg"`.
+  The help adds the `[]` automatically.
+
+`CliHelpFormatter` adds `...` to options that take a list, so `<args>` shows as
+`<args>...` and `args` shows as `[args]...`.
+
+For an option that takes an argument, the help message follows these rules:
+
+| Case | Notation |
+|------|----------|
+| Required argument | `<arg>` |
+| Optional argument | `[arg]` |
+| Array of required arguments | `<args>...` |
+| Array of optional arguments | `[args]...` |
+
+An argument with a fixed set of accepted values sets `choices`, so that argparse
+rejects any other value, and its help ends with `Values: %(choices)s`. An
+argument with a default states it at the end of the description as
+`(Default: value)`.
+
+```text
+--option <arg>   Description of the option (Default: value).
+                 Values: <value1>, <value2>, ..., <valueN>
+```
+
+### Renaming and Deprecation
+
+A renamed option must keep its old name working for now. Add the old name as an
+extra option string of the new option, keep the same `dest`, and declare the
+option with `DeprecatedAction`, the `base_action` it used before, and the old name
+in `deprecated_names`:
+
+```python
+roofline_group.add_argument(
+    "--roofline-device",
+    "--device",
+    dest="device",
+    action=DeprecatedAction,
+    base_action="store",
+    deprecated_names=["--device"],
+    help="Target GPU device ID per amd-smi for roofline benchmarking (Default: 0).",
+)
+```
+
+The help then lists `--device` as a deprecated alias, and using `--device` prints
+a warning that names `--roofline-device`.
+
+To deprecate an option without a rename, declare it with `DeprecatedAction` and
+leave out `deprecated_names`. Set `advice` to say what to use instead, if
+anything. Its help then starts with `DEPRECATED:`.
+
+Every rename also needs these updates:
+
+- Add the new name to `CHANGELOG.md` under "Changed"
+- Add the old name to `CHANGELOG.md` under "Upcoming changes", since it will be removed later
+
+An experimental option may be renamed or removed without keeping the old name
+working, but the change still needs a `CHANGELOG.md` entry.
+
+### Adding Experimental Features
 
 New features that aren't yet stable can be introduced behind the `--experimental` flag. This lets users opt in to preview functionality while keeping the default experience stable.
 
-### How It Works
+#### How It Works
 
 The `--experimental` flag acts as a master toggle:
 
@@ -44,7 +158,7 @@ To see available experimental features:
 rocprof-compute profile --experimental --help
 ```
 
-### Adding a New Experimental Feature
+#### Adding a New Experimental Feature
 
 Follow these three steps to add a new experimental flag.
 
@@ -81,8 +195,8 @@ profile_group.add_argument(
     base_action="store",  # Required — see supported actions below
     type=str,
     nargs="*",
-    metavar="",
-    help="\t\t\tDescription of your feature",
+    metavar="values",
+    help="Description of your feature",
 )
 
 # For a boolean toggle flag
@@ -94,14 +208,13 @@ analyze_group.add_argument(
     action=ExperimentalAction,
     experimental_enabled=experimental_enabled,
     feature_label="Your feature description",
-    base_action="store_const",  # Required — see supported actions below
-    nargs=0,
-    const=True,
-    help="\t\tDescription of your feature",
+    base_action="store_true",  # Required — see supported actions below
+    help="Description of your feature",
 )
 ```
 
-The `base_action` parameter is required and must be one of:
+The `base_action` parameter is required. The option takes the same arguments as
+`add_argument` with that action, and must be one of:
 
 | Value | Behavior |
 |---|---|
@@ -126,7 +239,7 @@ rocprof-compute profile --help
 rocprof-compute profile --experimental --help
 ```
 
-### Promoting a Feature to Stable
+#### Promoting a Feature to Stable
 
 When a feature is ready for general availability:
 
@@ -135,13 +248,40 @@ When a feature is ready for general availability:
 3. Remove the `experimental_enabled`, `feature_label`, and `base_action` parameters.
 4. Update documentation and tests accordingly.
 
-## Adding or Changing Command-Line Options
+### Adding Debug Options
 
-[`.ai/rules/cli-options.md`](.ai/rules/cli-options.md) is the single source of truth
-for how options are named, how their help text is written, and how an option is
-renamed or deprecated
-(see [Renaming and Deprecation](.ai/rules/cli-options.md#renaming-and-deprecation)).
-Follow it for every new or changed option.
+Debug options help troubleshoot rocprof-compute itself. Like experimental options,
+they are hidden from help output unless `--debug` is passed. Unlike experimental
+options, they work without `--debug`. The
+[analyze CLI documentation](docs/how-to/analyze/cli.rst#debug-options) describes
+them for users.
+
+#### Adding a New Debug Option
+
+**Step 1 — Add the argument using `DebugAction`**
+
+In `src/argparser.py`, name the option `--debug-<name>` and add it to the
+Debug Options group of its mode, such as `analyze_debug_group` for analyze.
+
+```python
+analyze_debug_group.add_argument(
+    "--debug-your-option",
+    action=DebugAction,
+    debug_enabled=debug_enabled,
+    base_action="store_true",  # Required — same values as ExperimentalAction
+    help="Description of your option.",
+)
+```
+
+**Step 2 — Verify behavior**
+
+```bash
+# Should not appear
+rocprof-compute analyze --help
+
+# Should appear
+rocprof-compute analyze --debug --help
+```
 
 ## Using Pre-Commit Hooks
 
@@ -252,6 +392,10 @@ If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
 
+### Metric Library
+
+The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. Until production reads the library, a metric change goes into both the panel YAMLs and the metric library. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks.
+
 ## Memory Chart Layouts
 
 The memory chart is drawn from one JSON layout per architecture family. To add or change a layout, see the [memory chart layouts README](./src/memory_chart/README.md).
@@ -302,6 +446,7 @@ For detailed vendoring workflow (adding/updating packages), see [`src/vendored/R
 This project uses AI coding assistants (Claude Code, Cursor, GitHub Copilot). All AI-specific guidelines live in [`AGENTS.md`](AGENTS.md), which serves as the single source of truth. Tool-specific adapter files (e.g., `CLAUDE.md`, `.github/copilot-instructions.md`) reference `AGENTS.md` without duplicating content.
 
 To add or update AI guidelines, edit the appropriate file under `.ai/` and add a reference in `AGENTS.md`.
+
 ## Profile Mode Dependency Policy
 
 Profile mode code should not use non-standard Python libraries.

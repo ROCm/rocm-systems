@@ -20,6 +20,7 @@ import yaml
 
 import config
 from rocprof_compute_soc.soc_base import (
+    AnalysisConfigMetric,
     CounterFile,
     LimitedSet,
     OmniSoC_Base,
@@ -231,7 +232,15 @@ def apply_cp_util_priority_patches(soc: OmniSoC_Base, patch_stack: ExitStack) ->
             soc,
             "_iter_arch_analysis_yaml_metrics",
             return_value=iter([
-                ("1700", 1701, 1, "CP Utilization", CP_UTIL_METRIC_EXPRESSIONS)
+                AnalysisConfigMetric(
+                    "1700",
+                    1701,
+                    1,
+                    "CP Utilization",
+                    CP_UTIL_METRIC_EXPRESSIONS,
+                    table={},
+                    metric={},
+                )
             ]),
         )
     )
@@ -871,7 +880,7 @@ def test_live_attach_set_fits_one_pass_on_each_architecture(gpu_arch: str) -> No
     [
         pytest.param([], True, id="no_filter_runs_benchmark"),
         pytest.param(["4"], True, id="block_4_runs_benchmark"),
-        pytest.param(["roofline"], True, id="roofline_alias_runs_benchmark"),
+        pytest.param(["roof"], True, id="roof_alias_runs_benchmark"),
         pytest.param(["11.2.3", "11.2.4"], False, id="set_metrics_skip_benchmark"),
         pytest.param(["2"], False, id="unrelated_block_skips_benchmark"),
     ],
