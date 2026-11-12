@@ -1,1 +1,1 @@
-* On gfx1250 SPX, AllToAll takes DDA LL up to 128 KiB total (was 64 KiB), as on DPX. `RCCL_DDA_LL_THRESHOLD` still overrides the table.
+* On gfx1250 SPX, AllToAll takes the DDA tiers that DPX takes: DDA LL up to 128 KiB total (was 64 KiB) and DDA LL128 above it up to 16 MiB (was 8 MiB). Larger messages take per-peer Send/Recv as before. `RCCL_DDA_LL_THRESHOLD` and `RCCL_DDA_LL128_THRESHOLD` still override the table.
