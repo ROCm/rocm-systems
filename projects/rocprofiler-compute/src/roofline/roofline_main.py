@@ -60,7 +60,7 @@ TRACE_COLORS: dict[str, str] = {
     "l0": "#F0E442",
     "l1": "#0072B2",
     "l2": "#009E73",
-    "mall": "#000000",
+    "mall": "#9467BD",
     "hbm": "#D55E00",
     "gddr6": "#D55E00",
     "lds": "#E69F00",

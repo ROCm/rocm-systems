@@ -20,7 +20,12 @@ import roofline.roofline_html as roofline_html
 from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
 from roofline.roofline_hover import truncate_kernel_name, wrap_hover_name
 from roofline.roofline_html import RooflineViewModel, build_interactive_document
-from roofline.roofline_main import Roofline, _default_precisions, get_color
+from roofline.roofline_main import (
+    TRACE_COLORS,
+    Roofline,
+    _default_precisions,
+    get_color,
+)
 from utils.html_report.report_shell import DARK_THEME_CLASS, read_asset
 
 _ASSETS = Path(roofline_html.__file__).parent / "assets"
@@ -441,10 +446,16 @@ def test_gfx1201_figure_draws_the_gddr6_and_mall_roofs_where_mi_draws_hbm(
 
 
 def test_gddr6_and_mall_traces_have_their_own_colors() -> None:
-    """GDDR6 shares the HBM color, and MALL is black, so neither falls back to
-    the default trace color."""
+    """GDDR6 shares the HBM color. MALL has a mid-tone color of its own that
+    shows on both the white and black plot areas and differs from the
+    page's #888888 fallback trace color."""
     assert get_color("gddr6") == get_color("hbm")
-    assert get_color("mall") == "#000000"
+    mall = get_color("mall")
+    assert mall == "#9467BD"
+    other_roofs = {k: v for k, v in TRACE_COLORS.items() if k != "mall"}
+    assert mall not in other_roofs.values()
+    assert mall.upper() != "#888888"
+    assert mall.upper() not in {"#000000", "#FFFFFF"}
 
 
 @pytest.mark.parametrize(
