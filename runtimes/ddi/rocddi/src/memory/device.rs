@@ -28,11 +28,9 @@ pub use types::{
 };
 pub use virtual_memory::{VirtualAddress, VirtualDeviceMapping, VirtualHostMapping, VirtualMemory};
 
+pub(crate) use super::constraints::{AllocationDesc, AllocationLimits};
 pub(crate) use allocation::{DriverAllocation, set_device_access_for};
-pub(crate) use types::{
-    AllocationDesc, AllocationLimits, HostRegistration, VirtualMapRequest,
-    registered_host_page_cover,
-};
+pub(crate) use types::{HostRegistration, VirtualMapRequest, registered_host_page_cover};
 #[cfg(test)]
 pub(crate) use virtual_memory::{DeviceIntervals, HostIntervals};
 pub(crate) use virtual_memory::{
