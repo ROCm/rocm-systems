@@ -173,7 +173,7 @@ TEST(RegisterHazardPluginTest, RegisterCheckingUsesOnlyCoreFindings) {
     EXPECT_TRUE(plugin.observes_register_hazards());
     EXPECT_FALSE(plugin.observes_vgpr_reads());
     EXPECT_FALSE(plugin.observes_vgpr_writes());
-    EXPECT_FALSE(plugin.observes_sgpr_reads());
+    EXPECT_FALSE(plugin.observes_scalar_register_reads());
     EXPECT_FALSE(plugin.observes_scalar_register_writes());
     EXPECT_TRUE(plugin.observes_memory_routing());
     EXPECT_TRUE(plugin.observes_tensor_dma_issue());

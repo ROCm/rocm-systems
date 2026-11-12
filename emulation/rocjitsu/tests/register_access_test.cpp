@@ -133,7 +133,7 @@ class RecordingPlugin : public ExecutionPlugin {
 public:
   bool observes_vgpr_reads() const override { return true; }
   bool observes_vgpr_writes() const override { return true; }
-  bool observes_sgpr_reads() const override { return true; }
+  bool observes_scalar_register_reads() const override { return true; }
   bool observes_scalar_register_writes() const override { return true; }
   bool supports_async_instructions() const override { return false; }
 
@@ -144,15 +144,15 @@ public:
     reads.push_back({wf, physical_reg, lane_mask, byte_mask});
   }
 
-  void onAmdgpuReadSgpr(const Wavefront *wf, uint32_t physical_reg) override {
-    sgpr_reads.push_back(physical_reg);
-    sgpr_read_wavefronts.push_back(wf);
-  }
-
   void onAmdgpuReadScalarRegister(const Wavefront *wf, RegisterRef reg) override {
-    ExecutionPlugin::onAmdgpuReadScalarRegister(wf, reg);
     scalar_reads.push_back(reg);
     scalar_read_wavefronts.push_back(wf);
+    if (wf && reg.cls == RegClass::SGPR) {
+      for (uint32_t offset = 0; offset < reg.width; ++offset) {
+        sgpr_reads.push_back(wf->sgpr_alloc().base + reg.index + offset);
+        sgpr_read_wavefronts.push_back(wf);
+      }
+    }
   }
 
   void onAmdgpuWriteScalarRegister(const Wavefront *wf, RegisterRef reg) override {

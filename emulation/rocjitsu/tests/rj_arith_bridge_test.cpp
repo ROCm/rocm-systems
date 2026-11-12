@@ -104,7 +104,7 @@ class WriteRecorder : public ExecutionPlugin {
 public:
   bool observes_vgpr_reads() const override { return true; }
   bool observes_vgpr_writes() const override { return true; }
-  bool observes_sgpr_reads() const override { return true; }
+  bool observes_scalar_register_reads() const override { return true; }
   bool observes_scalar_register_writes() const override { return true; }
   bool supports_async_instructions() const override { return false; }
 
@@ -122,7 +122,11 @@ public:
                              uint8_t bytes) override {
     reads.push_back({reg, lanes, bytes});
   }
-  void onAmdgpuReadSgpr(const Wavefront *, uint32_t reg) override { scalar_reads.push_back(reg); }
+  void onAmdgpuReadScalarRegister(const Wavefront *wf, RegisterRef reg) override {
+    if (wf && reg.cls == RegClass::SGPR)
+      for (uint32_t offset = 0; offset < reg.width; ++offset)
+        scalar_reads.push_back(wf->sgpr_alloc().base + reg.index + offset);
+  }
   void onAmdgpuWriteScalarRegister(const Wavefront *, RegisterRef reg) override {
     scalar_writes.push_back(reg);
   }
@@ -1132,11 +1136,14 @@ TEST(ArithBridgeTest, ReverseSubtractDppScalarSourceIsZero) {
 TEST(ArithBridgeTest, EmptyMad64SkipsScalarAccumulatorAndClearsCarry) {
   class ScalarReads : public ExecutionPlugin {
   public:
-    bool observes_sgpr_reads() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
     bool supports_async_instructions() const override { return false; }
 
     ScalarReads() : ExecutionPlugin("scalar_reads") {}
-    void onAmdgpuReadSgpr(const Wavefront *, uint32_t) override { ++count; }
+    void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef reg) override {
+      if (reg.cls == RegClass::SGPR)
+        count += reg.width;
+    }
     int count = 0;
   };
   BridgeFixture fixture(false, 64);

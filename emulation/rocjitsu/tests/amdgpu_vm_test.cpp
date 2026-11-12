@@ -10391,7 +10391,7 @@ public:
 
 class LiveHotHookSubscriptionPlugin final : public ExecutionPlugin {
 public:
-  bool observes_sgpr_reads() const override { return true; }
+  bool observes_scalar_register_reads() const override { return true; }
   bool supports_async_instructions() const override { return false; }
 
   explicit LiveHotHookSubscriptionPlugin(bool observes)
@@ -10401,7 +10401,10 @@ public:
   bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *) const override {
     return observes_;
   }
-  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++sgpr_reads; }
+  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef reg) override {
+    if (reg.cls == RegClass::SGPR)
+      sgpr_reads += reg.width;
+  }
 
   uint32_t sgpr_reads = 0;
 

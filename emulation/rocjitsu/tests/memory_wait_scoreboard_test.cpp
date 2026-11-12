@@ -1978,13 +1978,16 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
   class Observer final : public ExecutionPlugin {
   public:
     bool observes_vgpr_reads() const override { return true; }
-    bool observes_sgpr_reads() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
     bool supports_async_instructions() const override { return false; }
 
     Observer() : ExecutionPlugin("flat_planning_observer") {}
     unsigned reads = 0;
     void onAmdgpuReadVgprLanes(const Wavefront *, uint32_t, uint64_t, uint8_t) override { ++reads; }
-    void onAmdgpuReadSgpr(const Wavefront *, uint32_t) override { ++reads; }
+    void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef reg) override {
+      if (reg.cls == RegClass::SGPR)
+        reads += reg.width;
+    }
   };
   constexpr uint64_t shared = uint64_t{2} << 32;
   constexpr uint64_t private_base = uint64_t{3} << 32;
@@ -6009,7 +6012,7 @@ TEST(MemoryWaitExecutionTest, ModernRejectedBufferReadsOnlyItsRequiredDescriptor
 TEST(MemoryWaitExecutionTest, BufferTypeSuppressesResultsButKeepsEncodedSourceDependencies) {
   class Observer final : public ExecutionPlugin {
   public:
-    bool observes_sgpr_reads() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
     bool supports_async_instructions() const override { return false; }
 
     Observer() : ExecutionPlugin("planning_observer") {}
@@ -6227,7 +6230,7 @@ TEST(MemoryWaitExecutionTest, DecodedScalarIssueUsesArchitecturalWaitDomain) {
 TEST(MemoryWaitFootprintTest, ScalarRelativeAccessesMatchExecution) {
   class ScalarObserver final : public ExecutionPlugin {
   public:
-    bool observes_sgpr_reads() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
     bool observes_scalar_register_writes() const override { return true; }
     bool supports_async_instructions() const override { return false; }
 
@@ -7055,7 +7058,7 @@ TEST(MemoryWaitExecutionTest,
   class Observer final : public ExecutionPlugin {
   public:
     bool observes_vgpr_reads() const override { return true; }
-    bool observes_sgpr_reads() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
     bool supports_async_instructions() const override { return false; }
 
     Observer() : ExecutionPlugin("buffer_alias_observer") {}

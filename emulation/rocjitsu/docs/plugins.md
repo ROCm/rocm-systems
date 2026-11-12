@@ -409,9 +409,9 @@ keeps plugins independent of encoded selector values and of the simulator's
 physical storage layout. In particular, ordinary SGPRs and wave-private TTMPs
 have distinct identities even though both can appear in scalar operand fields.
 
-The older `onAmdgpuReadSgpr` hook continues to expose physical SGPR indices for
-compatibility. New consumers that need architectural identity should use the
-typed scalar-register hooks. Scalar writes have only the typed callback.
+Both hooks report a complete logical range in one callback, including its
+width. Subscribe through `observes_scalar_register_reads()` and
+`observes_scalar_register_writes()`, respectively.
 
 ### Core register findings
 
@@ -479,7 +479,7 @@ from the corresponding interest method:
 `observes_after_execute_instruction()`,
 `observes_async_instruction_issued()`,
 `observes_memory_instruction_routing()`, `observes_vgpr_reads()`,
-`observes_vgpr_writes()`, `observes_sgpr_reads()`,
+`observes_vgpr_writes()`, `observes_scalar_register_reads()`,
 `observes_scalar_register_writes()`, `observes_memory_routing()`,
 `observes_tensor_dma_memory_access()`, `observes_tensor_dma_issue()`, or
 `observes_register_hazards()`. All default to `false`; overriding a callback
@@ -621,8 +621,7 @@ still writes zeros to its global destination. Consumers must opt in through
 `observes_tensor_dma_issue()`.
 
 SGPR owner resolution is skipped when no contained plugin observes scalar
-register reads. `observes_sgpr_reads()` enables both
-`onAmdgpuReadScalarRegister` and legacy `onAmdgpuReadSgpr` callbacks.
+register reads. Raw storage reads do not produce observation callbacks.
 
 Pass the complete sink configuration to the group constructor and add plugins
 before publishing the group to simulation components. `add()` is not

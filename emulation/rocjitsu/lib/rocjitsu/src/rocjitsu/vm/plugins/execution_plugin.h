@@ -14,7 +14,6 @@
 
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/kernel_dispatch_info.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
@@ -28,6 +27,10 @@
 #include <string>
 
 namespace rocjitsu {
+
+namespace amdgpu {
+class Wavefront;
+}
 
 /// The kind of barrier passed to ExecutionPlugin::onAmdgpuBarrierResolved.
 enum class BarrierKind : uint8_t {
@@ -126,8 +129,7 @@ public:
   virtual bool observes_memory_instruction_routing() const { return false; }
   virtual bool observes_vgpr_reads() const { return false; }
   virtual bool observes_vgpr_writes() const { return false; }
-  /// Enables both typed scalar-register reads and legacy SGPR reads.
-  virtual bool observes_sgpr_reads() const { return false; }
+  virtual bool observes_scalar_register_reads() const { return false; }
   virtual bool observes_scalar_register_writes() const { return false; }
   virtual bool observes_memory_routing() const { return false; }
   virtual bool observes_tensor_dma_memory_access() const { return false; }
@@ -339,26 +341,14 @@ public:
                                       uint64_t /*lane_mask*/,
                                       uint8_t /*byte_mask*/ = kFullByteMask) {}
 
-  /// Called when an SGPR is read during instruction execution.
-  /// @param wf Owning wavefront, or nullptr if the register is unallocated.
-  /// @param physical_reg Physical register index in the SGPR file.
-  /// May run concurrently across simulation partitions unless
-  /// requires_serial_hot_hooks() returns true.
-  virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/) {}
-
   /// Called when an architectural scalar register is read during instruction execution.
   /// @param wf Owning wavefront.
-  /// @param reg Logical register identity. The class distinguishes ordinary
-  ///        SGPRs from TTMPs without exposing their encoded selector values or
-  ///        physical storage layout.
+  /// @param reg Logical register range, reported in one callback. The class
+  ///        distinguishes ordinary SGPRs from TTMPs without exposing their
+  ///        encoded selector values or physical storage layout.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
-  virtual void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
-    if (!wf || reg.cls != RegClass::SGPR)
-      return;
-    for (uint32_t offset = 0; offset < reg.width; ++offset)
-      onAmdgpuReadSgpr(wf, wf->sgpr_alloc().base + reg.index + offset);
-  }
+  virtual void onAmdgpuReadScalarRegister(const amdgpu::Wavefront * /*wf*/, RegisterRef /*reg*/) {}
 
   /// Called when an architectural scalar register is written during instruction execution.
   /// Memory completion and runtime initialization remain unobserved storage operations.
@@ -374,6 +364,7 @@ public:
   /// Opt in to reads of the LDS-direct VALU source. Sampled when the plugin is registered.
   virtual bool observes_lds_direct_reads() const { return false; }
   virtual void onAmdgpuLdsDirectRead(const amdgpu::Wavefront &, uint32_t, uint32_t, uint32_t) {}
+
 private:
   friend class ExecutionPluginGroup;
   std::string name_;
