@@ -62,9 +62,9 @@ inline bool cdna5_ignores_buffer_resource(const RegisterModifiers &modifiers, co
   const uint32_t selector = modifiers.buffer_resource->encoding_value();
   if (!buffer_resource_range_is_backed(wf, selector))
     return false;
-  const auto word3 = resolve_scalar_register_range(wf, selector + 3, 1);
-  return word3 &&
-         cdna5_buffer_resource_type(RegisterAccess(wf).read_scalar_unobserved(*word3)) != 0;
+  const auto range = resolve_scalar_register_range(wf, selector + 3, 1);
+  const auto word3 = range ? RegisterAccess(wf).read_scalar_unobserved(*range) : std::nullopt;
+  return word3 && cdna5_buffer_resource_type(*word3) != 0;
 }
 
 /// MUBUF/MTBUF SOFFSET accepts scalar registers and inline integer/float constants.
