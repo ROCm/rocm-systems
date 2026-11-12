@@ -548,3 +548,31 @@ pub(crate) trait GpuSpmOperations: Driver {
         destination: Option<usize>,
     ) -> Result<SpmDestinationReport, SpmDestinationFailure>;
 }
+
+/// Optional process-range advice and migration, independent of allocation.
+/// Providers encode the whole request before native effects and stage complete
+/// query results. Success is not a durable residency guarantee.
+pub(crate) trait MemoryAdviceOperations: Driver {
+    fn advice_capabilities(&self) -> Result<crate::memory::advice::AdviceCapabilities, Error>;
+    fn advice_set(
+        &self,
+        address: u64,
+        size: u64,
+        changes: &[crate::memory::advice::AdviceChange],
+    ) -> Result<(), Error>;
+    fn advice_query(
+        &self,
+        address: u64,
+        size: u64,
+        queries: &[crate::memory::advice::AdviceQuery],
+    ) -> Result<Vec<crate::memory::advice::AdviceValue>, Error>;
+    /// Meets the requested completion guarantee or rejects it before effects.
+    /// Completed migration does not guarantee durable residency after return.
+    fn advice_prefetch(
+        &self,
+        address: u64,
+        size: u64,
+        location: crate::memory::advice::AdviceLocation,
+        completion: crate::memory::advice::PrefetchCompletion,
+    ) -> Result<(), Error>;
+}

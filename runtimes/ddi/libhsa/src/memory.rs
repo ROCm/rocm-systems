@@ -17,6 +17,7 @@
 //! allocations, pointer metadata, IPC and interop, virtual memory, and
 //! copy/SVM operations. This root retains shared state and shutdown order.
 
+pub(crate) mod advice;
 pub(crate) mod copy_svm;
 pub(crate) mod interop;
 pub(crate) use crate::api::memory::copy_svm::hsa_memory_copy;
@@ -36,12 +37,12 @@ use std::time::Duration;
 
 use crate::platform::memory as linux_interop;
 use crate::platform::memory::AisFileOperation as AisOperation;
-use crate::platform::memory::{KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation};
 use rocddi::device::Device;
 use rocddi::device::gpu::{
     CopyRect, GpuCopyOptions, GpuCopySequence, GpuCopySignal, GpuCopySignalOperation,
     GpuCopyTimestamps, GpuCopyWait,
 };
+use rocddi::memory::advice::{AdviceLocation as SvmLocation, MemoryAdvice};
 use rocddi::memory::device::{
     Allocation, DeviceAccess, HostMappingPolicy, MemoryKind, VirtualAddress, VirtualDeviceMapping,
     VirtualHostMapping, VirtualMemory,
@@ -123,18 +124,6 @@ const ALLOC_EXECUTABLE: u32 = 1 << 2;
 pub(crate) const ALLOC_UNCACHED: u32 = 1 << 3;
 /// Native allocation flags accepted by this frontend.
 const ALLOC_FLAGS: u32 = ALLOC_PCIE | ALLOC_CONTIGUOUS | ALLOC_EXECUTABLE | ALLOC_UNCACHED;
-/// SVM policy bit allowing host access.
-pub(crate) const SVM_FLAG_HOST_ACCESS: u32 = 0x01;
-/// SVM policy bit requesting coherent access.
-pub(crate) const SVM_FLAG_COHERENT: u32 = 0x02;
-/// SVM policy bit restricting placement to the local hive.
-pub(crate) const SVM_FLAG_HIVE_LOCAL: u32 = 0x04;
-/// SVM policy bit making GPU access read-only.
-pub(crate) const SVM_FLAG_GPU_READ_ONLY: u32 = 0x08;
-/// SVM policy bit allowing GPU execution.
-pub(crate) const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
-/// SVM policy bit marking a range read-mostly for GPUs.
-pub(crate) const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
 /// Largest accepted SVM migration-granularity encoding.
 pub(crate) const SVM_MAX_MIGRATION_GRANULARITY: u64 = 18;
 /// Maximum number of SVM attributes accepted in one request.
