@@ -1,0 +1,21 @@
+{
+    "_comment": "AMD 4 nodes: DSv3 trainer EP16 (nodes 1-2) -> generator TP8 DP2 (one node per TP8 replica, nodes 3-4).",
+    "train": {
+        "num_gpus": 16,
+        "tp_size": 1,
+        "cp_size": 1,
+        "ep_size": 16,
+        "pp_size": 1,
+        "fsdp_size": 1,
+        "dp_size": 1
+    },
+    "generation": {
+        "num_gpus": 16,
+        "tp_size": 8,
+        "cp_size": 1,
+        "ep_size": 1,
+        "pp_size": 1,
+        "fsdp_size": 1,
+        "dp_size": 2
+    }
+}
