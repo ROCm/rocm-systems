@@ -818,19 +818,10 @@ __device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
     team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
-  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
-
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int pe_size = team_obj->tinfo_wrt_world->size;
-  long *p_sync = team_obj->bcast_pSync;
-
-  // Passed pe_root is relative to team, convert to world root
-  int pe_root_world = team_obj->get_pe_in_world(PE_root);
-  internal_broadcast_wave<T>(dest, source, nelems, pe_root_world,
-                              pe_start, stride, pe_size, p_sync);
-
-  return ROCSHMEM_SUCCESS;
+  // Route through the generic dispatcher so this path exercises the new
+  // thread-puts fast path (and its size/SDMA gating) instead of
+  // reimplementing it here.
+  return broadcastmem_wave(team, dest, source, nelems * sizeof(T), PE_root);
 }
 
 template <typename T>

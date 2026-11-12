@@ -1211,7 +1211,7 @@ __device__ int GDAContext::alltoall_wave(rocshmem_team_t team,
 template <typename T>
 __device__ void GDAContext::fcollect_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
-  fcollectmem_linear_thread_puts_wg(team, dst, src, nelems * sizeof(T));
+  fcollectmem_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>
@@ -1219,8 +1219,7 @@ __device__ int GDAContext::fcollect_wave(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
-
-  fcollectmem_linear_thread_puts_wave(team, dst, src, nelems * sizeof(T));
+  fcollectmem_wave(team, dst, src, nelems * sizeof(T));
 
   return ROCSHMEM_SUCCESS;
 }
