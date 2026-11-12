@@ -51,9 +51,11 @@ ncclResult_t PciTestCalloc(ncclUniquePtr<Value>& pointer, size_t count) {
 
 #undef ncclCalloc
 #define ncclCalloc(...) PciTestCalloc(__VA_ARGS__)
+#define ncclTopoGetNetPropertiesSnapshot(...) g_ncclTopoGetNetPropertiesSnapshot(__VA_ARGS__)
 #include "fakes/libc_seam.h"
 #include RAS_DIAGNOSTICS_PCI_CC_PATH
 #include "fakes/libc_seam_undef.h"
+#undef ncclTopoGetNetPropertiesSnapshot
 #undef ncclCalloc
 
 namespace {

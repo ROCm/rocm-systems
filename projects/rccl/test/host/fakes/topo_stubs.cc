@@ -280,10 +280,6 @@ static ncclResult_t DefaultTopoGetNetPropertiesSnapshot(
 std::function<ncclResult_t(struct ncclComm*, bool, struct ncclTopoNetPropertiesSnapshot**, int*)>
     g_ncclTopoGetNetPropertiesSnapshot = DefaultTopoGetNetPropertiesSnapshot;
 ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetNetPropertiesSnapshot, ncclTopoGetNetPropertiesSnapshot);
-ncclResult_t ncclTopoGetNetPropertiesSnapshot(struct ncclComm* comm, bool requireInitialized,
-                                             struct ncclTopoNetPropertiesSnapshot** properties, int* count) {
-  return g_ncclTopoGetNetPropertiesSnapshot(comm, requireInitialized, properties, count);
-}
 
 void ResetTopoStubs() {
   g_ncclTopoGetNetPropertiesSnapshot = DefaultTopoGetNetPropertiesSnapshot;
