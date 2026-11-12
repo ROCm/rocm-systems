@@ -2414,8 +2414,10 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     if (active->instruction_execution_error_detail())
       execution_failure_detail_ = active->instruction_execution_error_detail();
     active->pc = instruction_pc;
-    fail_wave_instruction(*active, instruction_mnemonic, instruction_pc,
-                          active->instruction_execution_error(),
+    const std::string_view preserved_mnemonic = active->instruction_execution_error_mnemonic();
+    fail_wave_instruction(*active,
+                          preserved_mnemonic.empty() ? instruction_mnemonic : preserved_mnemonic,
+                          instruction_pc, active->instruction_execution_error(),
                           // Taken before reporting, so a throwing failure handler
                           // cannot leave it for the next instruction.
                           std::exchange(execution_failure_detail_, {}));
