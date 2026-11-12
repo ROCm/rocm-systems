@@ -1,12 +1,11 @@
+import { findRecordedBase } from '../../../../scripts/benchmark-data/runOrdering.mjs';
 import { compareRunExecution, commitShaFor } from './runOrdering.js';
 import { selectRunComparison } from './selectors.js';
 
 export function selectAutomaticReference(data, candidate) {
   const develop = (data.runs ?? []).filter((run) => run.branch === (data.canonicalBranch ?? 'develop'));
-  if (candidate?.sourceBase?.branch === (data.canonicalBranch ?? 'develop')) {
-    const exact = develop.filter((run) => commitShaFor(run) === candidate.sourceBase.commit).sort(compareRunExecution).at(-1);
-    if (exact) return { run: exact, reason: 'exact-base', description: `Exact develop base ${commitShaFor(exact)} · attempt ${exact.runId}` };
-  }
+  const exact = findRecordedBase(develop, candidate, data.canonicalBranch ?? 'develop');
+  if (exact) return { run: exact, reason: 'exact-base', description: `Exact develop base ${commitShaFor(exact)} · attempt ${exact.runId}` };
   const earlier = candidate ? develop.filter((run) => Date.parse(run.timestamp) < Date.parse(candidate.timestamp)).sort(compareRunExecution).at(-1) : null;
   return earlier ? { run: earlier, reason: 'earlier-develop', description: `Latest develop execution completed before this candidate · attempt ${earlier.runId}` }
     : { run: null, reason: 'unavailable', description: 'No published develop reference is available for this candidate.' };

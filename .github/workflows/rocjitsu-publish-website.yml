@@ -68,6 +68,7 @@ jobs:
           filters: |
             changed:
               - 'emulation/rocjitsu/website/dashboard/**'
+              - 'emulation/rocjitsu/scripts/benchmark-data/**'
               - '.github/workflows/rocjitsu-publish-website.yml'
 
       - name: Detect handbook changes since publication

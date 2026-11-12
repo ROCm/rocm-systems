@@ -426,12 +426,11 @@ for (const postMerge of [false, true]) {
       associated[0].merge_commit_sha = args.headSha;
     }
     const { readFile } = require('node:fs/promises');
-    const { pathToFileURL } = require('node:url');
-    const { adaptPublishedDashboardData } = await import(pathToFileURL(resolve(dashboard, 'src/data/dashboardDataAdapter.js')));
+    const { normalizePublishedData } = await import('../../../emulation/rocjitsu/scripts/benchmark-data/index.mjs');
     const directory = resolve(dashboard, 'tests/fixtures/data');
     const index = JSON.parse(await readFile(resolve(directory, 'index.json'), 'utf8'));
     const runs = await Promise.all(index.runFiles.map(async (file) => JSON.parse(await readFile(resolve(directory, file), 'utf8'))));
-    const { data } = adaptPublishedDashboardData({ index, runs });
+    const data = normalizePublishedData({ index, runs });
     data.allRuns.find((run) => run.runId === args.publishedRunId).sourceBase = {
       branch: 'develop', commit: data.allRuns.find((run) => run.runId === 'fictional-develop-22').provenance.rocjitsuCommitSha,
     };

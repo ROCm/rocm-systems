@@ -3,13 +3,12 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile, writeFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, mkdtemp, rm, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { adaptPublishedDashboardData } from '../../../emulation/rocjitsu/website/dashboard/src/data/dashboardDataAdapter.js';
-import { publishedRunPath } from '../../../emulation/rocjitsu/website/dashboard/src/data/runSchema.js';
+import { normalizePublishedData } from '../../../emulation/rocjitsu/scripts/benchmark-data/index.mjs';
+import { publishedRunPath } from '../../../emulation/rocjitsu/scripts/benchmark-data/runSchema.mjs';
 import { buildBenchmarkSummary, readBenchmarkSummary } from '../rocjitsu_benchmark_report.js';
 
 const fixture = JSON.parse(await readFile(new URL('../../../emulation/rocjitsu/website/dashboard/tests/fixtures/fictional-producer-run.json', import.meta.url)));
@@ -40,7 +39,7 @@ function dataset(runs) {
 }
 
 async function summarize(runs = publication()) {
-  return buildBenchmarkSummary(adaptPublishedDashboardData(dataset(runs)).data, 'candidate', candidateSha);
+  return buildBenchmarkSummary(normalizePublishedData(dataset(runs)), 'candidate', candidateSha);
 }
 
 test('uses dashboard comparisons for counts, timing rows and exact run links', async () => {
@@ -133,19 +132,28 @@ test('groups targets and thread policies separately and limits the largest chang
 });
 
 test('refuses a missing candidate or mismatched measured commit', async () => {
-  const data = adaptPublishedDashboardData(dataset(publication())).data;
+  const data = normalizePublishedData(dataset(publication()));
   await assert.rejects(buildBenchmarkSummary(data, 'missing', candidateSha), /does not match/);
   await assert.rejects(buildBenchmarkSummary(data, 'candidate', baselineSha), /does not match/);
 });
 
-test('CLI reads the publication snapshot and writes an identified summary artifact', async (t) => {
+test('CLI produces the summary without a website checkout', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'rocjitsu-summary-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const source = dataset(publication());
   await mkdir(join(directory, 'runs/default-branch'), { recursive: true });
   await writeFile(join(directory, 'index.json'), JSON.stringify(source.index));
   for (const entry of source.runs) await writeFile(join(directory, publishedRunPath(entry)), JSON.stringify(entry));
-  const script = fileURLToPath(new URL('../rocjitsu_benchmark_report.js', import.meta.url));
+  const checkout = join(directory, 'checkout');
+  const scripts = join(checkout, '.github/scripts');
+  await mkdir(scripts, { recursive: true });
+  for (const file of ['rocjitsu_benchmark_report.js', 'rocjitsu_fuzz_report.js']) {
+    await cp(new URL(`../${file}`, import.meta.url), join(scripts, file));
+  }
+  const sharedData = join(checkout, 'emulation/rocjitsu/scripts/benchmark-data');
+  await mkdir(sharedData, { recursive: true });
+  await cp(new URL('../../../emulation/rocjitsu/scripts/benchmark-data/', import.meta.url), sharedData, { recursive: true });
+  const script = join(scripts, 'rocjitsu_benchmark_report.js');
   const output = join(directory, 'summary.json');
   execFileSync(process.execPath, [script, '--data-dir', directory, '--run-id', 'candidate', '--head-sha', candidateSha, '--output', output]);
   const summary = JSON.parse(await readFile(output, 'utf8'));

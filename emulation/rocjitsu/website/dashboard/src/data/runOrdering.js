@@ -1,13 +1,10 @@
+import { commitShaFor, compareRunExecution } from '../../../../scripts/benchmark-data/runOrdering.mjs';
+export { commitShaFor, compareRunExecution };
 import { isValidTimestamp } from '../utils/timestamp.js';
 
 function parsedTime(value) {
   const time = Date.parse(value);
   return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
-}
-
-export function commitShaFor(run) {
-  const sha = run?.provenance?.rocjitsuCommitSha;
-  return typeof sha === 'string' ? sha : '';
 }
 
 export function commitTimestampFor(run) {
@@ -16,11 +13,6 @@ export function commitTimestampFor(run) {
 
 export function hasCommitTimestamp(run) {
   return isValidTimestamp(run?.commitTimestamp);
-}
-
-export function compareRunExecution(left, right) {
-  return parsedTime(left?.timestamp) - parsedTime(right?.timestamp)
-    || String(left?.runId ?? '').localeCompare(String(right?.runId ?? ''));
 }
 
 export function compareCommitPosition(left, right) {
