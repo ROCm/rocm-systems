@@ -31,6 +31,7 @@ profiler-hub/
     formats/           format registry
       rocpd_v2/        legacy rocpd (.rpd, schema 2) reader and trim rules
       rocpd_v3/        rocpd schema 3 reader, histogram, tables, trim rules
+      pytorch/         PyTorch Kineto trace parser
     queries/           fluent SQL builders
     writers/           writer interfaces and schema-3 writers
   tests/
@@ -44,7 +45,7 @@ profiler-hub/
 
 | File | Role | Purpose |
 |---|---|---|
-| `CMakeLists.txt` | Build | Configures the C++20 project, the object library, the schema options, the per-format switches `PROFILER_HUB_ENABLE_ROCPD_V2` / `_V3`, and install rules. |
+| `CMakeLists.txt` | Build | Configures the C++20 project, the object library, the schema options, the per-format switches `PROFILER_HUB_ENABLE_ROCPD_V2` / `_V3` / `PROFILER_HUB_ENABLE_PYTORCH_KINETO`, and install rules. |
 
 ## include/c
 
@@ -143,6 +144,7 @@ profiler-hub/
 | `traits.hpp` | Shared | Compile-time traits for optionals, maps, string literals, and SQLite bind types. |
 | `string_conversions.hpp` | Writer | Key and string helpers for writer entity validation. |
 | `types.hpp` | Writer | Owning copies of writer ids used inside the entity registry. |
+| `utility.hpp` | Shared | Steady-clock milliseconds and an `fclose` deleter. Built only with `PROFILER_HUB_ENABLE_PYTORCH_KINETO`. |
 
 ## source/data_storage
 
@@ -189,6 +191,16 @@ profiler-hub/
 | `rocpd_v3_histogram.cpp` | Reader | SQL that buckets region, kernel, memory, and HIP durations. |
 | `rocpd_v3_table_events.cpp` | Reader | Paged table rows and the SQL name-duration summary. |
 | `rocpd_v3_trim_schema.cpp` | Trim | Trim rules by table prefix: intervals, samples, events, and child rows. |
+
+### source/formats/pytorch
+
+Built only with `PROFILER_HUB_ENABLE_PYTORCH_KINETO`. No registry entry opens these files yet, and nothing calls them.
+
+| File | Role | Purpose |
+|---|---|---|
+| `kineto_loader.hpp`, `kineto_loader.cpp` | Reader | Streams a plain or gzip Kineto JSON trace into a flat event list with its names, categories, thread and process names. An optional cancel check is polled on each 1 MiB refill. |
+| `category_class.hpp`, `category_class.cpp` | Reader | Maps a Kineto category name, including the older spellings, to device or host work, launch site, and event type. |
+| `kineto_format.hpp`, `kineto_format.cpp` | Reader | Decides from the first 64 KiB of a trace's text whether it is a Kineto trace. |
 
 ## source/queries
 
