@@ -903,7 +903,8 @@ mod tests {
         assert_eq!(
             slot.finish_pending_disable()
                 .unwrap_err()
-                .native_error_code(),
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code),
             Some(errno::EINTR)
         );
         assert!(slot.state.lock().unwrap().pending_disable);
