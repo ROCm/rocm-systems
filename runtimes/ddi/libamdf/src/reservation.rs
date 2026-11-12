@@ -323,6 +323,13 @@ pub(crate) unsafe extern "C" fn detach(
     })
 }
 
+#[cfg_attr(
+    windows,
+    allow(
+        clippy::forget_non_drop,
+        reason = "Windows reservations are unavailable until their native owner is implemented"
+    )
+)]
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_memory_reservation_t) -> u64 {
     boundary(|| unsafe {
         let reservation = object(pointer.cast::<Reservation>())?;
