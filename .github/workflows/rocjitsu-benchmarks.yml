@@ -259,7 +259,7 @@ jobs:
       BENCHMARK_SHA: ${{ needs.source-metadata.outputs.source_sha }}
       BENCHMARK_BRANCH: ${{ needs.source-metadata.outputs.source_branch }}
     runs-on: rocjitsu-benchmark
-    timeout-minutes: 120
+    timeout-minutes: 240
     permissions:
       contents: read
     outputs:
@@ -435,7 +435,8 @@ jobs:
 
       - name: Run performance suite
         if: ${{ success() && steps.prepare.outcome == 'success' && steps.rdna.outcome == 'success' }}
-        timeout-minutes: 60
+        # Sequential cases include cold compilation and CPU validation.
+        timeout-minutes: 180
         id: benchmark
         working-directory: ${{ env.CORPUS_SOURCE_DIR }}
         run: |
