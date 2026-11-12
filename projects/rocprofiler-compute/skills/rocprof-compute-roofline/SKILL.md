@@ -29,9 +29,9 @@ that leave out roofline (block 4), or with the deprecated `--no-roof`, so an
 existing profile collected that way has no roofline data.
 
 MI100 (gfx908) does not support the roofline microbenchmarks. Every other
-supported architecture does. On MI100 the benchmark is skipped and the profile
-still succeeds, so a missing roofline there is not a mistake in how the profile
-was run. Never tell an MI100 user to re-profile to get roofline; use
+supported architecture does. On MI100 a full profile skips the benchmark and
+still succeeds, and selecting roofline fails, so a missing roofline there is not
+a mistake in how the profile was run. Never tell an MI100 user to re-profile to get roofline; use
 Speed-of-Light and the `rocprof-compute-memory` skill instead. Confirm support
 for a new architecture against
 [compatible-accelerators.rst](../../docs/reference/compatible-accelerators.rst).

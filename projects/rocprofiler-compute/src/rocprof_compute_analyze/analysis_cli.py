@@ -27,7 +27,7 @@ from utils.utils_analysis import (
     rollup_node_stats,
     traced_frameworks_from_config,
 )
-from utils.utils_common import validate_roofline_csv
+from utils.utils_common import selects_roofline, validate_roofline_csv
 
 # Display names for the backends in operator headings and messages.
 _OPERATOR_LABELS = {"torch": "PyTorch", "triton": "Triton", "user": "User"}
@@ -407,6 +407,12 @@ class cli_analysis(OmniAnalyze_Base):
                             "Skipping roofline charting: "
                             f"Invalid roofline.csv: {roofline_error_msg}",
                         )
+                elif selects_roofline(args.filter_metrics):
+                    console_warning(
+                        "roofline",
+                        f"{gpu_arch} does not support the roofline benchmark, so "
+                        "analyze shows no roofline data.",
+                    )
 
             tty.show_all(
                 args,

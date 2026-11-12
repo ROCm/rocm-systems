@@ -634,12 +634,9 @@ class RocProfCompute:
         promoted to the workload directory after passing validation.
         """
         if self.__mspec.gpu_arch not in BENCHMARKING_SUPPORTED:
-            console_log(
-                "roofline",
-                f"Skipping benchmark: roofline benchmarking not supported on "
-                f"{self.__mspec.gpu_arch}",
+            console_error(
+                f"{self.__mspec.gpu_arch} does not support the roofline benchmark."
             )
-            return
 
         output_dir = Path(self.__args.output_directory)
         if not output_dir.exists():
