@@ -10,8 +10,8 @@
 mod linux;
 #[cfg(target_os = "linux")]
 pub(crate) use linux::{
-    acquire_code_object_file, bind_process, code_object_file_uri, driver_uid, event, fd,
-    invalid_file, memory, native_cpu_node_ordinal, node_id, process_is_current,
+    acquire_code_object_file, bind_process, code_object_file_uri, driver_uid, fd, invalid_file,
+    memory, native_cpu_node_ordinal, node_id, process_is_current,
 };
 
 #[cfg(not(target_os = "linux"))]

@@ -117,9 +117,12 @@ impl DriverInstance {
         }
     }
 
-    /// Counts only the driver reference held by a recognized internal page.
-    pub(crate) fn has_other_owners_except(&self, page: Option<&Allocation>) -> bool {
-        let expected = 1 + usize::from(page.is_some_and(|page| self.owns_allocation(page)));
+    /// Counts the exact references held by recognized internal allocations.
+    pub(crate) fn has_other_owners_except(&self, internal: &[&Allocation]) -> bool {
+        let expected = 1 + internal
+            .iter()
+            .filter(|allocation| self.owns_allocation(allocation))
+            .count();
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
