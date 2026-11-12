@@ -892,7 +892,7 @@ TEST(Gfx1250ExecutionTest, ClusterLdsPinPreventsAllocatorReuseUntilClusterComple
   // A cluster pin blocks LDS reclamation even when the CU has no resident waves.
   cu->maybe_reset_lds_alloc();
 
-  EXPECT_EQ(cu->allocate_lds(257), 512u);
+  EXPECT_EQ(cu->allocate_lds(257), 2048u);
   cu->unpin_lds_for_cluster(7);
   // Once the pin is released and the CU is idle, the LDS allocator resets.
   cu->maybe_reset_lds_alloc();
@@ -1613,7 +1613,7 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsWritesEachIssuingParticipant) {
 TEST(Gfx1250SimulationTest, GlobalLoadAsyncToLdsDropsNetNegativeDestination) {
   constexpr uint64_t kernel_addr = 0x10000;
   constexpr uint64_t input_addr = 0x2600;
-  constexpr uint32_t lds_bytes_per_wg = 256;
+  constexpr uint32_t lds_bytes_per_wg = 2048;
   constexpr uint32_t kSentinel = 0xa5a5a5a5u;
 
   const uint32_t code[] = {
@@ -1657,7 +1657,7 @@ TEST(Gfx1250SimulationTest, GlobalLoadAsyncToLdsDropsNetNegativeDestination) {
 TEST(Gfx1250SimulationTest, GlobalLoadAsyncToLdsDropsDestinationPastWorkgroupAllocation) {
   constexpr uint64_t kernel_addr = 0x10000;
   constexpr uint64_t input_addr = 0x2800;
-  constexpr uint32_t lds_bytes_per_wg = 256;
+  constexpr uint32_t lds_bytes_per_wg = 2048;
   constexpr uint32_t kSentinel = 0xa5a5a5a5u;
 
   const uint32_t code[] = {
@@ -1665,7 +1665,7 @@ TEST(Gfx1250SimulationTest, GlobalLoadAsyncToLdsDropsDestinationPastWorkgroupAll
       0xBE810080u, // s_mov_b32 s1, 0
       0x7E000280u, // v_mov_b32_e32 v0, 0
       0xEE180000u,    0x00000000u,
-      0x00010000u, // global_load_async_to_lds_b32 v0, v0, s[0:1] offset:256
+      0x00080000u, // global_load_async_to_lds_b32 v0, v0, s[0:1] offset:2048
       0xBFCA0000u, // s_wait_asynccnt 0
       S_ENDPGM_GFX12,
   };

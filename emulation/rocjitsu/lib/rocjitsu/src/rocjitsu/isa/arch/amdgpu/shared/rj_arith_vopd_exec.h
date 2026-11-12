@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rj_arith/rj_arith.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_status.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/simd.h"
@@ -12,6 +13,24 @@
 #include <cstdint>
 
 namespace rocjitsu::amdgpu::arith {
+
+// The library's required-status mode covers nearest rounding with preserved denormals.
+// Compatibility must also execute the other guest modes supported by dual MUL.
+inline int gfx12_compat_dual_mul(const Wavefront &wave, uint64_t flags, uint32_t exec_mask,
+                                 uint32_t *result, const uint32_t *a, const uint32_t *b,
+                                 uint32_t *causes) {
+  const int error = rj_arith_v_dual_mul_f32_w32_gfx12(flags, exec_mask, 0, &result, &a, &b, causes);
+  if (error != RJ_ARITH_SUCCESS)
+    return error;
+  using F32 = fp_format::F32;
+  for (uint32_t active = exec_mask; active; active &= active - 1) {
+    const auto lane = std::countr_zero(active);
+    const auto zero = (a[lane] ^ b[lane]) & F32::kSign;
+    *causes |= fp_status::fma<F32>(a[lane], b[lane], zero, result[lane], wave.fp_round_mode_f32(),
+                                   wave.fp_denorm_mode_f32());
+  }
+  return RJ_ARITH_SUCCESS;
+}
 
 // Both slots read pre-instruction storage. Only a successful pair commits
 // destinations and optional state; a rejected second slot cannot expose the

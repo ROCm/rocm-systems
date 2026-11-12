@@ -12,7 +12,7 @@ namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 // before stores.
 template <int M, int K, int Batch, int PerWord, bool Bf16 = false>
 void mfma_reduce_scalar(uint64_t instruction_flags, uint32_t *const *d, const float *left,
-                        const float *right, const uint32_t *const *c) {
+                        const float *right, const uint32_t *const *c, bool clamp_overflow = false) {
   constexpr int Regs = M * M * Batch / 64;
   uint32_t result[Regs][64];
   for (int batch = 0; batch < Batch; ++batch) {
@@ -32,6 +32,10 @@ void mfma_reduce_scalar(uint64_t instruction_flags, uint32_t *const *d, const fl
           } else {
             acc += left[ai] * right[bi];
           }
+        }
+        if (clamp_overflow) {
+          acc = mfma_clamp_overflow<M, K, Batch, PerWord>(
+              acc, as_float(c[out.reg][out.lane]), left, right, row, col, batch, instruction_flags);
         }
         result[out.reg][out.lane] = as_bits(acc);
       }
