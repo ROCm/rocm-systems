@@ -1209,8 +1209,18 @@ WriteInterceptor(const void* packets,
     // range: it already holds this same mutex as a writer. (The async GPU tail is handled by the
     // replay window's agent-wide drain, not by this lock.)
     std::optional<std::shared_lock<std::shared_mutex>> replay_reader_guard{};
+    std::atomic<uint64_t>*                             submit_epoch = nullptr;
     if((has_kernel_replay || has_range_replay) && !range_replay::this_thread_replaying())
-        replay_reader_guard.emplace(agent_replay_mutex(queue.get_agent().get_rocp_agent()->id));
+    {
+        const auto agent_id = queue.get_agent().get_rocp_agent()->id;
+        replay_reader_guard.emplace(agent_replay_mutex(agent_id));
+        if(num_dispatch_packets > 0) submit_epoch = &agent_submit_epoch(agent_id);
+    }
+    // Declared after the reader guard so it runs first on every exit: the epoch advances once the
+    // packets are in the ring and before the reader lock is released.
+    const auto advance_submit_epoch = common::scope_destructor{[submit_epoch]() {
+        if(submit_epoch != nullptr) submit_epoch->fetch_add(1, std::memory_order_release);
+    }};
 
     bool should_batch_packets = true;
     queue.signal_callback([&should_batch_packets](const auto& map) {

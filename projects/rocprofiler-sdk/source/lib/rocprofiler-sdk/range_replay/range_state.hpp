@@ -35,9 +35,17 @@
 //
 // Declining is never fatal. The application's own execution of the range -- pass 0 -- is forwarded
 // unmodified in every case; a decline only means the SDK will not re-execute the recording.
+//
+// A host-replay range (host_range_state_t::enabled) records nothing: the extra passes re-run the
+// application's code via siglongjmp, so note_submission only counts its dispatches, and the
+// packet-recording declines (queue/agent binding, graphs, copies from the owner thread, budget,
+// kernarg layout) do not apply. See host_replay.hpp.
 
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
+#include "lib/rocprofiler-sdk/range_replay/digest.hpp"
 #include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -119,6 +127,9 @@ public:
     // Append a recorded dispatch, declining with PROGRAM_TOO_LARGE at the budget.
     bool add_dispatch(recorded_dispatch_t&& dispatch);
 
+    // Count dispatches without recording them (host replay). No-op once declined.
+    void count_dispatches(size_t count);
+
     // Code objects are numbered in load order. The entry snapshot is taken when the range binds and
     // holds the module variables (__device__ / __constant__ globals) of every code object loaded by
     // then, so a kernel from a code object numbered above the watermark -- loaded lazily by HIP or
@@ -147,6 +158,50 @@ private:
 struct external_decline_t
 {
     std::atomic<uint32_t> reason = {ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED};
+    // Device writes from the range's own thread. They are part of the program a host range
+    // re-executes, so they are not a decline on their own. finish_pass snapshots this around the
+    // tool callbacks: a copy those callbacks submit runs after the pass fence, and the compute
+    // queue barrier does not wait for it.
+    std::atomic<uint64_t> owning_device_writes = {0};
+};
+
+// Device state of one GPU agent captured when a host-replay range opens.
+struct host_agent_state_t
+{
+    hsa_agent_t                                       hsa_agent = {.handle = 0};
+    rocprofiler_agent_id_t                            agent_id  = {.handle = 0};
+    kernel_replay::memory_snapshot::device_snapshot_t snapshot  = {};
+    // Base, size and lifetime of each entry allocation. Reusing a freed address is not unchanged.
+    kernel_replay::memory_tracker::tracked_map_t tracked      = {};
+    digest::region_digests_t                     exit_digests = {};
+};
+
+// Host memory the application registered with rocprofiler_range_replay_host_track_memory.
+struct host_region_t
+{
+    void*                ptr         = nullptr;
+    std::vector<uint8_t> saved       = {};
+    uint64_t             exit_digest = 0;
+};
+
+struct host_range_state_t
+{
+    bool     enabled = false;
+    uint64_t pass    = 0;  // pass the application is executing: 0 is its own run
+
+    bool                            snapshot_taken        = false;
+    std::vector<host_agent_state_t> agents                = {};
+    std::vector<host_region_t>      regions               = {};
+    uint64_t                        code_object_watermark = 0;
+    bool                            exit_digests_taken    = false;
+
+    // Carries the PASS callback context from the PHASE_ENTER raised just before a siglongjmp to the
+    // PHASE_EXIT raised when that pass reaches end() again.
+    pass_context_state_t pass_state = {};
+
+    // The local-context override must outlive the jumps between passes, so it is heap-owned here
+    // rather than scoped to one call frame. Released when the range closes.
+    std::shared_ptr<kernel_replay::scoped_local_context_control> local_context = {};
 };
 
 // The live, HSA-facing half of an open range: the record plus what the executor needs to re-submit
@@ -176,7 +231,46 @@ struct range_context_t
     uint64_t thread_id        = 0;
     uint64_t internal_corr_id = 0;
     uint64_t ancestor_corr_id = 0;
+
+    host_range_state_t host = {};
 };
+
+// Staged thread-local sigjmp_buf behind rocprofiler_range_replay_host_jmpbuf(). host_jmpbuf() arms
+// it; take_host_jmp_armed() consumes the arming and promotes the staged target only without an open
+// range, so a rejected nested begin cannot replace the active range's target.
+void*
+host_jmpbuf();
+
+bool
+take_host_jmp_armed();
+
+// The buffer itself, without arming. Only a valid siglongjmp target for a range whose begin()
+// consumed an arming.
+void*
+host_jmp_target();
+
+// Host regions registered while no range was open on this thread, consumed by the next begin().
+struct pending_host_region_t
+{
+    void*  ptr  = nullptr;
+    size_t size = 0;
+};
+
+void
+add_pending_host_region(void* ptr, size_t size);
+
+std::vector<pending_host_region_t>
+take_pending_host_regions();
+
+// Mark the calling thread's open range as host replay. Its registry entry then matches every agent
+// for foreign dispatches and device writes from other threads, while device writes from the owning
+// thread are part of the re-executed program and are ignored.
+void
+set_host_mode(range_context_t& ctx);
+
+// Id of the most recently loaded code object (0 when none is loaded).
+uint64_t
+newest_code_object_id();
 
 // Publish a decline reason from a thread that does not own the range.
 void
@@ -224,20 +318,22 @@ note_submission(const hsa::Queue&              queue,
                 size_t                         packet_count,
                 bool                           graph_launch_active);
 
-// Called from the queue path for a submission made by a thread *without* an open range: if some
-// other thread has a range open on the same agent, that range's isolation assumption is broken.
+// Called from the queue path independently of this thread's own range: if another thread has a
+// range open on the same agent, that range's isolation assumption is broken.
 void
 note_foreign_dispatch(uint64_t agent_key);
 
 // Called from the async-copy path when a copy writes memory owned by a GPU agent. Any open range on
 // that agent is declined: the copy's write is not part of the recorded program, so a replayed pass
-// would run without it.
+// would run without it. A host-replay range is declined only by a copy from another thread: its own
+// copies re-run with every pass.
 void
 note_device_write(uint64_t agent_key);
 
-// Called when a code object is about to be unloaded. Every bound range is declined, because its
-// recorded packets may point at the code being freed, and the kernarg layouts cached by kernel
-// object address are dropped, because a later load may reuse those addresses for other kernels.
+// Called when a code object is about to be unloaded. Every bound packet range and host range is
+// declined, because saved packets or executable globals may refer to freed code, and layouts cached
+// by kernel object address are dropped, because a later load may reuse those addresses for other
+// kernels.
 void
 note_code_object_unload();
 }  // namespace range_replay

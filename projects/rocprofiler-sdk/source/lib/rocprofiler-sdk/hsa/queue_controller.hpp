@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -94,6 +95,8 @@ public:
     const Queue* get_queue(const hsa_queue_t&) const;
 
     void iterate_queues(const queue_iterator_cb_t&) const;
+    // Keeps SDK and runtime queues alive through callbacks without holding the queue-map lock.
+    void iterate_queues_with_lifetime(const queue_iterator_cb_t&) const;
     void set_queue_state(queue_state state, hsa_queue_t* hsa_queue);
 
     void add_dispatch_ready(const Queue* queue);
@@ -135,6 +138,7 @@ public:
 #endif
 
 private:
+    mutable std::shared_mutex _queue_lifetime_mutex;
     using client_id_map_t  = std::unordered_map<ClientID, agent_callback_tuple_t>;
     using resource_alloc_t = void(const AgentCache&, const CoreApiTable&, const AmdExtTable&);
 

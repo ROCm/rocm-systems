@@ -48,19 +48,55 @@ namespace hsa
 namespace
 {
 thread_local bool tl_passthrough = false;
+
+struct agent_replay_state_t
+{
+    std::shared_mutex     mutex        = {};
+    std::atomic<uint64_t> submit_epoch = {0};
+};
+
+agent_replay_state_t&
+agent_replay_state(rocprofiler_agent_id_t agent_id)
+{
+    // No get_fini_status() guard is needed here. Every caller reaches this only when a replay
+    // service is active, and that is false during finalization, so the static map below is never
+    // touched after teardown.
+    using state_map_t    = std::unordered_map<rocprofiler_agent_id_t, agent_replay_state_t>;
+    static auto*& states = common::static_object<common::Synchronized<state_map_t>>::construct();
+
+    // Every submit looks its agent up. Nodes are never erased and unordered_map references survive
+    // rehashing, so a reference stays valid without the lock and a thread can cache its last one.
+    thread_local auto                  tl_agent_id = rocprofiler_agent_id_t{.handle = UINT64_MAX};
+    thread_local agent_replay_state_t* tl_state    = nullptr;
+    if(tl_state != nullptr && tl_agent_id.handle == agent_id.handle) return *tl_state;
+
+    auto* state = const_cast<agent_replay_state_t*>(states->rlock(
+        [](const state_map_t& _map, auto _id) -> const agent_replay_state_t* {
+            const auto itr = _map.find(_id);
+            return (itr == _map.end()) ? nullptr : &itr->second;
+        },
+        agent_id));
+    if(state == nullptr)
+        state = &states->wlock(
+            [](state_map_t& _map, auto _id) -> agent_replay_state_t& { return _map[_id]; },
+            agent_id);
+
+    tl_agent_id = agent_id;
+    tl_state    = state;
+    return *state;
+}
 }  // namespace
 
 std::shared_mutex&
 agent_replay_mutex(rocprofiler_agent_id_t agent_id)
 {
-    // No get_fini_status() guard is needed here. Every caller reaches this only when a replay
-    // service is active, and that is false during finalization, so the static lock map below is
-    // never touched after teardown.
-    using lock_map_t    = std::unordered_map<rocprofiler_agent_id_t, std::shared_mutex>;
-    static auto*& locks = common::static_object<common::Synchronized<lock_map_t>>::construct();
+    return agent_replay_state(agent_id).mutex;
+}
 
-    return locks->wlock([](lock_map_t& _map, auto _id) -> std::shared_mutex& { return _map[_id]; },
-                        agent_id);
+std::atomic<uint64_t>&
+agent_submit_epoch(rocprofiler_agent_id_t agent_id)
+{
+    return agent_replay_state(agent_id).submit_epoch;
 }
 
 void
@@ -103,6 +139,7 @@ bool
 replay_ring_submit(const Queue& queue, const rocprofiler_packet* packets, size_t count)
 {
     if(count == 0) return true;
+    if(queue.get_engine_type() != Queue::engine_type::compute) return false;
 
     const auto* hsa_queue = queue.intercept_queue();
     if(hsa_queue == nullptr || hsa_queue->base_address == nullptr) return false;

@@ -38,10 +38,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <csetjmp>
 #include <cstring>
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocprofiler
@@ -61,13 +63,15 @@ open_range_counter()
 // One entry per open range. Small (bounded by the number of threads inside a range), so a vector
 // scanned under a read lock is cheaper than a map. Foreign dispatches and device-writing copies
 // look up by agent; `agent_key` is 0 until the range binds to its first dispatch, and an unbound
-// range cannot be interfered with because it has recorded nothing yet.
+// range cannot be interfered with because it has recorded nothing yet. A host-replay entry has no
+// agent key: it snapshots every GPU agent at begin, so it matches all of them.
 struct registry_entry_t
 {
     uint64_t                            agent_key = 0;
     uint64_t                            thread_id = 0;
     std::shared_ptr<external_decline_t> external  = {};
     const range_context_t*              owner     = nullptr;
+    bool                                host      = false;
 };
 
 using registry_t = std::vector<registry_entry_t>;
@@ -81,6 +85,12 @@ registry()
 
 thread_local std::unique_ptr<range_context_t> tl_range     = {};
 thread_local bool                             tl_replaying = false;
+
+thread_local sigjmp_buf                         tl_host_jmp_buffers[2]  = {};
+thread_local sigjmp_buf*                        tl_host_jmp_staged      = &tl_host_jmp_buffers[0];
+thread_local sigjmp_buf*                        tl_host_jmp_active      = &tl_host_jmp_buffers[1];
+thread_local bool                               tl_host_jmp_armed       = false;
+thread_local std::vector<pending_host_region_t> tl_pending_host_regions = {};
 
 // kernel_object -> (kernarg segment size, alignment, parent code object), memoized. Resolving it
 // means walking the loaded code objects' symbols, which is far too slow to repeat per recorded
@@ -237,6 +247,12 @@ range_record_t::add_dispatch(recorded_dispatch_t&& dispatch)
 }
 
 void
+range_record_t::count_dispatches(size_t count)
+{
+    if(eligible()) m_observed += count;
+}
+
+void
 range_record_t::set_code_object_watermark(uint64_t newest_code_object_id)
 {
     m_code_object_watermark = newest_code_object_id;
@@ -287,6 +303,58 @@ void
 set_this_thread_replaying(bool replaying)
 {
     tl_replaying = replaying;
+}
+
+void*
+host_jmpbuf()
+{
+    tl_host_jmp_armed = true;
+    return tl_host_jmp_staged;
+}
+
+bool
+take_host_jmp_armed()
+{
+    const bool armed = std::exchange(tl_host_jmp_armed, false);
+    // A nested HOST_BEGIN writes only the staged buffer; consuming its rejected begin must not
+    // replace the enclosing range's live siglongjmp target.
+    if(armed && !tl_range) std::swap(tl_host_jmp_staged, tl_host_jmp_active);
+    return armed;
+}
+
+void*
+host_jmp_target()
+{
+    return tl_host_jmp_active;
+}
+
+void
+add_pending_host_region(void* ptr, size_t size)
+{
+    tl_pending_host_regions.emplace_back(pending_host_region_t{ptr, size});
+}
+
+std::vector<pending_host_region_t>
+take_pending_host_regions()
+{
+    return std::exchange(tl_pending_host_regions, {});
+}
+
+void
+set_host_mode(range_context_t& ctx)
+{
+    ctx.host.enabled = true;
+    const auto* self = &ctx;
+    registry().wlock([&](registry_t& entries) {
+        for(auto& entry : entries)
+            if(entry.owner == self) entry.host = true;
+    });
+}
+
+uint64_t
+newest_code_object_id()
+{
+    return newest_loaded_code_object_id();
 }
 
 range_context_t*
@@ -350,6 +418,22 @@ note_submission(const hsa::Queue&              queue,
 
     fold_external_decline(*ctx);
     if(!ctx->record.eligible()) return;
+
+    if(ctx->host.enabled)
+    {
+        // Only the application's own execution is counted: the re-executed passes submit the same
+        // work again, and the PASS/CLOSE dispatch_count describes one execution of the range.
+        if(ctx->host.pass != 0) return;
+
+        const auto* rocp_agent = queue.get_agent().get_rocp_agent();
+        if(ctx->agent_id.handle == 0 && rocp_agent != nullptr) ctx->agent_id = rocp_agent->id;
+
+        auto dispatches = size_t{0};
+        for(size_t i = 0; i < packet_count; ++i)
+            if(is_dispatch_packet(packets[i])) ++dispatches;
+        ctx->record.count_dispatches(dispatches);
+        return;
+    }
 
     if(graph_launch_active)
     {
@@ -433,7 +517,7 @@ note_foreign_dispatch(uint64_t agent_key)
     registry().rlock([&](const registry_t& entries) {
         for(const auto& entry : entries)
         {
-            if(entry.agent_key != agent_key || entry.thread_id == tid) continue;
+            if((!entry.host && entry.agent_key != agent_key) || entry.thread_id == tid) continue;
             if(entry.external)
                 publish_external_decline(*entry.external,
                                          ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
@@ -446,10 +530,17 @@ note_device_write(uint64_t agent_key)
 {
     if(!any_range_open()) return;
 
+    const auto tid = common::get_tid();
     registry().rlock([&](const registry_t& entries) {
         for(const auto& entry : entries)
         {
-            if(entry.agent_key != agent_key) continue;
+            if(entry.host && entry.thread_id == tid)
+            {
+                if(entry.external)
+                    entry.external->owning_device_writes.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+            if(!entry.host && entry.agent_key != agent_key) continue;
             if(entry.external)
                 publish_external_decline(*entry.external,
                                          ROCPROFILER_RANGE_REPLAY_STATUS_MEMORY_COPY_IN_RANGE);
@@ -468,8 +559,10 @@ note_code_object_unload()
     registry().rlock([](const registry_t& entries) {
         for(const auto& entry : entries)
         {
-            // An unbound range has recorded nothing, so no packet of it can point at this code.
-            if(entry.agent_key == 0 || !entry.external) continue;
+            // Host snapshots also contain executable globals, whose addresses an unload
+            // invalidates. Only an unbound packet range has no saved state referring to the
+            // unloaded code.
+            if((!entry.host && entry.agent_key == 0) || !entry.external) continue;
             publish_external_decline(*entry.external,
                                      ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
         }

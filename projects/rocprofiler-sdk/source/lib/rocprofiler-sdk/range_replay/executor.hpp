@@ -103,6 +103,16 @@ ensure_entry_snapshot(range_context_t&                      ctx,
 rocprofiler_range_replay_status_t
 execute_range(range_context_t& ctx, uint64_t& divergence_count);
 
+// Sorted base pointers of the allocations the memory tracker holds for `agent`: the set an agent
+// snapshot covers, compared before a restore to detect allocations made or freed since the
+// snapshot.
+std::vector<void*>
+tracked_pointers(hsa_agent_t agent);
+
+// Bytes of device memory held in a snapshot's host copies.
+size_t
+snapshot_bytes(const kernel_replay::memory_snapshot::device_snapshot_t& snapshot);
+
 // True when divergence checking is enabled (ROCPROF_RANGE_REPLAY_VERIFY). Reads the environment
 // once.
 bool

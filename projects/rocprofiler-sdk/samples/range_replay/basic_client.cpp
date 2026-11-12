@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 
 namespace
 {
@@ -43,6 +44,12 @@ range_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_d
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
         data->pass_count_cb = pass_count;
+        // RR_HOST_REPLAY selects host re-execution (sigsetjmp / siglongjmp) instead of packet
+        // replay. The application has to open the range with the host-begin macro; main.cpp does
+        // that when RR_APP_MODE=host.
+        const auto* host_env = std::getenv("RR_HOST_REPLAY");
+        data->host_replay =
+            (host_env != nullptr && host_env[0] != '\0' && host_env[0] != '0') ? 1 : 0;
         g_configs.fetch_add(1);
         return;
     }

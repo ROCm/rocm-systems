@@ -25,20 +25,88 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/range_replay/executor.hpp"
+#include "lib/rocprofiler-sdk/range_replay/host_replay.hpp"
 #include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
 #include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
 
 #include <rocprofiler-sdk/experimental/range_replay.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <algorithm>
 #include <atomic>
+#include <climits>
+#include <csetjmp>
 #include <cstdint>
+#include <limits>
+
+namespace rocprofiler
+{
+namespace range_replay
+{
+namespace
+{
+void
+close_range(range_context_t&                  ctx,
+            rocprofiler_range_replay_status_t status,
+            uint64_t                          divergence_count)
+{
+    execute_close_callback(ctx.plan,
+                           status,
+                           ctx.agent_id,
+                           ctx.record.observed_dispatch_count(),
+                           divergence_count,
+                           ctx.thread_id,
+                           ctx.internal_corr_id,
+                           ctx.ancestor_corr_id);
+}
+
+// Everything end() does except the jump, so that every C++ object it creates is destroyed before
+// the caller calls siglongjmp. Returns the host pass to jump into, 0 once the range is closed, and
+// -1 when no range is open on this thread.
+int64_t
+end_range()
+{
+    auto* live = current_range();
+    if(live == nullptr) return -1;
+
+    if(live->host.enabled)
+    {
+        const auto step = host::finish_pass(*live);
+        if(step.next_pass > 0) return static_cast<int64_t>(step.next_pass);
+
+        auto ctx = range_context_t{};
+        if(!take_range(ctx)) return -1;
+        // finish_pass copied its status before this fold. A decline published in that window
+        // (foreign dispatch, device write, executable unload) is in the record and must be what
+        // CLOSE reports. Statuses finish_pass returns without declining the record, such as
+        // NO_PASS_COUNT, stay as step.status while the record is still eligible.
+        const auto status = ctx.record.eligible() ? step.status : ctx.record.status();
+        close_range(ctx, status, step.divergence_count);
+        return 0;
+    }
+
+    auto ctx = range_context_t{};
+    if(!take_range(ctx)) return -1;
+
+    auto       divergence_count = uint64_t{0};
+    const auto status           = execute_range(ctx, divergence_count);
+    close_range(ctx, status, divergence_count);
+    return 0;
+}
+}  // namespace
+}  // namespace range_replay
+}  // namespace rocprofiler
 
 extern "C" {
 rocprofiler_status_t
 rocprofiler_range_replay_begin(uint64_t range_id)
 {
     namespace range_replay = ::rocprofiler::range_replay;
+
+    // Consumed before any early return, so an arming is never carried to a later begin() whose
+    // sigsetjmp frame may be gone.
+    const bool host_jmp_armed  = range_replay::take_host_jmp_armed();
+    auto       pending_regions = range_replay::take_pending_host_regions();
 
     if(!range_replay::has_registered_range_replay_context())
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
@@ -60,9 +128,10 @@ rocprofiler_range_replay_begin(uint64_t range_id)
     ctx->plan = range_replay::execute_config_callback(
         range_id, ctx->thread_id, ctx->internal_corr_id, ctx->ancestor_corr_id);
 
-    // Range replay re-submits recorded packets through the interception path in hsa/queue.cpp. The
-    // write-pointer virtualization path has its own submission handling, which this beta does not
-    // cover, so a range opened under it is recorded and declined rather than replayed.
+    // Both replay paths depend on the interception path in hsa/queue.cpp: packet replay to
+    // re-submit, host replay to see dispatches from other threads. The write-pointer
+    // virtualization path has its own submission handling, which this beta does not cover, so a
+    // range opened under it is declined rather than replayed.
     if(::rocprofiler::hsa::queue_interposition::supports_queue_interposition())
     {
         static std::atomic<bool> _warned{false};
@@ -72,29 +141,63 @@ rocprofiler_range_replay_begin(uint64_t range_id)
         ctx->record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_UNSUPPORTED_QUEUE_PATH);
     }
 
+    if(ctx->plan.host_replay)
+    {
+        if(host_jmp_armed)
+            range_replay::host::enter_range(*ctx, std::move(pending_regions));
+        else
+            ctx->record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET);
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+void*
+rocprofiler_range_replay_host_jmpbuf(void)
+{
+    return ::rocprofiler::range_replay::host_jmpbuf();
+}
+
+rocprofiler_status_t
+rocprofiler_range_replay_host_track_memory(void* ptr, uint64_t size)
+{
+    namespace range_replay = ::rocprofiler::range_replay;
+
+    if(ptr == nullptr || size == 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    if(size > std::numeric_limits<uintptr_t>::max() - reinterpret_cast<uintptr_t>(ptr))
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if(auto* ctx = range_replay::current_range(); ctx != nullptr)
+        range_replay::host::track_region(*ctx, ptr, static_cast<size_t>(size));
+    else
+        range_replay::add_pending_host_region(ptr, static_cast<size_t>(size));
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+rocprofiler_range_replay_get_host_pass(uint64_t* pass)
+{
+    if(pass == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    const auto* ctx = ::rocprofiler::range_replay::current_range();
+    *pass           = (ctx != nullptr && ctx->host.enabled) ? ctx->host.pass : 0;
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
 rocprofiler_range_replay_end(void)
 {
-    namespace range_replay = ::rocprofiler::range_replay;
+    const auto next = ::rocprofiler::range_replay::end_range();
+    if(next < 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    auto ctx = range_replay::range_context_t{};
-    if(!range_replay::take_range(ctx)) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    auto       divergence_count = uint64_t{0};
-    const auto status           = range_replay::execute_range(ctx, divergence_count);
-
-    range_replay::execute_close_callback(ctx.plan,
-                                         status,
-                                         ctx.agent_id,
-                                         ctx.record.observed_dispatch_count(),
-                                         divergence_count,
-                                         ctx.thread_id,
-                                         ctx.internal_corr_id,
-                                         ctx.ancestor_corr_id);
-
+    if(next > 0)
+    {
+        // Only PODs are live in this frame: siglongjmp does not run C++ destructors.
+        const int value = static_cast<int>(std::min<int64_t>(next, INT_MAX));
+        siglongjmp(  // NOLINT(cert-err52-cpp)
+            *static_cast<sigjmp_buf*>(::rocprofiler::range_replay::host_jmp_target()),
+            value);
+    }
     return ROCPROFILER_STATUS_SUCCESS;
 }
 }

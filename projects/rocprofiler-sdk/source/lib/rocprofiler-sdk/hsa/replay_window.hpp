@@ -38,8 +38,10 @@
 #include <fmt/format.h>
 #include <hsa/hsa.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <shared_mutex>
 #include <string_view>
 
@@ -63,6 +65,14 @@ union rocprofiler_packet;
 // tail is drained by the replay window before it snapshots.
 std::shared_mutex&
 agent_replay_mutex(rocprofiler_agent_id_t agent_id);
+
+// Count of dispatch submissions on the agent, advanced under the reader lock after the packets
+// are written. A fence only covers work submitted before it, and a host range releases the agent
+// between its fence and its writer lock (the fence needs the queue's ROCr intercept lock, which a
+// waiting submitter can hold). Reading this before the fence and again under the writer lock tells
+// the range whether any dispatch slipped into that gap.
+std::atomic<uint64_t>&
+agent_submit_epoch(rocprofiler_agent_id_t agent_id);
 
 // A single blocking wait -- Queue::sync(), or the replay drain barrier -- gives up after one slice
 // and reports whether it drained. The replay drain helpers retry for at most max_slices slices and
@@ -118,7 +128,7 @@ replay_drain_agent_or_fatal(hsa_agent_t agent);
 // application itself performs, so whichever interception mechanism is installed sees them. Used to
 // re-submit recorded packets from outside a WriteInterceptor call (range replay), where no
 // interceptor-provided writer is in scope. Blocks while the ring is full. Returns false if the
-// queue's packet buffer is unavailable.
+// queue's packet buffer is unavailable or its engine does not accept AQL packets.
 //
 // Callers submitting *recorded* packets must clear their completion signals first: re-firing a
 // signal the application has already consumed corrupts its synchronization.
