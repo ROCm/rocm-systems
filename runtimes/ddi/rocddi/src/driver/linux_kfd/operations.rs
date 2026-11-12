@@ -495,6 +495,16 @@ pub(super) fn marketing_name(contents: &str, device_id: u32, revision: u32) -> O
 impl AllocationOperations for LinuxKfdDriver {
     type Allocation = LinuxAllocation;
 
+    fn publish_local_backing_identity(
+        allocation: &LinuxAllocation,
+        identity: crate::memory::device::LocalBackingIdentity,
+    ) -> Result<(), Error> {
+        allocation.set_host_alias_identity([identity.namespace, identity.object])
+    }
+    fn backing_offset(allocation: &LinuxAllocation) -> Option<u64> {
+        allocation.host_alias_source_offset()
+    }
+
     fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
         endpoint.driver_instance == self.driver_instance && endpoint.gpu().is_some()
     }
