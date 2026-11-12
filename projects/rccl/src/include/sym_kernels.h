@@ -36,7 +36,7 @@ constexpr size_t ncclSymkAgHierMaxChunkBytes = 256 << 10;
 
 // AllGather_HierLsaST block count. nBytes is per rank.
 constexpr int ncclSymkAgHierBlocksForSize(int nRanks, size_t nBytes) {
-  if (size_t(nRanks) * nBytes >= (size_t(1) << 30)) return 72;
+  if (size_t(nRanks) * nBytes >= (size_t(1) << 30)) return ncclSymkAgHierMaxBlocks;
   return 64;
 }
 
@@ -244,6 +244,8 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
                        size_t nElts);
 uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                       size_t nElts, bool symAligned16B = true);
+// Packages the hierarchical LSA AllGather kernel spans on this comm, or 0 where it can't run.
+int ncclSymkAgHierGroups(struct ncclComm* comm);
 // How many of nBlocks the hierarchical LSA AllGather kernel puts to work; the rest would sit out.
 int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks);
 int ncclSymkAgHierMaxBlocksLimit();

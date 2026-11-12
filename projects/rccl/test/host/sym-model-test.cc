@@ -417,6 +417,18 @@ TEST_F(SymModelTdmHierTest, EightPackages_BlockCounts) {
   EXPECT_EQ(vec.nChannels, 67);
 }
 
+// The by-size block count never undercuts NCCL_MIN_CTAS.
+TEST_F(SymModelTdmHierTest, VectorKernel_HonorsMinCtas) {
+  comm_->nRanks = 16;
+  comm_->tuningContext.forced[ncclFuncAllGather] = 1;
+  ncclTuningInput_t in = Input(ncclFuncAllGather, size_t(1) << 20);
+  in.minCTAs = ncclSymkAgHierMaxBlocks;
+  in.maxCTAs = MAXCHANNELS;
+  ncclTuningResult_t r = Evaluate(in, ncclSymkKernelId_AllGather_HierLsaST);
+  ASSERT_TRUE(r.valid);
+  EXPECT_EQ(r.nChannels, ncclSymkAgHierLaunchBlocks(comm_.get(), ncclSymkAgHierMaxBlocks));
+}
+
 // The vector kernels hold every size range, so neither TDM kernel runs unless asked for.
 TEST_F(SymModelTdmHierTest, DefaultParam_AllGatherStaysOnVectorKernels) {
   for (size_t nBytes : {size_t(16) << 10, size_t(1) << 20, size_t(64) << 20}) {

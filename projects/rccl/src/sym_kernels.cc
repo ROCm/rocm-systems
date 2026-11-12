@@ -18,6 +18,7 @@
 #endif
 #include <cmath>
 #include <cfloat>
+#include <mutex>
 
 constexpr uint32_t kernelMask_STMC =
   1 << ncclSymkKernelId_AllGather_LLMC | 1 << ncclSymkKernelId_AllGather_STMC |
@@ -238,10 +239,10 @@ int ncclSymkAgHierMaxBlocksLimit() {
   int64_t requested = ncclParamSymAgHierCtas();
   if (requested < 1) return ncclSymkAgHierMaxBlocks;
   if (requested > MAXCHANNELS) {
-    static int warned = 0;
-    if (warned++ == 0) {
+    static std::once_flag warned;
+    std::call_once(warned, [&] {
       INFO(NCCL_ENV, "NCCL_SYM_AG_HIER_CTAS=%lld exceeds %d, using %d", (long long)requested, MAXCHANNELS, MAXCHANNELS);
-    }
+    });
     return MAXCHANNELS;
   }
   return static_cast<int>(requested);
@@ -251,11 +252,11 @@ size_t ncclSymkAgHierMaxChunkBytesLimit() {
   int64_t requested = ncclParamSymAgHierChunkBytes();
   if (requested < 1) return ncclSymkAgHierMaxChunkBytes;
   if (requested > ncclSymkAgHierMaxChunkBytesEnv) {
-    static int warned = 0;
-    if (warned++ == 0) {
+    static std::once_flag warned;
+    std::call_once(warned, [&] {
       INFO(NCCL_ENV, "NCCL_SYM_AG_HIER_CHUNK_BYTES=%lld exceeds %lld, using %lld", (long long)requested,
            (long long)ncclSymkAgHierMaxChunkBytesEnv, (long long)ncclSymkAgHierMaxChunkBytesEnv);
-    }
+    });
     return static_cast<size_t>(ncclSymkAgHierMaxChunkBytesEnv);
   }
   return static_cast<size_t>(requested);
@@ -309,10 +310,11 @@ static int computeHierScaleInSize(struct ncclComm* comm) {
 
 // Packages the hierarchical AllGather spans, or 0 where it can't run: it needs gfx1250 in partition
 // mode and an LSA team of at least two equal packages, so there is a cross-package hop to save.
-static int ncclSymkAgHierGroups(struct ncclComm* comm) {
+int ncclSymkAgHierGroups(struct ncclComm* comm) {
   int scaleIn = comm->symkState.kcomm.hierScaleInSize;
+  if (!ncclSymkAgHierAvailable(comm) || scaleIn <= 0) return 0;
   int lsaRanks = ncclTeamLsa(comm).nRanks;
-  if (!ncclSymkAgHierAvailable(comm) || scaleIn <= 0 || lsaRanks % scaleIn != 0 || lsaRanks / scaleIn < 2) return 0;
+  if (lsaRanks % scaleIn != 0 || lsaRanks / scaleIn < 2) return 0;
   return lsaRanks / scaleIn;
 }
 

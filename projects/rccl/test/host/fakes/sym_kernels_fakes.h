@@ -29,6 +29,8 @@ extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, siz
 extern std::function<bool(int)> g_symkKernelIdIsLL;
 extern std::function<bool(int)> g_symkKernelIdIsTma;
 extern std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize;
+// Packages of the hierarchical AllGather; defaults to 0, so the hierarchical symk window is off.
+extern std::function<int(struct ncclComm*)> g_symkAgHierGroups;
 
 // The ncclSymk* index seams (kernel masks, ncclSymkGetKernelIndex, ncclSymkKernelIdToString,
 // ncclSymkMakeDevWork) live in sym_kernels_index_fakes.h, not here. rccl-UnitTestsMicro cannot link
