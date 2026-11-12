@@ -2181,9 +2181,16 @@ InstructionComputeUnitView::report_tensor_dma_issue(const TensorDmaIssueObservat
 /// interleaving ensures forward progress when wavefronts on different
 /// CUs synchronize via global memory (e.g., spin-locks, semaphores).
 ///
+/// A model may refine the shell by deriving from it, such as a clocked CU that
+/// adds its own pipeline. IsaExecComputeUnit then completes the derived class
+/// with the ISA-specific parts; see create_compute_unit().
+///
 /// @tparam Mode Execution mode (FUNCTIONAL or CLOCKED).
 template <simdojo::ExecMode Mode> class ExecComputeUnit : public ComputeUnitCore {
 public:
+  /// The execution mode this shell drives.
+  static constexpr simdojo::ExecMode kExecMode = Mode;
+
   using ComputeUnitCore::ComputeUnitCore;
 
   /// @brief Execute work up to the quantum limit, then yield.
@@ -2304,10 +2311,25 @@ private:
 /// count, avoiding unreachable upper-half storage on Wave32-only targets.
 /// Materializes wavefront slots as IsaWavefront<Isa> instances on first dispatch.
 ///
+/// The ISA parts complete an execution shell, @p BaseComputeUnit. That is ExecComputeUnit
+/// itself, or a class derived from it that refines the shell, so a model's CU
+/// class sits between the shell and the ISA in one hierarchy:
+///
+/// @code
+///   ComputeUnitCore
+///     +-- ExecComputeUnit<Mode>
+///           +-- BaseComputeUnit (optional: a model's CU, e.g. a clocked pipeline)
+///                 +-- IsaExecComputeUnit<Mode, Isa, BaseComputeUnit>
+/// @endcode
+///
 /// @tparam Mode Execution mode (FUNCTIONAL or CLOCKED).
 /// @tparam Isa ISA traits struct satisfying the GpuIsa concept.
-template <simdojo::ExecMode Mode, GpuIsa Isa>
-class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
+/// @tparam BaseComputeUnit ExecComputeUnit<Mode>, or a class derived from it.
+template <simdojo::ExecMode Mode, GpuIsa Isa, typename BaseComputeUnit = ExecComputeUnit<Mode>>
+class IsaExecComputeUnit : public BaseComputeUnit {
+  static_assert(std::is_base_of_v<ExecComputeUnit<Mode>, BaseComputeUnit>,
+                "an ISA compute unit completes an ExecComputeUnit of its mode");
+
 public:
   static constexpr bool supports_async_execution =
       Mode == simdojo::ExecMode::FUNCTIONAL && HasAsyncMma<Isa>;
@@ -2334,10 +2356,15 @@ public:
   /// @param config CU configuration parameters.
   /// @param memory Shared GPU memory (not owned).
   /// @param l2 Shared L2 cache (not owned).
+  /// @param base_args Arguments for @p BaseComputeUnit's own state.
+  ///                  @p BaseComputeUnit's constructor takes them first,
+  ///                  then ExecComputeUnit's.
+  template <typename... BaseArgs>
   IsaExecComputeUnit(std::string name, const ComputeUnitCore::Config &config, GpuMemory *memory,
-                     L2Cache *l2)
-      : ExecComputeUnit<Mode>(std::move(name), config, memory, l2, Isa::WF_SIZE, Isa::WF_SIZE_MAX,
-                              effective_vgpr_allocation_block_size(config)) {
+                     L2Cache *l2, BaseArgs &&...base_args)
+      : BaseComputeUnit(std::forward<BaseArgs>(base_args)..., std::move(name), config, memory, l2,
+                        Isa::WF_SIZE, Isa::WF_SIZE_MAX,
+                        effective_vgpr_allocation_block_size(config)) {
     static_assert(!HasAccVgpr<Isa> || Isa::MAX_VGPRS_PER_WF == ACC_VGPR_OFFSET,
                   "AccVGPR allocation base must match execution-side addressing");
     const uint32_t vgprs_per_block = this->vgpr_allocation_block_size();
