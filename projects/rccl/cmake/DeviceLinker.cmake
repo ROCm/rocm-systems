@@ -824,11 +824,10 @@ endif()
 # ENABLE_RCCL_EP_IN_LIBRCCL is set. Off by default: the standalone
 # librccl_ep.so is the normal artifact and librccl's ABI is unchanged.
 #
-# Read from the source tree, not ${HIPIFY_DIR}: rccl_ep is not in SRC_FILES and
-# is already HIP-native, so it is never hipify-staged. gfx9 only: the kernels
-# are wave64 throughout and would compile without a diagnostic, and run wrong,
-# on a wave32 target, so the object is built for the build's gfx9 targets only.
-# ROCM_VERSION explicitly, because <nccl_device.h> is version-gated on it.
+# HIP-native, so read from the source tree rather than ${HIPIFY_DIR}.
+# gfx9 only: its wave64 kernels build silently for wave32 and run wrong there.
+# ROCM_VERSION is passed explicitly because <nccl_device.h> is gated on it.
+# src/CMakeLists.txt checks after the link that librccl.so exports the C ABI.
 # ===========================================================================
 if(ENABLE_RCCL_EP_IN_LIBRCCL)
   set(_rccl_ep_dir "${PROJECT_SOURCE_DIR}/src/algorithms/rccl_ep")
