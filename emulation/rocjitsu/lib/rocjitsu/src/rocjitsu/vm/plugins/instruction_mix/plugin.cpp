@@ -135,7 +135,8 @@ void InstructionMixPlugin::count_instruction(InstructionMixWavefrontState &state
 
 void InstructionMixPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/,
                                                             const Instruction &inst,
-                                                            amdgpu::Wavefront &wf) {
+                                                            amdgpu::Wavefront &wf,
+                                                            std::span<const uint32_t>) {
   auto *state = static_cast<InstructionMixWavefrontState *>(wf.plugin_state(slot_index()));
   count_instruction(*state, inst, wf.dispatch_id());
 }

@@ -34,8 +34,8 @@ public:
     BarrierKind kind = BarrierKind::Workgroup;
   };
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
-                                        amdgpu::Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &,
+                                        std::span<const uint32_t>) override {
     active_instructions_.fetch_add(1, std::memory_order_relaxed);
   }
 

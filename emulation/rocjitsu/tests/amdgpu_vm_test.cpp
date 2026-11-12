@@ -2393,8 +2393,8 @@ TEST(AqlDispatchTest, ConcurrentRootReplacementPreservesAdmittedDispatchSnapshot
 
     InstructionGate() : ExecutionPlugin("dispatch_vm_replacement_gate") {}
 
-    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
-                                          amdgpu::Wavefront &) override {
+    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &,
+                                          std::span<const uint32_t>) override {
       instruction_count_.fetch_add(1, std::memory_order_relaxed);
       std::unique_lock lock(mutex_);
       if (released_)
@@ -10661,8 +10661,8 @@ public:
 
   BlockingInstructionPlugin() : ExecutionPlugin("blocking_instruction") {}
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
-                                        amdgpu::Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &,
+                                        std::span<const uint32_t>) override {
     std::unique_lock<std::mutex> lock(mutex_);
     if (entered_)
       return;
@@ -11340,8 +11340,8 @@ public:
   enum Hook { Before, After, Halt };
   explicit ThrowingIssuePlugin(Hook hook) : ExecutionPlugin("throwing_issue"), hook_(hook) {}
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
-                                        amdgpu::Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &,
+                                        std::span<const uint32_t>) override {
     fail_at(Before);
   }
   void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &,

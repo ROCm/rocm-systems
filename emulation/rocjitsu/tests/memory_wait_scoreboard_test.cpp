@@ -5597,8 +5597,8 @@ TEST(MemoryWaitExecutionTest, MemoryProducerOverwriteIsCheckedBeforeExecution) {
 
     BeforeObserver(uint64_t pc, ComputeUnitCore *cu)
         : ExecutionPlugin("wait_before_test"), target(pc), cu(cu) {}
-    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
-                                          Wavefront &wf) override {
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, Wavefront &wf,
+                                          std::span<const uint32_t>) override {
       if (pc == target) {
         ++visits;
         diagnostics = cu->memory_wait_diagnostic_count();

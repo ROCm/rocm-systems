@@ -28650,7 +28650,8 @@ TEST_F(KfdIoctlTest, OtherProcessDebuggerDoesNotClaimARevokedRuntimeProbe) {
     RevokeBeforeLoad(rocjitsu::amdgpu::GpuVm &vm, rocjitsu::amdgpu::AddressSpaceHandle handle)
         : ExecutionPlugin("revoke-runtime-load"), vm_(vm), handle_(handle) {}
     void onAmdgpuBeforeExecuteInstruction(uint64_t, const rocjitsu::Instruction &,
-                                          rocjitsu::amdgpu::Wavefront &) override {
+                                          rocjitsu::amdgpu::Wavefront &,
+                                          std::span<const uint32_t>) override {
       if (!revoked) {
         revoked = true;
         EXPECT_TRUE(vm_.invalidate(handle_));

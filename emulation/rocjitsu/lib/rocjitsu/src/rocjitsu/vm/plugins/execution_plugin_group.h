@@ -232,20 +232,6 @@ public:
     });
   }
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                        amdgpu::Wavefront &wf) {
-    if (!observes_before_execute_instruction_)
-      return;
-    dispatch_wave_hot_hook(&wf, [&](bool cached) {
-      for (size_t index = 0; index != plugins_.size(); ++index) {
-        auto &entry = plugins_[index];
-        if (entry.observes_before_execute_instruction &&
-            plugin_observes_hot_hooks(index, &wf, cached))
-          entry.plugin->onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
-      }
-    });
-  }
-
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
                                         std::span<const uint32_t> fetch_window) {
     if (!observes_before_execute_instruction_)

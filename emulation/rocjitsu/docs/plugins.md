@@ -645,11 +645,13 @@ instead copy the instruction's PC and encoding as it executes, and disassemble
 the copy when the report is written. Validate the encoding before copying it:
 `raw_encoding()` is null when the instruction has no encoding, and the copy
 needs `size()` to be a positive multiple of four bytes that fits the buffer.
-The CU normally fetches four words starting at the PC. GFX10 MIMG with
-NSA=3 uses a fifth word. The fetch-aware hook receives all five for that
-instruction. The example stores up to five words, as the race detector does,
-and rejects invalid sizes at capture. Perfsim's FFM event format has its own
-four-word encoding limit.
+The before-execute hook also receives the CU's borrowed fetch window: normally
+four words starting at the PC, including words after a shorter instruction.
+GFX10 MIMG with NSA=3 uses a fifth word, and the hook receives all five for that
+instruction. An empty span means no fetch window is available. This window is
+separate from the instruction's own encoding. The example stores up to five
+encoding words, as the race detector does, and rejects invalid sizes at capture.
+Perfsim's FFM event format has its own four-word encoding limit.
 
 ```cpp
 // Set for each wave in onAmdgpuWavefrontDispatched() with wf.set_plugin_state().
@@ -663,7 +665,8 @@ bool observes_before_execute_instruction() const override { return true; }
 bool supports_async_instructions() const override { return false; }
 
 void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                      amdgpu::Wavefront &wf) override {
+                                      amdgpu::Wavefront &wf,
+                                      std::span<const uint32_t>) override {
   auto &last = *static_cast<LastInstruction *>(wf.plugin_state(slot_index()));
   const int bytes = inst.size();
   if (!inst.raw_encoding() || bytes <= 0 || bytes % sizeof(uint32_t) != 0 ||

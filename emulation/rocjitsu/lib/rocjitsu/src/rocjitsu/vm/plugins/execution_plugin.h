@@ -177,21 +177,16 @@ public:
   /// Wavefront state reflects the state prior to the instruction's effects.
   /// Memory instructions expose their decoded issue metadata through
   /// Instruction::amdgpu_memory_issue_info() at this point.
+  /// The CU supplies four DWORDs starting at the instruction PC, including
+  /// words following a shorter instruction. For a GFX10 MIMG instruction
+  /// with NSA=3, the window also contains the fifth DWORD. An empty span
+  /// means no fetch window is available. The instruction, wave and fetch
+  /// window are borrowed only for this callback.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
-                                                amdgpu::Wavefront & /*wf*/) {}
-
-  /// Fetch-aware form of onAmdgpuBeforeExecuteInstruction(). The CU supplies
-  /// four DWORDs starting at @p pc, including words following a shorter
-  /// instruction. For a GFX10 MIMG instruction with NSA=3, the borrowed
-  /// window also contains the fifth DWORD. The default forwards to the
-  /// original hook.
-  virtual void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                                amdgpu::Wavefront &wf,
-                                                std::span<const uint32_t> /*fetch_window*/) {
-    onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
-  }
+                                                amdgpu::Wavefront & /*wf*/,
+                                                std::span<const uint32_t> /*fetch_window*/) {}
 
   /// Called after a synchronously executed AMDGPU instruction.
   /// Wavefront state (wait targets, PC, etc.) reflects the instruction's effects.

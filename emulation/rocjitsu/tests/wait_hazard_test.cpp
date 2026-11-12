@@ -141,7 +141,7 @@ public:
   void wait(uint32_t word) { wait(std::span<const uint32_t>(&word, 1)); }
   void wait(std::span<const uint32_t> words) {
     with_wait(cu_->arch(), words, [&](Instruction &inst) {
-      plugins_->onAmdgpuBeforeExecuteInstruction(wave_->pc, inst, *wave_);
+      plugins_->onAmdgpuBeforeExecuteInstruction(wave_->pc, inst, *wave_, {});
       ASSERT_TRUE(cu_->execute_instruction(&inst, *wave_).succeeded());
       plugins_->onAmdgpuAfterExecuteInstruction(wave_->pc, inst, *wave_);
     });
@@ -155,7 +155,7 @@ public:
     EXPECT_TRUE(probe.succeeded());
     if (probe.failed())
       return false;
-    plugins_->onAmdgpuBeforeExecuteInstruction(wave_->pc, *probe.value(), *wave_);
+    plugins_->onAmdgpuBeforeExecuteInstruction(wave_->pc, *probe.value(), *wave_, {});
     state_->getDetector()->validateRead(key * 4, WaveId{0}, 0, 4, MemoryOrderClass::UNORDERED);
     return sink_->str().size() != before;
   }

@@ -493,8 +493,8 @@ public:
     events.push_back(e);
   }
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                        amdgpu::Wavefront &wf) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
+                                        std::span<const uint32_t>) override {
     HookEvent e{HookEvent::BEFORE_INSTRUCTION};
     e.dispatch_id = wf.dispatch_id();
     e.wg_id = wf.wg_id();
