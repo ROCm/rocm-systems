@@ -15,10 +15,16 @@
  * (ep_create, ep_configure) stays on the null stream -- it runs once, before
  * any caller work exists to race with.
  *
+ * Every entry point validates its own arguments and returns -1 (or a null
+ * handle) with one "[rccl_ep] <fn>: <reason>" line before it launches anything
+ * or changes any state, since the ABI is reachable without the Python layer.
+ *
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include <hip/hip_bf16.h>
@@ -61,6 +67,57 @@ struct EpHandle {
     fprintf(stderr, "[rccl_ep] %s:%d %s\n", __FILE__, __LINE__,          \
             hipGetErrorString(e_)); return -1; } } while (0)
 
+// Prints "[rccl_ep] <fn>: <reason>" and returns -1: how an entry point rejects a call.
+__attribute__((format(printf, 2, 3))) int ep_fail(const char* fn, const char* fmt, ...) {
+  char msg[320];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(msg, sizeof(msg), fmt, ap);
+  va_end(ap);
+  fprintf(stderr, "[rccl_ep] %s: %s\n", fn, msg);
+  return -1;
+}
+
+#define REQUIRE_HANDLE(h, fn) \
+  do { \
+    if ((h) == nullptr) return ep_fail(fn, "null handle"); \
+  } while (0)
+
+// A pointer the call reads or writes, required when `needed`. Buffers sized by a token or row
+// count are needed only when that count is positive: an empty tensor's data pointer is null.
+#define REQUIRE_PTR(fn, p, needed) \
+  do { \
+    if ((needed) && (p) == 0) return ep_fail(fn, "%s must not be null", #p); \
+  } while (0)
+
+// A token count of this rank's (num_tokens) or a received row count (num_recv), within the
+// window's capacity: T per source rank, R * T received.
+#define REQUIRE_TOKENS(h, fn, n) \
+  do { \
+    if ((n) < 0 || (n) > (h)->cfg.num_max_tokens_per_rank) { \
+      return ep_fail(fn, "%s %d outside [0, num_max_tokens_per_rank=%d]", #n, (int)(n), \
+                     (h)->cfg.num_max_tokens_per_rank); \
+    } \
+  } while (0)
+#define REQUIRE_RECV(h, fn, n) \
+  do { \
+    const int64_t cap_ = (int64_t)(h)->cfg.num_ranks * (h)->cfg.num_max_tokens_per_rank; \
+    if ((n) < 0 || (int64_t)(n) > cap_) { \
+      return ep_fail(fn, "%s %d outside [0, %lld] (num_ranks x num_max_tokens_per_rank)", #n, (int)(n), \
+                     (long long)cap_); \
+    } \
+  } while (0)
+
+// num_sms is a CTA budget, 0 for the default. Past the grid's y limit a launch would fail
+// without stopping the barriers around it.
+constexpr int kMaxNumSms = 65535;
+#define REQUIRE_SMS(fn, n) \
+  do { \
+    if ((n) < 0 || (n) > kMaxNumSms) { \
+      return ep_fail(fn, "num_sms %d outside [0, %d]", (int)(n), kMaxNumSms); \
+    } \
+  } while (0)
+
 inline int sms_or(int num_sms, int dflt) { return num_sms > 0 ? num_sms : dflt; }
 
 // `num_sms` is a TOTAL CTA budget, but the dispatch grid is
@@ -96,12 +153,42 @@ inline void release_window(EpHandle* h, bool registered) {
 // Every data-path entry point is reachable without the Python layer -- the unit
 // tests include this ABI directly -- so an unconfigured handle has to say so
 // rather than fault on a null window or an uninitialised devComm.
-#define REQUIRE_CONFIGURED(h, fn) do {                                        \
-    if (!(h)->configured) {                                                   \
-      fprintf(stderr, "[rccl_ep] " fn " before a successful ep_configure\n"); \
-      return -1;                                                              \
-    }                                                                         \
+#define REQUIRE_CONFIGURED(h, fn) \
+  do { \
+    REQUIRE_HANDLE(h, fn); \
+    if (!(h)->configured) return ep_fail(fn, "called before a successful ep_configure"); \
   } while (0)
+
+// Makes `device` current for a scope and restores the caller's device when it ends. Configure and teardown allocate,
+// free, synchronize and launch on the null stream, all on the current device, which the calling thread may have pointed
+// at another GPU since ep_create.
+class DeviceScope {
+public:
+  explicit DeviceScope(int device) {
+    if (hipGetDevice(&prev_) != hipSuccess) prev_ = -1;
+    if (device < 0 || device == prev_) return;
+    const hipError_t he = hipSetDevice(device);
+    if (he != hipSuccess) {
+      fprintf(stderr, "[rccl_ep] hipSetDevice(%d): %s\n", device, hipGetErrorString(he));
+      ok_ = false;
+      return;
+    }
+    switched_ = prev_ >= 0;
+  }
+  ~DeviceScope() {
+    if (switched_) (void)hipSetDevice(prev_);
+  }
+  DeviceScope(const DeviceScope&) = delete;
+  DeviceScope& operator=(const DeviceScope&) = delete;
+  bool ok() const {
+    return ok_;
+  }
+
+private:
+  int prev_{-1};
+  bool switched_{false};
+  bool ok_{true};
+};
 
 // Waves per block for every kernel that moves payload. The parallelism these
 // kernels get is CTAs x waves, and only the CTA count follows the caller's
@@ -134,6 +221,7 @@ extern "C" {
 int ep_unique_id_size() { return (int)sizeof(ncclUniqueId); }
 
 int ep_get_unique_id(char* out) {
+  REQUIRE_PTR("ep_get_unique_id", out, true);
   ncclUniqueId id;
   if (ncclGetUniqueId(&id) != ncclSuccess) return -1;
   memcpy(out, &id, sizeof(id));
@@ -143,11 +231,11 @@ int ep_get_unique_id(char* out) {
 // unique_id must be ncclUniqueId bytes broadcast from rank 0 by the caller.
 void* ep_create(int rank, int num_ranks, const char* unique_id,
                 int max_tokens_per_rank, int hidden, int device) {
-  // Bind explicitly. The caller's torch context may have selected a different
-  // device than this thread's current one.
-  hipError_t he = hipSetDevice(device);
-  if (he != hipSuccess) {
-    fprintf(stderr, "[rccl_ep] hipSetDevice(%d): %s\n", device, hipGetErrorString(he));
+  // Every argument check below runs before ncclCommInitRank and gives the same answer on every rank given the same
+  // arguments, so a rejected call returns on each rank instead of leaving its peers waiting in the init. The device
+  // check, which can differ between ranks, is agreed over the new communicator instead (see below).
+  if (unique_id == nullptr) {
+    fprintf(stderr, "[rccl_ep] ep_create: unique_id must not be null\n");
     return nullptr;
   }
   // Payload copies move 16B per lane from a 256B-aligned region base, so the
@@ -155,22 +243,45 @@ void* ep_create(int rank, int num_ranks, const char* unique_id,
   // tails cover a leftover element count, not a misaligned base, so reject an
   // odd hidden here rather than reach a misaligned dwordx4.
   if (hidden <= 0 || hidden % 8 != 0) {
-    fprintf(stderr, "[rccl_ep] hidden %d must be a positive multiple of 8 (16B vector alignment)\n", hidden);
+    fprintf(stderr, "[rccl_ep] ep_create: hidden %d must be a positive multiple of 8 (16B vector alignment)\n", hidden);
     return nullptr;
   }
   // kMaxRanks bounds the scale-up domain the window layout is written for, and
   // ctas_per_rank divides by num_ranks, so zero is a division by zero.
   if (num_ranks < 1 || num_ranks > kMaxRanks) {
-    fprintf(stderr, "[rccl_ep] num_ranks %d must be in [1, kMaxRanks=%d]\n", num_ranks, kMaxRanks);
+    fprintf(stderr, "[rccl_ep] ep_create: num_ranks %d must be in [1, kMaxRanks=%d]\n", num_ranks, kMaxRanks);
     return nullptr;
   }
   // EpWindowLayout::make widens this to size_t, so a negative value sign-extends
   // and wraps every offset in the window; zero reserves empty regions that the
   // slot arithmetic then indexes anyway.
   if (max_tokens_per_rank < 1) {
-    fprintf(stderr, "[rccl_ep] max_tokens_per_rank %d must be positive\n", max_tokens_per_rank);
+    fprintf(stderr, "[rccl_ep] ep_create: max_tokens_per_rank %d must be positive\n", max_tokens_per_rank);
     return nullptr;
   }
+  if (rank < 0 || rank >= num_ranks) {
+    fprintf(stderr, "[rccl_ep] ep_create: rank %d outside [0, num_ranks=%d)\n", rank, num_ranks);
+    return nullptr;
+  }
+  // Bind explicitly. The caller's torch context may have selected a different
+  // device than this thread's current one.
+  hipError_t he = hipSetDevice(device);
+  if (he != hipSuccess) {
+    fprintf(stderr, "[rccl_ep] ep_create: hipSetDevice(%d): %s\n", device, hipGetErrorString(he));
+    return nullptr;
+  }
+  // The kernels are wave64 throughout (kWarpSize lanes per wave, 64-bit ballots): a wave32
+  // device would compute wrong lane and wave indices rather than fail. Checked once every rank
+  // has joined the communicator, below.
+  int warp_size = 0;
+  if (hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, device) != hipSuccess) warp_size = -1;
+  // Test hook, as RCCL_EP_FAKE_ARCH is for the architecture check: RCCL_EP_FAKE_WAVE_SIZE replaces the
+  // wave size on the rank RCCL_EP_FAKE_WAVE_SIZE_RANK names (every rank without it), so the failing
+  // path can be tested on wave64 GPUs.
+  const char* fake_wave = getenv("RCCL_EP_FAKE_WAVE_SIZE");
+  const char* fake_wave_rank = getenv("RCCL_EP_FAKE_WAVE_SIZE_RANK");
+  if (fake_wave && *fake_wave && (!fake_wave_rank || atoi(fake_wave_rank) == rank)) warp_size = atoi(fake_wave);
+  const bool wave_ok = warp_size == kWarpSize;
 
   auto* h = new EpHandle();
   h->cfg.num_ranks = num_ranks;
@@ -193,14 +304,39 @@ void* ep_create(int rank, int num_ranks, const char* unique_id,
       hipMalloc(&h->d_recvoff, num_ranks * sizeof(int32_t)) == hipSuccess &&
       hipMalloc(&h->d_total, sizeof(int32_t)) == hipSuccess &&
       hipMalloc(&h->d_views, num_ranks * sizeof(WindowView)) == hipSuccess;
-  if (!alloced) {
-    fprintf(stderr, "[rccl_ep] hipMalloc for scratch failed\n");
-    hipFree(h->d_recvoff);
-    hipFree(h->d_total);
-    hipFree(h->d_views);
+  auto release = [h]() -> void* {
+    (void)hipFree(h->d_recvoff);
+    (void)hipFree(h->d_total);
+    (void)hipFree(h->d_views);
     ncclCommDestroy(h->comm);
     delete h;
     return nullptr;
+  };
+  if (!alloced) {
+    fprintf(stderr, "[rccl_ep] hipMalloc for scratch failed\n");
+    return release();
+  }
+  // The device check, agreed over the communicator: the number of ranks whose device fails it, summed in d_total
+  // (scratch until the first dispatch). Every rank sees the same sum, so a group with any such device fails on every
+  // rank together and releases its communicator, rather than one rank returning while the others wait for it in their
+  // next collective.
+  int bad_ranks = wave_ok ? 0 : 1;
+  if (hipMemcpy(h->d_total, &bad_ranks, sizeof(int32_t), hipMemcpyHostToDevice) != hipSuccess ||
+      ncclAllReduce(h->d_total, h->d_total, 1, ncclInt32, ncclSum, h->comm, nullptr) != ncclSuccess ||
+      hipDeviceSynchronize() != hipSuccess ||
+      hipMemcpy(&bad_ranks, h->d_total, sizeof(int32_t), hipMemcpyDeviceToHost) != hipSuccess) {
+    fprintf(stderr, "[rccl_ep] ep_create: the cross-rank device check failed\n");
+    return release();
+  }
+  if (bad_ranks > 0) {
+    if (!wave_ok) {
+      fprintf(stderr, "[rccl_ep] ep_create: device %d has a wave size of %d; rccl_ep needs a wave64 (gfx9) device\n",
+              device, warp_size);
+    } else {
+      fprintf(stderr, "[rccl_ep] ep_create: %d rank(s) of this group have no wave64 (gfx9) device; failing on all\n",
+              bad_ranks);
+    }
+    return release();
   }
   return h;
 }
@@ -210,24 +346,26 @@ void* ep_create(int rank, int num_ranks, const char* unique_id,
 // reveals at the first dispatch, not at buffer construction.
 int ep_configure(void* handle, int num_experts, int num_topk) {
   auto* h = static_cast<EpHandle*>(handle);
+  constexpr const char* fn = "ep_configure";
+  REQUIRE_HANDLE(h, fn);
   if (h->configured && h->cfg.num_experts == num_experts && h->cfg.num_topk == num_topk) {
     return 0;
   }
   // Validated before the teardown below, so a rejected reconfigure leaves the
   // existing window intact rather than freed.
   if (num_topk < 1 || num_topk > kMaxTopk) {
-    fprintf(stderr, "[rccl_ep] num_topk %d must be in [1, kMaxTopk=%d]\n", num_topk, kMaxTopk);
-    return -1;
+    return ep_fail(fn, "num_topk %d must be in [1, kMaxTopk=%d]", num_topk, kMaxTopk);
   }
   // experts_per_rank() truncates, so a non-multiple leaves the tail experts
   // owned by no rank: k_ep_plan never routes their tokens, and the epilogue's
   // owner = e / experts_per_rank() reaches num_ranks, indexing one whole
   // rank-region past the end of `y`. num_experts <= 0 is the epr == 0 case.
   if (num_experts <= 0 || num_experts % h->cfg.num_ranks != 0) {
-    fprintf(stderr, "[rccl_ep] num_experts %d must be a positive multiple of num_ranks %d\n",
-            num_experts, h->cfg.num_ranks);
-    return -1;
+    return ep_fail(fn, "num_experts %d must be a positive multiple of num_ranks %d", num_experts, h->cfg.num_ranks);
   }
+  // Everything below allocates, frees and launches on the current device (see DeviceScope).
+  const DeviceScope dev(h->device);
+  if (!dev.ok()) return ep_fail(fn, "cannot select device %d", h->device);
   if (h->configured) {
     release_window(h, true);
     h->configured = false;
@@ -239,25 +377,35 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
 
   ncclResult_t nr = ncclMemAlloc(&h->win_buf, h->win_bytes);
   if (nr != ncclSuccess) {
-    fprintf(stderr, "[rccl_ep] ncclMemAlloc(%zu): %s\n", h->win_bytes, ncclGetErrorString(nr));
     h->win_buf = nullptr;
-    return -1;
+    return ep_fail(fn, "ncclMemAlloc(%zu): %s", h->win_bytes, ncclGetErrorString(nr));
   }
-  hipMemset(h->win_buf, 0, h->win_bytes);
+  // Spelled out rather than wrapped in HC: the macro returns before the window
+  // can be handed back.
+  if (hipMemset(h->win_buf, 0, h->win_bytes) != hipSuccess) {
+    release_window(h, false);
+    return ep_fail(fn, "clearing the %zu-byte window failed", h->win_bytes);
+  }
+  h->win = nullptr;
   nr = ncclCommWindowRegister(h->comm, h->win_buf, h->win_bytes, &h->win, NCCL_WIN_COLL_SYMMETRIC);
   if (nr != ncclSuccess) {
-    fprintf(stderr, "[rccl_ep] WindowRegister: %s (NCCL_CUMEM_ENABLE=1?)\n", ncclGetErrorString(nr));
     release_window(h, false);
-    return -1;
+    return ep_fail(fn, "WindowRegister: %s (needs NCCL_WIN_ENABLE=1 and NCCL_CUMEM_ENABLE=1)", ncclGetErrorString(nr));
+  }
+  // RCCL can decline a registration and still return success, with a null window, when the
+  // communicator has no symmetric memory (window support disabled, or cuMem off).
+  if (h->win == nullptr) {
+    release_window(h, false);
+    return ep_fail(fn, "symmetric memory is unavailable (the window registration was declined); "
+                       "needs NCCL_CUMEM_ENABLE=1 and window support");
   }
 
   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   reqs.lsaBarrierCount = kEpBarrierCtas;  // LSA only: no GIN contexts on the intranode path
   nr = ncclDevCommCreate(h->comm, &reqs, &h->devComm);
   if (nr != ncclSuccess) {
-    fprintf(stderr, "[rccl_ep] ncclDevCommCreate: %s\n", ncclGetErrorString(nr));
     release_window(h, true);
-    return -1;
+    return ep_fail(fn, "ncclDevCommCreate: %s", ncclGetErrorString(nr));
   }
   h->devcomm = true;
 
@@ -267,12 +415,11 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
   // spans nodes, or one whose ranks are reordered within the node, would
   // otherwise push payloads into the wrong peer's window with no error.
   if (h->devComm.lsaSize != h->cfg.num_ranks || h->devComm.lsaRank != h->cfg.rank) {
-    fprintf(stderr,
-            "[rccl_ep] LSA team is rank %d of %d but the communicator is rank %d of %d; "
-            "rccl_ep needs a single-node communicator with the identity LSA mapping\n",
-            h->devComm.lsaRank, h->devComm.lsaSize, h->cfg.rank, h->cfg.num_ranks);
     release_window(h, true);
-    return -1;
+    return ep_fail(fn,
+                   "LSA team is rank %d of %d but the communicator is rank %d of %d; "
+                   "rccl_ep needs a single-node communicator with the identity LSA mapping",
+                   h->devComm.lsaRank, h->devComm.lsaSize, h->cfg.rank, h->cfg.num_ranks);
   }
 
   hipLaunchKernelGGL(k_capi_fill_views, dim3(1), dim3(1), 0, 0,
@@ -281,9 +428,8 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
   // can be handed back.
   hipError_t he = hipDeviceSynchronize();
   if (he != hipSuccess) {
-    fprintf(stderr, "[rccl_ep] view fill: %s\n", hipGetErrorString(he));
     release_window(h, true);
-    return -1;
+    return ep_fail(fn, "view fill: %s", hipGetErrorString(he));
   }
   h->self_view = WindowView{(uint8_t*)h->win_buf, h->lay};
 
@@ -294,9 +440,8 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
   char err[256];
   if (check_uniform_arch(h->cfg, h->device, h->d_views, h->self_view,
                          h->devComm, err, sizeof(err)) != 0) {
-    fprintf(stderr, "[rccl_ep] %s\n", err);
     release_window(h, true);
-    return -1;
+    return ep_fail(fn, "%s", err);
   }
 
   h->configured = true;
@@ -304,19 +449,20 @@ int ep_configure(void* handle, int num_experts, int num_topk) {
 }
 
 size_t ep_window_bytes(void* handle) {
-  return static_cast<EpHandle*>(handle)->win_bytes;
+  return handle ? static_cast<EpHandle*>(handle)->win_bytes : 0;
 }
 
 void ep_destroy(void* handle) {
   auto* h = static_cast<EpHandle*>(handle);
   if (!h) return;
+  const DeviceScope dev(h->device);
   // Unconditional rather than gated on `configured`: a handle whose ep_configure
   // failed part-way has already handed back what it took, and release_window is
   // a no-op on the flags it cleared, so this covers both without double-freeing.
   release_window(h, h->configured);
-  hipFree(h->d_recvoff);
-  hipFree(h->d_total);
-  hipFree(h->d_views);
+  (void)hipFree(h->d_recvoff);
+  (void)hipFree(h->d_total);
+  (void)hipFree(h->d_views);
   ncclCommDestroy(h->comm);
   delete h;
 }
@@ -336,7 +482,13 @@ int ep_plan(void* handle, uintptr_t topk_idx, int num_tokens,
             uintptr_t out_slot, uintptr_t out_list, uintptr_t out_sendc,
             uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
-  REQUIRE_CONFIGURED(h, "ep_plan");
+  constexpr const char* fn = "ep_plan";
+  REQUIRE_CONFIGURED(h, fn);
+  REQUIRE_TOKENS(h, fn, num_tokens);
+  REQUIRE_PTR(fn, topk_idx, num_tokens > 0);
+  REQUIRE_PTR(fn, out_slot, num_tokens > 0);
+  REQUIRE_PTR(fn, out_list, num_tokens > 0);
+  REQUIRE_PTR(fn, out_sendc, true);
   hipStream_t s = (hipStream_t)stream;
   hipLaunchKernelGGL(k_ep_plan, dim3(h->cfg.num_ranks), dim3(kWarpSize), 0, s,
                      h->cfg, (const int32_t*)topk_idx, num_tokens,
@@ -354,31 +506,38 @@ int ep_dispatch(void* handle,
                 uintptr_t out_topk, uintptr_t out_tw, uintptr_t out_src,
                 uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
-  const EpConfig& c = h->cfg;
+  constexpr const char* fn = "ep_dispatch";
   hipStream_t s = (hipStream_t)stream;
-  REQUIRE_CONFIGURED(h, "ep_dispatch");
-  // fp8 payload is 1 byte/element, so the 16B vector copies need hidden % 16 == 0;
-  // ep_create's hidden % 8 guard only covers bf16 (2 bytes/element).
-  if (use_fp8 && c.hidden % 16 != 0) {
-    fprintf(stderr, "[rccl_ep] hidden %d must be a multiple of 16 for fp8 (16B vector alignment)\n", c.hidden);
-    return -1;
-  }
-  // The fp8 paths read x_sf and write out_sf unconditionally, so a missing scale
-  // tensor is a device-side fault rather than a skipped copy.
-  if (use_fp8 && (x_sf == 0 || out_sf == 0)) {
-    fprintf(stderr, "[rccl_ep] fp8 dispatch needs both x_sf and out_sf\n");
-    return -1;
-  }
-
+  REQUIRE_CONFIGURED(h, fn);
+  const EpConfig& c = h->cfg;
   // Slot index is rank * num_max_tokens_per_rank + i, with i bounded only by
   // num_tokens in k_ep_plan. Past capacity the push runs into the next rank's
   // region of the peer's window, and combine's src_tok = g % T then aliases
   // two tokens onto one slot.
-  if (num_tokens > c.num_max_tokens_per_rank) {
-    fprintf(stderr, "[rccl_ep] num_tokens %d exceeds num_max_tokens_per_rank %d\n",
-            num_tokens, c.num_max_tokens_per_rank);
-    return -1;
+  REQUIRE_TOKENS(h, fn, num_tokens);
+  REQUIRE_SMS(fn, num_sms);
+  // fp8 payload is 1 byte/element, so the 16B vector copies need hidden % 16 == 0;
+  // ep_create's hidden % 8 guard only covers bf16 (2 bytes/element).
+  if (use_fp8 && c.hidden % 16 != 0) {
+    return ep_fail(fn, "hidden %d must be a multiple of 16 for fp8 (16B vector alignment)", c.hidden);
   }
+  // Per-token inputs are read only when this rank has tokens; a rank with none passes null
+  // pointers (empty tensors). The fp8 paths read x_sf for every local token and write out_sf
+  // unconditionally, so a missing scale tensor would be a device-side fault, not a skipped copy.
+  const bool tok = num_tokens > 0;
+  REQUIRE_PTR(fn, sendc, true);
+  REQUIRE_PTR(fn, send_list, tok);
+  REQUIRE_PTR(fn, x, tok);
+  REQUIRE_PTR(fn, x_sf, tok && use_fp8);
+  REQUIRE_PTR(fn, topk_idx, tok);
+  REQUIRE_PTR(fn, topk_w, tok);
+  // The epilogue writes every output, metadata included, for each row this rank receives, which
+  // is not known here, so all of them are required.
+  REQUIRE_PTR(fn, out_x, true);
+  REQUIRE_PTR(fn, out_sf, use_fp8);
+  REQUIRE_PTR(fn, out_topk, true);
+  REQUIRE_PTR(fn, out_tw, true);
+  REQUIRE_PTR(fn, out_src, true);
 
   // 128 total CTAs is the measured bandwidth peak on gfx950; sweeping the CTA
   // budget shows dispatch flat from 32 upward on 8x MI350X.
@@ -424,7 +583,9 @@ int ep_dispatch(void* handle,
 // Per-source received counts, so the caller can report the per-rank prefix sum.
 int ep_recv_counts(void* handle, uintptr_t out_counts, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
-  REQUIRE_CONFIGURED(h, "ep_recv_counts");
+  constexpr const char* fn = "ep_recv_counts";
+  REQUIRE_CONFIGURED(h, fn);
+  REQUIRE_PTR(fn, out_counts, true);
   hipStream_t s = (hipStream_t)stream;
   // No sync: the destination is a caller tensor read back on the same stream.
   HC(hipMemcpyAsync((void*)out_counts, (uint8_t*)h->win_buf + h->lay.off_counts,
@@ -435,7 +596,11 @@ int ep_recv_counts(void* handle, uintptr_t out_counts, uintptr_t stream) {
 int ep_expert_counts(void* handle, uintptr_t recv_topk, int num_recv, uintptr_t out_counts,
                      uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
-  REQUIRE_CONFIGURED(h, "ep_expert_counts");
+  constexpr const char* fn = "ep_expert_counts";
+  REQUIRE_CONFIGURED(h, fn);
+  REQUIRE_RECV(h, fn, num_recv);
+  REQUIRE_PTR(fn, recv_topk, num_recv > 0);
+  REQUIRE_PTR(fn, out_counts, true);
   hipStream_t s = (hipStream_t)stream;
   hipLaunchKernelGGL(k_expand_count, dim3(h->cfg.experts_per_rank()), dim3(256), 0, s,
                      h->cfg, (const int32_t*)recv_topk, num_recv, (int32_t*)out_counts);
@@ -448,7 +613,16 @@ int ep_expand_build(void* handle, uintptr_t recv_topk, int num_recv, int expert_
                     uintptr_t counts, uintptr_t offsets, uintptr_t psum,
                     uintptr_t hist, uintptr_t row_map, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
-  REQUIRE_CONFIGURED(h, "ep_expand_build");
+  constexpr const char* fn = "ep_expand_build";
+  REQUIRE_CONFIGURED(h, fn);
+  REQUIRE_RECV(h, fn, num_recv);
+  if (expert_alignment < 1) return ep_fail(fn, "expert_alignment %d must be positive", expert_alignment);
+  REQUIRE_PTR(fn, recv_topk, num_recv > 0);
+  REQUIRE_PTR(fn, hist, num_recv > 0);
+  REQUIRE_PTR(fn, row_map, num_recv > 0);
+  REQUIRE_PTR(fn, counts, true);
+  REQUIRE_PTR(fn, offsets, true);
+  REQUIRE_PTR(fn, psum, true);
   const EpConfig& c = h->cfg;
   hipStream_t s = (hipStream_t)stream;
   const int epr = c.experts_per_rank();
@@ -483,8 +657,31 @@ int ep_expand_scatter(void* handle, int use_fp8,
                       int zero_pad, int expert_alignment,
                       uintptr_t counts, uintptr_t offsets, int num_sms, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
-  REQUIRE_CONFIGURED(h, "ep_expand_scatter");
+  constexpr const char* fn = "ep_expand_scatter";
+  REQUIRE_CONFIGURED(h, fn);
   const EpConfig& c = h->cfg;
+  REQUIRE_RECV(h, fn, num_recv);
+  REQUIRE_SMS(fn, num_sms);
+  // The same 16-byte vector bound dispatch applies to an fp8 row.
+  if (use_fp8 && c.hidden % 16 != 0) {
+    return ep_fail(fn, "hidden %d must be a multiple of 16 for fp8 (16B vector alignment)", c.hidden);
+  }
+  const bool rows = num_recv > 0;
+  REQUIRE_PTR(fn, src_x, rows);
+  REQUIRE_PTR(fn, src_w, rows && out_w != 0);
+  REQUIRE_PTR(fn, row_map, rows);
+  // With no rows every count is 0, so the padding pass writes nothing either.
+  REQUIRE_PTR(fn, out_x, rows);
+  REQUIRE_PTR(fn, src_sf, rows && use_fp8);
+  REQUIRE_PTR(fn, out_sf, rows && use_fp8);
+  if (use_fp8 && (sf_row_stride < 0 || sf_col_stride < 0)) {
+    return ep_fail(fn, "scale strides %d / %d must not be negative", sf_row_stride, sf_col_stride);
+  }
+  if (zero_pad) {
+    if (expert_alignment < 1) return ep_fail(fn, "expert_alignment %d must be positive", expert_alignment);
+    REQUIRE_PTR(fn, counts, true);
+    REQUIRE_PTR(fn, offsets, true);
+  }
   hipStream_t s = (hipStream_t)stream;
   const int cta = sms_or(num_sms, 64);
 
@@ -519,17 +716,22 @@ int ep_combine(void* handle,
                uintptr_t bias0, uintptr_t bias1, int grouped,
                uintptr_t out, uintptr_t out_w, int num_sms, uintptr_t stream) {
   auto* h = static_cast<EpHandle*>(handle);
-  const EpConfig& c = h->cfg;
+  constexpr const char* fn = "ep_combine";
   hipStream_t s = (hipStream_t)stream;
-  REQUIRE_CONFIGURED(h, "ep_combine");
+  REQUIRE_CONFIGURED(h, fn);
+  const EpConfig& c = h->cfg;
   // Same capacity bound ep_dispatch enforces: combine writes slot
   // rank * num_max_tokens_per_rank + t, and src_tok = g % T aliases two tokens
   // onto one slot once t runs past capacity.
-  if (num_tokens > c.num_max_tokens_per_rank) {
-    fprintf(stderr, "[rccl_ep] num_tokens %d exceeds num_max_tokens_per_rank %d\n",
-            num_tokens, c.num_max_tokens_per_rank);
-    return -1;
-  }
+  REQUIRE_TOKENS(h, fn, num_tokens);
+  REQUIRE_RECV(h, fn, num_recv);
+  REQUIRE_SMS(fn, num_sms);
+  REQUIRE_PTR(fn, y, num_recv > 0);
+  REQUIRE_PTR(fn, recv_topk, num_recv > 0);
+  REQUIRE_PTR(fn, recv_src, num_recv > 0);
+  REQUIRE_PTR(fn, topk_idx, num_tokens > 0);
+  REQUIRE_PTR(fn, out, num_tokens > 0);
+  grouped = grouped ? 1 : 0;
   // Two different grids. The transport is (num_ranks, per_rank) so a CTA owns
   // one peer; the reduce epilogue is purely local and 1-D over tokens, so it
   // takes the whole budget. Sharing one value silently starved the epilogue of

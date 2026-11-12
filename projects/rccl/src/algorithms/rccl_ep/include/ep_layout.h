@@ -54,16 +54,23 @@ struct EpConfig {
   }
 };
 
+// The rank owning expert `e`, or -1 for an id outside [0, num_experts), which every path ignores.
+__host__ __device__ inline int owner_of(const EpConfig& c, int e) {
+  return (e >= 0 && e < c.num_experts) ? e / c.experts_per_rank() : -1;
+}
+
 // Byte offsets of each region within a rank's symmetric window.
 //
 //   [ counts    ] num_ranks int32          how many tokens source s sent me
 //   [ flags     ] num_ranks uint32         per-source completion flag
 //   [ x         ] R * T * hidden  (bf16)   token payload, staged by source
+//   [ sf        ] R * T * hidden_sf float  fp8 scaling factors
 //   [ topk_idx  ] R * T * num_topk int32
 //   [ topk_w    ] R * T * num_topk float
 //   [ src_idx   ] R * T int32              src_token_global_idx
 //   [ y         ] R * T * num_topk * hidden  combine payload, staged by owner
 //   [ cw        ] R * T * num_topk float   combine top-k weights, by owner
+//   [ arch      ] R * kArchLen char        gcnArchName per rank
 //
 // where R = num_ranks, T = num_max_tokens_per_rank.
 //
