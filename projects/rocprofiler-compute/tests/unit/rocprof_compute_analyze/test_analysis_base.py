@@ -136,7 +136,6 @@ def test_initalize_runs_corrects_specs_only_when_asked(
             normal_unit="per_kernel",
             list_stats=False,
             filter_metrics=None,
-            config_dir=str(tmp_path),
             gpu_kernel=None,
         ),
         {},
