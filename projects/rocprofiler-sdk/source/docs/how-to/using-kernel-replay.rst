@@ -16,10 +16,11 @@ restores the snapshot between them so every pass observes identical captured inp
 The domain is not tied to hardware counters. A tool can use it for counters, timing, PC sampling,
 thread trace, or any other per-pass work.
 
-This page is the SDK how-to: it covers subscribing to the replay domain from a custom tool.
-Conceptual and API detail live under :ref:`kernel-replay-conceptual` and
-:ref:`kernel-replay-sdk-api`. For the ``rocprofv3`` command-line option
-(``--replay-mode kernel --kernel-replay-beta-enabled``), see the rocprofv3 how-to guide (:ref:`using-kernel-replay-rocprofv3`).
+This page is the custom-tool how-to. The mechanism (the snapshot inventory, the per-GPU lock, the
+pass loop) lives under :ref:`kernel-replay-conceptual` and :ref:`kernel-replay-sdk-api`.
+
+* Collecting counters from the command line: :ref:`using-kernel-replay-rocprofv3`.
+* One new process per counter group, which is the default: :ref:`using-application-replay`.
 
 .. warning::
 
@@ -120,6 +121,12 @@ that callback after ``CONFIG`` ``PHASE_ENTER`` returns:
 
 One dispatch id is reserved before ``CONFIG`` and reused for every pass. The application observes
 exactly one kernel completion regardless of pass count.
+
+Advanced
+========
+
+A fixed pass count is enough for counter groups. The rest of this page is for a tool that changes
+what a pass collects, stops early, or keeps state across the passes of one dispatch.
 
 Carry state with ``user_data``
 ==============================
@@ -230,6 +237,8 @@ Limitations
 See also
 ========
 
+* :ref:`using-application-replay` — one process per counter group
+* :ref:`using-kernel-replay-rocprofv3` — the command-line form of this service
 * :ref:`kernel-replay-sdk-api` — payload, operations, dispatch counting pattern
 * :ref:`kernel-replay-callback-api` — API contract and source map
 * :ref:`kernel-replay-concurrency` — isolation model

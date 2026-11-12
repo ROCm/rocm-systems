@@ -1101,10 +1101,12 @@ To supply the counters in the command line, use:
    - When specifying more than one counter, separate them using space or a comma.
    - Job fails if the entire set of counters can't be collected in a single pass.
 
+.. _application-replay:
+
 Multi-pass counter collection
 ++++++++++++++++++++++++++++++
 
-When counters can't be collected simultaneously due to hardware limitations, you can use multi-pass counter collection. This helps you collect different sets of counters across multiple profiling passes of the same application.
+When counters can't be collected simultaneously due to hardware limitations, you can use multi-pass counter collection. This helps you collect different sets of counters across multiple profiling passes of the same application. This default is application replay: one new process per counter group. :ref:`using-application-replay` is the full description, including when to switch to kernel replay.
 
 **Using multiple** ``--pmc`` **flags:**
 
@@ -1172,7 +1174,7 @@ In multi-pass counter collection, each pass generates its output in a separate `
 Kernel replay (beta)
 ++++++++++++++++++++
 
-By default, multiple ``--pmc`` groups are collected using *application replay*: the application is re-run from start to finish once per counter group (as described in the preceding section). ``--replay-mode kernel --kernel-replay-beta-enabled`` switches to *kernel replay* instead, collecting all ``--pmc`` groups within a **single** application run. Each kernel dispatch is replayed once per counter group in-process. Before replay, rocprofv3 snapshots every tracked coarse-grained device allocation owned by that agent, plus discovered module-scope device variables, and restores that snapshot between passes so every group observes identical captured inputs.
+By default, multiple ``--pmc`` groups are collected using :ref:`application replay <using-application-replay>`: the application is re-run from start to finish once per counter group (as described in the preceding section). ``--replay-mode kernel --kernel-replay-beta-enabled`` switches to *kernel replay* instead, collecting all ``--pmc`` groups within a **single** application run. Each kernel dispatch is replayed once per counter group in-process. Before replay, rocprofv3 snapshots every tracked coarse-grained device allocation owned by that agent, plus discovered module-scope device variables, and restores that snapshot between passes so every group observes identical captured inputs.
 
 This is useful when re-running the whole application per group is expensive or non-deterministic. Without ``--replay-mode kernel``, multiple ``--pmc`` groups use application replay as usual.
 
@@ -1202,7 +1204,7 @@ The preceding command collects both counter groups in a single run of ``<applica
 
    - Only single-packet, single-dispatch submissions are replayed. A multi-packet submission runs once without replay and warns once.
 
-For usage, limitations, and when to prefer application replay, see :ref:`using-kernel-replay-rocprofv3`. Tool authors should see :ref:`using-kernel-replay` and :ref:`kernel-replay-sdk-api`.
+For usage, limitations, and when to prefer application replay, see :ref:`using-application-replay` and :ref:`using-kernel-replay-rocprofv3`. Tool authors should see :ref:`using-kernel-replay` and :ref:`kernel-replay-sdk-api`.
 
 .. _extra-counters:
 

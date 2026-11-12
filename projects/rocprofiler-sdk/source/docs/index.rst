@@ -56,6 +56,7 @@ The documentation is structured as follows:
       * :ref:`using-thread-trace`
       * :ref:`using-rocprofv3-on-wsl`
       * :ref:`using-spm`
+      * :ref:`using-application-replay`
       * :ref:`using-kernel-replay`
       * :ref:`using-kernel-replay-rocprofv3`
       * :doc:`Samples <how-to/samples>`

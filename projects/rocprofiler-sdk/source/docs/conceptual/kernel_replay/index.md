@@ -53,9 +53,14 @@ same domain for timing, PC sampling, or thread trace.
 
 ## Documentation in this section
 
-**Tool authors:** start with {ref}`using-kernel-replay`.
+**rocprofv3 users:** start with {ref}`using-kernel-replay-rocprofv3`. The command line, the output
+fields, and the cases that run once without replay are there. This section is the mechanism.
 
-**rocprofv3 users:** start with {ref}`using-kernel-replay-rocprofv3`.
+**Several counter groups as several processes:** {ref}`using-application-replay`. That is the
+default. Kernel replay replaces it for a single dispatch.
+
+**Tool authors:** start with {ref}`using-kernel-replay`. The pages below are the callback contract,
+the snapshot, and the isolation rules that how-to links to.
 
 **SDK / tool developers:**
 
