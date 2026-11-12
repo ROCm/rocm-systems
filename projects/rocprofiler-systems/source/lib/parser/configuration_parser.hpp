@@ -100,8 +100,9 @@ public:
     /// @throws std::runtime_error if a variable cannot be set.
     void apply_to_environment() const;
 
-    [[nodiscard]] std::string render_help(help_style       style = help_style::compact,
-                                          std::string_view topic = {}) const;
+    /// @p max_level basic omits advanced rows. advanced includes them.
+    [[nodiscard]] std::string render_help(param_level      max_level = param_level::basic,
+                                          std::string_view topic     = {}) const;
 
     [[nodiscard]] std::shared_ptr<const schema> config_schema() const;
 

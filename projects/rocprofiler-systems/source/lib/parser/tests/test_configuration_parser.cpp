@@ -378,21 +378,46 @@ TEST(parser_configuration, reports_constraints_and_unknown_presets)
 
 TEST(parser_configuration, help_filters_by_level_and_topic)
 {
-    auto       parser  = make_parser();
-    const auto compact = parser.render_help(help_style::compact);
-    EXPECT_NE(compact.find("--output"), std::string::npos);
-    EXPECT_NE(compact.find("--trace"), std::string::npos);
-    EXPECT_EQ(compact.find("type:"), std::string::npos);
+    auto       parser = make_parser();
+    const auto basic  = parser.render_help();
+    EXPECT_NE(basic.find("--output"), std::string::npos);
+    EXPECT_NE(basic.find("--trace"), std::string::npos);
+    EXPECT_EQ(basic.find("type:"), std::string::npos);
 
-    const auto full = parser.render_help(help_style::full);
-    EXPECT_NE(full.find("type: bool"), std::string::npos);
-
-    const auto tracing = parser.render_help(help_style::full, "tracing");
+    const auto tracing = parser.render_help(param_level::basic, "tracing");
     EXPECT_NE(tracing.find("--trace"), std::string::npos);
     EXPECT_EQ(tracing.find("--output"), std::string::npos);
 
-    const auto missing = parser.render_help(help_style::compact, "missing");
+    const auto missing = parser.render_help(param_level::basic, "missing");
     EXPECT_NE(missing.find("No parameters match topic"), std::string::npos);
+
+    schema catalog{};
+    auto   mode        = named("mode", param_type::enumeration);
+    mode.category      = "sampling";
+    mode.arg           = "--mode";
+    mode.description   = "Sampling mode";
+    mode.choices       = { choice{ "realtime" }, choice{ "cputime" } };
+    auto hidden        = named("hidden", param_type::boolean);
+    hidden.category    = "sampling";
+    hidden.level       = param_level::advanced;
+    hidden.flag        = true;
+    hidden.arg         = "--hidden";
+    hidden.description = "Hidden option";
+    ASSERT_TRUE(catalog.add_param(std::move(mode)));
+    ASSERT_TRUE(catalog.add_param(std::move(hidden)));
+
+    configuration_parser levels;
+    levels.set_environment([](std::string_view) { return std::optional<std::string>{}; });
+    ASSERT_TRUE(levels.initialize(std::move(catalog)));
+    const auto short_help = levels.render_help();
+    const auto long_help  = levels.render_help(param_level::advanced);
+    EXPECT_NE(short_help.find("--mode"), std::string::npos);
+    EXPECT_NE(short_help.find("choices: realtime cputime"), std::string::npos);
+    EXPECT_EQ(short_help.find("--hidden"), std::string::npos);
+    EXPECT_EQ(short_help.find("type:"), std::string::npos);
+    EXPECT_NE(long_help.find("--hidden"), std::string::npos);
+    EXPECT_NE(long_help.find("choices: realtime cputime"), std::string::npos);
+    EXPECT_EQ(long_help.find("type:"), std::string::npos);
 }
 
 TEST(parser_configuration, exports_environment_and_json)
@@ -513,7 +538,7 @@ TEST(parser_configuration, help_shows_backend_choices_and_a_category_word)
     ASSERT_TRUE(parser.initialize(extra));
     ASSERT_TRUE(parser.add_backend(std::make_unique<letter_backend>()));
 
-    const auto help = parser.render_help(help_style::full);
+    const auto help = parser.render_help();
     EXPECT_NE(help.find("--letter"), std::string::npos);
     EXPECT_NE(help.find("alpha"), std::string::npos);
     EXPECT_NE(help.find("ghost"), std::string::npos);

@@ -564,13 +564,13 @@ configuration_parser::apply_to_environment() const
 }
 
 std::string
-configuration_parser::render_help(help_style style, std::string_view topic) const
+configuration_parser::render_help(param_level max_level, std::string_view topic) const
 {
     if(m_store == nullptr)
     {
         return "parser is not initialized\n";
     }
-    return format_help(*m_store->config_schema(), style, topic, m_backends.get());
+    return format_help(*m_store->config_schema(), max_level, topic, m_backends.get());
 }
 
 std::shared_ptr<const schema>
