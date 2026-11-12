@@ -99,21 +99,18 @@ GIN_FABRIC_LSA_HD inline bool ginFabricLsaA2ACapablePredicate(bool fabricMemPath
   return true;
 }
 
-#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
-
 // Default total-size threshold of the lane. On MI450 the lane beats gin.put up to 2 MiB total and
 // loses from 4-8 MiB at 4, 8 and 16 ranks alike (1P4G, 2P8G and 4P16G pods), so the crossover is a
-// total size, not a per-peer one.
+// total size, not a per-peer one. Visible on the device pass: createContext calls this from a .cc
+// that HIP still parses for device when ENABLE_DEVICE_LINKER=OFF.
 constexpr size_t kGinFabricLsaA2ADefaultThreshold = (size_t)2 * 1024 * 1024;
 
 // This rank's lane threshold: envThreshold (RCCL_GIN_ANVIL_FABRIC_LSA_THRESHOLD_ALLTOALL,
 // negative when unset) or the default, and 0 when the rank did not opt in.
-inline size_t ginFabricLsaA2AThreshold(bool optIn, int64_t envThreshold, int nRanks) {
+GIN_FABRIC_LSA_HD inline size_t ginFabricLsaA2AThreshold(bool optIn, int64_t envThreshold, int nRanks) {
   if (!optIn || nRanks < 2) return 0;
   return envThreshold >= 0 ? (size_t)envThreshold : kGinFabricLsaA2ADefaultThreshold;
 }
-
-#endif  // host
 
 }  // namespace fabric
 }  // namespace gin

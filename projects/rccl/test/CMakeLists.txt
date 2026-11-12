@@ -750,6 +750,8 @@ if(BUILD_TESTS)
   add_test(NAME rccl-UnitTestsGinScatterReduceGpu COMMAND rccl-UnitTestsGinScatterReduceGpu)
   set_tests_properties(rccl-UnitTestsGinScatterReduceGpu PROPERTIES LABELS "unit;gpu")
 
+  # Host-only LSA AllToAll policy. Also registered in the test-runner configs, which
+  # is how CI runs the sibling GIN policy binaries with the other unit tests.
   add_executable(rccl-UnitTestsGinFabricLsaPolicy gin/gin_fabric_lsa_policy_test.cpp)
   set_source_files_properties(gin/gin_fabric_lsa_policy_test.cpp PROPERTIES LANGUAGE CXX)
   target_include_directories(rccl-UnitTestsGinFabricLsaPolicy PRIVATE
