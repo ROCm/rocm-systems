@@ -501,7 +501,7 @@ impl LifecycleTransition {
 impl Drop for LifecycleTransition {
     /// Rolls back an incomplete generation transition.
     fn drop(&mut self) {
-        if !self.armed {
+        if !self.armed || !crate::platform::process_is_current() {
             return;
         }
         let mut registry = LIFECYCLE
@@ -536,6 +536,9 @@ pub(crate) static LIFECYCLE_CONDVAR: Condvar = Condvar::new();
 
 /// Locks the process-global lifecycle state, handling poisoned locks.
 pub(crate) fn lock() -> Result<MutexGuard<'static, HsaLifecycle>, Status> {
+    if !crate::platform::process_is_current() {
+        return Err(NOT_INITIALIZED);
+    }
     LIFECYCLE.lock().map_err(|_| ERROR)
 }
 

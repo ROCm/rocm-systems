@@ -11,7 +11,7 @@
 #include "fp/elementwise.h"
 #include "fp/omod_f64_test.h"
 #include "fp/reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <algorithm>
 #include <gtest/gtest.h>

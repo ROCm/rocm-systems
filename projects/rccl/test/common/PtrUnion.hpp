@@ -39,7 +39,8 @@ namespace RcclUnitTesting
 
   // Device-data mode (ON by default; set UT_DEVICE_DATA=0 to disable): when enabled,
   // the unit-test data layer builds input/expected and validates on the GPU instead
-  // of the host. Cached once. Disabling restores the host reference path byte-for-byte.
+  // of the host. Disabling restores the host reference path byte-for-byte. Also false when
+  // the test binary's kernels cannot run on the current device (see KernelLoadCache).
   bool UtDeviceDataEnabled();
 
   // Whether the device-data kernels support this dtype. All host-supported dtypes are

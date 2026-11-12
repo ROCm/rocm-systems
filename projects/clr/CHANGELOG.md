@@ -4,6 +4,16 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ## HIP 7.18.0 for ROCm 10.3.0
 
+### Added
+* New HIP APIs
+    - Memory Management: support for API parity with corresponding CUDA API.
+      * `hipMemcpyWithAttributesAsync` performs a single asynchronous 1D copy with the attributes
+        described by a `hipMemcpyAttributes` structure, without requiring the caller to build the
+        arrays that `hipMemcpyBatchAsync` takes.
+      * `hipMemcpy3DWithAttributesAsync` performs a single asynchronous 3D copy described by a
+        `hipMemcpy3DBatchOp` structure, without requiring the caller to build the operation list
+        that `hipMemcpy3DBatchAsync` takes.
+
 ### Resolved issues
 
 * `hipDrvLaunchKernelEx` now validates cluster dimensions before dispatch. Previously, an oversized or overflowing cluster size (e.g. exceeding the device maximum, or a product that overflows `uint32_t`) reached the hardware and caused an `HSA_STATUS_ERROR_INVALID_ARGUMENT` queue abort. Both `hipDrvLaunchKernelEx` and `hipLaunchKernelExC` now return `hipErrorInvalidClusterSize` at the API boundary for invalid cluster dimensions, matching CUDA's `cudaErrorInvalidClusterSize` / `CUDA_ERROR_INVALID_CLUSTER_SIZE` behavior. A cluster size greater than 1 on a device that does not support clusters (`clusterMaxSize == 0`) is also rejected.
@@ -11,11 +21,13 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
 * `HIP_SKIP_ABORT_ON_GPU_ERROR` now correctly suppresses process termination for device-side assertions (`HSA_STATUS_ERROR_EXCEPTION`), consistent with existing behavior for out-of-memory and invalid-dispatch errors. Previously, when core dumps were enabled (`RLIMIT_CORE` nonzero), a device-side assertion could still invoke `abort()` even when skip-abort mode was enabled. The HIP runtime now returns `hipErrorLaunchFailure` instead of aborting the process.
 * Resolved a segmentation fault on every call to the eight external-semaphore graph node APIs (`hipGraphAddExternalSemaphoresSignalNode`, `hipGraphAddExternalSemaphoresWaitNode`, and their `GetParams`/`SetParams`/`Exec...SetParams` APIs). Their runtime dispatch-table entries were never set; they now route to the implementations, and `hipGraphAddExternalSemaphoresSignalNode` returns `hipErrorInvalidValue` for invalid arguments as the wait variant does.
+* `hipCtxDestroy` no longer releases the device context for a context the caller did not create with `hipCtxCreate`, which could free the context while the runtime still referenced it.
 
 ### Changed
 
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
 * With `HIP_SKIP_ABORT_ON_GPU_ERROR` enabled, device-side assertions now return `hipErrorLaunchFailure` rather than terminating the process with `abort()`, even when core dumps are enabled (`RLIMIT_CORE` > 0).
+* `hipCtxDestroy` returns `hipErrorInvalidContext` for a context the caller did not create with `hipCtxCreate` (was `hipSuccess`).
 
 ## HIP 7.17.0 for ROCm 10.2.0
 

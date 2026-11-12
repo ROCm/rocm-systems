@@ -17,6 +17,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/prt_residency.h"
 #include "rocjitsu/vm/amdgpu/vm_mutation_epoch.h"
 #include "util/distributed_shared_mutex.h"
 #include "util/intrusive_shared_ptr.h"
@@ -390,6 +391,8 @@ public:
   using HostExtent = amdgpu::LegacyHostExtent;
   using PageTableEntry = amdgpu::LegacyPageTableEntry;
   using PageTable = amdgpu::LegacyPageTable;
+  const std::shared_ptr<amdgpu::PrtResidency> prt_residency =
+      std::make_shared<amdgpu::PrtResidency>();
 
   /// @brief Map host pages into this process's GPU page table.
   /// @param mtype PTE MTYPE for these pages (derived from allocation flags).

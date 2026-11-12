@@ -1167,9 +1167,10 @@ TEST_F(FreshRegistrationLegacyIpcSucceedsFixture, PopulatesIpcInfoRecord)
 
 // Fresh-registration variant: ncclProxyCallBlocking returns success but
 // writes rmtRegAddr=NULL into the response buffer. Drives the False arm
-// of `if (rmtRegAddr)` -- the entire bookkeeping
-// block (newInfo alloc, ipcInfos[] install, hostPeerRmtAddrs lazy alloc)
-// must be skipped. Because *regBufFlag is then never set to 1, the
+// of `if (rmtRegAddr)` -- the bookkeeping block (ipcInfos[] install,
+// hostPeerRmtAddrs slot write) must be skipped. newInfo and the host table
+// are allocated before the proxy call; newInfo is released at the end of the
+// iteration and the empty table stays with the record. Because *regBufFlag is then never set to 1, the
 // post-loop strong-stream block also stays skipped, and the function
 // returns ncclSuccess with all outputs left zeroed by the prologue.
 TEST_F(FreshRegistrationMicrotest, ProxyReturnsNullRmtAddrSkipsBookkeeping)
@@ -1202,7 +1203,9 @@ TEST_F(FreshRegistrationMicrotest, ProxyReturnsNullRmtAddrSkipsBookkeeping)
     EXPECT_EQ(r, ncclSuccess);
     // Bookkeeping block was skipped:
     EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);  // fixture's regRecord
-    EXPECT_EQ(regRecord.regIpcAddrs.hostPeerRmtAddrs, nullptr);
+    ASSERT_NE(regRecord.regIpcAddrs.hostPeerRmtAddrs, nullptr);
+    EXPECT_EQ(regRecord.regIpcAddrs.hostPeerRmtAddrs[kPeerLocalRank], 0u);
+    EXPECT_FALSE(regRecord.regIpcAddrs.devPeerRmtAddrsStale);
     EXPECT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs,  nullptr);
     EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
     // Outputs stay at the prologue-cleared values:
@@ -1264,9 +1267,8 @@ TEST_F(FreshRegistrationMicrotest, SkipsProxyConnectWhenAlreadyInitialized)
     ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
 }
 
-// Fresh-registration fail path with newInfo already allocated. Drives the
-// True arm of `if (newInfo) free(newInfo)` in the `fail:` epilogue -- the
-// leak-prevention contract on the fail: epilogue. Sequence:
+// Fresh-registration fail path after newInfo was handed to the record.
+// Sequence:
 //
 //   1. Happy-path through hipMemGetAddressRange / hipIpcGetMemHandle /
 //      proxyCallBlocking -> rmtRegAddr non-null -> newInfo ncclCalloc'd,
@@ -1275,19 +1277,14 @@ TEST_F(FreshRegistrationMicrotest, SkipsProxyConnectWhenAlreadyInitialized)
 //   3. Post-loop COLLECTIVE strong-stream block fires (devPeerRmtAddrs is
 //      NULL, needUpdate is true).
 //   4. g_strongStreamAcquire hook returns failure -> NCCLCHECKGOTO into
-//      `fail:` with newInfo non-null and the local var still holding the
-//      most recent allocation.
+//      `fail:`.
 //
-// Without this test the True arm was never hit (existing fresh-reg
-// failure test triggers fail: before newInfo is ever set).
-//
-// Note on the dangling pointer: the production fail: epilogue frees
-// newInfo but leaves regRecord->ipcInfos[peerLocalRank] pointing at the
-// freed memory. That's an existing pre-condition of the function (the
-// fail: path doesn't roll back ipcInfos), not something this test is
-// asserting. The RegRecordCleaner would normally double-free, so we
-// null out the slot before the cleaner runs.
-TEST_F(FreshRegistrationMicrotest, FreesNewInfoOnPostLoopFailure)
+// Once installed in ipcInfos the entry belongs to the record, which frees it
+// on deregistration, so fail: must leave it alone. Freeing it there left the
+// slot dangling and the record's own cleanup freed it a second time. Reading
+// the entry back below is a heap-use-after-free under ASAN if fail: frees it,
+// and RegRecordCleaner is what releases it.
+TEST_F(FreshRegistrationMicrotest, PostLoopFailureLeavesNewInfoOwnedByTheRecord)
 {
     constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
 
@@ -1320,20 +1317,103 @@ TEST_F(FreshRegistrationMicrotest, FreesNewInfoOnPostLoopFailure)
     EXPECT_EQ(r, ncclSystemError);
     out.ExpectZeroed();
 
-    // The contract being pinned down: the function ran far enough that
-    // newInfo *was* allocated (and stashed in ipcInfos) before the
-    // failure, and the fail: epilogue then free()d it. We can't observe
-    // the free directly without leak detection, but we *can* observe
-    // that the precondition was reached -- otherwise the True arm of
-    // `if (newInfo)` was never exercised.
     ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr)
-        << "test scaffolding broken: newInfo was never allocated, so the "
-           "True arm of `if (newInfo) free(newInfo)` is not reached";
-
-    // Production leaves this slot pointing at freed memory on fail:.
-    // Null it out so RegRecordCleaner doesn't double-free.
-    regRecord.ipcInfos[kPeerLocalRank] = nullptr;
+        << "test scaffolding broken: newInfo was never installed in the record";
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->peerRank, kPeerRank);
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->impInfo.rmtRegAddr, reinterpret_cast<void*>(kRmtRegAddr));
 }
+
+// The entry stays published when the device-table update fails, so the next
+// lookup takes the reuse arm. That arm must redo the update rather than hand
+// a COLLECTIVE caller the never-filled (here NULL) device table.
+TEST_F(FreshRegistrationMicrotest, DevTableAllocFailsThenReuse_RetriesTheDeviceTableUpdate)
+{
+    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
+
+    InstallLegacyCudaRegisterHook();
+    auto memGet = MakeDefaultMemGetHook();
+    auto ipcGet = MakeDefaultIpcGetHook();
+    ScopedHook connect(g_proxyConnect, MarkProxyConnInitialized());
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
+    auto honestCalloc = g_fakeCudaCallocAsync;
+    int devCallocs = 0;
+    ScopedHook calloc(g_fakeCudaCallocAsync,
+        [&](void** ptr, std::size_t nbytes, hipStream_t stream) -> ncclResult_t {
+            if (++devCallocs == 1) return ncclUnhandledCudaError;
+            return honestCalloc(ptr, nbytes, stream);
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs first;
+    bool isLegacyIpc = false;
+    ASSERT_EQ(ncclUnhandledCudaError,
+              CallIpcRegisterBuffer(cb, kUserbuff, /*buffSize=*/ 256, peerRanks, 1,
+                                    NCCL_IPC_COLLECTIVE, &regRecord, first, &isLegacyIpc));
+    first.ExpectZeroed();
+    ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    ASSERT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs, nullptr);
+    EXPECT_TRUE(regRecord.regIpcAddrs.devPeerRmtAddrsStale);
+
+    IpcRegOutputs reuse;
+    ASSERT_EQ(ncclSuccess,
+              CallIpcRegisterBuffer(cb, kUserbuff, /*buffSize=*/ 256, peerRanks, 1,
+                                    NCCL_IPC_COLLECTIVE, &regRecord, reuse, &isLegacyIpc));
+    EXPECT_EQ(proxy.calls, 1) << "the second call reuses the import";
+    EXPECT_EQ(calloc.calls, 2) << "the reuse arm retried the device-table allocation";
+    EXPECT_EQ(reuse.regBufFlag, 1);
+    ASSERT_NE(reuse.peerRmtAddrs, nullptr);
+    EXPECT_EQ(reuse.peerRmtAddrs, regRecord.regIpcAddrs.devPeerRmtAddrs);
+    EXPECT_EQ(reuse.peerRmtAddrs[kPeerLocalRank], kRmtRegAddr);
+    EXPECT_FALSE(regRecord.regIpcAddrs.devPeerRmtAddrsStale);
+}
+
+// The host table and newInfo are allocated before the proxy imports the
+// buffer. A failure of either must leave no peer import behind and nothing in
+// ipcInfos; otherwise the next SENDRECV call would reuse the entry and index
+// a NULL host table.
+class BookkeepingAllocFailsTest : public FreshRegistrationMicrotest,
+                                  public ::testing::WithParamInterface<std::size_t> {};
+
+TEST_P(BookkeepingAllocFailsTest, NeverReachesTheProxyAndTheNextCallRegistersAfresh)
+{
+    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
+
+    InstallLegacyCudaRegisterHook();
+    auto memGet = MakeDefaultMemGetHook();
+    auto ipcGet = MakeDefaultIpcGetHook();
+    ScopedHook connect(g_proxyConnect, MarkProxyConnInitialized());
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
+    SetP2pCallocFailSize(GetParam());
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs first;
+    bool isLegacyIpc = false;
+    ASSERT_EQ(ncclSystemError,
+              CallIpcRegisterBuffer(cb, kUserbuff, /*buffSize=*/ 256, peerRanks, 1,
+                                    NCCL_IPC_SENDRECV, &regRecord, first, &isLegacyIpc));
+    first.ExpectZeroed();
+    EXPECT_EQ(proxy.calls, 0) << "a failure after the import would orphan the peer's mapping";
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
+
+    IpcRegOutputs retry;
+    ASSERT_EQ(ncclSuccess,
+              CallIpcRegisterBuffer(cb, kUserbuff, /*buffSize=*/ 256, peerRanks, 1,
+                                    NCCL_IPC_SENDRECV, &regRecord, retry, &isLegacyIpc));
+    EXPECT_EQ(proxy.calls, 1) << "the retry registers afresh";
+    EXPECT_EQ(retry.regBufFlag, 1);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(retry.peerRmtAddrs), kRmtRegAddr);
+}
+
+// The calloc shim arms by request size, so each must be the only request of its size.
+constexpr std::size_t kHostTableBytes = NCCL_MAX_LOCAL_RANKS * sizeof(uintptr_t);
+static_assert(kHostTableBytes != sizeof(p2pIpcExpInfo) && kHostTableBytes != sizeof(ncclIpcRegInfo) &&
+              sizeof(ncclIpcRegInfo) != sizeof(p2pIpcExpInfo));
+INSTANTIATE_TEST_SUITE_P(FreshRegistration, BookkeepingAllocFailsTest,
+                         ::testing::Values(kHostTableBytes, sizeof(ncclIpcRegInfo)),
+                         [](const ::testing::TestParamInfo<std::size_t>& info) {
+                             return info.param == kHostTableBytes ? "HostTable" : "NewInfo";
+                         });
 
 // Regression test for NVIDIA/nccl#1859 / AICOMRCCL-1100 ("user-buffer p2p +
 // coll rmtAddr nullptr error"). The same buggy code was present in RCCL's
@@ -6423,10 +6503,11 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CrossProcessNonPosix_ImportsFrom
     ASSERT_NE(QueueHead(conn_), nullptr);
 }
 
-// A cuMem register whose per-segment map fails takes the fail-cleanup path:
-// every segment mapped/imported before the failure is unmapped and released,
-// no record is left on the queue, respBuff is NULL, and *done is still latched.
-TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemMapFails_ReleasesImportedHandlesAndRecordsNothing)
+// A same-process cuMem register whose per-segment map fails takes the
+// fail-cleanup path: the segment mapped before the failure is unmapped, the
+// borrowed handles are left to their owner, no record is left on the queue,
+// respBuff is NULL, and *done is still latched.
+TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemMapFails_UnmapsWithoutReleasingBorrowedHandlesAndRecordsNothing)
 {
     conn_.sameProcess = 1;   // same-process: handle copied in, no import seam
 
@@ -6446,6 +6527,11 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemMapFails_ReleasesImportedHa
                     hipMemGenericAllocationHandle_t, unsigned long long) -> hipError_t {
             return (++mapCalls == 1) ? hipSuccess : hipErrorInvalidValue;
         });
+    int unmapCalls = 0;
+    ScopedHook unmap(g_hipMemUnmap, [&unmapCalls](void*, size_t) -> hipError_t {
+        ++unmapCalls;
+        return hipSuccess;
+    });
     int releaseCalls = 0;
     ScopedHook release(g_hipMemRelease,
         [&releaseCalls](hipMemGenericAllocationHandle_t) -> hipError_t {
@@ -6462,9 +6548,9 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemMapFails_ReleasesImportedHa
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(resp, nullptr);                    // no address handed back
     EXPECT_EQ(done, 1);
-    // Both segments were marked imported (handle copied in) before the map of
-    // the second failed; cleanup releases each imported handle.
-    EXPECT_EQ(releaseCalls, kNumSegments);
+    EXPECT_EQ(unmapCalls, 1);                    // only the first segment was mapped
+    // The requester already dropped its retain and still owns the handles.
+    EXPECT_EQ(releaseCalls, 0);
     EXPECT_EQ(QueueHead(conn_), nullptr);        // nothing recorded
 }
 
@@ -6506,14 +6592,7 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_PosixFdCloseFails_ReleasesAndRec
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(resp, nullptr);
     EXPECT_EQ(done, 1);
-    // Latent bug: the handle is imported (p2p.cc:1501) before the close, but
-    // imported[segment] = true is only set after the close (p2p.cc:1511), so
-    // when the close fails into fail: the segment is not flagged and the
-    // fail-cleanup loop's `if (imported[segment])` release is skipped -- the
-    // imported handle leaks. releaseCalls is therefore 0. Pin the current
-    // contract; moving imported[segment] = true above the close (or releasing
-    // on the close-failure path) is a production follow-up.
-    EXPECT_EQ(releaseCalls, 0);
+    EXPECT_EQ(releaseCalls, 1);
     EXPECT_EQ(QueueHead(conn_), nullptr);    // nothing recorded
 }
 
@@ -6521,25 +6600,36 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_PosixFdCloseFails_ReleasesAndRec
 
 // A successful legacy import whose record bookkeeping allocation fails
 // propagates the error: the mapped address is not recorded (the caller sees
-// the failure rather than a half-built queue entry).
+// the failure rather than a half-built queue entry), and the import is closed
+// at its base (the request offset subtracted back out) so it does not leak.
 TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_RecordAllocFails_Propagates)
 {
-    constexpr uintptr_t kBase = 0x8000;
+    constexpr uintptr_t kBase   = 0x8000;
+    constexpr uintptr_t kOffset = 0x40;
 
     p2pIpcExpInfo req{};
     req.legacyIpcCap = true;
     req.size         = 0x1000;
+    req.offset       = kOffset;
 
     ScopedHook open(g_hipIpcOpenMemHandle,
         [](void** devPtr, hipIpcMemHandle_t, unsigned int) -> hipError_t {
             if (devPtr) *devPtr = reinterpret_cast<void*>(kBase);
             return hipSuccess;
         });
+    int   closeCalls = 0;
+    void* closedPtr  = nullptr;
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [&](void* devPtr) -> hipError_t {
+            ++closeCalls;
+            closedPtr = devPtr;
+            return hipSuccess;
+        });
     // The record wrapper (proxyMemHandle) is the first ncclCalloc in the
     // exit-bookkeeping block; starve it.
     SetP2pCallocFailSize(sizeof(proxyMemHandle));
 
-    void* resp = nullptr;
+    void* resp = reinterpret_cast<void*>(0xDEAD);
     int   done = 0;
     auto r = p2pTransport.send.proxyRegister(&conn_, &state_, &req,
                                              sizeof(p2pIpcExpInfo), &resp,
@@ -6547,28 +6637,36 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_RecordAllocFails_Propagates)
 
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(QueueHead(conn_), nullptr);    // no record enqueued
-    // Latent bug: on this bookkeeping-alloc-failure path the bare
-    // NCCLCHECK(ncclCalloc(...)) returns before *done is latched, unlike the
-    // fail: path which nulls regAddr and reaches *done = 1. done therefore
-    // stays 0, which would leave the requesting rank blocked in
-    // ncclProxyCallBlocking. Pin the current contract; latching done on this
-    // path is a production follow-up.
-    EXPECT_EQ(done, 0);
+    EXPECT_EQ(done, 1);
+    EXPECT_EQ(resp, nullptr);
+    EXPECT_EQ(closeCalls, 1);
+    EXPECT_EQ(closedPtr, reinterpret_cast<void*>(kBase));
 }
 
 // The impInfo payload allocation (the second ncclCalloc in the bookkeeping
-// block) failing likewise propagates without enqueuing a record.
+// block) failing likewise propagates without enqueuing a record and closes
+// the import at its base.
 TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_ImpInfoAllocFails_Propagates)
 {
-    constexpr uintptr_t kBase = 0x8000;
+    constexpr uintptr_t kBase   = 0x8000;
+    constexpr uintptr_t kOffset = 0x40;
 
     p2pIpcExpInfo req{};
     req.legacyIpcCap = true;
     req.size         = 0x1000;
+    req.offset       = kOffset;
 
     ScopedHook open(g_hipIpcOpenMemHandle,
         [](void** devPtr, hipIpcMemHandle_t, unsigned int) -> hipError_t {
             if (devPtr) *devPtr = reinterpret_cast<void*>(kBase);
+            return hipSuccess;
+        });
+    int   closeCalls = 0;
+    void* closedPtr  = nullptr;
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [&](void* devPtr) -> hipError_t {
+            ++closeCalls;
+            closedPtr = devPtr;
             return hipSuccess;
         });
     // proxyMemHandle and ncclIpcImpInfo differ in size; starving the latter
@@ -6576,7 +6674,7 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_ImpInfoAllocFails_Propagates)
     ASSERT_NE(sizeof(proxyMemHandle), sizeof(ncclIpcImpInfo));
     SetP2pCallocFailSize(sizeof(ncclIpcImpInfo));
 
-    void* resp = nullptr;
+    void* resp = reinterpret_cast<void*>(0xDEAD);
     int   done = 0;
     auto r = p2pTransport.send.proxyRegister(&conn_, &state_, &req,
                                              sizeof(p2pIpcExpInfo), &resp,
@@ -6584,10 +6682,116 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_ImpInfoAllocFails_Propagates)
 
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(QueueHead(conn_), nullptr);
-    // See ProxyRegister_RecordAllocFails_Propagates: done is left unlatched on
-    // this alloc-failure path, so it stays 0 (a latent peer-blocking bug).
-    EXPECT_EQ(done, 0);
+    EXPECT_EQ(done, 1);
+    EXPECT_EQ(resp, nullptr);
+    EXPECT_EQ(closeCalls, 1);
+    EXPECT_EQ(closedPtr, reinterpret_cast<void*>(kBase));
 }
+
+#if ROCM_VERSION >= 70000
+
+// A cuMem register whose record bookkeeping allocation fails after the
+// request offset was applied to regAddr unwinds from the reserved base: every
+// segment is unmapped at base + its running offset and the VA reservation is
+// freed at base. Only handles the proxy imported itself (cross-process) are
+// released; same-process handles are borrowed from the requester.
+class P2pProxyRegisterCuMemUnwindTest : public P2pProxyRegisterMicrotest {
+protected:
+    // Three segments keeps the per-segment callocs (bool[3], handle[3]) from
+    // matching sizeof(proxyMemHandle), which is the allocation starved below.
+    static constexpr int kNumSegments = 3;
+
+    void RunRecordAllocFails(int sameProcess, int expectedReleases);
+};
+
+void P2pProxyRegisterCuMemUnwindTest::RunRecordAllocFails(int sameProcess, int expectedReleases)
+{
+    conn_.sameProcess = sameProcess;
+    ScopedCuMemHandleType handleType(hipMemHandleTypeWin32);  // cross-process: import from cuDesc, no fd
+
+    constexpr uintptr_t kBase        = 0x600000;
+    constexpr uintptr_t kOffset      = 0x80;
+    constexpr size_t    kSegSize     = 0x1000;
+
+    std::array<p2pIpcExpInfo, kNumSegments> req{};
+    for (auto& seg : req) seg.size = kSegSize;
+    req[0].offset = kOffset;
+
+    int importCalls = 0;
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [&importCalls](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) -> hipError_t {
+            ++importCalls;
+            if (h) *h = nullptr;
+            return hipSuccess;
+        });
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [](void** ptr, std::size_t, std::size_t, void*, unsigned long long) -> hipError_t {
+            if (ptr) *ptr = reinterpret_cast<void*>(kBase);
+            return hipSuccess;
+        });
+    ScopedHook map(g_hipMemMap,
+        [](void*, std::size_t, std::size_t,
+           hipMemGenericAllocationHandle_t, unsigned long long) -> hipError_t {
+            return hipSuccess;
+        });
+    ScopedHook access(g_hipMemSetAccess,
+        [](void*, std::size_t, const hipMemAccessDesc*, std::size_t) -> hipError_t {
+            return hipSuccess;
+        });
+    std::vector<void*> unmapped;
+    ScopedHook unmap(g_hipMemUnmap, [&](void* p, size_t) -> hipError_t {
+        unmapped.push_back(p);
+        return hipSuccess;
+    });
+    int releaseCalls = 0;
+    ScopedHook release(g_hipMemRelease,
+        [&releaseCalls](hipMemGenericAllocationHandle_t) -> hipError_t {
+            ++releaseCalls;
+            return hipSuccess;
+        });
+    int    addrFreeCalls = 0;
+    void*  freedAddr     = nullptr;
+    size_t freedSize     = 0;
+    ScopedHook addrFree(g_hipMemAddressFree, [&](void* p, size_t size) -> hipError_t {
+        ++addrFreeCalls;
+        freedAddr = p;
+        freedSize = size;
+        return hipSuccess;
+    });
+    SetP2pCallocFailSize(sizeof(proxyMemHandle));
+
+    void* resp = reinterpret_cast<void*>(0xDEAD);
+    int   done = 0;
+    auto r = p2pTransport.send.proxyRegister(&conn_, &state_, req.data(),
+                                             sizeof(p2pIpcExpInfo) * kNumSegments,
+                                             &resp, sizeof(void*), &done);
+
+    EXPECT_NE(r, ncclSuccess);
+    EXPECT_EQ(resp, nullptr);
+    EXPECT_EQ(done, 1);
+    EXPECT_EQ(QueueHead(conn_), nullptr);
+    ASSERT_EQ(unmapped.size(), static_cast<size_t>(kNumSegments));
+    for (int segment = 0; segment < kNumSegments; segment++) {
+        EXPECT_EQ(unmapped[segment], reinterpret_cast<void*>(kBase + segment * kSegSize));
+    }
+    EXPECT_EQ(importCalls, sameProcess ? 0 : kNumSegments);
+    EXPECT_EQ(releaseCalls, expectedReleases);
+    EXPECT_EQ(addrFreeCalls, 1);
+    EXPECT_EQ(freedAddr, reinterpret_cast<void*>(kBase));
+    EXPECT_EQ(freedSize, kSegSize * kNumSegments);
+}
+
+TEST_F(P2pProxyRegisterCuMemUnwindTest, SameProcess_RecordAllocFails_UnwindsFromReservedBaseWithoutReleasingBorrowedHandles)
+{
+    RunRecordAllocFails(/*sameProcess=*/1, /*expectedReleases=*/0);
+}
+
+TEST_F(P2pProxyRegisterCuMemUnwindTest, CrossProcess_RecordAllocFails_UnwindsFromReservedBaseAndReleasesImportedHandles)
+{
+    RunRecordAllocFails(/*sameProcess=*/0, /*expectedReleases=*/kNumSegments);
+}
+
+#endif  // ROCM_VERSION >= 70000
 
 class P2pProxyDeregisterMicrotest : public P2pProxyRegisterMicrotest {};
 

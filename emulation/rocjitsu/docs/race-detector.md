@@ -243,7 +243,14 @@ following lifecycle:
    perspective of other waves in the same workgroup.
 1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
    retired and, from the perspective of all threads in all wavefronts, the
-   operation is complete.
+   operation is complete. A workgroup with a single wave has no other wave to
+   race with, so its LDS events are retired as soon as they are wave-complete,
+   without a barrier. They then leave the LDS lists that race checks scan, so
+   those checks do not slow down as completed events add up in long
+   single-wave kernels. Retired events stay in the event registry until it
+   trims them, and it trims only from the oldest event: an older event that is
+   still pending, such as a global load waiting on `loadcnt`, keeps every
+   later retired event in the registry.
 
 Generic `FLAT_*` instructions select counter domains from their resolved memory
 requests. Global and scratch requests use the vector-memory counter; LDS
@@ -376,6 +383,10 @@ wave can bypass the interval scan because those operations are ordered. A
 mixed chunk uses the scan until its count drains. The history remains available
 for checks by other waves until a barrier retires it. Direct-to-LDS and unordered
 memory operations still require their own completion checks.
+For a DS or FLAT instruction, the plugin first merges the active lanes' byte
+ranges into intervals and checks the chunk counts under them. When no chunk can
+hold a conflict, it skips the per-lane checks. The same intervals become the
+instruction's event.
 
 **VGPR race detection** tracks events per register, using the stored exec mask
 to determine which lanes are affected. Tracking is at byte granularity within
@@ -445,9 +456,8 @@ race_detector/
     ├── event_registry.h      append-only event store with prefix trimming
     ├── interval_set.h        half-open byte range tracking for LDS
     ├── types.h               core enum types and structs
-    ├── common_register.h     SGPR/VGPR classification helpers
-    ├── dim3d.h               3D coordinate helpers
-    └── profiler_interface.h  optional hook profiling
+    ├── common_register.h     memory event types and ordering
+    └── dim3d.h               3D coordinate helpers
 ```
 
 Explicit wait decoding is shared with the core checker in

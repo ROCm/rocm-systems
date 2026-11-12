@@ -156,10 +156,12 @@ target_include_directories(
 rj_configure_target(rj_code_object_fuzz_test PRIVATE_INCLUDES WARNINGS)
 add_dependencies(rj_code_object_fuzz_test rj_code_object_fuzz)
 rj_add_gtest_tests(rj_code_object_fuzz_test)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
     NAME CodeObjectFuzzCliTest
     COMMAND
         ${CMAKE_COMMAND} -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_code_object_fuzz>
+        -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}
         -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/code-object-fuzz-cli -P
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/code_object/test_code_object_fuzz_cli.cmake
 )
@@ -218,6 +220,21 @@ add_test(
 )
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+if(
+    CMAKE_SYSTEM_NAME STREQUAL "Linux"
+    AND NOT CMAKE_CROSSCOMPILING
+    AND CMAKE_GENERATOR MATCHES "^Ninja"
+)
+    add_test(
+        NAME cmake.build_path_cache
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_build_path_cache.py
+            ${CMAKE_COMMAND} ${CMAKE_CXX_COMPILER} "${CMAKE_CXX_COMPILER_ARG1}"
+            ${CMAKE_MAKE_PROGRAM}
+    )
+    set_tests_properties(cmake.build_path_cache PROPERTIES SKIP_RETURN_CODE 77)
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Exercise the native runtime resolved by the configured Python environment.
     # Reinstall native changes first, or put an uninstalled build on PATH when
@@ -430,9 +447,9 @@ add_executable(
     legacy_page_table_cache_test.cpp
     config_test.cpp
     checkpoint_restore_errors_test.cpp
-    rj_arith_bridge_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
+    rj_arith_bridge_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
@@ -459,9 +476,11 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_memory_snapshot_test.cpp
+    rdna1_memory_test.cpp
     ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
     flat_lds_transfer_test.cpp
+    rdna35_memory_test.cpp
     scalar_buffer_store_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
@@ -483,7 +502,10 @@ add_executable(
     simulated_kfd_test.cpp
     kfd_events_test.cpp
     decode_smoke_test.cpp
+    rdna2_memory_test.cpp
     rdna4_dot_dpp_test.cpp
+    rdna1_valu_test.cpp
+    rdna4_memory_test.cpp
     readlane_selector_test.cpp
     pc_extension_test.cpp
     pc_fetch_test.cpp
@@ -580,6 +602,7 @@ add_executable(
     scalar_atomic_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
+    rdna4_scalar_test.cpp
     scalar_f16_constant_test.cpp
     vector16_inline_constant_test.cpp
     scalar_scc_test.cpp
@@ -587,6 +610,7 @@ add_executable(
     cbranch_fork_join_test.cpp
     isa_diagnostics_test.cpp
     clocked_issue_cycle_test.cpp
+    wavefront_slot_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp
@@ -1063,6 +1087,23 @@ if(RJ_BUILD_CONSAN_ANALYZER)
     endif()
 endif()
 
+# Host-only checked anchor regressions use model ISA providers.
+add_executable(rocjitsu_text_edit_tests patch/checked_text_edits_test.cpp)
+target_include_directories(
+    rocjitsu_text_edit_tests
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(
+    rocjitsu_text_edit_tests
+    PRIVATE
+        rocjitsu_dbt_internal
+        rocjitsu_amdgpu_isa_model_registry
+        simdojo_headers
+        GTest::gtest_main
+)
+rj_configure_target(rocjitsu_text_edit_tests PRIVATE_INCLUDES WARNINGS)
+rj_add_gtest_tests(rocjitsu_text_edit_tests)
+
 # These existing suites exercise ELF inspection, CFG construction, kernel
 # reachability, and register queries using only the static-analysis composition.
 add_executable(
@@ -1159,26 +1200,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     rj_configure_target(cache_allocation_failure_test WARNINGS)
     rj_add_gtest_tests(cache_allocation_failure_test)
-
-    # Isolate the process-wide replacement operator new from rocjitsu_tests.
-    add_executable(
-        file_loading_allocation_failure_test
-        code/file_loading_allocation_failure_test.cpp
-    )
-    target_include_directories(
-        file_loading_allocation_failure_test
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-    target_link_libraries(
-        file_loading_allocation_failure_test
-        PRIVATE
-            rocjitsu_dbt_internal
-            rocjitsu_cdna5_model_registry
-            simdojo_headers
-            GTest::gtest_main
-    )
-    rj_configure_target(file_loading_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
-    rj_add_gtest_tests(file_loading_allocation_failure_test)
 
     # Keep allocation injection isolated from the main test executable.
     add_executable(
@@ -2224,11 +2245,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
     )
     rj_configure_target(vm_shared_memory_api_test TEST)
-    target_compile_definitions(
+    rj_add_test_path(
         vm_shared_memory_api_test
-        PRIVATE
-            RJ_VM_API_LIBRARY="$<TARGET_FILE:rocjitsu_shared>"
-            RJ_VM_API_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/race-detector/race_test_config.json"
+        RJ_VM_API_LIBRARY
+        "$<TARGET_FILE:rocjitsu_shared>"
+    )
+    rj_add_test_path(
+        vm_shared_memory_api_test
+        RJ_VM_API_CONFIG
+        "${CMAKE_CURRENT_SOURCE_DIR}/race-detector/race_test_config.json"
     )
     add_dependencies(vm_shared_memory_api_test rocjitsu_shared rocjitsu_memory)
     foreach(_backing IN ITEMS native zero-hard-limit)
@@ -2440,7 +2465,7 @@ set(_rj_interposer_drm_tests
     PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
-    TimestampUsesAdvertisedNanosecondClock
+    TimestampUsesAdvertisedDeviceClock
 )
 set(_rj_interposer_gem_tests
     LowAddressMappingHonorsMap32Bit
@@ -2522,6 +2547,7 @@ rj_add_interposer_test_suite(
 )
 
 set(_rj_interposer_pm4_tests
+    UnsupportedGdsResetLeavesQueueUsable
     SparseReplacementPreservesResidentTail
     SubmissionFenceQueryPollsAndWaitsForCompletion
     SubmissionFenceSequencesAreLocalToContextAndEngine
@@ -4533,6 +4559,10 @@ if(RJ_ENABLE_HIP_TESTS)
     endif()
 
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        if(HSA_RUNTIME64)
+            rj_add_hip_test(hip_shader_rtc_test ARCH gfx950 EXTRA_LIBS ${HSA_RUNTIME64})
+            rj_add_hip_test_case(hip_shader_rtc_test "HipShaderRtcTest.AqlKernelReadsTheCalibratedGpuClock")
+        endif()
         rj_add_hip_test(hip_hw_id_test ARCH gfx950)
         rj_add_hip_test_case(
             hip_hw_id_test
