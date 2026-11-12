@@ -105,15 +105,9 @@ set_tests_properties(
 add_test(
     NAME RocjitsuPathsJson
     COMMAND
-        ${CMAKE_COMMAND} -E env ROCJITSU_RUNTIME_DIR=${_rj_paths_runtime}
-        $<TARGET_FILE:rocjitsu_bin> paths --json
-)
-set_tests_properties(
-    RocjitsuPathsJson
-    PROPERTIES
-        PASS_REGULAR_EXPRESSION
-            "\"runtime_dir\": \".*/paths-runtime\"(.|[\r\n])*\"config_handoff_path\": \".*/paths-runtime/config_path\""
-        FAIL_REGULAR_EXPRESSION "default_config_path|invocation_"
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_RUNTIME_DIR=${_rj_paths_runtime}" -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_rocjitsu_paths_json.cmake
 )
 add_test(
     NAME RocjitsuPathsRejectsUnknown
