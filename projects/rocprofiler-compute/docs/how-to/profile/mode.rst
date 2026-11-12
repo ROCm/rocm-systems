@@ -422,20 +422,16 @@ rocprof-compute exits with an error:
 
 Without any of these options, profile mode collects every block.
 
-.. _profile-filtering-options:
-
 Filtering options
 -----------------
 
 ``-b``, ``--block``
    Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
-   See :ref:`profile-selection-options` for the options it can be combined with.
 
 ``--speed-of-light``, ``--memory-chart``, ``--roofline``
    Aliases of ``-b 2``, ``-b 3``, and ``-b 4``. They profile the
    Speed-of-Light, Memory Chart, and Roofline blocks.
-   See :ref:`profile-selection-options` for the options they can be combined with.
 
 ``-k``, ``--kernel``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
@@ -636,6 +632,7 @@ Metric sets filtering
 A metrics set contains a subset of metrics that can be collected in a single pass. This filtering option minimizes profiling overhead by only collecting counters of interest.
 The `--set` filter option provides a convenient way to group related metrics for common profiling scenarios, eliminating the need to manually specify individual metrics for typical analysis workflows.
 See :ref:`profile-selection-options` for the options it can be combined with.
+``--set`` can't be used with ``--pc-sampling``.
 
 .. code-block:: shell-session
 
@@ -820,7 +817,7 @@ This is useful for:
 * Re-generating ``roofline.csv`` in an existing workload directory without re-profiling.
 * Running the microbenchmark on a system where only HIP is available (no rocprofiler-sdk needed).
 
-See :ref:`profile-selection-options` for the options it can be combined with.
+``--roofline-bench-only`` can't be used with ``-b``, its aliases, ``--set`` or ``--no-roof``.
 
 .. code-block:: shell-session
 
