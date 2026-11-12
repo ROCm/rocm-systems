@@ -1,5 +1,5 @@
 .. meta::
-  :description: Using rocprofv3 and ROCprofiler-SDK under WSL2 (Windows Subsystem for Linux)
+  :description: Using rocprofv3 under WSL2 (Windows Subsystem for Linux)
   :keywords: ROCprofiler-SDK, rocprofv3, WSL, WSL2, DXG, hardware counters, environment variables
 
 .. _using-rocprofv3-on-wsl:
@@ -32,7 +32,7 @@ Set up the environment
    WSL2.
 
 3. Make sure ``HSA_TOOLS_DISABLE_REGISTER`` isn't set to ``1``. That setting
-   prevents ``rocprofv3`` from attaching to the application on any platform.
+   prevents ``rocprofv3`` from collecting any data on any platform.
 
 .. note::
 
@@ -73,7 +73,8 @@ Limitations
 
 * Process attachment (``rocprof-attach``) isn't supported on WSL2.
 * PC sampling and SPM aren't supported on WSL2. Both require the KFD driver.
-* Thread trace with ``--selected-regions`` produces empty traces on WSL2.
+* Thread trace with ``--selected-regions`` has produced empty traces on WSL2 in
+  testing.
 
 .. _wsl-counter-accuracy:
 
@@ -85,7 +86,8 @@ Windows shares the GPU among all its clients, including the desktop compositor,
 and any of their work that runs during a dispatch is counted toward that
 dispatch. ROCprofiler-SDK can't separate it out.
 
-The extra activity only ever adds to a count. To get usable values:
+Apart from occasional zero readings, the extra activity only ever adds to a
+count. To get usable values:
 
 * Run the workload several times and use the smallest non-zero value.
 * Keep the Windows desktop idle while you collect.
