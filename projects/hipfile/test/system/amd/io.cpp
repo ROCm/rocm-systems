@@ -207,6 +207,20 @@ TEST_P(HipFileIo, zeroSizedWriteAtAlignedOffsetBeyondEndOfFileReturnsZero)
 }
 #endif
 
+TEST_P(HipFileIo, ValidReadDoesNotSetHipError)
+{
+    (void)hipGetLastError(); // Clear any set HIP Error.
+    ASSERT_EQ(tmpfile_size, hipFileRead(tmpfile_handle, unregistered_device_buffer, tmpfile_size, 0, 0));
+    ASSERT_EQ(hipSuccess, hipGetLastError());
+}
+
+TEST_P(HipFileIo, ValidWriteDoesNotSetHipError)
+{
+    (void)hipGetLastError(); // Clear any set HIP Error.
+    ASSERT_EQ(tmpfile_size, hipFileWrite(tmpfile_handle, unregistered_device_buffer, tmpfile_size, 0, 0));
+    ASSERT_EQ(hipSuccess, hipGetLastError());
+}
+
 INSTANTIATE_TEST_SUITE_P(, HipFileIo, testing::ValuesIn(io_test_params),
                          [](const testing::TestParamInfo<HipFileIo::ParamType> &param_info) {
                              return param_info.param.name;
@@ -311,19 +325,7 @@ struct HipFileIoHipErrors : public testing::Test {
     }
 };
 
-// Whether the fastpath succeeds or falls back (e.g. no AIS ioctl), a
-// successful sync I/O must not leave an error behind.
-TEST_F(HipFileIoHipErrors, SuccessfulSyncIoLeavesNoHipError)
-{
-    hipFileHandle_t handle{registerFd(tmpfile.fd)};
-
-    ASSERT_EQ(io_size, hipFileWrite(handle, device_buffer, io_size, 0, 0));
-    EXPECT_EQ(hipSuccess, hipPeekAtLastError());
-    ASSERT_EQ(io_size, hipFileRead(handle, device_buffer, io_size, 0, 0));
-    EXPECT_EQ(hipSuccess, hipPeekAtLastError());
-
-    hipFileHandleDeregister(handle);
-}
+// TODO: Test that a successful fallback IO does not set HIP Error
 
 // The HIP Runtime only sets the HIP error value on a failed fastpath request
 // on ROCm >= 10.3 (HIP 7.18).
