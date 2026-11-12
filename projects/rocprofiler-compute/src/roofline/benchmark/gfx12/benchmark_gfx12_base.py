@@ -148,12 +148,16 @@ class Bench_gfx12(benchmark_base.Bench_base):
         bus_bits: int,
         gbps_per_pin: float,
     ) -> float:
-        """Measure sustained device-memory read bandwidth and print it as a share
-        of the DRAM pin rate, which a read-only stream cannot exceed."""
+        """Measure device-memory read bandwidth.
+
+        The returned peak is the measured bandwidth. The printed line is the
+        full Navi 48 pin-rate reference, not the peak of every board.
+        """
         peak = self.hbm_bw_benchmark(device, kernel_name, label)
         ceiling = dram_pin_bandwidth_gbps(bus_bits, gbps_per_pin)
         print(
-            f"DRAM pin-rate reference: {bus_bits}-bit x {gbps_per_pin} Gbps "
+            "Full Navi 48 pin-rate reference (not every board): "
+            f"{bus_bits}-bit x {gbps_per_pin} Gbps "
             f"= {ceiling:.1f} GB/sec ({percent_of_ceiling(peak, ceiling)})"
         )
         return peak
