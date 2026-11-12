@@ -51,6 +51,7 @@ RJ_DIAGNOSTIC_POP
 #include <linux/filter.h>
 #include <linux/seccomp.h>
 #include <poll.h>
+#include <pthread.h>
 #include <spawn.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
@@ -419,7 +420,6 @@ protected:
   void check_debug_resume_across_active_xcc_areas();
   void check_unmodelled_cwsr_queue(uint32_t gpu_id);
   void check_rejected_memory_violation(bool private_atomic);
-  void check_daemon_queue_startup_failure(bool sdma);
 
   // Split out so a fixture can bring up a different part. Uses ASSERT_*, so it
   // has to stay void-returning and be called directly from SetUp().
@@ -4021,95 +4021,6 @@ TEST_F(KfdIoctlTest, GetTileConfigReturnsUnsupportedInDaemonMode) {
   for (auto value : macro_tile_config)
     EXPECT_EQ(value, 0xdeadbeefu);
   EXPECT_EQ(daemon_driver.close(process_id), 0);
-}
-
-void KfdIoctlTest::check_daemon_queue_startup_failure(bool sdma) {
-  rocjitsu::SimulatedKfd daemon_driver(*soc_, /*daemon_mode=*/true);
-  const uint32_t process_id = daemon_driver.open_process(/*client_pid=*/4242);
-  ASSERT_NE(process_id, 0u);
-  constexpr uint64_t kQueueVa = 0x400000000ULL;
-  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
-  allocation.va_addr = kQueueVa;
-  allocation.size = 4096;
-  allocation.gpu_id = 0;
-  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
-                     KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE | KFD_IOC_ALLOC_MEM_FLAGS_AQL_QUEUE_MEM |
-                     KFD_IOC_ALLOC_MEM_FLAGS_COHERENT;
-  ASSERT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
-  uint32_t device_id = 0;
-  kfd_ioctl_map_memory_to_gpu_args map{};
-  map.handle = allocation.handle;
-  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&device_id);
-  map.n_devices = 1;
-  ASSERT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
-
-  kfd_ioctl_create_queue_args create{};
-  create.gpu_id = 0;
-  create.queue_type = sdma ? KFD_IOC_QUEUE_TYPE_SDMA : KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
-  create.ring_base_address = 0x500000000ULL;
-  create.ring_size = 4096;
-  create.read_pointer_address = kQueueVa + offsetof(amd_queue_t, read_dispatch_id);
-  create.write_pointer_address = kQueueVa + offsetof(amd_queue_t, write_dispatch_id);
-  create.queue_percentage = 100;
-  if (sdma) {
-    soc_->sdma_queue_scheduler().fail_next_worker_start_for_testing();
-  } else {
-    auto *cp = soc_->assign_queue_owner_cp(0);
-    const std::optional<rocjitsu::amdgpu::GpuVmAccess> access =
-        soc_->gpu_vm().snapshot_vmid(process_id);
-    ASSERT_TRUE(access);
-    const rocjitsu::amdgpu::ComputeQueueConfig config{
-        .address_space = access->cache_namespace().address_space,
-        .process_id = process_id,
-        .queue_id = 123,
-        .ring_base_va = create.ring_base_address,
-        .ring_size = create.ring_size,
-        .read_ptr_va = create.read_pointer_address,
-        .write_ptr_va = create.write_pointer_address,
-        .doorbell_mode = rocjitsu::amdgpu::QueueDoorbellMode::HostPolled,
-        .xcd_fanout = true,
-    };
-    cp->fail_next_doorbell_monitor_start_for_testing();
-    EXPECT_THROW((void)cp->register_queue(config), std::system_error);
-    const uint64_t retry = cp->register_queue(config);
-    ASSERT_NE(retry, 0u) << "the same identity must be reusable after rollback";
-    ASSERT_TRUE(cp->unregister_queue_registration(retry));
-    cp->fail_next_doorbell_monitor_start_for_testing();
-  }
-  EXPECT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_CREATE_QUEUE, &create), -EIO);
-  EXPECT_EQ(create.queue_id, 0u);
-  EXPECT_EQ(create.doorbell_offset, 0u);
-  EXPECT_EQ(soc_->sdma_queue_scheduler().active_queues(), 0u);
-  for (uint32_t rank = 0; rank < soc_->num_xcds(); ++rank) {
-    auto *cp = soc_->xcd(rank)->command_processor();
-    EXPECT_EQ(cp->registered_queue_count_for_test(), 0u) << rank;
-    EXPECT_FALSE(cp->doorbell_monitor_running_for_test()) << rank;
-    EXPECT_FALSE(cp->doorbell_monitor_joinable_for_test()) << rank;
-  }
-  ASSERT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_CREATE_QUEUE, &create), 0);
-  EXPECT_EQ(create.doorbell_offset & ((1ULL << rocjitsu::KFD_MMAP_GPU_ID_SHIFT) - 1), 0u)
-      << "the failed startup must release the first doorbell";
-  if (sdma) {
-    EXPECT_EQ(soc_->sdma_queue_scheduler().active_queues(), 1u);
-  } else {
-    for (uint32_t rank = 0; rank < soc_->num_xcds(); ++rank)
-      EXPECT_EQ(soc_->xcd(rank)->command_processor()->registered_queue_count_for_test(), 1u);
-  }
-  kfd_ioctl_destroy_queue_args destroy{};
-  destroy.queue_id = create.queue_id;
-  EXPECT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
-  kfd_ioctl_free_memory_of_gpu_args free{};
-  free.handle = allocation.handle;
-  EXPECT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
-  EXPECT_EQ(daemon_driver.close(process_id), 0);
-}
-
-TEST_F(KfdIoctlTest, DaemonComputeMonitorStartupFailureReleasesReplicasAndDoorbell) {
-  ASSERT_NO_FATAL_FAILURE(check_daemon_queue_startup_failure(/*sdma=*/false));
-}
-
-TEST_F(KfdIoctlTest, DaemonSdmaWorkerStartupFailureReleasesDoorbell) {
-  ASSERT_NO_FATAL_FAILURE(check_daemon_queue_startup_failure(/*sdma=*/true));
 }
 
 // ROCr places its queue object in a USERPTR allocation that KFD must update
@@ -8705,6 +8616,107 @@ constexpr size_t framed_ioctl_request_bytes(size_t arg_bytes) {
 // signal-interrupted wait produces, without having to time a signal. Queued
 // before the client sends anything: the two directions are independent, so the
 // reply can already be waiting when the request goes out.
+namespace {
+
+void check_native_rpc_exit(bool waiting_for_payload) {
+  int sockets[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);
+  const CloseOnScopeExit server{sockets[1]};
+  rocjitsu::RemoteDriver driver(sockets[0]);
+  int pipe_fds[2];
+  ASSERT_EQ(::pipe2(pipe_fds, O_CLOEXEC), 0);
+  const CloseOnScopeExit pipe_read{pipe_fds[0]}, pipe_write{pipe_fds[1]};
+  struct stat identity {};
+  ASSERT_EQ(::fstat(pipe_read.get(), &identity), 0);
+  const auto aliases = [&] {
+    size_t count = 0;
+    for (const auto &entry : std::filesystem::directory_iterator("/proc/self/fd")) {
+      struct stat info {};
+      if (::stat(entry.path().c_str(), &info) == 0 && info.st_dev == identity.st_dev &&
+          info.st_ino == identity.st_ino)
+        ++count;
+    }
+    return count;
+  };
+  ASSERT_EQ(aliases(), 2u);
+  if (waiting_for_payload) {
+    rocjitsu::RpcHeader response{};
+    response.opcode = rocjitsu::RPC_IOCTL;
+    response.payload_bytes = sizeof(kfd_ioctl_get_version_args);
+    const int reply_fd = pipe_read.get();
+    ASSERT_EQ(rocjitsu::rpc_send_msg(sockets[1], &response, sizeof(response), &reply_fd, 1),
+              sizeof(response));
+  }
+
+  struct WaitState {
+    rocjitsu::RemoteDriver *driver;
+    std::atomic<pid_t> tid{0};
+    bool returned = false;
+  } state{&driver};
+  pthread_t waiter{};
+  ASSERT_EQ(::pthread_create(
+                &waiter, nullptr,
+                +[](void *argument) -> void * {
+                  auto *state = static_cast<WaitState *>(argument);
+                  state->tid.store(syscall(SYS_gettid), std::memory_order_release);
+                  kfd_ioctl_get_version_args version{};
+                  (void)state->driver->ioctl(AMDKFD_IOC_GET_VERSION, &version);
+                  state->returned = true;
+                  return nullptr;
+                },
+                &state),
+            0);
+  bool blocked = false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (const pid_t tid = state.tid.load(std::memory_order_acquire)) {
+      std::ifstream syscall_state("/proc/self/task/" + std::to_string(tid) + "/syscall");
+      long number;
+      if (syscall_state >> number && number == SYS_recvmsg &&
+          aliases() == (waiting_for_payload ? 3u : 2u)) {
+        blocked = true;
+        break;
+      }
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_TRUE(blocked);
+  ASSERT_EQ(::pthread_cancel(waiter), 0);
+  void *result = nullptr;
+  ASSERT_EQ(::pthread_join(waiter, &result), 0);
+  EXPECT_EQ(result, PTHREAD_CANCELED);
+  EXPECT_FALSE(state.returned);
+  EXPECT_EQ(aliases(), 2u) << "the unadopted reply descriptor survived native exit";
+
+  // Both calls need rpc_mutex_. They must finish, and the abandoned response
+  // must never be reused as another ioctl's reply.
+  kfd_ioctl_get_version_args after{};
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_GET_VERSION, &after), -EPROTO);
+  EXPECT_EQ(driver.close(), 0);
+}
+
+} // namespace
+
+TEST(RemoteDriverStreamPoisonDeathTest, NativeExitDuringHeaderReceiveUnlocksAndPoisonsTheStream) {
+  ASSERT_EXIT(
+      {
+        ::alarm(5);
+        check_native_rpc_exit(false);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST(RemoteDriverStreamPoisonDeathTest, NativeExitDuringPayloadReceiveClosesTheUnadoptedFd) {
+  ASSERT_EXIT(
+      {
+        ::alarm(5);
+        check_native_rpc_exit(true);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
 TEST(RemoteDriverStreamPoisonTest, TruncatedIoctlReplyMakesEveryLaterCallFailFast) {
   int sv[2];
   ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);

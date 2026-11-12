@@ -37,8 +37,10 @@ RJ_DIAGNOSTIC_POP
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <fcntl.h>
 #include <filesystem>
 #include <iterator>
+#include <pthread.h>
 #include <shared_mutex>
 #include <span>
 #include <thread>
@@ -3137,6 +3139,53 @@ TEST_F(SimulatedKfdTest, ConcurrentIoctlAndCloseIsRaceFree) {
 // interposer's phase-2 teardown wake depends on for a hardware-backed guest, but
 // reaching it through GuestKfd::ioctl() needs a real /dev/kfd. These drive the
 // algorithm directly with an injected poll, covering all five of its outcomes.
+
+struct GuestWaitExitState {
+  rocjitsu::GuestKfd *guest;
+  int close_result;
+};
+thread_local GuestWaitExitState *g_guest_wait_exit = nullptr;
+
+int exit_from_guest_wait(int, unsigned long, ...) {
+  // Close while the wait holds its lease. Native exit must then drain it,
+  // including the deferred close, even when C++ unwinding is disabled.
+  g_guest_wait_exit->close_result = g_guest_wait_exit->guest->close();
+  ::pthread_exit(g_guest_wait_exit);
+}
+
+TEST(GuestKfdWaitPollLoopTest, NativeThreadExitReleasesTheWaitLeaseAndDeferredClose) {
+  rocjitsu::GuestKfd guest(rocjitsu::config::DbtGuestConfig{});
+  const int host_fd = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(host_fd, 0);
+  rocjitsu::GuestKfdTestAccess::prepare_hardware_wait(guest, host_fd);
+
+  GuestWaitExitState state{&guest, -1};
+  auto &real = rocjitsu::libc_passthrough();
+  auto *original_ioctl = real.ioctl;
+  real.ioctl = exit_from_guest_wait;
+  pthread_t waiter{};
+  const int create_result = ::pthread_create(
+      &waiter, nullptr,
+      +[](void *argument) -> void * {
+        g_guest_wait_exit = static_cast<GuestWaitExitState *>(argument);
+        kfd_ioctl_wait_events_args args{};
+        (void)g_guest_wait_exit->guest->ioctl(AMDKFD_IOC_WAIT_EVENTS, &args);
+        return nullptr;
+      },
+      &state);
+  void *result = nullptr;
+  const int join_result = create_result == 0 ? ::pthread_join(waiter, &result) : -1;
+  real.ioctl = original_ioctl;
+
+  ASSERT_EQ(create_result, 0);
+  ASSERT_EQ(join_result, 0);
+  EXPECT_EQ(result, &state);
+  EXPECT_EQ(state.close_result, 0);
+  EXPECT_EQ(guest.local_open_ref_count(), 0u);
+  errno = 0;
+  EXPECT_EQ(::fcntl(host_fd, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF);
+}
 
 // A zero-timeout poll is already prompt, so it must be forwarded verbatim: exactly
 // one poll, with the caller's timeout untouched (no kPollMs slice substituted).

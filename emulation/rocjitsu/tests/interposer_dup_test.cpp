@@ -5025,66 +5025,6 @@ TEST(InterposerSyncobjTest, WaitValidationMatchesDrm) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-TEST(InterposerSyncobjTest, OversizedBinaryWaitReturnsEnomem) {
-  // These runtimes reserve large shadow mappings and may abort on allocation
-  // failure instead of letting the C++ allocation throw.
-  if (dlsym(RTLD_DEFAULT, "__asan_init") || dlsym(RTLD_DEFAULT, "__tsan_init"))
-    GTEST_SKIP() << "address-space limits are incompatible with ASan and TSan";
-
-  constexpr char kChildEnv[] = "RJ_TEST_SYNCOBJ_MEMORY_LIMIT";
-  if (!getenv(kChildEnv)) {
-    // Re-exec before limiting memory so the interposer owns a fresh backend.
-    std::string child_env = std::string(kChildEnv) + "=1";
-    std::vector<char *> environment;
-    for (char **entry = environ; *entry; ++entry)
-      environment.push_back(*entry);
-    environment.push_back(child_env.data());
-    environment.push_back(nullptr);
-    char executable[] = "/proc/self/exe";
-    char filter[] = "--gtest_filter=InterposerSyncobjTest.OversizedBinaryWaitReturnsEnomem";
-    char *arguments[] = {executable, filter, nullptr};
-    pid_t child = -1;
-    ASSERT_EQ(posix_spawn(&child, executable, nullptr, nullptr, arguments, environment.data()), 0);
-    int status = 0;
-    ASSERT_EQ(waitpid(child, &status, 0), child);
-    ASSERT_TRUE(WIFEXITED(status));
-    EXPECT_EQ(WEXITSTATUS(status), 0);
-    return;
-  }
-
-  int kfd = open_kfd();
-  ASSERT_GE(kfd, 0);
-  ASSERT_TRUE(kfd_version_ok(kfd));
-  int drm = open_drm_render();
-  ASSERT_GE(drm, 0);
-
-  struct rlimit original {};
-  ASSERT_EQ(getrlimit(RLIMIT_AS, &original), 0);
-  size_t virtual_pages = 0;
-  {
-    std::ifstream statm("/proc/self/statm");
-    ASSERT_TRUE(statm >> virtual_pages);
-  }
-  const long page_size = sysconf(_SC_PAGESIZE);
-  ASSERT_GT(page_size, 0);
-  // Leave room for background driver threads while rejecting the 32 GiB
-  // points allocation, regardless of the backend's existing VM reservations.
-  struct rlimit limited = original;
-  limited.rlim_cur =
-      std::min<rlim_t>(original.rlim_cur, virtual_pages * page_size + rlim_t{512} * 1024 * 1024);
-  drm_syncobj_wait wait{};
-  wait.handles = 1;
-  wait.count_handles = UINT32_MAX;
-  ASSERT_EQ(setrlimit(RLIMIT_AS, &limited), 0);
-  const int result = ioctl(drm, DRM_IOCTL_SYNCOBJ_WAIT, &wait);
-  const int wait_errno = errno;
-  ASSERT_EQ(setrlimit(RLIMIT_AS, &original), 0);
-  EXPECT_EQ(result, -1);
-  EXPECT_EQ(wait_errno, ENOMEM);
-  EXPECT_EQ(close(drm), 0);
-  EXPECT_EQ(close(kfd), 0);
-}
-
 TEST(InterposerSyncobjTest, DestroyRejectsInvalidInput) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
@@ -5245,6 +5185,34 @@ TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {
 TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   int drm = open_drm_render();
   ASSERT_GE(drm, 0);
+  drm_amdgpu_gem_create buffer{};
+  buffer.in.bo_size = 4096;
+  buffer.in.domains = AMDGPU_GEM_DOMAIN_GTT;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_CREATE, &buffer), 0);
+  drm_prime_handle prime{};
+  prime.handle = buffer.out.handle;
+  prime.flags = DRM_CLOEXEC;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
+  struct stat backing {};
+  ASSERT_EQ(syscall(SYS_fstat, prime.fd, &backing), 0);
+  const auto count_backing_fds = [&] {
+    DIR *directory = opendir("/proc/self/fd");
+    if (!directory)
+      return -1;
+    int count = 0;
+    while (dirent *entry = readdir(directory)) {
+      int candidate;
+      struct stat info {};
+      if (std::sscanf(entry->d_name, "%d", &candidate) == 1 &&
+          syscall(SYS_fstat, candidate, &info) == 0 && info.st_dev == backing.st_dev &&
+          info.st_ino == backing.st_ino)
+        ++count;
+    }
+    closedir(directory);
+    return count;
+  };
+  const int retained_fds = count_backing_fds();
+  ASSERT_GE(retained_fds, 2);
   drm_syncobj_create create{};
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
   uint64_t point = 1;
@@ -5265,18 +5233,16 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   sigemptyset(&action.sa_mask);
   ASSERT_EQ(sigaction(SIGUSR1, &action, &old_action), 0);
   std::atomic<pid_t> tid{0};
-  bool unwound = false, returned = false;
+  bool cleaned_up = false, returned = false;
   std::thread waiter([&] {
-    struct Cleanup {
-      bool &unwound;
-      ~Cleanup() { unwound = true; }
-    } cleanup{unwound};
+    pthread_cleanup_push(+[](void *state) { *static_cast<bool *>(state) = true; }, &cleaned_up);
     tid.store(syscall(SYS_gettid), std::memory_order_release);
     (void)call(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     returned = true;
+    pthread_cleanup_pop(0);
   });
   // Wait for the actual futex sleep so a signal during setup cannot make this
-  // pass without exercising forced unwinding through the interposer.
+  // pass without exercising native thread-exit cleanup in the interposer.
   bool blocked = false;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
   while (std::chrono::steady_clock::now() < deadline) {
@@ -5297,14 +5263,18 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   }
   waiter.join();
   EXPECT_TRUE(blocked);
-  EXPECT_TRUE(unwound);
+  EXPECT_TRUE(cleaned_up);
   EXPECT_FALSE(returned);
   EXPECT_EQ(sigaction(SIGUSR1, &old_action, nullptr), 0);
   drm_syncobj_destroy destroy{};
   destroy.handle = create.handle;
   EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
-  // Closing the file also checks that unwinding released its ioctl reservation.
+  EXPECT_EQ(count_backing_fds(), retained_fds);
+  // The final DRM close must release its private GEM backing descriptor. A leaked
+  // wait reservation would retain that descriptor even though close returns zero.
   EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(count_backing_fds(), retained_fds - 1);
+  EXPECT_EQ(close(prime.fd), 0);
 }
 
 namespace {

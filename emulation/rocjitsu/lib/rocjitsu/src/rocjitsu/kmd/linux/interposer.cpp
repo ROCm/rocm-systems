@@ -65,7 +65,6 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <dirent.h>
 #include <dlfcn.h>
-#include <exception>
 #include <fcntl.h>
 #include <format>
 #include <limits>
@@ -79,7 +78,6 @@ RJ_DIAGNOSTIC_POP
 #include <pthread.h>
 #include <signal.h>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <sys/eventfd.h>
@@ -105,6 +103,18 @@ using rocjitsu::LinuxKfd;
 using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedKfd;
 using rocjitsu::Sysfs;
+
+#if defined(__SANITIZE_THREAD__)
+#define INTERPOSER_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define INTERPOSER_TSAN 1
+#endif
+#endif
+
+#ifdef INTERPOSER_TSAN
+#include <sanitizer/linux_syscall_hooks.h>
+#endif
 
 namespace rocjitsu {
 
@@ -152,12 +162,48 @@ static_assert(std::atomic<uint32_t>::is_always_lock_free,
 }
 
 /// @brief Sleep while @p word still equals @p expected, until @p deadline or a signal.
-long futex_wait_until(std::atomic<uint32_t> &word, uint32_t expected, const timespec *deadline) {
-  // Wine may call pthread_exit from a signal handler during this wait. Use the
-  // resolved pointer to avoid libc's noexcept declaration of syscall, which
-  // would terminate forced unwinding instead of releasing the waiter's state.
-  return rocjitsu::libc_passthrough().syscall(SYS_futex, &word, FUTEX_WAIT_BITSET_PRIVATE, expected,
-                                              deadline, nullptr, FUTEX_BITSET_MATCH_ANY);
+/// @details The caller releases its locks before waiting. Its cleanup releases
+/// wait-owned resources if a signal handler calls pthread_exit during the wait.
+template <typename Cleanup>
+long futex_wait_until(std::atomic<uint32_t> &word, uint32_t expected, const timespec *deadline,
+                      Cleanup &cleanup) {
+  long result;
+  pthread_cleanup_push(+[](void *state) { (*static_cast<Cleanup *>(state))(); }, &cleanup);
+#ifdef INTERPOSER_TSAN
+  // Raw syscalls bypass TSan's blocking-call tracking, which otherwise defers
+  // native exit until after this cleanup is gone. Its signal trampoline resets
+  // interception before calling the handler, so only normal return needs post.
+  __sanitizer_syscall_pre_futex(&word, FUTEX_WAIT_BITSET_PRIVATE, expected, deadline, nullptr,
+                                FUTEX_BITSET_MATCH_ANY);
+#endif
+  // Use the resolved pointer instead of libc's noexcept syscall declaration.
+  result =
+      rocjitsu::libc_passthrough().syscall(SYS_futex, &word, FUTEX_WAIT_BITSET_PRIVATE, expected,
+                                           deadline, nullptr, FUTEX_BITSET_MATCH_ANY);
+#ifdef INTERPOSER_TSAN
+  const int wait_errno = errno;
+  __sanitizer_syscall_post_futex(result, &word, FUTEX_WAIT_BITSET_PRIVATE, expected, deadline,
+                                 nullptr, FUTEX_BITSET_MATCH_ANY);
+  errno = wait_errno;
+#endif
+  pthread_cleanup_pop(0);
+  return result;
+}
+
+/// @brief Keep a dispatch snapshot alive and release it on native thread exit.
+template <typename Driver>
+int dispatch_ioctl_snapshot(std::shared_ptr<Driver> &driver, unsigned long request, void *arg) {
+  int result;
+  pthread_cleanup_push(
+      +[](void *state) {
+        const int saved_errno = errno;
+        static_cast<std::shared_ptr<Driver> *>(state)->reset();
+        errno = saved_errno;
+      },
+      &driver);
+  result = driver->ioctl(request, arg);
+  pthread_cleanup_pop(0);
+  return result;
 }
 
 /// @brief Wake every waiter sleeping on @p word.
@@ -460,9 +506,9 @@ public:
   /// @brief Hold in_construction for a scope, restoring it on every exit path.
   ///
   /// @details Clearing the flag by hand is a fail-OPEN hazard rather than a leak:
-  /// while it is set this thread bypasses path redirection entirely, so a throw that
-  /// skipped a clear would leave the thread opening the HOST's real device nodes for
-  /// the rest of its life -- the exact outcome the child gate exists to prevent.
+  /// while it is set this thread bypasses path redirection entirely, so an early
+  /// return that skipped a clear would leave the thread opening the HOST's real device
+  /// nodes for the rest of its life -- the outcome the child gate exists to prevent.
   /// Restores the previous value rather than clearing, so a nested construction
   /// cannot end the outer one's scope early.
   class ConstructionScope {
@@ -1618,12 +1664,7 @@ public:
   /// @brief Track a newly opened synthetic DRM fd.
   /// @returns The identity of a stale displaced DRM file whose final reference
   /// was removed, if any. The caller reaps it after releasing the lifecycle lock.
-  /// @param lease Taken by reference and moved in LAST, after every operation that can
-  /// throw. Owning it here across an allocation failure would destroy it during the
-  /// unwind -- while the CALLER still holds the fd-lifecycle lock, since callee objects
-  /// die first -- and releasing a lease reaches release_local_open() and so init_mutex_,
-  /// which is the one order lock_drm_fd_lifecycle() forbids. Leaving it with the caller
-  /// means a failure releases it at the caller's scope exit, after that lock is gone.
+  /// @param lease Backend lease transferred after the fd table entry is installed.
   [[nodiscard]] DrmFinalRelease track_drm(int fd, uint32_t render_minor, DrmBackendLease &lease) {
     auto state = std::make_shared<DrmFileState>();
     state->render_minor = render_minor;
@@ -1634,10 +1675,10 @@ public:
       state->id = next_drm_file_id_++;
       if (auto stale = drm_fds_.find(fd); stale != drm_fds_.end()) {
         displaced = release_drm_file_locked(stale->second);
-        state->backend_lease = std::move(lease); // noexcept, after the throwing work
+        state->backend_lease = std::move(lease);
         stale->second = std::move(state);
       } else {
-        auto [it, inserted] = drm_fds_.emplace(fd, state); // may throw; lease not ours yet
+        auto [it, inserted] = drm_fds_.emplace(fd, state);
         static_cast<void>(inserted);
         it->second->backend_lease = std::move(lease);
       }
@@ -1703,11 +1744,15 @@ public:
     DrmFileReservation(DrmFileReservation &&other) noexcept
         : context_(std::exchange(other.context_, nullptr)), file_(std::move(other.file_)) {}
     DrmFileReservation &operator=(DrmFileReservation &&) = delete;
-    ~DrmFileReservation() {
-      if (!context_)
+    ~DrmFileReservation() { reset(); }
+
+    void reset() {
+      InterposerContext *context = std::exchange(context_, nullptr);
+      if (!context)
         return;
       const int saved_errno = errno;
-      context_->release_drm_file_reservation(file_);
+      context->release_drm_file_reservation(file_);
+      file_.reset();
       errno = saved_errno;
     }
 
@@ -1789,20 +1834,14 @@ public:
     uint32_t candidate = state.next_syncobj_handle++;
     while (candidate == 0 || state.syncobj_entries.count(candidate) != 0)
       candidate = state.next_syncobj_handle++;
-    try {
-      auto entry = std::make_shared<SyncobjEntry>();
-      entry->has_fence = (flags & DRM_SYNCOBJ_CREATE_SIGNALED) != 0;
-      entry->signaled = entry->has_fence;
-      if (entry->has_fence) {
-        entry->binary_fence = std::make_shared<SyncobjFence>();
-        entry->binary_fence->signaled.store(true, std::memory_order_relaxed);
-      }
-      state.syncobj_entries.emplace(candidate, std::move(entry));
-    } catch (const std::bad_alloc &) {
-      return -ENOMEM;
-    } catch (const std::length_error &) {
-      return -ENOMEM;
+    auto entry = std::make_shared<SyncobjEntry>();
+    entry->has_fence = (flags & DRM_SYNCOBJ_CREATE_SIGNALED) != 0;
+    entry->signaled = entry->has_fence;
+    if (entry->has_fence) {
+      entry->binary_fence = std::make_shared<SyncobjFence>();
+      entry->binary_fence->signaled.store(true, std::memory_order_relaxed);
     }
+    state.syncobj_entries.emplace(candidate, std::move(entry));
     *handle = candidate;
     return 0;
   }
@@ -1974,7 +2013,8 @@ public:
     entry.has_fence = true;
   }
 
-  int transfer_syncobj(const DrmFileToken &file, const drm_syncobj_transfer request) {
+  int transfer_syncobj(DrmFileReservation &reservation, const drm_syncobj_transfer request) {
+    const DrmFileToken &file = reservation.file();
     if (!file)
       return -EBADF;
     if ((request.flags & ~DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT) || request.pad)
@@ -1993,6 +2033,12 @@ public:
         return -errno;
       deadline.tv_sec += 5;
       std::shared_ptr<SyncobjFence> fence;
+      auto exit_cleanup = [&] {
+        source.reset();
+        target.reset();
+        fence.reset();
+        reservation.reset();
+      };
       while (true) {
         const uint32_t generation = file->syncobj_generation.load(std::memory_order_acquire);
         fence = syncobj_fence_locked(*source, request.src_point);
@@ -2001,7 +2047,8 @@ public:
         if (!(request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT))
           return -EINVAL;
         lock.unlock();
-        const long rc = futex_wait_until(file->syncobj_generation, generation, &deadline);
+        const long rc =
+            futex_wait_until(file->syncobj_generation, generation, &deadline, exit_cleanup);
         const int wait_errno = errno;
         lock.lock();
         if (rc == 0 || wait_errno == EAGAIN)
@@ -2036,17 +2083,12 @@ public:
       real().close(fd);
       return -error;
     }
-    try {
-      sync_file_fds_.emplace(fd, object);
-    } catch (...) {
-      real().close(fd);
-      throw;
-    }
+    sync_file_fds_.emplace(fd, object);
     object->refresh();
     return fd;
   }
 
-  int export_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) try {
+  int export_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) {
     if (request.pad || request.flags != DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE)
       return -EINVAL;
     std::lock_guard lock(fd_mutex_);
@@ -2060,11 +2102,9 @@ public:
       return fd;
     request.fd = fd;
     return 0;
-  } catch (const std::bad_alloc &) {
-    return -ENOMEM;
   }
 
-  int import_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) try {
+  int import_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) {
     if (request.pad || request.flags != DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE)
       return -EINVAL;
     {
@@ -2085,11 +2125,9 @@ public:
     }
     notify_syncobj_waiters(file);
     return 0;
-  } catch (const std::bad_alloc &) {
-    return -ENOMEM;
   }
 
-  std::optional<int> merge_sync_files(int fd, sync_merge_data &request) try {
+  std::optional<int> merge_sync_files(int fd, sync_merge_data &request) {
     std::lock_guard lock(fd_mutex_);
     auto first = sync_file_fds_.find(fd);
     if (first == sync_file_fds_.end())
@@ -2115,8 +2153,6 @@ public:
       return result;
     request.fence = result;
     return 0;
-  } catch (const std::bad_alloc &) {
-    return -ENOMEM;
   }
 
   // Called inside the fd lifecycle lock, after a successful kernel dup operation.
@@ -2140,13 +2176,7 @@ public:
   /// @brief Copy a caller-owned array without faulting inside the interposer.
   template <typename T>
   static int snapshot_user_array(uint64_t address, uint32_t count, std::vector<T> &snapshot) {
-    try {
-      snapshot.resize(count);
-    } catch (const std::bad_alloc &) {
-      return -ENOMEM;
-    } catch (const std::length_error &) {
-      return -ENOMEM;
-    }
+    snapshot.resize(count);
     const size_t bytes = static_cast<size_t>(count) * sizeof(T);
     iovec local{snapshot.data(), bytes};
     iovec remote{reinterpret_cast<void *>(static_cast<uintptr_t>(address)), bytes};
@@ -2161,7 +2191,9 @@ public:
   /// @details Waiters use a per-file generation futex. Producers update the
   /// points under fd_mutex_, increment the generation with release ordering, and
   /// wake all sleepers; waiters recheck state under the same mutex after waking.
-  int wait_syncobj_timeline(const DrmFileToken &file, drm_syncobj_timeline_wait *wait) {
+  int wait_syncobj_timeline(DrmFileReservation &reservation, drm_syncobj_timeline_wait *wait,
+                            bool binary = false) {
+    const DrmFileToken &file = reservation.file();
     if (!wait)
       return -EINVAL;
     const drm_syncobj_timeline_wait request = *wait;
@@ -2176,20 +2208,18 @@ public:
     std::vector<uint64_t> points;
     if (int rc = snapshot_user_array(request.handles, request.count_handles, handles); rc != 0)
       return rc;
-    if (int rc = snapshot_user_array(request.points, request.count_handles, points); rc != 0)
+    if (binary) {
+      points.resize(request.count_handles, 0);
+    } else if (int rc = snapshot_user_array(request.points, request.count_handles, points);
+               rc != 0) {
       return rc;
+    }
     if (!file)
       return -EBADF;
     std::vector<std::shared_ptr<SyncobjEntry>> entries;
     std::vector<std::shared_ptr<SyncobjFence>> fences;
-    try {
-      fences.resize(request.count_handles);
-      entries.reserve(request.count_handles);
-    } catch (const std::bad_alloc &) {
-      return -ENOMEM;
-    } catch (const std::length_error &) {
-      return -ENOMEM;
-    }
+    fences.resize(request.count_handles);
+    entries.reserve(request.count_handles);
     std::unique_lock lock(fd_mutex_);
     for (uint32_t i = 0; i < request.count_handles; ++i) {
       auto it = file->syncobj_entries.find(handles[i]);
@@ -2230,6 +2260,14 @@ public:
       return {(wait_all ? all_ready : any_ready) ? 1 : 0, first_ready};
     };
 
+    auto exit_cleanup = [&] {
+      std::vector<uint32_t>().swap(handles);
+      std::vector<uint64_t>().swap(points);
+      std::vector<std::shared_ptr<SyncobjEntry>>().swap(entries);
+      std::vector<std::shared_ptr<SyncobjFence>>().swap(fences);
+      reservation.reset();
+    };
+
     while (true) {
       auto &generation_word =
           file->imported_sync_fence ? imported_syncobj_generation_ : file->syncobj_generation;
@@ -2255,7 +2293,7 @@ public:
       // so it cannot apply the kernel ioctl layer's SA_RESTART decision. Surface
       // EINTR consistently and let callers retry; the focused regression pins
       // that documented difference from the in-kernel DRM implementation.
-      const long rc = futex_wait_until(generation_word, generation, &deadline);
+      const long rc = futex_wait_until(generation_word, generation, &deadline, exit_cleanup);
       const int wait_errno = errno;
       lock.lock();
       if (rc == 0 || wait_errno == EAGAIN)
@@ -2425,46 +2463,37 @@ public:
 
   /// @brief Launch the local VM engine on an owned (joinable) thread and wait for
   /// component startup to complete before returning.
-  /// @returns false if the engine thread could not be created OR a component's
-  /// startup() failed (caller unwinds).
+  /// @returns false if a component's startup() returned failure.
   /// @details The thread is owned (not detached) so process teardown can join it
   /// before destroying VM/driver state it reaches. wait_until_started() closes the
   /// window where a short-lived caller could publish and then tear down a device
   /// whose components are still in startup() — the race that faulted the engine in
-  /// CommandProcessor::startup() against C++ finalizers. If startup() threw, the
+  /// CommandProcessor::startup() against C++ finalizers. If startup() failed, the
   /// engine already returned an error and stopped, so join the thread and report
   /// failure rather than leaving a published-but-dead device.
   [[nodiscard]] bool start_local_vm() {
     assert(local_vm_ != nullptr);
     assert(!local_vm_thread_);
-    try {
-      // make_unique/std::thread can throw system_error (resource exhaustion) or
-      // bad_alloc; treat any failure to launch as a start failure so the caller
-      // unwinds and never publishes a device with no engine behind it.
-      // Latch readiness from the THREAD, not just from inside engine->run(): the
-      // wait below happens under init_mutex_, so any rj_vm_run() path that returns
-      // without reaching run() (e.g. its own argument validation) would otherwise
-      // strand this wait forever AND hold init_mutex_ forever — deadlocking every
-      // later interposed open/close and the DSO finalizer itself. The engine's own
-      // in-band latch wins; this only fires if nothing latched.
-      local_vm_thread_ = std::make_unique<std::thread>([vm = local_vm_.get()]() {
-        const rj_status_t status = rj_vm_run(vm, nullptr);
-        vm->engine->latch_startup_if_unlatched(/*failed=*/true);
-        if (status != ROCJITSU_STATUS_SUCCESS && vm->engine->wait_until_started()) {
-          util::Logger::warn("rocjitsu: local VM failed: ", vm->engine->last_exit().message);
-          // rj_vm_run() has joined the engine workers and shut down components
-          // and plugins. The host may be blocked on a completion that can no
-          // longer arrive. exit() would run the interposer finalizer on this
-          // thread and try to join itself, so use the process-level fatal exit.
-          std::_Exit(EXIT_FAILURE);
-        }
-      });
-    } catch (const std::exception &e) {
-      util::Logger::debug_print("rocjitsu: failed to start local VM engine thread: ", e.what());
-      return false;
-    }
+    // Latch readiness from the THREAD, not just from inside engine->run(): the
+    // wait below happens under init_mutex_, so any rj_vm_run() path that returns
+    // without reaching run() (e.g. its own argument validation) would otherwise
+    // strand this wait forever AND hold init_mutex_ forever — deadlocking every
+    // later interposed open/close and the DSO finalizer itself. The engine's own
+    // in-band latch wins; this only fires if nothing latched.
+    local_vm_thread_ = std::make_unique<std::thread>([vm = local_vm_.get()]() {
+      const rj_status_t status = rj_vm_run(vm, nullptr);
+      vm->engine->latch_startup_if_unlatched(/*failed=*/true);
+      if (status != ROCJITSU_STATUS_SUCCESS && vm->engine->wait_until_started()) {
+        util::Logger::warn("rocjitsu: local VM failed: ", vm->engine->last_exit().message);
+        // rj_vm_run() has joined the engine workers and shut down components
+        // and plugins. The host may be blocked on a completion that can no
+        // longer arrive. exit() would run the interposer finalizer on this
+        // thread and try to join itself, so use the process-level fatal exit.
+        std::_Exit(EXIT_FAILURE);
+      }
+    });
     if (!local_vm_->engine->wait_until_started()) {
-      // A component's startup() threw; the engine thread already returned. Join it
+      // A component's startup() failed; the engine thread already returned. Join it
       // so the caller can safely destroy the VM on the unwind path.
       local_vm_thread_->join();
       local_vm_thread_.reset();
@@ -2615,270 +2644,252 @@ public:
     auto *driver = drm_file_simulated(file);
     if (!driver)
       return -ENODEV;
-    std::shared_ptr<SyncobjFence> finished;
-    // Keep queue identity stable through acceptance and exception cleanup.
+    // Keep queue identity stable through submission acceptance.
     std::lock_guard submission_lock(file->submission_mutex);
-    std::optional<uint64_t> pending_queue;
-    uint64_t sequence = 0;
-    try {
-      const auto request = argument->in;
-      if (request.flags || request.bo_list_handle || !request.num_chunks ||
-          request.num_chunks > 1024)
-        return -EINVAL;
-      std::vector<uint64_t> pointers;
-      if (int rc = snapshot_user_array(request.chunks, request.num_chunks, pointers); rc)
+    const auto request = argument->in;
+    if (request.flags || request.bo_list_handle || !request.num_chunks || request.num_chunks > 1024)
+      return -EINVAL;
+    std::vector<uint64_t> pointers;
+    if (int rc = snapshot_user_array(request.chunks, request.num_chunks, pointers); rc)
+      return rc;
+    rocjitsu::amdgpu::Pm4Submission submission;
+    std::vector<drm_amdgpu_cs_chunk_syncobj> inputs, outputs;
+    std::vector<drm_amdgpu_bo_list_entry> buffers;
+    std::optional<drm_amdgpu_cs_chunk_fence> user_fence;
+    uint32_t engine = UINT32_MAX, ring = UINT32_MAX;
+    for (uint64_t pointer : pointers) {
+      std::vector<drm_amdgpu_cs_chunk> chunks;
+      if (int rc = snapshot_user_array(pointer, 1, chunks); rc)
         return rc;
-      rocjitsu::amdgpu::Pm4Submission submission;
-      std::vector<drm_amdgpu_cs_chunk_syncobj> inputs, outputs;
-      std::vector<drm_amdgpu_bo_list_entry> buffers;
-      std::optional<drm_amdgpu_cs_chunk_fence> user_fence;
-      uint32_t engine = UINT32_MAX, ring = UINT32_MAX;
-      for (uint64_t pointer : pointers) {
-        std::vector<drm_amdgpu_cs_chunk> chunks;
-        if (int rc = snapshot_user_array(pointer, 1, chunks); rc)
-          return rc;
-        const auto chunk = chunks[0];
-        if (chunk.length_dw > (1u << 20))
-          return -EINVAL;
-        std::vector<uint32_t> words;
-        if (int rc = snapshot_user_array(chunk.chunk_data, chunk.length_dw, words); rc)
-          return rc;
-        const size_t bytes = words.size() * 4;
-        switch (chunk.chunk_id) {
-        case AMDGPU_CHUNK_ID_IB: {
-          if (bytes != sizeof(drm_amdgpu_cs_chunk_ib))
-            return -EINVAL;
-          drm_amdgpu_cs_chunk_ib ib;
-          std::memcpy(&ib, words.data(), sizeof(ib));
-          if ((ib.ip_type != AMDGPU_HW_IP_COMPUTE && ib.ip_type != AMDGPU_HW_IP_GFX) ||
-              ib.ip_instance || ib.ring >= (ib.ip_type == AMDGPU_HW_IP_GFX ? 1u : 4u) ||
-              !ib.ib_bytes || (ib.ib_bytes & 3) ||
-              (ib.flags & ~(AMDGPU_IB_FLAG_PREAMBLE | AMDGPU_IB_FLAG_PREEMPT |
-                            AMDGPU_IB_FLAG_TC_WB_NOT_INVALIDATE | AMDGPU_IB_FLAG_EMIT_MEM_SYNC)))
-            return -EINVAL;
-          if (engine != UINT32_MAX && (engine != ib.ip_type || ring != ib.ring))
-            return -EINVAL;
-          submission.graphics_engine = ib.ip_type == AMDGPU_HW_IP_GFX;
-          engine = ib.ip_type;
-          ring = ib.ring;
-          submission.buffers.push_back({.address = ib.va_start, .dwords = ib.ib_bytes / 4});
-          break;
-        }
-        case AMDGPU_CHUNK_ID_FENCE: {
-          if (bytes != sizeof(drm_amdgpu_cs_chunk_fence) || user_fence)
-            return -EINVAL;
-          user_fence.emplace();
-          std::memcpy(&*user_fence, words.data(), sizeof(*user_fence));
-          break;
-        }
-        case AMDGPU_CHUNK_ID_BO_HANDLES: {
-          if (bytes != sizeof(drm_amdgpu_bo_list_in))
-            return -EINVAL;
-          drm_amdgpu_bo_list_in list;
-          std::memcpy(&list, words.data(), sizeof(list));
-          if (list.bo_info_size != sizeof(drm_amdgpu_bo_list_entry))
-            return -EINVAL;
-          if (int rc = snapshot_user_array(list.bo_info_ptr, list.bo_number, buffers); rc)
-            return rc;
-          break;
-        }
-        case AMDGPU_CHUNK_ID_SYNCOBJ_IN:
-        case AMDGPU_CHUNK_ID_SYNCOBJ_OUT: {
-          auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_IN ? inputs : outputs;
-          for (uint32_t handle : words)
-            target.push_back({handle, 0, 0});
-          break;
-        }
-        case AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT:
-        case AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_SIGNAL: {
-          if (bytes % sizeof(drm_amdgpu_cs_chunk_syncobj))
-            return -EINVAL;
-          auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT ? inputs : outputs;
-          for (size_t offset = 0; offset < bytes; offset += sizeof(drm_amdgpu_cs_chunk_syncobj)) {
-            drm_amdgpu_cs_chunk_syncobj object;
-            std::memcpy(&object, reinterpret_cast<uint8_t *>(words.data()) + offset,
-                        sizeof(object));
-            if (object.flags & ~DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT)
-              return -EINVAL;
-            target.push_back(object);
-          }
-          break;
-        }
-        default:
-          return -ENOTSUP;
-        }
-      }
-      if (submission.buffers.empty())
+      const auto chunk = chunks[0];
+      if (chunk.length_dw > (1u << 20))
         return -EINVAL;
-      struct Dependency {
-        std::shared_ptr<SyncobjEntry> entry;
-        std::shared_ptr<SyncobjFence> fence;
-        uint64_t point;
-      };
-      std::vector<Dependency> dependencies;
-      finished = std::make_shared<SyncobjFence>();
-      auto retained = std::make_shared<GemSubmissionLease>();
-      retained->context = this;
-      for (const auto &buffer : buffers)
-        retained->handles.push_back(buffer.bo_handle);
-      if (user_fence)
-        retained->handles.push_back(user_fence->handle);
-      std::ranges::sort(retained->handles);
-      retained->handles.erase(std::ranges::unique(retained->handles).begin(),
-                              retained->handles.end());
-      void *fence_address = nullptr;
-      uint64_t queue_key;
-      {
-        std::lock_guard lock(fd_mutex_);
-        if (!file->contexts.count(request.ctx_id))
+      std::vector<uint32_t> words;
+      if (int rc = snapshot_user_array(chunk.chunk_data, chunk.length_dw, words); rc)
+        return rc;
+      const size_t bytes = words.size() * 4;
+      switch (chunk.chunk_id) {
+      case AMDGPU_CHUNK_ID_IB: {
+        if (bytes != sizeof(drm_amdgpu_cs_chunk_ib))
           return -EINVAL;
-        for (auto handle : retained->handles) {
-          auto it = gem_entries_.find(handle);
-          if (it == gem_entries_.end() || it->second.handle_closed ||
-              it->second.drm_file_id != file->id)
-            return -ENOENT;
-        }
-        for (const auto &input : inputs) {
-          auto entry = lookup_syncobj_locked(file, input.handle);
-          if (!entry)
-            return -ENOENT;
-          auto fence = syncobj_fence_locked(*entry, input.point);
-          if (!fence && !(input.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT))
+        drm_amdgpu_cs_chunk_ib ib;
+        std::memcpy(&ib, words.data(), sizeof(ib));
+        if ((ib.ip_type != AMDGPU_HW_IP_COMPUTE && ib.ip_type != AMDGPU_HW_IP_GFX) ||
+            ib.ip_instance || ib.ring >= (ib.ip_type == AMDGPU_HW_IP_GFX ? 1u : 4u) ||
+            !ib.ib_bytes || (ib.ib_bytes & 3) ||
+            (ib.flags & ~(AMDGPU_IB_FLAG_PREAMBLE | AMDGPU_IB_FLAG_PREEMPT |
+                          AMDGPU_IB_FLAG_TC_WB_NOT_INVALIDATE | AMDGPU_IB_FLAG_EMIT_MEM_SYNC)))
+          return -EINVAL;
+        if (engine != UINT32_MAX && (engine != ib.ip_type || ring != ib.ring))
+          return -EINVAL;
+        submission.graphics_engine = ib.ip_type == AMDGPU_HW_IP_GFX;
+        engine = ib.ip_type;
+        ring = ib.ring;
+        submission.buffers.push_back({ib.va_start, ib.ib_bytes / 4});
+        break;
+      }
+      case AMDGPU_CHUNK_ID_FENCE: {
+        if (bytes != sizeof(drm_amdgpu_cs_chunk_fence) || user_fence)
+          return -EINVAL;
+        user_fence.emplace();
+        std::memcpy(&*user_fence, words.data(), sizeof(*user_fence));
+        break;
+      }
+      case AMDGPU_CHUNK_ID_BO_HANDLES: {
+        if (bytes != sizeof(drm_amdgpu_bo_list_in))
+          return -EINVAL;
+        drm_amdgpu_bo_list_in list;
+        std::memcpy(&list, words.data(), sizeof(list));
+        if (list.bo_info_size != sizeof(drm_amdgpu_bo_list_entry))
+          return -EINVAL;
+        if (int rc = snapshot_user_array(list.bo_info_ptr, list.bo_number, buffers); rc)
+          return rc;
+        break;
+      }
+      case AMDGPU_CHUNK_ID_SYNCOBJ_IN:
+      case AMDGPU_CHUNK_ID_SYNCOBJ_OUT: {
+        auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_IN ? inputs : outputs;
+        for (uint32_t handle : words)
+          target.push_back({handle, 0, 0});
+        break;
+      }
+      case AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT:
+      case AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_SIGNAL: {
+        if (bytes % sizeof(drm_amdgpu_cs_chunk_syncobj))
+          return -EINVAL;
+        auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT ? inputs : outputs;
+        for (size_t offset = 0; offset < bytes; offset += sizeof(drm_amdgpu_cs_chunk_syncobj)) {
+          drm_amdgpu_cs_chunk_syncobj object;
+          std::memcpy(&object, reinterpret_cast<uint8_t *>(words.data()) + offset, sizeof(object));
+          if (object.flags & ~DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT)
             return -EINVAL;
-          dependencies.push_back({entry, fence, input.point});
+          target.push_back(object);
         }
-        for (const auto &output : outputs)
-          if (!lookup_syncobj_locked(file, output.handle))
-            return -ENOENT;
-        if (user_fence) {
-          auto it = gem_entries_.find(user_fence->handle);
-          if (it == gem_entries_.end() || it->second.handle_closed ||
-              it->second.drm_file_id != file->id || user_fence->offset % 8 || it->second.size < 8 ||
-              user_fence->offset > it->second.size - 8)
-            return -EINVAL;
-          auto &gem = it->second;
-          if (gem.cpu_ptr) {
-            fence_address = static_cast<uint8_t *>(gem.cpu_ptr) + user_fence->offset;
-          } else {
-            // Retain only the fence page through GEM_CLOSE and rejected enqueue.
-            // Token backing still needs a temporary full-BO shmat attachment.
-            const size_t page = sysconf(_SC_PAGESIZE);
-            const uint64_t offset = user_fence->offset / page * page;
-            auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
-            void *mapping = gem.dmabuf_fd->use([&](int fd) {
-              return rocjitsu::map_memory_backing(nullptr, page, PROT_READ | PROT_WRITE, MAP_SHARED,
-                                                  fd, offset);
-            });
-            if (mapping == MAP_FAILED)
-              return -errno;
-            retained->fence_view = mapping;
-            retained->fence_view_size = page;
-            fence_address = static_cast<uint8_t *>(mapping) + (user_fence->offset - offset);
-          }
-        }
-        for (auto handle : retained->handles)
-          ++gem_entries_.at(handle).submission_refs;
-        retained->active = true;
-        for (const auto &output : outputs) {
-          auto entry = lookup_syncobj_locked(file, output.handle);
-          if (output.point) {
-            append_timeline_fence_locked(*entry, output.point, finished);
-          } else {
-            entry->timeline_fences.clear();
-            entry->submitted_point = entry->signaled_point = 0;
-            entry->binary_fence = finished;
-          }
-          entry->has_fence = true;
-          entry->signaled = false;
-        }
-        const uint64_t key = (uint64_t{request.ctx_id} << 32) | (engine << 16) | ring;
-        static std::atomic<uint64_t> next_queue_key{1};
-        auto [it, inserted] = file->pm4_queues.try_emplace(key);
-        auto &queue = it->second;
-        if (inserted)
-          queue.key = next_queue_key.fetch_add(1, std::memory_order_relaxed);
-        queue_key = queue.key;
-        // Reserve storage before acceptance, but publish the sequence and
-        // retire history only after the command processor accepts the job.
-        sequence = queue.next_sequence;
-        queue.fences.emplace(sequence, finished);
-        pending_queue = key;
+        break;
       }
-      submission.ready = [this, dependencies = std::move(dependencies)](
-                             util::DiagnosticEmitter emit_error) mutable -> util::FailureOr<bool> {
-        std::lock_guard lock(fd_mutex_);
-        for (auto &dependency : dependencies) {
-          if (!dependency.fence)
-            dependency.fence = syncobj_fence_locked(*dependency.entry, dependency.point);
-          if (dependency.fence && dependency.fence->is_failed())
-            return emit_error.emit() << "PM4 submission dependency failed";
-          if (!dependency.fence || !dependency.fence->is_signaled())
-            return false;
-        }
-        return true;
-      };
-      submission.complete = [this, file, finished, fence_address, sequence, retained,
-                             driver](bool success) {
-        if (success && fence_address) {
-          auto mapping_lock = rocjitsu::host_mapping_lock().lock_shared();
-          success = rocjitsu::with_host_access_guard(
-              [&] { std::memcpy(fence_address, &sequence, sizeof(sequence)); });
-        }
-        // The executing CP keeps its driver alive. Do not acquire a VM ownership
-        // snapshot here: its last release must never join the engine from itself.
-        retained->release(driver);
-        if (success)
-          finished->signaled.store(true, std::memory_order_release);
-        else
-          finished->failed.store(true, std::memory_order_release);
-        notify_syncobj_waiters(file);
-      };
-      int result = driver->submit_pm4(file->render_minor, queue_key, std::move(submission));
-      {
-        std::lock_guard lock(fd_mutex_);
-        // A concurrent final close may already have retired this file's queues.
-        auto it = file->pm4_queues.find(*pending_queue);
-        if (it != file->pm4_queues.end() && result) {
-          it->second.fences.erase(sequence);
-        } else if (it != file->pm4_queues.end()) {
-          auto &queue = it->second;
-          ++queue.next_sequence;
-          // Rejected submissions must not evict accepted fence errors from
-          // the bounded history or change WAIT_CS's latest sequence.
-          while (queue.fences.size() > 64) {
-            const auto &oldest = queue.fences.begin()->second;
-            if (!oldest->is_signaled() && !oldest->is_failed())
-              break;
-            queue.fences.erase(queue.fences.begin());
-          }
-        }
-        pending_queue.reset();
+      default:
+        return -ENOTSUP;
       }
-      if (result) {
-        finished->failed.store(true, std::memory_order_release);
-        notify_syncobj_waiters(file);
-        return result;
-      }
-      argument->out.handle = sequence;
-      notify_syncobj_waiters(file);
-      return 0;
-    } catch (const std::exception &error) {
-      if (pending_queue) {
-        std::lock_guard lock(fd_mutex_);
-        if (auto it = file->pm4_queues.find(*pending_queue); it != file->pm4_queues.end())
-          it->second.fences.erase(sequence);
-      }
-      if (finished) {
-        finished->failed.store(true, std::memory_order_release);
-        notify_syncobj_waiters(file);
-      }
-      util::Logger::warn("DRM submission failed: ", error.what());
-      return dynamic_cast<const std::bad_alloc *>(&error) ? -ENOMEM : -EINVAL;
     }
+    if (submission.buffers.empty())
+      return -EINVAL;
+    struct Dependency {
+      std::shared_ptr<SyncobjEntry> entry;
+      std::shared_ptr<SyncobjFence> fence;
+      uint64_t point;
+    };
+    std::vector<Dependency> dependencies;
+    auto finished = std::make_shared<SyncobjFence>();
+    auto retained = std::make_shared<GemSubmissionLease>();
+    retained->context = this;
+    for (const auto &buffer : buffers)
+      retained->handles.push_back(buffer.bo_handle);
+    if (user_fence)
+      retained->handles.push_back(user_fence->handle);
+    std::ranges::sort(retained->handles);
+    retained->handles.erase(std::ranges::unique(retained->handles).begin(),
+                            retained->handles.end());
+    void *fence_address = nullptr;
+    uint64_t queue_key;
+    uint64_t queue_lookup_key;
+    uint64_t sequence;
+    {
+      std::lock_guard lock(fd_mutex_);
+      if (!file->contexts.count(request.ctx_id))
+        return -EINVAL;
+      for (auto handle : retained->handles) {
+        auto it = gem_entries_.find(handle);
+        if (it == gem_entries_.end() || it->second.handle_closed ||
+            it->second.drm_file_id != file->id)
+          return -ENOENT;
+      }
+      for (const auto &input : inputs) {
+        auto entry = lookup_syncobj_locked(file, input.handle);
+        if (!entry)
+          return -ENOENT;
+        auto fence = syncobj_fence_locked(*entry, input.point);
+        if (!fence && !(input.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT))
+          return -EINVAL;
+        dependencies.push_back({entry, fence, input.point});
+      }
+      for (const auto &output : outputs)
+        if (!lookup_syncobj_locked(file, output.handle))
+          return -ENOENT;
+      if (user_fence) {
+        auto it = gem_entries_.find(user_fence->handle);
+        if (it == gem_entries_.end() || it->second.handle_closed ||
+            it->second.drm_file_id != file->id || user_fence->offset % 8 || it->second.size < 8 ||
+            user_fence->offset > it->second.size - 8)
+          return -EINVAL;
+        auto &gem = it->second;
+        if (gem.cpu_ptr) {
+          fence_address = static_cast<uint8_t *>(gem.cpu_ptr) + user_fence->offset;
+        } else {
+          // Retain only the fence page through GEM_CLOSE and rejected enqueue.
+          // Token backing still needs a temporary full-BO shmat attachment.
+          const size_t page = sysconf(_SC_PAGESIZE);
+          const uint64_t offset = user_fence->offset / page * page;
+          auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
+          void *mapping = gem.dmabuf_fd->use([&](int fd) {
+            return rocjitsu::map_memory_backing(nullptr, page, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                                fd, offset);
+          });
+          if (mapping == MAP_FAILED)
+            return -errno;
+          retained->fence_view = mapping;
+          retained->fence_view_size = page;
+          fence_address = static_cast<uint8_t *>(mapping) + (user_fence->offset - offset);
+        }
+      }
+      for (auto handle : retained->handles)
+        ++gem_entries_.at(handle).submission_refs;
+      retained->active = true;
+      for (const auto &output : outputs) {
+        auto entry = lookup_syncobj_locked(file, output.handle);
+        if (output.point) {
+          append_timeline_fence_locked(*entry, output.point, finished);
+        } else {
+          entry->timeline_fences.clear();
+          entry->submitted_point = entry->signaled_point = 0;
+          entry->binary_fence = finished;
+        }
+        entry->has_fence = true;
+        entry->signaled = false;
+      }
+      queue_lookup_key = (uint64_t{request.ctx_id} << 32) | (engine << 16) | ring;
+      static std::atomic<uint64_t> next_queue_key{1};
+      auto [it, inserted] = file->pm4_queues.try_emplace(queue_lookup_key);
+      auto &queue = it->second;
+      if (inserted)
+        queue.key = next_queue_key.fetch_add(1, std::memory_order_relaxed);
+      queue_key = queue.key;
+      // Reserve storage before acceptance, but publish the sequence and
+      // retire history only after the command processor accepts the job.
+      sequence = queue.next_sequence;
+      queue.fences.emplace(sequence, finished);
+    }
+    submission.ready = [this, dependencies = std::move(dependencies)](
+                           util::DiagnosticEmitter emit_error) mutable -> util::FailureOr<bool> {
+      std::lock_guard lock(fd_mutex_);
+      for (auto &dependency : dependencies) {
+        if (!dependency.fence)
+          dependency.fence = syncobj_fence_locked(*dependency.entry, dependency.point);
+        if (dependency.fence && dependency.fence->is_failed())
+          return emit_error.emit() << "PM4 submission dependency failed";
+        if (!dependency.fence || !dependency.fence->is_signaled())
+          return false;
+      }
+      return true;
+    };
+    submission.complete = [this, file, finished, fence_address, sequence, retained,
+                           driver](bool success) {
+      if (success && fence_address) {
+        auto mapping_lock = rocjitsu::host_mapping_lock().lock_shared();
+        success = rocjitsu::with_host_access_guard(
+            [&] { std::memcpy(fence_address, &sequence, sizeof(sequence)); });
+      }
+      // The executing CP keeps its driver alive. Do not acquire a VM ownership
+      // snapshot here: its last release must never join the engine from itself.
+      retained->release(driver);
+      if (success)
+        finished->signaled.store(true, std::memory_order_release);
+      else
+        finished->failed.store(true, std::memory_order_release);
+      notify_syncobj_waiters(file);
+    };
+    int result = driver->submit_pm4(file->render_minor, queue_key, std::move(submission));
+    {
+      std::lock_guard lock(fd_mutex_);
+      // A concurrent final close may already have retired this file's queues.
+      auto it = file->pm4_queues.find(queue_lookup_key);
+      if (it != file->pm4_queues.end() && result) {
+        it->second.fences.erase(sequence);
+      } else if (it != file->pm4_queues.end()) {
+        auto &queue = it->second;
+        ++queue.next_sequence;
+        // Rejected submissions must not evict accepted fence errors from
+        // the bounded history or change WAIT_CS's latest sequence.
+        while (queue.fences.size() > 64) {
+          const auto &oldest = queue.fences.begin()->second;
+          if (!oldest->is_signaled() && !oldest->is_failed())
+            break;
+          queue.fences.erase(queue.fences.begin());
+        }
+      }
+    }
+    if (result) {
+      finished->failed.store(true, std::memory_order_release);
+      notify_syncobj_waiters(file);
+      return result;
+    }
+    argument->out.handle = sequence;
+    notify_syncobj_waiters(file);
+    return 0;
   }
 
   /// @brief Query a context/engine/ring submission fence using an absolute deadline.
-  int wait_drm_cs(const DrmFileToken &file, drm_amdgpu_wait_cs *argument) {
+  int wait_drm_cs(DrmFileReservation &reservation, drm_amdgpu_wait_cs *argument) {
+    const DrmFileToken &file = reservation.file();
     if (!file || !argument)
       return -EINVAL;
     const auto request = argument->in;
@@ -2900,6 +2911,10 @@ public:
       if (it != queue->second.fences.end())
         fence = it->second;
     }
+    auto exit_cleanup = [&] {
+      fence.reset();
+      reservation.reset();
+    };
     const auto finish = [&](bool busy) {
       std::memset(argument, 0, sizeof(*argument));
       argument->out.status = busy;
@@ -2920,8 +2935,9 @@ public:
       const timespec deadline{static_cast<time_t>(request.timeout / 1'000'000'000),
                               static_cast<long>(request.timeout % 1'000'000'000)};
       lock.unlock();
-      const long rc = futex_wait_until(file->syncobj_generation, generation,
-                                       request.timeout == UINT64_MAX ? nullptr : &deadline);
+      const long rc =
+          futex_wait_until(file->syncobj_generation, generation,
+                           request.timeout == UINT64_MAX ? nullptr : &deadline, exit_cleanup);
       const int wait_errno = errno;
       lock.lock();
       if (rc == 0 || wait_errno == EAGAIN || wait_errno == ETIMEDOUT)
@@ -3547,73 +3563,64 @@ public:
         return nullptr;
       }
 
-      try {
-        util::StringDiagnostic diagnostic;
-        auto maybe_dbt_guest =
-            rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff, diagnostic.emitter());
-        if (maybe_dbt_guest.failed()) {
-          util::Logger::warn("rocjitsu: failed to load child config: ", diagnostic.message());
+      util::StringDiagnostic diagnostic;
+      auto maybe_dbt_guest =
+          rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff, diagnostic.emitter());
+      if (maybe_dbt_guest.failed()) {
+        util::Logger::warn("rocjitsu: failed to load child config: ", diagnostic.message());
+        destroy_local_vm();
+        return nullptr;
+      }
+      auto dbt_guest = std::move(maybe_dbt_guest.value());
+      if (dbt_guest.enabled) {
+        LinuxKfd *execution_driver = nullptr;
+        const bool simulator_backend =
+            dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Simulator;
+        if (simulator_backend) {
+          const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
+              handoff->config_path, dbt_guest.host.simulator_config_path);
+          if (!create_local_vm(host_config_path)) {
+            return nullptr;
+          }
+          execution_driver = local_vm_->vm->driver();
+          if (rocjitsu::config::validate_dbt_simulator_device_limits(
+                  dbt_guest, local_vm_->loaded.device, diagnostic.emitter())
+                  .failed()) {
+            util::Logger::warn("rocjitsu: failed to load child config: ", diagnostic.message());
+            destroy_local_vm();
+            return nullptr;
+          }
+        }
+
+        // The deleter captures local_vm_, so the guest is destroyed BEFORE the VM
+        // whose bootstrap open it holds. That ordering is now a property of the
+        // object graph rather than a rule two unwind paths have to follow.
+        auto guest_driver =
+            std::shared_ptr<GuestKfd>(new GuestKfd(std::move(dbt_guest), execution_driver),
+                                      [vm = local_vm_](GuestKfd *g) { delete g; });
+        if (!guest_driver->prepare_for_discovery()) {
+          guest_driver.reset();
           destroy_local_vm();
           return nullptr;
         }
-        auto dbt_guest = std::move(maybe_dbt_guest.value());
-        if (dbt_guest.enabled) {
-          LinuxKfd *execution_driver = nullptr;
-          const bool simulator_backend =
-              dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Simulator;
-          if (simulator_backend) {
-            const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
-                handoff->config_path, dbt_guest.host.simulator_config_path);
-            if (!create_local_vm(host_config_path)) {
-              return nullptr;
-            }
-            execution_driver = local_vm_->vm->driver();
-            if (rocjitsu::config::validate_dbt_simulator_device_limits(
-                    dbt_guest, local_vm_->loaded.device, diagnostic.emitter())
-                    .failed()) {
-              util::Logger::warn("rocjitsu: failed to load child config: ", diagnostic.message());
-              destroy_local_vm();
-              return nullptr;
-            }
-          }
-
-          // The deleter captures local_vm_, so the guest is destroyed BEFORE the VM
-          // whose bootstrap open it holds. That ordering is now a property of the
-          // object graph rather than a rule two unwind paths have to follow.
-          auto guest_driver =
-              std::shared_ptr<GuestKfd>(new GuestKfd(std::move(dbt_guest), execution_driver),
-                                        [vm = local_vm_](GuestKfd *g) { delete g; });
-          if (!guest_driver->prepare_for_discovery()) {
-            guest_driver.reset();
-            destroy_local_vm();
-            return nullptr;
-          }
-          auto driver = std::static_pointer_cast<LinuxKfd>(guest_driver);
-          guest_driver_ = std::move(guest_driver);
-          // Start the engine and wait for readiness BEFORE publishing, so no
-          // concurrent interposed call can observe a driver whose components are
-          // still starting (or whose startup will fail). On failure nothing was
-          // published; destroy_local_vm() unpublishes (no-op) + frees, and
-          // guest_driver_ is reset first because it owns the simulator bootstrap
-          // open.
-          if (simulator_backend && !start_local_vm()) {
-            driver.reset();
-            destroy_local_vm();
-            return nullptr;
-          }
-          publish_local_driver_locked(driver);
-          return driver;
-        }
-
-        if (!create_local_vm(handoff->config_path)) {
+        auto driver = std::static_pointer_cast<LinuxKfd>(guest_driver);
+        guest_driver_ = std::move(guest_driver);
+        // Start the engine and wait for readiness BEFORE publishing, so no
+        // concurrent interposed call can observe a driver whose components are
+        // still starting (or whose startup will fail). On failure nothing was
+        // published; destroy_local_vm() unpublishes (no-op) + frees, and
+        // guest_driver_ is reset first because it owns the simulator bootstrap
+        // open.
+        if (simulator_backend && !start_local_vm()) {
+          driver.reset();
+          destroy_local_vm();
           return nullptr;
         }
-      } catch (const std::exception &e) {
-        // Retain containment for allocation and library exceptions during config
-        // loading and driver initialization. Failing closed leaves the process with
-        // a null driver, so the reason must be audible in a default build.
-        util::Logger::warn("rocjitsu: failed to load child config: ", e.what());
-        destroy_local_vm();
+        publish_local_driver_locked(driver);
+        return driver;
+      }
+
+      if (!create_local_vm(handoff->config_path)) {
         return nullptr;
       }
 
@@ -4171,19 +4178,9 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
     return {true, -1};
 
   InterposerContext::DrmFinalRelease displaced;
-  try {
+  {
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
-    // backend_lease stays OURS across this call: on a throw it is released at this
-    // function's scope exit, by which point drm_lifecycle is gone. See track_drm().
     displaced = InterposerContext::ctx.track_drm(drm_fd, render_minor, backend_lease);
-  } catch (const std::exception &) {
-    // Not just bad_alloc: unique_lock's constructor can throw system_error, and this
-    // is an extern "C" entry point -- letting anything escape into a C caller frame
-    // is undefined.
-    const int saved_errno = ENOMEM;
-    InterposerContext::real().close(drm_fd);
-    errno = saved_errno;
-    return {true, -1};
   }
   InterposerContext::ctx.complete_drm_release(std::move(displaced));
   return {true, drm_fd};
@@ -4770,8 +4767,8 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
       return kfd_ioctl_ret(
           InterposerContext::ctx.submit_drm_cs(drm_file, static_cast<drm_amdgpu_cs *>(arg)));
     if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_WAIT_CS && arg)
-      return kfd_ioctl_ret(
-          InterposerContext::ctx.wait_drm_cs(drm_file, static_cast<drm_amdgpu_wait_cs *>(arg)));
+      return kfd_ioctl_ret(InterposerContext::ctx.wait_drm_cs(
+          drm_file_reservation, static_cast<drm_amdgpu_wait_cs *>(arg)));
     if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_GET_CAP) && arg) {
       auto *cap = static_cast<drm_get_cap *>(arg);
       cap->value = 0;
@@ -4794,21 +4791,13 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
                                            DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE;
       if ((wait->flags & ~kSupportedFlags) != 0)
         return kfd_ioctl_ret(-EINVAL);
-      std::vector<uint64_t> points;
-      try {
-        points.resize(wait->count_handles, 0);
-      } catch (const std::bad_alloc &) {
-        return kfd_ioctl_ret(-ENOMEM);
-      } catch (const std::length_error &) {
-        return kfd_ioctl_ret(-ENOMEM);
-      }
       drm_syncobj_timeline_wait timeline{};
       timeline.handles = wait->handles;
-      timeline.points = reinterpret_cast<uint64_t>(points.data());
       timeline.count_handles = wait->count_handles;
       timeline.timeout_nsec = wait->timeout_nsec;
       timeline.flags = wait->flags;
-      int result = InterposerContext::ctx.wait_syncobj_timeline(drm_file, &timeline);
+      int result = InterposerContext::ctx.wait_syncobj_timeline(drm_file_reservation, &timeline,
+                                                                /*binary=*/true);
       wait->first_signaled = timeline.first_signaled;
       return kfd_ioctl_ret(result);
     }
@@ -4842,7 +4831,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
           drm_file, *static_cast<drm_syncobj_timeline_array *>(arg)));
     if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_TRANSFER) && arg)
       return kfd_ioctl_ret(InterposerContext::ctx.transfer_syncobj(
-          drm_file, *static_cast<drm_syncobj_transfer *>(arg)));
+          drm_file_reservation, *static_cast<drm_syncobj_transfer *>(arg)));
     if (type == kDrmIoctlType && nr == kDrmIoctlNrVersion && arg) {
       auto *ver = static_cast<drm_version *>(arg);
       ver->version_major = 3;
@@ -4966,7 +4955,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrSyncobjTimelineWait && arg) {
       return kfd_ioctl_ret(InterposerContext::ctx.wait_syncobj_timeline(
-          drm_file, static_cast<drm_syncobj_timeline_wait *>(arg)));
+          drm_file_reservation, static_cast<drm_syncobj_timeline_wait *>(arg)));
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrAmdgpuInfo && arg) {
       // Service the AMDGPU_INFO queries that real libdrm_amdgpu issues during
@@ -5224,7 +5213,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
   }
 
   if (auto remote = InterposerContext::ctx.remote_lookup(fd))
-    return kfd_ioctl_ret(remote->ioctl(request, arg));
+    return kfd_ioctl_ret(dispatch_ioctl_snapshot(remote, request, arg));
   // Dispatch a tracked KFD fd by its RECORDED backend, not by "remote if any
   // remote is live". In mixed local+daemon mode a Local-tagged dup must route to
   // the local driver and a Remote-tagged dup to the remote connection; guessing
@@ -5257,7 +5246,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
           // shared_ptr snapshot is still live, and this dup still belongs to it.
           remote_dispatch = InterposerContext::ctx.remote();
         } else if (auto drv = InterposerContext::ctx.driver()) {
-          int rc = drv->ioctl(request, arg);
+          int rc = dispatch_ioctl_snapshot(drv, request, arg);
           // Capture the KFD allocation flags for a freshly exported dmabuf fd. The
           // flags determine the GPU PTE MTYPE when the fd is later mapped via GEM_VA,
           // and must be recorded now because the allocation may be freed first. Only
@@ -5285,7 +5274,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     // Classification done and no local snapshot held: dispatch the remote op on the
     // lifetime-extending snapshot captured above.
     if (remote_dispatch)
-      return kfd_ioctl_ret(remote_dispatch->ioctl(request, arg));
+      return kfd_ioctl_ret(dispatch_ioctl_snapshot(remote_dispatch, request, arg));
   }
   // Late-ioctl safety net: an AMDKFD ('K') ioctl may arrive on a tracked KFD fd
   // whose primary remote handle changed underneath it (e.g. a close/dup race in
@@ -5310,7 +5299,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     }
     if (have_backend && backend == InterposerContext::DupBackend::Remote) {
       if (auto remote = InterposerContext::ctx.remote())
-        return kfd_ioctl_ret(remote->ioctl(request, arg));
+        return kfd_ioctl_ret(dispatch_ioctl_snapshot(remote, request, arg));
     }
   }
 

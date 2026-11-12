@@ -40,7 +40,8 @@ enum {
 /// socket is bound and listening and the engine and accept threads have
 /// started. The caller owns the returned handle and must eventually pass it to
 /// rj_daemon_stop. An abandoned socket is recovered, while a live socket or
-/// non-socket path is never removed.
+/// non-socket path is never removed. Internal allocation or thread-creation
+/// failures terminate the calling process.
 ///
 /// @param[in] json VM JSON configuration string.
 /// @param[in] socket_path Filesystem path for the Unix domain socket.
@@ -49,7 +50,6 @@ enum {
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL, the
 /// JSON configuration is invalid, or the socket path cannot be represented by
 /// sockaddr_un.
-/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Allocation or thread creation failed.
 /// @retval ROCJITSU_STATUS_ERROR Socket setup or VM initialization failed.
 RJ_API_EXPORT rj_status_t rj_daemon_start(const char *json, const char *socket_path,
                                           rj_daemon_t **daemon);

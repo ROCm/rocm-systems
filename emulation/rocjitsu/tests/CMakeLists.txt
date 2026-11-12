@@ -2702,7 +2702,6 @@ set(_rj_interposer_syncobj_tests
     IndependentDrmOpensHaveSeparateNamespaces
     CreateSignaledSeedsOnlyTheInitialPoint
     WaitValidationMatchesDrm
-    OversizedBinaryWaitReturnsEnomem
     DestroyRejectsInvalidInput
     TimelineWaitBlocksUntilSignalOrDeadline
     TimelineWaitReturnsEintrForSignal
@@ -2715,8 +2714,8 @@ rj_add_interposer_test_suite(
 )
 set(_rj_signal_exit_env)
 if(RJ_ENABLE_TSAN)
-    # Model Wine's deliberate pthread_exit from a signal handler. Forced unwind
-    # allocates and frees memory, so disable only this test's signal-safety
+    # Model Wine's deliberate pthread_exit from a signal handler. Thread-exit
+    # cleanup frees memory, so disable only this test's signal-safety
     # diagnostic; retain TSan's race and mutex checks.
     set(_rj_signal_exit_env "TSAN_OPTIONS=report_signal_unsafe=0")
 endif()
