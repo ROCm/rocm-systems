@@ -1,6 +1,5 @@
 jobs:
-  - pc_sampling_beta_enabled: true
-    kernel_trace: true
+  - kernel_trace: true
     pc_sampling_unit: "cycles"
     pc_sampling_method: "stochastic"
     pc_sampling_interval: 1048576

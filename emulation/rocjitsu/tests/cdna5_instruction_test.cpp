@@ -4,10 +4,14 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -23,6 +27,7 @@ public:
     std::vector<uint32_t> workgroup_ids;
     std::thread::id callback_thread;
     uint32_t active_instructions = 0;
+    BarrierKind kind = BarrierKind::Workgroup;
   };
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
@@ -35,9 +40,11 @@ public:
     active_instructions_.fetch_sub(1, std::memory_order_relaxed);
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                               BarrierKind kind) override {
     Resolution resolution;
     resolution.span_size = wavefronts.size();
+    resolution.kind = kind;
     resolution.callback_thread = std::this_thread::get_id();
     resolution.active_instructions = active_instructions_.load(std::memory_order_relaxed);
     std::vector<uint32_t> workgroups;
@@ -724,6 +731,9 @@ TEST(Gfx1250SimulationTest, AqlDescriptorAllocatesNamedBarriersForTwoWaveKernel)
 
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto plugin = std::make_unique<BarrierSpanPlugin>();
+  auto *barrier_span = plugin.get();
+  ASSERT_TRUE(sim.plugin_group->add(std::move(plugin)));
   uint64_t kernel_object = sim.write_kernel(kKernelAddr, code, std::size(code), 104, 32, 2, false,
                                             false, false, 0, 0, 0, 0, 0, 1);
   test::AqlQueue queue(sim.memory, sim.cp());
@@ -733,6 +743,9 @@ TEST(Gfx1250SimulationTest, AqlDescriptorAllocatesNamedBarriersForTwoWaveKernel)
   ASSERT_EQ(sim.snapshot->snapshots().size(), 2u);
   for (const auto &wf : sim.snapshot->snapshots())
     EXPECT_EQ(wf.sgpr(4), 0x01000021u);
+  const auto resolutions = barrier_span->resolutions();
+  ASSERT_EQ(resolutions.size(), 1u);
+  EXPECT_EQ(resolutions[0].kind, BarrierKind::Named);
 }
 
 TEST(Gfx1250SimulationTest, ParallelClusterBarrierSynchronizesWorkgroupsAcrossComputeUnits) {
@@ -777,6 +790,7 @@ TEST(Gfx1250SimulationTest, ParallelClusterBarrierSynchronizesWorkgroupsAcrossCo
   const auto resolutions = barrier_span->resolutions();
   ASSERT_EQ(resolutions.size(), 1u);
   EXPECT_EQ(resolutions[0].span_size, 4u);
+  EXPECT_EQ(resolutions[0].kind, BarrierKind::Cluster);
   EXPECT_EQ(resolutions[0].workgroup_ids, (std::vector<uint32_t>{0, 1}));
   EXPECT_EQ(resolutions[0].callback_thread, cp_thread);
   EXPECT_EQ(resolutions[0].active_instructions, 0u);
@@ -1495,6 +1509,7 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrB64ExchangesBothAddresses) {
 
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(256));
+  wf->set_lds_size(256);
   constexpr uint32_t kAddr = 1;
   constexpr uint32_t kData0 = 2;
   constexpr uint32_t kData1 = 4;
@@ -1553,6 +1568,7 @@ TEST(Gfx1250SimulationTest, NonReturningDsAddU32DoesNotWriteVgpr) {
 
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(64));
+  wf->set_lds_size(64);
   constexpr uint32_t kAddr = 1;
   constexpr uint32_t kData = 2;
   constexpr uint32_t kUnusedVdst = 4;
@@ -1594,6 +1610,7 @@ TEST(Gfx1250SimulationTest, NonReturningDsAddU64DoesNotWriteVgpr) {
 
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(64));
+  wf->set_lds_size(64);
   constexpr uint32_t kAddr = 1;
   constexpr uint32_t kData = 2;
   constexpr uint32_t kUnusedVdst = 4;
@@ -1639,6 +1656,7 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrStride64B32UsesScaledOffsetsForActiv
 
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(1024));
+  wf->set_lds_size(1024);
   constexpr uint32_t kAddr = 1;
   constexpr uint32_t kData0 = 2;
   constexpr uint32_t kData1 = 3;
@@ -1718,6 +1736,7 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrSameAddressAppliesBothExchangesInOrd
 
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(64));
+  wf->set_lds_size(64);
   constexpr uint32_t kAddr = 1;
   constexpr uint32_t kData0 = 2;
   constexpr uint32_t kData1 = 3;
@@ -2006,6 +2025,7 @@ TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
 
   auto &cu = *sim.cu();
   wf->set_lds_base(cu.allocate_lds(0x4000));
+  wf->set_lds_size(0x4000);
   constexpr uint32_t kM0ByteBase = 0x1000;
   wf->set_m0(kM0ByteBase);
 

@@ -15,7 +15,7 @@
 #include "rocjitsu/vm/amdgpu/consumer_cursor_journal.h"
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
@@ -340,12 +340,15 @@ struct DispatchEntry {
   uint32_t wfs_per_workgroup = 1;
   uint32_t sgprs_per_wf = 104;
   uint32_t vgprs_per_wf = 256;
+  uint32_t accum_vgpr_base = 0;
   uint64_t kernarg_addr = 0;
   uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
   /// Register-programmed compute launches use the PM4 user-data register ABI.
   bool pm4_abi = false;
+  /// DRM maps shader addresses in the high half at sign-extended VAs.
+  bool drm_shader_addresses = false;
   std::shared_ptr<Pm4FailureState>
       pm4_failure{};                     ///< Shared with all waves and the owning submission.
   std::array<uint32_t, 16> user_sgprs{}; ///< PM4 COMPUTE_USER_DATA register values.
@@ -382,6 +385,7 @@ struct DispatchEntry {
   bool enable_wg_id_y = false;
   bool enable_wg_id_z = false;
   bool enable_wg_info = false;
+  /// Enable the private-segment wave-offset SGPR at dispatch.
   bool enable_private_segment = false;
   uint8_t enable_vgpr_workitem_id = 0;
   uint16_t workgroup_size_x = 64;

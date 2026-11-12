@@ -4,12 +4,12 @@
 // AVX2 FP16 interpolation with packed source selection and staged rounding.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "common/x86_64/half_x86_64_v3.h"
 #include "fp/x86_64/mixed_half_x86_64_v3.h"
 #include "graphics/interp.h"
 #include "graphics/interp16_scalar.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_graphics.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -19,8 +19,8 @@ namespace rocjitsu::arith {
 // Evaluate an FP16 interpolation stage. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 template <bool P2, bool Rtz>
-void interp16_x86_64_v3(bool saturate, uint32_t exec_mask, uint32_t mode, uint32_t *d,
-                        const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+uint32_t interp16_x86_64_v3(bool saturate, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                            const uint32_t *a, const uint32_t *b, const uint32_t *c) {
   for (int lane = 0; lane < 32; lane += 8) {
     auto aw = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + lane));
     auto x = half_input<false>(aw, mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0, mode);
@@ -36,6 +36,15 @@ void interp16_x86_64_v3(bool saturate, uint32_t exec_mask, uint32_t mode, uint32
     } else {
       z = _mm256_permute_ps(half_input<false>(cw, mode & RJ_ARITH_ALU_HIGH_C ? 16 : 0, mode >> 2),
                             _MM_SHUFFLE(0, 0, 0, 0));
+    }
+    const auto magnitude = [](__m256 input) {
+      return _mm256_and_si256(_mm256_castps_si256(input), _mm256_set1_epi32(INT32_MAX));
+    };
+    const auto largest =
+        _mm256_max_epi32(magnitude(x), _mm256_max_epi32(magnitude(y), magnitude(z)));
+    const auto special = _mm256_cmpgt_epi32(largest, _mm256_set1_epi32(0x7f7fffff));
+    if ((exec_mask >> lane) & uint32_t(_mm256_movemask_ps(_mm256_castsi256_ps(special)))) {
+      return exec_mask & (~uint32_t{0} << lane);
     }
     __m256i result;
     if constexpr (P2) {
@@ -73,16 +82,20 @@ void interp16_x86_64_v3(bool saturate, uint32_t exec_mask, uint32_t mode, uint32
                                             _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
     _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), lane_exec_mask, result);
   }
+  return 0;
 }
 
-template void interp16_x86_64_v3<false, false>(bool, uint32_t, uint32_t, uint32_t *,
-                                               const uint32_t *, const uint32_t *,
-                                               const uint32_t *);
-template void interp16_x86_64_v3<true, false>(bool, uint32_t, uint32_t, uint32_t *,
-                                              const uint32_t *, const uint32_t *, const uint32_t *);
-template void interp16_x86_64_v3<false, true>(bool, uint32_t, uint32_t, uint32_t *,
-                                              const uint32_t *, const uint32_t *, const uint32_t *);
-template void interp16_x86_64_v3<true, true>(bool, uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                             const uint32_t *, const uint32_t *);
+template uint32_t interp16_x86_64_v3<false, false>(bool, uint32_t, uint32_t, uint32_t *,
+                                                   const uint32_t *, const uint32_t *,
+                                                   const uint32_t *);
+template uint32_t interp16_x86_64_v3<true, false>(bool, uint32_t, uint32_t, uint32_t *,
+                                                  const uint32_t *, const uint32_t *,
+                                                  const uint32_t *);
+template uint32_t interp16_x86_64_v3<false, true>(bool, uint32_t, uint32_t, uint32_t *,
+                                                  const uint32_t *, const uint32_t *,
+                                                  const uint32_t *);
+template uint32_t interp16_x86_64_v3<true, true>(bool, uint32_t, uint32_t, uint32_t *,
+                                                 const uint32_t *, const uint32_t *,
+                                                 const uint32_t *);
 
 } // namespace rocjitsu::arith

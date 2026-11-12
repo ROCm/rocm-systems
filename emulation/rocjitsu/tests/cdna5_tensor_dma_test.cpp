@@ -228,6 +228,54 @@ TEST(Gfx1250ExecutionTest, TensorDmaRejectsElementCountOverflow) {
   EXPECT_TRUE(validate_supported_descriptor(desc, layout).failed());
 }
 
+TEST(Gfx1250ExecutionTest, TensorDmaDenseTransferSkipsUnusedInteriorDimensions) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+
+  // Axes 0, 2 and 4 each contain two elements. Axes 1 and 3 have zero
+  // bounds and deliberately large strides, but their tile dimensions are unused.
+  constexpr uint64_t kGlobal = 0x135000;
+  constexpr std::array<uint32_t, 16> groups{
+      2u << 16, 2u << 16, 0,        2u << 16, 2u << 16, 99, 8u << 16, 0, // Group 1.
+      2,        0,        99,       0,                                   // Group 2.
+      24,       2u << 16, 2u << 16, 0,                                   // Group 3.
+  };
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  for (uint32_t descriptor_word = 0; descriptor_word < groups.size(); ++descriptor_word)
+    write_wave_sgpr(*cu, *wf, 12 + descriptor_word, groups[descriptor_word]);
+  const std::array<uint32_t, 3> load_words{0xd0710001u, 0x7c000000u, 0x18140c00u};
+  const std::array<uint32_t, 3> store_words{0xd0714001u, 0x7c000000u, 0x18140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(store, nullptr);
+
+  constexpr std::array<uint32_t, 8> global_indices{0, 1, 8, 9, 24, 25, 32, 33};
+  for (const uint32_t index_size : {0u, 1u << 30}) {
+    // The gather index-size flag has no effect on dense descriptors.
+    write_wave_sgpr(*cu, *wf, 0, 1u | index_size);
+    for (uint32_t global_index = 0; global_index < 34; ++global_index)
+      write_global_u32(*sim.memory, kGlobal + 4 * global_index, 1000 + global_index);
+    ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+    for (uint32_t tile_index = 0; tile_index < global_indices.size(); ++tile_index) {
+      EXPECT_EQ(cu->lds().read32(wf->lds_base() + 4 * tile_index),
+                1000 + global_indices[tile_index]);
+      cu->lds().write32(wf->lds_base() + 4 * tile_index, 2000 + global_indices[tile_index]);
+    }
+    ASSERT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
+    for (uint32_t global_index = 0; global_index < 34; ++global_index) {
+      const bool copied = std::ranges::find(global_indices, global_index) != global_indices.end();
+      EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 4 * global_index),
+                (copied ? 2000 : 1000) + global_index);
+    }
+  }
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaIterationsMayReuseResidentLds) {
   using namespace amdgpu::tensor_dma_detail;
   Gfx1250Sim sim;
@@ -302,12 +350,13 @@ TEST(Gfx1250ExecutionTest, TensorDmaZeroLdsAllocationIsNotRejected) {
   EXPECT_EQ(state.elements.size(), 1u);
 }
 
-/// A wave with 256 bytes of LDS followed by a neighbouring allocation, and a
+/// A wave with one 2 KiB LDS allocation followed by a neighbouring allocation, and a
 /// four-element i32 tile whose last two elements fall past the wave's LDS.
 class TensorDmaLdsOutOfRangeTest : public ::testing::Test {
 protected:
   static constexpr uint64_t kGlobal = 0x187000;
-  static constexpr uint32_t kLdsOffset = 248;
+  static constexpr uint32_t kLdsBytes = 2048;
+  static constexpr uint32_t kLdsOffset = kLdsBytes - 8;
   static constexpr uint32_t kSentinel = 0x5e5e5e5eu;
 
   Gfx1250Sim sim;
@@ -331,14 +380,13 @@ protected:
     cu = sim.cu();
     wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
-    // A block ahead of the wave's puts its allocation at [256, 512), so its end
-    // differs from its size and code that confuses the two is caught.
-    const uint32_t preceding = cu->allocate_lds(256);
-    wf->set_lds_base(cu->allocate_lds(256));
-    wf->set_lds_size(256);
-    ASSERT_EQ(wf->lds_base(), preceding + 256);
+    // A preceding allocation distinguishes the wave-relative limit from its absolute end.
+    const uint32_t preceding = cu->allocate_lds(kLdsBytes);
+    wf->set_lds_base(cu->allocate_lds(kLdsBytes));
+    wf->set_lds_size(kLdsBytes);
+    ASSERT_EQ(wf->lds_base(), preceding + kLdsBytes);
     ASSERT_NE(wf->lds_base(), 0u);
-    neighbour = cu->allocate_lds(256);
+    neighbour = cu->allocate_lds(kLdsBytes);
     ASSERT_EQ(neighbour, wf->lds_base() + wf->lds_size());
     cu->lds().write32(neighbour, kSentinel);
     cu->lds().write32(neighbour + 4, kSentinel);
@@ -396,100 +444,100 @@ TEST_F(TensorDmaLdsOutOfRangeTest, StoreReadsZeroOutsideTheWavesLds) {
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, LoadI64StraddlingTheEndWritesOnlyItsFourInRangeBytes) {
-  // One i64 element at offset 252 has four bytes inside the wave's LDS.
-  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 252);
+  // One i64 element at offset 2044 has four bytes inside the wave's LDS.
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, kLdsBytes - 4);
   write_wave_sgpr(*cu, *wf, 12, 3u << 16); // i64 elements.
   write_wave_sgpr(*cu, *wf, 13, 1u << 16);
   write_wave_sgpr(*cu, *wf, 15, 1u << 16);
   write_global_u32(*sim.memory, kGlobal, 0x55667788u);
   write_global_u32(*sim.memory, kGlobal + 4, 0x11223344u);
   ASSERT_TRUE(execute(/*store=*/false));
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 252), 0x55667788u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + kLdsBytes - 4), 0x55667788u);
   EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
-  EXPECT_EQ(
-      issue_observer->issues[0].lds_ranges,
-      (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base() + 252, .bytes = 4}}));
+  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
+            (std::vector<amdgpu::TensorDmaLdsRange>{
+                {.address = wf->lds_base() + kLdsBytes - 4, .bytes = 4}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, StoreI64StraddlingTheEndReadsZeroForItsFourOutOfRangeBytes) {
-  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 252);
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, kLdsBytes - 4);
   write_wave_sgpr(*cu, *wf, 12, 3u << 16); // i64 elements.
   write_wave_sgpr(*cu, *wf, 13, 1u << 16);
   write_wave_sgpr(*cu, *wf, 15, 1u << 16);
-  cu->lds().write32(wf->lds_base() + 252, 0xaabbccddu);
+  cu->lds().write32(wf->lds_base() + kLdsBytes - 4, 0xaabbccddu);
   write_global_u32(*sim.memory, kGlobal, 0xffffffffu);
   write_global_u32(*sim.memory, kGlobal + 4, 0xffffffffu);
   ASSERT_TRUE(execute(/*store=*/true));
   EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), 0xaabbccddu);
   EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 4), 0u);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
-  EXPECT_EQ(
-      issue_observer->issues[0].lds_ranges,
-      (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base() + 252, .bytes = 4}}));
+  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
+            (std::vector<amdgpu::TensorDmaLdsRange>{
+                {.address = wf->lds_base() + kLdsBytes - 4, .bytes = 4}}));
 }
 
-// One i32 element at offset 254 has two bytes inside the wave's LDS. Keeping a
+// One i32 element at offset 2046 has two bytes inside the wave's LDS. Keeping a
 // two-byte prefix distinguishes byte-prefix clipping from rounding the kept
 // length to whole DWORDs, which would keep nothing.
 TEST_F(TensorDmaLdsOutOfRangeTest, LoadI32StraddlingTheEndWritesOnlyItsTwoInRangeBytes) {
-  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 254);
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, kLdsBytes - 2);
   write_wave_sgpr(*cu, *wf, 12, 2u << 16); // i32 elements.
   write_wave_sgpr(*cu, *wf, 13, 1u << 16);
   write_wave_sgpr(*cu, *wf, 15, 1u << 16);
-  cu->lds().write32(wf->lds_base() + 252, 0xa3a2a1a0u);
+  cu->lds().write32(wf->lds_base() + kLdsBytes - 4, 0xa3a2a1a0u);
   write_global_u32(*sim.memory, kGlobal, 0x55667788u);
   ASSERT_TRUE(execute(/*store=*/false));
-  // Bytes 252 and 253 are untouched; 254 and 255 take the element's low bytes.
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 252), 0x7788a1a0u);
+  // Bytes 2044 and 2045 are untouched; 2046 and 2047 take the element's low bytes.
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + kLdsBytes - 4), 0x7788a1a0u);
   EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
-  EXPECT_EQ(
-      issue_observer->issues[0].lds_ranges,
-      (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base() + 254, .bytes = 2}}));
+  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
+            (std::vector<amdgpu::TensorDmaLdsRange>{
+                {.address = wf->lds_base() + kLdsBytes - 2, .bytes = 2}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, StoreI32StraddlingTheEndReadsZeroForItsTwoOutOfRangeBytes) {
-  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 254);
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, kLdsBytes - 2);
   write_wave_sgpr(*cu, *wf, 12, 2u << 16); // i32 elements.
   write_wave_sgpr(*cu, *wf, 13, 1u << 16);
   write_wave_sgpr(*cu, *wf, 15, 1u << 16);
-  cu->lds().write32(wf->lds_base() + 252, 0xddcc0000u);
+  cu->lds().write32(wf->lds_base() + kLdsBytes - 4, 0xddcc0000u);
   write_global_u32(*sim.memory, kGlobal, 0xffffffffu);
   ASSERT_TRUE(execute(/*store=*/true));
   // The two in-range bytes, then zero rather than the neighbour's sentinel.
   EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), 0x0000ddccu);
   EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
-  EXPECT_EQ(
-      issue_observer->issues[0].lds_ranges,
-      (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base() + 254, .bytes = 2}}));
+  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
+            (std::vector<amdgpu::TensorDmaLdsRange>{
+                {.address = wf->lds_base() + kLdsBytes - 2, .bytes = 2}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, PaddingPushesTheLastElementPastTheEnd) {
-  // One dword of padding after every two places the elements at 240, 244, 252
-  // and 256; the last is past the wave's LDS.
-  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 240);
+  // One dword of padding after every two places the elements at 2032, 2036, 2044
+  // and 2048; the last is past the wave's LDS.
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, kLdsBytes - 16);
   write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 20)); // i32, pad enabled.
   for (uint32_t i = 0; i < 4; ++i)
     write_global_u32(*sim.memory, kGlobal + i * 4, 0x4b000000u + i);
-  cu->lds().write32(wf->lds_base() + 248, kSentinel);
+  cu->lds().write32(wf->lds_base() + kLdsBytes - 8, kSentinel);
   ASSERT_TRUE(execute(/*store=*/false));
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 240), 0x4b000000u);
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 244), 0x4b000001u);
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 248), kSentinel);
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 252), 0x4b000002u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + kLdsBytes - 16), 0x4b000000u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + kLdsBytes - 12), 0x4b000001u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + kLdsBytes - 8), kSentinel);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + kLdsBytes - 4), 0x4b000002u);
   EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
-  EXPECT_EQ(
-      issue_observer->issues[0].lds_ranges,
-      (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base() + 240, .bytes = 8},
-                                              {.address = wf->lds_base() + 252, .bytes = 4}}));
+  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
+            (std::vector<amdgpu::TensorDmaLdsRange>{
+                {.address = wf->lds_base() + kLdsBytes - 16, .bytes = 8},
+                {.address = wf->lds_base() + kLdsBytes - 4, .bytes = 4}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, IterationPastTheEndIsDropped) {
-  // Two iterations of a 2-element row, 16 bytes apart in LDS starting at 240.
-  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 240);
+  // Two iterations of a 2-element row, 16 bytes apart in LDS starting at 2032.
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, kLdsBytes - 16);
   write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
   write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
   write_wave_sgpr(*cu, *wf, 14, 2u << 16);                // tensor dim1.
@@ -503,20 +551,20 @@ TEST_F(TensorDmaLdsOutOfRangeTest, IterationPastTheEndIsDropped) {
   for (uint32_t i = 0; i < 4; ++i)
     write_global_u32(*sim.memory, kGlobal + i * 4, 0x4c000000u + i);
   ASSERT_TRUE(execute(/*store=*/false, 0x7c140c00u));
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 240), 0x4c000000u);
-  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 244), 0x4c000001u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + kLdsBytes - 16), 0x4c000000u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + kLdsBytes - 12), 0x4c000001u);
   EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
   EXPECT_EQ(cu->lds().read32(neighbour + 4), kSentinel);
   ASSERT_EQ(observer->accesses.size(), 1u);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
   EXPECT_EQ(observer->accesses[0].addresses.size(), 4u);
-  EXPECT_EQ(
-      issue_observer->issues[0].lds_ranges,
-      (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base() + 240, .bytes = 8}}));
+  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
+            (std::vector<amdgpu::TensorDmaLdsRange>{
+                {.address = wf->lds_base() + kLdsBytes - 16, .bytes = 8}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, GatherRowPastTheEndIsDropped) {
-  // Rows land 8 bytes apart in LDS starting at 248; the second is past the end.
+  // Rows land 8 bytes apart in LDS starting at 2040; the second is past the end.
   write_tensor_dma_d0(*cu, *wf, 0, kGlobal, kLdsOffset);
   write_wave_sgpr(*cu, *wf, 0, 1u | (1u << 30) | (1u << 31)); // 32-bit gather indices.
   write_wave_sgpr(*cu, *wf, 13, 2u << 16);                    // tensor dim0.
@@ -560,7 +608,7 @@ TEST_F(TensorDmaLdsOutOfRangeTest, ZeroFillPastTheEndIsDropped) {
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, TileWhollyOutsideTheWavesLdsStillCompletes) {
-  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 256);
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal, kLdsBytes);
   write_global_u32(*sim.memory, kGlobal, 0x4a000000u);
   ASSERT_TRUE(execute(/*store=*/false));
   EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
@@ -777,7 +825,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaLdsAddressDoesNotWrapPastTheAllocation) {
   constexpr uint64_t kGlobal = 0x1a8000;
   constexpr uint64_t kGlobalValue = 0x0123456789abcdefu;
   constexpr uint8_t kLdsSentinel = 0x5e;
-  for (const uint32_t lds_base : {0xffffff00u, UINT32_MAX}) {
+  for (const uint32_t lds_base : {0xfffff800u, UINT32_MAX}) {
     for (const bool store : {false, true}) {
       SCOPED_TRACE(testing::Message() << std::hex << lds_base << (store ? " store" : " load"));
       Gfx1250Sim sim;
@@ -785,11 +833,11 @@ TEST(Gfx1250ExecutionTest, TensorDmaLdsAddressDoesNotWrapPastTheAllocation) {
       auto *cu = sim.cu();
       auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
       ASSERT_NE(wf, nullptr);
-      const uint32_t below = cu->allocate_lds(256);
-      wf->set_lds_base(cu->allocate_lds(256));
-      wf->set_lds_size(256);
-      ASSERT_EQ(wf->lds_base(), below + 256);
-      for (uint32_t byte = 0; byte < 512; ++byte)
+      const uint32_t below = cu->allocate_lds(2048);
+      wf->set_lds_base(cu->allocate_lds(2048));
+      wf->set_lds_size(2048);
+      ASSERT_EQ(wf->lds_base(), below + 2048);
+      for (uint32_t byte = 0; byte < 4096; ++byte)
         cu->lds().write8(below + byte, kLdsSentinel);
       sim.memory->write64(kGlobal, kGlobalValue);
 
@@ -809,7 +857,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaLdsAddressDoesNotWrapPastTheAllocation) {
       EXPECT_TRUE(tensor_dma_lds_ranges(state).empty());
 
       EXPECT_EQ(resume_tensor_dma_state(state, *wf), amdgpu::VmAccessOutcome::Complete);
-      for (uint32_t byte = 0; byte < 512; ++byte)
+      for (uint32_t byte = 0; byte < 4096; ++byte)
         EXPECT_EQ(cu->lds().read8(below + byte), kLdsSentinel) << byte;
       // A load's data is discarded. A store reads its dropped LDS bytes as zero,
       // which is the simulator's modeling choice rather than an ISA rule.
@@ -859,10 +907,10 @@ TEST(Gfx1250ExecutionTest, TensorDmaBarrierMustFitOwnedLds) {
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
-  cu->allocate_lds(256);
-  wf->set_lds_base(cu->allocate_lds(256));
-  wf->set_lds_size(256);
-  const uint32_t neighbour = cu->allocate_lds(256);
+  cu->allocate_lds(2048);
+  wf->set_lds_base(cu->allocate_lds(2048));
+  wf->set_lds_size(2048);
+  const uint32_t neighbour = cu->allocate_lds(2048);
   ASSERT_EQ(neighbour, wf->lds_base() + wf->lds_size());
   constexpr uint64_t kGlobal = 0x1b0000;
   write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
@@ -873,7 +921,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaBarrierMustFitOwnedLds) {
     auto encoding = words;
     if (store)
       encoding[0] = 0xd0714001u;
-    for (uint32_t barrier : {256u, 0x7fff8u}) {
+    for (uint32_t barrier : {2048u, 0x7fff8u}) {
       SCOPED_TRACE(store);
       SCOPED_TRACE(barrier);
       write_wave_sgpr(*cu, *wf, 13, (1u << 16) | (barrier >> 3));
@@ -901,7 +949,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaBarrierMustFitOwnedLds) {
   empty.count = 1;
   empty.elem_size = 4;
   empty.atomic_barrier = true;
-  empty.atomic_barrier_addr = 256;
+  empty.atomic_barrier_addr = 2048;
   TensorDmaState invalid_empty(empty, false);
   EXPECT_TRUE(prepare_tensor(invalid_empty, *wf).failed());
   EXPECT_TRUE(invalid_empty.elements.empty());
@@ -1880,7 +1928,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTileValidatesItsBarrierAddressAndNullTens
   };
   for (const Case &c : kCases) {
     for (const bool store : {false, true}) {
-      for (const uint32_t barrier : {248u, 256u}) {
+      for (const uint32_t barrier : {248u, 2048u}) {
         SCOPED_TRACE(testing::Message()
                      << c.name << (store ? " store" : " load") << ", barrier at " << barrier);
         Gfx1250Sim sim;
@@ -1888,9 +1936,9 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTileValidatesItsBarrierAddressAndNullTens
         auto *cu = sim.cu();
         auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
         ASSERT_NE(wf, nullptr);
-        wf->set_lds_base(cu->allocate_lds(256));
-        wf->set_lds_size(256);
-        const uint32_t neighbour = cu->allocate_lds(256);
+        wf->set_lds_base(cu->allocate_lds(2048));
+        wf->set_lds_size(2048);
+        const uint32_t neighbour = cu->allocate_lds(2048);
         ASSERT_EQ(neighbour, wf->lds_base() + wf->lds_size());
         cu->lds().write64(neighbour, 0);
 
@@ -1908,7 +1956,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaNopTileValidatesItsBarrierAddressAndNullTens
                                                0x7c7c0c00u};
         auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
         ASSERT_NE(inst, nullptr);
-        const bool past_the_end = barrier + 8 > 256;
+        const bool past_the_end = barrier + 8 > 2048;
         EXPECT_EQ(cu->execute_instruction(inst.get(), *wf).succeeded(),
                   !(c.validates_barrier && past_the_end));
         EXPECT_EQ(cu->lds().read64(neighbour), 0u);
@@ -3057,7 +3105,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateMasksPlanesBeyondTensorDimension) {
             (std::vector<uint64_t>{kGlobal, kGlobal + sizeof(uint32_t)}));
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaIterateRejectsOverlappingStrides) {
+TEST(Gfx1250ExecutionTest, TensorDmaIterateCopiesInBoundsOverlappingRows) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -3066,26 +3114,125 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateRejectsOverlappingStrides) {
   wf->set_lds_base(cu->allocate_lds(256));
   wf->set_lds_size(256);
 
-  write_tensor_dma_d0(*cu, *wf, 0, 0x135000);
+  constexpr uint64_t kGlobal = 0x135000;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
   write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
   write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
-  write_wave_sgpr(*cu, *wf, 14, 2u << 16);                // tensor dim1.
-  write_wave_sgpr(*cu, *wf, 15, 1u << 16);                // tile dim0.
-  write_wave_sgpr(*cu, *wf, 16, 1u);                      // tile dim1.
-  write_wave_sgpr(*cu, *wf, 17, 1u);                      // Overlaps tensor dim0.
-  write_wave_sgpr(*cu, *wf, 18, 0);
-  write_wave_sgpr(*cu, *wf, 19, 0);
-  write_wave_sgpr(*cu, *wf, 20, 0);
-  write_wave_sgpr(*cu, *wf, 21, 1u);
+  write_wave_sgpr(*cu, *wf, 15, 2u << 16);                // tile dim0.
+  write_wave_sgpr(*cu, *wf, 21, 2u);                      // LDS increment in elements.
   write_wave_sgpr(*cu, *wf, 22, 1u);
-  write_wave_sgpr(*cu, *wf, 23, 1u << 16);
 
   const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
   auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
   ASSERT_NE(load, nullptr);
-  EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).failed());
-  EXPECT_EQ(wf->instruction_execution_error(),
-            amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+  const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x7c140c00u};
+  auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
+  ASSERT_NE(store, nullptr);
+
+  constexpr std::array<uint32_t, 4> global_indices{0, 1, 1, 2};
+  for (const uint32_t row_dim : {1u, 2u}) {
+    SCOPED_TRACE(row_dim);
+    write_wave_sgpr(*cu, *wf, 23, 1u << 16); // Two iterations fit.
+    // Use two active axes, also when the row resides in dimension 2.
+    write_wave_sgpr(*cu, *wf, 14, row_dim == 1 ? 2u << 16 : 0u); // tensor dim1.
+    write_wave_sgpr(*cu, *wf, 16, row_dim == 1 ? 1u : 1u << 16); // tile dim1 / dim2.
+    write_wave_sgpr(*cu, *wf, 17, row_dim == 1 ? 1u : 99u);      // dim0 stride.
+    write_wave_sgpr(*cu, *wf, 18, row_dim == 2 ? 1u << 16 : 0u); // dim1 stride.
+    write_wave_sgpr(*cu, *wf, 19, 0);
+    write_wave_sgpr(*cu, *wf, 20, row_dim == 2 ? 2u : 0u); // tensor dim2.
+    for (uint32_t global_index = 0; global_index < 4; ++global_index)
+      write_global_u32(*sim.memory, kGlobal + 4 * global_index, 1000 + global_index);
+    ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+    for (uint32_t tile_index = 0; tile_index < global_indices.size(); ++tile_index) {
+      EXPECT_EQ(cu->lds().read32(wf->lds_base() + 4 * tile_index),
+                1000 + global_indices[tile_index]);
+      cu->lds().write32(wf->lds_base() + 4 * tile_index, 2000 + global_indices[tile_index]);
+    }
+    ASSERT_TRUE(cu->execute_instruction(store.get(), *wf).succeeded());
+    for (uint32_t global_index = 0; global_index < 3; ++global_index)
+      EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 4 * global_index), 2000 + global_index);
+    EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 12), 1003u);
+
+    // A third tile would step past the last row of this overlapping layout.
+    write_wave_sgpr(*cu, *wf, 23, 2u << 16);
+    for (auto *inst : {load.get(), store.get()}) {
+      EXPECT_TRUE(cu->execute_instruction(inst, *wf).failed());
+      EXPECT_EQ(wf->instruction_execution_error(),
+                amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    }
+  }
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIterateChecksAdvancingStepsAcrossUnusedDimension) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+
+  constexpr uint64_t kGlobal = 0x135000;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate.
+  write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // Tensor {2, 2, 3}.
+  write_wave_sgpr(*cu, *wf, 14, 2u << 16);
+  write_wave_sgpr(*cu, *wf, 15, 2u << 16); // Tile {2, tile_dim1, 1}.
+  write_wave_sgpr(*cu, *wf, 17, 2);        // Strides {2, 4}.
+  write_wave_sgpr(*cu, *wf, 18, 4u << 16);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 3);
+  write_wave_sgpr(*cu, *wf, 21, 2);        // LDS increment in elements.
+  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // Two iterations.
+  const std::array<uint32_t, 3> load_words{0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  const std::array<uint32_t, 3> store_words{0xd0714001u, 0x7c000000u, 0x7c140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(store, nullptr);
+
+  struct Case {
+    uint32_t tile_dim1, global_increment;
+    bool supported;
+  };
+  constexpr Case cases[] = {
+      {0, 2, false}, // Step along the unused axis.
+      {1, 2, true},  // Same step with that axis active.
+      {0, 4, true},  // Whole row along dimension 2.
+      {0, 0, true},  // Repeated tile at the same origin.
+  };
+  for (const auto &[tile_dim1, increment, supported] : cases) {
+    SCOPED_TRACE(::testing::Message() << "tile_dim1=" << tile_dim1 << " increment=" << increment);
+    write_wave_sgpr(*cu, *wf, 16, tile_dim1 | (1u << 16));
+    write_wave_sgpr(*cu, *wf, 22, increment);
+    std::array<uint32_t, 6> expected_global{};
+    for (uint32_t global_index = 0; global_index < expected_global.size(); ++global_index) {
+      expected_global[global_index] = 1000 + global_index;
+      write_global_u32(*sim.memory, kGlobal + 4 * global_index, expected_global[global_index]);
+    }
+    constexpr uint32_t kSentinel = 0xdeadbeef;
+    for (uint32_t tile_index = 0; tile_index < 4; ++tile_index)
+      cu->lds().write32(wf->lds_base() + 4 * tile_index, kSentinel);
+
+    const auto expected_error = supported
+                                    ? amdgpu::InstructionExecutionError::None
+                                    : amdgpu::InstructionExecutionError::UnsupportedOperandValue;
+    EXPECT_EQ(cu->execute_instruction(load.get(), *wf).succeeded(), supported);
+    EXPECT_EQ(wf->instruction_execution_error(), expected_error);
+    for (uint32_t tile_index = 0; tile_index < 4; ++tile_index) {
+      const uint32_t global_element = (tile_index / 2) * increment + tile_index % 2;
+      EXPECT_EQ(cu->lds().read32(wf->lds_base() + 4 * tile_index),
+                supported ? 1000 + global_element : kSentinel);
+      cu->lds().write32(wf->lds_base() + 4 * tile_index, 2000 + global_element);
+      if (supported)
+        expected_global[global_element] = 2000 + global_element;
+    }
+    EXPECT_EQ(cu->execute_instruction(store.get(), *wf).succeeded(), supported);
+    EXPECT_EQ(wf->instruction_execution_error(), expected_error);
+    for (uint32_t global_index = 0; global_index < expected_global.size(); ++global_index)
+      EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 4 * global_index),
+                expected_global[global_index]);
+  }
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaIterateAllowsAliasedUnitExtent) {
@@ -3467,42 +3614,56 @@ TEST(Gfx1250ExecutionTest, DsAtomicAsyncBarrierArriveFlipsRawBarrierPhase) {
   EXPECT_TRUE(wf->wait_counters().empty());
 }
 
-TEST(Gfx1250ExecutionTest, LocalMemPipelineUsesInjectedBarrierDecrementPayload) {
+TEST(Gfx1250ExecutionTest, DsAtomicBarrierArriveSubtractsLowDwordAndReturnsOldCell) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
-  wf->set_exec(1);
   wf->set_lds_base(cu->allocate_lds(256));
   wf->set_lds_size(256);
 
-  constexpr uint32_t kBarrierLdsAddr = 64;
-  cu->write_vgpr(wf->vgpr_alloc().base + 0, 0, kBarrierLdsAddr);
-  cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, amdgpu::lds_barrier_cell_init_state(2));
+  struct Case {
+    uint64_t before;
+    uint64_t update;
+    uint32_t next_state;
+  };
+  constexpr Case cases[] = {
+      {0x0000000300000000ull, 2, 0xe0000003},           {0x0000000300000000ull, 6, 0xe0000003},
+      {0x0000000320000002ull, 5, 0x00000003},           // Borrow from a nonzero phase.
+      {0x0000000300000000ull, 0x20000000u, 0xe0000000}, // New pending sign bit is clear.
+      {0x0000000300000000ull, 0x10000001u, 0xefffffff}, // Pending borrowed, bit 28 clear.
+      {0x0000000310000000ull, 0, 0x00000003},           // Zero update, bit 28 already set.
+      {0x0000000200000002ull, 0x100000001ull, 1},       {0x0000000200000002ull, 0x100000000ull, 2},
+  };
+  wf->set_exec((1u << std::size(cases)) - 1);
+  const uint32_t base = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < std::size(cases); ++lane) {
+    const Case &test_case = cases[lane];
+    const uint32_t addr = lane * 8;
+    cu->lds().write64(wf->lds_base() + addr, test_case.before);
+    cu->write_vgpr(base, lane, addr);
+    cu->write_vgpr(base + 2, lane, static_cast<uint32_t>(test_case.update));
+    cu->write_vgpr(base + 3, lane, static_cast<uint32_t>(test_case.update >> 32));
+  }
 
-  const std::array<uint32_t, 2> words = {0xd9580000u, 0x00000000u};
-  auto *arrive_inst = new cdna5::DsAtomicAsyncBarrierArriveB64Vds(words.data());
-  arrive_inst->execute_impl(*wf);
-
-  auto *state = arrive_inst->data_as<amdgpu::VectorMemState>();
-  const uint64_t decrement = 2;
-  state->store_data.resize(static_cast<size_t>(wf->wf_size()) * sizeof(decrement));
-  std::memcpy(state->store_data.data(), &decrement, sizeof(decrement));
-
+  const auto words =
+      cdna5::build_vds(cdna5::kDsAtomicBarrierArriveRtnB64Vds, {.addr = 0, .data0 = 2, .vdst = 4});
+  auto inst = std::make_unique<cdna5::DsAtomicBarrierArriveRtnB64Vds>(words.data());
+  ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   amdgpu::LocalMemPipeline local_pipeline;
-  local_pipeline.issue(arrive_inst, *wf);
-
-  const uint64_t expected =
-      amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_init_state(2), decrement);
-  EXPECT_EQ(cu->lds().read64(wf->lds_base() + kBarrierLdsAddr), expected);
-  EXPECT_EQ(expected, (1ull << 32) |
-                          (amdgpu::kLdsBarrierCellPhaseMask << amdgpu::kLdsBarrierCellPhaseShift) |
-                          1ull);
-  EXPECT_TRUE(wf->wait_counters().empty());
+  ASSERT_EQ(local_pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+  for (uint32_t lane = 0; lane < std::size(cases); ++lane) {
+    SCOPED_TRACE(lane);
+    const Case &test_case = cases[lane];
+    EXPECT_EQ(cu->lds().read64(wf->lds_base() + lane * 8),
+              (test_case.before & ~amdgpu::kLdsBarrierCellBarStateMask) | test_case.next_state);
+    EXPECT_EQ(cu->read_vgpr(base + 4, lane), static_cast<uint32_t>(test_case.before));
+    EXPECT_EQ(cu->read_vgpr(base + 5, lane), static_cast<uint32_t>(test_case.before >> 32));
+  }
 }
 
-TEST(Gfx1250ExecutionTest, LdsBarrierCellHandlesSingleAndBatchedArrivals) {
+TEST(Gfx1250ExecutionTest, LdsBarrierCellHandlesSingleArrivals) {
   uint64_t state = amdgpu::lds_barrier_cell_init_state(2);
   EXPECT_EQ(state, (1ull << 32) | 1ull);
 
@@ -3522,15 +3683,6 @@ TEST(Gfx1250ExecutionTest, LdsBarrierCellHandlesSingleAndBatchedArrivals) {
   EXPECT_EQ(amdgpu::lds_barrier_cell_update_arrive(drained, 0), drained);
   EXPECT_EQ(amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_init_state(3), 0),
             amdgpu::lds_barrier_cell_init_state(3));
-
-  uint64_t iterated = amdgpu::lds_barrier_cell_init_state(2);
-  for (int i = 0; i < 5; ++i)
-    iterated = amdgpu::lds_barrier_cell_update_arrive(iterated);
-  const uint64_t batched =
-      amdgpu::lds_barrier_cell_update_arrive(amdgpu::lds_barrier_cell_init_state(2), 5);
-  EXPECT_EQ(batched, iterated);
-  EXPECT_EQ(batched, (1ull << 32) | (0x6ull << amdgpu::kLdsBarrierCellPhaseShift));
-  EXPECT_FALSE(amdgpu::lds_barrier_cell_phase_parity(batched));
 
   for (uint32_t arrivals_per_phase : {0u, 1u}) {
     state = amdgpu::lds_barrier_cell_init_state(arrivals_per_phase);

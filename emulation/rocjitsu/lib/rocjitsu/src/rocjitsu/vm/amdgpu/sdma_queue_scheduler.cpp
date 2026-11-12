@@ -16,6 +16,7 @@
 #include <exception>
 #include <format>
 #include <limits>
+#include <system_error>
 #include <utility>
 
 namespace rocjitsu::amdgpu {
@@ -133,6 +134,8 @@ SdmaQueueScheduler::Handle SdmaQueueScheduler::allocate_locked(std::shared_ptr<Q
 void SdmaQueueScheduler::ensure_worker_locked() {
   if (worker_.joinable())
     return;
+  if (std::exchange(fail_next_worker_start_for_testing_, false))
+    throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
   worker_ = std::jthread([this](std::stop_token stop_token) { worker_loop(stop_token); });
 }
 

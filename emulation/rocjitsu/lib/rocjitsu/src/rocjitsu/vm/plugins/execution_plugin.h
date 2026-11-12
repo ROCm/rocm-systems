@@ -28,6 +28,19 @@
 
 namespace rocjitsu {
 
+/// The kind of barrier passed to ExecutionPlugin::onAmdgpuBarrierResolved.
+enum class BarrierKind : uint8_t {
+  /// A workgroup barrier or workgroup trap barrier. It resolves only after
+  /// every wave of the workgroup has arrived or ended.
+  Workgroup,
+  /// A named barrier. It counts signals against a member count set by the
+  /// program and notifies the waves that joined it.
+  Named,
+  /// A cluster barrier or cluster trap barrier. One signal from any wave of
+  /// a workgroup counts for the whole workgroup.
+  Cluster,
+};
+
 /// @brief Abstract plugin interface for execution hooks.
 ///
 /// Plugins receive callbacks at key points during simulation execution.
@@ -270,7 +283,8 @@ public:
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontDispatched(amdgpu::Wavefront & /*wf*/) {}
 
-  /// Called when a wavefront terminates normally, before its resources are freed.
+  /// Called when a wavefront terminates normally, after its memory operations
+  /// have drained and before its resources are freed.
   /// Dispatch cancellation uses onAmdgpuWavefrontCancelled instead.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront & /*wf*/) {}
@@ -342,8 +356,11 @@ public:
   virtual void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront * /*wf*/, RegisterRef /*reg*/) {}
 
   /// Called with the waves synchronized by a completed barrier domain.
+  /// Workgroup callbacks include all surviving waves of one workgroup.
+  /// Waves that ended before the barrier resolved are not included.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
-  virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
+  virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/,
+                                       BarrierKind /*kind*/) {}
 
   /// Whether this plugin consumes onAmdgpuMemoryAccessRouted(). Building the
   /// observation is real work on the per-instruction path, so a plugin that
@@ -369,6 +386,10 @@ public:
   /// conservative default preserves existing plugin behavior: callbacks
   /// continue unless a plugin explicitly opts out.
   virtual bool observes_sgpr_reads() const { return true; }
+
+  /// Opt in to reads of the LDS-direct VALU source. Sampled when the plugin is registered.
+  virtual bool observes_lds_direct_reads() const { return false; }
+  virtual void onAmdgpuLdsDirectRead(const amdgpu::Wavefront &, uint32_t, uint32_t, uint32_t) {}
 
 private:
   friend class ExecutionPluginGroup;
