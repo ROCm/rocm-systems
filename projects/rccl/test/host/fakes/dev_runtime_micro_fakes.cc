@@ -489,9 +489,11 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 // its answer.
 
 // The real ncclGinDevCommSetup records a non-zero ginContextCount and a valid
-// ginHandles[0] on success; both gate ncclGinDevCommFree in ncclDevCommDestroy
-// and on the create-failure path. The default mirrors that contract so a test
-// driving the create path past the GIN gate can observe the leak-release.
+// ginHandles[0] on success. The create-failure path frees GIN only once setup has
+// succeeded (ginDevCommSetupDone); ginContextCount stays non-zero so the
+// ncclGinDevCommClearFields check has something to clear. The default mirrors
+// that contract so a test driving the create path past the GIN gate can observe
+// the leak-release.
 static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
                                            struct ncclDevComm* devComm, uint32_t) {
   devComm->ginContextCount = 1;
@@ -518,7 +520,6 @@ void ncclGinDevCommClearFields(struct ncclDevComm* devComm) {
   devComm->ginContextCount = 0;
   for (auto& handle : devComm->ginHandles) handle = nullptr;
 }
-#undef ASSERT_HOOK_MATCHES_PROD
 
 // The enqueue-rearch job path: collective_stubs.cc reads ncclParamEnqueueRearchEnable
 // through g_loadParam (default 0), so it is reached only when a test sets

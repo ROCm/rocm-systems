@@ -64,12 +64,9 @@ extern std::function<ncclResult_t(struct ncclComm*, void*[NCCL_GIN_MAX_CONNECTIO
                                   uint32_t const[NCCL_GIN_MAX_ACTIVE_BACKENDS])>
     g_devrGinDeregister;
 
-// GIN devcomm lifecycle. The setup default records a non-zero ginContextCount so
-// the create path's fail handler reaches ncclGinDevCommFree; the free default is
-// a no-op, counted via ScopedHook to verify the leak-release fires exactly once.
-extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
-                                  uint32_t)>
-    g_devrGinDevCommSetup;
+// Called on the create fail path once ncclGinDevCommSetup has succeeded. The
+// default is a no-op, counted via ScopedHook to verify the leak-release fires
+// exactly once.
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevComm const*)> g_devrGinDevCommFree;
 
 // Reached when a test sets ENQUEUE_REARCH_ENABLE through g_loadParam (fakes/nccl_fakes.h).

@@ -7229,8 +7229,9 @@ TEST_F(DevrCommCreateInternalTest, LateStageFailureFreesGinDevComm) {
   ScopedHook streamCreate(g_hipStreamCreateWithFlags,
                           [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
   // Pin that the free gets the devComm setup filled in (the 0xACE handle the
-  // setup default records), not just that the free was called -- this is the
-  // struct identity the compat temporary-buffer path depends on.
+  // setup default records), not just that the free was called. This fixture
+  // zeroes the compat struct, so it runs on &outDevComm and does not exercise
+  // the compat temporary-buffer path.
   ScopedHook ginFree(g_devrGinDevCommFree,
                      [](struct ncclComm*, struct ncclDevComm const* dc) {
                        EXPECT_EQ(dc->ginHandles[0], reinterpret_cast<void*>(0xACE));
