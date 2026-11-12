@@ -283,9 +283,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   from `mgmt-task-enq-test.cc`); suite `MgmtTaskEnq*`. Its own binary because
   `fakes/mgmt_task_enq_fakes.cc`, which the other targets link, fakes `ncclMgmtTaskEnqueue`.
   See `test_categories_micro_mgmt_task_enq.yaml`.
-- **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suite
-  `CeCollMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`, both in
-  `ce-coll-test.cc`. Its own binary because every other target links
+- **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suites
+  `CeCollMicrotest.*`, `CeInitMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`,
+  all in `ce-coll-test.cc`. Its own binary because every other target links
   `fakes/ce_fakes.cc`, which fakes the symbols this file defines, and the
   `rccl-UnitTestsMicroInit` cleanup-order oracle needs the fake `ncclCeFinalize`
   in `fakes/nccl_stubs.cc`, which this target drops via
