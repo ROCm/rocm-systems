@@ -10,6 +10,13 @@
 //! Layout-sensitive records are checked by compile-time assertions and ABI
 //! tests where the public contract requires an exact size or field offset.
 
+/// Native code-object input handle, matching `hsa_file_t` in `hsa.h`.
+#[cfg(unix)]
+pub type HsaFile = std::ffi::c_int;
+/// Native code-object input handle, matching `hsa_file_t` in `hsa.h`.
+#[cfg(windows)]
+pub type HsaFile = *mut std::ffi::c_void;
+
 use std::ffi::{c_char, c_void};
 
 /// Numeric `hsa_status_t` result returned by HSA C entry points.

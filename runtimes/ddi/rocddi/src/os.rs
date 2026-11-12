@@ -21,7 +21,7 @@ use linux as platform;
 
 #[cfg(target_os = "linux")]
 pub(crate) use platform::{
-    HostAllocation, HostReservation, host_clock, host_page_size, native_error,
+    HostAllocation, HostReservation, file, host_clock, host_page_size, native_error,
 };
 
 #[cfg(target_os = "linux")]
