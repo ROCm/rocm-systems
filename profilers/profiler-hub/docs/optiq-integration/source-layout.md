@@ -85,7 +85,7 @@ profiler-hub/
 | `reader_impl.hpp` | Reader | `reader_t::impl`, the abstract per-format backend: catalog build, timeline, details, correlation, tables, summaries, and histograms. |
 | `reader_catalog.hpp`, `reader_catalog.cpp` | Reader | The shared in-memory catalog of strings, info rows, tracks, and lookup maps, and its schema-3 builders. |
 | `populate_reader_catalog.hpp`, `populate_reader_catalog.cpp` | Reader | Fills one catalog in parallel across the pool's connections. |
-| `file_probe.cpp`, `file_probe_failure.hpp` | Reader | Detects a rocpd SQLite file and reads its schema family and version without loading it. The exception carries a failed probe result. |
+| `file_probe.cpp`, `file_probe_failure.hpp` | Reader | Checks that the file exists, is a regular file and is readable, then asks each format registry entry in order whether the file is its own and returns that entry's probe result, without loading the file. The exception carries a failed probe result. |
 | `event_query.hpp`, `event_query.cpp` | Reader | The resolved table query (time window, tracks, string and kernel-symbol ids) and case-insensitive term matching. |
 | `event_partitions.hpp`, `event_partitions.cpp` | Reader | Splits an event id span into ranges for parallel reads and merges the results by start time. |
 | `depth_tracker.hpp` | Reader | Gives each event the lowest free nesting level as events are added in start order. |
@@ -161,7 +161,13 @@ profiler-hub/
 
 | File | Role | Purpose |
 |---|---|---|
-| `trace_formats.hpp`, `trace_formats.cpp` | Shared | The format registry. Maps a probed schema and major version to a reader factory and a trim-rule factory. Entries are compiled in by the format switches. |
+| `trace_formats.hpp`, `trace_formats.cpp` | Shared | The format registry. One entry per format; an entry recognises its files, probes them, says which versions this build reads, and maps a version to a reader factory and a trim-rule factory. The rocpd entry is always built; the format switches remove a version's reader and trim sources. |
+
+### source/formats/rocpd
+
+| File | Role | Purpose |
+|---|---|---|
+| `rocpd_probe.hpp`, `rocpd_probe.cpp` | Reader | Recognises a rocpd file by the SQLite header and probes its metadata tables for the schema version and GUIDs. |
 
 ### source/formats/rocpd_v2 (legacy .rpd)
 

@@ -44,7 +44,7 @@ class thread_pool;
 /**
  * @brief Detects whether a reader can open @p path.
  *        Opens a recognized file read-only and does not create or modify it.
- *        Another format is added by registering a detector; another schema by
+ *        Another format is added by registering an entry; another schema by
  *        registering the versions its reader accepts.
  */
 [[nodiscard]] reader_types::file_probe_result_t
