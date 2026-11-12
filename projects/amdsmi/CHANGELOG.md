@@ -286,6 +286,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi` using the `amdsmi` Python library of another ROCm install**.  
   - When `ROCM_PATH` or `ROCM_HOME` named a different ROCm install, `amd-smi` loaded that install's library, so it either failed with an `AttributeError` or reported the other install's library and ROCm versions. `ROCM_PATH` and `ROCM_HOME` no longer redirect which `amdsmi` Python package `amd-smi` loads.
 
+- **Fixed wrong per-XCP metrics on GPUs that report gpu_metrics v1.8**.  
+  - On MI300-series and MI350-series GPUs whose amdgpu driver publishes gpu_metrics v1.8 (for example Linux 6.16 to 6.18), `xcp_stats` for XCPs 1-7 were read from the wrong place, `pcie_lc_perf_other_end_recovery` showed `N/A`, and `temperature_xcd` showed values from another field instead of `N/A`.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
