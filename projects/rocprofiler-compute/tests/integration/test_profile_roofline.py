@@ -5,6 +5,7 @@
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import common
 import pytest
@@ -100,11 +101,7 @@ def test_roofline_workload_dir_not_set_error():
         from roofline.roofline_main import Roofline
         from utils.specs import generate_machine_specs
 
-        class MockArgs:
-            def __init__(self):
-                self.roof_only = True
-
-        args = MockArgs()
+        args = SimpleNamespace()
         mspec = generate_machine_specs(None, None)
 
         run_parameters = {

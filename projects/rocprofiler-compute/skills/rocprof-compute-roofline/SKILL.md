@@ -24,13 +24,14 @@ rocprof-compute profile --name <workload_name> --roofline -- <application> <args
 On ROCm 10.2 and earlier, use `-b roof` instead of `--roofline`.
 
 Collecting it runs microbenchmarks in addition to profiling the application,
-which takes extra time. An existing profile already has roofline unless it was
-collected with `--no-roof`, or with a `-b` list that left out `roof`.
+which takes extra time. They are skipped when `-b` or `--set` selects blocks
+that leave out roofline (block 4), or with the deprecated `--no-roof`, so an
+existing profile collected that way has no roofline data.
 
 MI100 (gfx908) does not support the roofline microbenchmarks. Every other
-supported architecture does. On MI100 the benchmark is skipped and the profile
-still succeeds, so a missing roofline there is not a mistake in how the profile
-was run. Never tell an MI100 user to re-profile without `--no-roof`; use
+supported architecture does. On MI100 a full profile skips the benchmark and
+still succeeds, and selecting roofline fails, so a missing roofline there is not
+a mistake in how the profile was run. Never tell an MI100 user to re-profile to get roofline; use
 Speed-of-Light and the `rocprof-compute-memory` skill instead. Confirm support
 for a new architecture against
 [compatible-accelerators.rst](../../docs/reference/compatible-accelerators.rst).
@@ -59,8 +60,8 @@ also runs the roofline benchmarks.
 - `--set <set_name>` collects a predefined topic in one pass.
   `rocprof-compute profile --list-sets` lists the sets.
 - Add `-k <kernel_name>` when the user names the kernels that matter.
-- Add `--no-roof` unless the question is about roofline. A `-b` list without
-  block 4 (`roof`) already skips it.
+- Unless the question is about roofline, select blocks with `-b` and leave out
+  block 4 (`roof`), so the roofline benchmark is skipped.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
@@ -126,7 +127,7 @@ To compare many kernels, write the
 
 | Cause | What to do |
 |---|---|
-| Profiled with `--no-roof` | re-profile without it |
+| Profiled with `--no-roof`, or `-b`/`--set` without block 4 | re-profile without `--no-roof`; add `--roofline` to `-b`, or replace `--set` with `-b` blocks plus `--roofline` (no set includes block 4) |
 | Architecture has no microbenchmark support | use Speed-of-Light and the `rocprof-compute-memory` skill instead |
 | `roofline.csv` absent from the workload directory | the benchmark did not complete; check the profile log |
 
