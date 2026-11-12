@@ -90,59 +90,6 @@ def test_set_cache_sizes_rdna_uses_l0_and_l1():
 
 
 @pytest.mark.misc
-@pytest.mark.parametrize(
-    "num_cu, gl1_groups, expected_gl1, expected_warnings",
-    [
-        (56, [(256, 4), (256, 4)], 256 * 1024, []),
-        (64, [(256, 8)], 256 * 1024, []),
-        (56, [(256, 3), (256, 4)], None, []),
-        (
-            56,
-            [(128, 4), (128, 4), (256, 4), (256, 4)],
-            None,
-            ["Ambiguous GL1 cache size reported by AMD-SMI."],
-        ),
-    ],
-    ids=["split_groups", "single_group", "incomplete_groups", "ambiguous_sizes"],
-)
-def test_set_cache_sizes_navi48(
-    monkeypatch, num_cu, gl1_groups, expected_gl1, expected_warnings
-):
-    """RX 9070 cache groups preserve GL0, GL1, L2, and Infinity Cache capacity."""
-    warnings = []
-    monkeypatch.setattr(specs, "console_warning", warnings.append)
-    cache_info = {
-        "cache": [
-            {
-                "cache_level": level,
-                "cache_properties": ["DATA_CACHE", "SIMD_CACHE"],
-                "cache_size": size,
-                "num_cache_instance": instances,
-            }
-            for level, size, instances in [
-                (1, 32, num_cu),
-                (1, 16, num_cu // 2),
-                *((1, size, count) for size, count in gl1_groups),
-                (2, 8192, 1),
-                (3, 65536, 1),
-            ]
-        ]
-    }
-    cache_sizes = specs.set_cache_sizes(
-        "rdna4_navi48", num_cu, cache_info, num_dies=1, num_se=4, num_sa_se=2
-    )
-    expected = {
-        "L0": 32 * 1024,
-        "L2": 8 * 1024 * 1024,
-        "MALL": 64 * 1024 * 1024,
-    }
-    if expected_gl1 is not None:
-        expected["L1"] = expected_gl1
-    assert cache_sizes == expected
-    assert warnings == expected_warnings
-
-
-@pytest.mark.misc
 def test_set_cache_sizes_l2_and_mall():
     """L2 and MALL (L3) cache entries are correctly parsed and scaled by num_dies."""
     cache_info = {

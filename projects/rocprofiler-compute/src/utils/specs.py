@@ -157,13 +157,13 @@ def set_cache_sizes(
                 "skipping GL1 cache size detection"
             )
         else:
-            gl1_sizes = _shader_array_cache_sizes(
-                l1_data_caches, int(num_se) * int(num_sa_se)
-            )
-            if len(gl1_sizes) == 1:
-                cache_sizes["L1"] = gl1_sizes[0] * 1024
-            elif len(gl1_sizes) > 1:
-                console_warning("Ambiguous GL1 cache size reported by AMD-SMI.")
+            sa_level_cache = [
+                cache
+                for cache in l1_data_caches
+                if cache["num_cache_instance"] == int(num_se) * int(num_sa_se)
+            ]
+            if sa_level_cache:
+                cache_sizes["L1"] = int(sa_level_cache[0]["cache_size"]) * 1024
 
     for cache_values in cache_info["cache"]:
         if cache_values["cache_level"] == 2:
@@ -172,32 +172,6 @@ def set_cache_sizes(
             cache_sizes["MALL"] = int(cache_values["cache_size"]) * 1024 // num_dies
 
     return cache_sizes
-
-
-def _shader_array_cache_sizes(
-    l1_data_caches: List[Dict[str, Any]],
-    num_shader_arrays: int,
-) -> List[int]:
-    """Return candidate GL1 capacities in KB, one instance per shader array.
-
-    AMD-SMI can split equal-sized instances into groups by the number of CUs
-    sharing each cache. Return the sizes of groups that sum to the shader-array
-    count so the caller can diagnose ambiguity without choosing a capacity.
-    """
-    for cache in l1_data_caches:
-        if int(cache["num_cache_instance"]) == num_shader_arrays:
-            return [int(cache["cache_size"])]
-
-    instances_by_size: Dict[int, List[int]] = {}
-    for cache in l1_data_caches:
-        instances_by_size.setdefault(int(cache["cache_size"]), []).append(
-            int(cache["num_cache_instance"])
-        )
-    return [
-        size
-        for size, instances in instances_by_size.items()
-        if len(instances) > 1 and sum(instances) == num_shader_arrays
-    ]
 
 
 def _kw_only(cls: T) -> T:
