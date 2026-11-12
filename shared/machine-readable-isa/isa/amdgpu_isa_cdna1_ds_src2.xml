@@ -1,0 +1,1638 @@
+<IsaAdditions Id="cdna1-ds-src2" BaseArchitecture="AMD CDNA 1" BaseSchemaVersion="1.1.1">
+  <!-- MI100 ISA sections 11.3.3 and 12.13, table 90. LLVM DSInstructions.td defines the gfx908 DS_Real_m0_vi encodings at 0x80 through 0xd3. These operations have one explicit VGPR address. The second operand is read from the data share. -->
+  <EncodingIdentifierAdditions>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>128</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000000000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>129</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000000100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>130</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000001000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>131</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000001100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>132</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000010000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>133</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000010100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>134</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000011000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>135</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000011100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>136</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000100000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>137</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000100100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>138</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000101000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>139</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000101100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>141</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001000110100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>146</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001001001000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>147</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001001001100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>149</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001001010100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>192</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100000000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>193</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100000100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>194</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100001000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>195</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100001100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>196</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100010000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>197</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100010100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>198</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100011000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>199</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100011100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>200</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100100000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>201</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100100100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>202</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100101000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>203</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100101100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>205</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001100110100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>210</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001101001000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_DS</EncodingName>
+      <Opcode>211</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011011001101001100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+  </EncodingIdentifierAdditions>
+  <InstructionAdditions>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_ADD_SRC2_U32</InstructionName>
+      <Description>Apply add to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">128</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_SUB_SRC2_U32</InstructionName>
+      <Description>Apply sub to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">129</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_RSUB_SRC2_U32</InstructionName>
+      <Description>Apply rsub to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">130</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_INC_SRC2_U32</InstructionName>
+      <Description>Apply inc to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">131</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_DEC_SRC2_U32</InstructionName>
+      <Description>Apply dec to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">132</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_MIN_SRC2_I32</InstructionName>
+      <Description>Apply min to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">133</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_I32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_I32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_I32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_MAX_SRC2_I32</InstructionName>
+      <Description>Apply max to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">134</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_I32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_I32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_I32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_MIN_SRC2_U32</InstructionName>
+      <Description>Apply min to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">135</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_MAX_SRC2_U32</InstructionName>
+      <Description>Apply max to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">136</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_AND_SRC2_B32</InstructionName>
+      <Description>Apply and to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">137</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_OR_SRC2_B32</InstructionName>
+      <Description>Apply or to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">138</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_XOR_SRC2_B32</InstructionName>
+      <Description>Apply xor to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">139</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_WRITE_SRC2_B32</InstructionName>
+      <Description>Apply write to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">141</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_MIN_SRC2_F32</InstructionName>
+      <Description>Apply min to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">146</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_MAX_SRC2_F32</InstructionName>
+      <Description>Apply max to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">147</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_ADD_SRC2_F32</InstructionName>
+      <Description>Apply add to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">149</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_ADD_SRC2_U64</InstructionName>
+      <Description>Apply add to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">192</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_SUB_SRC2_U64</InstructionName>
+      <Description>Apply sub to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">193</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_RSUB_SRC2_U64</InstructionName>
+      <Description>Apply rsub to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">194</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_INC_SRC2_U64</InstructionName>
+      <Description>Apply inc to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">195</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_DEC_SRC2_U64</InstructionName>
+      <Description>Apply dec to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">196</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_MIN_SRC2_I64</InstructionName>
+      <Description>Apply min to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">197</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_I64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_I64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_I64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_MAX_SRC2_I64</InstructionName>
+      <Description>Apply max to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">198</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_I64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_I64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_I64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_MIN_SRC2_U64</InstructionName>
+      <Description>Apply min to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">199</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_MAX_SRC2_U64</InstructionName>
+      <Description>Apply max to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">200</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_U64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_AND_SRC2_B64</InstructionName>
+      <Description>Apply and to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">201</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_B64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_B64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_B64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_OR_SRC2_B64</InstructionName>
+      <Description>Apply or to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">202</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_B64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_B64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_B64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_XOR_SRC2_B64</InstructionName>
+      <Description>Apply xor to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">203</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_B64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_B64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_B64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_WRITE_SRC2_B64</InstructionName>
+      <Description>Apply write to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">205</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_B64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_B64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_MIN_SRC2_F64</InstructionName>
+      <Description>Apply min to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">210</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_F64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_F64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_F64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>DS_MAX_SRC2_F64</InstructionName>
+      <Description>Apply max to values addressed in the data share and write the result to the first address.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_DS</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">211</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>ADDR</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="2">
+              <DataFormatName>FMT_NUM_F64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="false" Output="true" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="3">
+              <DataFormatName>FMT_NUM_F64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="true" IsBinaryMicrocodeRequired="true" Order="4">
+              <DataFormatName>FMT_NUM_F64</DataFormatName>
+              <OperandType>OPR_DSMEM</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>ATOMIC</Subgroup>
+          <Subgroup>DATA_SHARE</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+  </InstructionAdditions>
+</IsaAdditions>

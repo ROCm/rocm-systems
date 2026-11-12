@@ -20,6 +20,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
+#include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "util/host_target.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
@@ -358,6 +359,69 @@ TEST(ExecutionPluginTest, SignalingCompareReadsOnlySelectedInputs) {
         EXPECT_EQ(reads[1].physical_reg, vb + 1);
         EXPECT_EQ(reads[1].lane_mask, 1u);
         EXPECT_EQ(reads[1].byte_mask, 3u);
+      }
+    }
+    wave->halt();
+  }
+}
+
+TEST(ExecutionPluginTest, Gfx11IndexedGdsUsesOneLaneForInputsAndResults) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    Wave32PluginFixture f(arch);
+    ASSERT_TRUE(f.cu);
+    auto *plugin = f.attach_ordering_plugin();
+    auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, 32);
+    ASSERT_NE(wave, nullptr);
+    auto decoder = Decoder::create(arch);
+    wave->set_m0(64);
+    const uint32_t base = wave->vgpr_alloc().base;
+    for (uint64_t active : {0u, 3u, 0x14u}) {
+      wave->set_exec(active);
+      for (bool gds : {false, true}) {
+        SCOPED_TRACE(testing::Message() << arch << " active=" << active << " gds=" << gds);
+        // DS_ADD_RTN_U32 v8, v2, v3.
+        const std::array words{0xd8800000u | (uint32_t{gds} << 17), 0x08000302u};
+        auto inst = decoder->decode_window(words);
+        ASSERT_TRUE(inst.succeeded());
+        const uint64_t expected = gds ? active & -active : active;
+        EXPECT_EQ(amdgpu::MemoryWaitScoreboard::result_lanes(*inst.value(), *wave), expected);
+        auto &scoreboard = wave->ensure_memory_wait_scoreboard();
+        scoreboard.clear();
+        f.cu->track_memory_wait(*inst.value(), *wave);
+        EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::Ds), gds || active ? 1u : 0u);
+        for (const auto &event : scoreboard.events())
+          EXPECT_EQ(event.lanes, expected);
+        scoreboard.clear();
+        plugin->events.clear();
+        ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
+        const auto *data = inst.value()->data_as<amdgpu::VectorMemState>();
+        ASSERT_NE(data, nullptr);
+        EXPECT_EQ(data->lane_mask, expected);
+        EXPECT_EQ(wave->exec(), active);
+        uint64_t reads[2]{};
+        for (const auto &event : vgpr_read_events(*plugin)) {
+          ASSERT_LT(event.physical_reg - base - 2, 2u);
+          reads[event.physical_reg - base - 2] |= event.lane_mask;
+        }
+        EXPECT_EQ(reads[0], expected);
+        EXPECT_EQ(reads[1], expected);
+      }
+      for (unsigned opcode : {61u, 62u}) { // DS_CONSUME and DS_APPEND broadcast.
+        const std::array words{0xd8020000u | (opcode << 18), 0x08000000u};
+        auto inst = decoder->decode_window(words);
+        ASSERT_TRUE(inst.succeeded());
+        EXPECT_EQ(amdgpu::MemoryWaitScoreboard::result_lanes(*inst.value(), *wave), active);
+        auto &scoreboard = wave->ensure_memory_wait_scoreboard();
+        scoreboard.clear();
+        f.cu->track_memory_wait(*inst.value(), *wave);
+        EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::Ds), 1u);
+        for (const auto &event : scoreboard.events())
+          EXPECT_EQ(event.lanes, active);
+        scoreboard.clear();
+        ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
+        const auto *data = inst.value()->data_as<amdgpu::VectorMemState>();
+        ASSERT_NE(data, nullptr);
+        EXPECT_EQ(data->lane_mask, active);
       }
     }
     wave->halt();
@@ -988,6 +1052,50 @@ TEST(ExecutionPluginTest, UniformDppCompareSourceWaitsOnlyWhenALaneReadsIt) {
     }
     wave->halt();
   }
+}
+
+TEST(ExecutionPluginTest, StreamoutDoesNotAcquireDataForUnallocatedReturnTuple) {
+  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_NE(f.cu, nullptr);
+  auto *observer = f.attach_ordering_plugin();
+  auto *wave = f.cu->dispatch_wf(0, 0x100, 104, 32, 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0xa);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  auto &state = wave->ensure_memory_wait_scoreboard();
+  for (uint32_t opcode : {0xd9ea0000u, 0xd9ee0000u}) { // ds_add/sub_gs_reg_rtn
+    for (const auto &[dst, offset] : {std::pair{30u, 32u}, {31u, 0u}, {31u, 32u}}) {
+      const bool fits = dst + (offset == 32 ? 2 : 1) <= 32;
+      const std::array words{opcode | offset, (dst << 24) | 0x300u};
+      auto decoded = decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      auto &inst = *decoded.value();
+      SCOPED_TRACE(inst.disassemble());
+      for (uint64_t pending_lane : {2u, 8u}) {
+        unsigned reports = 0;
+        state.clear();
+        state.bind(0x200, &reports,
+                   [](void *ctx, const auto &) { ++*static_cast<unsigned *>(ctx); });
+        constexpr auto counter = WaitCounterKind::Load;
+        state.add(
+            {state.issue(counter), 0x100, pending_lane, {RegClass::VGPR, 3, 1}, counter, 0xf});
+        state.check_instruction(inst, *wave);
+        EXPECT_EQ(reports, unsigned(fits && pending_lane == 2));
+      }
+      state.clear();
+      observer->events.clear();
+      ASSERT_TRUE(f.cu->execute_instruction(&inst, *wave).succeeded());
+      uint64_t source_lanes = 0;
+      for (const auto &read : vgpr_read_events(*observer)) {
+        EXPECT_EQ(read.physical_reg, wave->vgpr_alloc().base + 3);
+        source_lanes |= read.lane_mask;
+      }
+      EXPECT_EQ(source_lanes, fits ? 2u : 0u);
+      EXPECT_EQ(MemoryWaitScoreboard::result_lanes(inst, *wave), source_lanes);
+      EXPECT_EQ(wave->exec(), 0xau);
+    }
+  }
+  wave->halt();
 }
 
 TEST(ExecutionPluginTest, ValuSimdWriteObservationUsesActiveExecMask) {

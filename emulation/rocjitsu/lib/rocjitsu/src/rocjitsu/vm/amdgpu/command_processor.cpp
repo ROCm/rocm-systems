@@ -647,9 +647,12 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       cu->write_sgpr(sbase + sys_idx++, wg_id_z);
   }
   if (pkt.enable_wg_info) {
-    cu->write_sgpr(sbase + sys_idx,
-                   ShaderProcessorInput::workgroup_info(arch, pkt.wfs_per_workgroup, wf_index_in_wg,
-                                                        wf_index_in_wg));
+    // Without ordered append the ABI supplies the wave-in-group as the term.
+    // An ordered launch reserves terms when the whole workgroup commits below.
+    if (pkt.ordered_append == DispatchEntry::OrderedAppend::Disabled)
+      cu->write_sgpr(sbase + sys_idx,
+                     ShaderProcessorInput::workgroup_info(arch, pkt.wfs_per_workgroup,
+                                                          wf_index_in_wg, wf_index_in_wg));
     ++sys_idx;
   }
   if (properties.uses_ttmp_workgroup_ids) {
@@ -893,6 +896,8 @@ void CommandProcessor::startup() {
       });
   completion_->set_dispatch_retired_callback([this](const DispatchEntry &entry) {
     erase_cluster_workgroups(entry.dispatch_id);
+    if (gws_device_)
+      gws_device_->retire_ordered_dispatch(entry.process_id, entry.queue_id, entry.dispatch_id);
     dispatch_launch_metadata_.erase(entry.dispatch_id);
     // Resume fetch after the blocking packet's completion is durable.
     if (entry.blocks_following && engine()) {
@@ -1566,6 +1571,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
       // every XCD at once: the KFD paths sweep all command processors, and an
       // owner cascades to its replicas below. No XCD is left holding a grid that
       // can no longer retire. Unregistering a lone replica is not supported.
+      reset_ordered_ids(*queue);
       compute_queues_.erase(queue);
     }
   }
@@ -2538,7 +2544,8 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       }
     }
 
-    // All fallible per-wave work succeeded: commit WG bookkeeping and the cluster pin.
+    // All fallible per-wave work succeeded: commit the launch terms, WG and cluster pin.
+    ShaderProcessorInput::init_ordered_append(*cu, entry, wg_wavefronts);
     cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup,
                         entry.num_named_barriers);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
@@ -3167,6 +3174,8 @@ void CommandProcessor::service_command_streams(simdojo::Tick now) {
       if (entry.execution_begun)
         plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
       erase_cluster_workgroups(entry.dispatch_id);
+      if (gws_device_)
+        gws_device_->retire_ordered_dispatch(entry.process_id, entry.queue_id, entry.dispatch_id);
       state.entries.pop_front();
       if (flushed != VmAccessOutcome::Complete) {
         util::Logger::warn("PM4 queue failed: PM4 cache flush failed");
@@ -3276,6 +3285,13 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   dp.interrupt_sink = queue.interrupt_sink;
   dp.enabled_cus = queue.enabled_cus;
   dp.kernel_wave_size = (initiator & (1u << 15)) ? 32 : 64;
+  if ((initiator & (1u << 3)) &&
+      (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2)) {
+    dp.ordered_append = (initiator & (1u << 4)) ? DispatchEntry::OrderedAppend::PerWorkgroup
+                                                : DispatchEntry::OrderedAppend::PerWave;
+    // AMD's GFX10 compute-ring initialization programs 32 ordered IDs per physical CU.
+    dp.ordered_id_count = std::min<size_t>(cus_.size() * 32, GwsDevice::kComputeWaveIdMask + 1);
+  }
   if (RJ_AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT)) {
     dp.enable_private_segment = true;
     dp.pm4_scratch_waves_per_se = regs[kPm4ComputeTmpringSize] & 0xfff;
@@ -3444,9 +3460,20 @@ void CommandProcessor::cancel_queue_dispatches(const ComputeQueueRecord &queue) 
     erase_cluster_workgroups(dispatch_id);
     for (auto *cu : cus_)
       cu->abort_dispatch(dispatch_id);
+    if (gws_device_)
+      gws_device_->retire_ordered_dispatch(queue.process_id, queue.queue_id, dispatch_id);
     for (auto *spi : spis_)
       spi->release_wgp_dispatch(dispatch_id);
   }
+}
+
+void CommandProcessor::reset_ordered_ids(const ComputeQueueRecord &queue) {
+  // Production CUs share one device. Standalone CPs can own CU-local GDS stores.
+  if (gws_device_)
+    gws_device_->reset_ordered_ids(queue.process_id, queue.queue_id);
+  else
+    for (auto *cu : cus_)
+      cu->gws_device().reset_ordered_ids(queue.process_id, queue.queue_id);
 }
 
 void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs) {
@@ -3517,6 +3544,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
                 arm_stall_recheck(now);
               },
           .fault_queue = [this, &queue, &qs] { fail_pm4_queue(queue, qs); },
+          .reset_gds_wave_id = [this, &queue] { reset_ordered_ids(queue); },
       });
 }
 

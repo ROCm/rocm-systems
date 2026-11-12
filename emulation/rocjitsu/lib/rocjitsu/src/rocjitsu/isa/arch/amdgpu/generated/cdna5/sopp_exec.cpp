@@ -25,15 +25,15 @@ void SSethaltSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) {
-  constexpr uint32_t kSleepClocksPerUnit = 64;
-  wf.issue_sleep_with_credit(kSleepClocksPerUnit *
-                             (static_cast<uint32_t>(simm16.encoding_value_) & 0x7Fu));
+  const uint32_t control = simm16.encoding_value_;
+  wf.issue_sleep_with_credit((control & 0x8000u) ? amdgpu::Wavefront::kSleepForever
+                                                 : 64u * (control & 0x7fu));
   wf.cu().request_functional_yield();
 }
 
 void SMonitorSleepSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_clause_sopp(*this, wf); }
+void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SSetVgprMsbSopp::execute_impl(amdgpu::Wavefront &wf) {
   wf.set_vgpr_msb_mode(static_cast<uint8_t>(simm16.encoding_value_ & 0xffu));
@@ -62,8 +62,7 @@ void SDenormModeSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBarrierWaitSopp::execute_impl(amdgpu::Wavefront &wf) {
-  int32_t barrier_id = static_cast<int16_t>(simm16.encoding_value_);
-  wf.barrier_wait(barrier_id);
+  amdgpu::execute_s_barrier_wait_sopp(*this, wf);
 }
 
 void SBarrierLeaveSopp::execute_impl(amdgpu::Wavefront &wf) { wf.write_scc(wf.barrier_leave()); }
@@ -141,21 +140,13 @@ void SSendmsghaltSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sendmsghalt_sopp(*this, wf);
 }
 
-void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_incperflevel_sopp(*this, wf);
-}
+void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_decperflevel_sopp(*this, wf);
-}
+void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ttracedata_sopp(*this, wf);
-}
+void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void STtracedataImmSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ttracedata_imm_sopp(*this, wf);
-}
+void STtracedataImmSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_icache_inv_sopp(*this, wf);

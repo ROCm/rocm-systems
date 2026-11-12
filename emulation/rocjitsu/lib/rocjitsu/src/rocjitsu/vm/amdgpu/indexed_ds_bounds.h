@@ -39,10 +39,12 @@ inline std::optional<IndexedDsAccessBounds> indexed_ds_access_bounds(const Vecto
                                                                      rj_code_arch_t arch,
                                                                      uint32_t lds_base,
                                                                      uint32_t lds_size) {
-  if (!checks_entire_native_ds_address(arch) || state.flat_local_lane_mask)
+  if (!checks_entire_native_ds_address(arch) || state.flat_local_lane_mask || state.gds ||
+      (state.gds_m0 && arch != ROCJITSU_CODE_ARCH_RDNA1))
     return std::nullopt;
-  const uint64_t begin = lds_base;
-  const uint64_t end = begin + lds_size;
+  const uint64_t begin = state.ds_base(lds_base);
+  const uint64_t end = state.gds_m0 ? std::min<uint64_t>(65536, begin + (*state.gds_m0 & 0xffffu))
+                                    : begin + lds_size;
   return IndexedDsAccessBounds{begin, end, uint64_t{state.elem_size} * state.num_elems};
 }
 

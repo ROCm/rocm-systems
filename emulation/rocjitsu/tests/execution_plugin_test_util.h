@@ -299,6 +299,7 @@ struct CapturedAccess {
   uint64_t architectural_exec_lane_mask = 0;
   uint64_t valid_lane_mask = 0;
   uint64_t request_lane_mask = 0;
+  std::optional<uint64_t> ordered_count_result_lane_mask;
   uint64_t inactive_lane_mask = 0;
   uint64_t unknown_lane_mask = 0;
   uint64_t scratch_lane_mask = 0;
@@ -315,6 +316,7 @@ struct CapturedAccess {
   std::vector<uint64_t> pre_routing_addresses;
   std::vector<uint64_t> execution_addresses;
   std::vector<uint64_t> secondary_addresses;
+  std::vector<uint32_t> lds_source_addresses;
   std::optional<amdgpu::LdsAllocationRange> lds_allocation;
   uint64_t ds_suppressed_lanes = 0;
   uint64_t ds2_suppressed_lanes = 0;
@@ -385,6 +387,7 @@ public:
     captured.architectural_exec_lane_mask = access.architectural_exec_lane_mask;
     captured.valid_lane_mask = access.valid_lane_mask;
     captured.request_lane_mask = access.request_lane_mask;
+    captured.ordered_count_result_lane_mask = access.ordered_count_result_lane_mask;
     captured.inactive_lane_mask = access.inactive_lane_mask();
     captured.unknown_lane_mask = access.unknown_lane_mask();
     captured.scratch_lane_mask = access.scratch_lane_mask;
@@ -406,6 +409,8 @@ public:
                                           access.pre_routing_addresses.end());
     captured.secondary_addresses.assign(access.secondary_addresses.begin(),
                                         access.secondary_addresses.end());
+    captured.lds_source_addresses.assign(access.lds_source_addresses.begin(),
+                                         access.lds_source_addresses.end());
     captured.lds_allocation = access.lds_allocation;
     captured.ds_suppressed_lanes = access.ds_suppressed_lanes;
     captured.ds2_suppressed_lanes = access.ds2_suppressed_lanes;

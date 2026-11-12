@@ -556,8 +556,8 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     constexpr uint32_t live_fields = (1u << 6) | (1u << 8) | (15u << 9) | (1u << 16);
     raw_value =
         (wf.status_raw() & ~live_fields) | (uint32_t{wf.cu().trap_addresses().first != 0} << 6) |
-        (uint32_t{wf.exec() == 0} << 9) | (uint32_t{wf.vcc_mask() == 0} << 10) |
-        (uint32_t{wf.cu().in_multiwave_workgroup()} << 11) |
+        (uint32_t{wf.cu().shader_export_ready()} << 8) | (uint32_t{wf.exec() == 0} << 9) |
+        (uint32_t{wf.vcc_mask() == 0} << 10) | (uint32_t{wf.cu().in_multiwave_workgroup()} << 11) |
         (uint32_t{wf.state() == WfState::BARRIER} << 12) | (uint32_t{!wf.is_halted()} << 16);
     return HwregAccessResult::Success;
   }

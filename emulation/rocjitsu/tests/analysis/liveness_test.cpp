@@ -918,7 +918,7 @@ TEST(LivenessAnalysis, Gfx12GlobalTransposeKillsOnlyTheWaveSizedResult) {
   }
 }
 
-TEST(GeneratedInstDefUse, Gfx10SubvectorLoopReadsSavedMaskOnlyAtEnd) {
+TEST(GeneratedInstDefUse, Gfx10SubvectorLoopTracksSavedMaskReadsByTarget) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
     auto decoder = Decoder::create(arch);
     for (const auto op : {27u, 28u}) {
@@ -929,7 +929,8 @@ TEST(GeneratedInstDefUse, Gfx10SubvectorLoopReadsSavedMaskOnlyAtEnd) {
       ASSERT_EQ(inst.value()->mnemonic(), end ? "s_subvector_loop_end" : "s_subvector_loop_begin");
       const InstDefUse accesses(*inst.value(), 64);
       EXPECT_TRUE(accesses.defs.contains({RegClass::SGPR, 4, 1}));
-      EXPECT_EQ(accesses.uses.contains({RegClass::SGPR, 4, 1}), end);
+      EXPECT_EQ(accesses.uses.contains({RegClass::SGPR, 4, 1}),
+                end || arch == ROCJITSU_CODE_ARCH_RDNA1);
     }
   }
 }

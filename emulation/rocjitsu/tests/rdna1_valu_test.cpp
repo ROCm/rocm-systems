@@ -107,7 +107,8 @@ TEST_F(Rdna1ValuTest, StickyExceptionsFromHalfAddAndSignalingCompare) {
   wf->set_trapsts(0x100);
   ASSERT_NO_FATAL_FAILURE(execute(0x64000501)); // V_ADD_F16
   EXPECT_EQ(wf->trapsts(), 0x101u);
-  wf->set_trapsts(0x100u);
+  ASSERT_NO_FATAL_FAILURE(execute(0x7e008200)); // V_CLREXCP
+  EXPECT_EQ(wf->trapsts(), 0x100u);
   set(1, 0x7fc00000, 1);
   set(2, 0x3f800000, 1);
   ASSERT_NO_FATAL_FAILURE(execute(0xd402806a, 0x02020501)); // inactive QNaN
@@ -155,6 +156,52 @@ TEST_F(Rdna1ValuTest, LdsDirectBroadcastIncludesSignedSubwordsAndReadfirstlane) 
   wf->set_m0((2u << 16) | 16);
   ASSERT_NO_FATAL_FAILURE(execute(0x7e0004fe));
   EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base), 0x1234ff80u);
+}
+
+TEST_F(Rdna1ValuTest, InterpolationSelectsPrimitiveChannelAndAccumulates) {
+  constexpr uint32_t offset = 16;
+  wf->set_m0((1u << 16) | offset); // quad 1 starts the second primitive
+  wf->set_exec(0x11);
+  for (unsigned prim = 0; prim < 2; ++prim) {
+    const auto write = [&](unsigned slot, float value) {
+      // Attribute 1 follows both primitive blocks of attribute 0.
+      cu->lds().write32(wf->lds_base() + offset + 48 * (2 + prim) + slot * 4,
+                        std::bit_cast<uint32_t>(value));
+    };
+    write(2, 2.0f + prim); // P0.y
+    write(3, 4.0f + prim); // P10.y
+    write(9, 6.0f + prim); // P20.y
+    set(2, std::bit_cast<uint32_t>(2.f), 4 * prim);
+  }
+  set(5, 0xcafe, 1);
+  auto p1 = rdna1::build_vintrp(0, {.vsrc = 2, .attrchan = 1, .attr = 1, .vdst = 5});
+  ASSERT_NO_FATAL_FAILURE(execute(p1[0]));
+  EXPECT_EQ(std::bit_cast<float>(get(5)), 10.f);
+  EXPECT_EQ(std::bit_cast<float>(get(5, 4)), 13.f);
+  ASSERT_NO_FATAL_FAILURE(execute(0xd6010005, 0x02020441)); // P2.e64, attr1.y
+  EXPECT_EQ(std::bit_cast<float>(get(5)), 22.f);
+  EXPECT_EQ(std::bit_cast<float>(get(5, 4)), 27.f);
+  EXPECT_EQ(get(5, 1), 0xcafeu);
+  auto mov = rdna1::build_vintrp(2, {.vsrc = 2, .attrchan = 1, .attr = 1, .vdst = 5});
+  ASSERT_NO_FATAL_FAILURE(execute(mov[0])); // p0
+  EXPECT_EQ(std::bit_cast<float>(get(5, 4)), 3.f);
+}
+
+TEST_F(Rdna1ValuTest, HalfInterpolationSelectsHighCoefficientsAndPreservesDestinationHalf) {
+  wf->set_m0(0);
+  cu->lds().write32(wf->lds_base(), 0x42003c00);      // P0.x = {1,3}
+  cu->lds().write32(wf->lds_base() + 4, 0x44003c00);  // P10.x = {1,4}
+  cu->lds().write32(wf->lds_base() + 32, 0x40003c00); // P20.x = {1,2}
+  set(2, std::bit_cast<uint32_t>(2.f));
+  ASSERT_NO_FATAL_FAILURE(execute(0xd7420005, 0x02020500)); // P1LL high
+  EXPECT_EQ(std::bit_cast<float>(get(5)), 11.f);
+  set(3, 0x45003c00);                                       // S2.high = 5
+  ASSERT_NO_FATAL_FAILURE(execute(0xd7430005, 0x040e0500)); // P1LV high
+  EXPECT_EQ(std::bit_cast<float>(get(5)), 13.f);
+  set(3, std::bit_cast<uint32_t>(8.f));
+  set(5, 0xdeadbeef);
+  ASSERT_NO_FATAL_FAILURE(execute(0xd75a4005, 0x440e0500)); // P2 high, -v2, dst.high
+  EXPECT_EQ(get(5), 0x4400beefu);                           // (2 * -2 + 8) = 4
 }
 
 } // namespace

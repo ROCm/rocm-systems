@@ -517,6 +517,9 @@ For CDNA2 DS and bounded FLAT LDS requests, `lds_allocation` reports the
 workgroup range intersected with the backing. Apply its `retained_bytes`
 method to each requesting lane and each address set to recover the actual
 byte intervals. Equal-offset CDNA2 DS pairs report a single access.
+BUFFER_STORE_LDS_DWORD reports the issue-time LDS source addresses in
+`lds_source_addresses` and the global destinations in `addresses`. The same
+request mask and allocation checks select which source DWORDs were read.
 
 Observers must inspect `flat_local_lane_mask` and `flat_dds_lane_mask` to account
 for LDS and DDS lanes; choosing a backing store

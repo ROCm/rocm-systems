@@ -209,22 +209,61 @@ constexpr std::array<uint8_t, 4> shader_export_sources(const Encoding &inst) {
           static_cast<uint8_t>(inst.vsrc2), static_cast<uint8_t>(inst.vsrc3)};
 }
 
+class Gfx10ShaderExportOperands {
+public:
+  uint8_t target, enabled;
+  bool compressed;
+  std::array<uint8_t, 4> sources;
+
+  bool valid() const {
+    return (target <= 9 || (target >= 12 && target <= 16) || target == 20 || target >= 32) &&
+           (!compressed || !((enabled ^ (enabled >> 1)) & 5u));
+  }
+
+  template <typename Visit> void for_each_source(uint32_t allocation, Visit visit) const {
+    if (target == 9)
+      return;
+    for (unsigned channel = 0; channel < 4; channel += compressed ? 2 : 1)
+      if (enabled & (1u << channel))
+        visit(channel, gfx115_source_vgpr(sources[compressed ? channel / 2 : channel], allocation));
+  }
+};
+
 class ShaderExportOperands {
 public:
   static constexpr uint8_t kLastMrt = 7, kDepth = 8, kFirstPosition = 12, kLastPosition = 16,
                            kPrimitive = 20, kDualSource0 = 21, kDualSource1 = 22;
   uint8_t target;
   uint8_t components;
+  bool done;
   bool row_from_m0;
   std::array<uint8_t, 4> sources;
 
   /// Decode the shared GFX11 EXP and GFX12 VEXPORT operand layout.
   template <typename Encoding> static ShaderExportOperands decode(const Encoding &inst) {
-    return {static_cast<uint8_t>(inst.tgt), static_cast<uint8_t>(inst.en), bool(inst.row_en),
-            shader_export_sources(inst)};
+    return {static_cast<uint8_t>(inst.tgt), static_cast<uint8_t>(inst.en), bool(inst.done),
+            bool(inst.row_en), shader_export_sources(inst)};
+  }
+
+  uint64_t source_lanes(uint64_t exec) const {
+    if (target == kDualSource0) {
+      const uint64_t even = exec & 0x5555555555555555ULL;
+      return even | (even << 1);
+    }
+    if (target == kDualSource1) {
+      const uint64_t odd = exec & 0xaaaaaaaaaaaaaaaaULL;
+      return odd | (odd >> 1);
+    }
+    return exec;
   }
 
   bool channel_enabled(unsigned channel) const { return components & (1u << channel); }
+
+  template <typename Visit> void for_each_source(uint32_t allocation, Visit visit) const {
+    for (unsigned channel = 0; channel < sources.size(); ++channel)
+      if (channel_enabled(channel))
+        visit(channel, gfx115_source_vgpr(sources[channel], allocation));
+  }
 };
 
 /// @brief Decoded register-access modifiers.
@@ -257,6 +296,7 @@ struct RegisterModifiers {
   std::optional<ImageSampleSources> image_sample_sources;
   const Operand *image_store_data = nullptr;
   std::optional<ShaderExportOperands> shader_export;
+  std::optional<Gfx10ShaderExportOperands> gfx10_export;
   /// Coordinate VGPR selectors, including NSA selectors.
   ImageAddressRegisters image_coordinates{};
   /// Number of tracked coordinate components.

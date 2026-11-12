@@ -242,6 +242,102 @@ protected:
   }
 };
 
+class Rdna1ShaderExportTest : public ImageAccessFixture {
+protected:
+  rj_code_arch_t arch() const override { return ROCJITSU_CODE_ARCH_RDNA1; }
+};
+
+TEST(Gfx10ExportTest, WaitsCheckOnlyThePayloadRegistersReadByExp) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    amdgpu::GpuMemory memory{"export_writes"};
+    amdgpu::L2Cache l2{"export_l2"};
+    l2.set_backing_memory(&memory);
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(test::initialize_compute_unit(cu, "export", config, &memory, &l2));
+    auto *wave = cu->dispatch_wf(0, 0x100, 106, 32, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    cu->set_shader_export_handler([](const amdgpu::Wavefront &, const amdgpu::ShaderExport &) {});
+    auto decoder = Decoder::create(arch);
+    for (bool skip : {false, true}) {
+      wave->set_status_raw((wave->status_raw() & ~(1u << 18)) | (uint32_t(skip) << 18));
+      for (bool compressed : {false, true}) {
+        for (uint8_t target : {0, 9}) {
+          auto words = rdna1::build_exp({.en = uint8_t(compressed ? 12 : 1),
+                                         .tgt = target,
+                                         .compr = uint8_t(compressed),
+                                         .vsrc0 = 4,
+                                         .vsrc1 = 7,
+                                         .vsrc2 = 9});
+          auto inst = decoder->decode_window(words);
+          ASSERT_TRUE(inst.succeeded());
+          for (unsigned reg : {0u, 4u, 7u, 9u}) {
+            SCOPED_TRACE(testing::Message() << arch << " reg=" << reg << " tgt=" << unsigned(target)
+                                            << " compr=" << compressed << " skip=" << skip);
+            auto &wait = wave->ensure_memory_wait_scoreboard();
+            unsigned alerts = 0;
+            wait.clear();
+            wait.bind(0x200, &alerts,
+                      [](void *sink, const auto &) { ++*static_cast<unsigned *>(sink); });
+            const auto counter = amdgpu::WaitCounterKind::Load;
+            wait.add({wait.issue(counter),
+                      0x100,
+                      1,
+                      {RegClass::VGPR, static_cast<uint16_t>(reg), 1},
+                      counter,
+                      0xf});
+            wait.check_instruction(*inst.value(), *wave);
+            EXPECT_EQ(alerts, unsigned(!skip && target != 9 && reg == (compressed ? 7u : 4u)));
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_F(Rdna1ShaderExportTest, CompressedColorAndNullExportCarryActiveMaskAndDone) {
+  auto decoder = Decoder::create(arch());
+  ASSERT_TRUE(decoder);
+  std::optional<amdgpu::ShaderExport> captured;
+  cu_->set_shader_export_handler(
+      [&](const amdgpu::Wavefront &, const amdgpu::ShaderExport &packet) { captured = packet; });
+  auto status = decoder->decode_window(
+      rdna1::build_sopk(rdna1::kSGetregB32Sopk, {.simm16 = 2u | (8u << 6), .sdst = 5}));
+  ASSERT_TRUE(status.succeeded());
+  ASSERT_TRUE(cu_->execute_instruction(status.value().get(), *wf_).succeeded());
+  EXPECT_EQ(cu_->read_sgpr(sb_ + 5), 1u);
+  for (uint32_t lane = 0; lane < 3; ++lane) {
+    cu_->write_vgpr(vb_ + 4, lane, 0x12340010u + lane);
+    cu_->write_vgpr(vb_ + 7, lane, 0x43210020u + lane);
+  }
+  for (uint8_t target : {0, 9}) {
+    captured.reset();
+    auto words = rdna1::build_exp(
+        {.en = 15, .tgt = target, .compr = 1, .done = 1, .vm = 1, .vsrc0 = 4, .vsrc1 = 7});
+    auto inst = decoder->decode_window(words);
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(cu_->execute_instruction(inst.value().get(), *wf_).succeeded());
+    ASSERT_TRUE(captured);
+    EXPECT_EQ(captured->target, target);
+    EXPECT_TRUE(captured->done);
+    EXPECT_TRUE(captured->valid_mask);
+    EXPECT_EQ(captured->lanes, 5u);
+    for (uint32_t lane = 0; lane < 3; ++lane) {
+      const std::array<uint32_t, 4> expected =
+          lane == 1 || target == 9
+              ? std::array<uint32_t, 4>{}
+              : std::array<uint32_t, 4>{0x10u + lane, 0x1234u, 0x20u + lane, 0x4321u};
+      EXPECT_EQ(captured->values[lane], expected);
+    }
+  }
+}
+
 class Rdna4ImageMemoryTest : public ImageAccessFixture {
 protected:
   rj_code_arch_t arch() const override { return ROCJITSU_CODE_ARCH_RDNA4; }

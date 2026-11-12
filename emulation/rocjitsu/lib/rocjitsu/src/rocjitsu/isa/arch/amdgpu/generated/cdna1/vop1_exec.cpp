@@ -1134,7 +1134,9 @@ RJ_NOINLINE void VFrexpMantF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf)
   dpp_write_mask_scope_.restore();
 }
 
-void VClrexcpVop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VClrexcpVop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_clrexcp_vop1(*this, wf);
+}
 
 void VScreenPartition4seB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP || inst_.src0 == amdgpu::SRC_SDWA) {

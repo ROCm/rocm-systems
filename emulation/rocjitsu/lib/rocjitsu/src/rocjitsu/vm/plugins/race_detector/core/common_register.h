@@ -51,6 +51,9 @@ enum class MemoryEventType {
   LDS_TO_GLOBAL,
   DIRECT_LDS_READ, ///< Completed synchronous read, retained until a workgroup barrier.
 
+  /// GFX10 DS_ORDERED_COUNT holds its contributing VGPR lane until EXPCNT retires.
+  GDS_ORDERED_COUNT_SOURCE,
+
   /// A completed GFX10 VALU operand read, visible to peer writes until a barrier.
   LDS_OPERAND_READ,
 
@@ -126,6 +129,11 @@ inline bool isFromLds(MemoryEventType t) {
 /// True if the event touches LDS (read or write).
 inline bool isLdsInvolved(MemoryEventType t) { return isToLds(t) || isFromLds(t); }
 
+inline bool isFromVgpr(MemoryEventType t) {
+  return t == MemoryEventType::VGPR_TO_GLOBAL || t == MemoryEventType::VGPR_TO_LDS ||
+         t == MemoryEventType::GDS_ORDERED_COUNT_SOURCE;
+}
+
 /// True if the event doesn't touch LDS — safe to trim at WAVE_COMPLETE.
 inline bool isWaveLocal(MemoryEventType t) { return !isLdsInvolved(t); }
 
@@ -145,6 +153,8 @@ inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
     return amdgpu::WaitCounterType::LGKMCNT;
   case MemoryEventType::LDS_TO_GLOBAL:
     return amdgpu::WaitCounterType::TENSORCNT;
+  case MemoryEventType::GDS_ORDERED_COUNT_SOURCE:
+    return amdgpu::WaitCounterType::EXPCNT;
   case MemoryEventType::LDS_OPERAND_READ:
   case MemoryEventType::DIRECT_LDS_READ: // Synchronous reads have no counter.
     break;
@@ -167,6 +177,7 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
   case MemoryEventType::GLOBAL_TO_SGPR:
   case MemoryEventType::GLOBAL_TO_TTMP:
   case MemoryEventType::SCALAR_TO_GLOBAL:
+  case MemoryEventType::GDS_ORDERED_COUNT_SOURCE:
   case MemoryEventType::DIRECT_LDS_READ:
     return MemoryOrderClass::UNORDERED;
   case MemoryEventType::LDS_TO_GLOBAL:

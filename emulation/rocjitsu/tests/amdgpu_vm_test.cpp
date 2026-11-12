@@ -994,6 +994,418 @@ TEST(LdsAllocationTest, PacketGroupSizeMaterializesDynamicWorkgroupBacking) {
   EXPECT_LT(f.cu()->lds().materialized_size_bytes(), f.cu()->lds().size_bytes());
 }
 
+TEST(RdnaDispatchTest, AqlShaderExportsHaveReadyStorageAndHonorFrontendBackpressure) {
+  using amdgpu::Wavefront;
+  struct Case {
+    bool hold, skip, empty, done;
+    unsigned target;
+  };
+  class ExportFrontend final : public ExecutionPlugin {
+  public:
+    explicit ExportFrontend(Case input) : ExecutionPlugin("export_frontend"), input_(input) {}
+    void onAmdgpuWavefrontDispatched(Wavefront &wave) override {
+      if (input_.hold)
+        wave.set_status_raw(wave.status_raw() & ~Wavefront::kStatusExportReadyMask);
+      if (input_.skip)
+        wave.set_status_raw(wave.status_raw() | (1u << 18));
+      if (input_.empty)
+        wave.set_exec(0);
+    }
+    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, Wavefront &) override {
+      ++total_issued;
+      if (inst.mnemonic() == "exp" || inst.mnemonic() == "export")
+        ++before;
+    }
+    void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &inst, Wavefront &) override {
+      if (inst.mnemonic() == "exp" || inst.mnemonic() == "export")
+        ++after;
+    }
+    void onAmdgpuReadVgprLanes(const Wavefront *, uint32_t, uint64_t lanes, uint8_t) override {
+      read_lanes |= lanes;
+    }
+    void onAmdgpuWavefrontHalted(Wavefront &wave) override {
+      const auto rows = wave.shader_exports();
+      exports.assign(rows.begin(), rows.end());
+    }
+    unsigned before = 0, after = 0, total_issued = 0;
+    uint64_t read_lanes = 0;
+    std::vector<amdgpu::ShaderExportRow> exports;
+
+  private:
+    Case input_;
+  };
+  for (const char *arch : {"rdna3", "rdna3_5", "rdna4"}) {
+    for (const auto c : {Case{false, false, false, true, 0}, Case{true, false, false, true, 0},
+                         Case{true, true, false, true, 0}, Case{true, false, true, false, 0},
+                         Case{true, false, true, true, 0}, Case{true, false, true, false, 12}}) {
+      for (bool diagnose : {false, true}) {
+        SCOPED_TRACE(testing::Message() << arch << " held=" << c.hold << " skip=" << c.skip
+                                        << " empty=" << c.empty << " done=" << c.done
+                                        << " target=" << c.target << " diagnostics=" << diagnose);
+        VmFixture f;
+        ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, 1));
+        f.cu()->restore_wait_diagnostics(diagnose ? amdgpu::MemoryWaitDiagnostics::Warn
+                                                  : amdgpu::MemoryWaitDiagnostics::Off,
+                                         amdgpu::MemoryWaitDiagnostics::Off);
+        auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+        auto frontend = std::make_unique<ExportFrontend>(c);
+        auto *observed = frontend.get();
+        ASSERT_TRUE(group->add(std::move(frontend)));
+        f.soc_ptr->set_plugin_group(group);
+        group->onInit();
+        const uint8_t target = static_cast<uint8_t>(c.target);
+        const auto words =
+            f.cu()->arch() == ROCJITSU_CODE_ARCH_RDNA4
+                ? rdna4::build_vexport({.en = 1, .tgt = target, .done = c.done, .vsrc0 = 0})
+                : rdna3::build_exp({.en = 1, .tgt = target, .done = c.done, .vsrc0 = 0});
+        constexpr uint32_t endpgm = 0xbfb00000u;
+        const uint32_t code[] = {words[0], words[1], endpgm};
+        const auto kernel = f.write_kernel(0x1000, code, sizeof(code), 32, 16);
+        test::AqlQueue queue(f.mem(), f.cp());
+        queue.dispatch(kernel, 2, 2);
+        Wavefront *wave = nullptr;
+        for (unsigned step = 0; step < 64 && f.engine->step(); ++step) {
+          wave = f.cu()->wf(0);
+          if (wave && (wave->state() == amdgpu::WfState::EXPORT_WAIT || wave->is_halted()))
+            break;
+        }
+        ASSERT_NE(wave, nullptr);
+        const bool writes = !c.skip && (!c.empty || c.done || c.target == 12);
+        if (c.hold && writes) {
+          ASSERT_EQ(wave->state(), amdgpu::WfState::EXPORT_WAIT);
+          EXPECT_TRUE(wave->shader_exports().empty());
+          EXPECT_EQ(wave->pc, kernel + sizeof(amdhsa::kernel_descriptor_t));
+          // A transient grant revoked before issue must leave hooks and inputs untouched.
+          wave->set_status_raw(wave->status_raw() | Wavefront::kStatusExportReadyMask);
+          wave->set_status_raw(wave->status_raw() & ~Wavefront::kStatusExportReadyMask);
+          for (unsigned step = 0; step < 3; ++step)
+            ASSERT_TRUE(f.engine->step());
+          EXPECT_EQ(observed->before, 0u);
+          EXPECT_EQ(observed->after, 0u);
+          EXPECT_EQ(observed->total_issued, 0u);
+          EXPECT_EQ(observed->read_lanes, 0u);
+          wave->set_status_raw(wave->status_raw() | Wavefront::kStatusExportReadyMask);
+          for (unsigned step = 0; step < 64 && !wave->is_halted(); ++step)
+            ASSERT_TRUE(f.engine->step());
+        }
+        ASSERT_TRUE(wave->is_halted());
+        EXPECT_EQ(observed->before, 1u);
+        EXPECT_EQ(observed->after, 1u);
+        EXPECT_EQ(observed->total_issued, 2u);
+        EXPECT_EQ(observed->read_lanes, writes && !c.empty ? 3u : 0u);
+        ASSERT_EQ(observed->exports.size(), unsigned(writes));
+        if (writes) {
+          const auto &output = observed->exports.front();
+          EXPECT_EQ(output.done, c.done);
+          EXPECT_EQ(output.target, c.target);
+          EXPECT_EQ(output.valid_lanes, c.empty ? 0u : 3u);
+          if (!c.empty) {
+            EXPECT_EQ(output.values[0][0], 0u);
+            EXPECT_EQ(output.values[1][0], 1u);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(RdnaDispatchTest, Gfx10SubvectorScratchChecksTheFirstRealAccess) {
+  // Resolve a TTMP load while privileged, then optionally leave privilege
+  // before the loop. Its issued destination survives the change in status.
+  class ScratchAccess final : public ExecutionPlugin {
+  public:
+    ScratchAccess(RegisterRef reg, bool drop)
+        : ExecutionPlugin("subvector_scratch_access"), reg_(reg), drop_(drop) {}
+    uint64_t loop_pc = 0;
+    std::string effects;
+    void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wave, RegisterRef reg) override {
+      if (wave && wave->pc == loop_pc && reg == reg_)
+        effects += 'r';
+    }
+    void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wave, RegisterRef reg) override {
+      if (wave && wave->pc == loop_pc && reg == reg_)
+        effects += 'w';
+    }
+    void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+                                     std::span<amdgpu::Wavefront *> waves) override {
+      if (reg_.cls != RegClass::TTMP)
+        return;
+      for (auto *wave : waves)
+        wave->set_status_raw(wave->status_raw() | amdgpu::Wavefront::kStatusPrivMask);
+    }
+    void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &inst,
+                                         amdgpu::Wavefront &wave) override {
+      if (drop_ && inst.mnemonic() == "s_load_dword")
+        wave.set_status_raw(wave.status_raw() & ~amdgpu::Wavefront::kStatusPrivMask);
+    }
+
+  private:
+    RegisterRef reg_;
+    bool drop_;
+  };
+  constexpr uint32_t begin = 0xbd800001, end = 0xbe000001; // branch over one NOP
+  struct Case {
+    uint32_t opcode;
+    uint8_t low, high, saved, scratch;
+    bool drop_priv = false, consume = true;
+  };
+  for (const auto c : {
+           Case{SOPP_S_NOP, 0, 0, 7, 8}, Case{begin, 0, 0, 7, 8},
+           Case{begin, 0, 0, 7, 8, false, false}, Case{begin, 1, 0, 7, 8}, Case{begin, 0, 1, 7, 8},
+           Case{end, 1, 0, 0, 8}, Case{end, 1, 0, 7, 8}, Case{end, 0, 1, 7, 8},
+           Case{end, 0, 0, 0, 8}, Case{begin, 1, 0, 7, 108}, Case{begin, 1, 0, 7, 108, true},
+           Case{end, 1, 0, 7, 108, true}, Case{begin, 1, 0, 7, 125}, // NULL scratch, later s8 read
+       }) {
+    for (const auto &[arch, width] : {std::pair{"rdna1", 32u}, std::pair{"rdna1", 64u},
+                                      std::pair{"rdna2", 32u}, std::pair{"rdna2", 64u}}) {
+      for (const bool waited : {false, true}) {
+        SCOPED_TRACE(std::format(
+            "{} opcode={:#x} EXEC={}:{} saved={} selector={} priv_drop={} next={} wave{} wait={}",
+            arch, c.opcode, c.high, c.low, c.saved, c.scratch, c.drop_priv, c.consume, width,
+            waited));
+        const bool ttmp = c.scratch == 108;
+        const uint32_t reg = ttmp ? 108 : 8;
+        const uint32_t op =
+            c.opcode == SOPP_S_NOP ? SOPP_S_NOP : c.opcode | (uint32_t{c.scratch} << 16);
+        const uint32_t code[] = {
+            0xbe8003ff,
+            0x4000,
+            0xbe810380,                          // s[0:1] = load address
+            0xbe800380u | (reg << 16) | c.saved, // initial value also equals memory
+            0xbefe0380u + c.low,
+            0xbeff0380u + c.high,
+            0xf4000000u | (reg << 6),
+            0xfa000000, // s_load_dword
+            waited ? 0xbf8cc07fu : SOPP_S_NOP,
+            op,
+            SOPP_S_NOP,
+            c.consume ? (0xbe8b0300u | reg) : SOPP_S_NOP, // s_mov_b32 s11, s8 or ttmp0
+            0xbf8c0000u,
+            SOPP_S_ENDPGM};
+        VmFixture f;
+        ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, 1, 64, 128, 64));
+        PluginSinkConfig config;
+        auto &race = config.emplace<StringSink>();
+        auto group = std::make_shared<ExecutionPluginGroup>(std::move(config));
+        ASSERT_TRUE(group->add(std::make_unique<plugins::race_detector::RaceDetectorPlugin>()));
+        auto observer = std::make_unique<ScratchAccess>(ttmp ? RegisterRef{RegClass::TTMP, 0, 1}
+                                                             : RegisterRef{RegClass::SGPR, 8, 1},
+                                                        c.drop_priv);
+        auto *observed = observer.get();
+        ASSERT_TRUE(group->add(std::move(observer)));
+        f.soc_ptr->set_plugin_group(group);
+        group->onInit();
+        f.mem()->write32(0x4000, c.saved);
+        const auto kernel =
+            f.write_kernel(0x1000, code, sizeof(code), 104, 8, 0, 0, false, 0, 0, width == 32);
+        observed->loop_pc = kernel + sizeof(amdhsa::kernel_descriptor_t) + 9 * sizeof(uint32_t);
+        test::AqlQueue queue(f.mem(), f.cp());
+        queue.dispatch(kernel, width, width);
+        testing::internal::CaptureStderr();
+        EXPECT_NO_THROW(f.engine->run());
+        const auto log = testing::internal::GetCapturedStderr();
+        ASSERT_EQ(f.engine->last_exit().code, 0) << log;
+        const bool loop_write =
+            !c.drop_priv &&
+            (c.opcode == begin ? c.low || c.high : c.opcode == end && !c.high && c.saved);
+        const bool loop_read =
+            c.opcode == end || (c.opcode == begin && f.cu()->arch() == ROCJITSU_CODE_ARCH_RDNA1);
+        std::string expected_effects;
+        if (c.scratch == reg && loop_read)
+          expected_effects += 'r';
+        if (c.scratch == reg && loop_write)
+          expected_effects += 'w';
+        EXPECT_EQ(observed->effects, expected_effects);
+        const bool accessed_by_loop = !expected_effects.empty();
+        const bool hazard = !waited && (accessed_by_loop || c.consume);
+        EXPECT_EQ(f.cu()->memory_wait_diagnostic_count(), unsigned(hazard)) << log;
+        EXPECT_EQ(race.str().find(ttmp ? "Race on TTMP ttmp0 [" : "Race on SGPR s8 [") !=
+                      std::string::npos,
+                  hazard)
+            << race.str();
+        if (hazard) {
+          const auto pc = kernel + sizeof(amdhsa::kernel_descriptor_t) +
+                          (accessed_by_loop ? 9 : 11) * sizeof(uint32_t);
+          const bool write = expected_effects == "w";
+          EXPECT_NE(log.find(std::format("pc={:#x}: {} of {}", pc, write ? "overwrite" : "read",
+                                         ttmp ? "ttmp0" : "s8")),
+                    std::string::npos)
+              << log;
+          EXPECT_NE(race.str().find(std::format("==>  {:#x}  ", pc)), std::string::npos)
+              << race.str();
+          EXPECT_NE(race.str().find(write ? " access=write " : " access=read "), std::string::npos)
+              << race.str();
+        }
+      }
+    }
+  }
+}
+
+TEST(RdnaDispatchTest, Gfx10SubvectorControlUsesBothExecWordsAtEitherWaveSize) {
+  constexpr uint32_t begin = 0xbd840001, end = 0xbe040001; // s4, skip the following instruction
+  struct Case {
+    uint32_t op, lo, hi, scratch, result_lo, result_hi, result_scratch;
+    bool branches;
+  };
+  for (const auto &c : {
+           Case{begin, 0, 0, 7, 0, 0, 7, true}, Case{begin, 0, 3, 7, 0, 3, 0, false},
+           Case{begin, 5, 0, 7, 5, 0, 0, false}, Case{begin, 5, 3, 7, 5, 0, 3, false},
+           Case{end, 5, 3, 7, 7, 3, 7, false}, Case{end, 0, 3, 0, 0, 3, 0, false},
+           Case{end, 5, 0, 0, 5, 0, 0, false}, Case{end, 0, 0, 3, 0, 3, 0, true},
+           Case{end, 5, 0, 3, 0, 3, 5, true},
+           // The encoded scratch operand can itself name an EXEC word.
+           Case{0xbdfe0001, 5, 3, 7, 3, 0, 7, false}, // BEGIN exec_lo
+           Case{0xbdff0001, 5, 3, 7, 5, 0, 7, false}, // BEGIN exec_hi
+           Case{0xbe7e0001, 5, 0, 7, 0, 5, 7, true},  // END exec_lo
+           Case{0xbe7f0001, 5, 3, 7, 3, 3, 7, false}, // END exec_hi
+       }) {
+    for (const char *arch : {"rdna1", "rdna2"}) {
+      for (unsigned width : {32u, 64u}) {
+        SCOPED_TRACE(std::format("{} wave{} opcode={:#x} EXEC={:#x}:{:#x} scratch={}", arch, width,
+                                 c.op, c.hi, c.lo, c.scratch));
+        const uint32_t code[] = {0x7e0e0280,             // v_mov_b32 v7, 0
+                                 0xbefe0380 + c.lo,      // s_mov_b32 exec_lo, lo
+                                 0xbeff0380 + c.hi,      // s_mov_b32 exec_hi, hi
+                                 0xbe840380 + c.scratch, // s_mov_b32 s4, scratch
+                                 0xbe850380,
+                                 c.op,
+                                 0xbe850381, // s5 = 1 only when control falls through
+                                 0xbe860380,
+                                 0xbf880001,
+                                 0xbe860381, // s6 = 1 when the wave-sized EXEC is nonzero
+                                 0x7e0e0281, // v_mov_b32 v7, 1 in the resulting active lanes
+                                 0xbe88047e, // s_mov_b64 s[8:9], exec reads the raw pair
+                                 SOPP_S_ENDPGM};
+        VmFixture f;
+        ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, 1, 64, 128, 64));
+        auto *captured = f.capture_halts();
+        const auto kernel =
+            f.write_kernel(0x1000, code, sizeof(code), 104, 8, 0, 0, false, 0, 0, width == 32);
+        test::AqlQueue queue(f.mem(), f.cp());
+        queue.dispatch(kernel, width, width);
+        f.engine->run();
+        ASSERT_EQ(captured->snapshots().size(), 1u);
+        const auto &wave = captured->snapshots().front();
+        const uint64_t result = (uint64_t{c.result_hi} << 32) | c.result_lo;
+        EXPECT_EQ(wave.wf_size, width);
+        EXPECT_EQ(wave.sgpr(4), c.result_scratch);
+        EXPECT_EQ(wave.sgpr(5), !c.branches);
+        EXPECT_EQ(wave.sgpr64(8), result);
+        EXPECT_EQ(wave.sgpr(6), width == 32 ? c.result_lo != 0 : result != 0);
+        for (unsigned lane = 0; lane < width; ++lane)
+          EXPECT_EQ(wave.vgpr(7, lane), (result >> lane) & 1u) << "lane " << lane;
+      }
+    }
+  }
+}
+
+TEST(RdnaDispatchTest, Gfx10SubvectorLoopRestoresExecAfterBothPasses) {
+  class ScratchWrites final : public ExecutionPlugin {
+  public:
+    ScratchWrites() : ExecutionPlugin("subvector_scratch_writes") {}
+    void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override {
+      if (reg.cls == RegClass::SGPR && reg.index == 4)
+        exec.push_back(wf->exec_raw());
+    }
+    std::vector<uint64_t> exec;
+  };
+  const uint32_t code[] = {
+      0x7e0e0280, 0xbefe0385,   0xbeff0383, // v7=0; EXEC_LO=5; EXEC_HI=3
+      0xbe850380, 0xbd840003,               // s5=0; BEGIN s4, after END
+      0xb7850001, 0x7e0e0205,   0xbe04fffd, // s_addk_i32 s5,1; v_mov_b32 v7,s5; END s4,-3
+      0xbe88047e, SOPP_S_ENDPGM};           // s_mov_b64 s[8:9],exec
+  for (const char *arch : {"rdna1", "rdna2"}) {
+    for (unsigned width : {32u, 64u}) {
+      SCOPED_TRACE(std::format("{} wave{}", arch, width));
+      VmFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, 1, 64, 128, 64));
+      test::HaltSnapshotPlugin *captured;
+      auto group = test::make_halt_snapshot_group(&captured);
+      auto writes = std::make_unique<ScratchWrites>();
+      auto *observed = writes.get();
+      ASSERT_TRUE(group->add(std::move(writes)));
+      f.soc_ptr->set_plugin_group(group);
+      const auto kernel =
+          f.write_kernel(0x1000, code, sizeof(code), 104, 8, 0, 0, false, 0, 0, width == 32);
+      test::AqlQueue queue(f.mem(), f.cp());
+      queue.dispatch(kernel, width, width);
+      f.engine->run();
+      ASSERT_EQ(captured->snapshots().size(), 1u);
+      const auto &wave = captured->snapshots().front();
+      EXPECT_EQ(wave.sgpr(4), 5u);
+      EXPECT_EQ(wave.sgpr(5), 2u);
+      // Each scratch write precedes the EXEC update for its pass.
+      EXPECT_EQ(observed->exec, (std::vector<uint64_t>{0x0000000300000005ULL, 5}));
+      EXPECT_EQ(wave.sgpr64(8), 0x0000000300000005ULL);
+      for (unsigned lane = 0; lane < width; ++lane)
+        EXPECT_EQ(wave.vgpr(7, lane), lane == 0 || lane == 2     ? 1u
+                                      : lane == 32 || lane == 33 ? 2u
+                                                                 : 0u)
+            << "lane " << lane;
+    }
+  }
+}
+
+TEST(RdnaDispatchTest, Gfx1030GdsTrapPreservesCountersAndEarlierSourcesAtTheSamePc) {
+  constexpr uint64_t tba = 0x9000;
+  class HandlerEntry final : public ExecutionPlugin {
+  public:
+    HandlerEntry() : ExecutionPlugin("gds_handler_entry") {}
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
+                                          amdgpu::Wavefront &wf) override {
+      if (pc != tba)
+        return;
+      const auto *scoreboard = wf.memory_wait_scoreboard();
+      ASSERT_NE(scoreboard, nullptr);
+      exp.push_back(scoreboard->outstanding(amdgpu::WaitCounterKind::Exp));
+      ds.push_back(scoreboard->outstanding(amdgpu::WaitCounterKind::Ds));
+    }
+    std::vector<uint64_t> exp, ds;
+  };
+  for (uint32_t width : {32u, 64u}) {
+    for (bool previous_read : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << width << " lanes, previous read=" << previous_read);
+      VmFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize("rdna2", 1, 1, 64, 128, 64));
+      auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+      auto observer = std::make_unique<HandlerEntry>();
+      auto *entry = observer.get();
+      ASSERT_TRUE(group->add(std::move(observer)));
+      f.soc_ptr->set_plugin_group(group);
+      const uint32_t code[] = {
+          0x7e000280,
+          0xbefc03ff,
+          previous_read ? 0x00800008u : 0x00800000u, // v0=0; M0 window
+          previous_read ? 0xbe800380u : 0xbe800381u, // s0=0 for two reads or 1 for a single read
+          0xba800501,
+          1, // s_setreg_imm32_b32 MODE[20],1
+          0xd8da0000,
+          0x04000000, // again: ds_read_b32 v4,v0 gds
+          0xbf8cc07f,
+          0xbf068100,
+          0xbf850004, // wait LGKM only; if s0==1 branch to end
+          0xbe800381,
+          0xbefc03ff,
+          0x00800000, // set s0=1 and shrink M0.size to zero
+          0xbf82fff7,
+          SOPP_S_ENDPGM};                    // branch to the very same GDS read
+      f.mem()->write32(tba, 0x87fe7e7e);     // s_and_b64 exec,exec,exec
+      f.mem()->write32(tba + 4, 0xbe80226c); // s_rfe_b64 ttmp[0:1]
+      f.cu()->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+        return amdgpu::ComputeUnitCore::TrapHandlerConfig{tba, 0, false};
+      });
+      const auto kernel =
+          f.write_kernel(0x1000, code, sizeof(code), 104, 8, 0, 0, false, 0, 0, width == 32);
+      test::AqlQueue queue(f.mem(), f.cp());
+      queue.dispatch(kernel, 1, width);
+      ASSERT_NO_THROW(f.engine->run());
+      EXPECT_EQ(entry->exp, std::vector<uint64_t>{previous_read ? 2u : 1u});
+      EXPECT_EQ(entry->ds, std::vector<uint64_t>{1u});
+      EXPECT_EQ(f.cu()->memory_wait_diagnostic_count(), previous_read ? 1u : 0u);
+    }
+  }
+}
+
 TEST(RdnaDispatchTest, Gfx1030MemoryViolationEntersHandlerOrInterruptsAndHalts) {
   enum class Handler { Disabled, Returns, Missing, Nested };
   constexpr uint64_t shared = 0x0001'0000'0000'0000, tba = 0x9000;
@@ -1380,19 +1792,21 @@ TEST(RdnaDispatchTest, Gfx1030SuppressedRegisterReturnPreservesTheNextConsumerHa
 
 TEST(RdnaDispatchTest, Gfx1030DsStoresUseTheIssuingWavesVgprZeroForUnallocatedWords) {
   for (uint32_t block : {16u, 256u}) {
-    {
+    for (bool gds : {false, true}) {
       for (bool unallocated_address : {false, true}) {
-        SCOPED_TRACE(testing::Message()
-                     << "block=" << block << " unallocated_address=" << unallocated_address);
+        SCOPED_TRACE(testing::Message() << "block=" << block << " gds=" << gds
+                                        << " unallocated_address=" << unallocated_address);
         // v0 is an aligned, unique address for every work-item in both waves.
         // v16 is either the neighboring physical wave slot or unallocated padding.
         const auto address =
             rdna2::build_vop2(rdna2::kVLshlrevB32Vop2, {.src0 = 131, .vsrc1 = 0, .vdst = 0});
         const auto store = rdna2::build_ds(
-            rdna2::kDsWriteB64, {.addr = uint8_t(unallocated_address ? 16 : 0), .data0 = 15});
-        const auto load = rdna2::build_ds(rdna2::kDsReadB64, {.addr = 0, .vdst = 4});
-        const auto add = rdna2::build_ds(rdna2::kDsAddU32, {.addr = 0, .data0 = 16});
-        const auto load_sum = rdna2::build_ds(rdna2::kDsReadB32, {.addr = 0, .vdst = 6});
+            rdna2::kDsWriteB64,
+            {.gds = gds, .addr = uint8_t(unallocated_address ? 16 : 0), .data0 = 15});
+        const auto load = rdna2::build_ds(rdna2::kDsReadB64, {.gds = gds, .addr = 0, .vdst = 4});
+        const auto add = rdna2::build_ds(rdna2::kDsAddU32, {.gds = gds, .addr = 0, .data0 = 16});
+        const auto load_sum =
+            rdna2::build_ds(rdna2::kDsReadB32, {.gds = gds, .addr = 0, .vdst = 6});
         constexpr uint32_t sentinel = 0x76543210;
         constexpr uint32_t wait = 0xbf8c0000;
         const uint32_t code[] = {0xbefc03ff,  1024,                 // s_mov_b32 m0, 1024 (GDS size)
@@ -11872,6 +12286,101 @@ TEST(Pm4DispatchTest, NativeRingFetchesRaw57BitBranchTarget) {
   EXPECT_FALSE(f.cp()->queue_faulted_for_test(71, 77));
   EXPECT_EQ(halts->snapshots().size(), 1u);
   EXPECT_TRUE(f.cp()->unregister_pm4_queue_registration(registration));
+}
+
+TEST(Pm4DispatchTest, Gfx10OrderedAppendReturnsCountsInGridOrder) {
+  for (const auto *arch : {"rdna1", "rdna2"}) {
+    for (bool per_group : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << arch << ", per_group=" << per_group);
+      VmFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(arch, /*num_cus=*/2));
+      auto *halts = f.capture_halts();
+      uint32_t completed = 0;
+      // Submit two independent counter streams under the same process. The second
+      // dispatch continues its ring's sequence. The last dispatch starts a new IB that resets it.
+      const uint32_t ids_per_group = per_group ? 1 : 2;
+      for (uint32_t stream = 0; stream < 2; ++stream) {
+        const uint32_t queue_id = 71 + stream;
+        const uint32_t code = 0x8000 + 0x100 * stream, ib = 0x4000 + 0x100 * stream;
+        amdgpu::ComputeQueueConfig queue;
+        queue.queue_id = queue_id;
+        ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
+
+        std::vector<uint32_t> shader{
+            0xbe83037c, // s_mov_b32 s3, m0 (capture launch state)
+            0x93fcff02,
+            0x000c0006, // s_bfe_u32 m0, s2, {offset=6, width=12}
+        };
+        if (per_group) {
+          // Only the first wave releases the group's shared ordered ID.
+          shader.push_back(0xbf0c9f02); // s_bitcmp0_b32 s2, 31
+          shader.push_back(0xbf850004); // s_cbranch_scc1 to s_endpgm
+        }
+        const uint32_t count[] = {
+            0x7e020281, // v_mov_b32 v1, 1
+            0xd8fe0300 | (4 * stream),
+            0x02000001, // ds_ordered_count v2, v1 release, done, gds
+            0xbf8cc07f, // s_waitcnt lgkmcnt(0)
+            SOPP_S_ENDPGM,
+        };
+        shader.insert(shader.end(), std::begin(count), std::end(count));
+        f.mem()->load_image(reinterpret_cast<const uint8_t *>(shader.data()), shader.size() * 4,
+                            code);
+        std::vector<uint32_t> words;
+        auto packet = [&](amdgpu::Pm4Opcode opcode, std::initializer_list<uint32_t> payload) {
+          words.push_back(0xc0000000 | ((payload.size() - 1) << 16) | (uint32_t(opcode) << 8));
+          words.insert(words.end(), payload);
+        };
+        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeNumThreadX, 128, 1, 1});
+        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmLo, code >> 8, 0});
+        // S0 = prior count, S1 = group X, S2 = group info.
+        packet(amdgpu::Pm4Opcode::SetShReg,
+               {amdgpu::kPm4ComputePgmRsrc2, (1u << 1) | (1u << 7) | (1u << 10)});
+        const uint32_t initiator = 1 | (1u << 3) | (uint32_t(per_group) << 4);
+        auto dispatch = [&](uint32_t groups, uint32_t prior_count) {
+          packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeUserData0, prior_count});
+          packet(amdgpu::Pm4Opcode::DispatchDirect, {groups, 1, 1, initiator});
+        };
+        dispatch(1, 0);
+        dispatch(2, ids_per_group);
+        const uint32_t reset_start = words.size();
+        dispatch(1, 3 * ids_per_group);
+        f.mem()->load_image(reinterpret_cast<const uint8_t *>(words.data()), words.size() * 4, ib);
+        amdgpu::Pm4Submission submission;
+        submission.buffers.push_back({ib, reset_start});
+        submission.buffers.push_back({.address = ib + 4 * reset_start,
+                                      .dwords = uint32_t(words.size()) - reset_start,
+                                      .reset_gds_wave_id = true});
+        f.engine->register_as_primary();
+        submission.complete = [&](bool ok) {
+          EXPECT_TRUE(ok);
+          ++completed;
+          f.engine->primary_release();
+        };
+        ASSERT_TRUE(f.cp()->submit_pm4(queue_id, 0, std::move(submission)));
+      }
+      f.engine->run();
+      EXPECT_EQ(completed, 2u);
+      ASSERT_EQ(halts->snapshots().size(), 16u);
+      for (const auto &wave : halts->snapshots()) {
+        ASSERT_EQ(wave.wf_size, 64u);
+        const uint32_t wave_in_group = wave.vgpr(0, 0) / 64;
+        const uint32_t group = wave.sgpr(1);
+        const uint32_t index = per_group ? group : 2 * group + wave_in_group;
+        const uint32_t prior_count = wave.sgpr(0);
+        const uint32_t start_id = prior_count == 3 * ids_per_group ? 0 : prior_count;
+        EXPECT_EQ(wave.sgpr(3), 0u); // Guest code moves the SPI-provided term into M0.
+        EXPECT_EQ((wave.sgpr(2) >> 6) & 0xfff, start_id + index);
+        if (!per_group || wave_in_group == 0) {
+          EXPECT_EQ(wave.vgpr(2, 0), prior_count + index);
+        }
+      }
+      f.cu()->gws_device().access_gds(f.cu()->arch(), 0, [&](amdgpu::Lds &gds) {
+        for (uint32_t address : {0u, 4u})
+          EXPECT_EQ(gds.read32(address), 4 * ids_per_group);
+      });
+    }
+  }
 }
 
 TEST(Pm4DispatchTest, MaskedPredExecDoesNotReplaySkippedNativeRingTail) {

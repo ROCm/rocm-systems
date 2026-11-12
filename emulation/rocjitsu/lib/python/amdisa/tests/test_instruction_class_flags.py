@@ -130,10 +130,6 @@ def test_wave_suspenders_are_flagged(name):
         'S_RFE_B64',
         'S_RFE_I64',
         'S_RFE_RESTORE_B64',
-        'S_CBRANCH_CDBGSYS',
-        'S_CBRANCH_CDBGUSER',
-        'S_CBRANCH_CDBGSYS_OR_USER',
-        'S_CBRANCH_CDBGSYS_AND_USER',
     ],
 )
 def test_pc_writers_without_control_flow_semantics_are_flagged(name):

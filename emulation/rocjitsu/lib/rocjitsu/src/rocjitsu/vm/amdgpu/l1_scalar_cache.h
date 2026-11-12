@@ -60,6 +60,9 @@ public:
                        bool allow_private_batch = false, Mtype instruction_mtype = Mtype::RW,
                        bool force_l1_bypass = false);
 
+  /// Advisory prefetch: copy a cacheable resident L2 line without a backing read.
+  void prefetch_resident(uint64_t addr, uint32_t vmid);
+
   /// @brief Scalar load: read num_bytes contiguous bytes from addr.
   VmAccessOutcome load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, uint32_t vmid = 0,
                              Mtype instruction_mtype = Mtype::RW, bool force_l1_bypass = false);

@@ -169,7 +169,10 @@ public:
     uint64_t writeback_lanes = ~uint64_t{0};
     VmemWriteback writeback = VmemWriteback::Ordinary;
     bool gds_source_lock = false;
-    bool holds_source() const { return gds_source_lock || counter == WaitCounterKind::X; }
+    bool export_source = false; // EXP reads its original VGPR and EXEC values at completion.
+    bool holds_source() const {
+      return gds_source_lock || export_source || counter == WaitCounterKind::X;
+    }
     uint8_t shadow_kind() const {
       return holds_source() ? MemoryWaitShadow::kSource : MemoryWaitShadow::kResult;
     }

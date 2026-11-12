@@ -9516,7 +9516,16 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapCwsrRoundTripPreservesGfx1250WaveState) {
       const bool edited = (edited_flags & 1u) != 0;
       const bool saved_barrier = (saved_flags & 2u) != 0;
       const bool in_handler = saved_barrier && edited;
-      wave->set_sleep_wakeup(incoming);
+      if (incoming) {
+        auto *sender = cu->dispatch_wf(0, wave->pc, 16, 4);
+        ASSERT_NE(sender, nullptr);
+        sender->set_process_id(wave->process_id());
+        sender->set_queue_id(wave->queue_id());
+        sender->set_dispatch_id(wave->dispatch_id());
+        sender->set_status_raw(rocjitsu::amdgpu::Wavefront::kStatusInTgMask);
+        issue(*sender, 0xbfb40000u); // s_wakeup
+        sender->halt(rocjitsu::amdgpu::Wavefront::CpCompletionNotice::Suppress);
+      }
       // The two workgroup flags carry independent values through the record.
       wave->set_workgroup_barrier_complete(saved_barrier);
       issue(*wave, 0xb8820844u); // s_getreg_b32 s2, hwreg(STATE_PRIV,1,2)

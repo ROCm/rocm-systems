@@ -544,7 +544,8 @@ SCbranchCdbgsysSopp::SCbranchCdbgsysSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
-  flags_ |= WRITES_PC;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 namespace detail {
@@ -558,6 +559,11 @@ DecodeResult decodeSCbranchCdbgsysSopp(const MachineInst *opcode,
 }
 } // namespace detail
 
+std::optional<int64_t> SCbranchCdbgsysSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbguser", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbguserSopp)),
@@ -565,7 +571,8 @@ SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
-  flags_ |= WRITES_PC;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 namespace detail {
@@ -579,6 +586,11 @@ DecodeResult decodeSCbranchCdbguserSopp(const MachineInst *opcode,
 }
 } // namespace detail
 
+std::optional<int64_t> SCbranchCdbguserSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys_or_user", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbgsysOrUserSopp)),
@@ -586,7 +598,8 @@ SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
-  flags_ |= WRITES_PC;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 namespace detail {
@@ -600,6 +613,11 @@ DecodeResult decodeSCbranchCdbgsysOrUserSopp(const MachineInst *opcode,
 }
 } // namespace detail
 
+std::optional<int64_t> SCbranchCdbgsysOrUserSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys_and_user", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbgsysAndUserSopp)),
@@ -607,7 +625,8 @@ SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
-  flags_ |= WRITES_PC;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
 }
 
 namespace detail {
@@ -620,6 +639,11 @@ DecodeResult decodeSCbranchCdbgsysAndUserSopp(const MachineInst *opcode,
   return std::make_unique<SCbranchCdbgsysAndUserSopp>(opcode);
 }
 } // namespace detail
+
+std::optional<int64_t> SCbranchCdbgsysAndUserSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
 
 SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst)
     : Sopp("s_endpgm_saved", reinterpret_cast<const OpEncoding *>(inst),

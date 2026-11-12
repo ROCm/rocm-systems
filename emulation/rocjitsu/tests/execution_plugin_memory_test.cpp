@@ -1055,6 +1055,97 @@ TEST(RoutedMemoryObservationTest, DecodedImageSampleReportsEveryFilteredTexelOnc
   wave->halt();
 }
 
+void check_cdna2_lds_to_buffer_observation(bool buffer_store_first) {
+  using namespace rocjitsu::plugins::race_detector;
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(2, "cdna2", 64, 102));
+  PluginSinkConfig config;
+  auto &sink = config.emplace<StringSink>();
+  fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+  auto observer = std::make_unique<MemoryObservationPlugin>();
+  auto *records = observer.get();
+  auto race = std::make_unique<RaceDetectorPlugin>();
+  auto *detector = race.get();
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(observer)));
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(race)));
+  fixture.soc->set_plugin_group(fixture.plugin_group_);
+  fixture.plugin_group_->onInit();
+  auto *cu = fixture.cu();
+  std::array<Wavefront *, 2> waves{cu->dispatch_wf(0, 0x100, 102, 32, 64),
+                                   cu->dispatch_wf(0, 0x200, 102, 32, 64)};
+  for (Wavefront *wave : waves) {
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    wave->set_lds_base(128);
+    wave->set_lds_size(16);
+  }
+  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 64, 204, waves);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  auto issue = [&](Wavefront &wave, const std::array<uint32_t, 2> &words) {
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, *inst, wave);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), wave).succeeded());
+    ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, inst.release(), wave),
+              VmAccessOutcome::Complete);
+  };
+  // The other wave writes the first dword this buffer store will read.
+  cu->write_vgpr(waves[0]->vgpr_alloc().base, 0, 8);
+  const auto ds_write = cdna2::build_ds(cdna2::kDsWriteB32, {.addr = 0, .data0 = 2});
+  auto &source = *waves[1];
+  source.set_m0(8);
+  source.set_exec(0b1101); // lane 0 is active and in bounds; lane 1 inactive; 2/3 out of bounds.
+  const unsigned sb = source.sgpr_alloc().base;
+  cu->write_sgpr(sb, 0x4000);
+  cu->write_sgpr(sb + 1, 4u << 16);
+  cu->write_sgpr(sb + 2, 256);
+  cu->write_sgpr(sb + 3, 1u << 23);
+  if (!buffer_store_first) {
+    ASSERT_NO_FATAL_FAILURE(issue(*waves[0], ds_write));
+  }
+  ASSERT_NO_FATAL_FAILURE(
+      issue(source, cdna2::build_mubuf(cdna2::kBufferStoreLdsDword, {.lds = 1, .soffset = 128})));
+  if (buffer_store_first) {
+    ASSERT_NO_FATAL_FAILURE(issue(*waves[0], ds_write));
+  }
+  auto *race_state = static_cast<RaceWavefrontState *>(source.plugin_state(detector->slot_index()));
+  const auto &events = race_state->race_state->getDetector()->events();
+  ASSERT_EQ(events.totalAllocated(), 2);
+  const EventId source_event{buffer_store_first ? 0 : 1};
+  const auto &event = events.ldsIntervals(source_event);
+  EXPECT_EQ(event.getTotalBytes(), 4);
+  EXPECT_TRUE(event.contains(136));
+  EXPECT_FALSE(event.contains(140));
+  EXPECT_FALSE(event.contains(144));
+  EXPECT_EQ(events.execMask(source_event), 0b1101u);
+  EXPECT_EQ(events.pendingCounterIncrement(source_event, WaitCounterType::VMCNT), 1);
+  EXPECT_EQ(events.pendingCounterIncrement(source_event, WaitCounterType::LGKMCNT), 1);
+  const char *expected =
+      buffer_store_first ? "type=LDS access=write reg=136" : "type=LDS access=read reg=136";
+  EXPECT_NE(sink.str().find(expected), std::string::npos);
+  ASSERT_EQ(records->accesses.size(), 2u);
+  const auto &ds = records->accesses[buffer_store_first ? 1 : 0];
+  ASSERT_TRUE(ds.lds_allocation);
+  EXPECT_EQ(ds.lds_allocation->begin, 128u);
+  EXPECT_EQ(ds.lds_allocation->end, 144u);
+  const auto &store = records->accesses[buffer_store_first ? 0 : 1];
+  EXPECT_EQ(store.request_lane_mask, 1u);
+  ASSERT_TRUE(store.lds_allocation);
+  ASSERT_EQ(store.lds_source_addresses.size(), 64u);
+  EXPECT_EQ(store.lds_source_addresses[0], 136u);
+  EXPECT_EQ(store.lds_source_addresses[1], kInvalidLdsAddress);
+  EXPECT_EQ(store.lds_source_addresses[2], kInvalidLdsAddress);
+  EXPECT_EQ(store.addresses[0], 0x4000u);
+}
+
+TEST(RoutedMemoryObservationTest, Cdna2LdsToBufferRecordsOnlyTheSourceDwordsRead) {
+  check_cdna2_lds_to_buffer_observation(false);
+}
+
+TEST(RoutedMemoryObservationTest, Cdna2DsWriteDetectsAnOutstandingLdsToBufferRead) {
+  check_cdna2_lds_to_buffer_observation(true);
+}
+
 void check_flat_lds_observation(rj_code_arch_t arch) {
   using namespace rocjitsu::plugins::race_detector;
 
@@ -1472,7 +1563,9 @@ TEST(RoutedMemoryObservationTest, DualDsReportsEffectiveAddressesAndKeepsBothRes
   constexpr uint32_t first = 128 + 20 + 4, second = first + 4;
   constexpr uint16_t read = rdna2::kDsRead2B32, write = rdna2::kDsWrite2B32,
                      swap = rdna2::kDsWrxchg2RtnB32;
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (const auto &[arch, gds] :
+       {std::pair{ROCJITSU_CODE_ARCH_RDNA2, false}, std::pair{ROCJITSU_CODE_ARCH_RDNA2, true},
+        std::pair{ROCJITSU_CODE_ARCH_CDNA4, false}}) {
     const bool rdna2 = arch == ROCJITSU_CODE_ARCH_RDNA2;
     PluginFixture fixture;
     ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, rdna2 ? "rdna2" : "cdna4", 64, 128));
@@ -1487,12 +1580,17 @@ TEST(RoutedMemoryObservationTest, DualDsReportsEffectiveAddressesAndKeepsBothRes
     cu->write_vgpr(base, lane, 20);
     cu->write_vgpr(base + 1, lane, 303);
     cu->write_vgpr(base + 2, lane, 404);
-    auto backing = [&](auto visit) { visit(wave->lds()); };
+    auto backing = [&](auto visit) {
+      if (gds)
+        cu->gws_device().access_gds(wave->cu().arch(), wave->process_id(), visit);
+      else
+        visit(wave->lds());
+    };
     auto decoder = Decoder::create(arch);
     for (auto opcode : {read, write, swap})
       for (bool equal : {false, true})
         for (uint64_t mask : {uint64_t{0}, uint64_t{1} << lane}) {
-          SCOPED_TRACE(testing::Message() << "arch=" << arch << " op=" << opcode
+          SCOPED_TRACE(testing::Message() << "arch=" << arch << " gds=" << gds << " op=" << opcode
                                           << " equal=" << equal << " mask=" << mask);
           backing([&](Lds &lds) {
             lds.write32(first, 101);
@@ -1504,7 +1602,7 @@ TEST(RoutedMemoryObservationTest, DualDsReportsEffectiveAddressesAndKeepsBothRes
           const uint8_t offset1 = equal ? 1 : 2;
           const auto words = rdna2 ? rdna2::build_ds(opcode, {.offset0 = 1,
                                                               .offset1 = offset1,
-
+                                                              .gds = gds,
                                                               .addr = 0,
                                                               .data0 = 1,
                                                               .data1 = 2,
@@ -1524,7 +1622,8 @@ TEST(RoutedMemoryObservationTest, DualDsReportsEffectiveAddressesAndKeepsBothRes
           ASSERT_EQ(plugin->accesses.size(), 1u);
           const auto &access = plugin->accesses.front();
           EXPECT_EQ(access.route, MemoryRoute::LOCAL);
-          EXPECT_EQ(access.decoded_space, DecodedMemorySpace::LOCAL);
+          EXPECT_EQ(access.decoded_space,
+                    gds ? DecodedMemorySpace::GDS : DecodedMemorySpace::LOCAL);
           EXPECT_EQ(access.is_load, opcode != write);
           EXPECT_EQ(access.atomic_op, opcode == swap ? AtomicOp::SWAP : AtomicOp::NONE);
           EXPECT_EQ(access.request_lane_mask, mask);

@@ -325,10 +325,10 @@ def test_cdna3_and_4_lane_special_opcodes_do_not_accept_dpp(opcode):
 )
 def test_legacy_dpp_prohibition_tables(profile, opcode):
     encoding = 'ENC_VOPC' if opcode.startswith(('V_CMP_', 'V_CMPX_')) else 'ENC_VOP1'
-    assert (
-        profile.dpp_opcode_rule(encoding, opcode, src0_size_bits=64)
-        is DppOpcodeRule.FORBID
-    )
+    expected = DppOpcodeRule.FORBID
+    if isinstance(profile, Cdna2Profile) and encoding == 'ENC_VOP1' and 'F64' in opcode:
+        expected = DppOpcodeRule.ROW_SELECT_ONLY
+    assert profile.dpp_opcode_rule(encoding, opcode, src0_size_bits=64) is expected
 
 
 @pytest.mark.parametrize(

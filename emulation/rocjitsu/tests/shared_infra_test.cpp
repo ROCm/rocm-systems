@@ -5669,15 +5669,47 @@ TEST(DppPermuteTest, Rdna4GeneratedVop1F64PreservesInactiveDestination) {
   rdna4_generated_vop1_64_preserves_inactive_destination();
 }
 
-TEST(DppPermuteTest, Cdna2DoublePrecisionFmacDppSelectsOnlyRowBroadcasts) {
+TEST(DppPermuteTest, Cdna2BroadcastsDoublePrecisionOperationsWithinRows) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
   ASSERT_NE(decoder, nullptr);
-  for (uint32_t lane = 0; lane < 16; ++lane) {
-    const std::array words{0x080008fau, 0xff015004u | (lane << 8)};
-    EXPECT_TRUE(decoder->decode_window(words).succeeded());
+  // LLVM gfx90a encodings. CVT has a 32-bit source and 64-bit destination,
+  // RCP is absent from the XML DPP alternates, and FMAC is a VOP2 operation.
+  for (uint32_t opcode : {0x7e0420fau, 0x7e044afau, 0x080008fau}) {
+    for (uint32_t lane = 0; lane < 16; ++lane) {
+      const std::array words{opcode, 0xff015004u | (lane << 8)};
+      EXPECT_TRUE(decoder->decode_window(words).succeeded()) << std::hex << opcode;
+    }
+    const std::array shift{opcode, 0xff011104u};
+    EXPECT_TRUE(decoder->decode_window(shift).failed()) << std::hex << opcode;
   }
-  const std::array shift{0x080008fau, 0xff011104u};
-  EXPECT_TRUE(decoder->decode_window(shift).failed());
+
+  amdgpu::GpuMemory memory("gfx90a_dpp_fp64_memory");
+  amdgpu::L2Cache cache("gfx90a_dpp_fp64_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx90a_dpp_fp64", config, &memory, &cache);
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  const auto base = wave->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 64; ++lane)
+    cu->write_vgpr(base + 4, lane, std::bit_cast<uint32_t>(1.5f + lane));
+  wave->set_exec(~uint64_t{0});
+  // v_cvt_f64_f32_dpp v[2:3], v4 row_newbcast:7
+  const std::array words{0x7e0420fau, 0xff015704u};
+  auto instruction = decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  ASSERT_TRUE(cu->execute_instruction(instruction.value().get(), *wave).succeeded());
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    const uint64_t value =
+        (uint64_t{cu->read_vgpr(base + 3, lane)} << 32) | cu->read_vgpr(base + 2, lane);
+    EXPECT_EQ(std::bit_cast<double>(value), 1.5 + ((lane & ~15u) + 7));
+  }
+  wave->halt();
 }
 
 TEST(DppPermuteTest, Cdna4GeneratedVop1Dpp64InputPermutesBothWords) {

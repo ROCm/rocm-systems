@@ -81,19 +81,17 @@ TEST_F(Rdna2MemoryTest, WorkgroupAllocationReservesComplete1024ByteBlocks) {
   EXPECT_EQ(amdgpu::lds_allocation_bytes(cu_->arch(), UINT32_MAX), uint64_t{1} << 32);
 }
 
-TEST_F(Rdna2MemoryTest, UnsupportedGdsReadAndReturningAtomicRejectUnallocatedResults) {
-  for (const auto opcode : {rdna2::kDsReadB32, rdna2::kDsAddRtnU32}) {
-    for (uint8_t dst : {8, 16}) {
-      SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " dst=" << unsigned(dst));
-      const auto words = rdna2::build_ds(opcode, {.gds = 1, .addr = 0, .data0 = 1, .vdst = dst});
-      auto decoded = decoder_->decode_window(words);
-      ASSERT_TRUE(decoded.succeeded());
-      wave_->clear_instruction_execution_error();
-      EXPECT_TRUE(cu_->execute_instruction(decoded.value().get(), *wave_).failed());
-      EXPECT_EQ(wave_->instruction_execution_error(),
-                amdgpu::InstructionExecutionError::UnimplementedInstruction);
-      EXPECT_EQ(decoded.value()->data(), nullptr);
-    }
+TEST_F(Rdna2MemoryTest, UnsupportedGdsReadAddtidRejectsAllocatedAndUnallocatedResults) {
+  for (uint8_t dst : {8, 16}) {
+    SCOPED_TRACE(unsigned(dst));
+    auto decoded =
+        decoder_->decode_window(rdna2::build_ds(rdna2::kDsReadAddtidB32, {.gds = 1, .vdst = dst}));
+    ASSERT_TRUE(decoded.succeeded());
+    wave_->clear_instruction_execution_error();
+    EXPECT_TRUE(cu_->execute_instruction(decoded.value().get(), *wave_).failed());
+    EXPECT_EQ(wave_->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(decoded.value()->data(), nullptr);
   }
 }
 
@@ -212,37 +210,65 @@ TEST_F(Rdna2MemoryTest, BufferLoadChecksWholeVgprTupleBeforeIssuingMemoryRequest
   }
 }
 
-TEST_F(Rdna2MemoryTest, DsNullifiesTheWholeReturnBeforeChangingStorage) {
+TEST_F(Rdna2MemoryTest, DsAndGdsNullifyTheWholeReturnBeforeChangingStorage) {
   amdgpu::LocalMemPipeline local;
+  wave_->set_m0((128u << 16) | 16);
   write_vector(0, 0);
   write_vector(1, 5);
   write_vector(2, 7);
-  wave_->lds().write32(1024u, 10);
-  wave_->lds().write32(1024u + 4, 20);
-  const auto check = [&](uint16_t op, uint8_t dst, bool active) {
-    auto inst = execute(
-        rdna2::build_ds(op, {.offset1 = 1, .addr = 0, .data0 = 1, .data1 = 2, .vdst = dst}));
-    ASSERT_TRUE(inst && inst->data());
-    auto *d = inst->data_as<amdgpu::VectorMemState>();
-    EXPECT_EQ(d->exec_mask, active ? 1u : 0u);
-    EXPECT_EQ(d->lane_mask, active ? 1u : 0u);
-    ASSERT_EQ(local.issue(inst.release(), *wave_), amdgpu::VmAccessOutcome::Complete);
-  };
-  write_vector(15, 0xfeedbeef);
-  ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsRead2B32, 15, false));
-  ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsWrxchg2RtnB32, 15, false));
-  EXPECT_EQ(read_vector(15), 0xfeedbeefu);
-  EXPECT_EQ(wave_->lds().read32(1024u), 10u);
-  EXPECT_EQ(wave_->lds().read32(1024u + 4), 20u);
-  ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsWrxchg2RtnB32, 14, true));
-  EXPECT_EQ(read_vector(14), 10u);
-  EXPECT_EQ(read_vector(15), 20u);
-  EXPECT_EQ(wave_->lds().read32(1024u), 5u);
-  EXPECT_EQ(wave_->lds().read32(1024u + 4), 7u);
-  // The unused VDST encoding cannot suppress a no-return atomic.
-  auto no_return = rdna2::build_ds(rdna2::kDsAddU32, {.addr = 0, .data0 = 1, .vdst = 16});
-  issue(no_return, local);
-  EXPECT_EQ(wave_->lds().read32(1024u), 10u);
+  for (uint8_t indexed_gds : {0, 1}) {
+    SCOPED_TRACE(unsigned(indexed_gds));
+    const auto backing = [&](auto action) {
+      if (indexed_gds)
+        gds_->access_gds(wave_->cu().arch(), 0, [&](amdgpu::Lds &b) { action(b, 128u); });
+      else
+        action(wave_->lds(), 1024u);
+    };
+    backing([](auto &b, uint32_t base) {
+      b.write32(base, 10);
+      b.write32(base + 4, 20);
+    });
+    const auto check = [&](uint16_t op, uint8_t dst, bool active, uint8_t offset1 = 1) {
+      auto inst = execute(rdna2::build_ds(op, {.offset1 = offset1,
+                                               .gds = indexed_gds,
+                                               .addr = 0,
+                                               .data0 = 1,
+                                               .data1 = 2,
+                                               .vdst = dst}));
+      ASSERT_TRUE(inst && inst->data());
+      auto *d = inst->data_as<amdgpu::VectorMemState>();
+      EXPECT_EQ(d->exec_mask, active ? 1u : 0u);
+      EXPECT_EQ(d->lane_mask, active ? 1u : 0u);
+      ASSERT_EQ(local.issue(inst.release(), *wave_), amdgpu::VmAccessOutcome::Complete);
+    };
+    write_vector(15, 0xfeedbeef);
+    ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsRead2B32, 15, false));
+    ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsWrxchg2RtnB32, 15, false));
+    EXPECT_EQ(read_vector(15), 0xfeedbeefu);
+    backing([](auto &b, uint32_t base) {
+      EXPECT_EQ(b.read32(base), 10u);
+      EXPECT_EQ(b.read32(base + 4), 20u);
+    });
+    ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsWrxchg2RtnB32, 14, true));
+    EXPECT_EQ(read_vector(14), 10u);
+    EXPECT_EQ(read_vector(15), 20u);
+    backing([](auto &b, uint32_t base) {
+      EXPECT_EQ(b.read32(base), 5u);
+      EXPECT_EQ(b.read32(base + 4), 7u);
+    });
+    // The unused VDST encoding cannot suppress a no-return atomic.
+    auto no_return =
+        rdna2::build_ds(rdna2::kDsAddU32, {.gds = indexed_gds, .addr = 0, .data0 = 1, .vdst = 16});
+    issue(no_return, local);
+    backing([](auto &b, uint32_t base) { EXPECT_EQ(b.read32(base), 10u); });
+    ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsReadB32, 16, false, 0));
+    ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsAddRtnU32, 16, false, 0));
+    ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsReadB32, 8, true, 0));
+    EXPECT_EQ(read_vector(8), 10u);
+    ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsAddRtnU32, 8, true, 0));
+    EXPECT_EQ(read_vector(8), 10u);
+    backing([](auto &b, uint32_t base) { EXPECT_EQ(b.read32(base), 15u); });
+  }
 }
 
 TEST_F(Rdna2MemoryTest, FlatAndBufferAtomicsCheckTheReturnedWidthBeforeRmw) {
@@ -562,6 +588,139 @@ TEST(Rdna2MemoryDispatchTest, PrivateViolationSurvivesWaitAndClearsThroughTrapst
     for (unsigned i = 0; i < expected.size(); ++i)
       EXPECT_EQ(f.mem->read32(0x4000 + 4 * i), expected[i]) << "output " << i;
   }
+}
+
+TEST_F(Rdna2MemoryTest, IndexedGdsSignalsRejectedAddressesAtCompletion) {
+  amdgpu::LocalMemPipeline local;
+  constexpr uint32_t base = 128;
+  constexpr uint32_t sticky = 1u << 2, mem_viol = 1u << 8;
+  wave_->set_m0((base << 16) | 8);
+  write_vector(1, 1);
+  write_vector(2, 0);
+  const auto check = [&](uint16_t op, uint32_t addr, bool fault, uint8_t offset1 = 0,
+                         uint8_t dst = 4, uint64_t exec = 1) {
+    SCOPED_TRACE(::testing::Message()
+                 << op << " address=" << addr << " offset1=" << unsigned(offset1));
+    wave_->set_exec(exec);
+    wave_->set_trapsts(sticky);
+    write_vector(0, addr);
+    auto inst = execute(rdna2::build_ds(
+        op, {.offset1 = offset1, .gds = 1, .addr = 0, .data0 = 1, .data1 = 2, .vdst = dst}));
+    ASSERT_TRUE(inst && inst->data());
+    auto &data = *inst->data_as<amdgpu::VectorMemState>();
+    if (data.gds_m0)
+      amdgpu::LocalMemPipeline::capture_gds_violations(data, *wave_);
+    EXPECT_EQ(data.address_range_violation_lanes, fault ? exec : 0u);
+    // Check the memory pipeline's completion independently of the routing observation.
+    data.address_range_violation_lanes = 0;
+    EXPECT_EQ(wave_->trapsts(), sticky);
+    ASSERT_EQ(local.issue(inst.release(), *wave_), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(wave_->trapsts(), sticky | (fault ? mem_viol : 0u));
+  };
+  gds_->access_gds(wave_->cu().arch(), 0, [](amdgpu::Lds &b) {
+    b.write32(base, 17);
+    b.write32(base + 4, 23);
+    b.write32(base + 8, 99);
+  });
+  check(rdna2::kDsReadB32, 4, false);
+  EXPECT_EQ(read_vector(4), 23u);
+  check(rdna2::kDsReadB32, 8, true);
+  EXPECT_EQ(read_vector(4), 0u);
+  check(rdna2::kDsReadB128, 4, true); // The first DWORD of four still fits.
+  EXPECT_EQ(read_vector(4), 23u);
+  EXPECT_EQ(read_vector(5), 0u);
+  EXPECT_EQ(read_vector(6), 0u);
+  EXPECT_EQ(read_vector(7), 0u);
+  check(rdna2::kDsReadB64, 4, true); // A single eight-byte element crosses the end.
+  EXPECT_EQ(read_vector(4), 0u);
+  EXPECT_EQ(read_vector(5), 0u);
+  check(rdna2::kDsWriteB32, 8, true);
+  check(rdna2::kDsRead2B32, 4, false); // Both offsets address the last DWORD.
+  EXPECT_EQ(read_vector(4), 23u);
+  EXPECT_EQ(read_vector(5), 23u);
+  check(rdna2::kDsRead2B32, 4, true, 1);
+  EXPECT_EQ(read_vector(4), 23u);
+  EXPECT_EQ(read_vector(5), 0u);
+  check(rdna2::kDsWrite2B32, 4, true, 1);
+  wave_->set_m0((base << 16) | 16);
+  check(rdna2::kDsReadB32, 1, false); // The modeled queue allows unaligned plain accesses.
+  check(rdna2::kDsAddRtnU32, 2, true);
+  EXPECT_EQ(read_vector(4), 0u);
+  check(rdna2::kDsAddRtnU64, 4, true);
+  EXPECT_EQ(read_vector(4), 0u);
+  EXPECT_EQ(read_vector(5), 0u);
+  constexpr uint32_t sentinel = 0xa5a5b6b6;
+  write_vector(15, sentinel);
+  check(rdna2::kDsRead2B32, 16, false, 1, 15); // Out-of-range address, suppressed return tuple.
+  EXPECT_EQ(read_vector(15), sentinel);
+  write_vector(4, sentinel);
+  check(rdna2::kDsReadB32, 16, false, 0, 4, 0); // Same invalid address with empty EXEC.
+  EXPECT_EQ(read_vector(4), sentinel);
+  check(rdna2::kDsReadB32, 16, true);
+  EXPECT_EQ(read_vector(4), 0u);
+  gds_->access_gds(wave_->cu().arch(), 0, [](amdgpu::Lds &b) {
+    EXPECT_EQ(b.read32(base), 17u);
+    EXPECT_EQ(b.read32(base + 4), 1u);
+    EXPECT_EQ(b.read32(base + 8), 99u);
+  });
+  wave_->set_m0(((base + 2) << 16) | 8);
+  check(rdna2::kDsAppend, 0, true); // APPEND uses M0 as the atomic address.
+  wave_->set_m0((0xfffcu << 16) | 8);
+  check(rdna2::kDsReadB32, 4, true); // M0's window extends past the 64 KiB backing.
+}
+
+TEST_F(Rdna2MemoryTest, IndexedGdsUsesDeviceBackingAndSnapshotsTheM0Window) {
+  amdgpu::LocalMemPipeline local;
+  wave_->set_process_id(7);
+  wave_->set_m0((128u << 16) | 4u);
+  wave_->lds().write32(1024, 0xcccc);
+  write_vector(0, 0);
+  write_vector(1, 0x1111);
+  auto store = execute(rdna2::build_ds(rdna2::kDsWriteB32, {.gds = 1, .addr = 0, .data0 = 1}));
+  ASSERT_TRUE(store && store->data());
+  wave_->set_m0(0);
+  EXPECT_EQ(local.issue(store.release(), *wave_), amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(wave_->lds().read32(1024), 0xccccu);
+
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA2;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 16;
+  std::unique_ptr<amdgpu::ComputeUnitCore> peer;
+  ASSERT_NO_FATAL_FAILURE(
+      test::initialize_compute_unit(peer, "rdna2_peer", config, &memory_, &cache_));
+  ASSERT_TRUE(peer->set_gws_device(gds_));
+  auto *peer_wave = peer->dispatch_wf(0, 0, 106, 16, 64);
+  ASSERT_NE(peer_wave, nullptr);
+  peer_wave->set_process_id(7);
+  peer_wave->set_exec(1);
+  peer_wave->set_m0((128u << 16) | 4u);
+  auto add = [&](unsigned addr, unsigned input, unsigned expected) {
+    const unsigned vgpr = peer_wave->vgpr_alloc().base;
+    peer->write_vgpr(vgpr, 0, addr);
+    peer->write_vgpr(vgpr + 1, 0, input);
+    auto op = decoder_->decode_window(
+        rdna2::build_ds(rdna2::kDsAddRtnU32, {.gds = 1, .addr = 0, .data0 = 1, .vdst = 2}));
+    ASSERT_TRUE(op.succeeded());
+    ASSERT_TRUE(peer->execute_instruction(op.value().get(), *peer_wave).succeeded());
+    EXPECT_EQ(local.issue(op.value().release(), *peer_wave), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(peer->read_vgpr(vgpr + 2, 0), expected);
+  };
+  add(0, 1, 0x1111);
+  add(4, 3, 0); // Outside the four-byte M0 window.
+  peer_wave->set_m0((132u << 16) | 4u);
+  add(0, 0, 0); // Adjacent backing retained its initial value.
+  peer_wave->set_m0((128u << 16) | 4u);
+  peer_wave->set_process_id(8);
+  add(0, 5, 0);
+  peer_wave->set_process_id(7);
+  add(0, 0, 0x1112);
+  peer_wave->halt();
+  wave_->halt();
+  gds_->release_process(7);
+  gds_->access_gds(wave_->cu().arch(), 7,
+                   [](amdgpu::Lds &backing) { EXPECT_EQ(backing.read32(128), 0u); });
 }
 
 } // namespace

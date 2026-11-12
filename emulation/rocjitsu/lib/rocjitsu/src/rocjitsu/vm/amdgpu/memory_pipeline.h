@@ -28,6 +28,10 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 
+/// Capture an ordered-count operand before the owning wave can be suspended.
+bool prepare_ordered_count(Wavefront &wf, VectorMemState &state, uint32_t offset0, uint32_t offset1,
+                           uint32_t addr, uint32_t vdst);
+
 /// An unaligned native GFX12 LDS atomic faults before any active lane accesses bytes.
 bool native_ds_atomic_misaligned(const VectorMemState &state, rj_code_arch_t arch,
                                  uint64_t request_lanes);
@@ -209,6 +213,8 @@ private:
 class LocalMemPipeline : public MemoryPipeline {
 public:
   LocalMemPipeline() : MemoryPipeline(WaitCounterType::LGKMCNT) {}
+  /// Capture synchronous indexed GDS errors before its source locks are registered.
+  static void capture_gds_violations(VectorMemState &data, const Wavefront &wf);
 
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;

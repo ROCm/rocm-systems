@@ -724,6 +724,7 @@ private:
   [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
                                      simdojo::Tick now);
   void cancel_queue_dispatches(const ComputeQueueRecord &queue);
+  void reset_ordered_ids(const ComputeQueueRecord &queue);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
   void complete_failed_queue(ComputeQueueRecord &queue);
   void drain_pending_queue_failures();

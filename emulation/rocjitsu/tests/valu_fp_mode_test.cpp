@@ -5493,6 +5493,43 @@ struct ForceScalarGuard {
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(original); }
 };
 
+TEST(ValuFpModeHelpers, Gfx1150InterpolationEvaluatesAllSixStages) {
+  // The helper tests EXEC=1 and full EXEC. A single active lane still
+  // reads coefficients from the designated neighboring lane of its quad.
+  for (unsigned op = 0; op < 6; ++op) {
+    SCOPED_TRACE(op);
+    const bool half = op >= 2;
+    const bool half_output = half && (op & 1);
+    const uint32_t a = half ? 0x4000u : 0x40000000u;                 // 2
+    const uint32_t c = half && !half_output ? 0x4400u : 0x40800000u; // 4
+    const ArithmeticCase test{"gfx1150Interp",
+                              ROCJITSU_CODE_ARCH_RDNA3_5,
+                              {0xcd000000u | (op << 16), 0x040e0501u},
+                              {{1, a}, {2, 0x40400000u}, {3, c}},
+                              {{0, half_output ? 0xdead4900u : 0x41200000u}},
+                              0x2f0u,
+                              FE_TONEAREST};
+    for (const auto mode : {amdgpu::ArithmeticSemantics::Compatibility,
+                            amdgpu::ArithmeticSemantics::BitExactEmpirical}) {
+      SCOPED_TRACE(static_cast<int>(mode));
+      expect_arithmetic_case(test, {}, false, {.semantics = mode});
+    }
+  }
+}
+
+TEST(ValuFpModeHelpers, Gfx1150InterpolationUsesGuestIeeeModeForSignalingNaNs) {
+  for (bool ieee : {false, true}) {
+    const ArithmeticCase test{"gfx1150InterpNan",
+                              ROCJITSU_CODE_ARCH_RDNA3_5,
+                              {0xcd000000u, 0x040e0501u},
+                              {{1, 0x7f800001u}, {2, 0x3f800000u}, {3, 0}},
+                              {{0, ieee ? 0x7fc00001u : 0x7f800001u}},
+                              0xf0u | (uint32_t{ieee} << 9),
+                              FE_TONEAREST};
+    expect_arithmetic_case(test);
+  }
+}
+
 TEST(ValuFpModeHelpers, Gfx1150VectorExceptionsAreStickyAndMaskAware) {
   struct Witness {
     std::array<uint32_t, 3> words;

@@ -127,6 +127,8 @@ struct Pm4IndirectBuffer {
   /// Nonzero only for a root ring frame; nested IBs always use linear addresses.
   uint64_t ring_base = 0;
   uint32_t ring_bytes = 0;
+  /// DRM asks the kernel to reset this ring's compute wave IDs before this IB.
+  bool reset_gds_wave_id = false;
 };
 
 /// @brief Shared launch/wave failure status; wake the CP to cancel the owning queue.

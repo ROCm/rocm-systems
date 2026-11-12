@@ -774,7 +774,7 @@ class TestDeriveScalarSplitBarrier:
             ('S_BARRIER_SIGNAL_ISFIRST', 'scalar_barrier_signal', 'signal_isfirst'),
             ('S_BARRIER_INIT', 'scalar_barrier_init', None),
             ('S_BARRIER_JOIN', 'scalar_barrier_join', None),
-            ('S_WAKEUP_BARRIER', 'true_nop', None),
+            ('S_WAKEUP_BARRIER', 'scalar_barrier_wakeup', None),
         ],
     )
     def test_named_barrier_ops_derive_execution_model(
