@@ -29,8 +29,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA used by HIP, race, file-limit, and DBT corpus tests. A missing file-limit matrix is skipped only for a SHA in ROCJITSU_FILE_LIMIT_LEGACY_CORPUS_SHAS that differs from the shared pin."
-        # Last updated on 2026/11/09.
-        default: "751a18880e162d3aad61a0b8433cb17f86d08f27"
+        # Last updated on 2026/11/11.
+        default: "069a2cae77ff2ca1a782d1f014087c970fc6042a"
         required: true
       vulkan_corpus_ref:
         description: "Branch, tag, or SHA used by the Vulkan compute/buffer CTS tests"
@@ -57,7 +57,7 @@ env:
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
   # Pins HIP, race, file-limit, and DBT tests; keep equal to the corpus_ref default.
-  ROCJITSU_DBT_CORPUS_REF: 751a18880e162d3aad61a0b8433cb17f86d08f27
+  ROCJITSU_DBT_CORPUS_REF: 069a2cae77ff2ca1a782d1f014087c970fc6042a
   # Earlier corpus pins that predate corpus/runtime/file-limits. Only manual
   # comparisons against these SHAs, different from the shared pin, may skip.
   ROCJITSU_FILE_LIMIT_LEGACY_CORPUS_SHAS: 8172b0ad3099e1836923a62d51abe65e106b5382
@@ -106,7 +106,9 @@ jobs:
             sanitizer_runtime: STATIC
             run_simulator_corpus: true
             run_race_corpus: true
-            corpus_soft_timeout: 360
+            # The gfx1201 large SGEMM took 358s with four simulator threads;
+            # leave shared runners room before the 600s diagnostic rerun.
+            corpus_soft_timeout: 480
             corpus_hard_timeout: 600
             corpus_rerun_timeout: 600
             corpus_sanitizer: none
@@ -426,6 +428,10 @@ jobs:
               -DRJ_BUILD_CONSAN_ANALYZER=ON
             )
           fi
+          if [[ "${{ matrix.name }}" == release ]]; then
+            # Exercise stock-driver peer grants in the required Linux lane.
+            CMAKE_CONFIG_FLAGS+=(-DROCJITSU_ENABLE_VFIO=ON)
+          fi
 
           CXXFLAGS=""
           if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
@@ -447,6 +453,15 @@ jobs:
 
           # Let Ninja and CTest choose their default CPU parallelism.
           cmake --build "${ROCJITSU_BUILD_DIR}" -j
+
+          if [[ "${{ matrix.name }}" == release ]]; then
+            VFIO_DISCOVERY="$(ctest --test-dir "${ROCJITSU_BUILD_DIR}" -N -R '^Vfio(TargetGrants|DeviceHost)')"
+            echo "${VFIO_DISCOVERY}"
+            if ! [[ "${VFIO_DISCOVERY}" =~ Total[[:space:]]Tests:[[:space:]][1-9][0-9]* ]]; then
+              echo "VFIO peer tests were not registered" >&2
+              exit 1
+            fi
+          fi
 
           CTEST_SELECTION=()
           if [[ -n "${TEST_REGEX}" ]]; then
@@ -639,9 +654,15 @@ jobs:
           export ROCJITSU_SOURCE_DIR
 
           corpus_test_status=0
+          corpus_workers="${ROCJITSU_CORPUS_WORKERS}"
+          # Leave CPU headroom for the long gfx1201 GEMM on shared runners.
+          # The 24-worker Release run exceeded both its 480s and 600s limits.
+          if [[ "${{ matrix.name }}" == "release" && "${corpus_workers}" -gt 8 ]]; then
+            corpus_workers=8
+          fi
 
           corpus_test_flags=(
-            --workers "${ROCJITSU_CORPUS_WORKERS}"
+            --workers "${corpus_workers}"
             --soft-timeout ${{ matrix.corpus_soft_timeout }}
             --hard-timeout ${{ matrix.corpus_hard_timeout }}
             --rerun-timeout ${{ matrix.corpus_rerun_timeout }}

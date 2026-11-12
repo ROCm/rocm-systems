@@ -25,6 +25,7 @@
 #include <sys/socket.h>
 #include <sys/statfs.h>
 #include <sys/un.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 namespace rocjitsu::kmd {
@@ -33,12 +34,17 @@ namespace {
 struct Region {
   KeeperTokenIdentity identity;
   void *mapping;
+  int file = -1;
+  Region *next_file = nullptr;
   size_t tokens;
+  uint32_t allocation_flags = 0;
+  bool has_allocation_flags = false;
 };
 
 struct Channel {
   Region *region;
   int socket;
+  int mode = O_RDWR;
   KeeperFileResults files;
   LIST_ENTRY(Channel) links;
 };
@@ -56,7 +62,10 @@ template <typename T> void free_record(T *record) {
 }
 
 void release_region(Region *region) {
-  host_call(libc_passthrough().shmdt, ::shmdt, region->mapping);
+  if (region->file >= 0)
+    host_close_fd(region->file);
+  else
+    host_call(libc_passthrough().shmdt, ::shmdt, region->mapping);
   free_record(region);
 }
 
@@ -168,6 +177,7 @@ int create_token(int epoll, Region *region, int mode, uint64_t serial) {
   std::memcpy(address.sun_path + 1, &identity, sizeof(identity));
   token->socket = sockets[0];
   token->region = region;
+  token->mode = mode;
   epoll_event event{};
   event.events = EPOLLIN | EPOLLRDHUP;
   event.data.ptr = token;
@@ -317,14 +327,23 @@ void *watch_lease(void *argument) {
   host_close_fd(startup);
   size_t tokens = 0;
   uint64_t serial = 0;
+  Region *file_regions = nullptr;
   LIST_HEAD(PrivateChannels, Channel) private_channels{};
   auto retire = [&](Channel *channel) {
     host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_DEL, channel->socket,
               nullptr);
     host_close_fd(channel->socket);
     if (channel->region) {
-      if (--channel->region->tokens == 0)
+      if (--channel->region->tokens == 0) {
+        if (channel->region->file >= 0) {
+          Region **link = &file_regions;
+          while (*link && *link != channel->region)
+            link = &(*link)->next_file;
+          if (*link)
+            *link = channel->region->next_file;
+        }
         release_region(channel->region);
+      }
       --tokens;
     } else {
       LIST_REMOVE(channel, links);
@@ -383,10 +402,88 @@ void *watch_lease(void *argument) {
       return false;
     }
     const int reply = region ? incoming : socket;
+    if (region && (request.operation == KeeperOperation::SetAllocationFlags ||
+                   request.operation == KeeperOperation::GetAllocationFlags)) {
+      KeeperAllocationFlagsReply policy{};
+      if (request.mode != 0 || request.size > UINT32_MAX) {
+        policy.error = EINVAL;
+      } else if (request.operation == KeeperOperation::SetAllocationFlags) {
+        const uint32_t flags = static_cast<uint32_t>(request.size);
+        if (region->has_allocation_flags && region->allocation_flags != flags) {
+          policy.error = EEXIST;
+        } else {
+          region->allocation_flags = flags;
+          region->has_allocation_flags = true;
+        }
+      }
+      policy.flags = region->allocation_flags;
+      policy.present = region->has_allocation_flags;
+      const bool sent = send_keeper_descriptor(reply, &policy, sizeof(policy), -1) == 0;
+      host_close_fd(incoming);
+      return sent;
+    }
     int result = EINVAL;
     int descriptor = -1;
     if (missing_descriptor) {
       result = EMFILE;
+    } else if (!region && request.operation == KeeperOperation::WrapFile && incoming >= 0 &&
+               (request.mode == O_RDONLY || request.mode == O_RDWR) && request.size <= UINT32_MAX &&
+               (request.name[0] == 0 || request.name[0] == 1)) {
+      struct stat info {};
+      const int file_flags = host_call(libc_passthrough().fcntl, ::fcntl, incoming, F_GETFL);
+      if (file_flags < 0 || host_call(libc_passthrough().fstat_fn, ::fstat, incoming, &info) != 0) {
+        result = errno;
+      } else if (!S_ISREG(info.st_mode) || info.st_size <= 0 ||
+                 (file_flags & O_ACCMODE) != request.mode) {
+        result = EINVAL;
+      } else {
+        Region *backing = nullptr;
+        bool conflicting_policy = false;
+        for (Region *candidate = file_regions; candidate; candidate = candidate->next_file) {
+          if (candidate->identity.ipc_namespace != info.st_dev ||
+              candidate->identity.object != info.st_ino)
+            continue;
+          if (candidate->allocation_flags != request.size)
+            conflicting_policy = true;
+          else if (candidate->identity.mode == request.mode &&
+                   candidate->identity.size == static_cast<uint64_t>(info.st_size))
+            backing = candidate;
+        }
+        if (conflicting_policy) {
+          result = EEXIST;
+        } else if (backing) {
+          descriptor = create_token(epoll, backing, request.mode, ++serial);
+          result = descriptor >= 0 ? 0 : errno;
+          if (descriptor >= 0)
+            ++tokens;
+        } else if ((backing = allocate_record<Region>())) {
+          backing->identity.size = static_cast<uint64_t>(info.st_size);
+          backing->identity.object = info.st_ino;
+          backing->identity.ipc_namespace = info.st_dev;
+          backing->identity.device_backing = request.name[0] != 0;
+          backing->identity.shmid = -1;
+          backing->identity.mode = request.mode;
+          backing->file = incoming;
+          backing->allocation_flags = static_cast<uint32_t>(request.size);
+          backing->has_allocation_flags = true;
+          incoming = -1;
+          descriptor = create_token(epoll, backing, request.mode, ++serial);
+          result = descriptor >= 0 ? 0 : errno;
+          if (descriptor >= 0) {
+            backing->next_file = file_regions;
+            file_regions = backing;
+            ++tokens;
+          } else {
+            release_region(backing);
+          }
+        } else {
+          result = errno;
+        }
+      }
+    } else if (region && request.operation == KeeperOperation::OpenFile && region->file >= 0 &&
+               request.mode == channel.mode) {
+      descriptor = host_call(libc_passthrough().fcntl, ::fcntl, region->file, F_DUPFD_CLOEXEC, 0);
+      result = descriptor >= 0 ? 0 : errno;
     } else if (!region && (request.operation == KeeperOperation::SizeFile || batch_file)) {
       if (incoming >= 0) {
         result = host_call(libc_passthrough().ftruncate, ::ftruncate, incoming, request.size) == 0
@@ -410,6 +507,7 @@ void *watch_lease(void *argument) {
                 request.operation == KeeperOperation::PreallocatedBacking ||
                 request.operation == KeeperOperation::TokenBacking) &&
                (request.mode == O_RDONLY || request.mode == O_RDWR) &&
+               (!region || region->file < 0 || request.mode == channel.mode) &&
                (region || (request.size && request.size <= SIZE_MAX &&
                            std::memchr(request.name, '\0', sizeof(request.name))))) {
       if (!region) {
@@ -422,7 +520,7 @@ void *watch_lease(void *argument) {
           result = descriptor >= 0 ? 0 : errno;
         }
       }
-      if (region || result == EFBIG) {
+      if (region || result == EFBIG || result == EOPNOTSUPP) {
         Region *backing =
             region ? region
                    : create_region(
