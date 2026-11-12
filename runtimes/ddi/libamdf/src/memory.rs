@@ -402,6 +402,43 @@ fn rounded(value: u64, granularity: u64) -> Result<u64, u64> {
         .ok_or(RANGE)
 }
 
+fn common_multiple(a: u64, b: u64) -> Result<u64, u64> {
+    if a == 0 || b == 0 {
+        return if a == b { Ok(0) } else { Err(UNSUPPORTED) };
+    }
+    let (mut x, mut y) = (a, b);
+    while y != 0 {
+        (x, y) = (y, x % y);
+    }
+    (a / x).checked_mul(b).ok_or(UNSUPPORTED)
+}
+
+fn logical_maximum(
+    native: u64,
+    unit: u64,
+    logical_unit: u64,
+    pointer_alignment: Option<u64>,
+) -> Result<u64, u64> {
+    if !unit.is_power_of_two() || logical_unit == 0 {
+        return Err(UNSUPPORTED);
+    }
+    let offset = if let Some(alignment) = pointer_alignment {
+        if !alignment.is_power_of_two() {
+            return Err(UNSUPPORTED);
+        }
+        unit - unit.min(alignment)
+    } else {
+        0
+    };
+    let maximum = (native - native % unit).saturating_sub(offset);
+    let maximum = maximum - maximum % logical_unit;
+    if maximum == 0 {
+        Err(UNSUPPORTED)
+    } else {
+        Ok(maximum)
+    }
+}
+
 fn native_extent(
     size: u64,
     address: Option<u64>,
@@ -643,7 +680,9 @@ unsafe fn profile(
     } else {
         provider
     };
-    if host_visible && provider.is_some_and(|cap| cap.host_cacheability.is_none()) {
+    if host_visible
+        && provider.is_some_and(|cap| !cap.host_visible || cap.host_cacheability.is_none())
+    {
         return Err(UNSUPPORTED);
     }
     let page = provider.map_or(instance.host_page_size, |cap| cap.native.granularity);
@@ -686,6 +725,12 @@ unsafe fn profile(
         MAX_LENGTH
     };
     let maximum = provider.map_or(maximum, |cap| maximum.min(cap.native.maximum_size));
+    let maximum = logical_maximum(
+        maximum,
+        page,
+        provider.map_or(1, |cap| cap.logical_size_granularity),
+        registered.then_some(logical_alignment),
+    )?;
     let construction = amdf_memory_construction_capabilities_t {
         maximum_byte_length: maximum,
         byte_length_granularity: provider.map_or(1, |cap| cap.logical_size_granularity),
@@ -899,6 +944,96 @@ fn constrain_profile(profile: &mut amdf_memory_profile_t, maximum: u64) {
     }
 }
 
+fn intersect_construction(
+    selected: &mut amdf_memory_construction_capabilities_t,
+    other: amdf_memory_construction_capabilities_t,
+) -> Result<(), u64> {
+    if selected.maximum_byte_length == 0 || other.maximum_byte_length == 0 {
+        *selected = amdf_memory_construction_capabilities_t::default();
+        return Ok(());
+    }
+    // One AMDF backing has one native extent recipe. Mixed recipes need a
+    // distinct shared mapping design and must not silently select the first.
+    if selected.native_byte_length_granularity != other.native_byte_length_granularity
+        || selected.native_byte_length_prefix != other.native_byte_length_prefix
+        || selected.registered_host_cacheability != other.registered_host_cacheability
+    {
+        return Err(UNSUPPORTED);
+    }
+    selected.byte_length_granularity = common_multiple(
+        selected.byte_length_granularity,
+        other.byte_length_granularity,
+    )?;
+    selected.registered_host_pointer_alignment = common_multiple(
+        selected.registered_host_pointer_alignment,
+        other.registered_host_pointer_alignment,
+    )?;
+    selected.minimum_alignment = selected.minimum_alignment.max(other.minimum_alignment);
+    selected.maximum_alignment = selected.maximum_alignment.min(other.maximum_alignment);
+    selected.placement_kinds &= other.placement_kinds;
+    let maximum = selected.maximum_byte_length.min(other.maximum_byte_length);
+    selected.maximum_byte_length = maximum - maximum % selected.byte_length_granularity;
+    if selected.minimum_alignment > selected.maximum_alignment || selected.maximum_byte_length == 0
+    {
+        return Err(UNSUPPORTED);
+    }
+    Ok(())
+}
+
+fn intersect_profile(
+    selected: &mut amdf_memory_profile_t,
+    other: &amdf_memory_profile_t,
+) -> Result<(), u64> {
+    if selected.memory_class != other.memory_class
+        || selected.external_memory_support_count != other.external_memory_support_count
+    {
+        return Err(UNSUPPORTED);
+    }
+    intersect_construction(&mut selected.allocation, other.allocation)?;
+    intersect_construction(&mut selected.registration, other.registration)?;
+    intersect_construction(&mut selected.import, other.import)?;
+    selected.roles &= other.roles;
+    selected.guaranteed_flags &= other.guaranteed_flags;
+    selected.supported_flags &= other.supported_flags;
+    selected.host_mapping.maximum_byte_length = selected
+        .host_mapping
+        .maximum_byte_length
+        .min(other.host_mapping.maximum_byte_length);
+    selected.host_mapping.byte_offset_granularity = common_multiple(
+        selected.host_mapping.byte_offset_granularity,
+        other.host_mapping.byte_offset_granularity,
+    )?;
+    selected.host_mapping.byte_length_granularity = common_multiple(
+        selected.host_mapping.byte_length_granularity,
+        other.host_mapping.byte_length_granularity,
+    )?;
+    selected.host_mapping.supported_access &= other.host_mapping.supported_access;
+    selected.host_mapping.features &= other.host_mapping.features;
+    for (selected, other) in selected
+        .external_memory_support
+        .iter_mut()
+        .zip(&other.external_memory_support)
+        .take(other.external_memory_support_count as usize)
+    {
+        if selected.r#type != other.r#type || selected.provenance.words != other.provenance.words {
+            return Err(UNSUPPORTED);
+        }
+        selected.flags &= other.flags;
+        selected.source_offset_alignment = common_multiple(
+            selected.source_offset_alignment,
+            other.source_offset_alignment,
+        )?;
+        selected.byte_length_alignment =
+            common_multiple(selected.byte_length_alignment, other.byte_length_alignment)?;
+        selected.maximum_byte_length = selected.maximum_byte_length.min(other.maximum_byte_length);
+    }
+    Ok(())
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "one transaction validates and intersects all admitted endpoint profiles"
+)]
 unsafe fn joint_profile(
     scope: &Scope,
     ordinal: u32,
@@ -962,20 +1097,37 @@ unsafe fn joint_profile(
         capability.device_address.maximum_address = access.address_range.1;
         common.0 = common.0.max(access.address_range.0);
         common.1 = common.1.min(access.address_range.1);
-        selected.get_or_insert(candidate);
+        if let Some(selected) = &mut selected {
+            intersect_profile(selected, &candidate)?;
+        } else {
+            selected = Some(candidate);
+        }
         capabilities.try_push(capability).map_err(|_| EXHAUSTED)?;
     }
     if common.0 > common.1 {
         return Err(UNSUPPORTED);
     }
-    let page = unsafe { (*scope.instance).host_page_size };
+    let mut selected = selected.ok_or(INTERNAL)?;
+    let registered = selected.roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER != 0;
+    let limits = if registered {
+        selected.registration
+    } else {
+        selected.allocation
+    };
+    let unit = limits.native_byte_length_granularity;
+    if !unit.is_power_of_two() {
+        return Err(UNSUPPORTED);
+    }
+    let first = common
+        .0
+        .checked_add(unit - 1)
+        .map(|value| value & !(unit - 1))
+        .ok_or(UNSUPPORTED)?;
     let envelope = common
         .1
-        .checked_sub(common.0)
-        .and_then(|extent| extent.checked_add(1))
-        .unwrap_or(u64::MAX);
-    let native_maximum = envelope - envelope % page;
-    let mut selected = selected.ok_or(INTERNAL)?;
+        .checked_sub(first)
+        .ok_or(UNSUPPORTED)?
+        .saturating_add(1);
     if accesses.iter().any(|access| !access.import_supported)
         || accesses
             .iter()
@@ -991,14 +1143,12 @@ unsafe fn joint_profile(
             support.flags &= !AMDF_EXTERNAL_MEMORY_SUPPORT_FLAG_IMPORT;
         }
     }
-    let maximum = if selected.roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER != 0 {
-        native_maximum.saturating_sub(page - 1)
-    } else {
-        native_maximum
-    };
-    if maximum == 0 {
-        return Err(UNSUPPORTED);
-    }
+    let maximum = logical_maximum(
+        envelope,
+        unit,
+        limits.byte_length_granularity,
+        registered.then_some(limits.registered_host_pointer_alignment),
+    )?;
     constrain_profile(&mut selected, maximum);
     let address_bit_count = u64::BITS - common.1.leading_zeros();
     for capability in &mut capabilities {
@@ -2358,6 +2508,42 @@ mod tests;
 #[cfg(test)]
 mod capability_geometry_tests {
     use super::*;
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn logical_maxima_fit_native_rounding_and_all_permitted_pointer_offsets() {
+        assert_eq!(logical_maximum(131_071, 65536, 1, None), Ok(65536));
+        assert_eq!(logical_maximum(131_072, 65536, 1, Some(1)), Ok(65537));
+        assert_eq!(logical_maximum(131_072, 65536, 64, Some(1)), Ok(65536));
+        let base = amdf_memory_construction_capabilities_t {
+            maximum_byte_length: 131_072,
+            byte_length_granularity: 1,
+            registered_host_pointer_alignment: 1,
+            minimum_alignment: 1,
+            maximum_alignment: 65536,
+            native_byte_length_granularity: 65536,
+            ..Default::default()
+        };
+        let strict = amdf_memory_construction_capabilities_t {
+            byte_length_granularity: 65536,
+            registered_host_pointer_alignment: 65536,
+            ..base
+        };
+        for (mut a, b) in [(base, strict), (strict, base)] {
+            intersect_construction(&mut a, b).unwrap();
+            assert_eq!(a.byte_length_granularity, 65536);
+            assert_eq!(a.registered_host_pointer_alignment, 65536);
+            assert_eq!(native_extent(1, Some(65536), a), Err(UNSUPPORTED));
+        }
+        let incompatible = amdf_memory_construction_capabilities_t {
+            native_byte_length_granularity: 4096,
+            ..base
+        };
+        assert_eq!(
+            intersect_construction(&mut { base }, incompatible),
+            Err(UNSUPPORTED)
+        );
+    }
+
     #[test]
     fn construction_uses_provider_units_and_checks_unrounded_logical_lengths() {
         let mut limits = amdf_memory_construction_capabilities_t {

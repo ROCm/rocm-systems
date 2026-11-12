@@ -890,6 +890,16 @@ pub(crate) fn aql_queue_limits(info: &rocddi::topology::GpuInfo) -> Option<(u32,
     Some((u32::try_from(minimum).ok()?, u32::try_from(maximum).ok()?))
 }
 
+/// Selects a valid cooperative ring while retaining HSA's preferred size.
+pub(crate) fn cooperative_queue_size(info: &rocddi::topology::GpuInfo) -> Option<u32> {
+    let controls = info.queues.aql?;
+    if !controls.cooperative || !controls.multiple_producers {
+        return None;
+    }
+    let (minimum, maximum) = aql_queue_limits(info)?;
+    Some(256_u32.clamp(minimum, maximum))
+}
+
 #[cfg(test)]
 mod capability_tests {
     #[test]
@@ -903,5 +913,11 @@ mod capability_tests {
             ..rocddi::topology::GpuUserQueueCapabilities::default()
         });
         assert_eq!(super::aql_queue_limits(&info), Some((16384, 32768)));
+        assert_eq!(super::cooperative_queue_size(&info), None);
+        if let Some(controls) = &mut info.queues.aql {
+            controls.cooperative = true;
+            controls.multiple_producers = true;
+        }
+        assert_eq!(super::cooperative_queue_size(&info), Some(16384));
     }
 }
