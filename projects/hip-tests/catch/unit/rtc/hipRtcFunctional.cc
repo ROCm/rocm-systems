@@ -28,27 +28,7 @@ __global__ void testinline()
 }
 )"};
 
-HIP_TEST_CASE(Unit_hiprtc_functional) {
-  using namespace std;
-  hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, nullptr, 0, nullptr, nullptr));
-
-  hiprtcResult compileResult{hiprtcCompileProgram(prog, 0, 0)};
-  size_t logSize;
-  HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
-  if (logSize) {
-    string log(logSize, '\0');
-    HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
-    cout << log << '\n';
-  }
-  REQUIRE(compileResult == HIPRTC_SUCCESS);
-  size_t codeSize;
-  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
-
-  vector<char> codec(codeSize);
-  HIPRTC_CHECK(hiprtcGetCode(prog, codec.data()));
-  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
-
+static void LaunchCode(const std::vector<char>& codec) {
 #if HT_NVIDIA
   int device = 0;
   HIPCHECK(hipInit(0));
@@ -71,10 +51,42 @@ HIP_TEST_CASE(Unit_hiprtc_functional) {
 #endif
 }
 
+HIP_TEST_CASE(Unit_hiprtc_functional) {
+  using namespace std;
+  hiprtcProgram prog;
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, nullptr, 0, nullptr, nullptr));
+
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 0, 0)};
+  size_t logSize;
+  HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
+  if (logSize) {
+    string log(logSize, '\0');
+    HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
+    cout << log << '\n';
+  }
+  REQUIRE(compileResult == HIPRTC_SUCCESS);
+  size_t codeSize;
+  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
+
+  vector<char> codec(codeSize);
+  HIPRTC_CHECK(hiprtcGetCode(prog, codec.data()));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+
+  LaunchCode(codec);
+}
+
 HIP_TEST_CASE(Unit_hiprtc_compile_twice) {
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, nullptr, 0, nullptr, nullptr));
   HIPRTC_CHECK(hiprtcCompileProgram(prog, 0, 0));
   HIPRTC_CHECK(hiprtcCompileProgram(prog, 0, 0));
+
+  size_t codeSize;
+  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
+  REQUIRE(codeSize > 0);
+  std::vector<char> codec(codeSize);
+  HIPRTC_CHECK(hiprtcGetCode(prog, codec.data()));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+
+  LaunchCode(codec);
 }
