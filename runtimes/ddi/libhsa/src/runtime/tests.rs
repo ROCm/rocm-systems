@@ -543,6 +543,7 @@ fn hardware_exception_events_match_the_amd_extension_layout() {
             agent,
             GpuHardwareException {
                 endpoint_id: Some([42; 16]),
+                origin_id: None,
                 scope: rocddi::device::event::GpuResetScope::WholeGpu,
                 memory_lost: false,
                 cause,
@@ -681,14 +682,14 @@ fn cache_handles_and_names_are_stable_runtime_objects() {
 #[test]
 /// Verifies that OS caches are not assigned to an unidentified CPU node.
 fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
-    use rocddi::topology::host::{CpuCache, HostCaches, HostTopologySnapshot};
+    use rocddi::topology::host::{CpuCache, HostCaches, HostTopologyGraphSnapshot};
 
     let cache = |cpu| CpuCache {
         cpu,
         shared_cpus: None,
         info: rocddi::topology::CacheInfo::new(1, 32 * 1024, None, CpuCacheKind::Data),
     };
-    let topology = HostTopologySnapshot {
+    let topology = HostTopologyGraphSnapshot {
         memory_bytes: None,
         cpu: None,
         cpu_apic_ids: Vec::new(),
@@ -710,7 +711,7 @@ fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
 #[test]
 /// Verifies separate KFD CPU nodes retain their bank sizes and APU policy.
 fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
-    use rocddi::topology::host::{HostCaches, HostTopologySnapshot};
+    use rocddi::topology::host::{HostCaches, HostTopologyGraphSnapshot};
     use rocddi::topology::{
         CpuNodeInfo, MemoryBank, MemoryBankKind, NativeNodeId, NodeId, NodeKind, SourceId,
         TopologyNode,
@@ -720,8 +721,8 @@ fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
         name: "test CPU".into(),
         compute_units: 12,
     };
-    let topology = TopologySnapshot {
-        host: HostTopologySnapshot {
+    let topology = TopologyGraphSnapshot {
+        host: HostTopologyGraphSnapshot {
             memory_bytes: Some(3 << 30),
             cpu: Some(host.clone()),
             cpu_apic_ids: Vec::new(),

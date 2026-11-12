@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu: eligibility against the
-// LL128 threshold and slot, the DDA_LL128_AG_THREADS block size, the peer-column grid, and the launch.
+// LL128 threshold and slot, the block size and grid budget from the arch table, the peer-column grid, and the launch.
 
 #include <gtest/gtest.h>
 
@@ -34,6 +34,10 @@ const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
 // A slice carries 1920 payload bytes in 2 KiB on the wire.
 constexpr size_t kSliceData = 1920;
 constexpr size_t kSliceWire = 2048;
+constexpr size_t kMiB = size_t{1} << 20;
+
+// fp32 count per rank that gathers totalBytes across the fixture's four ranks.
+constexpr size_t CountFor(size_t totalBytes) { return totalBytes / (4 * sizeof(float)); }
 
 template <int N>
 const void* Kernel() {
@@ -256,6 +260,38 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_ThreadsOverrideMustBeAWarpMultip
   params_["RCCL_DDA_LL128_AG_THREADS"] = 256;
   EXPECT_EQ(RunOne(9 * kSliceData / 4).grid.y, 2u);
   EXPECT_EQ(RunOne(8 * kSliceData / 4).grid.y, 1u);
+}
+
+// The arch table picks the block size for the gathered total, 512 when it sets none.
+// A valid DDA_LL128_AG_THREADS overrides both.
+TEST_F(DdaAllGatherFabricLL128Microtest, Launch_ThreadsFromArchTableUnlessOverridden) {
+  size_t total = 0;
+  g_rcclDdaFabricAgLL128Threads = [&total](const ncclComm*, size_t totalBytes) {
+    total = totalBytes;
+    return 256;
+  };
+  EXPECT_EQ(RunOne(CountFor(8 * kMiB)).block.x, 256u);
+  EXPECT_EQ(total, 8 * kMiB);
+  params_["RCCL_DDA_LL128_AG_THREADS"] = 512;
+  EXPECT_EQ(RunOne(CountFor(8 * kMiB)).block.x, 512u);
+  params_.erase("RCCL_DDA_LL128_AG_THREADS");
+  g_rcclDdaFabricAgLL128Threads = [](const ncclComm*, size_t) { return 0; };
+  EXPECT_EQ(RunOne(CountFor(8 * kMiB)).block.x, 512u);
+}
+
+// The arch table's block cap for the gathered total bounds the grid. One warp per block lets it bind on four ranks.
+TEST_F(DdaAllGatherFabricLL128Microtest, Launch_BlockBudgetFromArchTable) {
+  params_["RCCL_DDA_LL128_AG_THREADS"] = 32;
+  size_t total = 0;
+  g_rcclDdaFabricAgLL128Blocks = [&total](const ncclComm*, size_t totalBytes) {
+    total = totalBytes;
+    return 75;
+  };
+  const DdaLaunch& launch = RunOne(CountFor(8 * kMiB));
+  EXPECT_EQ(total, 8 * kMiB);
+  EXPECT_EQ(launch.grid.x, 3u);
+  EXPECT_EQ(launch.grid.y, 25u);
+  EXPECT_EQ(ncclAllGatherDdaFabricLL128Blocks(mock_.get(), CountFor(8 * kMiB), ncclFloat32), 75u);
 }
 
 TEST_F(DdaAllGatherFabricLL128Microtest, Blocks_SizedOnBytesNotElements) {

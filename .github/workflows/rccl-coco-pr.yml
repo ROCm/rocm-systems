@@ -80,6 +80,8 @@ jobs:
         run: python3 .github/scripts/rccl_detect_coco_changes.py --base-ref HEAD^ --base-branch "$BASE_BRANCH"
 
   # Must resolve once for all clusters, or a moving coco_ref pins a different commit per cluster.
+  # Dependabot runs, re-runs included, get Dependabot secrets rather than
+  # Actions secrets, so APP_ID is empty there just as on a fork.
   setup:
     name: Setup
     needs: changes
@@ -87,7 +89,8 @@ jobs:
       needs.changes.outputs.rccl == 'true'
       && (github.event_name != 'pull_request'
           || (!github.event.pull_request.head.repo.fork
-              && !github.event.pull_request.draft))
+              && !github.event.pull_request.draft
+              && github.actor != 'dependabot[bot]'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -217,6 +220,7 @@ jobs:
           RCCL_CHANGED: ${{ needs.changes.outputs.rccl }}
           IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
           IS_DRAFT: ${{ github.event.pull_request.draft }}
+          IS_DEPENDABOT: ${{ github.actor == 'dependabot[bot]' }}
           GATE_RESULT: ${{ needs.gate.result }}
         run: |
           set -euo pipefail
@@ -234,6 +238,10 @@ jobs:
           fi
           if [[ "${IS_FORK}" == "true" ]]; then
             echo "::error::Fork PRs do not run coco smoke automatically. A maintainer must dispatch the 'RCCL coco PR' workflow with this PR's pr_number and pr_sha, confirm it passes, then override this check."
+            exit 1
+          fi
+          if [[ "${IS_DEPENDABOT}" == "true" ]]; then
+            echo "::error::Dependabot PRs get no Actions secrets, so coco smoke cannot run on them. A maintainer must dispatch the 'RCCL coco PR' workflow with this PR's pr_number and pr_sha, confirm it passes, then override this check."
             exit 1
           fi
           if [[ "${SETUP_RESULT}" != "success" ]]; then

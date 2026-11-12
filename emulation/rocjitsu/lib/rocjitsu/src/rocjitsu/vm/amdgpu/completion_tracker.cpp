@@ -61,22 +61,11 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
     qs.publication_retry_pending = false;
 
   for (auto &qs : queues) {
-    // A faulted queue still retires work that its fault did not cancel. Queue
-    // cancellation removes the entries it cancels, so they cannot publish here.
-    const bool idle_generation_stale =
-        qs.idle_publication.active() &&
-        (!qs.entries.empty() || qs.idle_publication.activity_generation != qs.activity_generation);
-    const bool idle_publication_cancelable =
-        qs.idle_publication.phase == QueueIdlePublicationPhase::CaptureAccess ||
-        qs.idle_publication.phase == QueueIdlePublicationPhase::ReadSignalHandle ||
-        qs.idle_publication.phase == QueueIdlePublicationPhase::StoreIdleStatus;
-    if (idle_generation_stale && idle_publication_cancelable) {
-      // Before the status CAS commits, new work invalidates the prior empty
-      // transition. After it commits, the status is externally observable and
-      // its mailbox/interrupt tail must finish; ROCr clears the signal when its
-      // handler consumes that notification.
+    // The mailbox store is the first visible effect. New work supersedes an
+    // idle notification that is still waiting for backing.
+    if (qs.idle_publication.active() &&
+        (!qs.entries.empty() || qs.idle_publication.activity_generation != qs.activity_generation))
       qs.idle_publication.reset();
-    }
     if (qs.idle_publication.active()) {
       const VmAccessOutcome outcome = advance_queue_idle_publication(qs.idle_publication);
       if (outcome == VmAccessOutcome::Unavailable) {
@@ -103,6 +92,8 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
     uint32_t last_queue_id = 0;
     AddressSpaceHandle last_address_space;
     bool publication_stalled = false;
+    // A faulted queue still retires work that its fault did not cancel. Queue
+    // cancellation removes the entries it cancels, so they cannot publish here.
     while (!qs.entries.empty() && qs.entries.front().fully_completed()) {
       auto &entry = qs.entries.front();
       last_process_id = entry.process_id;
@@ -242,10 +233,8 @@ VmAccessOutcome CompletionTracker::deliver_completion(DispatchEntry &entry) {
 VmAccessOutcome
 CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &state) {
   constexpr uint64_t kQueueInactiveSignalOffset = offsetof(amd_queue_t, queue_inactive_signal);
-  constexpr uint32_t kSignalValueOffset = 8;
   constexpr uint32_t kMailboxPointerOffset = 16;
   constexpr uint32_t kEventIdOffset = 24;
-  constexpr uint64_t kIdleStatus = 0x10;
 
   for (;;) {
     switch (state.phase) {
@@ -279,18 +268,8 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
       }
       if ((state.signal_address & 0x3f) != 0)
         return VmAccessOutcome::Malformed;
-      state.phase = QueueIdlePublicationPhase::StoreIdleStatus;
-      continue;
-    }
-
-    case QueueIdlePublicationPhase::StoreIdleStatus: {
-      // Preserve ROCR's destructor sentinel: a completed mismatch still needs
-      // the mailbox and event-age notification below.
-      const AtomicCompareExchangeResult idle =
-          compare_exchange_gpu(state.access->value, state.signal_address + kSignalValueOffset,
-                               sizeof(uint64_t), 0, kIdleStatus);
-      if (idle.outcome != VmAccessOutcome::Complete)
-        return idle.outcome;
+      // ROCr interprets a nonzero queue-inactive value as a scratch request
+      // or queue error. An idle notification only needs the event mailbox.
       state.phase = QueueIdlePublicationPhase::ReadMailboxPointer;
       continue;
     }
@@ -377,20 +356,21 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
                                                  : CompletionPublicationPhase::CaptureAccess;
       continue;
 
-    case CompletionPublicationPhase::CaptureAccess:
+    case CompletionPublicationPhase::CaptureAccess: {
       if (!entry.address_space)
         return VmAccessOutcome::Faulted;
       if (std::optional<GpuVmAccess> access = gpu_vm_.snapshot_pinned(entry.address_space))
         state.access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(std::move(*access));
       else
         return VmAccessOutcome::Faulted;
+      const auto arch = cus_.empty() ? ROCJITSU_CODE_ARCH_INVALID : cus_.front()->arch();
       state.start_timestamp = entry.profiling_start_timestamp;
       if (state.start_timestamp == 0)
-        state.start_timestamp = hsa_system_timestamp();
-      state.end_timestamp = std::max(hsa_system_timestamp(), state.start_timestamp + 1);
+        state.start_timestamp = gpu_timestamp(arch);
+      state.end_timestamp = std::max(gpu_timestamp(arch), state.start_timestamp + 1);
       state.phase = CompletionPublicationPhase::ReadMailboxPointer;
       continue;
-
+    }
     case CompletionPublicationPhase::ReadMailboxPointer: {
       const VmAccessOutcome outcome =
           read_gpu(state.access->value, entry.completion_signal + kMailboxPointerOffset,

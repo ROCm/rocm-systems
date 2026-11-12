@@ -41,8 +41,8 @@ __global__ void
 sigquit_resume_kern (int *fence, const int *release)
 {
   atomicAdd_system (fence, 1);
-  while (__hip_atomic_load (release, __ATOMIC_RELAXED,
-                            __HIP_MEMORY_SCOPE_SYSTEM)
+  while (__scoped_atomic_load_n (release, __ATOMIC_RELAXED,
+                                 __MEMORY_SCOPE_SYSTEM)
          == 0)
     __builtin_amdgcn_s_sleep (16);
 }

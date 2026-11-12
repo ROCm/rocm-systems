@@ -284,6 +284,7 @@ pub(crate) unsafe extern "C" fn scope_pair_info(
 ) -> u64 {
     crate::support::boundary(|| unsafe {
         let scope = object(pointer.cast::<Scope>())?;
+        (*scope.instance).require_current_process()?;
         let query = input(query, AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY)?;
         let out = output(out, AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO)?;
         if query.reserved != 0

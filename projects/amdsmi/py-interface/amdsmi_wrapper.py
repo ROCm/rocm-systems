@@ -153,7 +153,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Dynamic library loading
 # ---------------------------------------------------------------------------
-# This wrapper supports three self-contained install paths:
+# This wrapper supports four self-contained install paths:
 #
 #   1. pip wheel
 #      The wheel ships ``libamd_smi_python.so`` next to this file.
@@ -167,6 +167,10 @@ from pathlib import Path
 #   3. relocatable ROCm tree (TheRock rocm-sdk wheels, portable tarball)
 #      Wrapper at ``<root>/share/amd_smi/amdsmi/``, library at
 #      ``<root>/lib/<SONAME>`` -- resolved by fixed relative path.
+#
+#   4. the copy TheRock ships in its rocm-sdk-core wheel, also once copied
+#      into site-packages: library at ``<_rocm_sdk_core>/lib/<SONAME>``.
+#      TheRock marks that copy by setting ``_AMDSMI_ROCM_SDK_CORE``.
 #
 # A user installs ONE of these packages. We never combine paths
 # from them -- no ROCM_HOME / ROCM_PATH ladders, no walking up to a
@@ -190,6 +194,117 @@ _AMDSMI_LIB_SONAME = "libamd_smi.so.27"
 # system library (which would risk symbol conflicts inside PyTorch / JAX).
 _AMDSMI_ALLOW_SYSTEM_FALLBACK = True
 
+# TheRock flips this to True in the copy it ships in the rocm-sdk-core wheel
+# (build_tools/build_python_packages.py). That copy then loads only
+# rocm-sdk-core's library, never a system libamd_smi.so found by SONAME, so a
+# module from one ROCm release is not paired with another release's library.
+_AMDSMI_ROCM_SDK_CORE = False
+
+
+def _module_version():
+    """(major, minor) of the build this module came from, read from the
+    _version.py that is configured beside it, or None when it is absent."""
+    import re
+
+    try:
+        text = (Path(__file__).resolve().parent / "_version.py").read_text()
+    except OSError:
+        return None
+    m = re.search(r'__version__\s*=\s*["\'](\d+)\.(\d+)', text)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _check_library_version(lib, path):
+    """Reject a library newer than this module: SONAME 27 has grown structs
+    between minor releases, and an older module's buffers are too small for
+    them. An older library only lacks newer functions, so it is a warning."""
+    expected = _module_version()
+    if expected is None:
+        return
+    try:
+        get_lib_version = lib.amdsmi_get_lib_version
+    except AttributeError:
+        return
+    # amdsmi_version_t starts with uint32 major, minor; the buffer is larger
+    # than the struct so no future layout can overflow it.
+    version = (ctypes.c_uint32 * 64)()
+    if get_lib_version(version) != 0:
+        return
+    found = (version[0], version[1])
+    if found[0] != expected[0] or found[1] > expected[1]:
+        raise OSError(
+            "loading %s returned AMD SMI library %d.%d, which this %d.%d Python module cannot "
+            "use; set AMDSMI_LIB_OVERRIDE to a library path to load it anyway"
+            % ((path,) + found + expected)
+        )
+    if found[1] < expected[1]:
+        import warnings
+
+        warnings.warn(
+            "loading %s returned AMD SMI library %d.%d, older than this %d.%d Python module; "
+            "newer functions are unavailable" % ((path,) + found + expected),
+            stacklevel=3,
+        )
+
+
+def _unload(lib):
+    """Drop the reference ctypes.CDLL took on a library the version check
+    rejected, so a later load by SONAME, or one PyTorch's hook redirects,
+    cannot return it."""
+    import _ctypes
+
+    handle = getattr(lib, "_handle", None)
+    if handle is not None and hasattr(_ctypes, "dlclose"):
+        _ctypes.dlclose(handle)
+
+
+def _rocm_sdk_core_dir():
+    """The _rocm_sdk_core package directory, found the way an import would
+    find it but without importing it, so import guards that reject third-party
+    packages cannot break the load."""
+    import sys
+
+    module = sys.modules.get("_rocm_sdk_core")
+    if getattr(module, "__file__", None):
+        return Path(module.__file__).parent
+    for entry in sys.path:
+        if not isinstance(entry, str):
+            continue
+        candidate = Path(os.path.abspath(entry)) / "_rocm_sdk_core"
+        try:
+            if (candidate / "__init__.py").is_file():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def _open_library(path, mode, errors, pinned=True):
+    """Open path, reusing it when it is already loaded. PyTorch's import hook
+    can redirect a plain load to another libamd_smi; with RTLD_NOLOAD the
+    redirect can only return a copy the process has already loaded. A pinned
+    path is then opened through ctypes.cdll, which the hook does not wrap, so
+    the file asked for is the file loaded."""
+    noload = getattr(os, "RTLD_NOLOAD", 0)
+    for attempt in ([mode | noload] if noload else []) + [mode]:
+        try:
+            if attempt == mode and pinned:
+                lib = ctypes.cdll.LoadLibrary(str(path))
+            else:
+                lib = ctypes.CDLL(str(path), mode=attempt)
+        except OSError as err:
+            if attempt == mode:
+                errors.append(str(err))
+            continue
+        try:
+            _check_library_version(lib, path)
+        except OSError as err:
+            errors.append(str(err))
+            _unload(lib)
+            return None
+        return lib
+    return None
+
 
 def _load_library():
     """Load the AMD SMI shared library.
@@ -198,8 +313,10 @@ def _load_library():
       1. ``AMDSMI_LIB_OVERRIDE`` env var (ABI-test escape hatch).
       2. ``libamd_smi_python.so`` next to this file (pip wheel).
       3. ``<root>/lib/<SONAME>`` relative to this file (relocatable ROCm tree).
-      4. SONAME via the dynamic linker (system rpm / deb); skipped when
-         _AMDSMI_ALLOW_SYSTEM_FALLBACK is False (pip wheel).
+      4. In rocm-sdk-core's copy: ``_rocm_sdk_core/lib/<SONAME>``, then stop.
+      5. SONAME via the dynamic linker (system rpm / deb).
+      6. ``_rocm_sdk_core/lib/<SONAME>``, for a copy without TheRock's flag.
+    3-6 skip a library newer than this module.
     """
     mode = getattr(ctypes, "RTLD_LOCAL", 0)
 
@@ -222,16 +339,43 @@ def _load_library():
     # amdsmi_interface.py resolves librocm-core.so the same way. A
     # present-but-unloadable file (missing deps) must not shadow the system
     # linker lookup, so fall through on OSError.
+    candidates = []
     here = Path(__file__).resolve()
     if len(here.parents) > 3:
-        relocatable = here.parents[3] / "lib" / _AMDSMI_LIB_SONAME
-        if relocatable.exists():
-            try:
-                return ctypes.CDLL(str(relocatable), mode=mode), str(relocatable)
-            except OSError:
-                pass
+        candidates.append(here.parents[3] / "lib" / _AMDSMI_LIB_SONAME)
+    if _AMDSMI_ROCM_SDK_CORE:
+        sdk_core = _rocm_sdk_core_dir()
+        if sdk_core is not None:
+            candidates.append(sdk_core / "lib" / _AMDSMI_LIB_SONAME)
 
-    return ctypes.CDLL(_AMDSMI_LIB_SONAME, mode=mode), _AMDSMI_LIB_SONAME
+    errors = []
+    for path in candidates:
+        if path.exists():
+            lib = _open_library(path, mode, errors)
+            if lib is not None:
+                return lib, str(path)
+
+    if _AMDSMI_ROCM_SDK_CORE:
+        if sdk_core is None:
+            errors.append("_rocm_sdk_core not found on sys.path")
+        raise OSError(
+            "no usable %s from rocm-sdk-core: %s"
+            % (_AMDSMI_LIB_SONAME, "; ".join(errors) or "no file at " + ", ".join(map(str, candidates)))
+        )
+    lib = _open_library(_AMDSMI_LIB_SONAME, mode, errors, pinned=False)
+    if lib is not None:
+        return lib, _AMDSMI_LIB_SONAME
+
+    # No system library: a module copied beside TheRock's rocm-sdk-core wheel
+    # by hand, without TheRock's flag, still finds that wheel's library.
+    sdk_core = _rocm_sdk_core_dir()
+    if sdk_core is not None:
+        path = sdk_core / "lib" / _AMDSMI_LIB_SONAME
+        if path.exists():
+            lib = _open_library(path, mode, errors)
+            if lib is not None:
+                return lib, str(path)
+    raise OSError("; ".join(errors))
 
 
 class _MissingLibrary:
@@ -3039,6 +3183,28 @@ struct_amdsmi_nic_stat_t._fields_ = [
 ]
 
 amdsmi_nic_stat_t = struct_amdsmi_nic_stat_t
+
+# values for enumeration 'amdsmi_nic_capability_bits_t'
+amdsmi_nic_capability_bits_t__enumvalues = {
+    1: 'AMDSMI_NIC_CAP_FWCTL',
+    2: 'AMDSMI_NIC_CAP_NETDEV',
+}
+AMDSMI_NIC_CAP_FWCTL = 1
+AMDSMI_NIC_CAP_NETDEV = 2
+amdsmi_nic_capability_bits_t = ctypes.c_uint32 # enum
+
+# values for enumeration 'amdsmi_nic_type_t'
+amdsmi_nic_type_t__enumvalues = {
+    0: 'AMDSMI_NIC_TYPE_UNKNOWN',
+    1: 'AMDSMI_NIC_TYPE_AINIC',
+    2: 'AMDSMI_NIC_TYPE_UALOE',
+    3: 'AMDSMI_NIC_TYPE_OTHER',
+}
+AMDSMI_NIC_TYPE_UNKNOWN = 0
+AMDSMI_NIC_TYPE_AINIC = 1
+AMDSMI_NIC_TYPE_UALOE = 2
+AMDSMI_NIC_TYPE_OTHER = 3
+amdsmi_nic_type_t = ctypes.c_uint32 # enum
 class struct_amdsmi_nic_asic_info_t(Structure):
     pass
 
@@ -3107,6 +3273,139 @@ struct_amdsmi_nic_fw_info_t._fields_ = [
 ]
 
 amdsmi_nic_fw_info_t = struct_amdsmi_nic_fw_info_t
+
+# values for enumeration 'amdsmi_nic_health_state_t'
+amdsmi_nic_health_state_t__enumvalues = {
+    0: 'AMDSMI_NIC_HEALTH_UNKNOWN',
+    1: 'AMDSMI_NIC_HEALTH_HEALTHY',
+    2: 'AMDSMI_NIC_HEALTH_WARNING',
+    3: 'AMDSMI_NIC_HEALTH_ERROR',
+    4: 'AMDSMI_NIC_HEALTH_UNSUPPORTED',
+}
+AMDSMI_NIC_HEALTH_UNKNOWN = 0
+AMDSMI_NIC_HEALTH_HEALTHY = 1
+AMDSMI_NIC_HEALTH_WARNING = 2
+AMDSMI_NIC_HEALTH_ERROR = 3
+AMDSMI_NIC_HEALTH_UNSUPPORTED = 4
+amdsmi_nic_health_state_t = ctypes.c_uint32 # enum
+class struct_amdsmi_nic_health_t(Structure):
+    pass
+
+struct_amdsmi_nic_health_t._pack_ = 1 # source:False
+struct_amdsmi_nic_health_t._layout_ = 'ms'
+struct_amdsmi_nic_health_t._fields_ = [
+    ('state', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('error_count', ctypes.c_uint32),
+    ('reporter', ctypes.c_char * 64),
+    ('reserved', ctypes.c_uint64 * 4),
+]
+
+amdsmi_nic_health_t = struct_amdsmi_nic_health_t
+class struct_amdsmi_nic_port_split_t(Structure):
+    pass
+
+struct_amdsmi_nic_port_split_t._pack_ = 1 # source:False
+struct_amdsmi_nic_port_split_t._layout_ = 'ms'
+struct_amdsmi_nic_port_split_t._fields_ = [
+    ('splittable', ctypes.c_ubyte),
+    ('split_count', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 6),
+    ('reserved', ctypes.c_uint64 * 1),
+]
+
+amdsmi_nic_port_split_t = struct_amdsmi_nic_port_split_t
+class struct_amdsmi_nic_telemetry_t(Structure):
+    pass
+
+struct_amdsmi_nic_telemetry_t._pack_ = 1 # source:False
+struct_amdsmi_nic_telemetry_t._layout_ = 'ms'
+struct_amdsmi_nic_telemetry_t._fields_ = [
+    ('health', amdsmi_nic_health_t),
+    ('port_split', amdsmi_nic_port_split_t),
+    ('reserved', ctypes.c_uint64 * 4),
+]
+
+amdsmi_nic_telemetry_t = struct_amdsmi_nic_telemetry_t
+
+# values for enumeration 'amdsmi_metric_unit_t'
+amdsmi_metric_unit_t__enumvalues = {
+    2: 'AMDSMI_METRIC_UNIT_BOOL',
+    5: 'AMDSMI_METRIC_UNIT_MILLIVOLT',
+    15: 'AMDSMI_METRIC_UNIT_MILLIDEGREE_CELSIUS',
+    16: 'AMDSMI_METRIC_UNIT_MICROWATT',
+}
+AMDSMI_METRIC_UNIT_BOOL = 2
+AMDSMI_METRIC_UNIT_MILLIVOLT = 5
+AMDSMI_METRIC_UNIT_MILLIDEGREE_CELSIUS = 15
+AMDSMI_METRIC_UNIT_MICROWATT = 16
+amdsmi_metric_unit_t = ctypes.c_uint32 # enum
+
+# values for enumeration 'amdsmi_metric_category_t'
+amdsmi_metric_category_t__enumvalues = {
+    3: 'AMDSMI_METRIC_CATEGORY_TEMPERATURE',
+    4: 'AMDSMI_METRIC_CATEGORY_POWER',
+    14: 'AMDSMI_METRIC_CATEGORY_VOLTAGE',
+}
+AMDSMI_METRIC_CATEGORY_TEMPERATURE = 3
+AMDSMI_METRIC_CATEGORY_POWER = 4
+AMDSMI_METRIC_CATEGORY_VOLTAGE = 14
+amdsmi_metric_category_t = ctypes.c_uint32 # enum
+
+# values for enumeration 'amdsmi_nic_sensor_name_t'
+amdsmi_nic_sensor_name_t__enumvalues = {
+    0: 'AMDSMI_NIC_SENSOR_NAME_UNKNOWN',
+    1: 'AMDSMI_NIC_SENSOR_NAME_INPUT',
+    2: 'AMDSMI_NIC_SENSOR_NAME_MIN',
+    3: 'AMDSMI_NIC_SENSOR_NAME_MAX',
+    4: 'AMDSMI_NIC_SENSOR_NAME_LCRIT',
+    5: 'AMDSMI_NIC_SENSOR_NAME_CRIT',
+    6: 'AMDSMI_NIC_SENSOR_NAME_EMERGENCY',
+    7: 'AMDSMI_NIC_SENSOR_NAME_SHUTDOWN',
+    8: 'AMDSMI_NIC_SENSOR_NAME_CAP',
+    9: 'AMDSMI_NIC_SENSOR_NAME_ALARM_MIN',
+    10: 'AMDSMI_NIC_SENSOR_NAME_ALARM_MAX',
+    11: 'AMDSMI_NIC_SENSOR_NAME_ALARM_LCRIT',
+    12: 'AMDSMI_NIC_SENSOR_NAME_ALARM_CRIT',
+    13: 'AMDSMI_NIC_SENSOR_NAME_ALARM_EMERGENCY',
+    14: 'AMDSMI_NIC_SENSOR_NAME_ALARM_SHUTDOWN',
+    15: 'AMDSMI_NIC_SENSOR_NAME_ALARM_CAP',
+}
+AMDSMI_NIC_SENSOR_NAME_UNKNOWN = 0
+AMDSMI_NIC_SENSOR_NAME_INPUT = 1
+AMDSMI_NIC_SENSOR_NAME_MIN = 2
+AMDSMI_NIC_SENSOR_NAME_MAX = 3
+AMDSMI_NIC_SENSOR_NAME_LCRIT = 4
+AMDSMI_NIC_SENSOR_NAME_CRIT = 5
+AMDSMI_NIC_SENSOR_NAME_EMERGENCY = 6
+AMDSMI_NIC_SENSOR_NAME_SHUTDOWN = 7
+AMDSMI_NIC_SENSOR_NAME_CAP = 8
+AMDSMI_NIC_SENSOR_NAME_ALARM_MIN = 9
+AMDSMI_NIC_SENSOR_NAME_ALARM_MAX = 10
+AMDSMI_NIC_SENSOR_NAME_ALARM_LCRIT = 11
+AMDSMI_NIC_SENSOR_NAME_ALARM_CRIT = 12
+AMDSMI_NIC_SENSOR_NAME_ALARM_EMERGENCY = 13
+AMDSMI_NIC_SENSOR_NAME_ALARM_SHUTDOWN = 14
+AMDSMI_NIC_SENSOR_NAME_ALARM_CAP = 15
+amdsmi_nic_sensor_name_t = ctypes.c_uint32 # enum
+class struct_amdsmi_nic_sensor_t(Structure):
+    pass
+
+struct_amdsmi_nic_sensor_t._pack_ = 1 # source:False
+struct_amdsmi_nic_sensor_t._layout_ = 'ms'
+struct_amdsmi_nic_sensor_t._fields_ = [
+    ('category', amdsmi_metric_category_t),
+    ('name', amdsmi_nic_sensor_name_t),
+    ('unit', amdsmi_metric_unit_t),
+    ('channel', ctypes.c_uint32),
+    ('instance', ctypes.c_uint32),
+    ('label', ctypes.c_char * 256),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('value', ctypes.c_int64),
+    ('reserved', ctypes.c_uint64 * 4),
+]
+
+amdsmi_nic_sensor_t = struct_amdsmi_nic_sensor_t
 class struct_amdsmi_nic_port_t(Structure):
     pass
 
@@ -5013,6 +5312,18 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_nic_type = _libraries['libamd_smi.so'].amdsmi_get_nic_type
+    amdsmi_get_nic_type.restype = amdsmi_status_t
+    amdsmi_get_nic_type.argtypes = [amdsmi_processor_handle, ctypes.POINTER(amdsmi_nic_type_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_nic_capability = _libraries['libamd_smi.so'].amdsmi_get_nic_capability
+    amdsmi_get_nic_capability.restype = amdsmi_status_t
+    amdsmi_get_nic_capability.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_nic_bus_info = _libraries['libamd_smi.so'].amdsmi_get_nic_bus_info
     amdsmi_get_nic_bus_info.restype = amdsmi_status_t
     amdsmi_get_nic_bus_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_nic_bus_info_t)]
@@ -5028,6 +5339,12 @@ try:
     amdsmi_get_nic_port_info = _libraries['libamd_smi.so'].amdsmi_get_nic_port_info
     amdsmi_get_nic_port_info.restype = amdsmi_status_t
     amdsmi_get_nic_port_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_nic_port_info_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_nic_port_ifindex = _libraries['libamd_smi.so'].amdsmi_get_nic_port_ifindex
+    amdsmi_get_nic_port_ifindex.restype = amdsmi_status_t
+    amdsmi_get_nic_port_ifindex.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:
@@ -5049,15 +5366,42 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_nic_telemetry = _libraries['libamd_smi.so'].amdsmi_get_nic_telemetry
+    amdsmi_get_nic_telemetry.restype = amdsmi_status_t
+    amdsmi_get_nic_telemetry.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_nic_telemetry_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_nic_hwmon_sensors = _libraries['libamd_smi.so'].amdsmi_get_nic_hwmon_sensors
+    amdsmi_get_nic_hwmon_sensors.restype = amdsmi_status_t
+    amdsmi_get_nic_hwmon_sensors.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_sensor_t)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_nic_port_statistics = _libraries['libamd_smi.so'].amdsmi_get_nic_port_statistics
     amdsmi_get_nic_port_statistics.restype = amdsmi_status_t
     amdsmi_get_nic_port_statistics.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t)]
 except AttributeError:
     pass
+
+# values for enumeration 'amdsmi_nic_stat_scope_t'
+amdsmi_nic_stat_scope_t__enumvalues = {
+    0: 'AMDSMI_NIC_STAT_SCOPE_DEFAULT',
+    1: 'AMDSMI_NIC_STAT_SCOPE_EXTENDED',
+}
+AMDSMI_NIC_STAT_SCOPE_DEFAULT = 0
+AMDSMI_NIC_STAT_SCOPE_EXTENDED = 1
+amdsmi_nic_stat_scope_t = ctypes.c_uint32 # enum
 try:
     amdsmi_get_nic_vendor_statistics = _libraries['libamd_smi.so'].amdsmi_get_nic_vendor_statistics
     amdsmi_get_nic_vendor_statistics.restype = amdsmi_status_t
     amdsmi_get_nic_vendor_statistics.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_nic_vendor_statistics_with_scope = _libraries['libamd_smi.so'].amdsmi_get_nic_vendor_statistics_with_scope
+    amdsmi_get_nic_vendor_statistics_with_scope.restype = amdsmi_status_t
+    amdsmi_get_nic_vendor_statistics_with_scope.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t), amdsmi_nic_stat_scope_t]
 except AttributeError:
     pass
 class struct_amdsmi_ampp_field_t(Structure):
@@ -5385,8 +5729,33 @@ __all__ = \
     'AMDSMI_MEM_PAGE_STATUS_UNRESERVABLE', 'AMDSMI_MEM_TYPE_FIRST',
     'AMDSMI_MEM_TYPE_GTT', 'AMDSMI_MEM_TYPE_LAST',
     'AMDSMI_MEM_TYPE_VIS_VRAM', 'AMDSMI_MEM_TYPE_VRAM',
-    'AMDSMI_MM_UVD', 'AMDSMI_MM_VCE', 'AMDSMI_MM_VCN',
-    'AMDSMI_MM__MAX', 'AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING',
+    'AMDSMI_METRIC_CATEGORY_POWER',
+    'AMDSMI_METRIC_CATEGORY_TEMPERATURE',
+    'AMDSMI_METRIC_CATEGORY_VOLTAGE', 'AMDSMI_METRIC_UNIT_BOOL',
+    'AMDSMI_METRIC_UNIT_MICROWATT',
+    'AMDSMI_METRIC_UNIT_MILLIDEGREE_CELSIUS',
+    'AMDSMI_METRIC_UNIT_MILLIVOLT', 'AMDSMI_MM_UVD', 'AMDSMI_MM_VCE',
+    'AMDSMI_MM_VCN', 'AMDSMI_MM__MAX', 'AMDSMI_NIC_CAP_FWCTL',
+    'AMDSMI_NIC_CAP_NETDEV', 'AMDSMI_NIC_HEALTH_ERROR',
+    'AMDSMI_NIC_HEALTH_HEALTHY', 'AMDSMI_NIC_HEALTH_UNKNOWN',
+    'AMDSMI_NIC_HEALTH_UNSUPPORTED', 'AMDSMI_NIC_HEALTH_WARNING',
+    'AMDSMI_NIC_SENSOR_NAME_ALARM_CAP',
+    'AMDSMI_NIC_SENSOR_NAME_ALARM_CRIT',
+    'AMDSMI_NIC_SENSOR_NAME_ALARM_EMERGENCY',
+    'AMDSMI_NIC_SENSOR_NAME_ALARM_LCRIT',
+    'AMDSMI_NIC_SENSOR_NAME_ALARM_MAX',
+    'AMDSMI_NIC_SENSOR_NAME_ALARM_MIN',
+    'AMDSMI_NIC_SENSOR_NAME_ALARM_SHUTDOWN',
+    'AMDSMI_NIC_SENSOR_NAME_CAP', 'AMDSMI_NIC_SENSOR_NAME_CRIT',
+    'AMDSMI_NIC_SENSOR_NAME_EMERGENCY',
+    'AMDSMI_NIC_SENSOR_NAME_INPUT', 'AMDSMI_NIC_SENSOR_NAME_LCRIT',
+    'AMDSMI_NIC_SENSOR_NAME_MAX', 'AMDSMI_NIC_SENSOR_NAME_MIN',
+    'AMDSMI_NIC_SENSOR_NAME_SHUTDOWN',
+    'AMDSMI_NIC_SENSOR_NAME_UNKNOWN', 'AMDSMI_NIC_STAT_SCOPE_DEFAULT',
+    'AMDSMI_NIC_STAT_SCOPE_EXTENDED', 'AMDSMI_NIC_TYPE_AINIC',
+    'AMDSMI_NIC_TYPE_OTHER', 'AMDSMI_NIC_TYPE_UALOE',
+    'AMDSMI_NIC_TYPE_UNKNOWN',
+    'AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING',
     'AMDSMI_NPM_BALANCING_MODE_INVALID',
     'AMDSMI_NPM_BALANCING_MODE_MAX',
     'AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING',
@@ -5695,15 +6064,18 @@ __all__ = \
     'amdsmi_get_link_topology_nearest',
     'amdsmi_get_minmax_bandwidth_between_processors',
     'amdsmi_get_nic_asic_info', 'amdsmi_get_nic_bus_info',
-    'amdsmi_get_nic_device_bdf', 'amdsmi_get_nic_driver_info',
-    'amdsmi_get_nic_fw_info', 'amdsmi_get_nic_numa_info',
-    'amdsmi_get_nic_port_info', 'amdsmi_get_nic_port_statistics',
+    'amdsmi_get_nic_capability', 'amdsmi_get_nic_device_bdf',
+    'amdsmi_get_nic_driver_info', 'amdsmi_get_nic_fw_info',
+    'amdsmi_get_nic_hwmon_sensors', 'amdsmi_get_nic_numa_info',
+    'amdsmi_get_nic_port_ifindex', 'amdsmi_get_nic_port_info',
+    'amdsmi_get_nic_port_statistics',
     'amdsmi_get_nic_processor_handles',
     'amdsmi_get_nic_rdma_dev_info',
-    'amdsmi_get_nic_rdma_port_statistics',
-    'amdsmi_get_nic_vendor_statistics', 'amdsmi_get_node_handle',
-    'amdsmi_get_npm_balancing_mode', 'amdsmi_get_npm_info',
-    'amdsmi_get_npm_supported_balancing_modes',
+    'amdsmi_get_nic_rdma_port_statistics', 'amdsmi_get_nic_telemetry',
+    'amdsmi_get_nic_type', 'amdsmi_get_nic_vendor_statistics',
+    'amdsmi_get_nic_vendor_statistics_with_scope',
+    'amdsmi_get_node_handle', 'amdsmi_get_npm_balancing_mode',
+    'amdsmi_get_npm_info', 'amdsmi_get_npm_supported_balancing_modes',
     'amdsmi_get_pcie_info', 'amdsmi_get_power_cap_info',
     'amdsmi_get_power_info',
     'amdsmi_get_processor_count_from_handles',
@@ -5734,15 +6106,20 @@ __all__ = \
     'amdsmi_link_type_t', 'amdsmi_memory_page_status_t',
     'amdsmi_memory_partition_config_t',
     'amdsmi_memory_partition_type_t', 'amdsmi_memory_type_t',
+    'amdsmi_metric_category_t', 'amdsmi_metric_unit_t',
     'amdsmi_mm_ip_t', 'amdsmi_name_value_t', 'amdsmi_nic_asic_info_t',
-    'amdsmi_nic_bus_info_t', 'amdsmi_nic_driver_info_t',
-    'amdsmi_nic_fw_entry_t', 'amdsmi_nic_fw_info_t',
-    'amdsmi_nic_numa_info_t', 'amdsmi_nic_port_info_t',
+    'amdsmi_nic_bus_info_t', 'amdsmi_nic_capability_bits_t',
+    'amdsmi_nic_driver_info_t', 'amdsmi_nic_fw_entry_t',
+    'amdsmi_nic_fw_info_t', 'amdsmi_nic_health_state_t',
+    'amdsmi_nic_health_t', 'amdsmi_nic_numa_info_t',
+    'amdsmi_nic_port_info_t', 'amdsmi_nic_port_split_t',
     'amdsmi_nic_port_t', 'amdsmi_nic_rdma_dev_info_t',
     'amdsmi_nic_rdma_devices_info_t', 'amdsmi_nic_rdma_port_info_t',
-    'amdsmi_nic_stat_t', 'amdsmi_node_handle',
-    'amdsmi_npm_balancing_mode_t', 'amdsmi_npm_info_t',
-    'amdsmi_npm_status_t', 'amdsmi_nps_caps_t',
+    'amdsmi_nic_sensor_name_t', 'amdsmi_nic_sensor_t',
+    'amdsmi_nic_stat_scope_t', 'amdsmi_nic_stat_t',
+    'amdsmi_nic_telemetry_t', 'amdsmi_nic_type_t',
+    'amdsmi_node_handle', 'amdsmi_npm_balancing_mode_t',
+    'amdsmi_npm_info_t', 'amdsmi_npm_status_t', 'amdsmi_nps_caps_t',
     'amdsmi_od_vddc_point_t', 'amdsmi_od_volt_curve_t',
     'amdsmi_od_volt_freq_data_t', 'amdsmi_p2p_capability_t',
     'amdsmi_pcie_bandwidth_t', 'amdsmi_pcie_info_t',
@@ -5844,12 +6221,14 @@ __all__ = \
     'struct_amdsmi_name_value_t', 'struct_amdsmi_nic_asic_info_t',
     'struct_amdsmi_nic_bus_info_t', 'struct_amdsmi_nic_driver_info_t',
     'struct_amdsmi_nic_fw_entry_t', 'struct_amdsmi_nic_fw_info_t',
-    'struct_amdsmi_nic_numa_info_t', 'struct_amdsmi_nic_port_info_t',
+    'struct_amdsmi_nic_health_t', 'struct_amdsmi_nic_numa_info_t',
+    'struct_amdsmi_nic_port_info_t', 'struct_amdsmi_nic_port_split_t',
     'struct_amdsmi_nic_port_t', 'struct_amdsmi_nic_rdma_dev_info_t',
     'struct_amdsmi_nic_rdma_devices_info_t',
-    'struct_amdsmi_nic_rdma_port_info_t', 'struct_amdsmi_nic_stat_t',
-    'struct_amdsmi_npm_info_t', 'struct_amdsmi_od_vddc_point_t',
-    'struct_amdsmi_od_volt_curve_t',
+    'struct_amdsmi_nic_rdma_port_info_t',
+    'struct_amdsmi_nic_sensor_t', 'struct_amdsmi_nic_stat_t',
+    'struct_amdsmi_nic_telemetry_t', 'struct_amdsmi_npm_info_t',
+    'struct_amdsmi_od_vddc_point_t', 'struct_amdsmi_od_volt_curve_t',
     'struct_amdsmi_od_volt_freq_data_t',
     'struct_amdsmi_p2p_capability_t',
     'struct_amdsmi_pcie_bandwidth_t', 'struct_amdsmi_pcie_info_t',

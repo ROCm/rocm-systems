@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
@@ -81,7 +82,9 @@ TEST(Rdna4DotDppTest, PermutesSourcesAndPreservesMaskedDestinations) {
       cfg.sgprs_per_wf = 106;
       cfg.vgprs_per_wf = 32;
       cfg.lds_size_kb = 64;
-      auto cu = amdgpu::ComputeUnitCore::create("dot_dpp", cfg, &memory, &l2);
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "dot_dpp", cfg, &memory, &l2));
       auto decoder = Decoder::create(cfg.arch);
       auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf, wave_size);
       ASSERT_NE(wf, nullptr);
@@ -140,7 +143,9 @@ TEST(Rdna4DotDppTest, FloatingDot4UsesEachOperandFormat) {
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 32;
-  auto cu = amdgpu::ComputeUnitCore::create("dot4_format", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "dot4_format", cfg, &memory, &l2));
   auto decoder = Decoder::create(cfg.arch);
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf, 32);
   ASSERT_NE(wf, nullptr);

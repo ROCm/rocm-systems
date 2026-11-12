@@ -25,8 +25,7 @@
 // g_loadParam on every read, so tests can vary a param between cases. Must
 // precede the unit under test, which is where the bodies are emitted.
 //
-// g_loadParam is supplied by fakes/dev_runtime_micro_fakes.cc here rather than
-// fakes/nccl_fakes.cc, which this binary does not link.
+// g_loadParam is defined in fakes/nccl_fakes.cc, which this binary links.
 #include "fakes/param_redirect.h"
 
 // ncclCalloc's failure arms cannot be reached while it always succeeds, and it
@@ -119,7 +118,15 @@ static inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* manager
 #include <gtest/gtest.h>
 
 #include "ScopedHook.h"
+#include "StickyHipLastError.h"
+#include "../common/LogCapture.hpp"  // CaptureLog: assert on WARN text
 
+#include <malloc.h>  // mallinfo2: heap in-use bytes for the DevCommCreate leak checks
+#if defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 33)
+#define DEV_RUNTIME_TEST_HAS_MALLINFO2 1
+#endif
+#endif
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -543,7 +550,7 @@ protected:
   std::vector<int> localRankToRank;
 
   // The only fixture here that installs hooks without a reset otherwise:
-  // ProxyOnlyDrainFails_StillEmptiesWindowList leaves a non-freeing
+  // ProxyOnlyDrainFails_StillReleasesRegistrationAndEmptiesWindowList leaves a non-freeing
   // g_devrShadowPoolFree behind, which is exactly the case the shadow-pool
   // liveness reset exists to clean up.
   void TearDown() override { ResetDevRuntimeMicroFakes(); }
@@ -685,9 +692,12 @@ TEST_F(DevrFinalizeTest, ProxyOnly_DrainsNonSymWindows) {
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
-// The drain must make progress even when the deregister fails: it only removes
-// the entry on success, so finalize drops it regardless to avoid spinning.
-TEST_F(DevrFinalizeTest, ProxyOnlyDrainFails_StillEmptiesWindowList) {
+// The drain must make progress even when a deregister stage fails. Finalize
+// passes forceCleanup, so after the failed shadow-pool free the remaining
+// stages still run: the local registration is released and the entry removed.
+// Without forceCleanup, finalize's own guard would still empty the list, but
+// ncclCommDeregister would never be reached.
+TEST_F(DevrFinalizeTest, ProxyOnlyDrainFails_StillReleasesRegistrationAndEmptiesWindowList) {
   comm->symmetricSupport = 0;
   ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
 
@@ -695,8 +705,11 @@ TEST_F(DevrFinalizeTest, ProxyOnlyDrainFails_StillEmptiesWindowList) {
   ASSERT_EQ(windowRegisterNonSym(comm, reinterpret_cast<void*>(0x100000), 4096, 0, nullptr, &out), ncclSuccess);
   ScopedHook poolFree(g_devrShadowPoolFree,
                       [](ncclShadowPool*, void*, hipStream_t) { return ncclSystemError; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
   ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+  EXPECT_EQ(poolFree.calls, 1);
+  EXPECT_EQ(dereg.calls, 1);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
@@ -3167,6 +3180,36 @@ TEST_F(SymWindowCreateTest, FullTable_ChainsAnotherTable) {
   EXPECT_EQ(first->next->entries[0].window, winDev);
 }
 
+// The table copies are asynchronous, so their sources must outlive the call:
+// both the entry and the chain link are copied out of the host shadow, never
+// out of a local. dev == host under the shadow-pool fake, so the host shadow
+// slot is the copy's own destination.
+TEST_F(SymWindowCreateTest, TableCopiesReadFromTheHostShadow) {
+  for (int i = 0; i < 32; i++) {
+    ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000 + i * 0x1000), 4096), ncclSuccess);
+  }
+  ncclDevCommWindowTable* first = comm->devrState.windowTable;
+  ASSERT_NE(first, nullptr);
+
+  std::vector<std::pair<void*, const void*>> copies;
+  ScopedHook copy(g_hipMemcpyAsync, [&](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+    copies.emplace_back(dst, src);
+    if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, size);
+    return hipSuccess;
+  });
+
+  ASSERT_EQ(Create(reinterpret_cast<void*>(0x200000), 4096), ncclSuccess);
+  ASSERT_NE(first->next, nullptr);
+  const void* linkSrc = nullptr;
+  const void* entrySrc = nullptr;
+  for (auto& c : copies) {
+    if (c.first == &first->next) linkSrc = c.second;
+    if (c.first == &first->next->entries[0]) entrySrc = c.second;
+  }
+  EXPECT_EQ(linkSrc, &first->next);
+  EXPECT_EQ(entrySrc, &first->next->entries[0]);
+}
+
 // The sorted list is keyed on user address, so windows created out of order are
 // still stored in address order.
 TEST_F(SymWindowCreateTest, InsertsIntoSortedListByAddress) {
@@ -3199,21 +3242,34 @@ TEST_F(SymWindowCreateTest, SegmentWindowsFail_ReturnsErrorWithoutPublishing) {
 TEST_F(SymWindowCreateTest, DescriptorAllocFails_ReturnsError) {
   ScopedHook alloc(g_devrShadowPoolAlloc,
                    [](ncclShadowPool*, size_t, void**, void**, hipStream_t) { return ncclSystemError; });
+  ScopedHook poolFree(g_devrShadowPoolFree, [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(poolFree.calls, 0);  // no descriptor was handed out, so fail: has nothing to return
 }
 
 // Branch: the descriptor copy to the device fails. It is the first copy the
 // function makes, so the window table is never reached and the sorted list
-// never grows.
+// never grows. fail: hands the descriptor back to the shadow pool.
 TEST_F(SymWindowCreateTest, DescriptorCopyFails_ReturnsErrorWithoutPublishing) {
-  ScopedHook copy(g_hipMemcpyAsync,
-                  [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; });
+  void* winDev = nullptr;
+  ScopedHook copy(g_hipMemcpyAsync, [&](void* dst, const void*, size_t, hipMemcpyKind, hipStream_t) {
+    winDev = dst;
+    return hipErrorInvalidValue;
+  });
+  // Records only: the fake's reset reclaims whatever the pool still holds.
+  std::vector<void*> freed;
+  ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void* obj, hipStream_t) {
+    freed.push_back(obj);
+    return ncclSuccess;
+  });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
   EXPECT_EQ(copy.calls, 1);  // failed on the descriptor, before the table copy
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  ASSERT_NE(winDev, nullptr);
+  EXPECT_EQ(freed, std::vector<void*>({winDev}));
 }
 
 // Branch: the descriptor copy lands but publishing the entry into the window
@@ -3222,18 +3278,70 @@ TEST_F(SymWindowCreateTest, DescriptorCopyFails_ReturnsErrorWithoutPublishing) {
 // DescriptorCopyFails above.
 TEST_F(SymWindowCreateTest, TablePublishCopyFails_ReturnsErrorWithoutPublishing) {
   int n = 0;
+  void* winDev = nullptr;
   ScopedHook copy(g_hipMemcpyAsync,
-                  [&n](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
-                    if (++n == 2) return hipErrorInvalidValue;
+                  [&](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+                    if (++n == 1) winDev = dst;
+                    if (n == 2) return hipErrorInvalidValue;
                     // Mirrors the fake's default: the earlier copies must still
                     // land, or the table walk reads uninitialised entries.
                     if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, size);
                     return hipSuccess;
                   });
+  std::vector<void*> freed;
+  ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void* obj, hipStream_t) {
+    freed.push_back(obj);
+    return ncclSuccess;
+  });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
   EXPECT_EQ(n, 2);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  ASSERT_NE(winDev, nullptr);
+  EXPECT_EQ(freed, std::vector<void*>({winDev}));
+  // The host shadow is written only after its device copy lands.
+  ASSERT_NE(comm->devrState.windowTable, nullptr);
+  EXPECT_EQ(comm->devrState.windowTable->entries[0].window, nullptr);
+}
+
+// Branch: the first table is full, so a new table is allocated, but linking it
+// into the chain fails. Both the unlinked table and the descriptor go back to
+// the pool, and the chain is left as it was.
+TEST_F(SymWindowCreateTest, ChainLinkCopyFails_FreesUnpublishedTableAndDescriptor) {
+  for (int i = 0; i < 32; i++) {
+    ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000 + i * 0x1000), 4096), ncclSuccess);
+  }
+  ncclDevCommWindowTable* first = comm->devrState.windowTable;
+  ASSERT_NE(first, nullptr);
+
+  // Copy 1 is the descriptor; with the first table full, copy 2 is the
+  // next-pointer link, whose source holds the freshly allocated table.
+  int n = 0;
+  void* winDev = nullptr;
+  void* unpublished = nullptr;
+  ScopedHook copy(g_hipMemcpyAsync,
+                  [&](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+                    if (++n == 1) winDev = dst;
+                    if (n == 2) {
+                      if (size == sizeof(void*)) unpublished = *static_cast<void* const*>(src);
+                      return hipErrorInvalidValue;
+                    }
+                    if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, size);
+                    return hipSuccess;
+                  });
+  std::vector<void*> freed;
+  ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void* obj, hipStream_t) {
+    freed.push_back(obj);
+    return ncclSuccess;
+  });
+
+  EXPECT_NE(Create(reinterpret_cast<void*>(0x200000), 4096), ncclSuccess);
+  EXPECT_EQ(n, 2);
+  EXPECT_EQ(comm->devrState.winSortedCount, 32);
+  EXPECT_EQ(first->next, nullptr);
+  ASSERT_NE(winDev, nullptr);
+  ASSERT_NE(unpublished, nullptr);
+  EXPECT_EQ(freed, std::vector<void*>({unpublished, winDev}));
 }
 
 
@@ -3760,6 +3868,22 @@ TEST_F(WindowRegisterNonSymIpcTest, MapsPeersAndReusesSelf) {
   EXPECT_EQ(win->ipcPeerPtrs[2], static_cast<char*>(reinterpret_cast<void*>(0x900000)) + 128);
 }
 
+// ROCM-33799: with cuMem off no probe runs, so an error the application has not read yet
+// must survive registration.
+TEST_F(WindowRegisterNonSymIpcTest, NoCuMemProbe_KeepsCallerLastError) {
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+  StickyHipLastError lastError;
+  lastError.pending = hipErrorOutOfMemory;
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_EQ(lastError.pending, hipErrorOutOfMemory);
+}
+
 // Branch: a peer in our own process is left unmapped -- opening an IPC handle
 // against the same address space is not supported here.
 TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_IsLeftUnmapped) {
@@ -4245,8 +4369,9 @@ TEST_F(WindowRegisterNonSymCuMemTest, VmmWindow_ExportsHandleAndImportsPeers) {
 TEST_F(WindowRegisterNonSymCuMemTest, RetainFails_FallsBackToLegacyIpc) {
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(8192));
-  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t*, void*) {
-    return hipErrorInvalidValue;
+  StickyHipLastError lastError;
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t*, void*) {
+    return lastError.Fail(hipErrorInvalidValue);
   });
   ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
   ScopedHook import(g_hipMemImportFromShareableHandle,
@@ -4287,6 +4412,8 @@ TEST_F(WindowRegisterNonSymCuMemTest, RetainFails_FallsBackToLegacyIpc) {
   EXPECT_EQ(win->ipcPeerIsCuMem[1], 0);
   EXPECT_EQ(win->ipcPeerIsCuMem[2], 0);
   EXPECT_EQ(open.calls, 2);
+  // ROCM-33799: the expected retain failure must not reach the application.
+  EXPECT_EQ(lastError.pending, hipSuccess);
 }
 
 // Branch: a cuMem peer is already mapped when a later one fails, so cleanup has
@@ -4969,22 +5096,28 @@ TEST_F(DevrWindowRegisterInGroupSymTest, AddressRangeFails_ReleasesLocalRegistra
 // allocation is rejected. The base is reported one byte below the user pointer,
 // which is the smallest offset that cannot satisfy the requirement.
 //
-// Unlike every other rejection in this function, this one is *not* asserted to
-// deregister: windowRegisterInGroup's NCCL_WIN_REQUIRED_ALIGNMENT check jumps
-// to fail, not fail_locReg, so
-// ncclCommDeregister never runs and the local registration taken at :1284 leaks
-// (as does the memHandles array allocated at :1304). EXPECT_EQ(dereg.calls, 1)
-// belongs here and fails today; see AICOMRCCL-2180 finding 13. Asserting
-// the current count instead would pin the leak.
-TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgument) {
+// The check runs before any segment handle is retained, so the unwind
+// deregisters the local registration and frees the still-empty memHandles array
+// (LSan reports it otherwise) without releasing anything beyond the
+// address-range walk's own probe.
+TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgumentAndUnwindsLocalRegistration) {
   ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
     if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(static_cast<char*>(dptr) - 1);
     if (psize) *psize = 8192;
     return hipSuccess;
   });
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t* h, void*) {
+    if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
+    return hipSuccess;
+  });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(out, nullptr);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(release.calls, retain.calls) << "every retained handle is released exactly once";
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
@@ -5002,7 +5135,7 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_Return
 
   ncclWindow_t out = nullptr;
   EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
-  EXPECT_EQ(dereg.calls, 1);  // this arm does unwind, unlike the misaligned one above
+  EXPECT_EQ(dereg.calls, 1);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
@@ -5057,28 +5190,30 @@ TEST_F(DevrWindowRegisterInGroupSymTest, UnsupportedSegmentType_ReturnsInvalidAr
 // retain 3 lands in
 // memHandles[0], and retain 4 is the one made to fail.
 //
-// Deliberately NOT asserting that memHandles[0] is released: it is not.
-// that loop's cuMemRetainAllocationHandle check jumps to fail_locReg, which is *below*
-// fail_locReg_memHandle's release loop and free(memHandles), so both are
-// skipped -- the retained handle and the array leak. Same for the two other
-// exits in this loop (:1346, :1354). Asserting the release count here would
-// pin that leak in place; see AICOMRCCL-2180 finding 12. What is asserted
-// is the part that does work: the error propagates and the local registration
-// is unwound.
-TEST_F(DevrWindowRegisterInGroupSymTest, RetainFails_PropagatesErrorAndUnwindsLocalRegistration) {
+// Each retain hands out a distinct handle, so the release log shows that the
+// unwind releases memHandles[0] (retain 3) once, on top of the walk's own two,
+// and does not touch the unfilled memHandles[1].
+TEST_F(DevrWindowRegisterInGroupSymTest, RetainFails_ReleasesRetainedHandlesAndUnwindsLocalRegistration) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
-  int retained = 0;
-  ScopedHook retain(g_hipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t* h, void*) {
+  static int retained;
+  static std::vector<uintptr_t> released;
+  retained = 0;
+  released.clear();
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t* h, void*) {
     if (++retained > 3) return hipErrorInvalidValue;
-    if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
+    if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(static_cast<uintptr_t>(0x70 + retained));
     return hipSuccess;
   });
-  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t h) {
+    released.push_back(reinterpret_cast<uintptr_t>(h));
+    return hipSuccess;
+  });
   ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 8192, 0, &out), ncclSuccess);
   EXPECT_EQ(retained, 4);  // proves the failure landed in the validation loop, not the walk
+  EXPECT_EQ(released, (std::vector<uintptr_t>{0x71, 0x72, 0x73}));
   EXPECT_EQ(dereg.calls, 1);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
@@ -5162,6 +5297,43 @@ TEST_F(WindowDeregisterNonSymTest, ShadowFreeFails_LeavesWindowRegistered) {
 
   EXPECT_NE(windowDeregisterNonSym(comm, winDev), ncclSuccess);
   EXPECT_EQ(comm->devrState.winSortedCount, 1);
+}
+
+// Branch: the stream create fails without forceCleanup, so nothing is torn
+// down and the caller can retry.
+TEST_F(WindowDeregisterNonSymTest, StreamCreateFails_LeavesWindowRegistered) {
+  ncclWindow_t winDev = RegisterOne(kUserPtr);
+  ScopedHook create(g_hipStreamCreateWithFlags, [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook poolFree(g_devrShadowPoolFree, [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
+
+  EXPECT_NE(windowDeregisterNonSym(comm, winDev), ncclSuccess);
+  EXPECT_EQ(poolFree.calls, 0);
+  EXPECT_EQ(comm->devrState.winSortedCount, 1);
+}
+
+// Branch: under forceCleanup a failed stream create still releases the shadow
+// entry, on the default stream, and waits for that stream before going on; the
+// failure is still reported.
+TEST_F(WindowDeregisterNonSymTest, ForceCleanupStreamCreateFails_FreesOnTheDefaultStreamAndSyncsIt) {
+  ncclWindow_t winDev = RegisterOne(kUserPtr);
+  ScopedHook create(g_hipStreamCreateWithFlags, [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  std::vector<std::string> order;
+  ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void*, hipStream_t s) {
+    order.push_back(s == nullptr ? "free(default)" : "free(other)");
+    return ncclSuccess;
+  });
+  ScopedHook sync(g_hipStreamSynchronize, [&](hipStream_t s) {
+    order.push_back(s == nullptr ? "sync(default)" : "sync(other)");
+    return hipSuccess;
+  });
+  ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipSuccess; });
+  ScopedHook dereg(g_devrNcclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
+
+  EXPECT_NE(windowDeregisterNonSym(comm, winDev, /*forceCleanup=*/true), ncclSuccess);
+  EXPECT_EQ(order, (std::vector<std::string>{"free(default)", "sync(default)"}));
+  EXPECT_EQ(destroy.calls, 0);
+  EXPECT_EQ(dereg.calls, 1);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
 
@@ -5913,6 +6085,47 @@ TEST_F(CommWindowRegisterImplTest, NoWindowSupport_SucceedsWithoutQueueing) {
   EXPECT_EQ(out, nullptr);
 }
 
+// The rearch path hands a job to ncclMgmtTaskEnqueue instead of queueing a task.
+TEST_F(CommWindowRegisterImplTest, Rearch_HandsTheJobToTheManagementQueue) {
+  ScopedHook rearch(g_loadParam, ParamOverride({{"ENQUEUE_REARCH_ENABLE", 1}}));
+  ncclAsyncJob* job = nullptr;
+  void (*jobFree)(void*) = nullptr;
+  ncclComm* jobComm = nullptr;
+  g_devrMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm* c) {
+    job = j;
+    jobFree = d;
+    jobComm = c;
+    return ncclSuccess;
+  };
+
+  ASSERT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, NCCL_WIN_COLL_SYMMETRIC), ncclSuccess);
+  ASSERT_NE(job, nullptr);
+  ASSERT_NE(jobFree, nullptr);
+  EXPECT_EQ(jobComm, comm);
+  auto* regJob = reinterpret_cast<ncclDevrRegAsyncJob*>(job);
+  EXPECT_EQ(regJob->userPtr, kUserPtr);
+  EXPECT_EQ(regJob->userSize, 8192u);
+  EXPECT_EQ(regJob->outWinDev, &out);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+  jobFree(job);
+}
+
+// ncclMgmtTaskEnqueue owns the job once called: when it rejects (a blocking and a nonblocking comm in one
+// group) it runs the destructor itself, so fail: must not free the job again.
+TEST_F(CommWindowRegisterImplTest, RearchEnqueueRejects_JobIsDestroyedOnlyByTheEnqueue) {
+  ScopedHook rearch(g_loadParam, ParamOverride({{"ENQUEUE_REARCH_ENABLE", 1}}));
+  int destroyed = 0;
+  g_devrMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm*) {
+    d(j);
+    ++destroyed;
+    return ncclInvalidArgument;
+  };
+
+  EXPECT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, NCCL_WIN_COLL_SYMMETRIC), ncclInvalidArgument);
+  EXPECT_EQ(destroyed, 1);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+}
+
 // Host-RMA alone is enough to accept the window, even without symmetric support.
 TEST_F(CommWindowRegisterImplTest, HostRmaOnly_QueuesTask) {
   comm->symmetricSupport = 0;
@@ -6123,18 +6336,6 @@ TEST_F(DeepCopyDevCommRequirementsTest, NoLists_LeavesBothEmpty) {
 
 // Branch: an allocation part-way through the copy releases what was built and
 // reports nothing back, rather than handing over a half-copied structure.
-//
-// +2, deliberately, not +1. deepCopyDevCommRequirements memcpys the whole
-// source struct (deepCopyDevCommRequirements' memcpy), which copies the
-// caller's list-head
-// pointers into the copy, and only overwrites them on the first *successful*
-// node alloc. ncclCallocDebug returns without touching *ptr on failure
-// (alloc.h:415-418), so failing the first node alloc leaves the copy's
-// resourceRequirementsList still pointing at the caller's &res1 -- a fixture
-// member -- and the fail: label's freeDevCommRequirements then free()s it.
-// +1 is therefore the index that exposes AICOMRCCL-2180 finding 15; running it
-// would corrupt the heap rather than assert, so this covers the adjacent
-// index and the bug is documented instead of pinned.
 TEST_F(DeepCopyDevCommRequirementsTest, NodeAllocFails_ReleasesPartialCopy) {
   res1.next = &res2;
   src.resourceRequirementsList = &res1;
@@ -6142,6 +6343,39 @@ TEST_F(DeepCopyDevCommRequirementsTest, NodeAllocFails_ReleasesPartialCopy) {
 
   EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
   EXPECT_EQ(dst, nullptr);
+}
+
+// Branch: the first node alloc of a list fails. The memcpy of the whole source
+// struct also copies the caller's list heads, and a failed ncclCalloc leaves
+// *ptr untouched (alloc.h:456-458, and MicroCalloc above), so the copy's heads must be cleared
+// before the first node is allocated; otherwise fail:'s freeDevCommRequirements
+// free()s the caller's first node (AICOMRCCL-2180 finding 15). res1 and team1
+// are fixture members, so a regression aborts in free() rather than failing an
+// expectation here.
+TEST_F(DeepCopyDevCommRequirementsTest, FirstResourceNodeAllocFails_LeavesCallerListAlone) {
+  res1.bufferSize = 128;
+  res1.next = &res2;
+  src.resourceRequirementsList = &res1;
+  ScopedCallocFailure callocFail(1);  // only the top-level object succeeds
+
+  EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  EXPECT_EQ(dst, nullptr);
+  EXPECT_EQ(src.resourceRequirementsList, &res1);
+  EXPECT_EQ(res1.next, &res2);
+  EXPECT_EQ(res1.bufferSize, 128u);
+}
+
+TEST_F(DeepCopyDevCommRequirementsTest, FirstTeamNodeAllocFails_LeavesCallerListAlone) {
+  team1.multimem = true;
+  team1.next = &team2;
+  src.teamRequirementsList = &team1;
+  ScopedCallocFailure callocFail(1);  // only the top-level object succeeds
+
+  EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  EXPECT_EQ(dst, nullptr);
+  EXPECT_EQ(src.teamRequirementsList, &team1);
+  EXPECT_EQ(team1.next, &team2);
+  EXPECT_TRUE(team1.multimem);
 }
 
 // freeDevCommRequirements tolerates null, so callers can release
@@ -6710,6 +6944,107 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 
 
 // ---------------------------------------------------------------------------
+// ncclDevCommCreate deep-copies the caller's requirements before it checks
+// them against the communicator, so a request rejected after the copy must
+// release that copy (NVIDIA/nccl#2225). The in-group task path and the
+// enqueue-rearch job path each hold the copy in their own object, so both are
+// driven. Heap in-use bytes are the oracle: a leaked copy per call adds up to
+// far more than one copy over the loop.
+
+class DevCommCreateFailureTest : public DevCommCreateTest {
+protected:
+  static constexpr int kResourceNodes = 64;
+  static constexpr int kTeamNodes = 8;
+  static constexpr int kCalls = 200;
+
+  std::vector<ncclDevResourceRequirements> resources;
+  std::vector<ncclTeamRequirements> teams;
+
+  void SetUp() override {
+    DevCommCreateTest::SetUp();
+    resources.assign(kResourceNodes, ncclDevResourceRequirements{});
+    for (int i = 0; i + 1 < kResourceNodes; i++) resources[i].next = &resources[i + 1];
+    teams.assign(kTeamNodes, ncclTeamRequirements{});
+    for (int i = 0; i + 1 < kTeamNodes; i++) teams[i].next = &teams[i + 1];
+    reqs.resourceRequirementsList = resources.data();
+    reqs.teamRequirementsList = teams.data();
+    reqs.cftCaps = NCCL_CFT_MULTIMEM;
+  }
+
+  static long long CopyBytes() {
+    return static_cast<long long>(sizeof(ncclDevCommRequirements) +
+                                  kResourceNodes * sizeof(ncclDevResourceRequirements) +
+                                  kTeamNodes * sizeof(ncclTeamRequirements));
+  }
+
+  // mallinfo2 needs glibc 2.33; older glibc only has the int-sized mallinfo.
+  static long long HeapInUse() {
+#ifdef DEV_RUNTIME_TEST_HAS_MALLINFO2
+    return static_cast<long long>(mallinfo2().uordblks);
+#else
+    return static_cast<long long>(mallinfo().uordblks);
+#endif
+  }
+
+  void ExpectRejectedWithoutLeak(bool rearch, const char* warning) {
+    // ScopedHook's own counter sees every g_loadParam call, so count the reads of
+    // this param separately: each call must branch on it (dev_runtime.cc:2813).
+    int rearchReads = 0;
+    auto prevLoadParam = g_loadParam;
+    ScopedHook rearchParam(g_loadParam, [rearch, prevLoadParam, &rearchReads](const char* env, int64_t deft) {
+      if (std::strcmp(env, "ENQUEUE_REARCH_ENABLE") != 0) return prevLoadParam(env, deft);
+      rearchReads++;
+      return int64_t(rearch);
+    });
+
+    // The first call names the check that fired, so the loop below is known to
+    // fail after the copy; it also runs ncclDevrInitOnce and warms up any lazily
+    // allocated logging state.
+    ncclResult_t res = ncclSuccess;
+    const std::string log =
+        RcclUnitTesting::CaptureLog([&] { res = ncclDevCommCreate(comm, &reqs, &outDevComm); });
+    ASSERT_EQ(res, ncclInvalidArgument) << "actual log:\n" << log;
+    ASSERT_TRUE(RcclUnitTesting::LogHas(log, warning)) << "actual log:\n" << log;
+    EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+
+    int rejected = 0;
+    long long growth = 0;
+    RcclUnitTesting::CaptureLog([&] {
+      const long long before = HeapInUse();
+      for (int i = 0; i < kCalls; i++) {
+        if (ncclDevCommCreate(comm, &reqs, &outDevComm) == ncclInvalidArgument) rejected++;
+      }
+      growth = HeapInUse() - before;
+    });
+    EXPECT_EQ(rejected, kCalls);
+    EXPECT_GE(rearchReads, 1 + kCalls);
+    EXPECT_LT(growth, CopyBytes()) << kCalls << " rejected calls left " << growth
+                                   << " heap bytes behind; one copy is " << CopyBytes();
+  }
+};
+
+TEST_F(DevCommCreateFailureTest, CftUnsupported_TaskPath_ReleasesCopy) {
+  comm->gpuCftSupport = 0;
+  ExpectRejectedWithoutLeak(false, "not all ranks in the communicator support CFT");
+}
+
+TEST_F(DevCommCreateFailureTest, CftUnsupported_RearchJobPath_ReleasesCopy) {
+  comm->gpuCftSupport = 0;
+  ExpectRejectedWithoutLeak(true, "not all ranks in the communicator support CFT");
+}
+
+TEST_F(DevCommCreateFailureTest, MultimemWithoutNvls_TaskPath_ReleasesCopy) {
+  comm->gpuCftSupport = 1;
+  comm->nvlsSupport = 0;
+  ExpectRejectedWithoutLeak(false, "NVLS is disabled or unsupported");
+}
+
+TEST_F(DevCommCreateFailureTest, MultimemWithoutNvls_RearchJobPath_ReleasesCopy) {
+  comm->gpuCftSupport = 1;
+  comm->nvlsSupport = 0;
+  ExpectRejectedWithoutLeak(true, "NVLS is disabled or unsupported");
+}
+
 // devrGinContextsTotal sizes the per-context resource regions for the largest
 // ginContextCount any active backend could round nGinContextsRequested up to.
 

@@ -1681,12 +1681,13 @@ TEST_F(NetTelemetryEthtoolMicrotest, CollectEthtoolBatch_TargetAlreadySet_KeepsF
   EXPECT_EQ(a_, 5);
 }
 
-TEST_F(NetTelemetryEthtoolMicrotest, CollectEthtoolBatch_TwoKeysForOneTarget_FirstListedStatWins) {
+TEST_F(NetTelemetryEthtoolMicrotest, CollectEthtoolBatch_TwoKeysForOneTarget_FirstWantedKeyWins) {
   Want(1, "stat_b", &a_);
 
   rcclTelemetryCollectEthtoolBatch("eth0", wanted_, 3);
 
-  EXPECT_EQ(a_, 20);
+  // stat_a is wanted first, so it wins although ethtool lists stat_b first.
+  EXPECT_EQ(a_, 10);
 }
 
 TEST_F(NetTelemetryEthtoolMicrotest, CollectEthtoolBatch_FullWidthStatName_Matches) {
@@ -2133,25 +2134,42 @@ class NetTelemetrySamplerMicrotest : public NetTelemetryMicrotest {
   }
 };
 
-TEST_F(NetTelemetrySamplerMicrotest, SampledTableIdx_ResolvesNameThenAlternate) {
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigAinic, 2), CounterIndex(&rcclHwConfigAinic, "cnp_rcvd"));
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigMlx5, 2), CounterIndex(&rcclHwConfigMlx5, "cnp_handled"));
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigAinic, 7), CounterIndex(&rcclHwConfigAinic, "to_retransmits"));
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigMlx5, 7),
-            CounterIndex(&rcclHwConfigMlx5, "local_ack_timeout_err"));
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigThor2, 7),
-            CounterIndex(&rcclHwConfigThor2, "local_ack_timeout_err"));
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&rcclHwConfigThor2, 3), -1);
+TEST_F(NetTelemetrySamplerMicrotest, SampledRows_ResolvesNameAndAlternate) {
+  int name = 0, alt = 0;
+  rcclTelemetrySampledRows(&rcclHwConfigAinic, 2, &name, &alt);
+  EXPECT_EQ(name, CounterIndex(&rcclHwConfigAinic, "cnp_rcvd"));
+  EXPECT_EQ(alt, -1);
+  rcclTelemetrySampledRows(&rcclHwConfigMlx5, 2, &name, &alt);
+  EXPECT_EQ(name, -1);
+  EXPECT_EQ(alt, CounterIndex(&rcclHwConfigMlx5, "cnp_handled"));
+  rcclTelemetrySampledRows(&rcclHwConfigAinic, 7, &name, &alt);
+  EXPECT_EQ(name, -1);
+  EXPECT_EQ(alt, CounterIndex(&rcclHwConfigAinic, "to_retransmits"));
+  rcclTelemetrySampledRows(&rcclHwConfigMlx5, 7, &name, &alt);
+  EXPECT_EQ(name, CounterIndex(&rcclHwConfigMlx5, "local_ack_timeout_err"));
+  EXPECT_EQ(alt, -1);
+  // Thor2 has both rows, so the sampler retries the primary before the alternate.
+  rcclTelemetrySampledRows(&rcclHwConfigThor2, 7, &name, &alt);
+  EXPECT_EQ(name, CounterIndex(&rcclHwConfigThor2, "local_ack_timeout_err"));
+  EXPECT_EQ(alt, CounterIndex(&rcclHwConfigThor2, "to_retransmits"));
+  rcclTelemetrySampledRows(&rcclHwConfigThor2, 3, &name, &alt);
+  EXPECT_EQ(name, CounterIndex(&rcclHwConfigThor2, "out_of_buffer"));
+  EXPECT_EQ(alt, -1);
 }
 
-TEST_F(NetTelemetrySamplerMicrotest, SampledTableIdx_AlternateMissingToo_ReturnsMinusOne) {
+TEST_F(NetTelemetrySamplerMicrotest, SampledRows_AlternateMissingToo_ReturnsMinusOne) {
   static const RcclHwCounterDesc counters[] = {HWC("cnp_sent", HWC_IB_SYSFS, "x")};
   RcclHwConfig hw = rcclHwConfigAinic;
   hw.counters = counters;
   hw.num_counters = 1;
+  int name = 0, alt = 0;
 
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&hw, 2), -1);
-  EXPECT_EQ(rcclTelemetrySampledTableIdx(&hw, 1), 0);
+  rcclTelemetrySampledRows(&hw, 2, &name, &alt);
+  EXPECT_EQ(name, -1);
+  EXPECT_EQ(alt, -1);
+  rcclTelemetrySampledRows(&hw, 1, &name, &alt);
+  EXPECT_EQ(name, 0);
+  EXPECT_EQ(alt, -1);
 }
 
 TEST_F(NetTelemetrySamplerMicrotest, SampleRow_PrimaryMissing_ReadsFallback) {
@@ -2448,20 +2466,20 @@ TEST_F(NetTelemetryJsonMicrotest, WriteJson_ActiveDevice_WritesFullReport) {
   EXPECT_EQ(json, expected);
 }
 
-TEST_F(NetTelemetryJsonMicrotest, WriteJson_NoDevices_WritesEmptyListAndDefaultTransport) {
+TEST_F(NetTelemetryJsonMicrotest, WriteJson_NoDevices_WritesEmptyListAndTransportNone) {
   Enable();
 
   std::string json = WriteJson();
 
-  EXPECT_NE(json.find("  \"transport\": \"IB-CAST\",\n  \"devices\": [\n  ]\n}\n"), std::string::npos) << json;
+  EXPECT_NE(json.find("  \"transport\": \"none\",\n  \"devices\": [\n  ]\n}\n"), std::string::npos) << json;
   EXPECT_EQ(json.find("latency_sample_interval"), std::string::npos);
 }
 
-TEST_F(NetTelemetryJsonMicrotest, WriteJson_FirstDeviceWithoutTransport_UsesDefaultTransport) {
+TEST_F(NetTelemetryJsonMicrotest, WriteJson_DeviceWithoutTransport_WritesTransportNone) {
   Enable();
   ASSERT_EQ(rcclTelemetryRegisterDevice(0, "rdma0", nullptr), 0);
 
-  EXPECT_NE(WriteJson().find("\"transport\": \"IB-CAST\""), std::string::npos);
+  EXPECT_NE(WriteJson().find("\"transport\": \"none\""), std::string::npos);
 }
 
 TEST_F(NetTelemetryJsonMicrotest, WriteJson_HostnameUnavailable_WritesUnknown) {
