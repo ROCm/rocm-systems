@@ -135,7 +135,8 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
   const amdgpu::VgprMsbBanks incoming_armed_banks = state.armed_banks;
   state.hazard = AdjacentSetVgprMsbHazard::Clear;
   state.armed_banks.fill(std::nullopt);
-  if (inst.opcode() == cdna5::kSSetVgprMsbSopp && inst.mnemonic() == "s_set_vgpr_msb") {
+  if (inst.opcode() == cdna5::kSSetVgprMsbSopp &&
+      inst.amdgpu_operation() == amdgpu::Operation::S_SET_VGPR_MSB) {
     if (setreg_vgpr_msb_fixup && incoming_hazard == AdjacentSetVgprMsbHazard::Armed) {
       state.banks = incoming_armed_banks;
       return;
@@ -157,7 +158,8 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
     return;
   }
 
-  if (inst.mnemonic() != "s_setreg_b32" && inst.mnemonic() != "s_setreg_imm32_b32")
+  if (inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_B32 &&
+      inst.amdgpu_operation() != amdgpu::Operation::S_SETREG_IMM32_B32)
     return;
   const Operand *hwreg_operand = inst.dst_operand(0);
   if (hwreg_operand == nullptr)
@@ -166,7 +168,7 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
   const bool writes_mode = amdgpu::decode_vgpr_msb_hwreg(hwreg).id == amdgpu::MODE_HWREG;
 
   if (setreg_vgpr_msb_fixup && writes_mode) {
-    if (inst.mnemonic() == "s_setreg_b32") {
+    if (inst.amdgpu_operation() == amdgpu::Operation::S_SETREG_B32) {
       state.banks.fill(std::nullopt);
       return;
     }
@@ -183,7 +185,7 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
     return;
   }
 
-  if (inst.mnemonic() == "s_setreg_b32") {
+  if (inst.amdgpu_operation() == amdgpu::Operation::S_SETREG_B32) {
     // The source SGPR is runtime data. Only bank fields intersecting the write
     // become unknown; disjoint MODE fields retain their proven values.
     amdgpu::apply_vgpr_msb_mode_write(state.banks, hwreg, std::nullopt);

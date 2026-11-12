@@ -95,6 +95,52 @@ const char *Vopd::op_name(uint16_t op) {
   }
 }
 
+amdgpu::Operation Vopd::operation(uint16_t op) {
+  switch (op) {
+  case kVopdFmacF32:
+    return amdgpu::Operation::V_DUAL_FMAC_F32;
+  case kVopdFmaakF32:
+    return amdgpu::Operation::V_DUAL_FMAAK_F32;
+  case kVopdFmamkF32:
+    return amdgpu::Operation::V_DUAL_FMAMK_F32;
+  case kVopdMulF32:
+    return amdgpu::Operation::V_DUAL_MUL_F32;
+  case kVopdAddF32:
+    return amdgpu::Operation::V_DUAL_ADD_F32;
+  case kVopdSubF32:
+    return amdgpu::Operation::V_DUAL_SUB_F32;
+  case kVopdSubrevF32:
+    return amdgpu::Operation::V_DUAL_SUBREV_F32;
+  case kVopdMulDx9ZeroF32:
+    return amdgpu::Operation::V_DUAL_MUL_DX9_ZERO_F32;
+  case kVopdMovB32:
+    return amdgpu::Operation::V_DUAL_MOV_B32;
+  case kVopdCndmaskB32:
+    return amdgpu::Operation::V_DUAL_CNDMASK_B32;
+  case kVopdMaxNumF32:
+    return amdgpu::Operation::V_DUAL_MAX_NUM_F32;
+  case kVopdMinNumF32:
+    return amdgpu::Operation::V_DUAL_MIN_NUM_F32;
+  case kVopdDot2AccF32F16:
+    return amdgpu::Operation::V_DUAL_DOT2ACC_F32_F16;
+  case kVopdDot2AccF32Bf16:
+    return amdgpu::Operation::V_DUAL_DOT2ACC_F32_BF16;
+  case kVopdAddNcU32:
+    return amdgpu::Operation::V_DUAL_ADD_NC_U32;
+  case kVopdLshlrevB32:
+    return amdgpu::Operation::V_DUAL_LSHLREV_B32;
+  case kVopdAndB32:
+    return amdgpu::Operation::V_DUAL_AND_B32;
+  default:
+    return amdgpu::Operation::Unknown;
+  }
+}
+
+void Vopd::implicit_uses(RegisterSet &uses) const {
+  if (x_.uses_vcc || y_.uses_vcc)
+    uses.expand(RegisterRef{RegClass::VCC, 0, 1});
+}
+
 Result Vopd::validate_encoding(const MachineInst *inst, const util::DiagnosticEmitter &emit_error) {
   const auto *words = reinterpret_cast<const uint32_t *>(inst);
   const uint32_t word0 = words[0];
@@ -170,6 +216,7 @@ Vopd::Vopd(const MachineInst *inst)
   std::memcpy(raw_words_.data(), words, size_);
   raw_encoding_ = raw_words_.data();
   init_operands();
+  set_amdgpu_operation(operation(opx_), operation(opy_));
   // Evaluate the qualified operand restrictions once, at decode.
   const bool vopd3 = false;
   const auto bank_conflict = [](const Operand &a, const Operand &b) {

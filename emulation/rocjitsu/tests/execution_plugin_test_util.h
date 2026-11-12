@@ -172,6 +172,14 @@ public:
     set_data(std::move(state));
   }
 
+  TestMemoryInstruction(std::unique_ptr<DynamicInstState> state, std::string_view mnemonic,
+                        amdgpu::Operation operation, amdgpu::MemoryAddressing addressing,
+                        amdgpu::MemoryKind kind)
+      : TestMemoryInstruction(std::move(state), mnemonic) {
+    set_amdgpu_operation(operation);
+    set_amdgpu_memory(addressing, kind);
+  }
+
 private:
   // These tests inject memory state directly. A valid nop encoding lets race
   // reports decode the synthetic instruction without depending on code memory.

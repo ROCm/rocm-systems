@@ -41,6 +41,7 @@ import os
 from dataclasses import dataclass, field as _field
 from collections import defaultdict
 from itertools import groupby
+from functools import cached_property
 from enum import Enum, auto
 
 from amdisa.gpuisa import (
@@ -73,6 +74,13 @@ from amdisa.isa_profile import DppOpcodeRule, FloatDotAccumulation, SwmmacLayout
 
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.cpp_file import CppFile
+from amdisa.codegen.instruction_metadata import (
+    canonical_operation_name,
+    classification_flags,
+    installed_operation_names,
+    memory_classification,
+    operation_expression,
+)
 from amdisa.codegen.shared_baselines import (
     SCALAR_SHARED_INCLUDE as _SCALAR_SHARED_INCLUDE,
     CDNA_SHARED_INCLUDE as _CDNA_SHARED_INCLUDE,
@@ -733,6 +741,58 @@ class CodeGenerator:
 
     def _supports_simm64_literal_operands(self) -> bool:
         return 'OPR_SIMM64' in self.isa_spec.operand_types
+
+    @cached_property
+    def _operation_names(self) -> frozenset[str]:
+        # Instruction's operation type comes from the core shared header even
+        # for a standard ISA profile generated into a separate output tree.
+        # Production emits that header before generating instruction metadata.
+        return installed_operation_names()
+
+    def _operation_expression(self, name: str) -> str:
+        return operation_expression(name, self._operation_names)
+
+    def _instruction_metadata_stmts(self, inst, sem, fields: set[str]) -> list[str]:
+        """Resolve instruction facts once, alongside decoded operand construction."""
+        name = canonical_operation_name(inst.name)
+        operation = self._operation_expression(name)
+        addressing, kind = memory_classification(
+            name, sem.semantic_class if sem is not None else None
+        )
+        if name.startswith('FLAT_') and 'seg' in fields:
+            operation = (
+                f'inst_.seg == 1 ? {self._operation_expression("SCRATCH_" + name[5:])} : '
+                f'inst_.seg == 2 ? {self._operation_expression("GLOBAL_" + name[5:])} : '
+                + operation
+            )
+            address_expr = (
+                'inst_.seg == 1 ? amdgpu::MemoryAddressing::Scratch : '
+                'inst_.seg == 2 ? amdgpu::MemoryAddressing::Global : '
+                'amdgpu::MemoryAddressing::Flat'
+            )
+        elif addressing == 'Lds' and 'gds' in fields:
+            address_expr = 'inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds'
+        else:
+            address_expr = f'amdgpu::MemoryAddressing::{addressing}'
+        stmts = [f'set_amdgpu_operation({operation});']
+        if addressing != 'None':
+            stmts.append(
+                f'set_amdgpu_memory({address_expr}, amdgpu::MemoryKind::{kind});'
+            )
+        flags = classification_flags(name, sem)
+        if flags:
+            stmts.append('flags_ |= ' + ' | '.join(flags) + ';')
+        if 'lds' in fields and kind == 'Load':
+            if addressing in ('Buffer', 'TypedBuffer'):
+                stmts.append('if (inst_.lds) flags_ |= MEMORY_TO_LDS;')
+            elif sem is not None and self._legacy_flat_lds_load(sem):
+                # The same encoded bit enables scratch VADDR on CDNA3/4.
+                # Reuse the execution predicate for the legacy LDS meaning.
+                stmts.append(
+                    'if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) '
+                    'flags_ |= MEMORY_TO_LDS;'
+                )
+        return stmts
 
     @staticmethod
     def _literal64_condition_names(inst_enc: InstEncoding) -> list[str]:
@@ -2433,6 +2493,10 @@ class CodeGenerator:
             f'  case k{op.enum_name}:\n    return "{op.mnemonic}";'
             for op in vopd_slot_ops
         )
+        vopd_operation_cases = '\n'.join(
+            f'  case k{op.enum_name}:\n    return {self._operation_expression(op.mnemonic)};'
+            for op in vopd_slot_ops
+        )
 
         def opcode_mask(name: str, opcodes: frozenset[int]) -> str:
             unknown_opcodes = opcodes.difference(op.opcode for op in vopd_slot_ops)
@@ -3168,6 +3232,7 @@ class CodeGenerator:
               void execute_impl(amdgpu::Wavefront &wf);
 
               std::string disassemble() const override;
+              void implicit_uses(RegisterSet &uses) const override;
 
               private:
               enum class Format : uint8_t { VopdXy@VOPD3_FORMAT_ENUM@ };
@@ -3186,6 +3251,7 @@ class CodeGenerator:
               };
 
               static const char *op_name(uint16_t op);
+              static amdgpu::Operation operation(uint16_t op);
               static bool uses_src_neg_modifier(uint16_t op);
               static uint32_t apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx);
               static uint32_t execute_slot(const Slot &slot, amdgpu::Wavefront &wf,
@@ -3482,6 +3548,19 @@ class CodeGenerator:
               }
             }
 
+            amdgpu::Operation Vopd::operation(uint16_t op) {
+              switch (op) {
+            @VOPD_OPERATION_CASES@
+              default:
+                return amdgpu::Operation::Unknown;
+              }
+            }
+
+            void Vopd::implicit_uses(RegisterSet &uses) const {
+              if (x_.uses_vcc || y_.uses_vcc)
+                uses.expand(RegisterRef{RegClass::VCC, 0, 1});
+            }
+
             @VOPD3_MODEL_HELPERS@
 
             @INLINE_EXECUTION_HELPERS@
@@ -3570,6 +3649,7 @@ class CodeGenerator:
               std::memcpy(raw_words_.data(), words, size_);
               raw_encoding_ = raw_words_.data();
               init_operands();
+              set_amdgpu_operation(operation(opx_), operation(opy_));
             @VOPD_ISA_DIAGNOSTICS@
               mnemonic_storage_ = std::string(op_name(opx_)) + " :: " + op_name(opy_);
               mnemonic_ = mnemonic_storage_;
@@ -3682,6 +3762,7 @@ class CodeGenerator:
             )
             .replace('@VOPD3_UNUSED_ATTR@', vopd3_unused_attr)
             .replace('@VOPD_OP_NAME_CASES@', vopd_op_name_cases)
+            .replace('@VOPD_OPERATION_CASES@', vopd_operation_cases)
             .replace('@VOPD3_MODEL_HELPERS@', vopd3_model_helpers)
             .replace('@VOPD3_VALIDATION_BRANCH@', vopd3_validation_branch)
             .replace('@VOPD3_CONSTRUCTOR_BRANCH@', vopd3_constructor_branch)
@@ -5000,14 +5081,14 @@ class CodeGenerator:
                     cgen.Line(
                         'bool should_print_dst_operand(uint8_t operand_index) const override {\n'
                         '  // Image atomics have one encoded VDATA tuple, printed as a source.\n'
-                        '  return !mnemonic_.starts_with("image_atomic_") &&\n'
+                        '  return amdgpu_memory_kind() != amdgpu::MemoryKind::Atomic &&\n'
                         '         Instruction::should_print_dst_operand(operand_index);\n'
                         '}'
                     )
                 )
                 if 'tfe' in enc_field_names:
                     image_atomic_source_display = (
-                        '  if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {\n'
+                        '  if (operand_index == 0 && inst_.tfe && amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic) {\n'
                         '    // VDATA is the first source. Assembly includes the status slot;\n'
                         '    // the source dependency includes only the atomic payload.\n'
                         '    const auto first = operand->encoding_value();\n'
@@ -6211,6 +6292,8 @@ class CodeGenerator:
                       num_src_ = 5;
                       num_dst_ = 1;
                       flags_ |= MFMA;
+                      flags_ |= MATRIX_OP;
+                      set_amdgpu_operation({self._operation_expression(spec.mnemonic)});
                       flags_ |= MATRIX_REGISTER_ACCESSES | DIRECT_REGISTER_ACCESSES;
                     }}
                     '''))
@@ -6798,6 +6881,15 @@ class CodeGenerator:
               encoding_id_ = raw_encoding_[0] >> 23;
               opcode_ = scale_inst_.op;
               size_ = 4 * sizeof(MachineInst);
+              flags_ |= MATRIX_OP;
+              set_amdgpu_operation(
+                  cdna5_scaled_wmma_is_f4_32x16x128(inst)
+                      ? (cdna5_scaled_wmma_is_scale16(inst)
+                             ? amdgpu::Operation::V_WMMA_SCALE16_F32_32X16X128_F4
+                             : amdgpu::Operation::V_WMMA_SCALE_F32_32X16X128_F4)
+                      : (cdna5_scaled_wmma_is_scale16(inst)
+                             ? amdgpu::Operation::V_WMMA_SCALE16_F32_16X16X128_F8F6F4
+                             : amdgpu::Operation::V_WMMA_SCALE_F32_16X16X128_F8F6F4));
 
               dst_operands_[0] = &vdst;
               src_operands_[0] = &src0;
@@ -15093,6 +15185,11 @@ class CodeGenerator:
                     ctor_body_parts.extend(_result_combinator_flag_stmts(_mem_sem))
                     ctor_body_parts.extend(
                         _instruction_class_flag_stmts(inst.name, _mem_sem)
+                    )
+                    ctor_body_parts.extend(
+                        self._instruction_metadata_stmts(
+                            inst, _mem_sem, inst_field_names
+                        )
                     )
 
                     ctor_body = ''.join(ctor_body_parts)

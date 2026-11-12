@@ -9101,23 +9101,43 @@ TEST_P(IsaTest, SEndpgm_Halts) {
 // The emulator's null-PC return sentinel is another normal termination path.
 // Keep a counter pending to distinguish draining it from freeing the wave early.
 TEST(ComputeUnitTest, NullPcReturnDrainsMemoryBeforeHalt) {
-  VmFixture fixture;
-  ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1));
-  const std::array<uint32_t, 1> words = cdna4::build_sop1(cdna4::kSSetPcB64Sop1, {.ssrc0 = 0});
-  constexpr uint64_t kPc = 0x1000;
-  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words), kPc);
-  amdgpu::Wavefront *wave = fixture.cu()->dispatch_wf(0, kPc, 104, 32);
-  ASSERT_NE(wave, nullptr);
-  fixture.cu()->write_sgpr(wave->sgpr_alloc().base, 0);
-  fixture.cu()->write_sgpr(wave->sgpr_alloc().base + 1, 0);
-  wave->wait_counters().increment(amdgpu::WaitCounterType::LGKMCNT);
+  struct Case {
+    const char *arch;
+    std::array<uint32_t, 1> words;
+    amdgpu::WaitCounterType counter;
+  };
+  const Case cases[] = {
+      {"cdna4", cdna4::build_sop1(cdna4::kSSetPcB64Sop1, {.ssrc0 = 0}),
+       amdgpu::WaitCounterType::LGKMCNT},
+      {"cdna4", cdna4::build_sop1(cdna4::kSSwapPcB64Sop1, {.ssrc0 = 0, .sdst = 2}),
+       amdgpu::WaitCounterType::LGKMCNT},
+      {"cdna5", cdna5::build_sop1(cdna5::kSSetPcI64Sop1, {.ssrc0 = 0}),
+       amdgpu::WaitCounterType::DSCNT},
+      {"cdna5", cdna5::build_sop1(cdna5::kSSwapPcI64Sop1, {.ssrc0 = 0, .sdst = 2}),
+       amdgpu::WaitCounterType::DSCNT},
+  };
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.arch);
+    SCOPED_TRACE(test_case.words[0]);
+    VmFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(test_case.arch, /*num_cus=*/1,
+                                               /*num_wf_slots=*/1));
+    constexpr uint64_t kPc = 0x1000;
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(test_case.words.data()),
+                              sizeof(test_case.words), kPc);
+    amdgpu::Wavefront *wave = fixture.cu()->dispatch_wf(0, kPc, 104, 32);
+    ASSERT_NE(wave, nullptr);
+    fixture.cu()->write_sgpr(wave->sgpr_alloc().base, 0);
+    fixture.cu()->write_sgpr(wave->sgpr_alloc().base + 1, 0);
+    wave->wait_counters().increment(test_case.counter);
 
-  fixture.cu()->step();
+    fixture.cu()->step();
 
-  ASSERT_EQ(wave->state(), amdgpu::WfState::ENDING);
-  EXPECT_FALSE(wave->is_halted());
-  wave->release_wait_counter(amdgpu::WaitCounterType::LGKMCNT);
-  EXPECT_TRUE(wave->is_halted());
+    ASSERT_EQ(wave->state(), amdgpu::WfState::ENDING);
+    EXPECT_FALSE(wave->is_halted());
+    wave->release_wait_counter(test_case.counter);
+    EXPECT_TRUE(wave->is_halted());
+  }
 }
 
 TEST_P(IsaTest, VMovB32_PerLane) {

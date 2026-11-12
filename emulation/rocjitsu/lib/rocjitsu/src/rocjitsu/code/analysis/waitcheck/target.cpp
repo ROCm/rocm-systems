@@ -9,6 +9,9 @@
 
 namespace rocjitsu {
 namespace waitcheck_detail {
+using amdgpu::MemoryAddressing;
+using amdgpu::MemoryKind;
+using amdgpu::Operation;
 
 std::optional<RegisterRef> WaitcheckTarget::register_operand(const Operand &operand,
                                                              rj_code_arch_t arch) {
@@ -152,93 +155,138 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
                                                          rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
     return false;
-  const auto mnemonic = inst.mnemonic();
-  if (mnemonic.starts_with("scratch_load_lds_") || mnemonic.starts_with("global_load_lds_"))
-    return true;
-  if (!mnemonic.starts_with("buffer_load") || inst.raw_encoding() == nullptr ||
-      inst.size() < 2 * static_cast<int>(sizeof(uint32_t)))
-    return false;
-
-  constexpr uint32_t kMubufLdsBit = 1u << 16u;
-  return (inst.raw_encoding()[0] & kMubufLdsBit) != 0;
+  const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
+  return inst.transfers_to_lds() && inst.amdgpu_memory_kind() == MemoryKind::Load &&
+         (addressing == MemoryAddressing::Scratch || addressing == MemoryAddressing::Global ||
+          addressing == MemoryAddressing::Buffer);
 }
 
 [[nodiscard]] std::optional<uint32_t> WaitcheckTarget::vinterp_wait_exp(const Instruction &inst) {
-  if (!inst.mnemonic().starts_with("v_interp_") || inst.raw_encoding() == nullptr ||
+  if (!inst.is_interpolation() || inst.raw_encoding() == nullptr ||
       inst.size() < static_cast<int>(sizeof(uint32_t)))
     return std::nullopt;
   return (inst.raw_encoding()[0] >> 8u) & 0x7u;
 }
 
-[[nodiscard]] bool WaitcheckTarget::is_dsdir(std::string_view mnemonic) {
-  return mnemonic == "ds_param_load" || mnemonic == "ds_direct_load" ||
-         mnemonic == "lds_param_load" || mnemonic == "lds_direct_load";
+[[nodiscard]] bool WaitcheckTarget::is_dsdir(const Instruction &inst) {
+  return inst.amdgpu_memory_addressing() == MemoryAddressing::DirectLds;
 }
 
 [[nodiscard]] std::optional<uint32_t> WaitcheckTarget::dsdir_wait_va_vdst(const Instruction &inst) {
-  if (!is_dsdir(inst.mnemonic()) || inst.raw_encoding() == nullptr ||
+  if (!is_dsdir(inst) || inst.raw_encoding() == nullptr ||
       inst.size() < static_cast<int>(sizeof(uint32_t)))
     return std::nullopt;
   return (inst.raw_encoding()[0] >> 16u) & 0xFu;
 }
 
 [[nodiscard]] std::optional<uint32_t> WaitcheckTarget::dsdir_wait_vm_vsrc(const Instruction &inst) {
-  const auto mnemonic = inst.mnemonic();
-  if ((mnemonic != "ds_param_load" && mnemonic != "ds_direct_load") ||
+  const Operation operation = inst.amdgpu_operation();
+  if ((operation != Operation::DS_PARAM_LOAD && operation != Operation::DS_DIRECT_LOAD) ||
       inst.raw_encoding() == nullptr || inst.size() < static_cast<int>(sizeof(uint32_t)))
     return std::nullopt;
   return (inst.raw_encoding()[0] >> 23u) & 0x1u;
 }
 
-[[nodiscard]] bool WaitcheckTarget::is_scalar_memory_op(std::string_view mnemonic) {
-  return mnemonic.starts_with("s_load") || mnemonic.starts_with("s_buffer_load") ||
-         mnemonic.starts_with("s_store") || mnemonic.starts_with("s_buffer_store") ||
-         mnemonic.starts_with("s_atc_probe") || mnemonic.starts_with("s_atomic_") ||
-         mnemonic.starts_with("s_buffer_atomic_") || mnemonic.starts_with("s_scratch_load") ||
-         mnemonic.starts_with("s_scratch_store") || mnemonic.starts_with("s_dcache_") ||
-         mnemonic == "s_gl1_inv" || mnemonic == "s_memtime" || mnemonic == "s_memrealtime" ||
-         mnemonic == "s_get_barrier_state" || mnemonic == "s_get_waveid_in_workgroup";
+[[nodiscard]] bool WaitcheckTarget::is_scalar_memory_op(const Instruction &inst) {
+  switch (inst.amdgpu_operation()) {
+  case Operation::S_MEMTIME:
+  case Operation::S_MEMREALTIME:
+  case Operation::S_GET_BARRIER_STATE:
+  case Operation::S_GET_WAVEID_IN_WORKGROUP:
+    return true;
+  default:
+    break;
+  }
+  if (!(inst.flags() & SMEM))
+    return false;
+  switch (inst.amdgpu_memory_kind()) {
+  case MemoryKind::Load:
+  case MemoryKind::Store:
+  case MemoryKind::Atomic:
+  case MemoryKind::Probe:
+  case MemoryKind::Cache:
+    return true;
+  default:
+    return false;
+  }
 }
 
-[[nodiscard]] bool WaitcheckTarget::is_vmem_store(std::string_view mnemonic) {
-  return mnemonic.starts_with("global_store") || mnemonic.starts_with("scratch_store") ||
-         mnemonic.starts_with("buffer_store") || mnemonic.starts_with("tbuffer_store") ||
-         mnemonic.starts_with("image_store");
+[[nodiscard]] bool WaitcheckTarget::is_vmem_store(const Instruction &inst) {
+  if (inst.amdgpu_memory_kind() != MemoryKind::Store || (inst.flags() & SMEM))
+    return false;
+  switch (inst.amdgpu_memory_addressing()) {
+  case MemoryAddressing::Global:
+  case MemoryAddressing::Scratch:
+  case MemoryAddressing::Buffer:
+  case MemoryAddressing::TypedBuffer:
+  case MemoryAddressing::Image:
+    return true;
+  default:
+    return false;
+  }
 }
 
-[[nodiscard]] bool WaitcheckTarget::is_vmem_atomic(std::string_view mnemonic) {
-  return mnemonic.starts_with("global_atomic") || mnemonic.starts_with("flat_atomic") ||
-         mnemonic.starts_with("buffer_atomic") || mnemonic.starts_with("image_atomic");
+[[nodiscard]] bool WaitcheckTarget::is_vmem_atomic(const Instruction &inst) {
+  if (inst.amdgpu_memory_kind() != MemoryKind::Atomic)
+    return false;
+  switch (inst.amdgpu_memory_addressing()) {
+  case MemoryAddressing::Global:
+  case MemoryAddressing::Flat:
+  case MemoryAddressing::Buffer:
+  case MemoryAddressing::Image:
+    return true;
+  default:
+    return false;
+  }
 }
 
-[[nodiscard]] bool WaitcheckTarget::is_image_atomic(std::string_view mnemonic) {
-  return mnemonic.starts_with("image_atomic");
+[[nodiscard]] bool WaitcheckTarget::is_image_atomic(const Instruction &inst) {
+  return inst.amdgpu_memory_addressing() == MemoryAddressing::Image &&
+         inst.amdgpu_memory_kind() == MemoryKind::Atomic;
 }
 
-[[nodiscard]] bool WaitcheckTarget::uses_ds_wait_counter(std::string_view mnemonic) {
-  // Match LLVM's TII.isDS && TII.usesLGKM_CNT classification. All VDS
-  // instructions use DS_CNT except the gfx1250 async-barrier arrive, which
-  // uses ASYNC_CNT instead. LDS-direct instructions have separate EXP_CNT
-  // semantics below.
-  return mnemonic.starts_with("ds_") && !is_dsdir(mnemonic) &&
-         mnemonic != "ds_atomic_async_barrier_arrive_b64";
+[[nodiscard]] bool WaitcheckTarget::uses_ds_wait_counter(const Instruction &inst) {
+  // All VDS instructions use DS_CNT except async-barrier arrive, which uses
+  // ASYNC_CNT. LDS-direct instructions have separate EXP_CNT semantics.
+  const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
+  return (addressing == MemoryAddressing::Lds || addressing == MemoryAddressing::Gds) &&
+         inst.amdgpu_operation() != Operation::DS_ATOMIC_ASYNC_BARRIER_ARRIVE_B64;
 }
 
-[[nodiscard]] bool WaitcheckTarget::is_async_lds_load(std::string_view mnemonic) {
-  return mnemonic.starts_with("global_load_async_to_lds") ||
-         mnemonic.starts_with("cluster_load_async_to_lds");
+[[nodiscard]] bool WaitcheckTarget::is_async_lds_load(const Instruction &inst) {
+  switch (inst.amdgpu_operation()) {
+  case Operation::GLOBAL_LOAD_ASYNC_TO_LDS_B8:
+  case Operation::GLOBAL_LOAD_ASYNC_TO_LDS_B32:
+  case Operation::GLOBAL_LOAD_ASYNC_TO_LDS_B64:
+  case Operation::GLOBAL_LOAD_ASYNC_TO_LDS_B128:
+  case Operation::CLUSTER_LOAD_ASYNC_TO_LDS_B8:
+  case Operation::CLUSTER_LOAD_ASYNC_TO_LDS_B32:
+  case Operation::CLUSTER_LOAD_ASYNC_TO_LDS_B64:
+  case Operation::CLUSTER_LOAD_ASYNC_TO_LDS_B128:
+    return true;
+  default:
+    return false;
+  }
 }
 
-[[nodiscard]] bool WaitcheckTarget::is_async_lds_store(std::string_view mnemonic) {
-  return mnemonic.starts_with("global_store_async_from_lds");
+[[nodiscard]] bool WaitcheckTarget::is_async_lds_store(const Instruction &inst) {
+  switch (inst.amdgpu_operation()) {
+  case Operation::GLOBAL_STORE_ASYNC_FROM_LDS_B8:
+  case Operation::GLOBAL_STORE_ASYNC_FROM_LDS_B32:
+  case Operation::GLOBAL_STORE_ASYNC_FROM_LDS_B64:
+  case Operation::GLOBAL_STORE_ASYNC_FROM_LDS_B128:
+    return true;
+  default:
+    return false;
+  }
 }
 
-[[nodiscard]] bool WaitcheckTarget::is_tensor_lds_load(std::string_view mnemonic) {
-  return mnemonic == "tensor_load_to_lds";
+[[nodiscard]] bool WaitcheckTarget::is_tensor_lds_load(const Instruction &inst) {
+  return inst.amdgpu_operation() == Operation::TENSOR_LOAD_TO_LDS;
 }
 
-[[nodiscard]] bool WaitcheckTarget::is_tensor_lds_store(std::string_view mnemonic) {
-  return mnemonic == "tensor_store_from_lds";
+[[nodiscard]] bool WaitcheckTarget::is_tensor_lds_store(const Instruction &inst) {
+  return inst.amdgpu_operation() == Operation::TENSOR_STORE_FROM_LDS;
 }
 
 [[nodiscard]] util::FailureOr<std::vector<ClassifiedEvent>>
@@ -264,15 +312,17 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return false;
   };
   const bool expert = amdgpu::supports_expert_scheduling(arch);
-  const auto mnemonic = inst.mnemonic();
+  const Operation operation = inst.amdgpu_operation();
+  const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
+  const MemoryKind memory_kind = inst.amdgpu_memory_kind();
   auto add_xcnt_event = [&](WaitEventKind kind) {
     if (arch == ROCJITSU_CODE_ARCH_CDNA5)
       events.emplace_back(WaitCounterKind::X, kind, TrackedRegisterSource::Uses,
                           /*check_uses=*/false, /*check_defs=*/true,
                           /*check_exec_defs=*/is_xcnt_vmem_kind(kind));
   };
-  if (is_async_lds_load(mnemonic) || is_async_lds_store(mnemonic)) {
-    const bool is_load = is_async_lds_load(mnemonic);
+  if (is_async_lds_load(inst) || is_async_lds_store(inst)) {
+    const bool is_load = is_async_lds_load(inst);
     const WaitEventKind kind = is_load ? WaitEventKind::AsyncLdsLoad : WaitEventKind::AsyncLdsStore;
     // These operations update both their ordinary VMEM counter and the
     // independent async counter in LLVM's hardware-event model.
@@ -292,7 +342,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic == "ds_atomic_async_barrier_arrive_b64") {
+  if (operation == Operation::DS_ATOMIC_ASYNC_BARRIER_ARRIVE_B64) {
     events.emplace_back(WaitCounterKind::Async, WaitEventKind::AsyncBarrier,
                         TrackedRegisterSource::None, /*check_uses=*/false,
                         /*check_defs=*/false, /*check_exec_defs=*/false, std::nullopt, std::nullopt,
@@ -301,13 +351,9 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (uses_ds_wait_counter(mnemonic)) {
-    const uint32_t gds_bit = model.value() == WaitcntModel::LegacyNoVscnt ? 16u : 17u;
-    const bool gds = amdgpu::uses_legacy_waitcnt(model.value()) &&
-                     (mnemonic == "ds_ordered_count" || mnemonic == "ds_add_gs_reg_rtn" ||
-                      mnemonic == "ds_sub_gs_reg_rtn" || mnemonic.starts_with("ds_gws_") ||
-                      (inst.raw_encoding() != nullptr && inst.size() >= 8 &&
-                       (inst.raw_encoding()[0] & (1u << gds_bit)) != 0));
+  if (uses_ds_wait_counter(inst)) {
+    const bool gds =
+        amdgpu::uses_legacy_waitcnt(model.value()) && addressing == MemoryAddressing::Gds;
     events.push_back({WaitCounterKind::Ds, gds ? WaitEventKind::Gds : WaitEventKind::Ds});
     // CDNA4 retains the legacy wait encoding, but EXPCNT is unused (ISA 3.1/4.4).
     if (gds && arch != ROCJITSU_CODE_ARCH_CDNA4)
@@ -319,8 +365,8 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (is_tensor_lds_load(mnemonic) || is_tensor_lds_store(mnemonic)) {
-    const bool is_load = is_tensor_lds_load(mnemonic);
+  if (is_tensor_lds_load(inst) || is_tensor_lds_store(inst)) {
+    const bool is_load = is_tensor_lds_load(inst);
     const WaitEventKind kind =
         is_load ? WaitEventKind::TensorLdsLoad : WaitEventKind::TensorLdsStore;
     events.emplace_back(WaitCounterKind::Tensor, kind, TrackedRegisterSource::None,
@@ -332,7 +378,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic.starts_with("flat_load")) {
+  if (addressing == MemoryAddressing::Flat && memory_kind == MemoryKind::Load) {
     events.push_back({WaitCounterKind::Load, WaitEventKind::FlatLoad});
     // Keep the instruction kind distinct: generic FLAT and native DS can
     // complete out of order even though both contribute to the DS counter.
@@ -344,7 +390,8 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic == "global_inv" || mnemonic == "buffer_inv" || mnemonic == "buffer_wbl2") {
+  if (operation == Operation::GLOBAL_INV || operation == Operation::BUFFER_INV ||
+      operation == Operation::BUFFER_WBL2) {
     // LLVM tracks this in LOAD_CNT so it changes the wait threshold for an
     // older load.  It has no result and does not by itself make the next
     // memory instruction a wait consumer.
@@ -353,7 +400,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic == "global_wb" || mnemonic == "global_wbinv") {
+  if (operation == Operation::GLOBAL_WB || operation == Operation::GLOBAL_WBINV) {
     events.emplace_back(amdgpu::vmem_store_wait_counter(model.value()), WaitEventKind::GlobalWb,
                         TrackedRegisterSource::None, false, false);
     return util::Result::success();
@@ -369,9 +416,11 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic.starts_with("global_load") || mnemonic.starts_with("scratch_load") ||
-      mnemonic.starts_with("buffer_load") || mnemonic.starts_with("tbuffer_load") ||
-      mnemonic.starts_with("image_load") || mnemonic == "image_get_resinfo") {
+  if ((memory_kind == MemoryKind::Load && !(inst.flags() & SMEM) &&
+       (addressing == MemoryAddressing::Global || addressing == MemoryAddressing::Scratch ||
+        addressing == MemoryAddressing::Buffer || addressing == MemoryAddressing::TypedBuffer ||
+        (addressing == MemoryAddressing::Image && operation != Operation::IMAGE_MSAA_LOAD))) ||
+      operation == Operation::IMAGE_GET_RESINFO) {
     events.push_back({WaitCounterKind::Load, WaitEventKind::VmemNoSamplerLoad});
     if (expert)
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemNoSamplerLoad,
@@ -380,7 +429,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (is_image_atomic(mnemonic)) {
+  if (is_image_atomic(inst)) {
     // Image models expose vdata as a destination even for no-return forms.
     // Read the return control until that distinction is available as metadata:
     // GFX9/10 GLC is bit 13, GFX11 GLC is bit 14, and GFX12 TH's
@@ -407,18 +456,18 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (is_vmem_atomic(mnemonic)) {
+  if (is_vmem_atomic(inst)) {
     const bool returns_value = has_register_result();
     const WaitCounterKind counter =
         returns_value ? WaitCounterKind::Load : amdgpu::vmem_store_wait_counter(model.value());
     const WaitEventKind kind =
-        mnemonic.starts_with("flat_atomic")
+        addressing == MemoryAddressing::Flat
             ? (returns_value ? WaitEventKind::FlatLoad : WaitEventKind::FlatStore)
             : (returns_value ? WaitEventKind::VmemNoSamplerLoad : WaitEventKind::VmemStore);
     events.emplace_back(counter, kind,
                         returns_value ? TrackedRegisterSource::Defs : TrackedRegisterSource::None,
                         /*check_uses=*/returns_value, /*check_defs=*/returns_value);
-    if (mnemonic.starts_with("flat_atomic"))
+    if (addressing == MemoryAddressing::Flat)
       events.emplace_back(WaitCounterKind::Ds, kind,
                           returns_value ? TrackedRegisterSource::Defs : TrackedRegisterSource::None,
                           /*check_uses=*/returns_value, /*check_defs=*/returns_value);
@@ -429,7 +478,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic.starts_with("flat_store")) {
+  if (addressing == MemoryAddressing::Flat && memory_kind == MemoryKind::Store) {
     events.push_back({amdgpu::vmem_store_wait_counter(model.value()), WaitEventKind::FlatStore,
                       TrackedRegisterSource::None, false, false});
     events.push_back(
@@ -441,7 +490,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (is_vmem_store(mnemonic)) {
+  if (is_vmem_store(inst)) {
     events.push_back({amdgpu::vmem_store_wait_counter(model.value()), WaitEventKind::VmemStore,
                       TrackedRegisterSource::None, false, false});
     if (expert)
@@ -451,27 +500,27 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic == "ds_param_load" || mnemonic == "ds_direct_load" || mnemonic == "lds_param_load" ||
-      mnemonic == "lds_direct_load") {
+  if (is_dsdir(inst)) {
     events.push_back({WaitCounterKind::Exp, WaitEventKind::LdsDirect});
     return util::Result::success();
   }
 
-  if (is_scalar_memory_op(mnemonic)) {
+  if (is_scalar_memory_op(inst)) {
     const bool produces_result = has_register_result();
     events.emplace_back(amdgpu::smem_wait_counter(model.value()), WaitEventKind::Smem,
                         produces_result ? TrackedRegisterSource::Defs : TrackedRegisterSource::None,
                         /*check_uses=*/produces_result, /*check_defs=*/produces_result);
     // Timestamp and barrier-state SOP operations account as SMEM_ACCESS,
     // but unlike SMRD instructions they do not translate a scalar address.
-    if (mnemonic != "s_memtime" && mnemonic != "s_memrealtime" &&
-        mnemonic != "s_get_barrier_state" && mnemonic != "s_get_waveid_in_workgroup")
+    if (operation != Operation::S_MEMTIME && operation != Operation::S_MEMREALTIME &&
+        operation != Operation::S_GET_BARRIER_STATE &&
+        operation != Operation::S_GET_WAVEID_IN_WORKGROUP)
       add_xcnt_event(WaitEventKind::Smem);
     return util::Result::success();
   }
 
-  if (mnemonic == "s_sendmsg" || mnemonic == "s_sendmsghalt" || mnemonic == "s_sendmsg_rtn_b32" ||
-      mnemonic == "s_sendmsg_rtn_b64") {
+  if (operation == Operation::S_SENDMSG || operation == Operation::S_SENDMSGHALT ||
+      operation == Operation::S_SENDMSG_RTN_B32 || operation == Operation::S_SENDMSG_RTN_B64) {
     const bool returns_value = has_register_result();
     events.emplace_back(amdgpu::smem_wait_counter(model.value()), WaitEventKind::SqMessage,
                         returns_value ? TrackedRegisterSource::Defs : TrackedRegisterSource::None,
@@ -479,8 +528,8 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic == "image_msaa_load" || mnemonic == "image_get_lod" ||
-      mnemonic.starts_with("image_sample") || mnemonic.starts_with("image_gather")) {
+  if (operation == Operation::IMAGE_MSAA_LOAD || operation == Operation::IMAGE_GET_LOD ||
+      (addressing == MemoryAddressing::Image && memory_kind == MemoryKind::Sample)) {
     events.push_back({amdgpu::image_sample_wait_counter(model.value()), WaitEventKind::Sample});
     if (expert)
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Sample,
@@ -489,7 +538,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic.starts_with("image_bvh")) {
+  if (addressing == MemoryAddressing::Image && memory_kind == MemoryKind::Bvh) {
     events.push_back({amdgpu::image_bvh_wait_counter(model.value()), WaitEventKind::Bvh});
     if (expert)
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Bvh,
@@ -498,7 +547,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic == "export" || mnemonic == "exp") {
+  if (operation == Operation::EXPORT || operation == Operation::EXP) {
     auto kind = WaitEventKind::Export;
     auto sources = TrackedRegisterSource::Uses;
     if (amdgpu::has_typed_export_waits(arch)) {
@@ -529,7 +578,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic == "s_barrier_signal_isfirst") {
+  if (operation == Operation::S_BARRIER_SIGNAL_ISFIRST) {
     if (!amdgpu::uses_legacy_waitcnt(model.value()))
       events.push_back({WaitCounterKind::Km, WaitEventKind::SccWrite, TrackedRegisterSource::None,
                         true, true, false, RegisterRef{RegClass::SCC, 0, 1},

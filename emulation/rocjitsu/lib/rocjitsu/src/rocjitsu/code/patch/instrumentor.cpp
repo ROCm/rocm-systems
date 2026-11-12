@@ -51,33 +51,26 @@ namespace rocjitsu {
 
 namespace {
 
-// PC-reading / PC-relative instructions to reject as anchors: relocating any of
-// them into a trampoline changes the PC value they read (s_getpc) or the target
-// they branch to. s_getpc and the s_rfe_ family carry no control-flow flag or
-// branch_offset_bytes, so validate_anchor's flag/offset checks miss them and the
-// denylist is the only thing that catches them. The s_call / s_setpc / s_swappc
-// entries are already rejected upstream by their INDIRECT_BRANCH / INDIRECT_CALL
-// flags and are listed only as defense-in-depth. gfx1250 renames the whole
-// family from *_b64 to *_i64 (e.g. s_getpc_b64 -> s_get_pc_i64), so both
-// spellings are listed; the s_rfe_ prefix match below covers s_rfe_b64,
-// s_rfe_i64, and s_rfe_restore_b64.
-constexpr std::array<std::string_view, 8> kPcRelativeDenylist = {
-    "s_getpc_b64",  "s_call_b64", "s_setpc_b64",  "s_swappc_b64",
-    "s_get_pc_i64", "s_call_i64", "s_set_pc_i64", "s_swap_pc_i64",
-};
-
-constexpr std::string_view kRfePrefix = "s_rfe_";
-
-[[nodiscard]] bool is_denylisted_mnemonic(std::string_view mnemonic) {
-  for (auto m : kPcRelativeDenylist)
-    if (mnemonic == m)
-      return true;
-  if (mnemonic.size() >= kRfePrefix.size() && mnemonic.substr(0, kRfePrefix.size()) == kRfePrefix)
+// Relocation changes the value observed by PC readers. PC restore and set
+// operations remain disallowed separately from ordinary branch metadata.
+[[nodiscard]] bool is_pc_relative_anchor(const Instruction &inst) {
+  if (inst.reads_pc())
     return true;
-  return false;
+  switch (inst.amdgpu_operation()) {
+  case amdgpu::Operation::S_SETPC_B64:
+  case amdgpu::Operation::S_SET_PC_I64:
+  case amdgpu::Operation::S_RFE_B64:
+  case amdgpu::Operation::S_RFE_I64:
+  case amdgpu::Operation::S_RFE_RESTORE_B64:
+    return true;
+  default:
+    return false;
+  }
 }
 
-[[nodiscard]] bool is_s_clause(const Instruction &inst) { return inst.mnemonic() == "s_clause"; }
+[[nodiscard]] bool is_s_clause(const Instruction &inst) {
+  return inst.amdgpu_operation() == amdgpu::Operation::S_CLAUSE;
+}
 
 // Per-site result of Instrumentor::patch's preflight: the chosen trampoline
 // offset and the concrete bytes we'll splice in once all preflights succeed.
@@ -324,8 +317,8 @@ bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
     report(error_out, "anchor instruction has a PC-relative branch offset");
     return false;
   }
-  if (is_denylisted_mnemonic(anchor.mnemonic())) {
-    report(error_out, "anchor mnemonic is in the PC-relative denylist");
+  if (is_pc_relative_anchor(anchor)) {
+    report(error_out, "anchor instruction has PC-relative semantics");
     return false;
   }
   if (is_s_clause(anchor)) {
@@ -382,7 +375,8 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
       fail("kernel boundary instrumentation requires a callable probe and valid anchor bytes");
       return std::nullopt;
     }
-    if (pt.kind == InstrumentationKind::KernelExit && anchor.mnemonic() != "s_endpgm") {
+    if (pt.kind == InstrumentationKind::KernelExit &&
+        anchor.amdgpu_operation() != amdgpu::Operation::S_ENDPGM) {
       fail("KernelExit must name s_endpgm");
       return std::nullopt;
     }
@@ -1980,8 +1974,13 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     for (const std::unique_ptr<BasicBlock> &block : blocks_) {
       for (const Instruction &instruction : block->instructions()) {
         const std::string_view mnemonic = instruction.mnemonic();
-        if ((mnemonic.starts_with("s_cbranch_cdbg") || mnemonic == "s_subvector_loop_begin" ||
-             mnemonic == "s_subvector_loop_end") &&
+        const amdgpu::Operation operation = instruction.amdgpu_operation();
+        if (((operation == amdgpu::Operation::S_CBRANCH_CDBGSYS ||
+              operation == amdgpu::Operation::S_CBRANCH_CDBGUSER ||
+              operation == amdgpu::Operation::S_CBRANCH_CDBGSYS_AND_USER ||
+              operation == amdgpu::Operation::S_CBRANCH_CDBGSYS_OR_USER) ||
+             operation == amdgpu::Operation::S_SUBVECTOR_LOOP_BEGIN ||
+             operation == amdgpu::Operation::S_SUBVECTOR_LOOP_END) &&
             !instruction.branch_offset_bytes()) {
           result.edit_error = TextEditError{
               .code = TextEditErrorCode::UnsupportedReferences,

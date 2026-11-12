@@ -94,29 +94,27 @@ void dfs_reverse_post_order(const BasicBlock &start,
 }
 
 [[nodiscard]] bool is_sgpr_movrel(const Instruction &inst) {
-  return inst.mnemonic().starts_with("s_movrel");
+  return (inst.flags() & (RELATIVE_SGPR_SOURCE | RELATIVE_SGPR_DESTINATION)) != 0;
 }
 
 // True if inst may reach VGPRs through M0-relative or GPR-index addressing,
 // which explicit operands do not show.
 [[nodiscard]] bool may_access_vgprs_indirectly(const Instruction &inst,
                                                std::span<const uint8_t> text, rj_code_arch_t arch) {
-  const std::string_view mnemonic = inst.mnemonic();
-  // TODO: Move indirect-access properties into decoded instruction metadata so
-  // future ISA variants cannot bypass this completeness gate.
-  if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  if ((inst.flags() & (RELATIVE_VGPR_SOURCE | RELATIVE_VGPR_DESTINATION)) != 0) {
     return true;
   }
   if (!isa_properties(arch).mode_has_gpr_idx_en)
     return false;
-  if (mnemonic == "s_set_gpr_idx_on")
+  if (operation == amdgpu::Operation::S_SET_GPR_IDX_ON)
     return true;
 
   // GPR indexing can also be enabled by writing MODE.GPR_IDX_EN through a
   // generic S_SETREG form. Dynamic writes covering bit 27 fail closed; immediate
   // writes can stay eligible when their decoded literal proves the bit is clear.
-  const bool is_dynamic_setreg = mnemonic == "s_setreg_b32";
-  const bool is_immediate_setreg = mnemonic == "s_setreg_imm32_b32";
+  const bool is_dynamic_setreg = operation == amdgpu::Operation::S_SETREG_B32;
+  const bool is_immediate_setreg = operation == amdgpu::Operation::S_SETREG_IMM32_B32;
   if (!is_dynamic_setreg && !is_immediate_setreg) {
     return false;
   }
