@@ -4625,60 +4625,6 @@ TEST(MemoryWaitFootprintTest, Cdna4HazardsMatchObservedVectorAccesses) {
   check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA4, 64, 512, cases);
 }
 
-TEST(MemoryWaitFootprintTest, MfmaShapesCheckEveryOperandAndSkipConstantAccumulators) {
-  std::vector<std::vector<uint32_t>> cases;
-  for (uint16_t accumulator : {uint16_t{288}, uint16_t{128}}) {
-    for (uint16_t opcode :
-         {cdna4::kVMfmaF6416x16x4F64Vop3pMfma, cdna4::kVMfmaI3216x16x64I8Vop3pMfma,
-          cdna4::kVMfmaF324x4x116bF32Vop3pMfma}) {
-      const auto words = cdna4::build_vop3p_mfma(
-          opcode, {.vdst = 64, .src0 = 256, .src1 = 272, .src2 = accumulator});
-      cases.emplace_back(words.begin(), words.end());
-    }
-    // Mixed FP8/FP4 inputs occupy different numbers of source registers.
-    const auto words = cdna4::build_vop3p_mfma(
-        cdna4::kVMfmaF3216x16x128F8f6f4Vop3pMfma,
-        {.vdst = 64, .cbsz = 0, .src0 = 256, .src1 = 272, .src2 = accumulator, .blgp = 4});
-    cases.emplace_back(words.begin(), words.end());
-    // F64 ignores CBSZ/ABID and uses BLGP for negation, not lane selection.
-    const auto f64 =
-        cdna4::build_vop3p_mfma(cdna4::kVMfmaF6416x16x4F64Vop3pMfma, {.vdst = 64,
-                                                                      .cbsz = 2,
-                                                                      .abid = 1,
-                                                                      .src0 = 256,
-                                                                      .src1 = 272,
-                                                                      .src2 = accumulator,
-                                                                      .blgp = 7});
-    cases.emplace_back(f64.begin(), f64.end());
-  }
-  check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA4, 64, 80, cases);
-}
-
-TEST(MemoryWaitFootprintTest, MfmaBroadcastChecksOnlySelectedSourceLanes) {
-  std::vector<std::vector<uint32_t>> cases;
-  for (const auto [cbsz, abid, blgp] :
-       {std::array<uint8_t, 3>{2, 1, 4}, {0, 0, 1}, {1, 1, 2}, {4, 15, 3}, {3, 6, 7}}) {
-    for (uint16_t opcode :
-         {cdna4::kVMfmaI324x4x416bI8Vop3pMfma, cdna4::kVMfmaF324x4x116bF32Vop3pMfma}) {
-      // These GFX9 encodings share their opcodes and broadcast fields across
-      // CDNA1-4. Only A and B are permuted; C and D still use every lane.
-      const auto words = cdna4::build_vop3p_mfma(opcode, {.vdst = 64,
-                                                          .cbsz = cbsz,
-                                                          .abid = abid,
-                                                          .src0 = 256,
-                                                          .src1 = 272,
-                                                          .src2 = 288,
-                                                          .blgp = blgp});
-      cases.emplace_back(words.begin(), words.end());
-    }
-  }
-  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                          ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    SCOPED_TRACE(static_cast<int>(arch));
-    check_vector_footprints(arch, 64, 512, cases);
-  }
-}
-
 TEST(MemoryWaitFootprintTest, DualFmacHazardsMatchObservedVectorAccesses) {
   std::vector<std::vector<uint32_t>> cases;
   // VOPD X is FMAC. Exercise Y's FMAC, MOV, integer ADD and shift slots,

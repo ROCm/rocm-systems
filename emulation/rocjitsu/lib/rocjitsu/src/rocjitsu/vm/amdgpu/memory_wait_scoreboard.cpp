@@ -9,7 +9,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/mfma_lane_permutation.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
@@ -831,13 +830,6 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     }
     if (!write && reg->cls == RegClass::VGPR && (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT))
       accessed_lanes &= UINT32_MAX;
-    if (matrix && !write && reg->cls == RegClass::VGPR) {
-      if (op == inst.src_operand(0))
-        accessed_lanes &= mfma_a_lane_mask(modifiers.mfma.cbsz, modifiers.mfma.abid,
-                                           modifiers.mfma.a_block_lanes);
-      else if (op == inst.src_operand(1))
-        accessed_lanes &= mfma_b_lane_mask(modifiers.mfma.blgp);
-    }
     // Interpolation coefficients are quad broadcasts, including inactive lanes.
     if (!write && reg->cls == RegClass::VGPR && name.starts_with("v_interp_") &&
         (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||

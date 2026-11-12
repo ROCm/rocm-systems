@@ -12780,19 +12780,6 @@ class CodeGenerator:
                         )
                     if inst_sem:
                         access_conditions = []
-                        if inst.name.startswith(('V_MFMA_F32_', 'V_MFMA_I32_')) and (
-                            'F8F6F4' not in inst.name.replace('_', '')
-                        ):
-                            a_block_lanes = (
-                                int(inst.name.split('_')[3].split('X')[0])
-                                if self.isa_spec.arch_name == 'cdna2'
-                                else 0
-                            )
-                            access_conditions.append(
-                                'modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, '
-                                f'{a_block_lanes}'
-                                '};'
-                            )
                         if dpp_routes_src1:
                             source = self._encoded_source_operands(inst)[1].name
                             access_conditions.append(
