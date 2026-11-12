@@ -30,6 +30,8 @@ import pytest
 
 from .gin_sdma_harness import (
     MiB,
+    _NUM,
+    _WRONG,
     detect_ngpus,
     env_int,
     gin_env_xflags,
@@ -197,14 +199,16 @@ def _run_reduce_gin_sdma(request, total_bytes, dtype, op, root, impl=3, ctas=RED
     cmd = " ".join(shlex.quote(a) for a in args)
     hang_msg = gin_hang_msg(
         "Reduce", REDUCE_TIMEOUT_S, size, dtype, "{} MiB total".format(total_bytes // MiB))
-    return run_with_conn_gate_retry(
+    rc, out = run_with_conn_gate_retry(
         lambda: launch_mpi_shell(cmd, REDUCE_TIMEOUT_S, hang_msg),
         REDUCE_CONN_RETRIES,
     )
+    # reduce_perf runs float instead of a type it was built without.
+    if "invalid type {}".format(dtype) in (out or ""):
+        pytest.skip("reduce_perf was built without {}".format(dtype))
+    return rc, out
 
 
-_NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
-_WRONG = r"(?:{}|N/A)".format(_NUM)
 # size count type redop root, then out-of-place (time algbw busbw #wrong) and,
 # unless -O 1, in-place. Not end-anchored, like gin_sdma_harness.BCAST_ROW_RE.
 REDUCE_ROW_RE = re.compile(
@@ -259,6 +263,8 @@ def _default_ll_cap(nranks):
     ("half", "max"),
     ("bfloat16", "avg"),
     ("double", "prod"),
+    ("fp8_e4m3", "sum"),
+    ("fp8_e5m2", "max"),
 ])
 @pytest.mark.parametrize("root_pos", ["first", "last"])
 def test_ReduceGinSdma(request, size, dtype, op, root_pos):
@@ -340,21 +346,31 @@ def test_ReduceGinSdmaThreads(request, tier, total_bytes):
                       total_bytes, REDUCE_NP, expect_tier=tier)
 
 
-# In-kernel timing (-B 1) with the timed-output check (-H 1) for both -D 3
-# kernels; the devtime line's CTA count shows which kernel was timed.
+# In-kernel timing for both -D 3 kernels. -B 1 adds a #[reduce-devtime] line
+# whose CTA count shows which kernel was timed: at 32 KiB the LL kernel runs 8
+# CTAs, the tiled kernel -V. -H 1 only checks the timed kernel's output with
+# -B 2, which reports that kernel's latency as the metric.
 @_reduce_gin_skip
-@pytest.mark.parametrize("tier, total_bytes", [("ll", 64 * 1024), ("tiled", 4 * MiB)])
-def test_ReduceGinSdmaDevtime(request, tier, total_bytes):
+@pytest.mark.parametrize("mode", ["augment", "check"])
+@pytest.mark.parametrize("tier, total_bytes", [("ll", 32 * 1024), ("tiled", 4 * MiB)])
+def test_ReduceGinSdmaDevtime(request, tier, total_bytes, mode):
+    timing = ["-B", "1"] if mode == "augment" else ["-B", "2", "-H", "1"]
     rc, out = _run_reduce_gin_sdma(request, total_bytes, "float", "sum", 0,
-                                   extra=["-B", "1", "-L", "5", "-P", "2", "-H", "1"])
-    _assert_reduce_ok(rc, out, "-D 3 -B 1 at {} bytes".format(total_bytes),
+                                   extra=timing + ["-L", "5", "-P", "2"])
+    _assert_reduce_ok(rc, out, "-D 3 {} at {} bytes".format(" ".join(timing), total_bytes),
                       total_bytes, REDUCE_NP, expect_tier=tier)
-    assert "ERROR: --devtime_check:" not in out, "timed-kernel data check failed:\n{}".format(
-        out[-2000:])
-    lines = REDUCE_DEVTIME_RE.findall(out or "")
-    assert lines, "no #[reduce-devtime] line. Output tail:\n{}".format(out[-2000:])
+    tail = out[-2000:]
+    if mode == "check":
+        assert "no in-kernel device-time measurement" not in out, (
+            "the timed kernel did not run, so -H 1 checked nothing:\n{}".format(tail))
+        assert "ERROR: --devtime_check:" not in out, "timed-kernel data check failed:\n{}".format(tail)
+        return
     want = _aligned_bytes(total_bytes, REDUCE_NP)
     ll_ctas = max(1, min(-(-want // 8 // 512), 256))
+    if ll_ctas == int(REDUCE_CTAS):
+        pytest.skip("both -D 3 kernels launch {} CTAs at {} bytes".format(ll_ctas, want))
+    lines = REDUCE_DEVTIME_RE.findall(out or "")
+    assert lines, "no #[reduce-devtime] line. Output tail:\n{}".format(tail)
     expect_ctas = ll_ctas if tier == "ll" else int(REDUCE_CTAS)
     assert all(int(s) == want and int(c) == expect_ctas for s, c in lines), (
         "devtime lines {} expected size {} and {} CTAs".format(lines, want, expect_ctas))
@@ -381,6 +397,19 @@ def test_ReduceGinSdmaRejects(request, case):
 # GinSdmaReduceKernel (deviceImpl 4). With fewer than 2N CTAs owners fold and
 # store straight to the root ("cu"); with at least 2N, dedicated CTAs issue the
 # SDMA puts and owners stage results for an SDMA copy to the root ("sdma").
+def _check_d4(request, total_bytes, dtype, op, root, path, np=None, xenv=()):
+    """Run -D 4 on one path and check its rows and tier."""
+    n = np or REDUCE_NP
+    ctas = n if path == "cu" else max(2 * n, 16)
+    if ctas > 128:
+        pytest.skip("reduce_perf -V is capped at 128 CTAs")
+    rc, out = _run_reduce_gin_sdma(request, total_bytes, dtype, op, root, impl=4, ctas=ctas,
+                                   np=np, xenv=xenv)
+    _assert_reduce_ok(rc, out, "-D 4 on {} ranks at {} bytes, dtype={}, op={}, path={}, root={}".format(
+        n, total_bytes, dtype, op, path, root), total_bytes, n - 1,
+        expect_tier="sdma-" + ("cu" if path == "cu" else "staged"), in_place=False)
+
+
 # 64 MiB splits each partition into several chunks.
 @_reduce_gin_skip
 @pytest.mark.parametrize("total_mib", [1, 64])
@@ -392,13 +421,7 @@ def test_ReduceGinSdmaRejects(request, case):
 @pytest.mark.parametrize("root_pos", ["first", "last"])
 def test_ReduceGinSdmaPut(request, total_mib, dtype, op, path, root_pos):
     root = 0 if root_pos == "first" else REDUCE_NP - 1
-    ctas = REDUCE_NP if path == "cu" else max(2 * REDUCE_NP, 16)
-    if ctas > 128:
-        pytest.skip("reduce_perf -V is capped at 128 CTAs")
-    rc, out = _run_reduce_gin_sdma(request, total_mib * MiB, dtype, op, root, impl=4, ctas=ctas)
-    _assert_reduce_ok(rc, out, "-D 4 at {} MiB, dtype={}, op={}, path={}, root={}".format(
-        total_mib, dtype, op, path, root), total_mib * MiB, REDUCE_NP - 1,
-        expect_tier="sdma-" + ("cu" if path == "cu" else "staged"), in_place=False)
+    _check_d4(request, total_mib * MiB, dtype, op, root, path)
 
 
 # -D 4 element types and ops beyond the float/bf16 pairs above, on both paths.
@@ -408,17 +431,24 @@ def test_ReduceGinSdmaPut(request, total_mib, dtype, op, path, root_pos):
     ("int32", "min"),
     ("int8", "sum"),
     ("double", "prod"),
+    ("fp8_e4m3", "sum"),
+    ("fp8_e5m2", "max"),
 ])
 @pytest.mark.parametrize("path", ["cu", "sdma"])
 def test_ReduceGinSdmaPutTypes(request, dtype, op, path):
-    root = REDUCE_NP - 1
-    ctas = REDUCE_NP if path == "cu" else max(2 * REDUCE_NP, 16)
-    if ctas > 128:
-        pytest.skip("reduce_perf -V is capped at 128 CTAs")
-    rc, out = _run_reduce_gin_sdma(request, MiB, dtype, op, root, impl=4, ctas=ctas)
-    _assert_reduce_ok(rc, out, "-D 4 at 1 MiB, dtype={}, op={}, path={}".format(dtype, op, path),
-                      MiB, REDUCE_NP - 1,
-                      expect_tier="sdma-" + ("cu" if path == "cu" else "staged"), in_place=False)
+    _check_d4(request, MiB, dtype, op, REDUCE_NP - 1, path)
+
+
+# NCCL_GIN_ANVIL_SDMA_REDUCE_CHUNKS=16 also splits the CU path's puts, up to one
+# chunk per CTA. With 2 packs per partition most chunks are empty, and issuers
+# and reducers must skip the same ones; 1 MiB has no empty chunks.
+@_reduce_gin_skip
+@pytest.mark.parametrize("size", ["2-packs", "1MiB"])
+@pytest.mark.parametrize("path", ["cu", "sdma"])
+def test_ReduceGinSdmaPutChunks(request, size, path):
+    total_bytes = {"2-packs": (REDUCE_NP - 1) * 2 * 16, "1MiB": MiB}[size]
+    _check_d4(request, total_bytes, "float", "sum", REDUCE_NP - 1, path,
+              xenv=["NCCL_GIN_ANVIL_SDMA_REDUCE_CHUNKS=16"])
 
 
 # -D 4 with two ranks: one owner, which is also the only sender to the root.
@@ -428,9 +458,4 @@ def test_ReduceGinSdmaPutTypes(request, dtype, op, path):
 @pytest.mark.parametrize("path", ["cu", "sdma"])
 @pytest.mark.parametrize("root", [0, 1])
 def test_ReduceGinSdmaPutTwoRanks(request, total_mib, path, root):
-    ctas = 2 if path == "cu" else 16
-    rc, out = _run_reduce_gin_sdma(request, total_mib * MiB, "float", "sum", root, impl=4,
-                                   ctas=ctas, np=2)
-    _assert_reduce_ok(rc, out, "-D 4 on 2 ranks at {} MiB, path={}, root={}".format(
-        total_mib, path, root), total_mib * MiB, 1,
-        expect_tier="sdma-" + ("cu" if path == "cu" else "staged"), in_place=False)
+    _check_d4(request, total_mib * MiB, "float", "sum", root, path, np=2)

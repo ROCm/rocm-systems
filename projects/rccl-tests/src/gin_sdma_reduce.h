@@ -23,8 +23,8 @@
 // below returns nullptr for it, and for fp8 prod.
 //
 // Include AFTER common.h (which pulls in rccl.h for __half / hip_bfloat16 and
-// rccl_float8.h for the fp8 types) so all element types and the HAVE_BF16 /
-// HAVE_FP8 guards are in scope.
+// the HAVE_BF16 / HAVE_FP8 guards) and, with HAVE_FP8, after rccl_float8.h for
+// the fp8 types, so all element types are in scope.
 
 #ifndef GIN_SDMA_REDUCE_H_
 #define GIN_SDMA_REDUCE_H_

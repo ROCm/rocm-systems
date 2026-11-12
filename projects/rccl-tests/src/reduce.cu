@@ -129,6 +129,20 @@ static void reduceReportTier(ReduceLaunchTier tier) {
 // that the previous Reduce finished with its slots is the kernel boundary, so
 // -D 4 has no persistent device-timed variant.
 
+// -D 4 layout, shared by GinSdmaReduceKernel and ReduceInitData. Non-root rank
+// `rank` owns partition sdmaReduceOwnedPart(rank, root, nRanks), and keeps
+// sender s's slice of it in recvbuff slot sdmaReduceSlot(s, rank). Chunk k of a
+// partition of `packs` packs starts at pack sdmaReduceChunkStart(packs, k, chunks).
+__host__ __device__ inline int sdmaReduceOwnedPart(int rank, int root, int nRanks) {
+  return (rank - root - 1 + nRanks) % nRanks;
+}
+__host__ __device__ inline int sdmaReduceSlot(int sender, int owner) {
+  return sender < owner ? sender : sender - 1;
+}
+__host__ __device__ inline size_t sdmaReduceChunkStart(size_t packs, int k, int chunks) {
+  return (size_t)k * packs / chunks;
+}
+
 void ReduceGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
   size_t aligned = count;
   // -D 3 splits the array into nranks slices and -D 4 into nranks-1 partitions,
@@ -162,12 +176,12 @@ testResult_t ReduceInitData(struct threadArgs* args, ncclDataType_t type, ncclRe
     else if (deviceImpl == 4 && !in_place && nranks > 1) {
       // -D 4 leaves each sender's slice of this rank's partition in its slot.
       const size_t part = recvcount / (size_t)(nranks - 1);
-      const int owner = (rank - root - 1 + nranks) % nranks;
+      const int owner = sdmaReduceOwnedPart(rank, root, nranks);
       // With issuer CTAs, the root's slot holds the reduced partition instead.
       const bool staged = deviceCtaCount >= 2 * nranks;
       for (int sender = 0; sender < nranks; sender++) {
         if (sender == rank) continue;
-        const int slot = sender < rank ? sender : sender - 1;
+        const int slot = sdmaReduceSlot(sender, rank);
         void* slotPtr = (char*)args->expected[i] + (size_t)slot * part * wordSize(type);
         if (staged && sender == root) TESTCHECK(InitDataReduce(slotPtr, part, (size_t)owner * part, type, op, rep, nranks));
         else TESTCHECK(InitData(slotPtr, part, (size_t)owner * part, type, op, rep, nranks, sender));
@@ -588,7 +602,7 @@ __device__ __forceinline__ void sdmaFoldPacks(const Pack* const* src, Pack* dst,
 // finished storing to the root, in two sets alternated by launch parity like
 // the chunk signals. Device globals are per GPU, and each GPU runs at most one
 // -D 4 Reduce at a time.
-__device__ unsigned int gSdmaReduceChunkDone[2][128];
+__device__ unsigned int gSdmaReduceChunkDone[2][kReduceFlagMaxCtas];
 __device__ unsigned int gSdmaReduceRootDone[2];
 
 __device__ __forceinline__ void postFlag(uint32_t* flag, uint32_t seq) {
@@ -633,7 +647,7 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
   const unsigned int par = seq & 1u;
   const unsigned int sigBase = par * (unsigned int)G;
   if (threadIdx.x == 0) gin.resetSignal((unsigned int)G - sigBase + blockIdx.x);
-  for (int j = blockIdx.x * blockDim.x + threadIdx.x; j < 128; j += G * blockDim.x) gSdmaReduceChunkDone[par ^ 1u][j] = 0;
+  for (int j = blockIdx.x * blockDim.x + threadIdx.x; j < kReduceFlagMaxCtas; j += G * blockDim.x) gSdmaReduceChunkDone[par ^ 1u][j] = 0;
   if (blockIdx.x == 0 && threadIdx.x == 0) gSdmaReduceRootDone[par ^ 1u] = 0;
   if (blockIdx.x == 0)
     for (int p = threadIdx.x; p < nRanks; p += blockDim.x)
@@ -653,12 +667,12 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
     // CTA `root` has no owner-to-owner peer, so it feeds the owner-to-root
     // queue; it is that queue's only producer.
     if (threadIdx.x == 0) {
-      const int owner = (me - root - 1 + nRanks) % nRanks;
-      const int rootSlot = root < me ? root : root - 1;
+      const int owner = sdmaReduceOwnedPart(me, root, nRanks);
+      const int rootSlot = sdmaReduceSlot(root, me);
       waitFlag(ready + root, seq);
       for (int k = 0; k < dmaChunks; k++) {
-        const size_t lo = (size_t)k * partPacks / dmaChunks * sizeof(Pack);
-        const size_t hi = (size_t)(k + 1) * partPacks / dmaChunks * sizeof(Pack);
+        const size_t lo = sdmaReduceChunkStart(partPacks, k, dmaChunks) * sizeof(Pack);
+        const size_t hi = sdmaReduceChunkStart(partPacks, k + 1, dmaChunks) * sizeof(Pack);
         if (hi == lo) continue;
         while (__hip_atomic_load(&gSdmaReduceChunkDone[par][k], __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) < (unsigned int)nReducers) {}
         gin.put(ncclTeamWorld(devComm), root,
@@ -672,14 +686,14 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
     if ((int)threadIdx.x < nMine) {
       const int q = blockIdx.x + threadIdx.x * G;
       if (q != root && q != me) {
-        const int owner = (q - root - 1 + nRanks) % nRanks;
-        const int slot = me < q ? me : me - 1;
+        const int owner = sdmaReduceOwnedPart(q, root, nRanks);
+        const int slot = sdmaReduceSlot(me, q);
         waitFlag(ready + q, seq);
         // The signal quiets the queue first, so put k+1 is only queued once
         // put k has landed and chunk k has been released to the owner.
         for (int k = 0; k < dmaChunks; k++) {
-          const size_t lo = (size_t)k * partPacks / dmaChunks * sizeof(Pack);
-          const size_t hi = (size_t)(k + 1) * partPacks / dmaChunks * sizeof(Pack);
+          const size_t lo = sdmaReduceChunkStart(partPacks, k, dmaChunks) * sizeof(Pack);
+          const size_t hi = sdmaReduceChunkStart(partPacks, k + 1, dmaChunks) * sizeof(Pack);
           if (hi == lo) continue;
           gin.put(ncclTeamWorld(devComm), q,
                   recvwin, recvoffset + (size_t)slot * partBytes + lo,
@@ -692,12 +706,12 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
   }
 
   if (me != root && (int)blockIdx.x >= nIssue) {
-    const int owner = (me - root - 1 + nRanks) % nRanks;
+    const int owner = sdmaReduceOwnedPart(me, root, nRanks);
     const char* slots = (const char*)ncclGetLocalPointer(recvwin, recvoffset);
     const Pack* own = (const Pack*)((const char*)ncclGetLocalPointer(sendwin, sendoffset) + (size_t)owner * partBytes);
     // Each pack of the root's slot is read and then overwritten by the same
     // thread, so staging the result there is safe.
-    Pack* dst = nIssue ? (Pack*)(slots + (size_t)(root < me ? root : root - 1) * partBytes)
+    Pack* dst = nIssue ? (Pack*)(slots + (size_t)sdmaReduceSlot(root, me) * partBytes)
                        : (Pack*)((char*)ncclGetLsaPointer(recvwin, recvoffset, root) + (size_t)owner * partBytes);
     if (!nIssue) {
       if (threadIdx.x == 0) waitFlag(ready + root, seq);
@@ -709,13 +723,13 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
     const Pack* src8[NR8];
     if (nRanks <= NR8) {
       for (int r = 0; r < nRanks; r++)
-        src8[r] = (r == me) ? own : (const Pack*)(slots + (size_t)(r < me ? r : r - 1) * partBytes);
+        src8[r] = (r == me) ? own : (const Pack*)(slots + (size_t)sdmaReduceSlot(r, me) * partBytes);
     }
     // Every reducing CTA takes a share of every chunk, so the chunk that lands
     // last is reduced by all of them rather than by a few.
     for (int k = 0; k < dmaChunks; k++) {
-      const size_t p0 = (size_t)k * partPacks / dmaChunks;
-      const size_t p1 = (size_t)(k + 1) * partPacks / dmaChunks;
+      const size_t p0 = sdmaReduceChunkStart(partPacks, k, dmaChunks);
+      const size_t p1 = sdmaReduceChunkStart(partPacks, k + 1, dmaChunks);
       if (p1 == p0) continue;
       gin.waitSignal(ncclCoopCta(), sigBase + (unsigned int)k, (uint64_t)nOwners);
       // The slots were written by a remote SDMA engine, not by a CU, so they
@@ -738,7 +752,7 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
         for (size_t pk = p0 + first; pk < p1; pk += stride) {
           T acc[VEC];
           for (int r = 0; r < nRanks; r++) {
-            const Pack v = (r == me) ? own[pk] : ((const Pack*)(slots + (size_t)(r < me ? r : r - 1) * partBytes))[pk];
+            const Pack v = (r == me) ? own[pk] : ((const Pack*)(slots + (size_t)sdmaReduceSlot(r, me) * partBytes))[pk];
             #pragma unroll
             for (int e = 0; e < VEC; e++) {
               const T x = gin_sdma_reduce::preOp(redOp, v.e[e], nRanks);
@@ -924,10 +938,10 @@ testResult_t ReduceDeviceTime(struct threadArgs* args, ncclDataType_t type, nccl
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
   const bool useLL = reduceUseLL(totalBytes, nRanksGlobal);
   auto llKernel = SPECIALIZE_REDUCE_KERNEL(GinReduceLLTimedKernel, type, op);
-#else
-  const bool useLL = false;
-#endif
   const int gridCtas = useLL ? reduceLLCtas(totalBytes) : deviceCtaCount;
+#else
+  const int gridCtas = deviceCtaCount;
+#endif
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
