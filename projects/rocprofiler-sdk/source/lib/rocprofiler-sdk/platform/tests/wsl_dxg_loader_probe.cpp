@@ -126,6 +126,8 @@ print_mapped(const char* key, std::string_view prefix, bool canonical)
 int
 main(int argc, char** argv)
 {
+    std::printf("probe started\n");
+    std::fflush(stdout);
     if(argc < 2) fail("usage", "CALLER [--preload PATH]... [--then-open DSO NAME]");
 
     const char* caller    = argv[1];

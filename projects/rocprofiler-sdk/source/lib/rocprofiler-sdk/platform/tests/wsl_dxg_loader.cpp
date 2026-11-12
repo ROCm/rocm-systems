@@ -30,7 +30,8 @@
 // librocdxg listed in the host's ld.so.cache would otherwise satisfy every bare
 // name. LD_LIBRARY_PATH, DT_RPATH/DT_RUNPATH and the default directories are
 // still searched, so the cases that need a bare name to fail first check that
-// the default directories do not hold one.
+// the default directories do not hold one. LD_LIBRARY_PATH holds only what a
+// case sets; probe_startup() explains how the probe's own libraries are found.
 
 #include "lib/rocprofiler-sdk/platform/wsl/dxg_thunk.hpp"
 
@@ -42,6 +43,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -174,28 +176,11 @@ paths(std::initializer_list<fs::path> list)
     return out;
 }
 
-// Run the probe with `args` in this environment, minus anything that would
-// steer the loader or the lookup, with LD_LIBRARY_PATH set to `library_path`
-// if there is one and unset otherwise.
+// Run `argv` with exactly the environment `envp` and wait for it, collecting
+// what it writes to stdout and stderr.
 ProbeRun
-run_probe(const std::vector<std::string>& args,
-          const std::optional<fs::path>&  library_path = std::nullopt)
+spawn_and_wait(std::vector<std::string> argv, std::vector<std::string> envp)
 {
-    auto argv = std::vector<std::string>{
-        dynamic_loader(), "--inhibit-cache", (fixture_dir() / kProbe).string()};
-    argv.insert(argv.end(), args.begin(), args.end());
-
-    auto envp = std::vector<std::string>{};
-    for(char** entry = environ; *entry != nullptr; ++entry)
-    {
-        const auto var = std::string_view{*entry};
-        if(var.rfind("LD_LIBRARY_PATH=", 0) == 0 || var.rfind("LD_PRELOAD=", 0) == 0 ||
-           var.rfind("ROCPROFILER_REGISTER_TOOL_ATTACHED=", 0) == 0)
-            continue;
-        envp.emplace_back(var);
-    }
-    if(library_path) envp.emplace_back("LD_LIBRARY_PATH=" + library_path->string());
-
     auto c_strings = [](std::vector<std::string>& strings) {
         auto out = std::vector<char*>{};
         for(auto& itr : strings)
@@ -251,6 +236,173 @@ run_probe(const std::vector<std::string>& args,
     return run;
 }
 
+// This environment minus anything that would steer the dynamic loader or the
+// lookup.
+std::vector<std::string>
+clean_environment()
+{
+    auto envp = std::vector<std::string>{};
+    for(char** entry = environ; *entry != nullptr; ++entry)
+    {
+        const auto var = std::string_view{*entry};
+        if(var.rfind("LD_LIBRARY_PATH=", 0) == 0 || var.rfind("LD_PRELOAD=", 0) == 0 ||
+           var.rfind("ROCPROFILER_REGISTER_TOOL_ATTACHED=", 0) == 0)
+            continue;
+        envp.emplace_back(var);
+    }
+    return envp;
+}
+
+// The real path of the object this process has mapped under file name `name`,
+// or an empty string.
+std::string
+mapped_object(const std::string& name)
+{
+    struct Search
+    {
+        std::string_view name = {};
+        std::string      path = {};
+    } search{name, {}};
+
+    ::dl_iterate_phdr(
+        [](dl_phdr_info* info, size_t, void* data) -> int {
+            auto*      out   = static_cast<Search*>(data);
+            const auto path  = std::string_view{info->dlpi_name != nullptr ? info->dlpi_name : ""};
+            const auto slash = path.find_last_of('/');
+            if(slash == std::string_view::npos || path.substr(slash + 1) != out->name) return 0;
+            out->path = std::string{path};
+            return 1;
+        },
+        &search);
+
+    auto ec = std::error_code{};
+    return search.path.empty() ? search.path : fs::canonical(search.path, ec).string();
+}
+
+// Every library the dynamic loader could not find, by the name it was looked
+// for under: from the "NAME => not found" lines of a traced load, or the
+// "error while loading shared libraries: NAME: ..." of an aborted one.
+std::vector<std::string>
+unresolved_dependencies(const std::string& loader_output)
+{
+    constexpr auto traced  = std::string_view{" => not found"};
+    constexpr auto aborted = std::string_view{"error while loading shared libraries: "};
+
+    auto out    = std::vector<std::string>{};
+    auto stream = std::istringstream{loader_output};
+    for(auto line = std::string{}; std::getline(stream, line);)
+    {
+        if(const auto at = line.find(traced); at != std::string::npos)
+        {
+            const auto begin = line.find_first_not_of(" \t");
+            if(begin < at) out.emplace_back(line.substr(begin, at - begin));
+        }
+        else if(const auto from = line.find(aborted); from != std::string::npos)
+        {
+            const auto begin = from + aborted.size();
+            const auto end   = line.find(':', begin);
+            if(end != std::string::npos && end > begin)
+                out.emplace_back(line.substr(begin, end - begin));
+        }
+    }
+    return out;
+}
+
+// How the probe's own dependencies are supplied: the absolute paths to preload,
+// joined with ':', or why they could not be found.
+struct ProbeStartup
+{
+    std::string preload = {};
+    std::string error   = {};
+};
+
+// The probe links what this test links, but its run path does not always reach
+// those libraries. TheRock rewrites the run path of every installed binary as
+// if it sat in a bin/ beside lib/, which the unit-test bin/ under share/ does
+// not; this test itself starts on an LD_LIBRARY_PATH the probe cannot be given.
+//
+// So each library the dynamic loader cannot find for the probe is preloaded by
+// absolute path, taken from the copy this process is running with. A preloaded
+// object only satisfies the DT_NEEDED entries naming its soname. It adds no
+// directory to LD_LIBRARY_PATH, to any DT_RPATH or DT_RUNPATH, or to the
+// default directories, so every bare-name lookup under test still searches
+// exactly the paths its case lays out. The directories are deliberately not
+// passed on: in an installed tree the one holding libamd_comgr also holds the
+// production librocdxg, which would answer the bare names.
+const ProbeStartup&
+probe_startup()
+{
+    static const auto startup = []() {
+        const auto probe   = (fixture_dir() / kProbe).string();
+        auto       preload = std::vector<std::string>{};
+        auto       joined  = std::string{};
+        for(auto round = 0; round < 8; ++round)
+        {
+            // A traced load, as ldd runs one: every dependency is resolved and
+            // listed, unresolved ones included, and the probe itself never runs.
+            auto envp = clean_environment();
+            envp.emplace_back("LD_TRACE_LOADED_OBJECTS=1");
+            if(!joined.empty()) envp.emplace_back("LD_PRELOAD=" + joined);
+            const auto list = spawn_and_wait({dynamic_loader(), "--inhibit-cache", probe}, envp);
+
+            const auto missing = unresolved_dependencies(list.output);
+            if(missing.empty() && list.status == 0) return ProbeStartup{joined, {}};
+            if(missing.empty())
+                return ProbeStartup{{},
+                                    std::string{"tracing the dependencies of "} + kProbe +
+                                        " failed (exit " + std::to_string(list.status) + "):\n" +
+                                        list.output};
+
+            for(const auto& name : missing)
+            {
+                const auto path = mapped_object(name);
+                if(path.empty() || std::find(preload.begin(), preload.end(), path) != preload.end())
+                    return ProbeStartup{
+                        {},
+                        kProbe + std::string{" needs "} + name +
+                            ", which neither its own run path nor this test process provides:\n" +
+                            list.output};
+                preload.emplace_back(path);
+                joined += (joined.empty() ? "" : ":") + path;
+            }
+        }
+        return ProbeStartup{{}, kProbe + std::string{" dependencies did not resolve"}};
+    }();
+    return startup;
+}
+
+// Run the probe with `args`, in the clean environment plus LD_LIBRARY_PATH set
+// to `library_path` if there is one, and its own dependencies preloaded.
+ProbeRun
+run_probe(const std::vector<std::string>& args,
+          const std::optional<fs::path>&  library_path = std::nullopt)
+{
+    const auto& startup = probe_startup();
+    if(!startup.error.empty()) return ProbeRun{-1, startup.error};
+
+    auto argv = std::vector<std::string>{
+        dynamic_loader(), "--inhibit-cache", (fixture_dir() / kProbe).string()};
+    argv.insert(argv.end(), args.begin(), args.end());
+
+    auto envp = clean_environment();
+    if(library_path) envp.emplace_back("LD_LIBRARY_PATH=" + library_path->string());
+    if(!startup.preload.empty()) envp.emplace_back("LD_PRELOAD=" + startup.preload);
+    return spawn_and_wait(std::move(argv), std::move(envp));
+}
+
+// Whether the probe reached main(). Exiting before then - 127 with "error while
+// loading shared libraries", typically - is the dynamic loader failing to start
+// it, and says nothing about the lookup under test.
+::testing::AssertionResult
+started(const ProbeRun& run)
+{
+    if(run.value("probe") == "started") return ::testing::AssertionSuccess();
+    return ::testing::AssertionFailure()
+           << kProbe << " did not start (exit " << run.status
+           << "): the dynamic loader failed before the lookup under test ran\n"
+           << run.output;
+}
+
 // The lookup with nothing of the test's own on the search path: LD_LIBRARY_PATH
 // unset and a caller directory holding only the caller. Anything it finds came
 // from the default directories.
@@ -270,6 +422,7 @@ protected:
         ASSERT_TRUE(fs::exists(fixture_dir() / kProbe))
             << kProbe << " is built and installed beside this test";
         ASSERT_FALSE(dynamic_loader().empty());
+        ASSERT_EQ(probe_startup().error, "");
     }
 };
 
@@ -279,6 +432,7 @@ protected:
     do                                                                                             \
     {                                                                                              \
         const auto host = lookup_with_an_empty_search_path();                                      \
+        ASSERT_TRUE(started(host));                                                                \
         ASSERT_EQ(host.status, 0) << host.output;                                                  \
         if(host.value("after-read") != "none")                                                     \
             GTEST_SKIP() << "a bare librocdxg name resolves from the default directories: "        \
@@ -298,6 +452,7 @@ TEST_F(wsl_dxg_loader, ld_library_path_is_searched_before_the_runpath_of_a_runpa
 
     const auto run = run_probe({caller.string()}, from_env.parent_path());
 
+    ASSERT_TRUE(started(run));
     ASSERT_EQ(run.status, 0) << run.output;
     ASSERT_EQ(run.value("caller-tag"), "RUNPATH") << run.output;
     EXPECT_EQ(run.value("nodes"), "1") << run.output;
@@ -316,6 +471,7 @@ TEST_F(wsl_dxg_loader, the_rpath_of_an_rpath_caller_is_searched_before_ld_librar
 
     const auto run = run_probe({caller.string()}, from_env.parent_path());
 
+    ASSERT_TRUE(started(run));
     ASSERT_EQ(run.status, 0) << run.output;
     ASSERT_EQ(run.value("caller-tag"), "RPATH") << run.output;
     EXPECT_EQ(run.value("nodes"), "1") << run.output;
@@ -339,6 +495,7 @@ TEST_F(wsl_dxg_loader, the_copy_beside_the_only_libhsa_runtime64_is_used_when_no
     const auto run = run_probe(
         {caller.string(), "--preload", hsa.string(), "--then-open", hsa.string(), kVersioned});
 
+    ASSERT_TRUE(started(run));
     ASSERT_EQ(run.status, 0) << run.output;
     ASSERT_EQ(run.values("hsa-runtime"), paths({hsa})) << run.output;
     EXPECT_EQ(run.value("nodes"), "1") << run.output;
@@ -360,6 +517,7 @@ TEST_F(wsl_dxg_loader, a_bare_name_that_resolves_is_taken_over_the_copy_beside_l
     const auto run =
         run_probe({caller.string(), "--preload", hsa.string()}, from_env.parent_path());
 
+    ASSERT_TRUE(started(run));
     ASSERT_EQ(run.status, 0) << run.output;
     ASSERT_EQ(run.values("hsa-runtime"), paths({hsa})) << run.output;
     EXPECT_EQ(run.value("nodes"), "1") << run.output;
@@ -383,6 +541,7 @@ TEST_F(wsl_dxg_loader, a_resident_copy_is_found_by_soname_and_no_second_copy_is_
             run_probe({caller.string(), "--preload", hsa.string(), "--preload", resident.string()},
                       from_env.parent_path());
 
+        ASSERT_TRUE(started(run)) << file_name;
         ASSERT_EQ(run.status, 0) << file_name << "\n" << run.output;
         EXPECT_EQ(run.value("nodes"), "1") << file_name << "\n" << run.output;
         EXPECT_EQ(run.values("after-read"), paths({resident})) << file_name << "\n" << run.output;
@@ -405,6 +564,7 @@ TEST_F(wsl_dxg_loader, two_libhsa_runtime64_directories_are_not_searched_beside)
     const auto run =
         run_probe({caller.string(), "--preload", first.string(), "--preload", second.string()});
 
+    ASSERT_TRUE(started(run));
     ASSERT_EQ(run.status, 0) << run.output;
     ASSERT_EQ(run.values("hsa-runtime"), paths({first, second})) << run.output;
     EXPECT_EQ(run.value("nodes"), "0") << run.output;
@@ -430,8 +590,68 @@ TEST_F(wsl_dxg_loader, one_libhsa_runtime64_directory_reached_through_a_symlink_
     const auto run =
         run_probe({caller.string(), "--preload", hsa.string(), "--preload", linked.string()});
 
+    ASSERT_TRUE(started(run));
     ASSERT_EQ(run.status, 0) << run.output;
     ASSERT_EQ(run.values("hsa-runtime"), paths({hsa, linked})) << run.output;
     EXPECT_EQ(run.value("nodes"), "1") << run.output;
     EXPECT_EQ(run.values("after-read"), paths({beside})) << run.output;
+}
+
+// --- the harness -----------------------------------------------------------
+
+// What is preloaded for the probe's own startup can be neither a thunk nor an
+// HSA runtime: either would become the resident copy or the mapped runtime the
+// cases above arrange for themselves.
+TEST_F(wsl_dxg_loader, nothing_preloaded_for_the_probe_is_a_thunk_or_an_hsa_runtime)
+{
+    auto stream = std::istringstream{probe_startup().preload};
+    for(auto path = std::string{}; std::getline(stream, path, ':');)
+    {
+        const auto name = fs::path{path}.filename().string();
+        EXPECT_NE(name.rfind("librocdxg", 0), 0) << path;
+        EXPECT_NE(name.rfind("libhsa-runtime64", 0), 0) << path;
+    }
+
+    const auto run = lookup_with_an_empty_search_path();
+    ASSERT_TRUE(started(run));
+    EXPECT_EQ(run.values("hsa-runtime"), std::vector<std::string>{"none"}) << run.output;
+}
+
+// A probe that never reached main() is a startup failure, not a lookup result.
+// The output is what CI printed when the probe's dependencies were unreachable.
+TEST(wsl_dxg_loader_harness, a_probe_that_never_reached_main_is_a_startup_failure)
+{
+    const auto unstarted =
+        ProbeRun{127,
+                 std::string{kProbe} +
+                     ": error while loading shared libraries: librocm_sysdeps_dw.so.1: cannot "
+                     "open shared object file: No such file or directory\n"};
+    const auto result = started(unstarted);
+    EXPECT_FALSE(result);
+    EXPECT_NE(std::string{result.message()}.find("did not start (exit 127)"), std::string::npos)
+        << result.message();
+
+    EXPECT_FALSE(started(ProbeRun{0, "nodes 0\n"})) << "a clean exit without the marker";
+    EXPECT_TRUE(started(ProbeRun{0, "probe started\nnodes 0\n"}));
+}
+
+// Unresolved dependencies are read from a traced load and from an aborted one.
+TEST(wsl_dxg_loader_harness, unresolved_dependencies_are_read_from_the_dynamic_loader)
+{
+    const auto traced =
+        std::string{"\tlinux-vdso.so.1 (0x00007ffd5a1f2000)\n"
+                    "\tlibrocm_sysdeps_dw.so.1 => not found\n"
+                    "\tlibamd_comgr.so.3 => /opt/rocm/lib/libamd_comgr.so.3 (0x00007f0e10000000)\n"
+                    "\tlibrocm_sysdeps_drm.so.2 => not found\n"};
+    EXPECT_EQ(unresolved_dependencies(traced),
+              (std::vector<std::string>{"librocm_sysdeps_dw.so.1", "librocm_sysdeps_drm.so.2"}));
+
+    const auto aborted = std::string{kProbe} +
+                         ": error while loading shared libraries: librocm_sysdeps_dw.so.1: "
+                         "cannot open shared object file: No such file or directory\n";
+    EXPECT_EQ(unresolved_dependencies(aborted),
+              std::vector<std::string>{"librocm_sysdeps_dw.so.1"});
+
+    EXPECT_TRUE(
+        unresolved_dependencies("\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x1)\n").empty());
 }
