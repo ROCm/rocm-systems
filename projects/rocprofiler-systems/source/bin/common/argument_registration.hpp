@@ -9,6 +9,7 @@
 #include "common/json_config.hpp"
 #include "common/string_utility.hpp"
 
+#include <fmt/format.h>
 #include <timemory/utility/argparse.hpp>
 
 #include <cstdlib>
@@ -183,15 +184,16 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
                 if(!input.empty())
                 {
                     const auto input_integer = utility::string::safe_stoi(input);
-                    if(input_integer.has_value())
+                    if(input_integer.is_ok())
                     {
                         freq = input;
                     }
                     else
                     {
-                        std::cerr
-                            << "[rocprof-sys] WARNING: Invalid CPU sampling frequency '"
-                            << input << "', using default 100 Hz\n";
+                        std::cerr << fmt::format(
+                            "[rocprof-sys] WARNING: Invalid CPU sampling frequency "
+                            "'{}' ({}), using default 100 Hz\n",
+                            input, input_integer.error());
                     }
                 }
             }

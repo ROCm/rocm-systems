@@ -7,7 +7,7 @@
 #pragma once
 
 #include "rocjitsu/isa/instruction.h"
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -28,9 +28,14 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 
+/// An unaligned native GFX12 LDS atomic faults before any active lane accesses bytes.
+bool native_ds_atomic_misaligned(const VectorMemState &state, rj_code_arch_t arch,
+                                 uint64_t request_lanes);
+
 enum class [[nodiscard]] MemoryAccessCompletion {
   Complete,
   Deferred,
+  Failed,
 };
 
 using MemoryAccessDeferredCompletion = std::function<void()>;
@@ -109,6 +114,7 @@ protected:
   virtual VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) = 0;
   /// Return Complete and do not call complete, or return Deferred and call it
   /// exactly once after the memory response is ready for architectural writeback.
+  /// Failed must not invoke complete. Earlier lane writes may remain.
   virtual MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
@@ -118,7 +124,7 @@ protected:
   void acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
   void release_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
   bool cancel_wait_check_issue(const PipelineEntry &entry);
-  void complete_entry(PipelineEntry entry);
+  VmAccessOutcome complete_entry(PipelineEntry entry);
 
   void finish_completed_access(Instruction *inst, Wavefront &wf, const WaitCounterTokens &counters,
                                uint64_t wave_generation) {
@@ -126,7 +132,14 @@ protected:
       delete inst;
       return;
     }
+    const auto *state = inst->data();
+    if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        inst->data_as<VectorMemState>()->address_range_violation_lanes)
+      wf.latch_memory_violation();
     release_wait_counters(wf, counters);
+    if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        inst->data_as<VectorMemState>()->flat_memory_violation)
+      wf.latch_memory_violation();
     if (wf.state() == WfState::VM_RETRY)
       wf.set_state(WfState::RUNNING);
     delete inst;
@@ -137,6 +150,9 @@ protected:
   std::queue<PipelineEntry> returned_;
   FaultHandler fault_handler_;
 };
+
+/// Suppress only buffer TFE elements inside published nonresident PRT ranges.
+void qualify_buffer_residency(VectorMemState &state, const GpuVmAccess &vm);
 
 /// @brief Scalar memory pipeline for SMEM instructions.
 ///
@@ -173,6 +189,12 @@ protected:
 private:
   VmAccessOutcome initiate_global_access(VectorMemState &state, Wavefront &wf,
                                          uint64_t request_lanes);
+  // Per-request mutable state lives only in per_lane_addr, response_data and
+  // translated; sampling swaps each tap's versions around this call. The other
+  // request fields must be shared by every tap. Translation may refresh an
+  // unready request snapshot, so each tap retains its own translation progress.
+  VmAccessOutcome initiate_texel_access(VectorMemState &state, Wavefront &wf,
+                                        uint64_t request_lanes);
   L1VectorCache *l1_;
   L2Cache *l2_;
 };

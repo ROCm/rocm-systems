@@ -72,6 +72,7 @@
 #include "suites/performance/memory_async_copy_on_engine.h"
 #include "suites/performance/enqueueLatency.h"
 #include "suites/performance/agent_preload.h"
+#include "suites/performance/signal_hint_cost.h"
 #include "suites/negative/memory_allocate_negative_tests.h"
 #include "suites/negative/queue_validation.h"
 #include "suites/stress/memory_concurrent_tests.h"
@@ -87,6 +88,7 @@
 #include "suites/functional/signal_concurrent.h"
 #include "suites/functional/signal_allocation_validation.h"
 #include "suites/functional/signal_wait_multi.h"
+#include "suites/functional/signal_yielding_poll.h"
 #include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
@@ -97,6 +99,7 @@
 #include "suites/functional/gpu_discovery_deprecated.h"
 #include "suites/functional/gl2_cache_test.h"
 #include "suites/functional/signal_batch_test.h"
+#include "suites/functional/signal_hints.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
@@ -300,6 +303,41 @@ TEST(rocrtstFunc, Signal_Wait_All_Satisfying_Values) {
   if (!RunCustomTestProlog(&swm)) return;
   swm.TestWaitAllReportsSatisfyingValues();
   RunCustomTestEpilog(&swm);
+}
+
+TEST(rocrtstFunc, Signal_Yielding_Poll_Long_Wait_Yields_Cpu) {
+  SignalYieldingPollTest syp(true);
+  if (!RunCustomTestProlog(&syp)) return;
+  syp.TestLongWaitYieldsCpu();
+  RunCustomTestEpilog(&syp);
+}
+
+TEST(rocrtstFunc, Signal_Yielding_Poll_Nap_Honors_Timeout) {
+  SignalYieldingPollTest syp(true);
+  if (!RunCustomTestProlog(&syp)) return;
+  syp.TestNapHonorsTimeout();
+  RunCustomTestEpilog(&syp);
+}
+
+TEST(rocrtstFunc, Signal_Yielding_Poll_Completion_During_Nap) {
+  SignalYieldingPollTest syp(true);
+  if (!RunCustomTestProlog(&syp)) return;
+  syp.TestCompletionDuringNap();
+  RunCustomTestEpilog(&syp);
+}
+
+TEST(rocrtstFunc, Signal_Yielding_Poll_Active_Hint_Widens_Hot_Window) {
+  SignalYieldingPollTest syp(true);
+  if (!RunCustomTestProlog(&syp)) return;
+  syp.TestActiveHintWidensHotWindow();
+  RunCustomTestEpilog(&syp);
+}
+
+TEST(rocrtstFunc, Signal_Busy_Wait_Default_Keeps_Spinning) {
+  SignalYieldingPollTest syp(false);
+  if (!RunCustomTestProlog(&syp)) return;
+  syp.TestDefaultKeepsSpinning();
+  RunCustomTestEpilog(&syp);
 }
 
 /* Temporary: Disable CU Masking until it is fixed */
@@ -528,6 +566,17 @@ TEST(rocrtstFunc, Signal_Batch_Negative) {
     RunCustomTestEpilog(&batch_test);
 }
 
+// Duplicate consumers stay invalid when interrupt waits are off. SetUp leaves
+// HSA_ENABLE_INTERRUPT alone because enable_interrupt() defaults to false.
+TEST(rocrtstFunc, Signal_Batch_Negative_InterruptDisabled) {
+    RestoreEnvironmentVariable restore_interrupt("HSA_ENABLE_INTERRUPT");
+    rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.NegativeArguments();
+    RunCustomTestEpilog(&batch_test);
+}
+
 TEST(rocrtstFunc, Signal_Batch_Agent_Queries) {
     SignalBatchTest batch_test;
     if (!RunCustomTestProlog(&batch_test)) return;
@@ -540,6 +589,27 @@ TEST(rocrtstFunc, Signal_Handle_Hints) {
     if (!RunCustomTestProlog(&batch_test)) return;
     batch_test.HandleHints();
     RunCustomTestEpilog(&batch_test);
+}
+
+TEST(rocrtstFunc, Signal_Hints_Value_Binary) {
+    SignalHintsTest hints_test;
+    if (!RunCustomTestProlog(&hints_test)) return;
+    hints_test.ValueBinary();
+    RunCustomTestEpilog(&hints_test);
+}
+
+TEST(rocrtstFunc, Signal_Hints_Timestamps) {
+    SignalHintsTest hints_test;
+    if (!RunCustomTestProlog(&hints_test)) return;
+    hints_test.Timestamps();
+    RunCustomTestEpilog(&hints_test);
+}
+
+TEST(rocrtstFunc, Signal_Hints_Interrupts) {
+    SignalHintsTest hints_test;
+    if (!RunCustomTestProlog(&hints_test)) return;
+    hints_test.Interrupts();
+    RunCustomTestEpilog(&hints_test);
 }
 
 TEST(rocrtstFunc, Memory_Atomic_Add_Test) {
@@ -1134,6 +1204,11 @@ TEST(rocrtstPerf, AQL_Dispatch_Time_Multi_Interrupt) {
 TEST(rocrtstPerf, Agent_Preload_Latency) {
   AgentPreloadTest apt;
   RunGenericTest(&apt);
+}
+
+TEST(rocrtstPerf, Signal_Hint_Cost) {
+  SignalHintCost hint_cost;
+  RunGenericTest(&hint_cost);
 }
 
 

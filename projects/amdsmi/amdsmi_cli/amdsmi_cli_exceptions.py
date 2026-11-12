@@ -424,6 +424,27 @@ class AmdSmiPermissionDeniedException(AmdSmiException):
         self._build_output_messages(common_message)
 
 
+class AmdSmiDriverNotLoadedException(AmdSmiException):
+    """*subject* (a command, parameter or view) needs a driver whose device is present."""
+
+    def __init__(self, subject: str, drivers: list, outputformat: str) -> None:
+        super().__init__()
+        self.value = int(AmdSmiExitCode.DRIVERS_NOT_LOADED)
+        self.subject = subject
+        self.drivers = list(drivers)
+        self.output_format = outputformat
+
+        names = " or ".join(self.drivers)
+        loads = " or ".join(f"sudo modprobe {driver}" for driver in self.drivers)
+        loaded = "it is not loaded" if len(self.drivers) == 1 else "none is loaded"
+        common_message = (
+            f"{subject} requires the {names} driver but {loaded}."
+            f" Check {names} version and module status ({loads})."
+        )
+
+        self._build_output_messages(common_message)
+
+
 class AmdSmiLibraryErrorException(AmdSmiException):
     # A library error is (almost always) specific to one device, so it is
     # recorded and the command keeps going to the next device.

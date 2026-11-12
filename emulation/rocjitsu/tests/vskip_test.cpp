@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/test_encodings.h"
@@ -51,9 +52,9 @@ protected:
     config.lds_size_kb = 64;
     config.functional_quantum = 1;
     config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
-    cu = ComputeUnitCore::create("vskip_cu", config, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "vskip_cu", config, &memory, &l2));
     decoder = Decoder::create(GetParam());
-    ASSERT_NE(cu, nullptr);
     ASSERT_NE(decoder, nullptr);
     wf = cu->dispatch_wf(0, kProgram, 104, 256);
     ASSERT_NE(wf, nullptr);
@@ -276,7 +277,9 @@ TEST(VskipAsyncTest, ExtendedMfmaSkipsBeforeAsyncSubmission) {
   config.sgprs_per_wf = 104;
   config.vgprs_per_wf = 512;
   config.async_resources = std::make_shared<matrix_coexecution::ExecutionResources>(1);
-  auto cu = ComputeUnitCore::create("vskip_async_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "vskip_async_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, kProgram, 104, 256);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(~uint64_t{0});
@@ -312,7 +315,9 @@ TEST(VskipTargetTest, ModeBitDoesNotSuppressRdnaOrCdna5) {
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
-    auto cu = ComputeUnitCore::create("vskip_other_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "vskip_other_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, kProgram, 106, 256);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(~uint64_t{0});

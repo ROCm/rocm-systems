@@ -1,7 +1,5 @@
-import { monoFont } from '../../theme/tokens';
 import RunOptionDetails from '../shared/RunOptionDetails';
-import { runSearchFields, runSelectionLabel as optionLabel } from '../shared/runOptionPresentation';
-import { matchAnchorWidth } from '../shared/dropdownGeometry';
+import { runSearchFields, runSelectionLabelWithBranch as optionLabel } from '../shared/runOptionPresentation';
 import {
   Autocomplete,
   Box,
@@ -38,7 +36,7 @@ export default function RunSelector({ label, options, value, onChange }) {
       renderOption={(props, run) => {
         const { key, ...optionProps } = props;
         return (
-          <Box component="li" key={key} {...optionProps} sx={{ py: 0.9, alignItems: 'flex-start' }}>
+          <Box component="li" key={key} {...optionProps} sx={{ py: '7px', alignItems: 'flex-start' }}>
             <RunOptionDetails run={run} />
           </Box>
         );
@@ -53,27 +51,13 @@ export default function RunSelector({ label, options, value, onChange }) {
             ...params.slotProps,
             inputLabel: { ...params.slotProps.inputLabel, shrink: true },
           }}
-          helperText={`Search ${options.length} runs · Showing up to ${MAX_VISIBLE_OPTIONS} matches`}
         />
       )}
       slotProps={{
         listbox: { sx: { maxHeight: 360, '& li': { overflowWrap: 'anywhere' } } },
-        popper: { modifiers: [matchAnchorWidth], sx: { maxWidth: 'calc(100vw - 24px)' } },
+        popper: { sx: { maxWidth: 'calc(100vw - 24px)' } },
       }}
     />
-    {/* Reserve both identity rows before selection so stacked controls do not move.
-        Keep full text in the DOM and titles when a long identity is ellipsized. */}
-    <Box
-      data-testid={value ? `${label.toLowerCase().replaceAll(' ', '-')}-selected-identity` : undefined}
-      aria-hidden={!value || undefined}
-      sx={{ mt: 0.75, px: 0.5, fontFamily: monoFont, fontSize: 11, lineHeight: '16px', color: 'text.secondary' }}
-    >
-      <Box title={value?.runId} sx={{ height: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value?.runId}</Box>
-      <Box title={value ? `${value.branch} · ${(value.modes ?? []).join(' / ')}` : undefined}
-        sx={{ mt: 0.25, height: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        {value && `${value.branch} · ${(value.modes ?? []).join(' / ')}`}
-      </Box>
-    </Box>
     </Box>
   );
 }

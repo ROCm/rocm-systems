@@ -19,6 +19,7 @@
 /// lanes must keep the sentinel. Inputs deliberately seed the 32-bit
 /// carry/borrow boundary on the low lanes.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -128,10 +129,14 @@ template <int WaveSize> struct WaveFixture {
             amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Rdna4Wave64CarryTestIsa>>(
             cu_label, cfg, &gpu_mem, &l2);
       } else {
-        cu = amdgpu::ComputeUnitCore::create(cu_label, cfg, &gpu_mem, &l2);
+        rocjitsu::test::initialize_compute_unit(cu, cu_label, cfg, &gpu_mem, &l2);
+        if (!cu)
+          return;
       }
     } else {
-      cu = amdgpu::ComputeUnitCore::create(cu_label, cfg, &gpu_mem, &l2);
+      rocjitsu::test::initialize_compute_unit(cu, cu_label, cfg, &gpu_mem, &l2);
+      if (!cu)
+        return;
     }
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
@@ -235,6 +240,8 @@ void check_case(const char *mem_label, const char *l2_label, const char *cu_labe
   auto run_mode = [&](bool force_scalar, uint64_t vcc_in, uint64_t cin_word) -> Result {
     util::set_force_scalar_for_testing(force_scalar);
     WaveFixture<WaveSize> fx(mem_label, l2_label, cu_label, arch);
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t sb = fx.wf->sgpr_alloc().base;

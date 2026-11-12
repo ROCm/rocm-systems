@@ -31,6 +31,10 @@ using nccl_dda_detail::DdaFabricBarrierState;
 using nccl_dda_detail::DdaFabricMaxBlocksOverride;
 
 RCCL_PARAM(DdaFabricBufferSizeForScratch, "DDA_FABRIC_BUFFER_SIZE", -1);
+// RCCL_DDA_A2A_PUSH_PEER_EPOCH: 1 (default) uses epoch flags for the peer-major vector and TDM alltoall pushes, 0 the
+// one-token CAS flags (see FabricGpuBarrier::signalWaitPeer / postPeer / waitPeer). Must be the same on every rank.
+// With 0 the pushes run without drain blocks (RCCL_DDA_A2A_PUSH_PEER_DRAIN is ignored).
+RCCL_PARAM(DdaA2APushPeerEpoch, "DDA_A2A_PUSH_PEER_EPOCH", 1);
 
 bool ncclDdaUseFabricPath(ncclComm* comm) {
   if (comm == nullptr) {
@@ -190,6 +194,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     } else {
       barrierState->resources = std::move(barrierPair.first);
       barrierState->barrierHost = barrierPair.second;
+      barrierState->barrierHost.setEpochFlags(rcclParamDdaA2APushPeerEpoch() != 0);
     }
 
     // Own stream: syncing the null stream would also consume async errors from the app's blocking streams.

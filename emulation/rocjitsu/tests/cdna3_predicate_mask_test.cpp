@@ -4,10 +4,12 @@
 /// @file cdna3_predicate_mask_test.cpp
 /// @brief CDNA3 predicate-mask semantics from hip-fpsan algebraic kernels.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -37,16 +39,19 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  Fixture() : gpu_mem("cdna3_predicate_mask_mem"), l2("cdna3_predicate_mask_l2") {
+  explicit Fixture(unsigned sgprs = SGPRS_PER_WF, unsigned wave_slots = 1)
+      : gpu_mem("cdna3_predicate_mask_mem"), l2("cdna3_predicate_mask_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = ROCJITSU_CODE_ARCH_CDNA3;
-    cfg.num_wf_slots = 1;
+    cfg.num_wf_slots = wave_slots;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_cdna3_predicate_mask", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_cdna3_predicate_mask", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
-    wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
+    wf = cu->dispatch_wf(0, 0, sgprs, VGPRS_PER_WF);
   }
 
   void write_vgpr(uint32_t reg, uint32_t lane, uint32_t val) {
@@ -88,6 +93,34 @@ struct Fixture {
   }
 };
 
+TEST(Cdna3VectorStateTest, AccumulatorMovesKeepTheSourceBankAcrossModifiers) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->write_exec(1);
+  fx.write_vgpr(2, 0, 0x11223344);
+  fx.write_vgpr(5, 0, 0xaabbccdd);
+  fx.execute({0xd3d94002u, 0x18000105u}); // v_accvgpr_write_b32 a2, v5
+  for (const auto words : {std::array{0x7e02a502u, 0u},
+                           std::array{0x7e02a4fau, 0xff08e402u},    // DPP, identity quad permute
+                           std::array{0x7e02a4f9u, 0x00060602u}}) { // SDWA, DWORD
+    fx.execute({0xd3d94001u, 0x18000102u}); // Seed a1 with v2 before each move.
+    fx.execute(words);
+    fx.execute({0xd3d84009u, 0x18000101u}); // v_accvgpr_read_b32 v9, a1
+    EXPECT_EQ(fx.read_vgpr(9, 0), 0xaabbccddu);
+  }
+}
+
+TEST(Cdna3ScalarControlTest, DescriptorSgprGranuleRoundsUpToPhysicalStorage) {
+  Fixture fx(8);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.write_sgpr_pair(0, 0x9876);
+  fx.write_sgpr_pair(8, 0xabcdef1234ull);
+  fx.execute({0xbe820108, 0}); // s_mov_b64 s[2:3],s[8:9]
+  EXPECT_EQ(fx.read_sgpr_pair(2), 0xabcdef1234ull);
+  fx.execute({0xbe880100, 0}); // s_mov_b64 s[8:9],s[0:1]
+  EXPECT_EQ(fx.read_sgpr_pair(8), 0x9876u);
+}
+
 struct ForceScalarGuard {
   ForceScalarGuard() : orig(util::force_scalar()) {}
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(orig); }
@@ -104,6 +137,250 @@ uint64_t expected_ge_mask(uint64_t exec, const Fixture &fx, uint32_t lhs_reg, ui
       mask |= 1ULL << lane;
   }
   return mask;
+}
+
+TEST(Cdna3PredicateMaskTest, ClassCmpxUpdatesExplicitScalarPairAndExec) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  constexpr uint64_t exec = 0xf07e153489abcdefULL;
+  constexpr uint64_t vcc = 0x894af0e73825196bULL;
+  // F16, F32, F64. Request positive zero (class mask bit 6) on even lanes.
+  for (uint32_t opcode : {0x15u, 0x11u, 0x13u}) {
+    fx.wf->set_exec(exec);
+    fx.wf->set_vcc_raw(vcc);
+    fx.write_sgpr_pair(6, UINT64_MAX);
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+      fx.write_vgpr64(2, lane, 0);
+      fx.write_vgpr(4, lane, (lane & 1) ? 0 : (1u << 6));
+    }
+    fx.execute({0xd0000006u | (opcode << 16), 0x00020902u});
+    const uint64_t expected = exec & 0x5555555555555555ULL;
+    EXPECT_EQ(fx.wf->exec(), expected);
+    EXPECT_EQ(fx.read_sgpr_pair(6), expected);
+    EXPECT_EQ(fx.wf->vcc(), vcc);
+  }
+}
+
+TEST(Cdna3VectorStateTest, F8WideningSdwaUsesOnlySourceSelection) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_exec(1);
+  // Byte 0..3 encode different powers of two in the CDNA3 FNUZ formats.
+  constexpr uint32_t fp8[] = {0x3d800000, 0xbf800000, 0x3f800000, 0x40800000};
+  constexpr uint32_t bf8[] = {0x3b800000, 0xbf800000, 0x3f800000, 0x41800000};
+  constexpr uint32_t packed_source = 0x5040c020;
+  constexpr uint32_t sentinel = 0xfedcba98;
+  fx.write_vgpr(2, 0, packed_source);
+  fx.write_sgpr_pair(6, packed_source);
+  for (uint32_t opcode : {84u, 85u, 86u, 87u}) {
+    const bool packed = opcode >= 86;
+    const auto &expected = (opcode & 1) ? bf8 : fp8;
+    for (uint32_t selection = packed ? 4 : 0; selection < (packed ? 6u : 4u); ++selection) {
+      const unsigned first = packed ? 2 * (selection - 4) : selection;
+      for (bool scalar : {false, true}) {
+        for (bool ignored_fields : {false, true}) {
+          // Include every source sign modifier, destination WORD_1/PRESERVE,
+          // CLAMP and div:2. Only the selected source byte or word affects D.
+          const uint32_t fields = ignored_fields ? 0x0038f500u : 0x00000600u;
+          const uint32_t src = scalar ? (1u << 23) | 6u : 2u;
+          const std::array<uint32_t, 2> words = {0x7e1000f9u | (opcode << 9),
+                                                 fields | (selection << 16) | src};
+          std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+          EXPECT_EQ(inst->raw_encoding()[1], words[1]);
+          if (ignored_fields) {
+            const auto assembly = inst->disassemble();
+            EXPECT_NE(assembly.find("dst_sel:WORD_1"), std::string::npos);
+            EXPECT_NE(assembly.find("dst_unused:UNUSED_PRESERVE"), std::string::npos);
+          }
+          amdgpu::RegisterModifiers modifiers;
+          inst->amdgpu_register_modifiers(modifiers);
+          EXPECT_TRUE(modifiers.sdwa);
+          EXPECT_EQ(modifiers.src0_selection, selection);
+          EXPECT_EQ(modifiers.dst_selection, 6u);
+          RegisterSet implicit;
+          inst->implicit_uses(implicit);
+          EXPECT_FALSE(implicit.intersects({RegClass::VGPR, 8, 1}));
+          for (unsigned lane : {0u, 1u}) {
+            fx.write_vgpr(8, lane, sentinel);
+            fx.write_vgpr(9, lane, sentinel);
+          }
+          ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+          EXPECT_EQ(fx.read_vgpr(8, 0), expected[first]);
+          EXPECT_EQ(fx.read_vgpr(9, 0), packed ? expected[first + 1] : sentinel);
+          EXPECT_EQ(fx.read_vgpr(8, 1), sentinel);
+          EXPECT_EQ(fx.read_vgpr(9, 1), sentinel);
+        }
+      }
+    }
+  }
+}
+
+TEST(Cdna3VectorStateTest, HalfArithmeticAndSignalingCompareReportOnlyActiveCauses) {
+  constexpr uint32_t invalid = 1u, overflow = 1u << 3, inexact = 1u << 5;
+  ForceScalarGuard guard;
+  for (bool force_scalar : {false, true}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    ASSERT_NE(fx.wf, nullptr);
+    fx.wf->set_mode_raw(0x2f0);
+    fx.write_vgpr(2, 0, 0x7bffu);
+    fx.write_vgpr(4, 0, 0x7bffu);
+    fx.write_vgpr(2, 63, 0x3c00u);
+    fx.write_vgpr(4, 63, 0x3c00u);
+    // Overflow is inactive initially. Later issues must report fresh causes
+    // even after the same bits have been set in the sticky register.
+    fx.wf->set_exec(1ULL << 63);
+    fx.wf->set_trapsts(1u << 7);
+    fx.execute({0x3e100902u, 0});
+    EXPECT_EQ(fx.wf->trapsts(), 1u << 7);
+    fx.wf->set_exec(UINT64_MAX);
+    for (const std::array<uint32_t, 2> word :
+         {std::array<uint32_t, 2>{0x3e100902u, 0}, {0xd11f0008u, 0x00020902u}}) {
+      fx.wf->clear_pending_alu_causes();
+      fx.execute(word);
+      EXPECT_EQ(fx.read_vgpr(8, 0), 0x7c00u);
+      EXPECT_EQ(fx.wf->trapsts(), (1u << 7) | overflow | inexact);
+      EXPECT_EQ(fx.wf->pending_alu_causes(), overflow | inexact);
+    }
+    fx.wf->set_trapsts(0);
+    fx.wf->clear_pending_alu_causes();
+    fx.write_vgpr(2, 0, 0x7fc00000u);
+    fx.write_vgpr(4, 0, 0x3f800000u);
+    fx.write_vgpr(2, 63, 0);
+    fx.write_vgpr(4, 63, 0x3f800000u);
+    fx.wf->set_exec((1ULL << 63) | 1);
+    fx.wf->set_vcc_raw(0x12345678);
+    fx.execute({0xd0410006u, 0x00020902u});
+    EXPECT_EQ(fx.wf->trapsts(), 0u);
+    fx.execute({0xd0518006u, 0x00020902u}); // CMPX LT, CLAMP, explicit s[6:7].
+    EXPECT_EQ(fx.wf->trapsts(), invalid);
+    EXPECT_EQ(fx.wf->pending_alu_causes(), invalid);
+    EXPECT_EQ(fx.wf->exec(), 1ULL << 63);
+    EXPECT_EQ(fx.read_sgpr_pair(6), 1ULL << 63);
+    EXPECT_EQ(fx.wf->vcc(), 0x12345678u);
+    fx.wf->set_trapsts(0);
+    fx.wf->clear_pending_alu_causes();
+    fx.execute({0xd0418006u, 0x00020902u});
+    EXPECT_EQ(fx.wf->pending_alu_causes(), 0u);
+    EXPECT_EQ(fx.wf->trapsts(), 0u);
+  }
+}
+
+TEST(Cdna3VectorStateTest, HalfExceptionsFollowDppBankAndSdwaSourceSelection) {
+  ForceScalarGuard guard;
+  for (bool force_scalar : {false, true}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    ASSERT_NE(fx.wf, nullptr);
+    fx.wf->set_mode_raw(0x2f0);
+    fx.wf->set_exec(0x38);
+    constexpr uint32_t sentinel = 0xa5a5beef;
+    for (uint32_t snan_lane : {4u, 5u}) {
+      for (uint32_t lane = 2; lane <= 6; ++lane) {
+        fx.write_vgpr(2, lane, lane == snan_lane ? 0x7c01u : 0x3c00u);
+        fx.write_vgpr(4, lane, 0x3c00u);
+        fx.write_vgpr(8, lane, sentinel);
+      }
+      fx.wf->set_trapsts(0x80);
+      fx.wf->clear_pending_alu_causes();
+      // row_shl:1 routes v2[4] to lane 3 and v2[5] to lane 4.
+      // bank_mask:1 enables lane 3 but suppresses lane 4.
+      fx.execute({0x3e1008fau, 0xf1010102u});
+      const uint32_t invalid = snan_lane == 4;
+      EXPECT_EQ(fx.wf->trapsts(), 0x80u | invalid);
+      EXPECT_EQ(fx.wf->pending_alu_causes(), invalid);
+      EXPECT_EQ(fx.read_vgpr(8, 2), sentinel);
+      EXPECT_EQ(fx.read_vgpr(8, 4), sentinel);
+      EXPECT_EQ(fx.read_vgpr(8, 5), sentinel);
+      if (!invalid) {
+        EXPECT_EQ(fx.read_vgpr(8, 3), 0x4000u);
+      }
+    }
+    fx.wf->set_exec(1);
+    fx.write_vgpr(4, 0, 0x3c00);
+    fx.write_vgpr(2, 1, 0x7c010000); // Inactive lane with a selected sNaN.
+    fx.write_vgpr(8, 1, sentinel);
+    for (bool high_snan : {false, true}) {
+      fx.write_vgpr(2, 0, high_snan ? 0x7c013c00u : 0x3c007c01u);
+      fx.write_vgpr(8, 0, sentinel);
+      fx.wf->set_trapsts(0x80);
+      fx.wf->clear_pending_alu_causes();
+      // src0_sel:WORD_1, src1_sel:WORD_0, dst_sel:WORD_0, dst_unused:PRESERVE.
+      fx.execute({0x3e1008f9u, 0x04051402u});
+      EXPECT_EQ(fx.wf->trapsts(), 0x80u | uint32_t(high_snan));
+      EXPECT_EQ(fx.wf->pending_alu_causes(), uint32_t(high_snan));
+      EXPECT_EQ(fx.read_vgpr(8, 1), sentinel);
+      EXPECT_EQ(fx.read_vgpr(8, 0) >> 16, sentinel >> 16);
+      if (!high_snan) {
+        EXPECT_EQ(fx.read_vgpr(8, 0), 0xa5a54000u);
+      }
+    }
+  }
+}
+
+TEST(Cdna3VectorStateTest, SaturatingUnsignedHalfArithmetic) {
+  ForceScalarGuard guard;
+  for (bool force_scalar : {false, true}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    ASSERT_NE(fx.wf, nullptr);
+    fx.wf->set_exec(1);
+    fx.write_vgpr(2, 0, 0x0002ffffu);
+    fx.write_vgpr(4, 0, 0x00030020u);
+    // Two positive half-products, only the low half overflows.
+    fx.execute({0xd381c008u, 0x18020902u});
+    EXPECT_EQ(fx.read_vgpr(8, 0), 0x0006ffffu);
+    fx.execute({0xd3814008u, 0x18020902u});
+    EXPECT_EQ(fx.read_vgpr(8, 0), 0x0006ffe0u);
+    fx.execute({0x521008f9u, 0x04042402u}); // SDWA, CLAMP and WORD_0.
+    EXPECT_EQ(fx.read_vgpr(8, 0), 0xffffu);
+    fx.execute({0xd1298008u, 0x00020902u}); // VOP3, CLAMP.
+    EXPECT_EQ(fx.read_vgpr(8, 0), 0xffffu);
+    fx.write_vgpr(2, 0, 0x7fffffffu);
+    fx.write_vgpr(4, 0, 0x08070605u);
+    fx.execute({0xd38bc008u, 0x18020902u});
+    EXPECT_EQ(fx.read_vgpr(8, 0), 0x77f8f9fau);
+  }
+}
+
+TEST(Cdna3VectorStateTest, Xf32MfmaQuantizesMultiplicandsBeforeAccumulation) {
+  // First XF32 tuples in Ray's MI300X capture corpus, ROCm/rocm-systems PR 14809.
+  struct Sample {
+    uint32_t size, opcode, result;
+    std::array<uint32_t, 8> a, b;
+  };
+  constexpr Sample samples[] = {{32,
+                                 0x3f,
+                                 0x3f844a48,
+                                 {0x3e9c41a2, 0x3ed322db, 0x3f4597fe, 0x3f1a6aa0},
+                                 {0xbc7654b7, 0xbeaa396c, 0x3ee7d997, 0xbe10b675}},
+                                {16,
+                                 0x3e,
+                                 0x3f8b9e2b,
+                                 {0x3e9c41a2, 0x3ed322db, 0x3ed7cc17, 0x3e36c081, 0xbf157fd5,
+                                  0xbf5e5f72, 0xbe407a6f, 0x3f2ac957},
+                                 {0xbc7654b7, 0xbeaa396c, 0x3f60c4a5, 0x3eede339, 0x3d028c38,
+                                  0x3e0567fe, 0x3ee5e9cc, 0x3e01bf8a}}};
+  ForceScalarGuard guard;
+  for (bool force_scalar : {false, true}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    ASSERT_NE(fx.wf, nullptr);
+    for (const auto &sample : samples) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+        for (uint32_t item = 0; item < 2; ++item) {
+          uint32_t k = (lane / sample.size) * 2 + item;
+          fx.write_vgpr(item, lane, sample.a[k]);
+          fx.write_vgpr(2 + item, lane, sample.b[k]);
+        }
+        for (uint32_t reg = 0; reg < sample.size * sample.size / WF_SIZE; ++reg)
+          fx.write_vgpr(32 + reg, lane, 0x3f693ce1u);
+      }
+      fx.execute({0xd3800010u | (sample.opcode << 16), 0x04820500u});
+      EXPECT_EQ(fx.read_vgpr(16, 0), sample.result);
+    }
+  }
 }
 
 TEST(Cdna3PredicateMaskTest, Vop3CompareWritesArbitrarySgprPair) {

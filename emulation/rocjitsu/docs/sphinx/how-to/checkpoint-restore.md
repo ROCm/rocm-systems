@@ -42,7 +42,7 @@ must supply the VM handle, a file path, and the current simulation tick.
 
     ``` c
     rj_vm_t *vm = NULL;
-    rj_status_t status = rj_vm_create("configs/gfx950_mi355x.json",
+    rj_status_t status = rj_vm_create("configs/gfx950_mi350x.json",
                                        RJ_VM_MODE_DEFAULT, &vm);
 
     uint64_t tick = 0;
@@ -66,6 +66,21 @@ must supply the VM handle, a file path, and the current simulation tick.
 returns `ROCJITSU_STATUS_INVALID_ARGUMENT` if either the VM handle or
 the path is `NULL`, and `ROCJITSU_STATUS_ERROR` if serialization or file
 I/O fails.
+
+On all AMDGPU profiles, allow each admitted AQL dispatch to launch every
+assigned workgroup and publish its requested completion signal before saving.
+If either is pending, step the VM and retry the save. If the runtime paused the
+queue, resume the queue before stepping. Wait for resident AQL waves that use
+private scratch to finish before saving. The checkpoint preserves their completed
+memory writes.
+
+Active RDNA1 waves require a resource record containing the logical VGPR allocation and
+LDS window. Older RDNA2 records can restore an active wave when they identify its process,
+LDS and scratch allocation state, logical register counts, and TRAPSTS. A physical VGPR
+dump alone cannot identify a live wave's allocation bounds. Files with no active GFX10
+waves remain usable.
+Restore files containing GFX10 scheduler records, an outstanding graphics grant or
+barrier wait, a sleep delay, or a wake credit with a scheduler-aware reader.
 
 ## Restore from a checkpoint
 
@@ -102,6 +117,15 @@ checkpoint file cannot be opened, read, or deserialized, or contains invalid
 execution-thread allocation settings. It returns `ROCJITSU_STATUS_ERROR` if
 the restored configuration does not contain a SoC.
 
+### Restoring older AMDGPU checkpoints
+
+On CDNA1 through CDNA5, RDNA3, RDNA3.5 and RDNA4, an active wave requires its
+saved LDS window and the CU's saved LDS contents. A zero-length window and an
+empty backing record represent a wave with no LDS allocation. Earlier writers
+could produce identical files for an empty window and a live allocation. Restore
+returns `ROCJITSU_STATUS_INVALID_FILE` for an active wave missing these records.
+Idle checkpoints from these writers remain usable.
+
 ## Save periodic checkpoints during a long simulation
 
 For simulations that run for many ticks, save checkpoints at regular
@@ -132,7 +156,7 @@ Both checkpoint functions return `rj_status_t`. The relevant codes are:
 |------|---------|
 | `ROCJITSU_STATUS_SUCCESS` | Operation completed successfully. |
 | `ROCJITSU_STATUS_INVALID_ARGUMENT` | A required argument is `NULL`. |
-| `ROCJITSU_STATUS_INVALID_FILE` | The checkpoint file could not be opened, read, or deserialized, or contains invalid execution-thread allocation settings (restore only). |
+| `ROCJITSU_STATUS_INVALID_FILE` | Restore could not read or deserialize the checkpoint, found invalid execution-thread allocation settings, or found an active wave missing required LDS records. |
 | `ROCJITSU_STATUS_ERROR` | Serialization or I/O failed during save, or the restored configuration has no SoC. |
 
 

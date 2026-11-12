@@ -21,7 +21,7 @@ ncclResult_t ncclCeLocalReduceLaunch_${tag}_${redname}(const void* in, void* out
                                                      uint32_t* d_barrierSync, hipStream_t stream, int coopLaunch) {
   using T = $ctype;
   constexpr int UnrollFactor = VecTrait<T>::GpuUnroll;
-  const int threads = 256;
+  const int threads = NCCL_CE_REDUCE_THREADS;
   // Single source of the block geometry, shared with the host-side reporting
   // wrapper (ncclCeLocalReduceBlocks_${tag}) so live dispatch and rcclGetCollImplInfo never drift.
   const int blocks = ncclCeLocalReduceBlocksT<T>(baseChunkElems);

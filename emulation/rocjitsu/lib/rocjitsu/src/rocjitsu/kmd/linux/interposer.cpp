@@ -544,9 +544,7 @@ public:
     // Keep generated topology and proc snapshots independent of limits lowered
     // by application code before its first GPU call. Inherited hard limits on
     // GPU backing are handled by the keeper's shared-RAM fallback.
-    const int warmup = rocjitsu::create_memory_backing(1);
-    if (warmup >= 0)
-      real().close(warmup);
+    rocjitsu::prepare_memory_keeper();
   }
 
   /// @brief Conservatively detect real GPU descriptors inherited outside this backend.
@@ -885,7 +883,12 @@ public:
     // out local-VM creation / a later remote retry. Only a fully-open driver is
     // ever visible to lock-free readers.
     if (!active_remote)
-      active_remote = std::make_shared<RemoteDriver>(sock);
+      active_remote = std::make_shared<RemoteDriver>(sock, [] {
+        // The daemon has stopped servicing GPU work. Native signal waits can
+        // otherwise spin forever without touching the disconnected RPC stream.
+        std::fprintf(stderr, "rocjitsu: daemon connection lost; exiting native process\n");
+        std::_Exit(EXIT_FAILURE);
+      });
     int fd = active_remote->open();
     if (fd < 0)
       return {};
@@ -2309,8 +2312,11 @@ public:
   }
 
   bool create_local_vm(const std::string &config_path) {
+    util::FailureOr<std::string> config_json = read_file_passthrough(config_path.c_str());
+    if (config_json.failed())
+      return false;
     rj_vm_t *created_vm = nullptr;
-    if (rj_vm_create(config_path.c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
+    if (rj_vm_create_from_string(config_json.value().c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
         ROCJITSU_STATUS_SUCCESS) {
       util::Logger::debug_print("rocjitsu: failed to create VM from ", config_path);
       return false;
@@ -2353,8 +2359,7 @@ public:
       return false;
     }
 
-    std::string config_json = read_file_passthrough(config_path.c_str());
-    if (rj_vm_load_plugins(local_vm_.get(), config_json.c_str(), nullptr) !=
+    if (rj_vm_load_plugins(local_vm_.get(), config_json.value().c_str(), nullptr) !=
         ROCJITSU_STATUS_SUCCESS) {
       util::Logger::debug_print("rocjitsu: failed to configure execution plugins");
       local_vm_.reset();
@@ -2443,8 +2448,16 @@ public:
       // later interposed open/close and the DSO finalizer itself. The engine's own
       // in-band latch wins; this only fires if nothing latched.
       local_vm_thread_ = std::make_unique<std::thread>([vm = local_vm_.get()]() {
-        rj_vm_run(vm, nullptr);
+        const rj_status_t status = rj_vm_run(vm, nullptr);
         vm->engine->latch_startup_if_unlatched(/*failed=*/true);
+        if (status != ROCJITSU_STATUS_SUCCESS && vm->engine->wait_until_started()) {
+          util::Logger::warn("rocjitsu: local VM failed: ", vm->engine->last_exit().message);
+          // rj_vm_run() has joined the engine workers and shut down components
+          // and plugins. The host may be blocked on a completion that can no
+          // longer arrive. exit() would run the interposer finalizer on this
+          // thread and try to join itself, so use the process-level fatal exit.
+          std::_Exit(EXIT_FAILURE);
+        }
       });
     } catch (const std::exception &e) {
       util::Logger::debug_print("rocjitsu: failed to start local VM engine thread: ", e.what());
@@ -2648,7 +2661,7 @@ public:
           submission.graphics_engine = ib.ip_type == AMDGPU_HW_IP_GFX;
           engine = ib.ip_type;
           ring = ib.ring;
-          submission.buffers.push_back({ib.va_start, ib.ib_bytes / 4});
+          submission.buffers.push_back({.address = ib.va_start, .dwords = ib.ib_bytes / 4});
           break;
         }
         case AMDGPU_CHUNK_ID_FENCE: {
@@ -2791,13 +2804,14 @@ public:
         queue.fences.emplace(sequence, finished);
         pending_queue = key;
       }
-      submission.ready = [this, dependencies = std::move(dependencies)]() mutable {
+      submission.ready = [this, dependencies = std::move(dependencies)](
+                             util::DiagnosticEmitter emit_error) mutable -> util::FailureOr<bool> {
         std::lock_guard lock(fd_mutex_);
         for (auto &dependency : dependencies) {
           if (!dependency.fence)
             dependency.fence = syncobj_fence_locked(*dependency.entry, dependency.point);
           if (dependency.fence && dependency.fence->is_failed())
-            throw std::runtime_error("PM4 submission dependency failed");
+            return emit_error.emit() << "PM4 submission dependency failed";
           if (!dependency.fence || !dependency.fence->is_signaled())
             return false;
         }
@@ -3344,6 +3358,8 @@ public:
     if (!prt && !drv->gem_va_map(va_address, host, map_size, gem.alloc_flags, gem.sealed_ram))
       return -EINVAL;
     gem.installed_vas.push_back(range);
+    if (prt)
+      publish_prt_locked(drv);
     if (publish_timeline)
       signal_syncobj_locked(timeline, timeline_point);
     lock.unlock();
@@ -3384,6 +3400,8 @@ public:
     if (!prt && !drv->gem_va_unmap(va_address, map_size))
       return -EINVAL;
     std::erase(gem.installed_vas, range);
+    if (prt)
+      publish_prt_locked(drv);
     if (publish_timeline)
       signal_syncobj_locked(timeline, timeline_point);
     lock.unlock();
@@ -3433,7 +3451,14 @@ public:
   /// under fd_mutex_ before erasing, so no state escapes the lock.
   void reap_gem_for_drm_file(uint64_t drm_file_id) {
     std::lock_guard lock(fd_mutex_);
-    prt_entries_.erase(drm_file_id);
+    if (auto prt = prt_entries_.find(drm_file_id); prt != prt_entries_.end()) {
+      auto snapshot = driver();
+      auto *active = dynamic_cast<SimulatedKfd *>(snapshot.get());
+      bool publish = active && active == prt->second.owner;
+      prt_entries_.erase(prt);
+      if (publish)
+        publish_prt_locked(active);
+    }
     for (auto it = gem_entries_.begin(); it != gem_entries_.end();) {
       if (it->second.drm_file_id == drm_file_id)
         it->second.handle_closed = true;
@@ -3612,16 +3637,21 @@ public:
   /// close), retrying on EINTR.
   /// @details Used during driver construction where re-entering our interposed
   /// I/O path could recurse. Read errors (other than EINTR) are reported and
-  /// yield an empty string, distinct from a successfully read empty file.
-  static std::string read_file_passthrough(const char *path) {
-    if (!real().ready())
-      return {};
+  /// return failure, distinct from a successfully read empty file.
+  static util::FailureOr<std::string> read_file_passthrough(const char *path) {
+    if (!real().ready()) {
+      util::Logger::warn("rocjitsu: cannot read VM configuration: libc passthrough is unavailable");
+      return util::Result::failure();
+    }
     int fd;
     do {
       fd = real().openat(AT_FDCWD, path, O_RDONLY, 0);
     } while (fd < 0 && errno == EINTR);
-    if (fd < 0)
-      return {};
+    if (fd < 0) {
+      util::Logger::warn("rocjitsu: cannot open plugin configuration '", path,
+                         "': ", std::strerror(errno));
+      return util::Result::failure();
+    }
     std::string out;
     char buf[4096] = {};
     for (;;) {
@@ -3631,7 +3661,7 @@ public:
           continue;
         util::Logger::warn("rocjitsu: read error on '", path, "': ", std::strerror(errno));
         real().close(fd);
-        return {};
+        return util::Result::failure();
       }
       if (n == 0)
         break; // EOF.
@@ -3876,6 +3906,16 @@ private:
     gem.dmabuf_fd.reset();
   }
 
+  void publish_prt_locked(SimulatedKfd *drv) {
+    rocjitsu::amdgpu::PrtRanges ranges;
+    for (const auto &[file, gem] : prt_entries_) {
+      if (gem.owner == drv)
+        for (const auto &r : gem.installed_vas)
+          ranges.push_back({r.va_address, r.va_address + r.map_size});
+    }
+    drv->publish_prt_ranges(std::move(ranges));
+  }
+
   /// @brief Remove only the intersection with a VA update, preserving both tails.
   /// @details PRT intervals carry no resident PTEs. Buffer intervals retain their
   /// existing host translations outside the update, including the original BO offset.
@@ -3909,8 +3949,11 @@ private:
       if (gem.drm_file_id == drm_file_id && !evict(gem.installed_vas, true))
         return false;
     auto prt = prt_entries_.find(drm_file_id);
-    if (prt != prt_entries_.end() && !evict(prt->second.installed_vas, false))
-      return false;
+    if (prt != prt_entries_.end()) {
+      if (!evict(prt->second.installed_vas, false))
+        return false;
+      publish_prt_locked(drv);
+    }
     return evicted_any || allow_missing;
   }
 
@@ -5000,9 +5043,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
         if (info->read_mmr_reg.dword_offset == 0x263e && info->read_mmr_reg.count == 1 &&
             info->return_size >= sizeof(uint32_t)) {
           *static_cast<uint32_t *>(out) =
-              major == 11
-                  ? rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3)
-                  : rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
+              rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
         }
         return 0;
       }

@@ -2046,8 +2046,9 @@ hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
 
 hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node, hipMemsetParams* pNodeParams) {
   HIP_INIT_API(hipGraphMemsetNodeGetParams, node, pNodeParams);
-  if (!hip::GraphNode::isNodeValid(reinterpret_cast<hip::GraphNode*>(node)) ||
-      pNodeParams == nullptr) {
+  hip::GraphNode* n = reinterpret_cast<hip::GraphNode*>(node);
+  if (!hip::GraphNode::isNodeValid(n) || pNodeParams == nullptr ||
+      n->GetType() != hipGraphNodeTypeMemset) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   reinterpret_cast<hip::GraphMemsetNode*>(node)->GetParams(pNodeParams);
@@ -2056,8 +2057,9 @@ hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node, hipMemsetParams* pNo
 
 hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node, const hipMemsetParams* pNodeParams) {
   HIP_INIT_API(hipGraphMemsetNodeSetParams, node, pNodeParams);
-  if (!hip::GraphNode::isNodeValid(reinterpret_cast<hip::GraphNode*>(node)) ||
-      pNodeParams == nullptr) {
+  hip::GraphNode* n = reinterpret_cast<hip::GraphNode*>(node);
+  if (!hip::GraphNode::isNodeValid(n) || pNodeParams == nullptr ||
+      n->GetType() != hipGraphNodeTypeMemset) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   if (pNodeParams->height > 1 &&
@@ -3320,7 +3322,10 @@ hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object, u
 
 hipError_t hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc, hipGraphNode_t hDst) {
   HIP_INIT_API(hipGraphKernelNodeCopyAttributes, hSrc, hDst);
-  if (hSrc == nullptr || hDst == nullptr) {
+  hip::GraphNode* src = reinterpret_cast<hip::GraphNode*>(hSrc);
+  hip::GraphNode* dst = reinterpret_cast<hip::GraphNode*>(hDst);
+  if (!hip::GraphNode::isNodeValid(src) || !hip::GraphNode::isNodeValid(dst) ||
+      src->GetType() != hipGraphNodeTypeKernel || dst->GetType() != hipGraphNodeTypeKernel) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(reinterpret_cast<hip::GraphKernelNode*>(hDst)->CopyAttr(
@@ -3540,6 +3545,10 @@ hipError_t hipGraphAddExternalSemaphoresSignalNode(
     size_t numDependencies, const hipExternalSemaphoreSignalNodeParams* nodeParams) {
   HIP_INIT_API(hipGraphAddExternalSemaphoresSignalNode, pGraphNode, graph, pDependencies,
                numDependencies, nodeParams);
+  if (pGraphNode == nullptr || graph == nullptr ||
+      (numDependencies > 0 && pDependencies == nullptr) || nodeParams == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   hip::GraphNode* node = new hip::hipGraphExternalSemSignalNode(nodeParams);
   hipError_t status =
       ihipGraphAddNode(node, reinterpret_cast<hip::Graph*>(graph),

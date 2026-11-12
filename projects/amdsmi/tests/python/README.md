@@ -37,7 +37,7 @@ tests/python/
 │   ├── cpu/                #   cli_metric_cpu_flags
 │   └── gpu/                #   apu_metrics, ...
 ├── functional/             # hardware tests (require a live device + root)
-│   ├── gpu/  cpu/  nic/  ifoe/  system/
+│   ├── gpu/  cpu/  ifoe/  system/
 └── cli/                    # exercise the installed `amd-smi` binary
 ```
 

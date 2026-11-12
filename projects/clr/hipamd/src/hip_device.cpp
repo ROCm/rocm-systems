@@ -163,11 +163,13 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   auto waitForStream = [&](hip::Stream* stream) {
     if (amd::Command* command = stream->getLastQueuedCommand(true)) {
       amd::Event& event = command->event();
-      // Check HW status of the ROCclr event.
+      // Check the HW status of the ROCclr event only when the command isn't known complete: a
+      // signal in device memory takes a read across the bus, and the last command of an idle
+      // stream stays queued, so every launch checks it again.
       // Note: not all ROCclr modes support HW status
-      bool ready = stream->device().IsHwEventReady(event);
+      bool ready = (command->status() == CL_COMPLETE);
       if (!ready) {
-        ready = (command->status() == CL_COMPLETE);
+        ready = stream->device().IsHwEventReady(event);
       }
       // Cache maintenance, not ordering: never skipped by the blocking tracker.
       submitMarker |= stream->vdev()->isFenceDirty();
@@ -623,14 +625,13 @@ hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (IS_LINUX) {
-    // The LUID is a Windows/DXGI adapter concept; unsupported elsewhere and the
-    // output parameters are left untouched.
-    HIP_RETURN(hipErrorNotSupported);
-  }
-
   auto* deviceHandle = g_devices[device]->devices()[0];
   const auto& info = deviceHandle->info();
+
+  // No WDDM/DXGI adapter behind this device, so no LUID to report.
+  if (info.luidLowPart_ == 0 && info.luidHighPart_ == 0) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
 
   // The LUID is an 8-byte value formed from the low and high parts reported by the backend.
   static_assert(sizeof(info.luidLowPart_) + sizeof(info.luidHighPart_) == 8,
@@ -824,11 +825,17 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options
-  deviceProps.gpuDirectRDMASupported = (info.dmabufSupported_ && info.largeBar_) ? 1 : 0;
   // Set option if we have a HDP register
   deviceProps.gpuDirectRDMAFlushWritesOptions =
       hip::ihipRdmaFlushWritesOptions(info.hdpMemFlushCntl);
   deviceProps.gpuDirectRDMAWritesOrdering = hip::ihipRdmaWritesOrdering();
+  // RDMA is only usable if an inbound write can be made visible, either by native ordering or
+  // by a flush.
+  const bool rdmaVisibilityPath =
+      (deviceProps.gpuDirectRDMAWritesOrdering != hipGPUDirectRDMAWritesOrderingNone) ||
+      (deviceProps.gpuDirectRDMAFlushWritesOptions != 0);
+  deviceProps.gpuDirectRDMASupported =
+      (info.dmabufSupported_ && info.largeBar_ && rdmaVisibilityPath) ? 1 : 0;
   // The LUID is a Windows/DXGI adapter concept; the backend reports a zero LUID
   // and zero node mask on platforms without a WDDM adapter.
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[0]) = info.luidLowPart_;

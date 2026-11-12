@@ -1,17 +1,17 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file
-/// @brief Private memory keeper exec entry point using inherited fixed descriptor slots.
+/// @file rocjitsu_memory.cpp
+/// @brief Start the keeper with its owner PID, listener name and inherited control descriptors.
 
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
-#include "rocjitsu/kmd/linux/memory_backing.h"
+#include "rocjitsu/kmd/linux/memory_keeper.h"
 
 #include <charconv>
 #include <cstring>
 
 int main(int argc, char **argv) {
-  if (argc != 2)
+  if (argc != 3)
     return 1;
   pid_t owner = 0;
   const char *end = argv[1] + std::strlen(argv[1]);
@@ -20,5 +20,5 @@ int main(int argc, char **argv) {
     return 1;
   using namespace rocjitsu;
   libc_passthrough().resolve();
-  run_memory_keeper(kMemoryKeeperListenerFd, kMemoryKeeperLeaseFd, kMemoryKeeperStartupFd, owner);
+  kmd::run_memory_keeper(owner, argv[2]);
 }

@@ -19,6 +19,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <optional>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -241,8 +242,7 @@ public:
   /// directly from a backing level, avoiding a second tag scan in fill_line().
   Allocation allocate_with_data(uint64_t addr, uint32_t vmid = 0, CacheTag *evicted_tag = nullptr,
                                 uint8_t *evicted_data = nullptr) {
-    // Complete deferred allocations before publishing a resident tag. A failing
-    // new_handler must leave the cache empty and safe to retry.
+    // Complete deferred allocations before publishing a resident tag.
     tags_.materialize();
     data_.materialize();
     uint32_t set = set_index(addr);
@@ -328,8 +328,8 @@ public:
     }
   }
 
-  /// @brief Invalidate all cache lines.
-  void invalidate_all() {
+  /// @brief Invalidate all cache lines, optionally restricted to one VMID.
+  void invalidate_all(std::optional<uint32_t> vmid = std::nullopt) {
     for (uint32_t first = 0; first < NumSets; first += sizeof(uint64_t)) {
       const uint32_t end = std::min<uint32_t>(first + sizeof(uint64_t), NumSets);
       uint64_t touched = 0;
@@ -343,12 +343,38 @@ public:
           continue;
         for (uint32_t w = 0; w < Associativity; ++w) {
           auto &t = tag_at(s, w);
+          if (vmid && t.vmid != *vmid)
+            continue;
           t.coherence_epoch = 0;
           t.valid = false;
           t.dirty = false;
           t.coherence = CoherenceState::INVALID;
         }
-        touched_sets_[s] = 0;
+        if (!vmid)
+          touched_sets_[s] = 0;
+      }
+    }
+  }
+
+  /// @brief Invalidate clean cache lines, preserving unpublished dirty state.
+  /// @details The caller must exclude concurrent accesses during this traversal.
+  void invalidate_clean() {
+    invalidate_clean_if([](const CacheTag &) { return true; });
+  }
+
+  /// Invalidate clean lines matching a controller's maintenance policy.
+  /// The caller must exclude concurrent accesses during this traversal.
+  template <typename Predicate> void invalidate_clean_if(Predicate matches) {
+    for (uint32_t set = 0; set < NumSets; ++set) {
+      if (!touched_sets_[set])
+        continue;
+      for (uint32_t way = 0; way < Associativity; ++way) {
+        CacheTag &tag = tag_at(set, way);
+        if (tag.valid && !tag.dirty && matches(tag)) {
+          tag.coherence_epoch = 0;
+          tag.valid = false;
+          tag.coherence = CoherenceState::INVALID;
+        }
       }
     }
   }
@@ -605,7 +631,7 @@ private:
           return ptr;
         std::new_handler handler = std::get_new_handler();
         if (!handler)
-          throw std::bad_alloc();
+          std::abort();
         handler();
       }
     }

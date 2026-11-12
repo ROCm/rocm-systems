@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
@@ -21,6 +23,37 @@ Wavefront::Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_si
       default_wf_size_(default_wf_size), max_wf_size_(max_wf_size), max_sgprs_(max_sgprs),
       max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en),
       memory_wait_checks_enabled_(cu.config().memory_wait_checks_enabled()) {}
+
+bool Wavefront::valu_destinations_allocated(const Instruction &inst) const {
+  for (int i = 0; i < inst.num_dst_operands(); ++i) {
+    const auto *op = inst.dst_operand(i);
+    const auto ref = op->to_register_ref();
+    if (ref && ref->cls == RegClass::SGPR && inst.num_dst_operands() > 1 &&
+        exceeds_rounded_sgpr_allocation(ref->index, ref->width))
+      return false;
+    if (!ref || (ref->cls != RegClass::VGPR && ref->cls != RegClass::ACC_VGPR))
+      continue;
+    const bool acc = ref->cls == RegClass::ACC_VGPR;
+    const uint32_t start =
+        acc ? ACC_VGPR_OFFSET + ref->index : apply_gpr_idx(*this, ref->index, op->vgpr_msb_role());
+    if (!vgpr_bank(acc).contains(start, ref->width))
+      return false;
+  }
+  return true;
+}
+
+bool Wavefront::memory_destination_out_of_range(const Instruction &inst) const {
+  const auto arch = cu_.arch();
+  if (arch != ROCJITSU_CODE_ARCH_CDNA2 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
+      arch != ROCJITSU_CODE_ARCH_CDNA4)
+    return false;
+  for (int i = 0; i < inst.num_dst_operands(); ++i) {
+    const auto reg = inst.dst_operand(i)->decoded_vgpr();
+    if (reg && !unified_vgpr_range_is_allocated(reg->index, reg->width))
+      return true;
+  }
+  return false;
+}
 
 void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
   if (!activity_tracked_)
@@ -52,6 +85,38 @@ bool Wavefront::uses_separate_trap_ctrl() const {
   return isa_properties(cu_.arch()).wave_state_layout != WaveStateLayout::Legacy;
 }
 
+bool Wavefront::discards_valu_result(const Instruction &inst) const {
+  if (!(inst.flags() & VALU))
+    return false;
+  switch (cu_.arch()) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return !valu_destinations_allocated(inst);
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return !vgpr_destinations_allocated(inst);
+  default:
+    return false;
+  }
+}
+
+bool Wavefront::vgpr_destinations_allocated(const Instruction &inst) const {
+  return RegisterAccess(*this).vgpr_results_fit_allocation(inst);
+}
+
+uint64_t Wavefront::memory_exec(const Instruction &inst) const {
+  if ((cu_.arch() == ROCJITSU_CODE_ARCH_RDNA1 || cu_.arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
+      (inst.flags() & (VMEM | LDS)) && !vgpr_destinations_allocated(inst))
+    return 0;
+  return exec();
+}
+
+void Wavefront::observe_lds_direct_read(uint32_t address, uint32_t bytes, uint32_t lane) const {
+  cu_.plugin_group().onAmdgpuLdsDirectRead(*this, address, bytes, lane);
+}
+
 bool Wavefront::has_gpu_memory() const { return cu_.memory() != nullptr; }
 
 uint64_t Wavefront::realtime_timestamp() const {
@@ -63,7 +128,7 @@ uint64_t Wavefront::realtime_timestamp() const {
 
 std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
   if (vm_access_)
-    return *vm_access_;
+    return vm_access_->value;
   GpuVm *gpu_vm = cu_.gpu_vm();
   if (gpu_vm == nullptr)
     return std::nullopt;
@@ -74,7 +139,7 @@ VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
     if (vm_access_)
-      return vm_access_->read(
+      return vm_access_->value.read(
           addr, std::span<std::byte>(reinterpret_cast<std::byte *>(dst.data()), dst.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
     if (!access)
@@ -90,7 +155,7 @@ VmAccessOutcome Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
     if (vm_access_)
-      return vm_access_->write(
+      return vm_access_->value.write(
           addr,
           std::span<const std::byte>(reinterpret_cast<const std::byte *>(src.data()), src.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
@@ -152,6 +217,7 @@ void Wavefront::halt(CpCompletionNotice notice) {
   //       first because reset() zeroes them,
   //   (3) notify the CU/CP of workgroup completion. Freeing before release_wf keeps
   //       has_active_wfs() accurate so the last wave triggers LDS reclaim.
+  // The halt hook also completes race events before release_wf can resolve a barrier.
   cu_.plugin_group().onAmdgpuWavefrontHalted(*this);
   const uint32_t dispatch_id = dispatch_id_;
   const uint32_t wg_id = wg_id_;
