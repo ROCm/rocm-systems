@@ -798,7 +798,8 @@ TEST_P(ScalarAtomicTest, ReportsScalarReadModifyWriteToPlugins) {
 
     Observer() : ExecutionPlugin("scalar_atomic_observer") {}
     bool observes_memory_routing() const override { return true; }
-    void onAmdgpuMemoryAccessRouted(const MemoryAccessObservation &access) override {
+    void onAmdgpuMemoryAccessRouted(const MemoryAccessObservation &access, const Instruction &,
+                                    Wavefront &) override {
       EXPECT_EQ(access.route, MemoryRoute::SCALAR);
       EXPECT_EQ(access.atomic_op, AtomicOp::DEC);
       EXPECT_EQ(access.wait_counter, WaitCounterType::LGKMCNT);

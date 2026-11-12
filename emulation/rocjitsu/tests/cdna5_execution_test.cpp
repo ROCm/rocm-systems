@@ -59,7 +59,8 @@ public:
 
   bool observes_memory_routing() const override { return true; }
 
-  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) override {
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                  const Instruction &, amdgpu::Wavefront &) override {
     mnemonic = access.mnemonic;
     active_lane_mask = access.active_lane_mask;
     architectural_exec_lane_mask = access.architectural_exec_lane_mask;

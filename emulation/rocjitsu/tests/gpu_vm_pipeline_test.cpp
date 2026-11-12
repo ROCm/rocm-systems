@@ -3500,8 +3500,8 @@ TEST(GpuVmPipeline, DeferredTensorLoadReportsInstructionPcAtCompletion) {
 
     TensorDmaPcObserver() : ExecutionPlugin("tensor-dma-pc") {}
     bool observes_tensor_dma_memory_access() const override { return true; }
-    void
-    onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
+    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
+                                       const amdgpu::Wavefront &) override {
       pcs.push_back(access.pc);
     }
     std::vector<uint64_t> pcs;
@@ -3570,8 +3570,8 @@ TEST(GpuVmPipeline, DeferredTensorLoadIssuesOnceAndCompletesAtItsInstructionPc) 
       if (on_issue)
         on_issue();
     }
-    void
-    onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
+    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
+                                       const amdgpu::Wavefront &) override {
       completion_pcs.push_back(access.pc);
     }
     int issues = 0;

@@ -334,19 +334,6 @@ public:
 
   bool observes_memory_routing() const override { return wants_hook_; }
 
-  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
-                                  const Instruction &inst, amdgpu::Wavefront &) override {
-    onAmdgpuMemoryAccessRouted(access);
-    const auto counters = CounterObservingPipeline{}.issue_counters(inst);
-    accesses.back().issued_counters.assign(counters.types.begin(),
-                                           counters.types.begin() + counters.size);
-    if (inst.data()->tag() == amdgpu::GLOBAL_MEM || inst.data()->tag() == amdgpu::LOCAL_MEM) {
-      const auto &addresses = inst.data_as<amdgpu::VectorMemState>()->per_lane_addr;
-      accesses.back().execution_addresses.assign(addresses.begin(),
-                                                 addresses.begin() + access.wavefront_size);
-    }
-  }
-
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override {
     before_tag.push_back(inst.data()->tag());
     // Only the two vector tags carry a amdgpu::VectorMemState. An instruction no
@@ -359,7 +346,8 @@ public:
     static_cast<void>(wf);
   }
 
-  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) override {
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                  const Instruction &inst, amdgpu::Wavefront &) override {
     CapturedAccess captured;
     captured.mnemonic = access.mnemonic;
     captured.pc = access.pc;
@@ -407,6 +395,13 @@ public:
                                           access.pre_routing_addresses.end());
     captured.secondary_addresses.assign(access.secondary_addresses.begin(),
                                         access.secondary_addresses.end());
+    const auto counters = CounterObservingPipeline{}.issue_counters(inst);
+    captured.issued_counters.assign(counters.types.begin(), counters.types.begin() + counters.size);
+    if (inst.data()->tag() == amdgpu::GLOBAL_MEM || inst.data()->tag() == amdgpu::LOCAL_MEM) {
+      const auto &addresses = inst.data_as<amdgpu::VectorMemState>()->per_lane_addr;
+      captured.execution_addresses.assign(addresses.begin(),
+                                          addresses.begin() + access.wavefront_size);
+    }
     accesses.push_back(std::move(captured));
   }
 

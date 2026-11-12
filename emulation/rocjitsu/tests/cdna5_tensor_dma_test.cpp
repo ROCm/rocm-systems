@@ -50,8 +50,8 @@ public:
 
   bool observes_tensor_dma_memory_access() const override { return wants_hook_; }
 
-  void
-  onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
+  void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
+                                     const amdgpu::Wavefront &) override {
     if (inspect)
       inspect(access);
     auto &captured = accesses.emplace_back(CapturedTensorDmaAccess{
@@ -1215,21 +1215,21 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationIsOptInAndSuppressesEmptyTransfer
   ASSERT_TRUE(mixed_group.add(std::move(enabled_member)));
   ASSERT_TRUE(mixed_group.observes_tensor_dma_memory_access());
 
-  const std::array<uint64_t, 2> mixed_addresses{0x1000, 0x1004};
-  rocjitsu::amdgpu::TensorDmaMemoryAccessObservation mixed_observation{};
-  mixed_observation.element_size_bytes = 4;
-  mixed_observation.addresses = std::span<const uint64_t>(mixed_addresses);
-  mixed_group.onAmdgpuTensorDmaMemoryAccess(mixed_observation);
-  EXPECT_TRUE(quiet_member_ptr->accesses.empty());
-  ASSERT_EQ(enabled_member_ptr->accesses.size(), 1u);
-  EXPECT_EQ(enabled_member_ptr->accesses[0].addresses, (std::vector<uint64_t>{0x1000, 0x1004}));
-
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto &observer = install_tensor_dma_observer(sim);
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
+  const std::array<uint64_t, 2> mixed_addresses{0x1000, 0x1004};
+  rocjitsu::amdgpu::TensorDmaMemoryAccessObservation mixed_observation{};
+  mixed_observation.element_size_bytes = 4;
+  mixed_observation.addresses = std::span<const uint64_t>(mixed_addresses);
+  mixed_group.onAmdgpuTensorDmaMemoryAccess(mixed_observation, *wf);
+  EXPECT_TRUE(quiet_member_ptr->accesses.empty());
+  ASSERT_EQ(enabled_member_ptr->accesses.size(), 1u);
+  EXPECT_EQ(enabled_member_ptr->accesses[0].addresses, (std::vector<uint64_t>{0x1000, 0x1004}));
+
   wf->set_lds_base(cu->allocate_lds(256));
   wf->set_lds_size(256);
 

@@ -53,11 +53,8 @@ public:
                                         amdgpu::Wavefront &wf) override;
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
                                         std::span<const uint32_t> fetch_window) override;
-  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) override;
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
-                                  const amdgpu::Wavefront &wf) override;
-  void
-  onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override;
+                                  const Instruction &inst, amdgpu::Wavefront &wf) override;
   void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
                                      const amdgpu::Wavefront &wf) override;
 

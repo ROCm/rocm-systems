@@ -221,29 +221,13 @@ public:
   /// instruction, including one no pipeline accepted, which is reported with
   /// an UNKNOWN route rather than dropped.
   ///
-  /// The observation's spans borrow execution-owned storage and are valid
-  /// only for the duration of this callback.
+  /// The instruction and wave already reflect the selected route. They and
+  /// the observation's execution-owned spans are borrowed only for this callback.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
-  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation & /*access*/) {}
-
-  /// Wavefront-aware form of onAmdgpuMemoryAccessRouted(). The default keeps
-  /// source compatibility with plugins that only need the observation payload.
-  /// Plugins with wave-local state can override this form to avoid a shared
-  /// identity lookup in concurrent hot callbacks.
-  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
-                                          const amdgpu::Wavefront & /*wf*/) {
-    onAmdgpuMemoryAccessRouted(access);
-  }
-
-  /// Context-preserving form of onAmdgpuMemoryAccessRouted(). The instruction
-  /// and wavefront are borrowed for the duration of the callback and already
-  /// reflect the selected route. The default preserves source compatibility by
-  /// forwarding to the wavefront-aware hook.
-  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
-                                          const Instruction & /*inst*/, amdgpu::Wavefront &wf) {
-    onAmdgpuMemoryAccessRouted(access, wf);
-  }
+  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation & /*access*/,
+                                          const Instruction & /*inst*/,
+                                          amdgpu::Wavefront & /*wf*/) {}
 
   /// Called after one tensor DMA instruction and any descriptor-requested
   /// atomic-barrier arrival return normally, when the transfer made at least one
@@ -251,18 +235,12 @@ public:
   /// The observation contains only in-bounds global requests attempted, in
   /// execution order. It intentionally does not filter memory access outcomes,
   /// matching the observer boundary.
-  /// Its deferred address view is borrowed and valid only during this callback.
+  /// The wave and deferred address view are borrowed only for this callback.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void
-  onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation & /*access*/) {}
-
-  /// Wavefront-aware form of onAmdgpuTensorDmaMemoryAccess(). See the regular
-  /// memory overload above for the compatibility and concurrency contract.
-  virtual void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
-                                             const amdgpu::Wavefront & /*wf*/) {
-    onAmdgpuTensorDmaMemoryAccess(access);
-  }
+  onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation & /*access*/,
+                                const amdgpu::Wavefront & /*wf*/) {}
 
   /// Called once when a tensor DMA instruction issues, after its descriptor is
   /// read and, unless it is NULL, validated and prepared. A store has already

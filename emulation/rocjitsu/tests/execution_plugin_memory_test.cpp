@@ -1739,9 +1739,8 @@ TEST(RoutedMemoryObservationTest, ASingleAccessCarriesNoSecondAddressSet) {
 }
 
 TEST(RoutedMemoryObservationTest, APluginThatDoesNotWantTheHookDoesNotPayForIt) {
-  // Building the observation is real work on the per-instruction path. A
-  // plugin that never implements the hook -- which is every plugin in the tree
-  // but one -- should not be charged for it.
+  // Building the observation is per-instruction work. Do not collect it when
+  // no plugin subscribes to the hook.
   PluginFixture fixture;
   ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *ordering = fixture.attach_ordering_plugin();
@@ -1794,7 +1793,8 @@ TEST(RoutedMemoryObservationTest, APluginThatDoesNotWantTheHookDoesNotPayForIt) 
   ASSERT_TRUE(mixed.observes_memory_routing());
 
   MemoryAccessObservation observation;
-  mixed.onAmdgpuMemoryAccessRouted(observation);
+  TestMemoryInstruction instruction(std::make_unique<VectorMemState>(LOCAL_MEM));
+  mixed.onAmdgpuMemoryAccessRouted(observation, instruction, *wave);
   EXPECT_TRUE(quiet_member_ptr->accesses.empty());
   ASSERT_EQ(wanting_member_ptr->accesses.size(), 1u);
 }

@@ -1997,6 +1997,79 @@ TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {
   EXPECT_TRUE(group.requires_serial_hot_hooks());
 }
 
+TEST(ExecutionPluginTest, MemoryHooksPreserveContextAndWaveSelection) {
+  static_assert(
+      std::is_member_function_pointer_v<decltype(&ExecutionPlugin::onAmdgpuMemoryAccessRouted)>);
+  static_assert(std::is_member_function_pointer_v<
+                decltype(&ExecutionPluginGroup::onAmdgpuMemoryAccessRouted)>);
+  static_assert(
+      std::is_member_function_pointer_v<decltype(&ExecutionPlugin::onAmdgpuTensorDmaMemoryAccess)>);
+  static_assert(std::is_member_function_pointer_v<
+                decltype(&ExecutionPluginGroup::onAmdgpuTensorDmaMemoryAccess)>);
+
+  class ContextObserver : public ExecutionPlugin {
+  public:
+    ContextObserver() : ExecutionPlugin("memory_context") {}
+    bool observes_memory_routing() const override { return true; }
+    bool observes_tensor_dma_memory_access() const override { return true; }
+    bool observes_hot_hooks_for_wavefront(const Wavefront *wf) const override {
+      return wf == selected;
+    }
+    void onAmdgpuMemoryAccessRouted(const MemoryAccessObservation &access, const Instruction &inst,
+                                    Wavefront &wf) override {
+      EXPECT_EQ(&wf, selected);
+      memory = &access;
+      instruction = &inst;
+      ++memory_calls;
+    }
+    void onAmdgpuTensorDmaMemoryAccess(const TensorDmaMemoryAccessObservation &access,
+                                       const Wavefront &wf) override {
+      EXPECT_EQ(&wf, selected);
+      tensor = &access;
+      ++tensor_calls;
+    }
+    const Wavefront *selected = nullptr;
+    const MemoryAccessObservation *memory = nullptr;
+    const TensorDmaMemoryAccessObservation *tensor = nullptr;
+    const Instruction *instruction = nullptr;
+    unsigned memory_calls = 0;
+    unsigned tensor_calls = 0;
+  };
+
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/2));
+  fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<ContextObserver>();
+  auto *observer = plugin.get();
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+  fixture.soc->set_plugin_group(fixture.plugin_group_);
+  auto &group = fixture.plugin_group();
+  group.onInit();
+  std::array<Wavefront *, 2> waves;
+  for (auto &wave : waves) {
+    wave = fixture.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/32, /*vgprs=*/32);
+    ASSERT_NE(wave, nullptr);
+  }
+  observer->selected = waves.front();
+  Instruction instruction("memory_context", nullptr);
+  const MemoryAccessObservation memory;
+  const TensorDmaMemoryAccessObservation tensor;
+  for (const bool cached : {false, true}) {
+    for (auto *wave : waves) {
+      if (cached)
+        group.onAmdgpuWavefrontDispatched(*wave);
+      group.onAmdgpuMemoryAccessRouted(memory, instruction, *wave);
+      group.onAmdgpuTensorDmaMemoryAccess(tensor, *wave);
+    }
+    EXPECT_EQ(observer->memory_calls, cached ? 2u : 1u);
+    EXPECT_EQ(observer->tensor_calls, cached ? 2u : 1u);
+    EXPECT_EQ(observer->memory, &memory);
+    EXPECT_EQ(observer->tensor, &tensor);
+    EXPECT_EQ(observer->instruction, &instruction);
+  }
+  fixture.shutdown();
+}
+
 TEST(ExecutionPluginTest, SgprReadPolicyComesFromContainedPlugins) {
   ExecutionPluginGroup group(PluginSinkConfig{});
   EXPECT_FALSE(group.observes_sgpr_reads());

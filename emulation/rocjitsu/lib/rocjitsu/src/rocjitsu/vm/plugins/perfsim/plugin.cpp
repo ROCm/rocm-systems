@@ -1595,21 +1595,12 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
   impl_->record_event({wf.dispatch_id(), std::move(event)});
 }
 
-void PerfsimPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) {
-  impl_->memory_access(access);
-}
-
 void PerfsimPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
-                                               const amdgpu::Wavefront &wf) {
+                                               const Instruction &, amdgpu::Wavefront &wf) {
   auto *state = wf.has_plugin_state(slot_index())
                     ? static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()))
                     : nullptr;
   impl_->memory_access(access, state);
-}
-
-void PerfsimPlugin::onAmdgpuTensorDmaMemoryAccess(
-    const amdgpu::TensorDmaMemoryAccessObservation &access) {
-  impl_->tensor_dma_memory_access(access);
 }
 
 void PerfsimPlugin::onAmdgpuTensorDmaMemoryAccess(
