@@ -12,11 +12,10 @@
 #include "util/diagnostic.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
-
-#include <sys/types.h>
 
 namespace rocjitsu {
 namespace config {
@@ -67,7 +66,8 @@ json_with_local_node(std::string_view json, std::string_view node_id,
 /// Failure means the source cannot be read, the overrides cannot be applied, or the
 /// copy cannot be written. The reason is emitted through @p emit_error.
 [[nodiscard]] FailureOr<std::string>
-write_effective_config(const std::string &source_path, const LaunchOverrides &overrides, pid_t pid,
+write_effective_config(const std::string &source_path, const LaunchOverrides &overrides,
+                       const std::filesystem::path &invocation_runtime_dir,
                        const util::DiagnosticEmitter &emit_error = {});
 
 /// @brief Publish one launch copy containing both optional overrides.

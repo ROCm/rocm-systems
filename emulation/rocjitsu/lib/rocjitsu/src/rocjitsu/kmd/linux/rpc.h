@@ -19,7 +19,9 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -224,9 +226,8 @@ inline ssize_t rpc_recv_msg(int sock, void *data, size_t data_len, int *fds = nu
 
   ssize_t bytes_received = recvmsg(sock, &msg, MSG_CMSG_CLOEXEC | MSG_WAITALL);
   if (bytes_received <= 0) {
-    if (num_fds) {
+    if (num_fds)
       *num_fds = 0;
-    }
     return bytes_received;
   }
 
@@ -239,11 +240,10 @@ inline ssize_t rpc_recv_msg(int sock, void *data, size_t data_len, int *fds = nu
         size_t count = ancillary_bytes / sizeof(int);
         auto *received = reinterpret_cast<int *>(CMSG_DATA(cmsg));
         for (size_t i = 0; i < count; ++i) {
-          if (fd_count < capacity) {
+          if (fd_count < capacity)
             fds[fd_count] = received[i];
-          } else {
+          else
             ::close(received[i]);
-          }
           ++fd_count;
         }
       }
@@ -275,12 +275,10 @@ inline bool rpc_recv_exact(int sock, void *buffer, size_t total_bytes) {
     msg.msg_iov = &iov;
     msg.msg_iovlen = 1;
     ssize_t bytes_read = recvmsg(sock, &msg, 0);
-    if (bytes_read < 0 && errno == EINTR) {
+    if (bytes_read < 0 && errno == EINTR)
       continue;
-    }
-    if (bytes_read <= 0) {
+    if (bytes_read <= 0)
       return false;
-    }
     cursor += bytes_read;
     remaining -= static_cast<size_t>(bytes_read);
   }
@@ -305,19 +303,16 @@ inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes,
   auto *cursor = static_cast<const uint8_t *>(buffer);
   size_t remaining = total_bytes;
   auto report = [&](bool complete) {
-    if (bytes_sent_out) {
+    if (bytes_sent_out)
       *bytes_sent_out = total_bytes - remaining;
-    }
     return complete;
   };
   while (remaining > 0) {
     ssize_t bytes_sent = rpc_send_msg(sock, cursor, remaining);
-    if (bytes_sent < 0 && errno == EINTR) {
+    if (bytes_sent < 0 && errno == EINTR)
       continue;
-    }
-    if (bytes_sent <= 0) {
+    if (bytes_sent <= 0)
       return report(false);
-    }
     cursor += bytes_sent;
     remaining -= static_cast<size_t>(bytes_sent);
   }
@@ -331,14 +326,23 @@ inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes,
 /// returning "" would root every derived path (socket, config, per-PID dirs) at
 /// the filesystem root and make the reapers iterate/delete from "/" or CWD, so we
 /// never return an empty string.
-inline std::string rpc_default_runtime_dir() {
-  if (const char *rj = getenv("ROCJITSU_RUNTIME_DIR"); rj && *rj) {
-    return rj;
-  }
-  if (const char *xdg = getenv("XDG_RUNTIME_DIR"); xdg && *xdg) {
-    return std::string(xdg) + "/rocjitsu";
-  }
+inline std::string rpc_default_runtime_dir(std::optional<std::string_view> rocjitsu_runtime_dir,
+                                           std::optional<std::string_view> xdg_runtime_dir) {
+  if (rocjitsu_runtime_dir && !rocjitsu_runtime_dir->empty())
+    return std::string(*rocjitsu_runtime_dir);
+  if (xdg_runtime_dir && !xdg_runtime_dir->empty())
+    return std::string(*xdg_runtime_dir) + "/rocjitsu";
   return "/tmp/rocjitsu-" + std::to_string(getuid());
+}
+
+inline std::optional<std::string_view> rpc_environment_value(const char *name) {
+  const char *value = getenv(name);
+  return value == nullptr ? std::nullopt : std::optional<std::string_view>(value);
+}
+
+inline std::string rpc_default_runtime_dir() {
+  return rpc_default_runtime_dir(rpc_environment_value("ROCJITSU_RUNTIME_DIR"),
+                                 rpc_environment_value("XDG_RUNTIME_DIR"));
 }
 
 /// @brief Default daemon socket path for the current user.
@@ -349,12 +353,12 @@ inline std::string rpc_default_config_file_path() {
   return rpc_default_runtime_dir() + "/config_path";
 }
 
-/// @brief Environment variable carrying the resolved runtime dir for this launch.
+/// @brief Environment variable carrying the resolved runtime directory.
 /// @details The CLI exports this before execvp, so every descendant process
 /// (direct children and grandchildren spawned through wrappers like ctest)
 /// inherits the exact directory holding config_path/daemon.sock without
-/// re-deriving it from its own PID. Daemon launch mode sets a per-invocation
-/// directory. Attach mode sets the selected daemon runtime directory.
+/// re-deriving it from its own PID. For attach launches, this names the
+/// validated daemon runtime directory instead of a new per-PID directory.
 inline constexpr char kRpcInvocationDirEnv[] = "ROCJITSU_INVOCATION_DIR";
 
 /// @brief Environment variable requiring the selected daemon socket.
