@@ -108,7 +108,6 @@ public:
                               const amdgpu::Wavefront &wf) override;
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
-                                   uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) override;
 
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;

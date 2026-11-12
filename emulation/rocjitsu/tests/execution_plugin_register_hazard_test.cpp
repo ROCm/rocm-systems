@@ -80,8 +80,7 @@ public:
     if (halt)
       halt(wave);
   }
-  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
-                                   std::span<Wavefront *> waves) override {
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, std::span<Wavefront *> waves) override {
     if (dispatch)
       dispatch(waves);
   }
@@ -803,7 +802,7 @@ TEST(RegisterHazardPluginTest, CounterOnlyIssuesParticipateInLdsPartialWaits) {
     ASSERT_NE(wave, nullptr);
     wave->set_exec(1);
     std::array<Wavefront *, 1> waves{wave};
-    h.fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+    h.fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, waves);
     for (bool lds : {true, false}) {
       auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
       state->is_load = true;
@@ -877,7 +876,7 @@ TEST(RegisterHazardPluginTest, MissingEvidenceKeepsFindingAndLogicalWaveContext)
   wave->set_dispatch_id(17);
   wave->set_wg_coord(2, 3, 4);
   std::array<Wavefront *, 1> waves{wave};
-  h.fixture.plugin_group_->onAmdgpuWorkgroupDispatched(17, 5, 256, 104, waves);
+  h.fixture.plugin_group_->onAmdgpuWorkgroupDispatched(17, 5, waves);
   KernelDispatchInfo info{};
   info.dispatch_id = 17;
   info.kernel_name = "racy_kernel";

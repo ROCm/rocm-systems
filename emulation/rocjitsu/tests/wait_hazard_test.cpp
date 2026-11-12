@@ -121,7 +121,7 @@ public:
       return;
     wave_->set_exec(1);
     std::array<Wavefront *, 1> waves{wave_};
-    plugins_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+    plugins_->onAmdgpuWorkgroupDispatched(1, 0, waves);
     state_ = static_cast<RaceWavefrontState *>(wave_->plugin_state(observer->slot_index()))
                  ->race_state.get();
   }
