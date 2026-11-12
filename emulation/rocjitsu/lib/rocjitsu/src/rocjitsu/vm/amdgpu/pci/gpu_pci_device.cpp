@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/pci/graphics_block_model.h"
 #include "rocjitsu/vm/amdgpu/pci/interrupt_block_model.h"
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery.h"
@@ -922,10 +923,8 @@ GpuPciDevice::make_sdma_callbacks(const amdgpu::SdmaQueueContext &context) {
                           .engine_id = engine_id})
         .outcome;
   };
-  callbacks.timestamp = [] {
-    const std::chrono::steady_clock::duration now =
-        std::chrono::steady_clock::now().time_since_epoch();
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+  callbacks.timestamp = [arch = soc_ ? soc_->arch() : ROCJITSU_CODE_ARCH_INVALID] {
+    return amdgpu::gpu_timestamp(arch);
   };
   return callbacks;
 }

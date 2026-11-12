@@ -191,7 +191,7 @@ protected:
   virtual int get_clock_counters_ioctl(void *arg);
 
   /// @brief Fill AMDKFD_IOC_GET_CLOCK_COUNTERS with synthetic monotonic counters.
-  static int fill_get_clock_counters_ioctl(void *arg);
+  static int fill_get_clock_counters_ioctl(void *arg, uint32_t frequency_mhz = 1000);
 
   /// @brief Handle AMDKFD_IOC_GET_PROCESS_APERTURES_NEW.
   virtual int get_process_apertures_ioctl(void *arg);

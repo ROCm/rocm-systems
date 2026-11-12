@@ -634,7 +634,8 @@ private:
 
   std::optional<amdgpu::ComputeUnitCore::TrapHandlerConfig>
   resolve_trap_handler(const amdgpu::Wavefront &wf, uint32_t gpu_ordinal);
-  bool on_wave_sendmsg(amdgpu::Wavefront &wf, uint32_t message);
+  std::optional<uint32_t> wave_doorbell_id(const amdgpu::Wavefront &wave);
+  bool on_wave_sendmsg(amdgpu::Wavefront &wf, uint32_t message, const amdgpu::InterruptSink &sink);
   void on_wave_trap_complete(amdgpu::Wavefront &wf);
   uint64_t debugger_queue_exception_mask(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                          uint64_t exception_mask,
