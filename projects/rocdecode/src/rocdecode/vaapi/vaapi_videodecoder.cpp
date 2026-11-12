@@ -1213,7 +1213,13 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
     // up skipping every stream and reporting success. Fail the query instead, so the caller gets an
     // error rather than a verdict it cannot tell apart from a hardware limitation.
 #ifndef _WIN32
-    const bool probe_empty = va_contexts_[va_ctx_id].num_va_profiles <= 0;
+    // A positive count is not evidence of decode capability: drivers advertise VAProfileNone for
+    // the video post-processing entrypoint, so a list holding nothing else is the same failed-probe
+    // case as an empty one.
+    const int num_probed_profiles = std::max(va_contexts_[va_ctx_id].num_va_profiles, 0);
+    const bool probe_empty = std::none_of(va_contexts_[va_ctx_id].va_profile_list.begin(),
+                                          va_contexts_[va_ctx_id].va_profile_list.begin() + num_probed_profiles,
+                                          [](VAProfile p) { return p != VAProfileNone; });
 #else
     // On Windows every capability query is answered from the profile_caps cache, so an empty cache
     // is the failure even when the driver did advertise profiles: none of them probed VLD-capable.
