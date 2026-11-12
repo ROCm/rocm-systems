@@ -165,7 +165,7 @@ fn native_mip_layout(
     permission: u32,
 ) -> Result<NativeMipLayout, Status> {
     let simple = descriptor.into();
-    let (format, mut surface, info, device, generation, inflight) = {
+    let (format, mut surface, device, generation, inflight) = {
         let guard = lock()?;
         let generation = guard.active_generation().ok_or(NOT_INITIALIZED)?;
         let runtime = guard.as_ref().ok_or(NOT_INITIALIZED)?;
@@ -182,7 +182,6 @@ fn native_mip_layout(
         (
             format,
             surface,
-            runtime.gpus[index].info(),
             runtime.gpus[index].device.clone(),
             generation,
             token,
@@ -205,7 +204,7 @@ fn native_mip_layout(
         _ => return Err(IMAGE_SIZE_UNSUPPORTED),
     };
     let request = SurfaceRequest {
-        family: info.asic_family_id,
+        family: config.asic_family_id,
         gb_addr_config: config.gb_addr_config,
         bits_per_pixel: u32::try_from(format.bytes.checked_mul(8).ok_or(IMAGE_SIZE_UNSUPPORTED)?)
             .map_err(|_| IMAGE_SIZE_UNSUPPORTED)?,

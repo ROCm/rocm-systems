@@ -569,6 +569,17 @@ pub(crate) fn unsupported_test_gpu() -> Error {
 
 /// Routes GPU-only operations through a checked GPU driver projection.
 impl GpuDriverRef<'_> {
+    pub(crate) fn asic_family_id(&self) -> u32 {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd { state, .. } => state.asic_family_id,
+            #[cfg(test)]
+            Self::Test { state, .. } => state.asic_family_id,
+        }
+    }
+
     pub(crate) fn xnack_enabled(&self) -> Result<bool, Error> {
         match self {
             #[cfg(not(target_os = "linux"))]
@@ -656,7 +667,10 @@ impl GpuDriverRef<'_> {
             #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => driver.surface_config(state),
             #[cfg(test)]
-            Self::Test { .. } => Err(unsupported_test_gpu()),
+            Self::Test { state, .. } => Ok(crate::device::gpu::GpuSurfaceConfig {
+                asic_family_id: state.asic_family_id,
+                gb_addr_config: 0,
+            }),
         }
     }
 
