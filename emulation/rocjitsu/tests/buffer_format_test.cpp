@@ -1878,11 +1878,13 @@ TEST_P(RdnaLegacyFormatDecodeTest, Gfx10BoundsUseElementStartsAndLaneAdjustedInd
     bool swizzle, add_tid;
     std::array<uint32_t, 3> first, second;
   };
-  constexpr Case cases[] = {
-      // Mode 0 accepts the first dword start at byte 12 of a 16-byte record.
-      {12, 0, 0, 4, false, false, {103, 103, 103}, {0, 0, 0}},
+  const bool inclusive_stride = GetParam() == ROCJITSU_CODE_ARCH_RDNA1;
+  const uint32_t boundary = inclusive_stride ? 104u : 0u;
+  const Case cases[] = {
+      // The second dword starts exactly at the stride, accepted on GFX10.1.
+      {12, 0, 0, 4, false, false, {103, 103, 103}, {boundary, boundary, boundary}},
       // Modes 0 and 1 check the ADD_TID-adjusted index even with IDXEN clear.
-      {12, 0, 0, 1, false, true, {103, 0, 0}, {0, 0, 0}},
+      {12, 0, 0, 1, false, true, {103, 0, 0}, {boundary, 0, 0}},
       {0, 0, 1, 1, false, true, {100, 0, 0}, {101, 0, 0}},
       // Swizzled mode 3 checks a per-row payload and reduces the record
       // limit by SOFFSET before index checking. This is the modeled policy.

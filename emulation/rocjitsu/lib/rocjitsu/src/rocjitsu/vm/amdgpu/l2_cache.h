@@ -359,6 +359,10 @@ public:
   /// correct for a global flush. Retained only for call-site signature symmetry.
   VmAccessOutcome flush_all(uint32_t vmid = 0);
 
+  /// Apply CDNA4 BUFFER_INV to this XCD's noncoherent lines. Device scope
+  /// retains a sole L2. System scope applies regardless of the topology.
+  VmAccessOutcome invalidate_buffer_scope(bool system_scope);
+
   /// @brief Publish and invalidate only the specified address space.
   /// @details On failure, no line in this VMID is invalidated. Previously published lines
   /// remain cached clean; unpublished bytes and unvisited dirty lines remain dirty for retry.

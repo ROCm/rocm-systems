@@ -61,6 +61,8 @@ namespace rocjitsu::test {
 
 class ComputeUnitTestAccess {
 public:
+  static void tick_memory_pipelines(amdgpu::ComputeUnitCore &cu) { cu.tick_pipelines(); }
+
   static amdgpu::Wavefront *sgpr_owner(const amdgpu::ComputeUnitCore &cu, uint32_t reg_idx) {
     return cu.sgpr_owner(reg_idx);
   }

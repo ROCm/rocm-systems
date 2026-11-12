@@ -98,9 +98,9 @@ public:
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via the SPI hierarchy.
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
-                     uint64_t private_limit) {
+                     uint64_t private_limit, bool ptr32 = false) {
     for (auto *xcd : xcds_)
-      xcd->set_apertures(shared_base, shared_limit, private_base, private_limit);
+      xcd->set_apertures(shared_base, shared_limit, private_base, private_limit, ptr32);
   }
   /// @brief Install legacy backing during configuration.
   /// @details A non-null backing cannot be replaced with a different object.

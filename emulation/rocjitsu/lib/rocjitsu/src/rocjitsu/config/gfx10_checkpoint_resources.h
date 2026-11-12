@@ -23,7 +23,8 @@ public:
     if (cu.lds_allocation_pinned())
       return emit_error.emit() << "Cannot checkpoint shared LDS reservations on " << cu.name();
     const fb::Gfx10Apertures aperture(cu.shared_aperture_base_, cu.shared_aperture_limit_,
-                                      cu.private_aperture_base_, cu.private_aperture_limit_, false);
+                                      cu.private_aperture_base_, cu.private_aperture_limit_,
+                                      cu.flat_pointer32_);
     const auto size = static_cast<uint32_t>(cu.lds().materialized_size_bytes());
     flatbuffers::Offset<flatbuffers::Vector<uint8_t>> lds;
     if (size) {
@@ -59,11 +60,11 @@ public:
       return emit_error.emit() << "Cannot checkpoint GFX10 privileged or halted wave state";
     const fb::Gfx10Apertures aperture(wave.shared_aperture_base(), wave.shared_aperture_limit(),
                                       wave.private_aperture_base(), wave.private_aperture_limit(),
-                                      false);
+                                      wave.flat_pointer32());
     const auto &target = wave.wait_target();
     const fb::Gfx10WaitLimits limits(target.vmcnt, target.lgkmcnt, target.expcnt, target.vscnt);
     return fb::CreateGfx10WaveResources(
-        builder, &aperture, false, &limits, wave.trapsts(), wave.scratch_base(),
+        builder, &aperture, wave.aperture_override_, &limits, wave.trapsts(), wave.scratch_base(),
         wave.scratch_lane_size(), wave.lds_base(), wave.lds_size(), wave.dispatch_id(),
         wave.wave_in_group(), wave.queue_id(), wave.queue_packet_id(), wave.num_vgprs(),
         wave.self_halted());
@@ -73,11 +74,12 @@ public:
                                  util::DiagnosticEmitter emit_error) {
     const auto &a = *s.launch_apertures();
     if ((a.ptr32() && cu.arch() != ROCJITSU_CODE_ARCH_RDNA1) ||
-        s.next_lds_alloc() > cu.lds().size_bytes() ||
-        (s.lds() && s.lds()->size() > cu.lds().size_bytes()))
+        (s.lds() && s.lds()->size() > cu.lds().size_bytes()) ||
+        (s.next_lds_alloc() && (!s.lds() || s.next_lds_alloc() > s.lds()->size())) ||
+        !cu.restore_lds_cursor(s.next_lds_alloc()))
       return emit_error.emit() << "Invalid GFX10 CU resource state";
-    cu.set_apertures(a.shared_base(), a.shared_limit(), a.private_base(), a.private_limit());
-    cu.next_lds_alloc_ = s.next_lds_alloc();
+    cu.set_apertures(a.shared_base(), a.shared_limit(), a.private_base(), a.private_limit(),
+                     a.ptr32());
     if (s.lds())
       cu.lds().write(uint32_t{0}, s.lds()->data(), s.lds()->size());
     return util::Result::success();
@@ -93,7 +95,9 @@ public:
         (s.self_halted() && !(wave.status_raw() & ((1u << 13) | (1u << 23)))) || limits.vm() > 63 ||
         limits.lgkm() > 63 || limits.exp() > 7 || limits.vs() > 63)
       return emit_error.emit() << "Invalid GFX10 wave resource state";
-    wave.set_apertures(a.shared_base(), a.shared_limit(), a.private_base(), a.private_limit());
+    wave.flat_pointer32_ = a.ptr32();
+    wave.set_apertures(a.shared_base(), a.shared_limit(), a.private_base(), a.private_limit(),
+                       s.override_launch());
     wave.set_wait_target(limits.vm(), limits.lgkm(), limits.exp());
     wave.set_wait_target_vscnt(limits.vs());
     wave.set_trapsts(s.trapsts());
