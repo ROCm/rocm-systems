@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "accl_shim.h"
+#include "accl_boundary.h"
 
 #define __hidden __attribute__((visibility("hidden")))
 
@@ -562,6 +563,7 @@ static inline int acclShouldFinalize(struct acclCollInfo* coll) {
   if (!coll->collStopped) return 0;
   if (coll->nKernelChCompleted < coll->nChannels) return 0;
   if (coll->nProxyOpsCompleted < coll->nProxyOpsStarted) return 0;
+  if (coll->proxyRegistrationKnown && coll->nProxyOpsCompleted < coll->nProxyOpsExpected) return 0;
   coll->finalized = 1;
   return 1;
 }
@@ -667,7 +669,7 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   // KernelLaunch is where the next window opens. P2p starts arrive without
   // their bit (src/plugin/profiler.cc), so they need no subscription.
   if (acclNetInit(&ctx->net, rank, nRanks, nNodes)) {
-    *eActivationMask |= ncclProfileKernelLaunch;
+    *eActivationMask |= ncclProfileKernelLaunch | ncclProfileNetPlugin;
   }
 
   ACCL_INFO("ACCL Profiler: init rank=%d nRanks=%d nNodes=%d "
@@ -844,6 +846,25 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
   }
 
   struct acclCommContext* ctx = (struct acclCommContext*)context;
+
+  if (eDescr->type == ncclProfileNetPlugin) {
+    const int64_t id = eDescr->netPlugin.id;
+    if (ctx->net.enabled && id == RCCL_ACCL_BOUNDARY_INFO) {
+      acclNetBoundaryInfo(&ctx->net, (const rcclAcclBoundaryInfo*)eDescr->netPlugin.data);
+    } else if (ctx->net.enabled && id == RCCL_ACCL_BOUNDARY_FINAL) {
+      acclNetFinalBoundary(&ctx->net);
+    } else if ((id == RCCL_ACCL_PROXY_BEGIN || id == RCCL_ACCL_PROXY_ADD) && eDescr->parentObj &&
+               *(uint64_t*)eDescr->parentObj == ncclProfileColl) {
+      auto* coll = (struct acclCollInfo*)eDescr->parentObj;
+      pthread_mutex_lock(&coll->mutex);
+      if (id == RCCL_ACCL_PROXY_BEGIN) coll->proxyRegistrationKnown = 1;
+      else coll->nProxyOpsExpected++;
+      pthread_mutex_unlock(&coll->mutex);
+      if (id == RCCL_ACCL_PROXY_BEGIN && ctx->net.enabled) acclNetRegistered(&coll->net);
+    }
+    *eHandle = NULL;
+    return ncclSuccess;
+  }
 
   if (eDescr->type == ncclProfileKernelLaunch) {
     // User thread, before the kernel is launched: wait here for the read that

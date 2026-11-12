@@ -15,6 +15,7 @@
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
 
 #include <cuda_runtime.h>
+#include <iostream>
 
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;

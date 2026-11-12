@@ -14,6 +14,7 @@
 #define ENABLE_TIMER 0
 #include "timer.h"
 #include "profiler.h"
+#include "accl_boundary.h"
 #include "transport.h"
 #include "cpuset.h"
 #include "compiler.h"
@@ -595,6 +596,8 @@ static ncclResult_t SaveProxy(struct ncclComm* comm, struct ncclChannel* channel
     *justInquire = true;
   } else {
     op->peer = peer;
+    if (op->taskEventHandle && !(ncclFuncSendRecv <= op->coll && op->coll <= ncclFuncRecv))
+      NCCLCHECK(ncclProfilerAcclNotify(comm, RCCL_ACCL_PROXY_ADD, op->taskEventHandle, nullptr));
     NCCLCHECK(ncclLocalOpAppend(comm, &connector->proxyConn, op));
   }
   return ncclSuccess;

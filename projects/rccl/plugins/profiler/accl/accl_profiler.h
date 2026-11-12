@@ -86,6 +86,8 @@ struct acclCollInfo {
   uint64_t    type;         // ncclProfileColl
   int         collStopped;
   int         finalized;
+  int         proxyRegistrationKnown;
+  int         nProxyOpsExpected;
   pthread_mutex_t mutex;
 
   // Collective metadata

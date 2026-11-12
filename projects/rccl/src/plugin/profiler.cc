@@ -17,6 +17,8 @@
 #include "compiler.h"
 #include "device.h"
 #include "sym_kernels.h"
+#include "bootstrap.h"
+#include "accl_boundary.h"
 #include <cstring>
 #include <mutex>
 #include <thread>
@@ -540,6 +542,40 @@ ncclResult_t ncclProfilerStopCollApiEvent() {
   return ncclSuccess;
 }
 
+static bool acclCountersRequested() {
+  const char* e = getenv("ACCL_NET_COUNTERS");
+  return e && strcmp(e, "1") == 0;
+}
+
+ncclResult_t ncclProfilerAcclNotify(struct ncclComm* comm, int64_t id, void* parent, void* data) {
+  if (!ncclProfiler || !comm->profilerContext || !acclCountersRequested()) return ncclSuccess;
+  ncclProfilerEventDescr_t e = {};
+  e.type = ncclProfileNetPlugin;
+  e.rank = comm->rank;
+  e.parentObj = parent;
+  e.netPlugin.id = id;
+  e.netPlugin.data = data;
+  void* handle = nullptr;
+  return ncclProfiler->startEvent(comm->profilerContext, &handle, &e);
+}
+
+static int acclSynchronizeBoundary(void* context, int locallyValid) {
+  auto* comm = static_cast<struct ncclComm*>(context);
+  int* ready = nullptr;
+  if (ncclCalloc(&ready, comm->nRanks) != ncclSuccess) return 1;
+  ready[comm->rank] = locallyValid;
+  ncclResult_t r = bootstrapAllGather(comm->bootstrap, ready, sizeof(int));
+  int invalid = r != ncclSuccess;
+  for (int i = 0; i < comm->nRanks; i++) invalid |= ready[i] != 1;
+  free(ready);
+  return invalid;
+}
+
+ncclResult_t ncclProfilerAcclFinalizeBoundary(struct ncclComm* comm) {
+  if (!acclCountersRequested()) return ncclSuccess;
+  return ncclProfilerAcclNotify(comm, RCCL_ACCL_BOUNDARY_FINAL, nullptr, nullptr);
+}
+
 ncclResult_t ncclProfilerStartKernelLaunchEvent(struct ncclKernelPlan* plan, cudaStream_t stream) {
   ncclProfilerEventDescr_t eDescr = {0};
   if (COMPILER_EXPECT(ncclProfiler != NULL, 0)) {
@@ -567,6 +603,21 @@ ncclResult_t ncclProfilerStartKernelLaunchEvent(struct ncclKernelPlan* plan, cud
     }
 
   startKernelLaunchEvent:
+    if ((eActivationMask_ & ncclProfileKernelLaunch) && acclCountersRequested()) {
+      auto* first = ncclIntruQueueHead(&plan->collTaskQueue);
+      const char* oob = getenv("NCCL_OOB_NET_ENABLE");
+      rcclAcclBoundaryInfo info = {1,
+        !plan->persistent && !plan->isHostCbEnq && !plan->isSymColl &&
+        !plan->isCeColl && !plan->isRma && first && !first->next &&
+        ncclIntruQueueEmpty(&plan->p2pTaskQueue) && plan->comm->intraRanks == 1 &&
+        (!oob || strcmp(oob, "0") == 0), plan->comm, acclSynchronizeBoundary};
+      const char* strict = getenv("ACCL_NET_STRICT");
+      // In strict diagnostic mode previous GPU work must retire before the
+      // plugin drains proxy work and performs the distributed boundary.
+      if (info.supported && strict && strcmp(strict, "1") == 0)
+        CUDACHECK(cudaStreamSynchronize(stream));
+      NCCLCHECK(ncclProfilerAcclNotify(plan->comm, RCCL_ACCL_BOUNDARY_INFO, nullptr, &info));
+    }
     if (eActivationMask_ & ncclProfileKernelLaunch) {
       eDescr.type = ncclProfileKernelLaunch;
       eDescr.rank = plan->comm->rank;
@@ -674,6 +725,9 @@ ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan* plan) {
         }
         eDescr.coll.userTag = ct->profilerTag;
         ncclProfiler->startEvent(plan->comm->profilerContext, &ct->eventHandle, &eDescr);
+        // All registration increments happen before Coll stop, so a fast GPU
+        // cannot finalize the record before a late-waking proxy starts.
+        NCCLCHECK(ncclProfilerAcclNotify(plan->comm, RCCL_ACCL_PROXY_BEGIN, ct->eventHandle, nullptr));
       }
     }
     // comm->seqNumber values are updated even if the plugin is not active, since they are used by RAS as well.

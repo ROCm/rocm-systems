@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include "accl_boundary.h"
 
 #define ACCL_HIDDEN __attribute__((visibility("hidden")))
 
@@ -23,6 +24,7 @@
 struct acclNetDevSnap {
   int      rdmaOk;
   int      ethOk;
+  uint64_t rdmaStartUs, rdmaEndUs;
   uint64_t rdma[ACCL_NET_MAX_RDMA];  // indexed by the device's rdmaNames slot
   uint64_t eth[ACCL_NET_MAX_ETH];    // indexed by the device's ethNames slot
 };
@@ -41,6 +43,8 @@ struct acclNetSnapshot {
   uint64_t seq;
   uint64_t tsStartUs;
   uint64_t tsEndUs;
+  int      stable;       // strict: two consecutive identical hardware reads
+  int      readAttempts;
   int      nSw;          // -1: SW counters unavailable
   struct acclNetSwSnap  sw[ACCL_NET_MAX_SW];
   struct acclNetDevSnap dev[ACCL_NET_MAX_DEVS];
@@ -52,6 +56,8 @@ struct acclNetCommStats;
 struct acclNetCollState {
   struct acclNetCommStats* owner;
   int    tracked;
+  int    completionVerified;
+  int    coordinated;
   int    posted;       // Coll stop seen: its proxy ops are posted
   int    overlapped;
   int    unavailable;
@@ -62,6 +68,12 @@ struct acclNetCollState {
 
 // Per-communicator totals for the summary line. Written under the net mutex.
 struct acclNetCommStats {
+  int      boundarySupported;
+  int      boundarySucceeded;
+  int      strictFailed;
+  int      finalBoundaryDone;
+  void*    boundaryContext;
+  int    (*synchronize)(void*, int);
   int      enabled;      // set at init, constant after
   int      nNodes;
   int      closed;       // set at finalize
@@ -107,6 +119,9 @@ ACCL_HIDDEN int  acclNetInit(struct acclNetCommStats* st, int rank, int nRanks, 
 ACCL_HIDDEN char* acclNetFinalize(struct acclNetCommStats* st, int* lost);
 
 // Event hooks.
+ACCL_HIDDEN void acclNetBoundaryInfo(struct acclNetCommStats*, const struct rcclAcclBoundaryInfo*);
+ACCL_HIDDEN void acclNetFinalBoundary(struct acclNetCommStats*);
+ACCL_HIDDEN void acclNetRegistered(struct acclNetCollState*);
 ACCL_HIDDEN void acclNetKernelLaunch(struct acclNetCommStats* st);
 ACCL_HIDDEN void acclNetCollStart(struct acclNetCommStats* st, struct acclNetCollState* cs);
 ACCL_HIDDEN void acclNetCollPosted(struct acclNetCollState* cs);

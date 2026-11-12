@@ -11,7 +11,7 @@ to all four key event types for full root-cause triage.
 ncclProfileColl | ncclProfileKernelCh | ncclProfileProxyOp | ncclProfileProxyStep
 ```
 
-`ncclProfileKernelLaunch | ncclProfileP2p` are added with `ACCL_NET_COUNTERS=1`
+`ncclProfileKernelLaunch | ncclProfileNetPlugin` are added with `ACCL_NET_COUNTERS=1`
 (see [Network Counters](#network-counters-opt-in)).
 
 | Event Type | What it captures |
@@ -161,98 +161,97 @@ The report classifies bottlenecks per message size (evaluated in this order):
 
 ## Network Counters (opt-in)
 
-With `ACCL_NET_COUNTERS=1` each record also carries NIC counter deltas for that
-collective, from chained snapshots taken by a plugin-owned thread:
+For accuracy-first diagnostics, build RCCL and this plugin from the same tree:
+
+```bash
+ACCL_NET_COUNTERS=1 ACCL_NET_STRICT=1 ACCL_NET_DEVICES=rdma0 \
+ACCL_PROFILER_MIN_SIZE_BYTES=0 NCCL_OOB_NET_ENABLE=0 NCCL_SOCKET_IFNAME=eno0 \
+NCCL_NET=IB-CAST <serialized application>
+```
+
+Strict mode supports an eager, serialized application with one collective per
+plan, one GPU per process, and one active communicator per process. Every rank
+must enable it consistently. The measured NICs must be isolated from unrelated
+producers. Graphs, host-callback plans, grouped/P2P plans, symmetric/GPU-initiated
+operations, and CE/RMA paths are unsupported. Unsupported or unverified windows
+cannot produce CLEAN. Aborted runs can lose the final snapshot and report it.
+
+The sequence is:
 
 ```
-read S0 -> coll N -> N completes -> read S1 -> coll N+1 -> ... -> read S2
-delta(N) = S1 - S0, delta(N+1) = S2 - S1
+previous GPU work retires
+all registered proxy operations complete (including ones that start late)
+all ranks establish a drained boundary through socket bootstrap
+worker reads until two consecutive hardware snapshots match (up to six reads)
+accept settled S1 (N's after and N+1's before)
+all ranks finish reading
+launch N+1
 ```
 
-N completes when all its kernel channels and all its proxy ops have stopped.
-Profiler callbacks never read hardware; before N+1's kernel is launched
-(`KernelLaunch` event) the launching thread waits for S1, so the wait is not
-counted as kernel time. Nothing else waits: a Coll start that finds S1 still
-pending (graph replay, host-callback launches) marks its record `unavailable`.
+The ordinary eager `KernelLaunch` callback performs the wait before GPU launch.
+Coll start never waits for reads. A final boundary runs during normal communicator
+finalization while bootstrap and progress threads are still alive. Any failed
+drain/read coordination invalidates attribution; it does not manufacture a delta.
+`ACCL_NET_WAIT_MS` (default 1000) bounds local waits. Distributed bootstrap follows
+RCCL's normal abort behavior, so diagnostic jobs should have an external timeout.
+
+RCCL supplies a small optional protocol through existing v5 NetPlugin events:
+registration begins before GPU completion events are posted, and each actual
+proxy operation is counted before posting. Coll stop closes registration.
+The completion predicate waits for the registered count as well as all GPU
+channels and all observed proxy operations. Profiler ABI layouts are unchanged.
+Older RCCL builds without this protocol produce unverified counter windows.
+
+RDMA netlink STAT_GET reads bypass the sysfs lifespan cache. ethtool pause/PFC
+counters are stale context on ionic and never determine a collective verdict.
+Software counters require `RCCL_TELEMETRY_ENABLE=1`. AINIC ucast hardware bytes
+include CTS control traffic; they are not identical to application payload bytes.
+
+Each `net_counters` object contains:
+
+- per-device deltas, overlap/unavailability flags, `completion_verified`, and
+  `coordinated`;
+- raw `snapshot_before` and `snapshot_after`, with IDs, every RDMA value, overall
+  read intervals, each device's read interval, stability status, and read attempts;
+- host-observed collective start/completion times and `launch_wait_us`;
+- `counter_discontinuities`: decreasing/reset/wrapped counters invalidate the
+  affected device's delta instead of silently erasing error evidence;
+- software payload-byte/CQ-error deltas and explicitly stale ethtool context.
+
+Snapshots are reused only across the coordinated quiescent boundary. The worker
+does the hardware reads. Several configured NICs are read sequentially, so their
+timestamps differ; no atomic multi-NIC latch is claimed. Two identical reads validate observed stability, not a firmware visibility fence.
+Counter visibility still depends on driver/firmware semantics and must be checked against hardware.
+
+Configuration retained for passive compatibility:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ACCL_NET_COUNTERS` | off | `1` turns it on |
-| `ACCL_NET_DEVICES` | none (required) | RDMA devices to read (port 1), e.g. `rdma0,rdma1` |
-| `ACCL_NET_DEVICE_SELECT` | read all | `local_rank`: read entry `rank % (nranks/nNodes)` of the first communicator only |
-| `ACCL_NET_WAIT_MS` | 1000 | longest wait for a read before launching anyway |
-| `ACCL_NET_GRACE_US` | 1000 | wait at launch for the previous collective's proxy ops |
+| `ACCL_NET_COUNTERS` | off | Enable counters |
+| `ACCL_NET_STRICT` | off | Coordinate accuracy-first boundaries; required for CLEAN |
+| `ACCL_NET_DEVICES` | required | Explicit RDMA devices, port 1 |
+| `ACCL_NET_DEVICE_SELECT` | all | `local_rank` uses rank modulo uniform ranks/node; verify routing |
+| `ACCL_NET_WAIT_MS` | 1000 | Local completion/read timeout |
+| `ACCL_NET_GRACE_US` | 1000 | Passive-mode grace only |
 
-Sources: RDMA hw counters over RDMA netlink (sysfs `hw_counters` is cached for
-10 ms; one firmware command per read, about 1-2 ms on AINIC); ethtool PFC/pause
-stats, marked `"stale": true` because ionic refreshes them about every 5 s; and
-`rcclTelemetrySwCapture()` (needs `RCCL_TELEMETRY_ENABLE=1`, `NCCL_NET=IB-CAST`).
+`net_tel_report.py OUTPUT --warmup 0 --trace trace.json` reports per-communicator,
+collective, and size. CLEAN requires registered/coordinated valid windows, all
+expected ranks, and at least three complete collective instances. Recognized
+loss/congestion produces NETWORK_SUSPECT; unclassified non-volume counter changes
+produce INCONCLUSIVE. Missing rank files cannot imply a healthy network.
 
-```json
-"net_counters": {"overlapped": false, "unavailable": false,
-  "before_ts_us": 1700, "after_ts_us": 3900, "after_read_us": 1480,
-  "launch_wait_us": 1210,
-  "devices": [{"name": "rdma0",
-    "rdma": {"tx_rdma_ucast_bytes": 4194304, "tx_rdma_ucast_pkts": 1024,
-             "rx_rdma_ucast_bytes": 4194304, "rx_rdma_ucast_pkts": 1024,
-             "resp_rx_outouf_seq": 3},
-    "ethtool": {"stale": true}}],
-  "sw": [{"device_id": 0, "tx_bytes": 4194304, "rx_bytes": 4194304, "cq_errors": 0}]}
-```
+The Perfetto trace has separate lanes for host-observed collective activity,
+NIC totals for that collective, and deduplicated raw hardware snapshots. Select
+a collective slice to inspect all NIC deltas, raw-read metadata, payload counters,
+and validity. GPU duration is a detail field; host callback placement is not
+presented as an exactly aligned GPU timeline. Counter graphs show per-collective
+totals, not instantaneous rates. Each host's CLOCK_MONOTONIC origin is normalized
+independently: timelines from different hosts are not clock synchronized.
 
-- `rdma` lists non-zero deltas plus the ionic volume counters; a counter that
-  went backwards (wrapped) is omitted.
-- `overlapped`: other work may have run in the window: another collective, a
-  proxy op no record owns (P2P, a collective below
-  `ACCL_PROFILER_MIN_SIZE_BYTES`) while it is live, or a proxy op that started
-  after its collective completed (`late_proxy_ops`). Symmetric collectives have
-  no proxy ops and are not tracked.
-- `unavailable`: a read failed or timed out, or no device is configured. The
-  collective is never affected.
-- `launch_wait_us`: time `KernelLaunch` spent waiting: for this comm's
-  previous collective to finish (`ACCL_NET_GRACE_US`) and for the "before" read.
-- The summary adds `net_counters` (records, overlapped, unavailable,
-  `records_with_read_error`, `queued_at_finalize`, `late_proxy_ops`, reads and
-  read times, per-device totals of clean windows). A record not written by
-  finalize clears `complete`.
-
-`net_tel_report.py` analyzes these records (`accl_report.py` ignores them):
-
-```bash
-python3 net_tel_report.py /path/to/output/ [--warmup 5] [--trace net_trace.json]
-```
-
-It prints, per message size, `NETWORK_SUSPECT` (loss/retransmit counters, or
-ECN/CNP), `CLEAN`, or `INCONCLUSIVE` (fewer than 3 clean windows, most windows
-overlapped/unavailable, no NIC traffic, or non-ionic counter names) with the
-counters, side and ranks behind it. Loss is often visible only on the
-receiving NIC, so all ranks are pooled and every rank needs a clean window.
-Other non-zero counters are listed but do not change the verdict. It also
-prints exec time with the read skew removed: ranks read at different speeds
-after the app's barrier, and a rank's kernel waits for the slowest peer, so
-`corrected = max(0, exec - (max launch_wait_us over the comm's ranks - own))`.
-That assumes the ranks reach each launch together (a per-collective barrier);
-sizes where many records clamp at 0 are marked `!`. `--trace` writes Chrome
-trace JSON (chrome://tracing, ui.perfetto.dev): one process per host, one
-thread per rank process, a slice per window and per read, and a NIC counter
-track per rank (per-host `CLOCK_MONOTONIC`, not aligned across hosts).
-
-Caveats:
-- Per-collective numbers need a serialized app, e.g. rccl-tests `-z 1`, and
-  `ACCL_PROFILER_MIN_SIZE_BYTES=0`.
-- Counters are per NIC: ranks and other processes sharing a NIC share windows.
-  Traffic without proxy-op events (CE collectives, RMA, GPU-initiated) is
-  invisible to the chain.
-- The chain is per process: several GPUs per process (rccl-tests `-g >1`)
-  overlap every window.
-- Every kernel launch waits, including P2P-only plans. A collective that
-  completes with no proxy op on a multi-node comm delays its read by 200 us.
-- The read wait (about 1-2 ms per collective) shows up in wall-clock benchmark
-  time; `coll_exec_time_us` includes the gap to the slowest peer's read (see
-  the corrected time above).
-- With AINIC CTS offload, a remote rank leaving the barrier early can start
-  sending before this rank's read finishes.
-- CUDA graphs are not supported (records come out `unavailable`/`overlapped`).
+Measured GPU times are reported unchanged. `--estimate-read-skew` optionally
+shows the older heuristic subtraction with an explicit warning; it does not
+recover the uninstrumented execution time. Snapshot waits and coordination alter
+the workload's natural overlap and congestion behavior.
 
 ## Requirements
 

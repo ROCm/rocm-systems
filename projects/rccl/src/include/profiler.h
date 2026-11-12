@@ -11,6 +11,10 @@
 #include <cuda_runtime.h>
 #include "nccl_profiler.h"
 
+// Optional ACCL accuracy protocol, ignored unless ACCL_NET_COUNTERS=1.
+ncclResult_t ncclProfilerAcclNotify(struct ncclComm*, int64_t, void*, void*);
+ncclResult_t ncclProfilerAcclFinalizeBoundary(struct ncclComm*);
+
 struct ncclProxyArgs;
 struct ncclKernelPlan;
 struct ncclTaskColl;

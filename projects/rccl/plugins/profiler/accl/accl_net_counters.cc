@@ -71,6 +71,9 @@ struct acclNetJob {
   int                      overlapped;
   int                      unavailable;
   int                      settle;
+  int                      completionVerified;
+  int                      coordinated;
+  uint64_t                 startUs, completeUs;
   uint64_t                 launchWaitUs;
   struct acclCompletedRecord rec;
 };
@@ -84,6 +87,8 @@ static struct {
   int             condInit;
   pthread_t       thread;
   int             users;
+  int             strict;
+  int             unknownTraffic;
   int             stop;
   uint64_t        waitUs;
   uint64_t        graceUs;
@@ -560,13 +565,43 @@ static struct acclNetSnapshot* acclNetReadAll(char* rx) {
     }
   } else {
     for (int i = 0; i < g.nDevs; i++) {
+      s->dev[i].rdmaStartUs = acclNetNowUs();
       s->dev[i].rdmaOk = acclRdmaRead(&g.devs[i], rx, s->dev[i].rdma, 0) == 0;
+      s->dev[i].rdmaEndUs = acclNetNowUs();
       s->dev[i].ethOk = acclEthRead(&g.devs[i], s->dev[i].eth) == 0;
     }
     acclNetReadSw(s);
   }
   s->tsEndUs = acclNetNowUs();
   return s;
+}
+
+// Preserve the raw endpoints and read intervals so attribution can be audited.
+static void acclNetRawSnapshot(struct acclStr* js, const struct acclNetSnapshot* s) {
+  if (!s) { acclStrAppend(js, "null"); return; }
+  acclStrAppend(js, "{\"id\":%lu,\"read_start_us\":%lu,\"read_end_us\":%lu,\"devices\":[",
+                (unsigned long)s->seq, (unsigned long)s->tsStartUs, (unsigned long)s->tsEndUs);
+  for (int i = 0; i < g.nDevs; i++) {
+    acclStrAppend(js, "%s{\"name\":\"%s\",\"ok\":%s,\"read_start_us\":%lu,\"read_end_us\":%lu,\"rdma\":{",
+      i ? "," : "", g.devs[i].name, s->dev[i].rdmaOk ? "true" : "false",
+      (unsigned long)s->dev[i].rdmaStartUs, (unsigned long)s->dev[i].rdmaEndUs);
+    for (int k = 0; k < g.devs[i].nRdma; k++) acclStrAppend(js, "%s\"%s\":%lu",
+      k ? "," : "", g.devs[i].rdmaNames[k], (unsigned long)s->dev[i].rdma[k]);
+    acclStrAppend(js, "}}");
+  }
+  acclStrAppend(js, "],\"stable\":%s,\"read_attempts\":%d}", s->stable ? "true" : "false", s->readAttempts);
+}
+
+// Counter values must settle while every rank remains behind the boundary.
+// This validates observed quiescence; it does not claim a firmware atomic latch.
+static int acclNetSameHardware(const struct acclNetSnapshot* a, const struct acclNetSnapshot* b) {
+  if (!a || !b) return 0;
+  for (int i = 0; i < g.nDevs; i++) {
+    if (!a->dev[i].rdmaOk || !b->dev[i].rdmaOk) return 0;
+    for (int k = 0; k < g.devs[i].nRdma; k++)
+      if (a->dev[i].rdma[k] != b->dev[i].rdma[k]) return 0;
+  }
+  return 1;
 }
 
 // Builds the record's "net_counters" object and updates the comm totals.
@@ -576,18 +611,33 @@ static void acclNetFormat(struct acclStr* js, struct acclNetJob* job, struct acc
   struct acclNetCommStats* st = job->st;
   int unavailable = job->unavailable || !b || !a || g.nDevs == 0;
   // A late "before" read already holds the previous collective's tail.
-  int trusted = !job->unavailable && b && a;
+  int trusted = !job->unavailable && b && a && (!g.strict || (b->stable && a->stable));
   int readError = !a;
   int usable[ACCL_NET_MAX_DEVS] = {0};
   for (int i = 0; i < g.nDevs && a; i++) {
     if (!a->dev[i].rdmaOk) readError = 1;
     if (g.devs[i].ethBuf && !a->dev[i].ethOk) readError = 1;
     usable[i] = trusted && b->dev[i].rdmaOk && a->dev[i].rdmaOk;
+    if (usable[i]) for (int k = 0; k < g.devs[i].nRdma; k++) {
+      if (a->dev[i].rdma[k] < b->dev[i].rdma[k]) { usable[i] = 0; break; }
+    }
     if (!usable[i]) unavailable = 1;
   }
 
   acclStrAppend(js, "\"net_counters\":{\"overlapped\":%s,\"unavailable\":%s",
                 job->overlapped ? "true" : "false", unavailable ? "true" : "false");
+  acclStrAppend(js, ",\"completion_verified\":%s,\"coordinated\":%s,\"collective_start_cpu_us\":%lu,\"collective_complete_cpu_us\":%lu",
+    job->completionVerified ? "true" : "false", job->coordinated ? "true" : "false",
+    (unsigned long)job->startUs, (unsigned long)job->completeUs);
+  acclStrAppend(js, ",\"counter_discontinuities\":[");
+  int discontinuity = 0;
+  if (b && a) for (int i = 0; i < g.nDevs; i++) {
+    if (!b->dev[i].rdmaOk || !a->dev[i].rdmaOk) continue;
+    for (int k = 0; k < g.devs[i].nRdma; k++) if (a->dev[i].rdma[k] < b->dev[i].rdma[k]) {
+      acclStrAppend(js, "%s\"%s/%s\"", discontinuity++ ? "," : "", g.devs[i].name, g.devs[i].rdmaNames[k]);
+    }
+  }
+  acclStrAppend(js, "]");
   if (b && a) {
     acclStrAppend(js, ",\"before_ts_us\":%lu,\"after_ts_us\":%lu,\"after_read_us\":%lu",
                   (unsigned long)b->tsStartUs, (unsigned long)a->tsStartUs,
@@ -615,7 +665,7 @@ static void acclNetFormat(struct acclStr* js, struct acclNetJob* job, struct acc
       acclStrAppend(js, "null");
     }
     acclStrAppend(js, ",\"ethtool\":");
-    if (b && a && b->dev[i].ethOk && a->dev[i].ethOk) {
+    if (trusted && !unavailable && b && a && b->dev[i].ethOk && a->dev[i].ethOk) {
       // ionic refreshes these about every 5 s: context only, never per-collective.
       acclStrAppend(js, "{\"stale\":true");
       for (int k = 0; k < d->nEth; k++) {
@@ -630,7 +680,12 @@ static void acclNetFormat(struct acclStr* js, struct acclNetJob* job, struct acc
     acclStrAppend(js, "}");
   }
   acclStrAppend(js, "],\"sw\":");
-  if (b && a && b->nSw > 0 && b->nSw == a->nSw) {
+  int swUsable = trusted && !unavailable && b && a && b->nSw > 0 && b->nSw == a->nSw;
+  if (swUsable) for (int i = 0; i < a->nSw; i++) {
+    if (a->sw[i].deviceId != b->sw[i].deviceId || a->sw[i].txBytes < b->sw[i].txBytes ||
+        a->sw[i].rxBytes < b->sw[i].rxBytes || a->sw[i].cqErrors < b->sw[i].cqErrors) swUsable = 0;
+  }
+  if (swUsable) {
     acclStrAppend(js, "[");
     for (int i = 0; i < a->nSw; i++) {
       acclStrAppend(js, "%s{\"device_id\":%d,\"tx_bytes\":%lu,\"rx_bytes\":%lu,\"cq_errors\":%lu}",
@@ -643,6 +698,8 @@ static void acclNetFormat(struct acclStr* js, struct acclNetJob* job, struct acc
   } else {
     acclStrAppend(js, "null");
   }
+  acclStrAppend(js, ",\"snapshot_before\":"); acclNetRawSnapshot(js, b);
+  acclStrAppend(js, ",\"snapshot_after\":"); acclNetRawSnapshot(js, a);
   acclStrAppend(js, "}");
 
   st->records++;
@@ -695,13 +752,28 @@ static void* acclNetWorker(void* arg) {
     if (settle) usleep(ACCL_NET_SETTLE_US);
 
     struct acclNetSnapshot* snap = acclNetReadAll(rx);
+    if (snap) snap->readAttempts = 1;
+    if (g.strict && snap) {
+      uint64_t verificationStartUs = snap->tsStartUs;
+      for (int attempt = 2; attempt <= 6; attempt++) {
+        struct acclNetSnapshot* check = acclNetReadAll(rx);
+        if (!check) break;
+        int stable = acclNetSameHardware(snap, check);
+        acclSnapUnref(snap);
+        snap = check;
+        snap->readAttempts = attempt;
+        snap->tsStartUs = verificationStartUs;
+        snap->stable = stable;
+        if (stable) break;
+      }
+    }
 
     pthread_mutex_lock(&gNetMu);
     acclSnapUnref(g.cur);
     g.cur = snap;
     g.readPending = 0;
     // Records that completed during this read need the next one.
-    if (g.head && g.nInflight == 0) acclNetRequestReadLocked();
+    if (!g.strict && g.head && g.nInflight == 0) acclNetRequestReadLocked();
     struct acclNetJob* jobs = g.reading;
     g.reading = NULL;
     pthread_cond_broadcast(&g.doneCv);
@@ -727,7 +799,7 @@ static void acclNetRequestReadLocked(void) {
 // Untracked proxy ops still sending. An op whose stop never arrives (non-net
 // transports) stops counting after ACCL_NET_STUCK_US without a new one.
 static int acclNetUntrackedActive(void) {
-  return g.untrackedLive > 0 && acclNetNowUs() - g.untrackedLastUs < ACCL_NET_STUCK_US;
+  return g.untrackedLive > 0; // Unknown live work must never age into a clean window.
 }
 
 static void acclNetFlagInflight(void) {
@@ -743,11 +815,13 @@ static void acclNetFlagPendingJobs(void) {
 // A collective the plugin never sees complete (e.g. no KernelCh events) would
 // otherwise mark every later record overlapped.
 static void acclNetEvictStuckLocked(void) {
+  if (g.strict) return;
   uint64_t now = acclNetNowUs();
   for (int i = 0; i < g.nInflight;) {
     struct acclNetCollState* cs = g.inflight[i];
     if (now - cs->startUs < ACCL_NET_STUCK_US) { i++; continue; }
     cs->overlapped = 1;
+    g.unknownTraffic = 1;
     g.dirty = 1;
     g.inflight[i] = g.inflight[--g.nInflight];
   }
@@ -756,7 +830,7 @@ static void acclNetEvictStuckLocked(void) {
 // Queued records whose window has closed must not wait for a later trigger.
 static void acclNetKickLocked(void) {
   acclNetEvictStuckLocked();
-  if (g.head && g.nInflight == 0 && !g.readPending) acclNetRequestReadLocked();
+  if (!g.strict && g.head && g.nInflight == 0 && !g.readPending) acclNetRequestReadLocked();
 }
 
 // This comm's collectives whose proxy ops are posted, i.e. from an earlier plan.
@@ -782,8 +856,80 @@ static int acclNetWaitReadLocked(void) {
   return !g.readPending;
 }
 
+void acclNetBoundaryInfo(struct acclNetCommStats* st, const struct rcclAcclBoundaryInfo* info) {
+  pthread_mutex_lock(&gNetMu);
+  st->boundarySupported = info && info->version == 1 && info->supported && info->synchronize;
+  st->boundaryContext = info ? info->context : NULL;
+  st->synchronize = info ? info->synchronize : NULL;
+  st->boundarySucceeded = 0;
+  pthread_mutex_unlock(&gNetMu);
+}
+
+void acclNetRegistered(struct acclNetCollState* cs) {
+  pthread_mutex_lock(&gNetMu);
+  cs->completionVerified = 1;
+  pthread_mutex_unlock(&gNetMu);
+}
+
+// Strict mode: drain locally, establish global quiescence, take one shared
+// after/before snapshot, then release only after all ranks finish reading.
+// No GPU/transport thread waits here; the supported eager launch thread does.
+static void acclNetStrictBoundary(struct acclNetCommStats* st) {
+  pthread_mutex_lock(&gNetMu);
+  uint64_t deadline = acclNetNowUs() + g.waitUs;
+  while ((g.nInflight || acclNetUntrackedActive()) && acclNetWaitUntil(deadline)) {}
+  int valid = g.nInflight == 0 && !acclNetUntrackedActive() && !g.unknownTraffic &&
+              g.users == 1 && st->boundarySupported && !st->strictFailed;
+  int (*sync)(void*, int) = st->synchronize;
+  void* context = st->boundaryContext;
+  pthread_mutex_unlock(&gNetMu);
+  if (sync && st->boundarySupported) valid = sync(context, valid) == 0 && valid;
+  else valid = 0;
+  pthread_mutex_lock(&gNetMu);
+  if (!valid) {
+    st->strictFailed = 1;
+    for (int i = 0; i < g.nInflight; i++) g.inflight[i]->unavailable = 1;
+    for (struct acclNetJob* j = g.head; j; j = j->next) j->unavailable = 1;
+    for (struct acclNetJob* j = g.reading; j; j = j->next) j->unavailable = 1;
+  }
+  acclNetRequestReadLocked();
+  deadline = acclNetNowUs() + g.waitUs;
+  while (g.readPending && acclNetWaitUntil(deadline)) {}
+  int readOk = !g.readPending && g.cur && g.cur->stable;
+  if (readOk) for (int i = 0; i < g.nDevs; i++) readOk &= g.cur->dev[i].rdmaOk;
+  // A rank may release subsequent traffic after the failed coordination.
+  // Invalidate jobs already being read before entering the release exchange;
+  // a later Coll start cannot retroactively repair a record already written.
+  if (!readOk) {
+    for (struct acclNetJob* j = g.reading; j; j = j->next) j->unavailable = 1;
+    for (struct acclNetJob* j = g.head; j; j = j->next) j->unavailable = 1;
+  }
+  pthread_mutex_unlock(&gNetMu);
+  if (sync && st->boundarySupported) readOk = sync(context, valid && readOk) == 0 && readOk;
+  else readOk = 0;
+  pthread_mutex_lock(&gNetMu);
+  st->boundarySucceeded = valid && readOk;
+  if (!st->boundarySucceeded) st->strictFailed = 1;
+  pthread_mutex_unlock(&gNetMu);
+}
+
+void acclNetFinalBoundary(struct acclNetCommStats* st) {
+  if (!g.strict || st->finalBoundaryDone) return;
+  acclNetStrictBoundary(st);
+  st->finalBoundaryDone = 1;
+}
+
 // User thread, before the kernel launch: the only place that waits.
 void acclNetKernelLaunch(struct acclNetCommStats* st) {
+  if (g.strict) {
+    uint64_t t0 = acclNetNowUs();
+    acclNetStrictBoundary(st);
+    pthread_mutex_lock(&gNetMu);
+    st->launchWaitUs = acclNetNowUs() - t0;
+    st->launchSeen = 1;
+    pthread_mutex_unlock(&gNetMu);
+    return;
+  }
   pthread_mutex_lock(&gNetMu);
   uint64_t t0 = acclNetNowUs();
   // Grace for the previous collective's proxy tail. Once it times out this
@@ -809,15 +955,17 @@ void acclNetCollStart(struct acclNetCommStats* st, struct acclNetCollState* cs) 
   acclNetKickLocked();
   int readDone = !g.readPending;
   cs->launchWaitUs = st->launchSeen ? st->launchWaitUs : 0;
+  cs->coordinated = g.strict && st->boundarySucceeded && !st->strictFailed && st->launchSeen;
+  int launchSeen = st->launchSeen;
   st->launchSeen = 0;
   cs->tracked = 1;
   cs->owner = st;
   cs->startUs = acclNetNowUs();
   cs->before = acclSnapRef(g.cur);
-  cs->unavailable = !readDone || !cs->before;
+  cs->unavailable = !readDone || !cs->before || !launchSeen || (g.strict && !cs->coordinated);
   // The pending read will land inside this collective.
   if (!readDone) acclNetFlagPendingJobs();
-  if (g.dirty || g.nInflight > 0 || acclNetUntrackedActive()) {
+  if (g.dirty || g.unknownTraffic || g.nInflight > 0 || acclNetUntrackedActive()) {
     cs->overlapped = 1;
     acclNetFlagInflight();
   }
@@ -826,6 +974,7 @@ void acclNetCollStart(struct acclNetCommStats* st, struct acclNetCollState* cs) 
     g.inflight[g.nInflight++] = cs;
   } else {
     // Untracked from here on: whatever runs next cannot be called clean.
+    g.unknownTraffic = 1;
     cs->overlapped = 1;
     g.dirty = 1;
   }
@@ -909,8 +1058,12 @@ int acclNetCollComplete(struct acclCommContext* ctx, struct acclNetCommStats* st
   job->st = st;
   job->before = cs->before;
   job->overlapped = cs->overlapped;
-  job->unavailable = cs->unavailable;
-  job->settle = nProxyOps == 0 && st->nNodes > 1;
+  job->unavailable = cs->unavailable || !cs->completionVerified;
+  job->completionVerified = cs->completionVerified;
+  job->coordinated = cs->coordinated;
+  job->startUs = cs->startUs;
+  job->completeUs = acclNetNowUs();
+  job->settle = !cs->completionVerified && nProxyOps == 0 && st->nNodes > 1;
   job->launchWaitUs = cs->launchWaitUs;
   cs->before = NULL;
   acclCtxRetain(ctx);
@@ -918,7 +1071,7 @@ int acclNetCollComplete(struct acclCommContext* ctx, struct acclNetCommStats* st
   g.tail = job;
   g.nJobs++;
   st->queued++;
-  if (g.nInflight == 0 || g.nJobs > ACCL_NET_MAX_QUEUED) acclNetRequestReadLocked();
+  if (!g.strict && (g.nInflight == 0 || g.nJobs > ACCL_NET_MAX_QUEUED)) acclNetRequestReadLocked();
   pthread_mutex_unlock(&gNetMu);
   return 0;
 }
@@ -1057,6 +1210,9 @@ int acclNetInit(struct acclNetCommStats* st, int rank, int nRanks, int nNodes) {
     pthread_mutex_unlock(&gNetMu);
     return 1;
   }
+  const char* strictEnv = getenv("ACCL_NET_STRICT");
+  g.strict = strictEnv && strcmp(strictEnv, "1") == 0;
+  g.unknownTraffic = 0;
   g.waitUs = acclNetEnvU64("ACCL_NET_WAIT_MS", 1000, 600000) * 1000;
   g.graceUs = acclNetEnvU64("ACCL_NET_GRACE_US", 1000, 1000000);
   g.nDevs = acclNetParseDevices(rank, nRanks, nNodes);
@@ -1146,6 +1302,9 @@ char* acclNetFinalize(struct acclNetCommStats* st, int* lost) {
   pthread_mutex_lock(&gNetMu);
   // Write this comm's queued records before its summary line. Re-kick on every
   // wakeup: another comm's collective may have held the window open.
+  if (g.strict && !st->finalBoundaryDone) {
+    for (struct acclNetJob* j = g.head; j; j = j->next) if (j->st == st) j->unavailable = 1;
+  }
   uint64_t deadline = acclNetNowUs() + 2 * g.waitUs + 500000;
   while (st->queued > 0) {
     if (g.head && !g.readPending) acclNetRequestReadLocked();

@@ -283,6 +283,9 @@ ncclResult_t ncclProfilerStopCollApiEvent(void) {
   return ncclSuccess;
 }
 
+ncclResult_t ncclProfilerAcclNotify(struct ncclComm*, int64_t, void*, void*) { return ncclSuccess; }
+ncclResult_t ncclProfilerAcclFinalizeBoundary(struct ncclComm*) { return ncclSuccess; }
+
 ncclResult_t ncclProfilerStartKernelLaunchEvent(struct ncclKernelPlan* plan, cudaStream_t stream) {
   (void)plan;
   (void)stream;

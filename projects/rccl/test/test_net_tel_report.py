@@ -26,6 +26,7 @@ def _rec(sn, rank=0, size=S, exec_us=100.0, overlapped=False, unavailable=False,
         counters.update(rdma or {})
         rec["net_counters"] = {
             "overlapped": overlapped, "unavailable": unavailable,
+            "completion_verified": True, "coordinated": True,
             "before_ts_us": 1000 * sn, "after_ts_us": 1000 * sn + 600,
             "after_read_us": 1400, "launch_wait_us": launch_wait_us,
             "devices": [{"name": "rdma0", "rdma": None if unavailable else counters,
@@ -45,6 +46,8 @@ KEY = ("0xabc", "AllReduce", S)
 
 
 def _verdict(tmp_path, lines):
+    # Single-rank fixtures must declare a single-rank communicator.
+    lines = [json.dumps({**json.loads(line), 'header': {**json.loads(line)['header'], 'n_ranks': 1}}) for line in lines]
     recs, _ = load([_write(tmp_path, lines)], warmup=0)
     return verdicts(recs)[KEY]
 
@@ -138,7 +141,7 @@ def test_never_usable_rank_is_inconclusive(tmp_path):
 def test_unlisted_counters_are_shown_not_judged(tmp_path):
     v = _verdict(tmp_path, [_rec(i, rdma={"req_rx_dup_response": 5,
                                           "tx_rdma_ccl_cts_pkts": 9}) for i in range(3)])
-    assert v.verdict == "CLEAN"
+    assert v.verdict == "INCONCLUSIVE"
     assert v.other == {"req_rx_dup_response": (15, 3, [0])}
 
 
@@ -149,8 +152,8 @@ def test_records_without_net_counters_are_counted(tmp_path):
 
 
 def test_comms_are_judged_separately(tmp_path):
-    a = _write(tmp_path, [_rec(i) for i in range(3)], comm="0x1")
-    b = _write(tmp_path, [_rec(i, rdma={"tx_rdma_retx_pkts": 1}) for i in range(3)], comm="0x2")
+    a = _write(tmp_path, [_rec(i, n_ranks=1) for i in range(3)], comm="0x1")
+    b = _write(tmp_path, [_rec(i, n_ranks=1, rdma={"tx_rdma_retx_pkts": 1}) for i in range(3)], comm="0x2")
     recs, _ = load([a, b], warmup=0)
     vs = verdicts(recs)
     assert vs[("0x1", "AllReduce", S)].verdict == "CLEAN"
@@ -225,7 +228,7 @@ def test_trace_has_windows_reads_and_counters(tmp_path):
     assert windows[1]["args"]["tx_rdma_retx_pkts"] == 2
     assert windows[0]["ts"] == 0 and windows[0]["dur"] == 600
     assert sum(1 for e in ev if e.get("cat") == "read") == 2
-    assert any(e["ph"] == "M" and e["args"]["name"] == "nodeA" for e in ev)
+    assert any(e["ph"] == "M" and e["args"]["name"].startswith("nodeA") for e in ev)
     assert all(e["ph"] != "C" or "tx_MB" in e["args"] for e in ev)
     assert windows[0]["args"]["exec_corrected_us"] == 100.0
 
@@ -235,7 +238,7 @@ def test_trace_keeps_comms_on_separate_threads(tmp_path):
     b = _write(tmp_path, [_rec(0, n_ranks=1)], comm="0x2")
     recs, _ = load([a, b], warmup=0)
     ev = build_trace(recs)["traceEvents"]
-    tids = {e["tid"] for e in ev if e["ph"] == "X"}
+    tids = {e["tid"] for e in ev if e["ph"] == "X" and e.get("cat") != "read"}
     assert len(tids) == 2
 
 
@@ -328,3 +331,71 @@ def test_bad_lines_and_foreign_files_are_tolerated(tmp_path):
     p.write_text("not json\n" + _rec(0, n_ranks=1) + "\n")
     recs, _ = load([str(p)], warmup=0)
     assert len(recs) == 1 and recs[0].host == "?"
+
+
+def test_missing_rank_file_cannot_be_clean(tmp_path):
+    path = _write(tmp_path, [_rec(i, rank=0, n_ranks=2) for i in range(3)])
+    rs, _ = load([path], warmup=0)
+    v = verdicts(rs)[KEY]
+    assert v.verdict == 'INCONCLUSIVE'
+    assert 'rank(s) 1' in v.reason
+
+
+def test_rank_without_counters_cannot_be_clean(tmp_path):
+    a = _write(tmp_path, [_rec(i, rank=0) for i in range(3)])
+    b = _write(tmp_path, [_rec(i, rank=1, net=False) for i in range(3)], rank=1)
+    rs, _ = load([a, b], warmup=0)
+    assert verdicts(rs)[KEY].verdict == 'INCONCLUSIVE'
+
+
+def test_raw_snapshots_are_deduplicated_and_activity_is_separate(tmp_path):
+    lines = []
+    for i in range(3):
+        r = json.loads(_rec(i, n_ranks=1))
+        n = r['net_counters']
+        n.update(completion_verified=True, coordinated=True,
+                 collective_start_cpu_us=1000*i+150, collective_complete_cpu_us=1000*i+500,
+                 snapshot_before={'id': i, 'read_start_us': 1000*i, 'read_end_us': 1000*i+100},
+                 snapshot_after={'id': i+1, 'read_start_us': 1000*(i+1), 'read_end_us': 1000*(i+1)+100})
+        lines.append(json.dumps(r))
+    rs, _ = load([_write(tmp_path, lines)], warmup=0)
+    es = build_trace(rs)['traceEvents']
+    reads = [e for e in es if e.get('cat') == 'read']
+    activity = [e for e in es if e.get('cat') == 'collective']
+    windows = [e for e in es if e.get('cat') == 'window']
+    assert len(reads) == 4 and len(activity) == len(windows) == 3
+    assert activity[0]['dur'] == 350 and windows[0]['dur'] == 900
+    assert activity[0]['tid'] != windows[0]['tid'] != reads[0]['tid']
+    assert activity[0]['args']['all_ranks_coordinated'] is True
+
+
+def test_discontinuous_counter_window_is_not_usable(tmp_path):
+    lines = []
+    for i in range(3):
+        r = json.loads(_rec(i, n_ranks=1))
+        r['net_counters']['counter_discontinuities'] = ['rdma0/resp_rx_outouf_seq']
+        lines.append(json.dumps(r))
+    rs, _ = load([_write(tmp_path, lines)], warmup=0)
+    assert verdicts(rs)[KEY].verdict == 'INCONCLUSIVE'
+    assert not any(e['ph'] == 'C' for e in build_trace(rs)['traceEvents'])
+
+
+def test_uncoordinated_windows_cannot_be_clean(tmp_path):
+    lines = []
+    for i in range(3):
+        r = json.loads(_rec(i, n_ranks=1))
+        r['net_counters']['coordinated'] = False
+        lines.append(json.dumps(r))
+    rs, _ = load([_write(tmp_path, lines)], warmup=0)
+    assert verdicts(rs)[KEY].verdict == 'INCONCLUSIVE'
+
+
+def test_legacy_windows_without_completion_proof_cannot_be_clean(tmp_path):
+    lines = []
+    for i in range(3):
+        r = json.loads(_rec(i, n_ranks=1))
+        r['net_counters'].pop('completion_verified')
+        r['net_counters'].pop('coordinated')
+        lines.append(json.dumps(r))
+    rs, _ = load([_write(tmp_path, lines)], warmup=0)
+    assert verdicts(rs)[KEY].verdict == 'INCONCLUSIVE'
