@@ -85,15 +85,14 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
     return (size_t)r * chunkSlices * (size_t)kDdaLL128DataBytesPerSlice;
   };
 
-  // Fan-out: 0 or >= nPeers means full fan-out (original behavior).
+  // Fan-out: 0 or >= nPeers means full fan-out
   const int kFanOut = (fanOut <= 0 || fanOut >= nPeers) ? nPeers : fanOut;
   const int nFanRounds = (nPeers + kFanOut - 1) / kFanOut;
 
   if (isRoot) {
-    // O8: scatter chunk[col] to peer (nPeers chunks, no root chunk).
-    // Root Phase 2 eliminated — no gather push needed.
+    // scatter chunk[col] to peer (nPeers chunks, no root chunk).
+    // no gather push needed.
     // Recvbuff write fused: each column writes chunk[col] to recvbuff.
-    // 3 columns x 21.3 MB = 64 MB = full message. No Phase 3 needed.
     uint64_t* scatterDst = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords;
     for (size_t s = gwarp; s < chunkSlices; s += wstride) {
       const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
@@ -110,15 +109,10 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
         ddaLL128StoreRegs<int8_t>(recvbuff + dOff, regs, elt, lane, flagLane);
     }
 
-    // Phase 3: eliminated (O8+O9: recvbuff fully written in Phase 1) — recvbuff writes fused into Phase 1+2 above.
-    // (sendbuff data was already in registers after LoadRegs; StoreRegs
-    //  writes it to recvbuff without re-reading sendbuff.)
-    // Phase 3: ELIMINATED (O8+O9: recvbuff fully written in Phase 1) (recvbuff writes fused into Phase 1+2 above)
-    // Root writes chunk[peer] to recvbuff in Phase 1 (all columns, no redundancy)
-    // and chunk[root] to recvbuff in Phase 2 (col==0 only, avoids 3x redundancy).
 
-        // Phase 4: wait for every peer's allgather contribution.
-    // Q5: non-roots forward only 1 padding slice to the root (see Phase 1).
+
+    // wait for every peer's allgather contribution.
+    // non-roots forward only 1 padding slice to the root (see Phase 1).
     // The root uses its own sendbuff, so only 1 slice per peer is needed here.
     const uint64_t* myScratch = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]);
     const uint64_t* myGather = myScratch + gatherOff + (uint64_t)peer * slotWireWords;
@@ -131,9 +125,9 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
     // --- NON-ROOT ---
 
     // Phase 1: poll scatter slot, forward to gather slots -- fan-out limited.
-    // D6 recvbuff write happens in round 0 only.
+    // recvbuff write happens in round 0 only.
     const uint64_t* myScatter = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords;
-    // O8: chunk index for this non-root (0..nPeers-1, skipping root)
+    // chunk index for this non-root (0..nPeers-1, skipping root)
     const int selfCol = selfRank < root ? selfRank : selfRank - 1;
     bool aborted = false;
     for (int fRound = 0; fRound < nFanRounds && !aborted; ++fRound) {
@@ -159,7 +153,7 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
           aborted = true;
           break;
         }
-        // Q5/O1: for the root peer, only forward 1 padding slice (s==0).
+        // for the root peer, only forward 1 padding slice (s==0).
         if (tgtPeer != root || s == 0) {
           ddaLL128StoreWire(tgtGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
                             vr, flag, flagLane);
@@ -175,7 +169,7 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
     }
 
     // Phase 2: gather -- poll own gather slot[peer], unpack into recvbuff.
-    // O8: skip for root column (root has no chunk in the allgather).
+    // skip for root column (root has no chunk in the allgather).
     if (peer != root) {
     const uint64_t* myGather = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) +
       gatherOff + (uint64_t)peer * slotWireWords;
