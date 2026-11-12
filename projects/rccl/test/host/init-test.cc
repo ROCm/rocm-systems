@@ -124,6 +124,8 @@ static int g_trRingChannelsInstalled = -1;
 
 // INIT_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/init.cc -- NOT init_tmp.cc, which shares the basename.
 #include INIT_CC_PATH
+// Above the #undefs, so the cpuset parsers' free() goes through the same g_microFree seam as the UUT's.
+#include "cpuset.h"
 
 #undef malloc  // scoped to the UUT: leaving it defined would silently reroute every malloc() in the tests below
 #undef free
@@ -152,28 +154,7 @@ extern "C" const char* __asan_default_options() {
 }
 
 // Must stay below #undef malloc/#undef free, or these bodies are rewritten into the UUT's seams.
-static const void* g_deleteWatchPtr = nullptr;
-static int g_deleteWatchHits = 0;
-
-static void MicroOperatorDelete(void* p) noexcept {
-  if (p != nullptr && p == g_deleteWatchPtr) ++g_deleteWatchHits;
-  std::free(p);
-}
-// Replaced as a matched pair and in every form: `delete p` emits the SIZED overload, so void* alone counts nothing.
-void* operator new(std::size_t n) {
-  void* p = std::malloc(n != 0 ? n : 1);
-  if (p == nullptr) throw std::bad_alloc();
-  return p;
-}
-void* operator new[](std::size_t n) { return ::operator new(n); }
-void* operator new(std::size_t n, const std::nothrow_t&) noexcept { return std::malloc(n != 0 ? n : 1); }
-void* operator new[](std::size_t n, const std::nothrow_t&) noexcept { return std::malloc(n != 0 ? n : 1); }
-void operator delete(void* p) noexcept { MicroOperatorDelete(p); }
-void operator delete[](void* p) noexcept { MicroOperatorDelete(p); }
-void operator delete(void* p, std::size_t) noexcept { MicroOperatorDelete(p); }
-void operator delete[](void* p, std::size_t) noexcept { MicroOperatorDelete(p); }
-void operator delete(void* p, const std::nothrow_t&) noexcept { MicroOperatorDelete(p); }
-void operator delete[](void* p, const std::nothrow_t&) noexcept { MicroOperatorDelete(p); }
+#include "WatchedDelete.h"
 
 class DeleteWatch {
  public:
@@ -1128,6 +1109,50 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_CalledTwice_AccumulatesAcrossCalls) {
   SetMicroEnv("NCCL_CTA_POLICY", "ZERO");
   getEnvCtaPolicyOnce();  // deliberately NOT reset in between
   EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO, ctaPolicyEnv);
+}
+
+namespace {
+// strtok() has one process-wide save pointer (NCCL 2.32.3, NVIDIA/nccl#2361): a parser calling it on another thread
+// moves this thread's position into the parser's string. Runs `parse` on a second thread while this thread is
+// between strtok() calls on "a,b" and returns this thread's next token. The parser's free() is deferred so that a
+// clobbered save pointer still points into live memory.
+std::string NextTokenAcrossConcurrentParse(const std::function<void()>& parse) {
+  char buf[] = "a,b";
+  std::vector<void*> deferred;
+  const char* next = nullptr;
+  {
+    ScopedHook microFree(g_microFree, [&](void* p) { deferred.push_back(p); });
+    EXPECT_STREQ("a", strtok(buf, ","));
+    std::thread(parse).join();
+    next = strtok(nullptr, ",");
+    EXPECT_GT(microFree.calls, 0) << "the parser's free() bypassed the deferral, so a clobbered pointer would dangle";
+  }
+  std::string result = next ? next : "(null)";
+  for (void* p : deferred) std::free(p);
+  return result;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, GetEnvCtaPolicy_ConcurrentParse_KeepsCallerStrtokState) {
+  SetMicroEnv("NCCL_CTA_POLICY", "EFFICIENCY|ZERO");
+  EXPECT_EQ("b", NextTokenAcrossConcurrentParse([] { getEnvCtaPolicyOnce(); }));
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY | NCCL_CTA_POLICY_ZERO, ctaPolicyEnv);
+}
+
+TEST_F(InitMicrotest, StrToCpuset_ConcurrentParse_KeepsCallerStrtokState) {
+  ncclAffinity set;
+  EXPECT_EQ("b", NextTokenAcrossConcurrentParse([&] { EXPECT_EQ(ncclSuccess, ncclStrToCpuset("1,3", &set)); }));
+  // Most significant 32-bit word first: "1,3" is CPU 32 plus CPUs 0 and 1.
+  EXPECT_EQ(3, CPU_COUNT(&set));
+  EXPECT_TRUE(CPU_ISSET(0, &set) && CPU_ISSET(1, &set) && CPU_ISSET(32, &set));
+}
+
+TEST_F(InitMicrotest, StrListToCpuset_ConcurrentParse_KeepsCallerStrtokState) {
+  ncclAffinity set;
+  EXPECT_EQ("b", NextTokenAcrossConcurrentParse([&] { EXPECT_EQ(ncclSuccess, ncclStrListToCpuset("1,3", &set)); }));
+  // A decimal CPU list, not a mask: the same "1,3" ncclStrToCpuset reads as a bitmask is just CPUs 1 and 3.
+  EXPECT_EQ(2, CPU_COUNT(&set));
+  EXPECT_TRUE(CPU_ISSET(1, &set) && CPU_ISSET(3, &set));
 }
 
 // A fresh NCCL_CONFIG_INITIALIZER passes every arm; each test perturbs exactly one field.
@@ -5200,7 +5225,44 @@ TEST_F(InitMicrotestIsolated, NcclInit_NumaBalancingOffAndIommuPassthrough_Warns
         ASSERT_TRUE(LogHas(log, "Kernel version: 6.8.0-microtest")) << "actual log:\n" << log;
         ASSERT_FALSE(LogHas(log, Dtor_kNumaBalancingWarning)) << "actual log:\n" << log;
         ASSERT_FALSE(LogHas(log, Dtor_kIommuWarning)) << "actual log:\n" << log;
-        // Anchors the iommu leg: the probe sits inside the non-cray block (init.cc:310-336), the INFO above does not.
+        // Anchors the iommu leg: the probe sits inside the non-cray block, the INFO above does not.
+        ASSERT_EQ(1, iommu.calls);
+      });
+}
+
+// An empty read used to reach strstr(NULL, "cray"). The check runs before call_once, so a later
+// ncclInit() in the same process can still succeed once the read works.
+TEST_F(InitMicrotestIsolated, NcclInit_UnreadableKernelVersion_ReturnsSystemError) {
+  RUN_ISOLATED_TEST(
+      "Init_NcclInit_UnreadableKernelVersion",
+      []() {
+        ncclResult_t res = ncclSuccess;
+        std::string log;
+        ScopedHook cpuid(g_microCpuid, CpuidWithoutHypervisorBit);
+        ScopedHook iommu(g_microIommuPassthroughOk, [](const char*) { return false; });
+        {
+          ScopedHook sysText(g_microTopoGetStrFromSys,
+                             [](const char*, const char* file, char* out, int maxLen) {
+                               if (!out || maxLen <= 0) return ncclSuccess;
+                               if (file && std::strcmp(file, "version") == 0) {
+                                 out[0] = '\0';
+                                 return ncclSuccess;
+                               }
+                               return SysFileText(file, "0", out, maxLen);
+                             });
+          log = RcclUnitTesting::CaptureLog([&] { res = ncclInit(); });
+          ASSERT_EQ(ncclSystemError, res);
+          ASSERT_TRUE(LogHas(log, "Could not read kernel version from /proc/version")) << "actual log:\n" << log;
+          ASSERT_EQ(0, iommu.calls);
+        }
+        // The empty-version hook is gone. This second call pins that the early return left
+        // initOnceFlag unlatched, so a later ncclInit() can still initialise. cpuid and iommu
+        // stay hooked so this call does not depend on the host.
+        ScopedHook sysText(g_microTopoGetStrFromSys,
+                           [](const char*, const char* file, char* out, int maxLen) {
+                             return SysFileText(file, "0", out, maxLen);
+                           });
+        ASSERT_EQ(ncclSuccess, ncclInit());
         ASSERT_EQ(1, iommu.calls);
       });
 }
@@ -5302,6 +5364,84 @@ TEST_F(InitMicrotest, ParseCommConfig_ZeroMinCTAsBelowMaxCTAs_IsRejectedAtTheBou
         c.maxCTAs = ParseCfg_kAmpleMaxCTAs;
       },
       warning.c_str());
+}
+
+// --- minCTAs / maxCTAs set one at a time (NVIDIA/nccl#2256): the unset field is
+// NCCL_CONFIG_UNDEF_INT (INT_MIN) and must neither take part in the min > max
+// comparison nor fail the <= 0 check; it falls back to its default instead. ---
+
+namespace {
+// The warning prints the unset field as NCCL_CONFIG_UNDEF_INT.
+std::string ParseCfg_CtaWarning(int minCTAs, int maxCTAs) {
+  return "Invalid config min/max channels attribute value " + std::to_string(minCTAs) + "/" +
+         std::to_string(maxCTAs);
+}
+}  // namespace
+
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMinCTAs_IsAcceptedAndMaxDefaultsToMaxChannels) {
+  for (const int minCTAs : {1, 4, 32, MAXCHANNELS}) {
+    ParseCfg_Scene s;
+    s.config().minCTAs = minCTAs;
+    EXPECT_EQ(ncclSuccess, s.Run()) << "minCTAs=" << minCTAs;
+    EXPECT_EQ(minCTAs, s.result_config().minCTAs);
+    EXPECT_EQ(MAXCHANNELS, s.result_config().maxCTAs) << "minCTAs=" << minCTAs;
+  }
+}
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMaxCTAs_IsAcceptedAndMinDefaultsToOne) {
+  for (const int maxCTAs : {1, 2, 16, MAXCHANNELS}) {
+    ParseCfg_Scene s;
+    s.config().maxCTAs = maxCTAs;
+    EXPECT_EQ(ncclSuccess, s.Run()) << "maxCTAs=" << maxCTAs;
+    EXPECT_EQ(1, s.result_config().minCTAs) << "maxCTAs=" << maxCTAs;
+    EXPECT_EQ(maxCTAs, s.result_config().maxCTAs);
+  }
+}
+TEST_F(InitMicrotest, ParseCommConfig_EqualMinAndMaxCTAs_IsAcceptedAndAssigned) {
+  ParseCfg_Scene s;
+  s.config().minCTAs = 8;
+  s.config().maxCTAs = 8;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(8, s.result_config().minCTAs);
+  EXPECT_EQ(8, s.result_config().maxCTAs);
+}
+// The range check does not bound minCTAs by the channel limit; the envConfigOverride
+// call at the end of parseCommConfig caps it instead of rejecting the config.
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMinCTAsAboveChannelLimit_IsAcceptedAndCapped) {
+  ConfigComm c;
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.minCTAs = MAXCHANNELS + 1;
+  const std::string log = CaptureInfoLog([&] { c.RunParse(&cfg); });
+  ASSERT_EQ(ncclSuccess, c.result()) << "actual log:\n" << log;
+  EXPECT_EQ(MAXCHANNELS, c.config().minCTAs);
+  EXPECT_EQ(MAXCHANNELS, c.config().maxCTAs);
+  const std::string capped = "minCTAs " + std::to_string(MAXCHANNELS + 1) + " is larger than #channels upper limit";
+  EXPECT_TRUE(LogHas(log, capped.c_str())) << "actual log:\n" << log;
+  // The min > max clamp would also end at MAXCHANNELS/MAXCHANNELS; it must not be the branch taken.
+  EXPECT_FALSE(LogHas(log, "is larger than maxCTAs")) << "actual log:\n" << log;
+}
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMinCTAsZero_IsRejected) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.minCTAs = 0; },
+                          ParseCfg_CtaWarning(0, NCCL_CONFIG_UNDEF_INT).c_str());
+}
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMinCTAsNegative_IsRejected) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.minCTAs = -4; },
+                          ParseCfg_CtaWarning(-4, NCCL_CONFIG_UNDEF_INT).c_str());
+}
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMaxCTAsZero_IsRejected) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.maxCTAs = 0; },
+                          ParseCfg_CtaWarning(NCCL_CONFIG_UNDEF_INT, 0).c_str());
+}
+TEST_F(InitMicrotest, ParseCommConfig_OnlyMaxCTAsNegative_IsRejected) {
+  ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.maxCTAs = -4; },
+                          ParseCfg_CtaWarning(NCCL_CONFIG_UNDEF_INT, -4).c_str());
+}
+TEST_F(InitMicrotest, ParseCommConfig_ZeroMaxCTAsWithMinCTAsSet_IsRejected) {
+  ParseCfg_ExpectRejected(
+      [](ncclConfig_t& c) {
+        c.minCTAs = 2;
+        c.maxCTAs = 0;
+      },
+      ParseCfg_CtaWarning(2, 0).c_str());
 }
 TEST_F(InitMicrotest, ParseCommConfig_ZeroNvlsCTAs_IsRejectedAtTheBoundary) {
   ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.nvlsCTAs = 0; },

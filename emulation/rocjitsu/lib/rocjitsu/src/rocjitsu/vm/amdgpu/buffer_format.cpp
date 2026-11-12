@@ -423,7 +423,15 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
                            : BufferStoreMissingChannel::Zero;
   RegisterAccess regs(wf);
   const uint32_t registers = d.buffer_d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
-  auto data = regs.read_vgpr_region(data_base, registers, d.lane_mask);
+  const bool half_tail = d.buffer_d16 && (d.buffer_components & 1u);
+  const uint8_t tail_mask = d.d16_hi ? 0xc : 0x3;
+  // A tuple crossing the wave's VGPR block must read as zero without observing its prefix.
+  const bool split = half_tail && registers > 1 && regs.owns_vgpr_range(data_base, registers);
+  auto data = regs.read_vgpr_region(data_base, registers - split, d.lane_mask,
+                                    half_tail && registers == 1 ? tail_mask : 0xf);
+  std::optional<RegisterAccess::VgprReadRegion> tail;
+  if (split)
+    tail.emplace(regs.read_vgpr_region(data_base + registers - 1, 1, d.lane_mask, tail_mask));
   const auto &format = d.decoded_buffer_format;
   const fp_mode::detail::ScopedFenv environment(0);
   d.store_data.resize(d.wf_size * d.elem_size);
@@ -443,7 +451,9 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
         continue;
       }
       const uint32_t shift = d.d16_hi ? 16 : (i % 2) * 16;
-      const uint16_t half = data.lane(i / 2, lane) >> shift;
+      const uint32_t word =
+          tail && i / 2 == registers - 1 ? tail->lane(0, lane) : data.lane(i / 2, lane);
+      const uint16_t half = word >> shift;
       components[shader_component] =
           integer(format.number)
               ? format.number == Number::Sint

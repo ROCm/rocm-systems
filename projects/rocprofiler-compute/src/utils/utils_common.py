@@ -47,6 +47,8 @@ from vendored import yaml
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
+# Block 4 and its alias; ids such as 4.1 are roofline metrics
+ROOFLINE_BLOCK_IDS = ("4", "roof")
 PROFILE_OUTPUT_FORMAT = "rocpd"
 # Profile names the native tool's per-pid CSVs <prefix>_<fbase>_<pid>.csv.gz
 # in the workload directory, and analyze reads them back by these prefixes.
@@ -894,6 +896,14 @@ def parse_pmc_perf(pmc_perf_file: str) -> List[str]:
     return jobs[0].get("pmc") or []
 
 
+def selects_roofline(filter_blocks: Optional[List[str]]) -> bool:
+    """Return True if nothing is selected (everything) or a block is 4, 4.x or roof."""
+    return not filter_blocks or any(
+        str(block) in ROOFLINE_BLOCK_IDS or str(block).startswith("4.")
+        for block in filter_blocks
+    )
+
+
 def is_only_pc_sampling(filter_blocks: List[str]) -> bool:
     """Return True if all requested blocks are PC sampling (block 21 or the
     ``pc_sampling`` alias)."""
@@ -1053,6 +1063,13 @@ def build_metric_details(
 def format_table_id(config_id: int) -> str:
     """Return the "block.table" id of a table config id, e.g. 1802 -> "18.2"."""
     return f"{config_id // 100}.{config_id % 100}"
+
+
+def metric_ids_by_name(data_config: Dict[str, Any]) -> Dict[str, str]:
+    """Map each metric name of a metric_table config to its "block.table.index" id."""
+    table_id = format_table_id(data_config["id"])
+    metrics = data_config.get("metric") or {}
+    return {name: f"{table_id}.{index}" for index, name in enumerate(metrics)}
 
 
 def resolve_block_token(token: str, alias_map: Dict[str, str]) -> Optional[str]:
@@ -1612,16 +1629,16 @@ def _iter_metric_table_rows(
     if block_id != "0":
         yield block_id, (panel["title"], "", "")
 
-    table_id = format_table_id(data_config["id"])
-    yield table_id, (data_config["title"], "", "")
+    yield format_table_id(data_config["id"]), (data_config["title"], "", "")
 
     descriptions = panel.get("metrics_description") or {}
-    for index, (name, entries) in enumerate(data_config["metric"].items()):
+    metric_ids = metric_ids_by_name(data_config)
+    for name, entries in data_config["metric"].items():
         if not _metric_has_valid_expr(entries, data_config):
             continue
         unit = entries.get("unit")
         description = " ".join(str(descriptions.get(name) or "").split())
-        yield f"{table_id}.{index}", (name, str(unit or ""), description)
+        yield metric_ids[name], (name, str(unit or ""), description)
 
 
 def _is_same_id_branch(metric_id: str, selected_id: str) -> bool:

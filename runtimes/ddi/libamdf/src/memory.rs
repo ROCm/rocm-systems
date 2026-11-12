@@ -373,6 +373,19 @@ struct Mapping {
     maintenance: Option<CacheMaintenance>,
 }
 
+impl Mapping {
+    /// A live mapping borrows its parent and instance under the C contract.
+    ///
+    /// # Safety
+    /// The caller holds a live public mapping handle.
+    unsafe fn instance(&self) -> &Instance {
+        match self.owner {
+            MappingOwner::Memory(memory) => unsafe { &*(*(*memory).scope).instance },
+            MappingOwner::Reservation(reservation) => unsafe { &*(*reservation).instance },
+        }
+    }
+}
+
 fn rounded(value: u64, granularity: u64) -> Result<u64, u64> {
     value
         .checked_add(granularity - 1)
@@ -1090,7 +1103,7 @@ pub(crate) unsafe extern "C" fn create(
         let accesses = unsafe { array(create.accesses, create.access_count) }?;
         // SAFETY: The live scope borrows its parent instance.
         let instance = unsafe { object(scope.instance) }?;
-        if instance.closing || instance.process_id != std::process::id() {
+        if instance.closing || !instance.native.is_current_process() {
             return Err(PRECONDITION);
         }
         if !unique_devices(accesses) {
@@ -1580,6 +1593,7 @@ pub(crate) unsafe extern "C" fn map(
 ) -> u64 {
     crate::support::boundary(|| unsafe {
         let memory = object(pointer.cast::<Memory>())?;
+        (*(*memory.scope).instance).require_current_process()?;
         output_pointer(out)?;
         let map = input(info, AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO)?;
         if map.byte_length == 0 || map.flags == 0 || map.flags & !3 != 0 {
@@ -1715,6 +1729,7 @@ pub(crate) unsafe extern "C" fn cache_control(
 ) -> u64 {
     crate::support::boundary(|| unsafe {
         let mapping = object(pointer.cast::<Mapping>())?;
+        mapping.instance().require_current_process()?;
         if operation != AMDF_HOST_CACHE_OPERATION_FLUSH
             && operation != AMDF_HOST_CACHE_OPERATION_INVALIDATE
         {
@@ -1754,6 +1769,7 @@ pub(crate) unsafe extern "C" fn cache_control(
 pub(crate) unsafe extern "C" fn unmap(pointer: *mut amdf_host_mapping_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let mapping = object(pointer.cast::<Mapping>())?;
+        mapping.instance().require_current_process()?;
         match mapping.owner {
             MappingOwner::Memory(memory) => unregister(&(*memory).children),
             MappingOwner::Reservation(reservation) => unregister(&(*reservation).children),
@@ -1779,12 +1795,13 @@ pub(crate) unsafe extern "C" fn destroy(
             // arguments, which remain the caller's synchronization duty.
             let pointer = pointer.cast::<Memory>();
             output_pointer(pointer)?;
+            let instance = &*(*(*pointer).scope).instance;
+            instance.require_current_process()?;
             // Alias registration can discover this backing through the
             // instance list without holding its public handle. Remove it
             // under the list lock before creating an exclusive Rust borrow.
             // A registered child keeps the source linked and returns BUSY.
             if (*pointer).listed_host_backing {
-                let instance = &*(*(*pointer).scope).instance;
                 unlink_host_backing(instance, pointer)?;
             }
             let memory = object(pointer)?;
@@ -1980,6 +1997,7 @@ pub(crate) unsafe extern "C" fn import(
             return Err(INVALID);
         }
         let instance = &*scope.instance;
+        instance.require_current_process()?;
         if instance.closing {
             return Err(PRECONDITION);
         }
@@ -2151,6 +2169,7 @@ pub(crate) unsafe extern "C" fn export(
 ) -> u64 {
     crate::support::boundary(|| unsafe {
         let memory = object(pointer.cast::<Memory>())?;
+        (*(*memory.scope).instance).require_current_process()?;
         let export = input(info, AMDF_STRUCTURE_TYPE_MEMORY_EXPORT_INFO)?;
         output_pointer(out)?;
         if export.reserved != 0

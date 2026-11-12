@@ -1872,8 +1872,8 @@ TEST(WaveMaskOperandDecodeTest, Gfx1250Vop3CompareDestinationIsWaveMask) {
 }
 
 // The gfx1250 VOPD3 decoder declares a v_dual_cndmask_b32 selector, in either
-// slot, as a 64-bit SGPR operand. Only that selector is marked, not the other
-// slot's src2.
+// slot, as one SGPR, the Wave32 lane-mask width. Only that selector is marked,
+// not the other slot's src2.
 TEST(WaveMaskOperandDecodeTest, Gfx1250VopdCndmaskSelectorIsWaveMask) {
   constexpr uint32_t kCndmask = 9;
   constexpr uint32_t kFmac = 0;
@@ -1898,8 +1898,7 @@ TEST(WaveMaskOperandDecodeTest, Gfx1250VopdCndmaskSelectorIsWaveMask) {
       ++marked;
       const std::optional<RegisterRef> ref = op->to_register_ref();
       ASSERT_TRUE(ref.has_value());
-      EXPECT_EQ(ref->cls, RegClass::SGPR);
-      EXPECT_EQ(ref->index, 8u);
+      EXPECT_EQ(*ref, (RegisterRef{RegClass::SGPR, 8, 1}));
     }
     EXPECT_EQ(marked, 1);
   }

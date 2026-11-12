@@ -1442,13 +1442,18 @@ protected:
   void fail_wave_instruction(Wavefront &wf, std::string_view instruction, uint64_t pc,
                              InstructionExecutionError error, std::string_view failure_detail = {});
   struct NoAsyncWindow {};
+  /// The async issue window, or an empty placeholder when async issue is off.
+  template <bool EnableAsync>
+  using MaybeAsyncWindow = std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow>;
+  /// Storage for the async issue window, or an empty placeholder.
+  template <bool EnableAsync>
+  using MaybeAsyncWindowStorage =
+      std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow>;
   /// @brief Share ordinary instruction execution with the optional scoreboard adapter.
   /// @returns Whether an instruction issued, as for issue_instruction().
   template <bool EnableAsync>
-  IssueOutcome issue_instruction_impl(
-      Wavefront *wf,
-      std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window = {},
-      std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage = {});
+  IssueOutcome issue_instruction_impl(Wavefront *wf, MaybeAsyncWindow<EnableAsync> window = {},
+                                      MaybeAsyncWindowStorage<EnableAsync> storage = {});
   /// @brief Advance CU scheduling with compile-time selection of the issue adapter.
   /// @param selected_slots Slots whose running wave may issue; every slot by default.
   /// @param issued If set, receives the selected slots that issued an instruction.
@@ -1738,7 +1743,7 @@ protected:
   };
   std::vector<Wavefront *> complete_barrier(uint32_t dispatch_id, uint32_t wg_id,
                                             uint8_t completion_bit, uint32_t named_barrier_id = 0);
-  void notify_barrier_complete(std::span<Wavefront *> members);
+  void notify_barrier_complete(std::span<Wavefront *> members, uint8_t completion_bit);
   std::unordered_map<uint64_t, WorkgroupBarriers> barrier_wgs_;
 
   /// @brief CU-private fallback GWS store, used when no shared store is injected.
@@ -1773,6 +1778,10 @@ protected:
   bool observes_memory_routing_ = false;
   bool observes_register_access_ = false;
   uint64_t memory_wait_diagnostic_count_ = 0;
+  // Written only when decoding or executing fails and cleared once reported,
+  // so the issue loop does not construct and destroy them per instruction.
+  util::StringDiagnostic decode_error_;
+  std::string execution_failure_detail_;
   std::vector<waitcheck_detail::ClassifiedEvent> memory_wait_classification_;
   uint64_t xcnt_diagnostic_count_ = 0;
   // Reports come only from the CU issuing thread; helpers must not report.

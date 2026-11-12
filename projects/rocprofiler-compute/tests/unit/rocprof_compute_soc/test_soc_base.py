@@ -20,6 +20,7 @@ import yaml
 
 import config
 from rocprof_compute_soc.soc_base import (
+    AnalysisConfigMetric,
     CounterFile,
     LimitedSet,
     OmniSoC_Base,
@@ -107,20 +108,17 @@ CONFIG_ARCHS = sorted(
 
 
 def offline_soc(
-    config_dir: Path,
     gpu_arch: str,
     filter_blocks: List[str],
     membw_analysis: bool,
     set_selected: Optional[str] = None,
 ) -> OmniSoC_Base:
-    """OmniSoC_Base that detects counters from the analysis configs in config_dir
-    without a GPU. With one XCD and one L2 bank, each TCC channel template
-    expands to channel 0 only."""
+    """OmniSoC_Base that detects counters from the analysis configs without a GPU.
+    With one XCD and one L2 bank, each TCC channel template expands to channel 0
+    only."""
     args = SimpleNamespace(
-        config_dir=config_dir,
         filter_blocks=filter_blocks,
         membw_analysis=membw_analysis,
-        roof_only=False,
         set_selected=set_selected,
     )
     machine_specs = SimpleNamespace(
@@ -147,7 +145,7 @@ def gfx1250_perfmon_config():
 
 
 @pytest.fixture
-def membw_analysis_soc(tmp_path: Path) -> OmniSoC_Base:
+def membw_analysis_soc(tmp_path: Path, monkeypatch) -> OmniSoC_Base:
     baseline_analysis_config = f"""\
 Panel Config:
   id: 200
@@ -193,7 +191,8 @@ Panel Config:
         encoding="utf-8",
     )
 
-    return offline_soc(tmp_path, "gfx950", [], membw_analysis=False)
+    monkeypatch.setattr(config, "analysis_configs_dir", tmp_path)
+    return offline_soc("gfx950", [], membw_analysis=False)
 
 
 def _make_soc(perfmon_config, arch="gfx908", num_xcd=1, l2_banks=4):
@@ -204,7 +203,6 @@ def _make_soc(perfmon_config, arch="gfx908", num_xcd=1, l2_banks=4):
     mspec.l2_banks = l2_banks
 
     args = MagicMock()
-    args.config_dir = "/dev/null"
 
     with patch("rocprof_compute_soc.soc_base.console_debug"):
         soc = OmniSoC_Base(args, mspec)
@@ -232,7 +230,15 @@ def apply_cp_util_priority_patches(soc: OmniSoC_Base, patch_stack: ExitStack) ->
             soc,
             "_iter_arch_analysis_yaml_metrics",
             return_value=iter([
-                ("1700", 1701, 1, "CP Utilization", CP_UTIL_METRIC_EXPRESSIONS)
+                AnalysisConfigMetric(
+                    "1700",
+                    1701,
+                    1,
+                    "CP Utilization",
+                    CP_UTIL_METRIC_EXPRESSIONS,
+                    table={},
+                    metric={},
+                )
             ]),
         )
     )
@@ -802,7 +808,7 @@ def test_detect_counters_reads_only_metric_expressions(
 ) -> None:
     """Comments, titles, descriptions and metric names add no counters,
     whichever way the metric is selected."""
-    config_root = Path(membw_analysis_soc.get_args().config_dir) / "gfx950"
+    config_root = config.analysis_configs_dir / "gfx950"
     (config_root / "0200_baseline.yaml").write_text(
         PROSE_ANALYSIS_CONFIG, encoding="utf-8"
     )
@@ -826,12 +832,12 @@ def test_panel_counters_add_up_to_full_profile(gpu_arch: str) -> None:
     for path in (config_dir / canonical_config_arch(gpu_arch)).glob("*.yaml"):
         file_id = path.name.split("_")[0]
         panel = str(int(file_id) // 100)
-        soc = offline_soc(config_dir, gpu_arch, [panel], membw_analysis=True)
+        soc = offline_soc(gpu_arch, [panel], membw_analysis=True)
         counters_by_file[file_id], _ = soc.detect_counters()
     membw_file = str(MEMBW_ANALYSIS_PANEL_ID)
 
-    default, _ = offline_soc(config_dir, gpu_arch, [], False).detect_counters()
-    membw, _ = offline_soc(config_dir, gpu_arch, [], True).detect_counters()
+    default, _ = offline_soc(gpu_arch, [], False).detect_counters()
+    membw, _ = offline_soc(gpu_arch, [], True).detect_counters()
 
     assert default == set().union(
         *(counters for file, counters in counters_by_file.items() if file != membw_file)
@@ -843,7 +849,6 @@ def test_panel_counters_add_up_to_full_profile(gpu_arch: str) -> None:
 def test_live_attach_set_fits_one_pass_on_each_architecture(gpu_arch: str) -> None:
     """Live attachment cannot replay the workload for additional counter passes."""
     soc = offline_soc(
-        config.analysis_configs_dir,
         gpu_arch,
         [],
         membw_analysis=False,

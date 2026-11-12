@@ -65,7 +65,7 @@ class Workload(Base):
     sys_info_extdata = Column(JSON)
     roofline_bench_extdata = Column(JSON)
     profiling_config_extdata = Column(JSON)
-    # Memory chart layout file, unchanged; see src/memory_chart/README.md
+    # Memory chart layout file with its format version; see src/memory_chart/README.md
     memory_chart_layout_extdata = Column(JSON)
 
     # Workload can have multiple kernels

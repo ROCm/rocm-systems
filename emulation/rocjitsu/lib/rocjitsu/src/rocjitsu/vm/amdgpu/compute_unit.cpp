@@ -21,6 +21,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/instruction.h"
@@ -29,6 +30,7 @@
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/log.h"
 
@@ -696,7 +698,7 @@ bool ComputeUnitCore::barrier_signal(Wavefront &wf, int32_t barrier_id, uint32_t
 
   barrier->signal_count = 0;
   auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), completion_bit, named_id);
-  notify_barrier_complete(members);
+  notify_barrier_complete(members, completion_bit);
   return is_first;
 }
 
@@ -724,10 +726,28 @@ std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id,
   return members;
 }
 
-void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members) {
-  if (!members.empty()) {
-    plugin_group_->onAmdgpuBarrierResolved(members);
+void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members,
+                                              uint8_t completion_bit) {
+  if (members.empty())
+    return;
+  BarrierKind kind;
+  switch (completion_bit) {
+  case kNamedBarrierBit:
+    kind = BarrierKind::Named;
+    break;
+  case kWorkgroupBarrierBit:
+  case kWorkgroupTrapBarrierBit:
+    kind = BarrierKind::Workgroup;
+    break;
+  case kClusterBarrierBit:
+  case kClusterTrapBarrierBit:
+    kind = BarrierKind::Cluster;
+    break;
+  default:
+    assert(false && "unknown barrier completion bit");
+    return;
   }
+  plugin_group_->onAmdgpuBarrierResolved(members, kind);
 }
 
 uint32_t ComputeUnitCore::barrier_state(const Wavefront &wf, int32_t barrier_id) const {
@@ -807,7 +827,7 @@ bool ComputeUnitCore::named_barrier_leave(Wavefront &wf) {
   if (barrier.signal_count >= barrier.member_count) {
     barrier.signal_count = 0;
     auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), kNamedBarrierBit, id);
-    notify_barrier_complete(members);
+    notify_barrier_complete(members, kNamedBarrierBit);
   }
   return barrier.member_count == 0;
 }
@@ -859,7 +879,7 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
         return;
       barrier.signal_count = 0;
       auto members = complete_barrier(dispatch_id, wg_id, completion_bit, joined_id);
-      notify_barrier_complete(members);
+      notify_barrier_complete(members, completion_bit);
     };
 
     retire_member(group->second.workgroup[0], kWorkgroupBarrierBit);
@@ -1418,22 +1438,12 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
           registers[count++] = *reg;
         }
       }
-      const uint8_t bytes =
-          sram_ecc() ? MemoryWaitScoreboard::kFullDwordByteMask : modifiers.memory_result_bytes;
-      const uint8_t tail = sram_ecc() ? MemoryWaitScoreboard::kFullDwordByteMask
-                                      : modifiers.memory_result_last_bytes;
       for (unsigned i = 0; i < count; ++i) {
-        auto reg = registers[i];
+        const auto reg = registers[i];
         const auto lanes = reg.cls == RegClass::VGPR ? vector_lanes : ~uint64_t{0};
-        if (reg.cls != RegClass::VGPR || bytes == tail) {
-          append(reg, lanes,
-                 reg.cls == RegClass::VGPR ? bytes : MemoryWaitScoreboard::kFullDwordByteMask);
-        } else {
-          const RegisterRef last{reg.cls, static_cast<uint16_t>(reg.index + reg.width - 1), 1};
-          if (--reg.width)
-            append(reg, lanes, bytes);
-          append(last, lanes, tail);
-        }
+        for_each_memory_result_range(
+            reg, modifiers, sram_ecc(),
+            [&](RegisterRef range, uint8_t bytes) { append(range, lanes, bytes); });
       }
     }
   }
@@ -1748,7 +1758,7 @@ void ComputeUnitCore::update_wf_states() {
             other_wf->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
           barrier_wfs.push_back(other_wf.get());
       }
-      notify_barrier_complete(barrier_wfs);
+      notify_barrier_complete(barrier_wfs, kWorkgroupBarrierBit);
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
@@ -1840,8 +1850,10 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
   if (async_mma_policy::supported(arch())) {
     uint32_t word;
     const GpuVmAccess *vm_access = active->vm_access();
-    const bool resident = vm_access ? inst_cache_.peek_word(*vm_access, active->pc, word)
-                                    : inst_cache_.peek_word(active->pc, active->process_id(), word);
+    const uint64_t pc =
+        vm_access || active->process_id() ? active->vm_instruction_pc() : active->pc;
+    const bool resident = vm_access ? inst_cache_.peek_word(*vm_access, pc, word)
+                                    : inst_cache_.peek_word(pc, active->process_id(), word);
     if (resident) {
       if (!async_mma_policy::encoding_may_be_candidate(arch(), word)) {
         issue_instruction(active);
@@ -1906,10 +1918,9 @@ constinit thread_local ComputeUnitCore::InstructionVmSnapshot
     *ComputeUnitCore::instruction_vm_snapshot_ = nullptr;
 
 template <bool EnableAsync>
-[[gnu::always_inline]] inline ComputeUnitCore::IssueOutcome ComputeUnitCore::issue_instruction_impl(
-    Wavefront *active,
-    std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window,
-    std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage) {
+[[gnu::always_inline]] inline ComputeUnitCore::IssueOutcome
+ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<EnableAsync> window,
+                                        MaybeAsyncWindowStorage<EnableAsync> storage) {
   uint32_t vmid = active->process_id();
   const auto drain_async_window = [&]() {
     if constexpr (EnableAsync) {
@@ -1964,6 +1975,7 @@ template <bool EnableAsync>
     }
   }
   const bool vm_address_space = vm_access != nullptr;
+  const uint64_t fetch_pc = vm_address_space ? active->vm_instruction_pc() : active->pc;
 
   std::array<rj_code_binary_inst_t, DecodedInstructionCache::kNumWords> words{};
   constexpr uint32_t kFirstFetchBytes = InstructionCache::kFetchBytes;
@@ -1987,7 +1999,7 @@ template <bool EnableAsync>
     }
     return VmAccessOutcome::Complete;
   };
-  VmAccessOutcome fetch_outcome = fetch(active->pc, words.data(), kFirstFetchBytes);
+  VmAccessOutcome fetch_outcome = fetch(fetch_pc, words.data(), kFirstFetchBytes);
   // GFX10 MIMG has a two-bit NSA count at bits 2:1. Only NSA=3 needs
   // a fifth word; shorter instructions must not fetch beyond the normal window.
   constexpr uint32_t kMimgEncodingAndNsaMask = 0xfc000006u;
@@ -1995,7 +2007,7 @@ template <bool EnableAsync>
   if (fetch_outcome == VmAccessOutcome::Complete &&
       (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
       (words[0] & kMimgEncodingAndNsaMask) == kMimgWithThreeNsaWords)
-    fetch_outcome = fetch(active->pc + kFirstFetchBytes, &words.back(), sizeof(words.back()));
+    fetch_outcome = fetch(fetch_pc + kFirstFetchBytes, &words.back(), sizeof(words.back()));
 
   if (fetch_outcome != VmAccessOutcome::Complete) {
     drain_async_window();
@@ -2013,7 +2025,7 @@ template <bool EnableAsync>
       return IssueOutcome::NotIssued;
     }
     if (fetch_outcome == VmAccessOutcome::Faulted && memory_violation_handler_ &&
-        memory_violation_handler_(*active, active->pc, false, active->pc)) {
+        memory_violation_handler_(*active, fetch_pc, false, active->pc)) {
       return IssueOutcome::NotIssued;
     }
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
@@ -2025,10 +2037,9 @@ template <bool EnableAsync>
 
   active->trace_inst_count_++;
 
-  util::StringDiagnostic decode_error;
   const bool reuse_decoded = !debugger_active;
   DecodeResult decoded = decoded_inst_cache_.decode(*decoder_, active->pc, vmid, words,
-                                                    decode_error.emitter(), reuse_decoded);
+                                                    decode_error_.emitter(), reuse_decoded);
   if (decoded.failed()) {
     drain_async_window();
     // Preserve debugger-first handling of illegal instructions. PM4 failures
@@ -2045,14 +2056,14 @@ template <bool EnableAsync>
         "words=[{:#x},{:#x},{:#x},{:#x}]: {}",
         this->name(), active->wf_id(), active->pc, active->process_id(), active->queue_id(),
         active->dispatch_id(), active->wg_id(), words[0], words[1], words[2], words[3],
-        decode_error.message());
+        decode_error_.message());
+    decode_error_({});
     handle_instruction_failure(*active, failure, exception_claimed);
     return IssueOutcome::NotIssued;
   }
   Instruction *inst = decoded.value().get();
   DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
                                                        active->pc, vmid, words, reuse_decoded);
-  std::string execution_failure_detail;
   const auto fail_current_instruction = [&]() {
     return_decoded.discard();
     if constexpr (EnableAsync) {
@@ -2060,7 +2071,10 @@ template <bool EnableAsync>
         window->drain();
     }
     fail_wave_instruction(*active, inst->mnemonic(), active->pc,
-                          active->instruction_execution_error(), execution_failure_detail);
+                          active->instruction_execution_error(),
+                          // Taken before reporting, so a throwing failure handler
+                          // cannot leave it for the next instruction.
+                          std::exchange(execution_failure_detail_, {}));
   };
   // Operand resolution outside execute_instruction() participates in the same
   // per-instruction failure contract as the generated execution callback.
@@ -2090,7 +2104,7 @@ template <bool EnableAsync>
     bool may_submit = true;
     std::optional<uint64_t> issuer;
     auto *admission = storage ? storage->admission : nullptr;
-    if (window && window->take_issuer(active->pc)) {
+    if (window && window->take_issuer(fetch_pc)) {
       may_submit = false;
       if (admission)
         ++admission->stats.issuer;
@@ -2101,7 +2115,7 @@ template <bool EnableAsync>
       if (async_pool().available()) {
         MmaAdmissionCache::Words first;
         std::ranges::copy_n(words.begin(), first.size(), first.begin());
-        issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, active->pc, vmid,
+        issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, fetch_pc, vmid,
                                     active->num_vgprs(), storage->has_accvgprs, first);
         may_submit = issuer.has_value();
       }
@@ -2182,7 +2196,7 @@ template <bool EnableAsync>
   // hardware saves the interrupted PC/status in TTMPs and begins fetching at
   // TBA. The handler advances TTMP0:1 for software traps, sends the KFD
   // interrupt message, restores STATUS, and returns through s_rfe_b64.
-  if (std::string_view(inst->mnemonic()) == "s_trap") {
+  if (inst->flags() & SOFTWARE_TRAP) {
     // s_trap bypasses execute_instruction(), but still occupies the adjacent
     // instruction slot that ends the gfx1250 setreg/VGPR-MSB hazard window.
     active->clear_setreg_vgpr_msb_hazard();
@@ -2278,7 +2292,9 @@ template <bool EnableAsync>
         return IssueOutcome::Issued;
       }
       if (target == 0) {
-        active->halt();
+        // The null-PC return sentinel terminates like s_endpgm, including its
+        // implicit memory wait before registers and the wave slot are freed.
+        active->end();
         return IssueOutcome::Issued;
       }
     }
@@ -2290,7 +2306,7 @@ template <bool EnableAsync>
 
   const uint32_t executing_process = active->process_id();
   const util::Result execution_result =
-      execute_instruction(inst, *active, &execution_failure_detail);
+      execute_instruction(inst, *active, &execution_failure_detail_);
 
   if (execution_result.failed()) [[unlikely]] {
     fail_current_instruction();

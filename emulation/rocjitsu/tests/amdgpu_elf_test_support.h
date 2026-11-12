@@ -43,6 +43,9 @@ void write_kernel_descriptor_for_test(void *descriptor, const TestKernelDescript
 uint16_t append_elf_section_for_test(std::vector<uint8_t> &image, Elf64_Shdr section,
                                      std::span<const uint8_t> contents);
 
+/// The optional function extent may end at text_words.size(); the pointer-table target
+/// must be strictly smaller. Invalid arguments record a nonfatal test failure while
+/// still producing an image so callers can safely inspect its ELF header.
 /// @param export_text_function Give the `.text` function global binding and a name of its own.
 /// @details A device function is LOCAL and shares the fixture's "kernel" name by default, which
 /// object_defines_only_kernels() then pairs with the "kernel.kd" descriptor and counts as a kernel.

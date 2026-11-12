@@ -7,10 +7,29 @@ from . import ExecuteContext
 from .rj_arith_names import wave_api
 from .rj_arith_graphics import CUBE_NAMES
 
-# Exponent extraction has no arithmetic exception classifier.
+PSEUDO_SCALAR_NAMES = {
+    f'V_S_{operation}_F{bits}'
+    for operation in ('EXP', 'LOG', 'RCP', 'RSQ', 'SQRT')
+    for bits in (16, 32)
+}
 
-
-UNARY_F32 = {'V_FREXP_EXP_I32_F32'}
+UNARY_F32 = {
+    'V_TRUNC_F32',
+    'V_CEIL_F32',
+    'V_RNDNE_F32',
+    'V_FLOOR_F32',
+    'V_FRACT_F32',
+    'V_RCP_F32',
+    'V_RCP_IFLAG_F32',
+    'V_SQRT_F32',
+    'V_RSQ_F32',
+    'V_EXP_F32',
+    'V_LOG_F32',
+    'V_SIN_F32',
+    'V_COS_F32',
+    'V_FREXP_EXP_I32_F32',
+    'V_FREXP_MANT_F32',
+}
 
 UNARY_F64 = {
     'V_TRUNC_F64',
@@ -20,6 +39,9 @@ UNARY_F64 = {
     'V_FRACT_F64',
     'V_FREXP_MANT_F64',
     'V_FREXP_EXP_I32_F64',
+    'V_RCP_F64',
+    'V_RSQ_F64',
+    'V_SQRT_F64',
 }
 
 PACKED_CONVERSION_NAMES = {
@@ -155,7 +177,22 @@ BINARY_SELECTION_F16 = {
     'V_MAXIMUM_F16',
 }
 
-UNARY_F16 = {'V_FREXP_EXP_I16_F16'}
+UNARY_F16 = {
+    'V_TRUNC_F16',
+    'V_CEIL_F16',
+    'V_RNDNE_F16',
+    'V_FLOOR_F16',
+    'V_RCP_F16',
+    'V_RSQ_F16',
+    'V_SQRT_F16',
+    'V_EXP_F16',
+    'V_LOG_F16',
+    'V_FRACT_F16',
+    'V_FREXP_MANT_F16',
+    'V_FREXP_EXP_I16_F16',
+    'V_SIN_F16',
+    'V_COS_F16',
+}
 
 FMA_F16 = {'V_FMA_F16', 'V_FMAC_F16', 'V_FMAAK_F16', 'V_FMAMK_F16'}
 
@@ -208,17 +245,46 @@ FLOAT_NAMES = (
     | PACKED_BINARY16_NAMES
     | PACKED_CONVERSION_NAMES
     | PACKED_FMA16_NAMES
+    | PSEUDO_SCALAR_NAMES
     | TERNARY_SELECTION_RDNA3
     | TERNARY_SELECTION_RDNA4
     | UNARY_F16
     | UNARY_F32
     | UNARY_F64
-    | {'V_MULLIT_F32', 'V_LDEXP_F64', 'V_FMA_F64'}
+    | {'V_MULLIT_F32', 'V_TRIG_PREOP_F64', 'V_FMA_F64', 'V_LDEXP_F64'}
 )
 
 
 class RjArithBody(str):
     """An emitted body whose arithmetic and SIMD dispatch belong to rj-arith."""
+
+
+def gen_pseudo_scalar(ctx: ExecuteContext) -> str | None:
+    arch = ctx.arch_name
+    mnemonic = ctx.inst.name
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    if arch != 'rdna4' or mnemonic not in PSEUDO_SCALAR_NAMES or not is_vop3:
+        return None
+    if len(dst) != 1 or len(src) != 1:
+        return None
+    half = mnemonic.endswith('F16')
+    return '\n'.join(
+        [
+            '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
+            '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
+            '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
+            '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
+            f'  amdgpu::arith::execute_pseudo_scalar(wf, rj_arith_{mnemonic.lower()},',
+            f'      wf.cu().arithmetic_flags(),',
+            f'      modifiers, {dst[0]}, {src[0]}, {str(half).lower()});',
+        ]
+    )
+
+
+# RCP_IFLAG and SQRT carry their legacy exception policies into rj-arith;
+# other entries here have no legacy classifier.
 
 
 def gen_float_unary32(ctx: ExecuteContext) -> str | None:
@@ -239,19 +305,39 @@ def gen_float_unary32(ctx: ExecuteContext) -> str | None:
             '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
             '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
         ]
-        # Exponent extraction has integer results and no floating output modifiers.
-        lines[-1] = lines[-1].removesuffix(' |') + ';'
+        if mnemonic.startswith('V_FREXP_EXP_'):
+            # Integer results ignore floating-point output modifiers.
+            lines[-1] = lines[-1].removesuffix(' |') + ';'
+        else:
+            lines += [
+                '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
+                '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
+            ]
         modifiers = 'modifiers'
+    guest_rounding = mnemonic.split('_')[1] in {
+        'TRUNC',
+        'CEIL',
+        'FLOOR',
+        'RNDNE',
+        'FRACT',
+    }
+    # These legacy classifiers run on EXEC even when DPP suppresses the destination.
+    status_scope = (
+        ', /*compatibility_all_exec=*/true'
+        if mnemonic in {'V_RCP_IFLAG_F32', 'V_SQRT_F32'}
+        else ''
+    )
     lines += [
         f'  amdgpu::arith::execute_float_unary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
-        f'      {dst[0]}, {src[0]}, {str(arch == "rdna3").lower()});',
+        f'      {dst[0]}, {src[0]}, {str(arch == "rdna3").lower()}, /*guest_rounding=*/{str(guest_rounding).lower()}{status_scope});',
     ]
     return '\n'.join(lines)
 
 
-# Integral operations keep their named rounding; FRACT subtraction and OMOD use
-# guest rounding. Guest denormal controls apply to all these loose FP64 operations.
+# FP64 unary operations use the shared guest-control adapter. Fixed-rounding
+# cores and native math approximations apply guest rounding to OMOD, except
+# RCP overflow, which produces signed infinity regardless of ROUND.
 
 
 def gen_float_unary64(ctx: ExecuteContext) -> str | None:
@@ -805,7 +891,7 @@ def gen_float64_word(ctx: ExecuteContext) -> str | None:
     is_vop3 = ctx.is_vop3
     if arch not in ('rdna3', 'rdna4') or not is_vop3:
         return None
-    if mnemonic not in {'V_LDEXP_F64'}:
+    if mnemonic not in {'V_LDEXP_F64', 'V_TRIG_PREOP_F64'}:
         return None
     if len(dst) != 1 or len(src) != 2:
         return None
@@ -816,7 +902,7 @@ def gen_float64_word(ctx: ExecuteContext) -> str | None:
         '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
         '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
         f'  amdgpu::arith::execute_float64_word(wf, {wave_api(api, 32)}, {wave_api(api, 64)}, wf.cu().arithmetic_flags(), modifiers,',
-        f'      {dst[0]}, {src[0]}, {src[1]}, {str(arch == "rdna3").lower()});',
+        f'      {dst[0]}, {src[0]}, {src[1]}, {str(arch == "rdna3").lower()}, /*ldexp=*/{str(mnemonic == "V_LDEXP_F64").lower()});',
     ]
     return '\n'.join(lines)
 
@@ -1113,7 +1199,7 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
                 f'      (({high} & 2) ? 0u : RJ_ARITH_DOT_HI_B_LOW);',
                 f'  amdgpu::arith::execute_ternary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
                 '      wf.cu().arithmetic_flags(), modifiers,',
-                f'      {dst[0]}, {", ".join(src)});',
+                f'      {dst[0]}, {", ".join(src)}, 0xF, 0xF, wf.exec() & wf.vgpr_write_mask());',
             ]
         )
     if mnemonic not in DOT2_F32_NAMES:
@@ -1351,13 +1437,26 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
             '      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |',
             '      ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |',
         ]
-        # Exponent extraction has integer results and no floating output modifiers.
-        lines[-1] = lines[-1].removesuffix(' |') + ';'
+        if mnemonic.startswith('V_FREXP_EXP_'):
+            # Integer results ignore floating-point output modifiers.
+            lines[-1] = lines[-1].removesuffix(' |') + ';'
+        else:
+            lines += [
+                '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
+                '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
+            ]
         modifiers = 'modifiers'
+    guest_rounding = mnemonic.split('_')[1] in {
+        'TRUNC',
+        'CEIL',
+        'FLOOR',
+        'RNDNE',
+        'FRACT',
+    }
     lines += [
         f'  amdgpu::arith::execute_float_unary16(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
-        f'      {dst[0]}, {src[0]}, {str(arch == "rdna3").lower()});',
+        f'      {dst[0]}, {src[0]}, {str(arch == "rdna3").lower()}, /*guest_rounding=*/{str(guest_rounding).lower()});',
     ]
     return '\n'.join(lines)
 

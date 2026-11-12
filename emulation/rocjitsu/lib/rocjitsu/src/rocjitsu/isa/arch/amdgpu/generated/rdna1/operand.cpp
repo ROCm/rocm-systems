@@ -25,7 +25,8 @@ std::string reg_name(const char *prefix, int reg_num, int size_bits) {
 
 Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
     : IsaOperand<Isa>(size_bits, opr_type, encoding_value),
-      execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())) {
+      execution_backend_(
+          static_cast<const ExecutionBackend *>(detail::current_isa_operand_backend_inline())) {
   switch (opr_type) {
   case OperandType::OPR_ATTR:
     if (!((encoding_value >= 0 && encoding_value <= 32)))
@@ -196,7 +197,8 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
 
 Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64)
     : IsaOperand<Isa>(size_bits, opr_type, static_cast<int>(literal64_value)),
-      execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
+      execution_backend_(
+          static_cast<const ExecutionBackend *>(detail::current_isa_operand_backend_inline())),
       literal64_value_(literal64_value), has_literal64_(is_literal64) {
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }

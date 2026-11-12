@@ -32,6 +32,15 @@ rccl_assert_source_line("${_rccl_src_root}/transport/net.cc"
 rccl_assert_source_line("${_rccl_src_root}/transport/net.cc"
   "NCCL_PARAM(GdrCopyFlushEnable, \"GDRCOPY_FLUSH_ENABLE\", 0);"
   "fakes/transport_stubs.cc: ncclParamGdrCopyFlushEnable()")
+# allocator-test.cc copies misc/utils.cc's pointer hash rather than linking utils.cc.
+rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
+  "uintptr_t h = reinterpret_cast<uintptr_t>(key);" "allocator-test.cc: ncclHashPointer()")
+rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
+  "h ^= h >> 32;" "allocator-test.cc: ncclHashPointer()")
+rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
+  "h *= 0x9e3779b97f4a7c13;" "allocator-test.cc: ncclHashPointer()")
+rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
+  "return (uint64_t)h >> (64 - hbits);" "allocator-test.cc: ncclHashPointer()")
 # src/enqueue/task_prep/*.cc declare these five but define none, and param_redirect.h only rewrites
 # NCCL_PARAM where it expands, so the hand-written bodies below are the only definitions on that link line.
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
@@ -142,8 +151,8 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
-# RasDiagnosticsTests.cpp (rccl-UnitTests) classifies report lines by kRasFailureMarkers;
-# each marker must stay both in that list and in every source file that emits it (comma-separated).
+# RasDiagnosticsTests.cpp (rccl-UnitTests) classifies report lines by kRasFailureMarkers and kRasHealthMarkers;
+# each marker must stay both in those lists and in every source file that emits it (comma-separated).
 set(_rccl_ras_tests "${CMAKE_CURRENT_LIST_DIR}/../RasDiagnosticsTests.cpp")
 set(_rccl_ras_markers
   "ras/diagnostics_checks_common.cc|diagnostics incomplete"
@@ -167,7 +176,6 @@ endforeach()
 # literal; a check label may be passed on without its ": ".
 set(_rccl_ras_labels
   "ras/diagnostics_gpu.cc|GPU inventory: "
-  "ras/diagnostics_gpu.cc|CUDA driver version: "
   "ras/diagnostics_gpu.cc|ECC: "
   "ras/diagnostics_env.cc|NCCL environment: "
   "ras/ras.cc|NCCL DIAG === RAS Diagnostics ==="
@@ -181,6 +189,15 @@ foreach(_entry IN LISTS _rccl_ras_labels)
     "the RAS labels in test/RasDiagnosticsTests.cpp")
   rccl_assert_source_line("${_rccl_ras_tests}" "= \"${_label}\"" "the report lines it labels in src/${_ras_cc}")
 endforeach()
+# The driver labels are macros on the AMD SMI arm of diagnostics_gpu.cc.
+rccl_assert_source_line("${_rccl_src_root}/ras/diagnostics_gpu.cc"
+  "#define RAS_DIAG_DRIVER_LABEL \"HIP driver version\"" "kDriver in test/RasDiagnosticsTests.cpp")
+rccl_assert_source_line("${_rccl_ras_tests}" "= \"HIP driver version: \""
+  "RAS_DIAG_DRIVER_LABEL in src/ras/diagnostics_gpu.cc")
+rccl_assert_source_line("${_rccl_src_root}/ras/diagnostics_gpu.cc"
+  "#define RAS_DIAG_GPU_DRIVER_LABEL \"AMD GPU driver version\"" "kGpuDriver in test/RasDiagnosticsTests.cpp")
+rccl_assert_source_line("${_rccl_ras_tests}" "= \"AMD GPU driver version: \""
+  "RAS_DIAG_GPU_DRIVER_LABEL in src/ras/diagnostics_gpu.cc")
 unset(_rccl_ras_tests)
 unset(_rccl_ras_markers)
 unset(_rccl_ras_labels)
@@ -323,6 +340,7 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     # real ncclP2pImportShareableBuffer, for dev-runtime-test.cc's cuMem window import.
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc
+    fakes/amdsmi_fakes.cc
     fakes/channel_fakes.cc
     fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc
@@ -726,6 +744,47 @@ function(rccl_define_micro_source_lists)
     fakes/rma_fakes.cc
     fakes/rocmwrap_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroMemManager -- src/mem_manager.cc. Own binary: mem_manager.cc defines ncclMemTrack and
+  # ncclMemTrackImportFromPeer (also in nccl_fakes.cc) and ncclCommMemSuspend (also in collective_stubs.cc).
+  set(TEST_MICRO_MEM_MANAGER_SOURCE_FILES
+    mem-manager-test.cc
+    fakes/mem_manager_micro_fakes.cc
+    fakes/bootstrap_stubs.cc
+    fakes/hip_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroAllocator -- src/allocator.cc. Own binary: every other binary that needs
+  # ncclShadowPoolToHost links allocator_fakes.cc instead.
+  set(TEST_MICRO_ALLOCATOR_SOURCE_FILES
+    allocator-test.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroMnnvl -- src/mnnvl.cc. Own binary: nccl_stubs.cc, which most targets link, defines
+  # ncclMnnvlCheck, and mnnvl.cc defines it too.
+  set(TEST_MICRO_MNNVL_SOURCE_FILES
+    mnnvl-test.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/utils_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroAlloc -- src/include/alloc.h. Own binary: alloc.h's inline side-stream map and
+  # shutdown and skip-free state would be shared with every other unit in rccl-UnitTestsMicro.
+  set(TEST_MICRO_ALLOC_SOURCE_FILES
+    alloc-test.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/os_fakes.cc
+    fakes/utils_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -2037,20 +2096,64 @@ rccl_add_micro_binary(rccl-UnitTestsMicroConnect
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_connect.yaml")
 
 # ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroMemManager
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroMemManager
+  SOURCES ${TEST_MICRO_MEM_MANAGER_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    MEM_MANAGER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/mem_manager.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mem_manager.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroAllocator
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroAllocator
+  SOURCES ${TEST_MICRO_ALLOCATOR_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ALLOCATOR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/allocator.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_allocator.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroMnnvl
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroMnnvl
+  SOURCES ${TEST_MICRO_MNNVL_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    MNNVL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/mnnvl.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mnnvl.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroAlloc
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroAlloc
+  SOURCES ${TEST_MICRO_ALLOC_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_alloc.yaml")
+
+# ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroEnqueue (+ shipping -devlinker arm standalone)
 # ---------------------------------------------------------------------------
 set(_enq_common_args
   SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
+  REMOVE_DEFS ENABLE_WARP_SPEED
   EXTRA_INCLUDES
     ${RCCL_HOST_HIPIFY_DIR}/src/device               # device/common.h (neutered)
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ${_MICRO_AMDSMI_DEF}
+    RCCL_TEST_ENQUEUE_HOOKS
     # Per-symbol omissions from the shared nccl_stubs.cc; enqueue.cc itself
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+    # enqueue-test.cc provides these launch-prepare floors directly.
+    RCCL_ENQUEUE_TEST_DEPS_OMIT_scheduleRmaTasksToPlan
+    RCCL_HIP_FAKES_OMIT_hipLaunchHostFunc
     # Production librccl always builds this arm (CMakeLists.txt LL128_ENABLED=ON).
     # Standalone host CI otherwise compiles enqueue.cc without it, so addP2pToPlan's
     # gfx1250 ENABLE=1 window is unreachable there.
@@ -2059,6 +2162,8 @@ set(_enq_common_args
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
 
 rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue ${_enq_common_args})
+rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue-warpspeed ${_enq_common_args})
+target_compile_definitions(rccl-UnitTestsMicroEnqueue-warpspeed PRIVATE ENABLE_WARP_SPEED)
 if(_ENQ_BUILD_DEVLINKER)
   rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue-devlinker ${_enq_common_args})
   target_compile_definitions(rccl-UnitTestsMicroEnqueue-devlinker PRIVATE RCCL_DEVICE_LINKER)
@@ -2457,6 +2562,7 @@ set(_MICRO_TRANSPORT_DEFS
   # Shipping builds set it; it gates whole TUs and net_ib_cast's ncclIbNetCommBase fields.
   ENABLE_FAULT_INJECTION
   COLL_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/coll_net.cc"
+  GENERIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/generic.cc"
   NET_IB_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/common.cc"
   # graph/connect.cc and diagnostics/p2p.cc keep the original basenames.
   NET_IB_CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/connect_tmp.cc"
@@ -2554,6 +2660,10 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportCollNet coll-net-tes
   EXTRA_DEFS
     # transport_stubs.cc would define coll_net.cc a second time
     RCCL_TRANSPORT_STUBS_OMIT_COLL_NET)
+
+# No shared fakes: transport_stubs.cc defines generic.cc's connect functions, so the test TU
+# fakes the transport calls generic.cc makes.
+rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportGeneric generic-test.cc)
 
 rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetSocket net-socket-test.cc
   SOURCES

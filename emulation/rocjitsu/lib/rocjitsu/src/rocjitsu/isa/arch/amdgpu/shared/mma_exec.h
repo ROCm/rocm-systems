@@ -1722,12 +1722,12 @@ inline PackedOutputLoc output_loc_16(uint32_t M, uint32_t N, uint32_t i, uint32_
 
 /// exec_f32_mixed for shapes and modes that try_exec_mfma_snapshot does not handle. Kept out of
 /// line so its staging frame is not live while the snapshot path runs.
-template <typename ExtractA, typename ExtractB>
-RJ_NOINLINE void exec_f32_mixed_generic(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-                                        uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
-                                        uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
-                                        uint32_t const_acc, uint32_t cbsz, uint32_t abid,
-                                        uint32_t blgp) {
+template <uint32_t M, uint32_t N, uint32_t K, uint32_t B, typename ExtractA, typename ExtractB>
+RJ_NOINLINE void exec_f32_mixed_generic(auto &cu, uint32_t a_bits, uint32_t b_bits, uint32_t dst,
+                                        uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea,
+                                        ExtractB eb, uint32_t const_acc, uint32_t cbsz,
+                                        uint32_t abid, uint32_t blgp) {
+  static_assert(M > 0 && N > 0 && K > 0);
   const uint32_t wf = cu.wf_size();
   struct Result {
     uint32_t reg;
@@ -1897,24 +1897,23 @@ RJ_NOINLINE void exec_f32_mixed_generic(auto &cu, uint32_t M, uint32_t N, uint32
 /// @param cbsz  A-matrix broadcast block size (0 = no broadcast).
 /// @param abid  A-matrix broadcast source block ID.
 /// @param blgp  B-matrix lane group permutation pattern.
-template <typename ExtractA, typename ExtractB>
-void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t a_bits,
-                    uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                    ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0,
-                    uint32_t abid = 0, uint32_t blgp = 0) {
+template <uint32_t M, uint32_t N, uint32_t K, uint32_t B, typename ExtractA, typename ExtractB>
+void exec_f32_mixed(auto &cu, uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
+                    uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+                    uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0, uint32_t abid = 0,
+                    uint32_t blgp = 0) {
   if (!try_exec_mfma_snapshot<float>(cu, M, N, K, B, a_bits, b_bits, dst, s0, s1, s2, ea, eb,
                                      const_acc, cbsz, abid, blgp))
-    exec_f32_mixed_generic(cu, M, N, K, B, a_bits, b_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz,
-                           abid, blgp);
+    exec_f32_mixed_generic<M, N, K, B>(cu, a_bits, b_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz,
+                                       abid, blgp);
 }
 
-template <typename ExtractA, typename ExtractB>
-void exec_f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t in_bits,
-              uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
-              uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0, uint32_t abid = 0,
-              uint32_t blgp = 0) {
-  exec_f32_mixed(cu, M, N, K, B, in_bits, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid,
-                 blgp);
+template <uint32_t M, uint32_t N, uint32_t K, uint32_t B, typename ExtractA, typename ExtractB>
+void exec_f32(auto &cu, uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+              ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0,
+              uint32_t abid = 0, uint32_t blgp = 0) {
+  exec_f32_mixed<M, N, K, B>(cu, in_bits, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid,
+                             blgp);
 }
 
 /// Column (N) leading-dimension pitch rounding A/B/C buffers up to a SIMD-width
@@ -6190,15 +6189,15 @@ void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t in_bits = 32;
   if constexpr (!util::has_stdx_simd) {
-    exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
-             const_acc, cbsz, abid, blgp);
+    exec_f32<M, N, K, BATCH>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
+                             const_acc, cbsz, abid, blgp);
     return;
   } else {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
     if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
-      exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32,
-               amdgpu::extract_f32, const_acc, cbsz, abid, blgp);
+      exec_f32<M, N, K, BATCH>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_f32,
+                               amdgpu::extract_f32, const_acc, cbsz, abid, blgp);
       return;
     }
     const uint32_t wf = cu.wf_size();
@@ -6294,15 +6293,15 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t B = BATCH, in_bits = 16;
   if constexpr (!util::has_stdx_simd) {
-    exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
-             const_acc, cbsz, abid, blgp);
+    exec_f32<M, N, K, B>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
+                         const_acc, cbsz, abid, blgp);
     return;
   } else {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
     if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
-      exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
-               const_acc, cbsz, abid, blgp);
+      exec_f32<M, N, K, B>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
+                           const_acc, cbsz, abid, blgp);
       return;
     }
     const uint32_t wf = cu.wf_size();
@@ -6399,15 +6398,15 @@ void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, u
                              uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t B = BATCH, in_bits = 16;
   if constexpr (!util::has_stdx_simd) {
-    exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
-             const_acc, cbsz, abid, blgp);
+    exec_f32<M, N, K, B>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
+                         const_acc, cbsz, abid, blgp);
     return;
   } else {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
     if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
-      exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
-               const_acc, cbsz, abid, blgp);
+      exec_f32<M, N, K, B>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
+                           const_acc, cbsz, abid, blgp);
       return;
     }
     const uint32_t wf = cu.wf_size();
@@ -6500,12 +6499,12 @@ void exec_f32_mfma_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
   constexpr auto ea = f8_extract_fn<A_FP8, FNUZ>();
   constexpr auto eb = f8_extract_fn<B_FP8, FNUZ>();
   if constexpr (!util::has_stdx_simd) {
-    exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid, blgp);
+    exec_f32<M, N, K, B>(cu, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid, blgp);
     return;
   } else {
     if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
         cu.wf_size() != 64) {
-      exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid, blgp);
+      exec_f32<M, N, K, B>(cu, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid, blgp);
       return;
     }
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above

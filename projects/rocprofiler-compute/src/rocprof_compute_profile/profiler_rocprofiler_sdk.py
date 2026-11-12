@@ -208,9 +208,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
     @demarcate
     def run_profiling(self, version: str, prog: str) -> None:
         """Run profiling."""
-        if self.get_args().roof_only:
-            console_log("roofline", "Profiling roofline counters only.")
-
         # Log profiling options and setup filtering
         super().run_profiling(version, prog)
 
