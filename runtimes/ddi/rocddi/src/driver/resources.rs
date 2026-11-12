@@ -314,27 +314,32 @@ impl AllocationState {
         }
     }
 
-    pub(crate) fn host_alias_source_offset(&self) -> Option<u64> {
+    pub(crate) fn backing_offset(&self) -> Option<u64> {
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
             #[cfg(target_os = "linux")]
-            Self::LinuxKfd(allocation) => allocation.driver_state().host_alias_source_offset(),
+            Self::LinuxKfd(allocation) => KfdDriver::backing_offset(allocation.driver_state()),
             #[cfg(test)]
             Self::Test(_) => None,
         }
     }
 
-    pub(crate) fn set_host_alias_identity(&self, identity: [u64; 2]) -> Result<(), Error> {
+    pub(crate) fn publish_local_backing_identity(
+        &self,
+        identity: crate::memory::device::LocalBackingIdentity,
+    ) -> Result<(), Error> {
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
             #[cfg(target_os = "linux")]
             Self::LinuxKfd(allocation) => {
-                allocation.driver_state().set_host_alias_identity(identity)
+                KfdDriver::publish_local_backing_identity(allocation.driver_state(), identity)
             }
             #[cfg(test)]
-            Self::Test(_) => unsupported_memory(),
+            Self::Test(allocation) => {
+                TestDriver::publish_local_backing_identity(allocation.driver_state(), identity)
+            }
         }
     }
 
@@ -475,7 +480,10 @@ impl DeviceDriverState {
                 )))
             }
             #[cfg(test)]
-            Self::Test { .. } => unsupported_memory(),
+            Self::Test { driver, state } => Ok(Allocation::new(AllocationState::from_test(
+                driver,
+                driver.allocate_owned(state, &[], kind, size, alignment, permissions)?,
+            ))),
         }
     }
 
@@ -593,7 +601,24 @@ impl DeviceDriverState {
                 )))
             }
             #[cfg(test)]
-            Self::Test { .. } => unsupported_memory(),
+            Self::Test { driver, state } => {
+                let states = origin.peer_states_for(
+                    peers,
+                    matches!(kind, MemoryKind::DeviceLocal { .. }),
+                    driver,
+                    state,
+                    |peer| peer.driver_state.test_driver(),
+                )?;
+                let inner = driver.allocate_owned(
+                    state,
+                    states.as_slice(),
+                    kind,
+                    size,
+                    alignment,
+                    permissions,
+                )?;
+                Ok(Allocation::new(AllocationState::from_test(driver, inner)))
+            }
         }
     }
 

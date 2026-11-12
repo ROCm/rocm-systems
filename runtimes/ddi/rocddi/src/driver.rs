@@ -194,6 +194,18 @@ pub(crate) trait Driver: Send + Sync {
 pub(crate) trait AllocationOperations: Driver {
     /// Native allocation and mapping state retained through cleanup.
     type Allocation: CachedInfo<Info = AllocationInfo>;
+    /// Optional indexing of frontend identity for native registration reuse.
+    /// Failure must not publish a different identity or acquire an alias.
+    fn publish_local_backing_identity(
+        _allocation: &Self::Allocation,
+        _identity: crate::memory::device::LocalBackingIdentity,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+    /// Offset into identified backing, when the provider exposes that metadata.
+    fn backing_offset(_allocation: &Self::Allocation) -> Option<u64> {
+        None
+    }
     /// Reports whether this endpoint can register caller-owned host pages.
     fn supports_host_registration(&self, endpoint: &Endpoint) -> bool;
     /// Checks that an allocation's native backing remains usable.

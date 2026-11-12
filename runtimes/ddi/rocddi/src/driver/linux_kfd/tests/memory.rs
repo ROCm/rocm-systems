@@ -1250,6 +1250,8 @@ fn failed_peer_map_keeps_old_access_and_retries_its_completed_prefix() {
     )
     .unwrap();
     assert!(allocation.set_access(&[&peer]).is_err());
+    allocation.set_host_alias_identity([19, 31]).unwrap();
+    assert!(allocation.set_host_alias_identity([19, 32]).is_err());
     assert!(allocation.device_address(&fixture.vm).is_ok());
     assert_eq!(
         allocation.device_address(&peer).unwrap_err().kind(),
@@ -1257,6 +1259,21 @@ fn failed_peer_map_keeps_old_access_and_retries_its_completed_prefix() {
     );
     allocation.set_access(&[&peer]).unwrap();
     assert!(allocation.device_address(&peer).is_ok());
+    let mut backing = None;
+    let mut alias = KfdHostAlias::try_create(
+        &peer,
+        &[],
+        allocation.host_address().unwrap(),
+        desc().size,
+        HostMappingPolicy::Fine,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+        &mut backing,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(alias.cached_info().physical_backing_id, [19, 31]);
+    alias.free();
+    drop(alias);
     allocation.free().unwrap();
     drop(allocation);
     fixture.exhausted();

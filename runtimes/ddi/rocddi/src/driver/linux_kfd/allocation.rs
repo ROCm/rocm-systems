@@ -166,10 +166,7 @@ impl LinuxAllocation {
         match self {
             Self::Kfd(allocation) => allocation.set_host_alias_identity(identity),
             Self::KfdHostAlias(_) | Self::DrmRegisteredHost(_) | Self::DrmImportedSystem(_) => {
-                Err(error(
-                    ErrorKind::Unsupported,
-                    "allocation cannot publish a host alias identity",
-                ))
+                Ok(())
             }
         }
     }

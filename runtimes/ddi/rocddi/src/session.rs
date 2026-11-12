@@ -1222,6 +1222,54 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_allocation_can_bind_identity_without_a_native_alias_registry() {
+        use crate::memory::device::LocalBackingIdentity;
+        let id = [0x4b; 16];
+        let driver = TestDriver::new(id, EndpointKind::Npu, DriverContextLifetime::Session)
+            .with_owned_allocation();
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let device = session
+            .activate(&session.open_endpoint(id).unwrap())
+            .unwrap();
+        let page = crate::memory::host_page_size().unwrap();
+        let mut allocation = device
+            .allocate_with_peers(
+                &[],
+                crate::memory::MemoryKind::System,
+                page,
+                page,
+                DeviceAccess::READ | DeviceAccess::WRITE,
+            )
+            .unwrap();
+        let identity = LocalBackingIdentity {
+            namespace: 17,
+            object: 23,
+        };
+        assert_eq!(allocation.local_backing_identity(), None);
+        assert_eq!(allocation.backing_offset(), None);
+        allocation.bind_local_backing_identity(identity).unwrap();
+        allocation.bind_local_backing_identity(identity).unwrap();
+        assert!(
+            allocation
+                .bind_local_backing_identity(LocalBackingIdentity {
+                    object: 24,
+                    ..identity
+                })
+                .is_err()
+        );
+        assert_eq!(allocation.local_backing_identity(), Some(identity));
+        allocation.free().unwrap();
+        assert!(allocation.bind_local_backing_identity(identity).is_err());
+        drop(allocation);
+        drop(device);
+        session.destroy().unwrap();
+    }
+
+    #[test]
     fn allocation_keeps_its_driver_live_after_the_device_is_dropped() {
         for lifetime in [
             DriverContextLifetime::Session,
