@@ -127,6 +127,15 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
   }
 }
 
+bool RaceDetector::mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
+                               MemoryOrderClass currentMemoryOrder) const {
+  const std::vector<LdsChunkCounts> &counts = isWrite ? byteReadCounts : byteWriteCounts;
+  return std::ranges::any_of(accessed, [&](const Interval &interval) {
+    return hasPotentialLdsConflict(interval.start, interval.end - interval.start, counts, wave,
+                                   currentMemoryOrder);
+  });
+}
+
 bool RaceDetector::hasPotentialLdsConflict(int addr, int nBytes,
                                            const std::vector<LdsChunkCounts> &counts, WaveId wave,
                                            MemoryOrderClass currentMemoryOrder) {
