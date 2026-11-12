@@ -222,6 +222,7 @@ bool Sop2::has_encoded_literal32() const {
   case 38:
   case 39:
   case 40:
+  case 41:
   case 42:
   case 43:
   case 44:
@@ -793,6 +794,18 @@ bool Vop2::hasImpliedLiteral() {
   return inst_.op == 23 || inst_.op == 24 || inst_.op == 36 || inst_.op == 37;
 }
 
+void Vintrp::append_interp_operand(std::string &out, uint8_t index,
+                                   const ::rocjitsu::Operand &attribute) const {
+  const auto *operand = src_operands_[index];
+  if (operand == &attribute) {
+    out += attribute.name();
+    out += '.';
+    out += "xyzw"[inst_.attrchan];
+    return;
+  }
+  Vintrp::append_src_operand(out, index);
+}
+
 Vintrp::Vintrp(std::string_view mnemonic, const VintrpMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   flags_ |= VALU;
@@ -833,6 +846,24 @@ Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn 
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
   flags_ |= VSKIP_AFFECTED;
+}
+
+void Vop3::append_interp_operand(std::string &out, uint8_t index,
+                                 const ::rocjitsu::Operand &attribute,
+                                 const ::rocjitsu::Operand *interpolant) const {
+  const auto *operand = src_operands_[index];
+  if (operand == &attribute) {
+    out += attribute.name();
+    out += '.';
+    out += "xyzw"[(inst_.src0 >> 6) & 3u];
+    return;
+  }
+  if (operand == interpolant) {
+    amdgpu::vop::append_vop3_operand(out, operand->name(), (inst_.abs >> 1) & 1u,
+                                     (inst_.neg >> 1) & 1u, false, 0);
+    return;
+  }
+  Vop3::append_src_operand(out, index);
 }
 
 bool Vop3::displays_vop3_op_sel() const {
@@ -932,7 +963,7 @@ Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exe
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
-  opcode_ = inst_.op;
+  opcode_ = inst_.op | (inst_.opm << 7);
   flags_ |= VSKIP_AFFECTED;
 }
 

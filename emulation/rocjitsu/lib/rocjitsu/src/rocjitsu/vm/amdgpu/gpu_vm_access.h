@@ -8,6 +8,7 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/prt_residency.h"
 #include "rocjitsu/vm/amdgpu/vm_mutation_epoch.h"
 #include "util/intrusive_shared_ptr.h"
 
@@ -458,6 +459,7 @@ public:
 
   [[nodiscard]] VmTranslationResult translate(uint64_t address, std::size_t size,
                                               VmAccessKind access) const;
+  [[nodiscard]] std::shared_ptr<const PrtRanges> nonresident_prt_ranges() const;
   /// @brief Query cache policy without exposing physical backing metadata.
   [[nodiscard]] std::optional<Mtype> query_mtype(uint64_t address) const;
   /// @brief Reuse a copied policy while its access state and mutation token are valid.

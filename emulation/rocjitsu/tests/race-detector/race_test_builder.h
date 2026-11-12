@@ -359,6 +359,7 @@ public:
   void clearViolations() { violations_.clear(); }
 
   const EventRegistry &events() const { return detector_->events(); }
+  const RaceDetector &detector() const { return *detector_; }
 
 private:
   /// A transfer has no lanes; its violations report lane -1. Validates and
