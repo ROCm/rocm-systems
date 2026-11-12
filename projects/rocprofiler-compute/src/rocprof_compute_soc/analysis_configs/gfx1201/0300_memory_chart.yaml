@@ -162,8 +162,7 @@ Panel Config:
       Percentage of instruction cache requests that hit. The instruction cache is
       read-only and shared by the WGPs it serves.
     ICache-GL1 Read Bandwidth: >-
-      Not collected by this implementation. The instruction cache counters give no
-      request size.
+      Not available
     DCache Requests: >-
       Scalar data cache requests after bank serialization, normalized by the chosen unit.
     DCache Hit Rate: >-
@@ -172,8 +171,7 @@ Panel Config:
       Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
       Bounds-check reductions are ignored.
     DCache-GL1 Read Bandwidth: >-
-      Not collected by this implementation. The scalar data cache counters give no
-      request size.
+      Not available
     GL0 Hit Rate: >-
       Percentage of vector L0 cache line accesses that hit.
     LDS Req: >-
@@ -204,14 +202,11 @@ Panel Config:
       Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity
       Cache hits are included.
     Infinity Cache Hit Rate: >-
-      Not collected by this implementation. Memory-destined L2 traffic can be
-      served by Infinity Cache; its hit rate cannot be inferred from that traffic.
+      Not available
     VRAM Read Bandwidth: >-
-      Not collected by this implementation. Memory-destined L2 read bandwidth
-      includes Infinity Cache hits and does not measure traffic reaching VRAM.
+      Not available
     VRAM Write Bandwidth: >-
-      Not collected by this implementation. Memory-destined L2 write bandwidth
-      does not measure traffic reaching VRAM.
+      Not available
     Wavefront Occupancy: >-
       Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the
       maximum wavefronts per WGP.

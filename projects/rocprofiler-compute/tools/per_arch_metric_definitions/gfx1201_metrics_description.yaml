@@ -65,8 +65,8 @@ Memory chart - Instruction Cache:
     rst: Percentage of instruction cache requests that hit. The instruction cache is read-only and shared by the WGPs it serves.
     unit: Percent
   ICache-GL1 Read Bandwidth:
-    plain: Not collected by this implementation. The instruction cache counters give no request size.
-    rst: Not collected by this implementation. The instruction cache counters give no request size.
+    plain: Not available
+    rst: Not available
     unit: Bytes/s
 Memory chart - Scalar Data Cache:
   DCache Requests:
@@ -82,8 +82,8 @@ Memory chart - Scalar Data Cache:
     rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads. Bounds-check reductions are ignored.
     unit: Bytes/s
   DCache-GL1 Read Bandwidth:
-    plain: Not collected by this implementation. The scalar data cache counters give no request size.
-    rst: Not collected by this implementation. The scalar data cache counters give no request size.
+    plain: Not available
+    rst: Not available
     unit: Bytes/s
 Memory chart - GL0 Cache (Vector L0):
   GL0 Hit Rate:
@@ -131,16 +131,16 @@ Memory chart - L2 to Memory:
     unit: Bytes/s
 Memory chart - Infinity Cache and VRAM:
   Infinity Cache Hit Rate:
-    plain: Not collected by this implementation. Memory-destined L2 traffic can be served by Infinity Cache; its hit rate cannot be inferred from that traffic.
-    rst: Not collected by this implementation. Memory-destined L2 traffic can be served by Infinity Cache; its hit rate cannot be inferred from that traffic.
+    plain: Not available
+    rst: Not available
     unit: Percent
   VRAM Read Bandwidth:
-    plain: Not collected by this implementation. Memory-destined L2 read bandwidth includes Infinity Cache hits and does not measure traffic reaching VRAM.
-    rst: Not collected by this implementation. Memory-destined L2 read bandwidth includes Infinity Cache hits and does not measure traffic reaching VRAM.
+    plain: Not available
+    rst: Not available
     unit: Bytes/s
   VRAM Write Bandwidth:
-    plain: Not collected by this implementation. Memory-destined L2 write bandwidth does not measure traffic reaching VRAM.
-    rst: Not collected by this implementation. Memory-destined L2 write bandwidth does not measure traffic reaching VRAM.
+    plain: Not available
+    rst: Not available
     unit: Bytes/s
 Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
