@@ -21,14 +21,13 @@ namespace rocjitsu::plugins::race_detector {
 ///
 /// Event lifecycle:
 ///   1. allocateEventId() — registers a new event (ACTIVE).
-///   2. markEventWaveComplete() — transitions to WAVE_COMPLETE after a wait or
-///      ordered counter-capacity backpressure satisfies all of the event's
-///      wait-counter obligations.
+///   2. After all counter obligations are satisfied, completed LDS evidence
+///      needed by peer waves becomes WAVE_COMPLETE via markEventWaveComplete().
+///      Events without LDS bytes or peer waves are retired immediately.
 ///   3. retireEvent() — removes from live lists, decrements byte counts,
-///      marks RETIRED. LDS events are retired at s_barrier via
+///      marks RETIRED. Retained LDS evidence is retired at s_barrier via
 ///      flushBarrierPendingEvents, since other waves can still race with a
-///      completed event until then. In a single-wave workgroup there is no other
-///      wave, so an LDS event is retired as soon as it completes.
+///      completed event until then.
 ///
 /// LDS race validation uses a two-level approach:
 ///   - Fast path: per-chunk byte counts (byteWriteCounts / byteReadCounts)

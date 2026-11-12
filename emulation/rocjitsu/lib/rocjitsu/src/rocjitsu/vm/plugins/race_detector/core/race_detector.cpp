@@ -59,13 +59,16 @@ bool RaceDetector::satisfyEventWaitCounter(EventId eventId, amdgpu::WaitCounterT
 }
 
 void RaceDetector::retireEvent(EventId eventId) {
-  if (events_.writesLds(eventId)) {
-    removeFromUnorderedList(ldsWriteEvents, eventId);
-    adjustByteCounts(events_.ldsIntervals(eventId), byteWriteCounts, -1);
-  }
-  if (events_.readsLds(eventId)) {
-    removeFromUnorderedList(ldsReadEvents, eventId);
-    adjustByteCounts(events_.ldsIntervals(eventId), byteReadCounts, -1);
+  const auto &intervals = events_.ldsIntervals(eventId);
+  if (!intervals.empty()) {
+    if (events_.writesLds(eventId)) {
+      removeFromUnorderedList(ldsWriteEvents, eventId);
+      adjustByteCounts(intervals, byteWriteCounts, -1);
+    }
+    if (events_.readsLds(eventId)) {
+      removeFromUnorderedList(ldsReadEvents, eventId);
+      adjustByteCounts(intervals, byteReadCounts, -1);
+    }
   }
   events_.markRetired(eventId);
 }
