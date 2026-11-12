@@ -24,6 +24,7 @@
 
 #include <rocprofiler-sdk/defines.h>
 
+#include <rocprofiler-sdk/rocjpeg/details/rocjpeg_api_trace.h>
 #include <rocprofiler-sdk/rocjpeg/details/rocjpeg_headers.h>
 
 #if ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG > 0
@@ -112,6 +113,48 @@ typedef union rocprofiler_rocjpeg_api_args_t
     {
         RocJpegStatus rocjpeg_status;
     } rocJpegGetErrorName;
+
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION >= 1
+    struct
+    {
+        RocJpegHandle              handle;
+        RocJpegStreamHandle        jpeg_stream_handle;
+        const RocJpegDecodeParams* decode_params;
+        RocJpegImage*              destination;
+    } rocJpegDecodeAsync;
+
+    struct
+    {
+        RocJpegHandle handle;
+        RocJpegImage* destination;
+    } rocJpegDecodeSync;
+#endif
+
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION >= 2
+    struct
+    {
+        RocJpegHandle              handle;
+        RocJpegStreamHandle*       jpeg_stream_handles;
+        int                        batch_size;
+        const RocJpegDecodeParams* decode_params;
+        RocJpegImage*              destinations;
+    } rocJpegDecodeBatchedAsync;
+
+    struct
+    {
+        RocJpegHandle handle;
+        RocJpegImage* destinations;
+        int           batch_size;
+    } rocJpegDecodeBatchedSync;
+#endif
+
+#if ROCJPEG_RUNTIME_API_TABLE_STEP_VERSION >= 3
+    struct
+    {
+        RocJpegHandle      handle;
+        RocJpegDecodeCaps* decode_caps;
+    } rocJpegGetDecoderCaps;
+#endif
 } rocprofiler_rocjpeg_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI
