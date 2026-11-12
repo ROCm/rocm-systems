@@ -592,7 +592,7 @@ impl HsaState {
             });
         }
         let gpus = std::mem::take(&mut pending.gpus);
-        let signal_state = SignalState::new(pending.session.as_ref().ok_or(ERROR)?);
+        let signal_state = SignalState::new(pending.session.as_ref().ok_or(ERROR)?)?;
         let session = pending.session.take().ok_or(ERROR)?;
         let health = Arc::new(GenerationHealth::new());
         Ok(Self {

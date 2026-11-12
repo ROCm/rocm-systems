@@ -11,6 +11,7 @@ mod imported_system;
 mod interop;
 mod kernel_queue;
 pub(super) mod memory;
+pub(crate) mod notification;
 mod operations;
 mod pc_sampling;
 mod queue;

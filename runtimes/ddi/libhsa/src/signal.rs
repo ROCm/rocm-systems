@@ -22,7 +22,9 @@ use std::sync::{Arc, LazyLock, Mutex, MutexGuard, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::platform::event::{SignalEvent, SignalEventAddressing, SignalEventService};
+use rocddi::device::gpu::event::{
+    SignalEvent, SignalEventAddressing, SignalEventProtocol, SignalEventService,
+};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 #[cfg(test)]
 use rocddi::session::DriverContextLifetime;
@@ -481,13 +483,13 @@ impl SignalState {
     }
 
     /// Initializes signal registries and stores the native context lifetime.
-    pub(crate) fn new(session: &rocddi::session::Session) -> Self {
-        Self {
+    pub(crate) fn new(session: &rocddi::session::Session) -> Result<Self, Status> {
+        Ok(Self {
             signal_slabs: Vec::new(),
             recycled_signals: Vec::new(),
             batches: HashMap::new(),
             batch_members: HashMap::new(),
-            event_service: SignalEventService::new(session),
+            event_service: SignalEventService::new(session).map_err(map_error)?,
             interrupt_signals: HashMap::new(),
             signal_event_pool: Vec::new(),
             owned_ipc_signals: HashMap::new(),
@@ -495,7 +497,7 @@ impl SignalState {
             async_signal_refs: HashMap::new(),
             signal_groups: HashMap::new(),
             async_dispatcher: None,
-        }
+        })
     }
 
     /// Releases HSA signal records after workers and native queues have stopped.
@@ -716,14 +718,14 @@ impl HsaState {
     /// Creates signal event and records its ownership.
     pub(crate) fn create_signal_event(
         &mut self,
-    ) -> Option<(crate::platform::event::SignalEvent, usize, u32)> {
+    ) -> Option<(rocddi::device::gpu::event::SignalEvent, usize, u32)> {
         let gpu = self.gpus.first()?;
         let (event, mailbox) = self
             .signal_state
             .event_service
             .create(&gpu.device, SignalEventAddressing::Identity)
             .ok()?;
-        let id = event.info().kfd_event_id;
+        let SignalEventProtocol::KfdSignal { event_id: id } = event.protocol();
         Some((event, mailbox.host, id))
     }
 
@@ -738,7 +740,7 @@ impl HsaState {
                 .event_service
                 .mailbox(&gpu.device, event)
                 .ok()?;
-            let id = event.info().kfd_event_id;
+            let SignalEventProtocol::KfdSignal { event_id: id } = event.protocol();
             let event = self.signal_state.signal_event_pool.pop()?;
             return Some((event, mailbox.host, id));
         }

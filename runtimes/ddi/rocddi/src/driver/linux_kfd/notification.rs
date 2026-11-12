@@ -4,6 +4,7 @@
 //! Linux KFD signal-event interoperability.
 
 use crate::device::gpu::GpuDevice;
+use crate::device::gpu::event::{SignalEventAddressing, SignalEventMailbox};
 use crate::device::gpu::queue::QueueErrorEvent;
 use crate::device::{Device, DeviceResources};
 use crate::driver::{self, DeviceDriverState, Driver};
@@ -345,30 +346,6 @@ impl Drop for SignalEventPage {
 
 const SIGNAL_EVENT_PAGE_BYTES: u64 = 4096 * 8;
 
-/// Address relationship required by the frontend's signal representation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SignalEventAddressing {
-    /// The signal publishes one address usable by both CPU and GPU.
-    Identity,
-    /// The signal publishes the GPU mailbox address separately.
-    Mapped,
-}
-
-impl SignalEventAddressing {
-    fn requires_identity(self) -> bool {
-        self == Self::Identity
-    }
-}
-
-/// Addresses of one KFD event mailbox in the process page.
-#[derive(Clone, Copy, Debug)]
-pub struct SignalEventMailbox {
-    /// CPU address used by a host signal implementation.
-    pub host: usize,
-    /// GPU address published to a device-side producer.
-    pub device: u64,
-}
-
 /// Owns first-event page preparation, native installation, and uncertain-page
 /// retention for one frontend's KFD context. Process services coordinate via
 /// the shared process-page identity; session services keep a private page.
@@ -391,21 +368,9 @@ impl SignalEventService {
         }
     }
 
-    /// Checks whether a session has external driver owners before this
-    /// service releases its internally retained signal page. A Busy result
-    /// leaves the page and event creation state unchanged.
-    ///
-    /// # Errors
-    /// Reports a foreign process, a page from another session, or a live
-    /// external owner of the session or one of its drivers.
-    pub fn preflight_session_destroy(
-        &self,
-        session: &mut crate::session::Session,
-    ) -> Result<(), Error> {
-        self.ensure_process()?;
-        session.preflight_destroy_allowing(
-            self.page.as_ref().and_then(|page| page.allocation.as_ref()),
-        )
+    /// Exact internal allocation retained by this provider service.
+    pub(crate) fn internal_allocation(&self) -> Option<&Allocation> {
+        self.page.as_ref().and_then(|page| page.allocation.as_ref())
     }
 
     fn ensure_process(&self) -> Result<(), Error> {
