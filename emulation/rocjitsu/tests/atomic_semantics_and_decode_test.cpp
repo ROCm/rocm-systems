@@ -961,8 +961,9 @@ protected:
                 buffer ? static_cast<uint32_t>(source_bits) : 0xbadu);
     } else {
       EXPECT_EQ(compute_unit_->read_vgpr(returned, 0), static_cast<uint32_t>(old_bits));
-      if (width == 8)
+      if (width == 8) {
         EXPECT_EQ(compute_unit_->read_vgpr(returned + 1, 0), static_cast<uint32_t>(old_bits >> 32));
+      }
     }
     if (width == 8)
       return memory_.read64(kAddress);
