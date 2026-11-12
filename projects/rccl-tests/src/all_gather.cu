@@ -10,6 +10,7 @@
 #include "cuda_runtime.h"
 #include "common.h"
 #include "gin_sdma_allgather_policy.h"
+#include "gin_sdma_allgather_reqs.h"
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
@@ -68,69 +69,14 @@ void AllGatherGetBw(size_t count, size_t typesize, double sec, double* algBw, do
   gin_sdma_allgather::bandwidthGBps(count, typesize, sec, nranks, algBw, busBw);
 }
 
+// -D 3 is GinHybridAllGatherKernel: LSA direct (small) + direct GIN puts (large).
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 testResult_t AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm) {
-  if (!reqs || !comm) return testInternalError;
-
-  ncclCommProperties_t commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
-  if (ncclCommQueryProperties(comm, &commProperties) != ncclSuccess) {
-    return testNcclError;
-  }
-
-  if (commProperties.nRanks != ncclTeamLsa(comm).nRanks) {
-    fprintf(stderr, "GinHybridAllGatherKernel requires CUDA P2P connectivity across all ranks. "
-                    "Not all ranks of this communicator have P2P connectivity.\n");
-    return testInvalidUsage;
-  }
-
-  switch(deviceImpl) {
-    case 3: { // GinHybridAllGatherKernel: LSA direct (small) + direct GIN puts (large)
-      if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
-        fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
-        return testInvalidUsage;
-      }
-#ifdef NCCL_GIN_BACKEND_MASK_ALL
-      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
-#endif
-      // Cover both the -V/deviceCtaCount launch and the size-adaptive CTA count the
-      // kernel self-selects (allGatherCtas, clamped to allGatherPoolCtas()), decoupled
-      // from -V -- the kernel indexes barrier/lsaBarrier/signal by blockIdx.x.
-      {
-        const int agBarCtas = gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount);
-        reqs->barrierCount = agBarCtas;
-        reqs->lsaBarrierCount = agBarCtas;
-        reqs->ginSignalCount = agBarCtas;
-      }
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,7)
-      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
-#else
-      reqs->ginForceEnable = true;
-#endif
-      return testSuccess;
-    }
-    default:
-      return testNotImplemented;
-  }
+  return ginSdmaAllGatherDevCommRequirements(deviceImpl, reqs, comm, "GinHybridAllGatherKernel");
 }
 #elif defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 bool AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs) {
-  if (!reqs) return false;
-  memset(reqs, 0, sizeof(*reqs));
-
-  switch(deviceImpl) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-    case 3: { // GinHybridAllGatherKernel: LSA direct (small) + direct GIN puts (large)
-      // Size to cover the size-adaptive CTA count (allGatherCtas) as well as -V.
-      const int agBarCtas = gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount);
-      reqs->barrierCount = agBarCtas;
-      reqs->lsaBarrierCount = agBarCtas;
-      reqs->ginSignalCount = agBarCtas;
-      return true;
-    }
-#endif
-    default:
-      return false;
-  }
+  return ginSdmaAllGatherDevCommRequirements(deviceImpl, reqs);
 }
 #endif
 

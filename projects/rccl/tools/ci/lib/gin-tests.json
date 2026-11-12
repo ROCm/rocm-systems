@@ -59,12 +59,12 @@
       "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1"
     },
     {
-      "_comment": "-D 3 selects GinHybridGatherKernel at the per-architecture LSA<->SDMA crossover, in-place and out-of-place.",
+      "_comment": "-D 3 selects GinHybridGatherKernel at the per-architecture LSA<->SDMA crossover, in-place and out-of-place, for every root (-r all).",
       "name": "rccl-gin-rocshmem-sdma-gather-d3",
       "kind": "rccl-tests",
       "bin": "gather_perf",
       "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7"],
-      "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1"
+      "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1 -r all"
     },
     {
       "_comment": "SDMA_THRESHOLD_GATHER=0 forces every chunk onto the GIN-put tier, which the per-architecture default leaves to large messages only (128 MiB/rank on gfx942). Covers the in-place root self-put skip.",
@@ -72,7 +72,7 @@
       "kind": "rccl-tests",
       "bin": "gather_perf",
       "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7", "NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER=0"],
-      "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1"
+      "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1 -r all"
     },
     {
       "_comment": "rocSHMEM-GDA (NCCL_GIN_TYPE=6) alltoall on an ionic runner: exercises the gin_ibv_* shim, QueuePairMux::provider_ dispatch and the ionic provider leaf. NCCL_GIN_IB_TC=104 is the traffic class GDA needs on ionic. No LSA tier in alltoall, so no threshold override needed.",

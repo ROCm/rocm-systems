@@ -223,13 +223,17 @@ inline size_t parseAllGatherCtasEnv() {
   return parseCtasEnv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS", "NCCL_GIN_ANVIL_AG_CTAS");  // deprecated alias
 }
 
-inline size_t resolveSdmaThresholdFromEnv() {
-  bool perCollSet = false, globalSet = false;
+static constexpr const char* kSdmaThresholdEnv = "NCCL_GIN_ANVIL_SDMA_THRESHOLD";
+static constexpr const char* kAllGatherSdmaThresholdEnv = "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER";
+static constexpr const char* kGatherSdmaThresholdEnv = "NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER";
+
+// Per-collective env `perCollName` > global kSdmaThresholdEnv > compiledDefault.
+inline size_t resolveSdmaThresholdFromEnv(const char* perCollName = kAllGatherSdmaThresholdEnv,
+                                          size_t compiledDefault = kAllGatherSdmaThresholdDefault) {
   unsigned long long perCollVal = 0, globalVal = 0;
-  perCollSet = parseEnvU64("NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER", &perCollVal);
-  globalSet = parseEnvU64("NCCL_GIN_ANVIL_SDMA_THRESHOLD", &globalVal);
-  return pickSdmaThreshold(perCollSet, perCollVal, globalSet, globalVal,
-                           kAllGatherSdmaThresholdDefault);
+  const bool perCollSet = parseEnvU64(perCollName, &perCollVal);
+  const bool globalSet = parseEnvU64(kSdmaThresholdEnv, &globalVal);
+  return pickSdmaThreshold(perCollSet, perCollVal, globalSet, globalVal, compiledDefault);
 }
 
 #endif  // host env helpers

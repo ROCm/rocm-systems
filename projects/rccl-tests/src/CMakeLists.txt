@@ -74,6 +74,7 @@ set(COMMON_FILES
   common.h
   common.cu
   gin_sdma_allgather_policy.h
+  gin_sdma_allgather_reqs.h
   gin_sdma_broadcast_policy.h
   gin_sdma_devtime.h
   gin_sdma_devtime_host.h

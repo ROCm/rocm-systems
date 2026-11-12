@@ -242,8 +242,9 @@ TEST(GatherPolicyInPlace, RootSkipsSelfPutOnlyInPlace) {
   // Out-of-place root: different windows, or the same window at another offset.
   EXPECT_FALSE(gatherRootSkipsSelfPut(true, false, root * chunk, 0, root, chunk));
   EXPECT_FALSE(gatherRootSkipsSelfPut(true, true, 0, 0, root, chunk));
-  // Non-root ranks always put, even with the in-place layout.
-  EXPECT_FALSE(gatherRootSkipsSelfPut(false, true, 1 * chunk, 0, root, chunk));
+  // Non-root ranks always put, even at the offset that would make root skip.
+  EXPECT_FALSE(gatherRootSkipsSelfPut(false, true, root * chunk, 0, root, chunk));
+  EXPECT_FALSE(gatherRootSkipsSelfPut(false, true, 512 + root * chunk, 512, root, chunk));
 }
 
 TEST(GatherPolicyInPlace, RootWaitsForOneSignalPerPut) {
@@ -309,6 +310,29 @@ TEST(AllGatherPolicyEnv, ParseAllGatherCtasEnv) {
   setenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS", "8foo", 1);
   EXPECT_EQ(parseAllGatherCtasEnv(), kAllGatherCtasUnset);
   unsetenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS");
+}
+
+TEST(GatherPolicyEnv, ResolveThresholdReadsGatherEnv) {
+  EXPECT_STREQ(kGatherSdmaThresholdEnv, "NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER");
+  const size_t archDefault = 512u << 10;
+  unsetenv(kGatherSdmaThresholdEnv);
+  unsetenv(kAllGatherSdmaThresholdEnv);
+  unsetenv(kSdmaThresholdEnv);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(kGatherSdmaThresholdEnv, archDefault), archDefault);
+
+  setenv(kSdmaThresholdEnv, "4096", 1);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(kGatherSdmaThresholdEnv, archDefault), 4096u);
+
+  // The AllGather variable must not leak into Gather.
+  setenv(kAllGatherSdmaThresholdEnv, "8192", 1);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(kGatherSdmaThresholdEnv, archDefault), 4096u);
+
+  setenv(kGatherSdmaThresholdEnv, "0", 1);
+  EXPECT_EQ(resolveSdmaThresholdFromEnv(kGatherSdmaThresholdEnv, archDefault), 0u);
+
+  unsetenv(kGatherSdmaThresholdEnv);
+  unsetenv(kAllGatherSdmaThresholdEnv);
+  unsetenv(kSdmaThresholdEnv);
 }
 
 TEST(GatherPolicyEnv, ParseGatherCtasEnvHasNoAlias) {

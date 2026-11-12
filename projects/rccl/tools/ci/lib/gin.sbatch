@@ -16,7 +16,7 @@
 #   2. lib/build-ompi.sh      build OpenMPI (--with-rocm) -> ompi.env
 #   3. projects/rccl  install.sh  build RCCL (GIN), then build
 #      rccl-UnitTestsFixtures, the ConnCheck host/device tests, and
-#      rccl-UnitTestsGinSdmaBroadcastPolicy -> rccl.env
+#      rccl-UnitTestsGinSdmaBroadcastPolicy, rccl-UnitTestsGinSdmaAllGatherPolicy -> rccl.env
 #   4. projects/rccl-tests        build rccl-tests (DEVICE_API + GIN)
 #   5. rccl-UnitTestsGinAnvilSdmaFactory  SDMA factory gtest (single-node)
 #   6. run-gin-ci.sh              run the GIN tests (non-gating)

@@ -8,6 +8,7 @@
 #include "cuda_runtime.h"
 #include "common.h"
 #include "gin_sdma_allgather_policy.h"
+#include "gin_sdma_allgather_reqs.h"
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
 #endif
@@ -48,78 +49,21 @@ void GatherGetBw(size_t count, size_t typesize, double sec, double* algBw, doubl
   *busBw = baseBw * factor;
 }
 
+// -D 3 is GinHybridGatherKernel: LSA direct (small) + one GIN put to root (large),
+// on the same pool as GinHybridAllGatherKernel.
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 testResult_t GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm) {
-  if (!reqs || !comm) return testInternalError;
-
-  ncclCommProperties_t commProperties = NCCL_COMM_PROPERTIES_INITIALIZER;
-  if (ncclCommQueryProperties(comm, &commProperties) != ncclSuccess) {
-    return testNcclError;
-  }
-
-  if (commProperties.nRanks != ncclTeamLsa(comm).nRanks) {
-    fprintf(stderr, "GinHybridGatherKernel requires P2P connectivity across all ranks. "
-                    "Not all ranks of this communicator have P2P connectivity.\n");
-    return testInvalidUsage;
-  }
-
-  switch(deviceImpl) {
-    case 3: { // GinHybridGatherKernel: LSA direct (small) + one GIN put to root (large)
-      if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
-        fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
-        return testInvalidUsage;
-      }
-#ifdef NCCL_GIN_BACKEND_MASK_ALL
-      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
-#endif
-      // Same barrier/signal pool as GinHybridAllGatherKernel. The launched grid is
-      // size-adaptive and never exceeds this pool; kernels index it by blockIdx.x.
-      {
-        const int barCtas = gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount);
-        reqs->barrierCount = barCtas;
-        reqs->lsaBarrierCount = barCtas;
-        reqs->ginSignalCount = barCtas;
-      }
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,7)
-      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
-#else
-      reqs->ginForceEnable = true;
-#endif
-      return testSuccess;
-    }
-    default:
-      return testNotImplemented;
-  }
+  return ginSdmaAllGatherDevCommRequirements(deviceImpl, reqs, comm, "GinHybridGatherKernel");
 }
 #elif defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 bool GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs) {
-  if (!reqs) return false;
-  memset(reqs, 0, sizeof(*reqs));
-
-  switch(deviceImpl) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-    case 3: {
-      const int barCtas = gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount);
-      reqs->barrierCount = barCtas;
-      reqs->lsaBarrierCount = barCtas;
-      reqs->ginSignalCount = barCtas;
-      return true;
-    }
-#endif
-    default:
-      return false;
-  }
+  return ginSdmaAllGatherDevCommRequirements(deviceImpl, reqs);
 }
 #endif
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-// Gather LSA<->SDMA crossover in bytes per rank. GATHER overrides the global
-// NCCL_GIN_ANVIL_SDMA_THRESHOLD, which overrides the default for the device's
-// architecture. Only root receives, so the crossover sits well above AllGather's
-// and differs by architecture: on one node (out-of-place float and int8, best of
-// 2 x 50 iterations) LSA stores match or beat the SDMA put through 128 MiB/rank on
-// 8x MI300X but only up to 512 KiB/rank on 4x MI455X, whose SDMA floor is ~44 us.
-// Architectures not in kGatherSdmaThresholdByArch.
+// Gather LSA<->SDMA crossover in bytes per rank: NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER >
+// NCCL_GIN_ANVIL_SDMA_THRESHOLD > per-arch default. Fallback for archs not in the table below.
 static constexpr size_t kGatherSdmaThresholdDefault = 1u << 20;
 
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
@@ -131,8 +75,9 @@ static constexpr gin_sdma_allgather::ArchSdmaThreshold kGatherSdmaThresholdByArc
 static size_t gatherArchSdmaThreshold() {
   int dev = 0;
   hipDeviceProp_t prop;
-  if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess)
+  if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess) {
     return kGatherSdmaThresholdDefault;
+  }
   return gin_sdma_allgather::archSdmaThreshold(
       prop.gcnArchName, kGatherSdmaThresholdByArch,
       sizeof(kGatherSdmaThresholdByArch) / sizeof(kGatherSdmaThresholdByArch[0]),
@@ -140,12 +85,8 @@ static size_t gatherArchSdmaThreshold() {
 }
 
 static size_t gatherSdmaThresholdOnce() {
-  unsigned long long perColl = 0;
-  unsigned long long global = 0;
-  const bool perCollSet = gin_sdma_allgather::parseEnvU64("NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER", &perColl);
-  const bool globalSet = gin_sdma_allgather::parseEnvU64("NCCL_GIN_ANVIL_SDMA_THRESHOLD", &global);
-  return gin_sdma_allgather::pickSdmaThreshold(perCollSet, perColl, globalSet, global,
-                                               gatherArchSdmaThreshold());
+  return gin_sdma_allgather::resolveSdmaThresholdFromEnv(gin_sdma_allgather::kGatherSdmaThresholdEnv,
+                                                         gatherArchSdmaThreshold());
 }
 #endif
 
@@ -196,14 +137,9 @@ __device__ void GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWin
 
 // Single-node hybrid Gather body (-D 3), the AllGather body with one destination:
 //   chunkBytes <= sdmaThreshold: direct LSA store into root (all CTAs).
-//   chunkBytes >  sdmaThreshold: one GIN put to root, issued by a single thread.
-//     The AllGather peer stripe still picks that thread: root is owned by CTA
-//     (root % gridDim.x), thread (root / gridDim.x). Every rank issues that one
-//     put, so root's signal[root % gridDim.x] advances by nRanks and only that
-//     CTA on root waits. The exit barrier holds every rank until that wait
-//     completes, which is what makes back-to-back launches safe.
-//     In-place, root's chunk already sits in its recv slice, so root skips its
-//     own put and waits for nRanks - 1.
+//   chunkBytes >  sdmaThreshold: one GIN put to root from the thread the AllGather
+//     peer stripe assigns to root. Only CTA (root % gridDim.x) on root waits, for
+//     one signal per put; the exit barrier keeps back-to-back launches safe.
 __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int root, size_t sdmaThreshold, const struct ncclDevComm& devComm) {
   if (gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold)) {
     ncclTeam lsa = ncclTeamLsa(devComm);
@@ -239,9 +175,10 @@ __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindo
   }
   __syncthreads();
 
-  if (isRoot && blockIdx.x == (root % peerStride))
+  if (isRoot && blockIdx.x == (root % peerStride)) {
     gin.waitSignal(ncclCoopCta(), signalIndex,
                    signalValue + gin_sdma_allgather::gatherRootExpectedSignals(devComm.nRanks, rootInPlace));
+  }
   gin.flush(ncclCoopCta());
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
@@ -294,6 +231,18 @@ testResult_t GatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
     switch(deviceImpl) {
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
       case 3: {
+#if NCCL_VERSION_CODE < NCCL_VERSION(2,29,0)
+        {
+          // The 2.28.x requirements hook gets no comm to reject this layout; the LSA
+          // tier addresses root by world rank, which is only its LSA rank on one node.
+          const ncclDevComm* devComm = (const ncclDevComm*)comm;
+          if (devComm->lsaSize != devComm->nRanks) {
+            fprintf(stderr, "GinHybridGatherKernel requires CUDA P2P connectivity across all ranks. "
+                            "Not all ranks of this communicator have P2P connectivity.\n");
+            return testInvalidUsage;
+          }
+        }
+#endif
         if (count == 0) return testSuccess;
         const size_t sdmaThreshold = GatherResolveSdmaThreshold();
         const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
