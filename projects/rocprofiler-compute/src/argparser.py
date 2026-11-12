@@ -102,21 +102,9 @@ def add_general_group(
             "Values: %(choices)s"
         ),
     )
-    general_group.add_argument(
-        "--config-dir",
-        dest="config_dir",
-        metavar="<dir>",
-        action=DeprecatedAction,
-        base_action="store",
-        advice=(
-            "Custom panel configs will be replaced by user-defined metric sets and "
-            "views."
-        ),
-        help=(
-            "Specify the directory of customized report section configs "
-            "(Default: built-in configs)."
-        ),
-        default=rocprof_compute_home / "rocprof_compute_soc/analysis_configs/",
+    # The built-in analysis configs that profile and analyze read
+    parser.set_defaults(
+        config_dir=rocprof_compute_home / "rocprof_compute_soc/analysis_configs/"
     )
     general_group.add_argument(
         "-s", "--specs", action="store_true", help="Print system specs and exit."

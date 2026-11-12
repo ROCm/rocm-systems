@@ -106,5 +106,3 @@ the family has no layout.
 
 - Optiq needs to read the new column and the layout format documented in
   `src/memory_chart/README.md`.
-- With a panel 3 configuration from `--config-dir`, a layout metric may have no
-  definition. Readers should show it as missing.
