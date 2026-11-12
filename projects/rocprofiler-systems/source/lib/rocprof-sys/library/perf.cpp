@@ -16,6 +16,7 @@
 #include "logger/debug.hpp"
 
 #include <asm/unistd.h>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <ctime>
@@ -162,24 +163,34 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
     m_fd = perf_event_open(&_pe, _pid, _cpu, -1, 0);
     if(m_fd == -1)
     {
-        const std::string path = "/proc/sys/kernel/perf_event_paranoid";
+        // Read errno before opening the paranoid file; that read overwrites it.
+        const int  open_errno = errno;
+        const bool denied     = open_errno == EACCES || open_errno == EPERM;
 
-        auto file = std::ifstream{ path.c_str() };
+        if(denied)
+        {
+            constexpr const char* k_paranoid_path =
+                "/proc/sys/kernel/perf_event_paranoid";
+            int  paranoid_value = 4;
+            auto paranoid_file  = std::ifstream{ k_paranoid_path };
+            if(paranoid_file)
+            {
+                paranoid_file >> paranoid_value;
+            }
 
-        ROCPROFSYS_RETURN_ERROR_MSG(!file,
-                                    "Failed to open " << path << ": " << strerror(errno));
-
-        int value = 4;
-        file >> value;
-
-        ROCPROFSYS_RETURN_ERROR_MSG(file.bad(), "Failed to read from "
-                                                    << path << ": " << strerror(errno));
+            ROCPROFSYS_RETURN_ERROR_MSG(
+                true,
+                "Failed to open perf event: "
+                    << strerror(open_errno) << ". Consider tweaking " << k_paranoid_path
+                    << " to 2 or less (current value is " << paranoid_value
+                    << "), or granting rocprof-sys CAP_PERFMON (or CAP_SYS_ADMIN).");
+        }
 
         ROCPROFSYS_RETURN_ERROR_MSG(
-            true, "Failed to open perf event. Consider tweaking "
-                      << path << " to 2 or less " << "(current value is " << value
-                      << "), "
-                      << "or granting rocprof-sys CAP_PERFMON (or CAP_SYS_ADMIN).");
+            true,
+            "Failed to open perf event: "
+                << strerror(open_errno)
+                << ". The requested event is unsupported by this CPU/PMU or kernel.");
     }
 
     // If sampling, map the perf event file
