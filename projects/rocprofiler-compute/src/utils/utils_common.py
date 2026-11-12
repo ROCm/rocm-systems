@@ -970,9 +970,7 @@ def config_template_path_for_arch(
 ) -> Optional[Path]:
     """Return the config template whose filename prefix matches arch.
 
-    Templates are considered in sorted name order, so a gfx120 template matches
-    before gfx12 and a gfx125 template matches before gfx12. Returns None when
-    no template prefix matches.
+    Returns None when no template prefix matches.
     """
     directory = configs_dir if configs_dir is not None else config.analysis_configs_dir
     for template_path in sorted(directory.glob("*_config_template.yaml")):

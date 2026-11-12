@@ -151,28 +151,38 @@ GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
 }
 
 
-# gfx1201 does not ship these gfx1250 tables, so their section names stay off
-# the gfx1201 map.
-_GFX1201_OMITTED_TABLE_IDS = {306, 307, 901, 906, 1102, 1104, 1106, 1304}
-
 GFX1201_PANEL_ID_TO_SECTION: dict[int, str] = {
-    table_id: section
-    for table_id, section in GFX1250_PANEL_ID_TO_SECTION.items()
-    if table_id not in _GFX1201_OMITTED_TABLE_IDS
-}
-GFX1201_PANEL_ID_TO_SECTION.update({
+    201: "System Speed-of-Light",
+    301: "Memory chart - Instruction Cache",
+    302: "Memory chart - Scalar Data Cache",
+    303: "Memory chart - GL0 Cache (Vector L0)",
+    304: "Memory chart - LDS (Local Data Share)",
     308: "Memory chart - GL2 Cache (L2)",
     309: "Memory chart - L2 to Memory",
     310: "Memory chart - Workgroup Processors (WGPs)",
     311: "Memory chart - Infinity Cache and VRAM",
     602: "Wave Dispatch Statistics",
+    701: "WGP Utilization",
+    702: "WGP Wavefront Launch Stats",
+    703: "WGP Wavefront Dispatch",
+    704: "WGP Wavefront Life",
+    705: "WGP Wavefront Instruction Mix",
+    706: "WGP VMEM Instruction Mix",
+    707: "WGP LDS Instruction Mix",
+    708: "WGP VALU Instruction Mix",
+    710: "WGP WMMA Instruction FLOPs and IOPs Counting",
+    711: "WGP Instruction Issue Stalls",
+    716: "WGP Instruction Cache",
+    717: "WGP Scalar Data Cache",
     902: "GL0 Request Statistics",
     903: "GL0 Cache Performance",
     908: "GL0 Stalls",
+    1101: "GL1A Processing",
     1103: "GL1 Cache Request Statistics",
     1310: "GL2 Cache Request Statistics",
     1311: "GL2 Cache Performance",
-})
+    1701: "GRBM Metrics",
+}
 
 
 def normalize_unit_for_docs(unit: str) -> str:

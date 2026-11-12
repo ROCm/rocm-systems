@@ -19,12 +19,12 @@ import utils.utils_common as utils_common
 from utils.utils_common import canonical_config_arch
 
 
-def arch_directories_with_panel_template():
-    """Analysis-config directories whose panel-alias lookup finds a template."""
+def analysis_config_archs():
+    """Arch directories under the analysis configs."""
     return sorted(
         arch_dir.name
-        for arch_dir in config.analysis_configs_dir.iterdir()
-        if arch_dir.is_dir() and utils_common.get_arch_panel_id_to_alias(arch_dir.name)
+        for arch_dir in config.analysis_configs_dir.glob("gfx*")
+        if arch_dir.is_dir()
     )
 
 
@@ -748,7 +748,7 @@ def test_convert_metric_id_to_panel_info_edge_case_dot_only():
 
 @pytest.mark.parametrize(
     "gpu_arch",
-    arch_directories_with_panel_template(),
+    analysis_config_archs(),
 )
 def test_get_arch_alias_to_panel_id_finds_template_aliases(gpu_arch):
     assert utils_common.get_arch_alias_to_panel_id(gpu_arch)
