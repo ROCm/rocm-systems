@@ -162,11 +162,12 @@ int binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint3
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if constexpr (Op == rocjitsu::arith::Binary::Mul) {
+  if constexpr (Op == rocjitsu::arith::Binary::Mul || Op == rocjitsu::arith::Binary::MulDx9Zero) {
     if (rocjitsu::arith::is_exact(flags) &&
         rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4) &&
         rocjitsu::arith::mul_exact_x86_64_v4(flags, exec_mask, uint32_t(instruction_flags), d[0],
-                                             a[0], b[0], state)) {
+                                             a[0], b[0], state,
+                                             Op == rocjitsu::arith::Binary::MulDx9Zero)) {
       return RJ_ARITH_SUCCESS;
     }
   }
