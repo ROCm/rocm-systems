@@ -125,28 +125,6 @@ bool supports_counter_capacity(rj_code_arch_t arch) {
   }
 }
 
-std::optional<amdgpu::MemoryIssueInfo>
-routed_flat_issue_info(const amdgpu::MemoryAccessObservation &access,
-                       const amdgpu::MemoryIssueInfo &decoded) {
-  if (access.decoded_space != amdgpu::DecodedMemorySpace::FLAT ||
-      (access.route != amdgpu::MemoryRoute::GLOBAL && access.route != amdgpu::MemoryRoute::LOCAL))
-    return std::nullopt;
-
-  if (access.request_lane_mask == 0)
-    return decoded.for_flat_memory_domains(false, false);
-
-  const uint64_t shared_lanes =
-      (access.flat_local_lane_mask | access.flat_dds_lane_mask) & access.request_lane_mask;
-  // Functional execution splits mixed requests by address space. The plugin's
-  // single mixed event retains both obligations until both domains are ready.
-  if (shared_lanes != 0 && shared_lanes != access.request_lane_mask)
-    return decoded;
-  if (access.route != (shared_lanes ? amdgpu::MemoryRoute::LOCAL : amdgpu::MemoryRoute::GLOBAL))
-    return std::nullopt;
-
-  return decoded.for_flat_memory_domains(shared_lanes == 0, shared_lanes != 0);
-}
-
 } // namespace
 
 util::FailureOr<MarkedInstruction> findConflict(const RaceViolation &v, RaceDetector &detector) {
@@ -505,16 +483,16 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       data && (data->tag() == amdgpu::LOCAL_MEM || data->tag() == amdgpu::GLOBAL_MEM) &&
       inst.data_as<amdgpu::VectorMemState>()->rejects_routed_access())
     return;
-  const auto *decoded = inst.amdgpu_memory_issue_info();
-  assert(decoded && "memory instruction reached the race detector without issue metadata");
-  if (!decoded)
+  const auto *issue = amdgpu::resolved_memory_issue_info(inst);
+  assert(issue && "memory instruction reached the race detector without issue metadata");
+  if (!issue)
     return;
-  const auto routed = routed_flat_issue_info(access, *decoded);
-  const auto &issue = routed ? *routed : *decoded;
-  const auto obligations = issue.counter_obligations();
+  const auto obligations = issue->counter_obligations();
   const MemoryOrderClass memoryOrder = memoryOrderForObligations(obligations);
-  if (routed && access.request_lane_mask != 0 && supports_counter_capacity(wf.cu().arch()) &&
-      rs->prepareForMemoryIssue(issue).failed()) {
+  if (access.decoded_space == amdgpu::DecodedMemorySpace::FLAT &&
+      (access.route == amdgpu::MemoryRoute::GLOBAL || access.route == amdgpu::MemoryRoute::LOCAL) &&
+      access.request_lane_mask != 0 && supports_counter_capacity(wf.cu().arch()) &&
+      rs->prepareForMemoryIssue(*issue).failed()) {
     report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
     return;
   }
@@ -530,9 +508,9 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
                              ~(access.flat_dds_lane_mask | access.flat_local_oob_lane_mask);
     if (execMask == 0)
       return;
-    const bool readModifyWrite =
-        (routed.has_value() || access.decoded_space == amdgpu::DecodedMemorySpace::LOCAL) &&
-        d.atomic_op != amdgpu::AtomicOp::NONE;
+    const bool readModifyWrite = (access.decoded_space == amdgpu::DecodedMemorySpace::FLAT ||
+                                  access.decoded_space == amdgpu::DecodedMemorySpace::LOCAL) &&
+                                 d.atomic_op != amdgpu::AtomicOp::NONE;
     const auto ldsAccess = readModifyWrite ? LdsAccess::ReadWrite
                            : d.is_load     ? LdsAccess::Read
                                            : LdsAccess::Write;

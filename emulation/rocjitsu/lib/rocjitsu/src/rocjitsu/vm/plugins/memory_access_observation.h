@@ -150,9 +150,9 @@ struct MemoryAccessObservation {
   /// @brief The routing-selected counter for this access.
   ///
   /// @details Uniform shared FLAT selects its LDS counter. Mixed FLAT retains
-  /// its VMEM counter here, while @ref VectorMemState::routed_issue_info carries
+  /// its VMEM counter here, while @ref resolved_memory_issue_info carries
   /// both VMEM and LDS obligations. This scalar field does not describe the
-  /// complete wait requirement; for mixed FLAT, consult the routed issue's
+  /// complete wait requirement; consult the resolved issue's
   /// counter_obligations().
   WaitCounterType wait_counter = WaitCounterType::VMCNT;
 

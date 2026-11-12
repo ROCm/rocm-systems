@@ -377,8 +377,9 @@ event can therefore retain many later completed records even after those records
 have left the LDS conflict lists. Logical completion and reclaiming registry
 storage are separate.
 
-The adapter uses the shared `MemoryIssueInfo` obligations and
-`WaitCounterPolicy` explicit-wait decoding. A zero wait completes every event
+The adapter and memory pipeline read the same `MemoryIssueInfo` selected by
+routing; the plugin does not infer FLAT's counter domains from addresses again.
+Explicit waits use `WaitCounterPolicy` decoding. A zero wait completes every event
 on its selected counter; an all-ones field means no wait. A nonzero wait retires
 only the provable prefix within each independently ordered completion class.
 Sharing a counter does not make scalar memory, GDS, and indexed LDS one FIFO.

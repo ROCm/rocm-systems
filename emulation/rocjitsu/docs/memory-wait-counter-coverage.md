@@ -142,7 +142,9 @@ express a separate replay-source lifetime.
 
 The obligations also drive emulated counters and plugin-visible metadata.
 `MemoryPipeline::issue_counters` turns each obligation into wave counter tokens,
-and execution plugins observe the metadata through `amdgpu_memory_issue_info()`.
+and execution plugins read the same routing-selected descriptor through
+`resolved_memory_issue_info()`. Before routing, `amdgpu_memory_issue_info()`
+describes the possible decoded domains instead.
 Removing VMEM EXP obligations therefore means VMEM stores and atomics no longer
 contribute EXPCNT tokens in emulation. This is the emulator's concrete accounting
 choice; the hardware source-reuse uncertainty described below remains separate.

@@ -511,8 +511,13 @@ reports a `MemoryAccessObservation` describing the access the memory system is
 actually about to be asked for — the pipeline it was issued to, its routing-selected
 counter, and its effective addresses. The scalar `wait_counter` field does not
 describe the complete wait requirement: mixed FLAT retains its VMEM counter here,
-while `VectorMemState::routed_issue_info` carries both VMEM and LDS obligations.
-Consult that routed issue's `counter_obligations()` for the full set.
+while the resolved issue carries both VMEM and LDS obligations. Use
+`amdgpu::resolved_memory_issue_info(inst)` from `vm/amdgpu/mem_state.h` to borrow
+the same descriptor as the memory pipeline, then read its `counter_obligations()`.
+Without a routing override it returns the decoded metadata. A present, empty
+override means the resolved issue contributes no obligations; it does not fall
+back to the decoded domains. The pointer is valid only while the instruction
+and its current dynamic state remain unchanged.
 
 When all requesting FLAT lanes use the shared aperture, routing selects the
 LDS pipeline and sets `normalized_to_local` to `true`. This flag describes the

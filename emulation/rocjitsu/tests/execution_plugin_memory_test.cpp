@@ -251,6 +251,37 @@ TEST(ExecutionPluginTest, EmptyGlobalTransposeSkipsAddressesAndPreservesLoadCoun
   }
 }
 
+TEST(ExecutionPluginTest, ResolvedMemoryIssueBorrowsTheRoutedDescriptorIncludingEmpty) {
+  CounterObservingPipeline pipeline;
+  for (const auto tag : {GLOBAL_MEM, LOCAL_MEM}) {
+    auto state = std::make_unique<VectorMemState>(tag);
+    auto *routed = state.get();
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::VMCNT, MemoryCompletionClass::VMEM, 2},
+                                {WaitCounterType::LGKMCNT, MemoryCompletionClass::LDS}});
+    const auto *decoded = inst.amdgpu_memory_issue_info();
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_EQ(resolved_memory_issue_info(inst), decoded);
+    EXPECT_EQ(pipeline.issue_counters(inst).size, 3);
+
+    for (const bool vmem : {false, true}) {
+      for (const bool lds : {false, true}) {
+        routed->routed_issue_info = decoded->for_flat_memory_domains(vmem, lds);
+        EXPECT_EQ(resolved_memory_issue_info(inst), &*routed->routed_issue_info);
+        const auto counters = pipeline.issue_counters(inst);
+        EXPECT_EQ(counters.size, 2 * vmem + lds);
+        const auto types = std::span(counters.types).first(counters.size);
+        EXPECT_EQ(std::ranges::count(types, WaitCounterType::VMCNT), vmem ? 2 : 0);
+        EXPECT_EQ(std::ranges::count(types, WaitCounterType::LGKMCNT), lds ? 1 : 0);
+      }
+    }
+    inst.set_data(nullptr);
+    EXPECT_EQ(resolved_memory_issue_info(inst), decoded);
+  }
+  Instruction no_memory("probe", nullptr);
+  EXPECT_EQ(resolved_memory_issue_info(no_memory), nullptr);
+}
+
 TEST(ExecutionPluginTest, MemoryPipelineHoldsDecodedCountersUntilCompletion) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
@@ -1761,17 +1792,18 @@ TEST(RoutedMemoryObservationTest, AnUnroutableAccessIsReportedRatherThanDropped)
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
+  using namespace plugins::race_detector;
   enum class Operation { Load, Store, ReturningAtomic, Atomic };
-  enum class Space { Global, Lds, Scratch, GlobalAndScratch };
+  enum class Space { Global, Lds, GlobalAndLds, Scratch, GlobalAndScratch };
   for (const std::string_view arch : {"cdna2", "cdna4", "rdna2", "rdna4", "cdna5"}) {
     for (const auto operation :
          {Operation::Load, Operation::Store, Operation::ReturningAtomic, Operation::Atomic}) {
-      for (const auto space :
-           {Space::Global, Space::Lds, Space::Scratch, Space::GlobalAndScratch}) {
+      for (const auto space : {Space::Global, Space::Lds, Space::GlobalAndLds, Space::Scratch,
+                               Space::GlobalAndScratch}) {
         // RDNA2's FLAT address calculator does not yet translate private pointers.
         if (arch == "rdna2" && (space == Space::Scratch || space == Space::GlobalAndScratch))
           continue;
-        for (const uint64_t exec : {0u, 2u, 3u}) {
+        for (const uint64_t exec : {0u, 1u, 2u, 3u}) {
           SCOPED_TRACE(arch);
           SCOPED_TRACE(static_cast<int>(operation));
           SCOPED_TRACE(static_cast<int>(space));
@@ -1782,7 +1814,17 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
           PluginFixture f;
           ASSERT_NO_FATAL_FAILURE(
               f.initialize(1, std::string(arch), wave_size, cdna_legacy ? 104 : 128));
-          auto *observer = f.attach_memory_observation_plugin();
+          PluginSinkConfig sinks;
+          sinks.emplace<StringSink>();
+          f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+          auto observation_plugin = std::make_unique<MemoryObservationPlugin>();
+          const auto *observer = observation_plugin.get();
+          ASSERT_TRUE(f.plugin_group_->add(std::move(observation_plugin)));
+          auto race_plugin = std::make_unique<RaceDetectorPlugin>();
+          const auto *race = race_plugin.get();
+          ASSERT_TRUE(f.plugin_group_->add(std::move(race_plugin)));
+          f.soc->set_plugin_group(f.plugin_group_);
+          f.plugin_group_->onInit();
           auto *cu = f.cu();
           constexpr uint64_t shared = 0x0001'0000'0000'0000ULL;
           constexpr uint64_t private_base = 0x0002'0000'0000'0000ULL;
@@ -1791,7 +1833,11 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
           cu->set_apertures(shared, shared + 0xFFFF, private_base, private_base + 0xFFFF);
           auto *wf = cu->dispatch_wf(0, 0x100, cdna_legacy ? 104 : 128, 256, wave_size);
           ASSERT_NE(wf, nullptr);
+          wf->set_dispatch_id(1);
           wf->set_exec(exec);
+          std::array<Wavefront *, 1> waves{wf};
+          f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, wf->sgpr_alloc().count, waves);
+          f.plugin_group_->onAmdgpuWavefrontDispatched(*wf);
           wf->set_scratch_base(scratch);
           wf->set_scratch_lane_size(256);
           const uint32_t vb = wf->vgpr_alloc().base;
@@ -1800,9 +1846,11 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
                 space == Space::Scratch || (space == Space::GlobalAndScratch && lane == 1);
             const uint64_t private_address =
                 arch == "cdna5" ? scratch + (uint64_t{lane} << 52) + 0x20 : private_base + 0x20;
-            const uint64_t address = space == Space::Lds ? shared + lane * 4
-                                     : private_lane      ? private_address
-                                                         : global + lane * 4;
+            const bool lds_lane =
+                space == Space::Lds || (space == Space::GlobalAndLds && lane == 0);
+            const uint64_t address = lds_lane       ? shared + lane * 4
+                                     : private_lane ? private_address
+                                                    : global + lane * 4;
             cu->write_vgpr(vb, lane, static_cast<uint32_t>(address));
             cu->write_vgpr(vb + 1, lane, address >> 32);
             cu->write_vgpr(vb + 4, lane, 1);
@@ -1862,6 +1910,7 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
           for (const auto obligation : inst->amdgpu_memory_issue_info()->counter_obligations())
             if (obligation.wait_counter_type() == WaitCounterType::EXPCNT)
               exports += obligation.counter_increment();
+          f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wf->pc, *inst, *wf);
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
           test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(inst), *wf);
           ASSERT_EQ(observer->accesses.size(), 1u);
@@ -1872,9 +1921,20 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
               : arch == "rdna2" && !result ? WaitCounterType::VSCNT
                                            : WaitCounterType::VMCNT;
           const auto ds_counter = split ? WaitCounterType::DSCNT : WaitCounterType::LGKMCNT;
-          EXPECT_EQ(std::ranges::count(counters, vm_counter), exec && space != Space::Lds ? 1 : 0);
-          EXPECT_EQ(std::ranges::count(counters, ds_counter), exec && space == Space::Lds ? 1 : 0);
+          const uint64_t lds_lanes = space == Space::Lds            ? exec
+                                     : space == Space::GlobalAndLds ? exec & 1
+                                                                    : 0;
+          EXPECT_EQ(std::ranges::count(counters, vm_counter), (exec & ~lds_lanes) != 0 ? 1 : 0);
+          EXPECT_EQ(std::ranges::count(counters, ds_counter), lds_lanes != 0 ? 1 : 0);
           EXPECT_EQ(std::ranges::count(counters, WaitCounterType::EXPCNT), exports);
+          const auto *race_state =
+              static_cast<RaceWavefrontState *>(wf->plugin_state(race->slot_index()));
+          const auto &events = race_state->race_state->getDetector()->events();
+          ASSERT_EQ(events.totalAllocated(), counters.empty() ? 0 : 1);
+          if (!counters.empty())
+            for (const auto counter : {vm_counter, ds_counter, WaitCounterType::EXPCNT})
+              EXPECT_EQ(events.pendingCounterIncrement(EventId{0}, counter),
+                        std::ranges::count(counters, counter));
         }
       }
     }

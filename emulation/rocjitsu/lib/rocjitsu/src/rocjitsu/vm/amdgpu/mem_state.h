@@ -478,6 +478,18 @@ public:
   }
 };
 
+/// Borrow the descriptor selected by routing, or the decoded descriptor before
+/// routing. A present but empty override still replaces the decoded obligations.
+inline const MemoryIssueInfo *resolved_memory_issue_info(const Instruction &inst) {
+  const auto *state = inst.data();
+  if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM)) {
+    const auto &routed = inst.data_as<VectorMemState>()->routed_issue_info;
+    if (routed)
+      return &*routed;
+  }
+  return inst.amdgpu_memory_issue_info();
+}
+
 /// CDNA1-4 buffer-OOB reads still write zeros to legal LDS destinations.
 /// Later architectures suppress the LDS write for lanes that did not request data.
 inline uint64_t lds_destination_write_mask(const VectorMemState &state, rj_code_arch_t arch) {
