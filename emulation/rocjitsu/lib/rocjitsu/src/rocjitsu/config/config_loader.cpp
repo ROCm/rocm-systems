@@ -67,8 +67,9 @@ resolve_execution_threads(const ExecutionThreadRequest &request, uint32_t host_t
   auto effective = [&](ExecutionThreadChoice choice) {
     ExecutionThreadAllocation result;
     result.engines = std::min(request.engines ? request.engines : choice.engines, xcds);
-    result.helpers = request.helpers >= 0 ? static_cast<uint32_t>(request.helpers)
-                                          : (async_supported ? choice.helpers : 0);
+    result.helpers = !async_supported       ? 0
+                     : request.helpers >= 0 ? static_cast<uint32_t>(request.helpers)
+                                            : choice.helpers;
     for (uint32_t capacity : dispatch_capacities)
       result.dispatch.push_back(
           std::min(request.dispatch ? request.dispatch : choice.dispatch, std::max(capacity, 1u)));

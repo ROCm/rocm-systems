@@ -2500,6 +2500,35 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaCompoundAdvancesCallbacksByFullPref
   EXPECT_EQ(before_events[1].pc - before_events[0].pc, 16u);
 }
 
+// Unconsumed scale lanes are not dependencies, even when another instruction writes them.
+TEST(ExecutionPluginTest, Gfx1250ScaledWmmaReadsOnlySelectedScaleLanes) {
+  for (bool wide : {false, true}) {
+    for (uint32_t select : {0u, 1u}) {
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5"));
+      auto *plugin = f.attach_ordering_plugin();
+      auto *cu = f.cu();
+      auto *wf = cu->dispatch_wf(0, 0, 104, 256, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(0xffffffffU);
+      auto words = mma_test::make_cdna5_wmma_scale_words(4, 4, 336, 338);
+      words[0] |= select << 11; // A and B independently select opposite halves.
+      words[1] |= (select ^ 1) << 27;
+      if (wide)
+        words[2] = 0xcc880040U;
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      std::map<uint32_t, uint64_t> reads;
+      for (const auto &event : vgpr_read_events(*plugin))
+        reads[event.physical_reg - wf->vgpr_alloc().base] |= event.lane_mask;
+      EXPECT_EQ(reads[80], wide ? 0xffffffffU : 0xffffU << (16 * select));
+      EXPECT_EQ(reads[82], 0xffffU << (16 * (select ^ 1)));
+    }
+  }
+}
+
 TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaScaleReadsUseSelectedByteMask) {
   constexpr uint32_t kSrc0 = 0;
   constexpr uint32_t kSrc1 = 16;
