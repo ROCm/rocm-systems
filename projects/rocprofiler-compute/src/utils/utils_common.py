@@ -46,6 +46,8 @@ from vendored import yaml
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
+# Block 4 and its alias; ids such as 4.1 are roofline metrics
+ROOFLINE_BLOCK_IDS = ("4", "roof")
 PROFILE_OUTPUT_FORMAT = "rocpd"
 # Profile names the native tool's per-pid CSVs <prefix>_<fbase>_<pid>.csv.gz
 # in the workload directory, and analyze reads them back by these prefixes.
@@ -622,6 +624,14 @@ def parse_pmc_perf(pmc_perf_file: str) -> List[str]:
     if not jobs:
         return []
     return jobs[0].get("pmc") or []
+
+
+def selects_roofline(filter_blocks: Optional[List[str]]) -> bool:
+    """Return True if nothing is selected (everything) or a block is 4, 4.x or roof."""
+    return not filter_blocks or any(
+        str(block) in ROOFLINE_BLOCK_IDS or str(block).startswith("4.")
+        for block in filter_blocks
+    )
 
 
 def is_only_pc_sampling(filter_blocks: List[str]) -> bool:

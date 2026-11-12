@@ -30,6 +30,7 @@ from utils.utils_common import (
     get_job_rank_and_size,
     is_only_pc_sampling,
     print_status,
+    selects_roofline,
 )
 from utils.utils_exceptions import (
     ExecutableNotFoundError,
@@ -367,7 +368,7 @@ class RocProfCompute_Base:
         gen_sysinfo(
             workload_dir=args.output_directory,
             app_cmd=args.remaining,
-            skip_roof=args.no_roof,
+            skip_roof=args.no_roof or not selects_roofline(args.filter_blocks),
             mspec=self._soc._mspec,
         )
 
@@ -466,9 +467,7 @@ class RocProfCompute_Base:
                 "No performance counters to collect -- PC sampling only mode",
             )
 
-        msg = "Collecting Performance Counters"
-        status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
-        print_status(status_msg)
+        print_status("Collecting Performance Counters")
 
         if total_runs:
             # Warn once per profile run, not once per counter collection pass.
