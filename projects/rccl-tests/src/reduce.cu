@@ -5,6 +5,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <atomic>
 #include "cuda_runtime.h"
 #include "common.h"
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
@@ -15,6 +16,77 @@
 #endif
 #include "gin_sdma_reduce.h"  // device reduction ops bit-matching verifiable.cu
 #include "gin_sdma_devtime.h" // shared device-side (wall_clock64) timing scaffold
+#include "gin_sdma_broadcast_policy.h"  // gin_sdma::parseSize / resolveLLCap
+#endif
+
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+// Small -D 3 messages take the LL tier instead (see GinReduceLLKernel).
+// NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES=<bytes> sets the cutover (0 = disable),
+// clamped to kReduceLLMaxBytes. Every rank must use the same value. The LL
+// buffer takes about 4*nRanks*cap bytes per rank (two epoch parities of 16-byte
+// lines carrying 8 data bytes each), so by default the cap is sized to keep it
+// within kReduceLLDefaultBufferBytes.
+static constexpr size_t kReduceLLMaxBytes = 1 << 20;
+static constexpr size_t kReduceLLDefaultBufferBytes = 16 << 20;
+static constexpr int kReduceLLMaxCtas = 256;
+static constexpr int kReduceLLUnitsPerCta = 512;  // 8-byte units per CTA, one per thread
+static_assert(kReduceLLMaxBytes / 8 <= (size_t)kReduceLLMaxCtas * kReduceLLUnitsPerCta,
+              "an LL block must never hold more than kReduceLLUnitsPerCta units");
+
+// The resolved LL cap and the handle ncclDevCommCreate fills in. With -p 1
+// every host thread builds its own requirements and devComms, so each thread
+// keeps its own copy. Otherwise the main thread builds them for every thread
+// before starting the others, so all threads must read that one copy: a
+// thread_local alone leaves threads 1..N-1 with a zero cap and zero handles,
+// and their ranks then launch a different kernel than thread 0's and hang.
+struct ReduceDevState {
+  size_t llMaxBytes;
+  ncclLLA2AHandle llHandle;
+};
+extern int parallel_init;
+static ReduceDevState g_reduceSharedState = {};
+thread_local ReduceDevState g_reduceThreadState = {};
+static ReduceDevState& reduceState() {
+  return parallel_init ? g_reduceThreadState : g_reduceSharedState;
+}
+// Each thread that builds requirements links its own node into its own list.
+thread_local ncclDevResourceRequirements g_reduceLLReq = {};
+
+static int reduceLLCtas(size_t bytes) {
+  const size_t units = bytes / 8;
+  const size_t ctas = (units + kReduceLLUnitsPerCta - 1) / kReduceLLUnitsPerCta;
+  return (int)std::max<size_t>(1, std::min<size_t>(ctas, kReduceLLMaxCtas));
+}
+
+// Whether a -D 3 message of `bytes` goes to the LL tier. Every element type is
+// at most 8 bytes, so 16-byte-aligned counts always fill whole LL units.
+static bool reduceUseLL(size_t bytes, int nRanks) {
+  const ReduceDevState& st = reduceState();
+  if (bytes == 0 || bytes > st.llMaxBytes) return false;
+  const int ctas = reduceLLCtas(bytes);
+  const size_t unitsPerCta = (bytes / 8 + ctas - 1) / ctas;
+  return (size_t)nRanks * unitsPerCta + 1 <= st.llHandle.nSlots;
+}
+#endif
+
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+// Which kernel launched, for tests that must tell the tiers apart: the data is
+// correct whichever tier runs, so #wrong alone cannot show that a tier was
+// skipped. Opt-in via RCCL_TESTS_REDUCE_TIER_LOG, once per tier, like
+// broadcast.cu's bcastReportTier. It goes to stderr: the in-place pass can take
+// another tier than the out-of-place pass, and on stdout its first launch would
+// land in the middle of the result row.
+enum class ReduceLaunchTier { LL, Tiled };
+
+static void reduceReportTier(ReduceLaunchTier tier) {
+  static const char* const kTierNames[] = { "ll", "tiled" };
+  static const bool enabled = getenv("RCCL_TESTS_REDUCE_TIER_LOG") != nullptr;
+  if (!enabled || !is_main_proc) return;
+  static std::atomic<unsigned> reported{0};
+  const unsigned bit = 1u << (unsigned)tier;
+  if (reported.fetch_or(bit, std::memory_order_relaxed) & bit) return;
+  fprintf(stderr, "#[reduce-tier] %s\n", kTierNames[(unsigned)tier]);
+}
 #endif
 
 // GIN-SDMA Reduce (-D 3) is a "reduce-scatter to the root": rank r read-reduces
@@ -26,6 +98,8 @@
 // ranks; only the final store targets the root. Entry + exit LSA barrier only --
 // no scratch, signals, or GIN puts. In-place safe: rank r is the sole reader and
 // writer of the root's [r*base] slice and loads all N sources before storing.
+// Messages up to NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES instead go to the root as
+// LL packets in one hop with no barrier (GinReduceLLKernel).
 
 void ReduceGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
   size_t aligned = count;
@@ -89,13 +163,30 @@ testResult_t ReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirement
     return testInvalidUsage;
   }
 
+  ReduceDevState& st = reduceState();
+  st = {};
   switch(deviceImpl) {
-    case 3: // tiled LSA read-reduce
+    case 3: { // LL tier and tiled LSA read-reduce
       reqs->lsaBarrierCount = deviceCtaCount;
+      st.llMaxBytes = gin_sdma::resolveLLCap(
+          gin_sdma::parseSize(getenv("NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES")),
+          kReduceLLDefaultBufferBytes / (4 * (size_t)commProperties.nRanks), kReduceLLMaxBytes);
+      if (is_main_proc && is_main_thread)
+        printf("# Reduce -D 3: LL tier for messages up to %zu bytes (NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES)\n",
+               st.llMaxBytes);
+      if (st.llMaxBytes > 0) {
+        // Each block receives every rank's share of its units, plus one ack slot.
+        const size_t unitsPerCta = std::min<size_t>(st.llMaxBytes / 8, kReduceLLUnitsPerCta);
+        const int nSlots = commProperties.nRanks * (int)unitsPerCta + 1;
+        ncclLLA2ACreateRequirement(reduceLLCtas(st.llMaxBytes), nSlots, &st.llHandle, &g_reduceLLReq);
+        g_reduceLLReq.next = reqs->resourceRequirementsList;
+        reqs->resourceRequirementsList = &g_reduceLLReq;
+      }
       return testSuccess;
+    }
     default:
       if (is_main_proc && is_main_thread)
-        fprintf(stderr, "Reduce has no -D %d; it only has -D 3.\n", deviceImpl);
+        fprintf(stderr, "Reduce has no -D %d; -D 3 picks the LL or LSA tier by message size.\n", deviceImpl);
       return testNotImplemented;
   }
 }
@@ -295,17 +386,98 @@ __global__ void GinReduceTimedKernel(ncclWindow_t sendwin, size_t sendoffset, nc
   if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
 }
 
-// Like testLaunchDeviceKernel() but forwards the reduction op, which the shared
-// launcher's fixed signature does not carry.
-template <typename F>
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+// LL tier of -D 3: one hop, no barrier. CTA b owns a contiguous range of n
+// 8-byte units. Every rank (the root included) stores its units into the root's
+// LL slots [rank*n, rank*n+n) of block b, tagged with the block's epoch; the
+// root polls them, folds the N contributions per unit in ascending rank order,
+// and stores the result to its recvbuff. Only the root receives data, so
+// nothing would stop a sender from running two epochs ahead and overwriting
+// slots of the same parity the root has not read yet. After it has read every
+// slot, the root therefore sends each sender an ack in the last slot, and a
+// sender does not finish its epoch until the ack arrives. In-place safe: the
+// thread that stores result unit j is the one that sent source unit j.
+template <typename T>
+__device__ __forceinline__ void ginReduceLLBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm const& devComm, int redOp, ncclLLA2AHandle llHandle) {
+  static_assert(sizeof(T) <= 8 && 8 % sizeof(T) == 0, "LL units hold whole elements");
+  constexpr int EPU = (int)(8 / sizeof(T));
+  struct alignas(8) Unit { T e[EPU]; };
+  const int nRanks = devComm.nRanks;
+  const int rank = devComm.rank;
+  const size_t nUnits = count * sizeof(T) / 8;
+  const size_t u0 = nUnits * blockIdx.x / gridDim.x;
+  const int n = (int)(nUnits * (blockIdx.x + 1) / gridDim.x - u0);
+  const int ackSlot = (int)llHandle.nSlots - 1;
+
+  ncclLLA2ASession<ncclCoopCta> ll { ncclCoopCta(), devComm, ncclTeamLsa(devComm), llHandle, blockIdx.x, (int)llHandle.nSlots };
+  const uint64_t* src = (const uint64_t*)ncclGetLocalPointer(sendwin, sendoffset) + u0;
+  for (int j = threadIdx.x; j < n; j += blockDim.x) ll.send(root, rank * n + j, src[j]);
+
+  if (rank == root) {
+    uint64_t* dst = (uint64_t*)ncclGetLocalPointer(recvwin, recvoffset) + u0;
+    for (int j = threadIdx.x; j < n; j += blockDim.x) {
+      T acc[EPU];
+      for (int r0 = 0; r0 < nRanks; r0 += 8) {
+        uint64_t v[8];
+        const int c = min(8, nRanks - r0);
+        ll.template recvUnrolled</*MinEltCount=*/1, /*MaxEltCount=*/8>(r0 * n + j, c, n, v);
+        for (int r = 0; r < c; r++) {
+          Unit x;
+          __builtin_memcpy(&x, &v[r], 8);
+          #pragma unroll
+          for (int e = 0; e < EPU; e++) {
+            const T y = gin_sdma_reduce::preOp(redOp, x.e[e], nRanks);
+            acc[e] = (r0 + r == 0) ? y : gin_sdma_reduce::combine(redOp, acc[e], y);
+          }
+        }
+      }
+      Unit o;
+      #pragma unroll
+      for (int e = 0; e < EPU; e++) o.e[e] = gin_sdma_reduce::postOp(redOp, acc[e], nRanks);
+      uint64_t out;
+      __builtin_memcpy(&out, &o, 8);
+      dst[j] = out;
+    }
+    __syncthreads();  // every slot of this epoch has been read
+    for (int p = threadIdx.x; p < nRanks; p += blockDim.x)
+      if (p != root) ll.send(p, ackSlot, (uint64_t)1);
+  } else if (threadIdx.x == 0) {
+    (void)ll.template recv<uint64_t>(ackSlot);
+  }
+  ll.endEpoch(ncclCoopCta());
+}
+
+template <typename K>
+__global__ void GinReduceLLKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp, ncclLLA2AHandle llHandle) {
+  ginReduceLLBody<typename gin_sdma_reduce::Elem<K>::type>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, redOp, llHandle);
+}
+
+template <typename K>
+__global__ void GinReduceLLTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp, ncclLLA2AHandle llHandle, int loop, int skip, long long* start_time, long long* end_time) {
+  for (int i = 0; i < skip + loop; i++) {
+    if (i == skip) {
+      __syncthreads();
+      if (threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
+    }
+    ginReduceLLBody<typename gin_sdma_reduce::Elem<K>::type>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, redOp, llHandle);
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
+}
+#endif
+
+// Like testLaunchDeviceKernel() but forwards the reduction op (and any extra
+// kernel arguments), which the shared launcher's fixed signature does not carry.
+template <typename F, typename... Extra>
 static testResult_t ReduceLaunchDeviceKernel(F kernel, int grid, void* sendbuff, size_t sendoffset,
                                              void* recvbuff, size_t recvoffset, size_t count,
-                                             ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+                                             ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream,
+                                             Extra... extra) {
   if (kernel == nullptr) return testNotImplemented;
   ncclDevComm* devComm = (ncclDevComm*)comm;
   ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
   ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
-  kernel<<<grid, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm, (int)op);
+  kernel<<<grid, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm, (int)op, extra...);
   return testSuccess;
 }
 #endif
@@ -330,6 +502,17 @@ testResult_t ReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
           return testInvalidUsage;
         }
         if (count == 0) return testSuccess;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+        const int nRanks = devComm->nRanks;
+        const size_t bytes = count * wordSize(type);
+        if (reduceUseLL(bytes, nRanks)) {
+          reduceReportTier(ReduceLaunchTier::LL);
+          TESTCHECK(ReduceLaunchDeviceKernel(SPECIALIZE_REDUCE_KERNEL(GinReduceLLKernel, type, op), reduceLLCtas(bytes), sendbuff, sendoffset, recvbuff, recvoffset, count, op, root, comm, stream,
+                                             reduceState().llHandle));
+          return testSuccess;
+        }
+#endif
+        reduceReportTier(ReduceLaunchTier::Tiled);
         TESTCHECK(ReduceLaunchDeviceKernel(SPECIALIZE_REDUCE_KERNEL(GinReduceKernel, type, op), deviceCtaCount, sendbuff, sendoffset, recvbuff, recvoffset, count, op, root, comm, stream));
         return testSuccess;
       }
@@ -364,13 +547,26 @@ testResult_t ReduceDeviceTime(struct threadArgs* args, ncclDataType_t type, nccl
   int skip = 0;
   gin_devtime::resolveLoopSkip(totalBytes / (size_t)nRanksGlobal, loop, skip);
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+  const bool useLL = reduceUseLL(totalBytes, nRanksGlobal);
+  auto llKernel = SPECIALIZE_REDUCE_KERNEL(GinReduceLLTimedKernel, type, op);
+  const int gridCtas = useLL ? reduceLLCtas(totalBytes) : deviceCtaCount;
+#else
   const int gridCtas = deviceCtaCount;
+#endif
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
         ncclDevComm* devComm = args->devComms + i;
         ncclWindow_t sendwin = (ncclWindow_t)(in_place ? args->recvRegHandles[i] : args->sendRegHandles[i]);
         ncclWindow_t recvwin = (ncclWindow_t)args->recvRegHandles[i];
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+        if (useLL) {
+          llKernel<<<gridCtas, 512, 0, args->streams[i]>>>(sendwin, 0, recvwin, 0, count, root, *devComm,
+                   (int)op, reduceState().llHandle, loop, skip, d_start, d_end);
+          return;
+        }
+#endif
         kernel<<<gridCtas, 512, 0, args->streams[i]>>>(sendwin, 0, recvwin, 0, count, root, *devComm,
                  (int)op, loop, skip, d_start, d_end);
       },

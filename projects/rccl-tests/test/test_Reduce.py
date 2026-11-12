@@ -128,8 +128,9 @@ def test_ReduceMPI(request, nthreads, nprocs, ngpus_mpi, byte_range, op, step_fa
 # ---------------------------------------------------------------------------
 # GIN-SDMA Reduce (deviceImpl 3) correctness.
 #
-# -D 3 folds the ranks in ascending order into the root's recvbuff through LSA
-# pointers; the perf binary's data check (-c 1)
+# -D 3 picks a tier by size: LL up to NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES and the
+# tiled LSA kernel above it. Every tier folds the ranks in
+# ascending order into the root's recvbuff; the perf binary's data check (-c 1)
 # exits non-zero on any wrong element. The partial-tile size leaves each rank's slice
 # a few packs past a whole number of warp tiles, so the tail path runs too, and
 # roots cover both ends of the rank range so the root-directed store is
@@ -169,20 +170,24 @@ GIN_KV = ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7"]
 
 
 def _run_reduce_gin_sdma(request, total_bytes, dtype, op, root, ctas=REDUCE_CTAS, xenv=(),
-                         np=None, gin_kv=GIN_KV, extra=()):
-    """Launch reduce_perf -D 3 at one size on np ranks."""
+                         np=None, threads=1, gin_kv=GIN_KV, extra=()):
+    """Launch reduce_perf -D 3 at one size. np is the rank count; with threads > 1
+    each process runs that many host threads (-t), so np // threads processes."""
     np = np or REDUCE_NP
     if np < 2:
         pytest.skip("need >= 2 ranks/GPUs for GIN-SDMA Reduce")
     if np > REDUCE_NP:
         pytest.skip("needs {} GPUs, have {}".format(np, REDUCE_NP))
+    if np % threads:
+        pytest.skip("{} ranks do not split into {} threads per process".format(np, threads))
     size = str(int(total_bytes))
-    kv = list(gin_kv) + REDUCE_XENV + list(xenv)
+    kv = list(gin_kv) + ["RCCL_TESTS_REDUCE_TIER_LOG=1"] + REDUCE_XENV + list(xenv)
+    impl_args = ["-t", str(threads)] if threads > 1 else []
     args = (
-        mpi_launch_prefix(request, REDUCE_LAUNCHER, np, REDUCE_MPI_OPTS)
+        mpi_launch_prefix(request, REDUCE_LAUNCHER, np // threads, REDUCE_MPI_OPTS)
         + gin_env_xflags(kv)
         + gin_perf_argv(REDUCE_EXE, size, dtype, ctas,
-                        extra=["-o", op, "-r", str(root)])
+                        extra=impl_args + ["-o", op, "-r", str(root)])
         + list(extra)
     )
     cmd = " ".join(shlex.quote(a) for a in args)
@@ -205,6 +210,8 @@ REDUCE_ROW_RE = re.compile(
     r"\s+{n}\s+{n}\s+{n}\s+({w})"
     r"(?:\s+{n}\s+{n}\s+{n}\s+({w}))?".format(n=_NUM, w=_WRONG)
 )
+REDUCE_TIER_RE = re.compile(r"^#\[reduce-tier\]\s+(\S+)", re.M)
+REDUCE_LL_CAP_RE = re.compile(r"^# Reduce -D 3: LL tier for messages up to (\d+) bytes", re.M)
 REDUCE_DEVTIME_RE = re.compile(r"^#\[reduce-devtime\] size\s+(\d+) B\s+ctas\s+(\d+)", re.M)
 
 
@@ -213,9 +220,9 @@ def _aligned_bytes(total_bytes, nparts):
     return total_bytes // (nparts * 16) * nparts * 16
 
 
-def _assert_reduce_ok(rc, out, ctx, total_bytes, nparts):
-    """The run exited 0, measured exactly the aligned size, and checked every
-    element of every row clean."""
+def _assert_reduce_ok(rc, out, ctx, total_bytes, nparts, expect_tier=None):
+    """The run exited 0, measured exactly the aligned size, checked every
+    element of every row clean, and (if asked) ran exactly the expected tier."""
     tail = (out or "")[-2000:]
     assert rc == 0, "Reduce {} failed (exit {}). Output tail:\n{}".format(ctx, rc, tail)
     rows = [m for m in (REDUCE_ROW_RE.match(l) for l in (out or "").splitlines()) if m]
@@ -229,6 +236,16 @@ def _assert_reduce_ok(rc, out, ctx, total_bytes, nparts):
         assert all(w not in (None, "N/A") and float(w) == 0.0 for w in wrong), (
             "Reduce {} row has #wrong {} (root {}); every element must be checked "
             "and correct.".format(ctx, wrong, m.group(3)))
+    if expect_tier is not None:
+        tiers = set(REDUCE_TIER_RE.findall(out or ""))
+        assert tiers == {expect_tier}, (
+            "Reduce {} ran tier(s) {}, expected {}. Output tail:\n{}".format(
+                ctx, sorted(tiers), expect_tier, tail))
+
+
+def _default_ll_cap(nranks):
+    """The -D 3 LL cap reduce_perf uses with NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES unset."""
+    return min(16 * MiB // (4 * nranks), MiB) // 8 * 8
 
 
 @_reduce_gin_skip
@@ -247,33 +264,92 @@ def test_ReduceGinSdma(request, size, dtype, op, root_pos):
     root = 0 if root_pos == "first" else REDUCE_NP - 1
     # 5 packs of 16 B past 1 MiB per rank.
     total_bytes = {"1MiB": MiB, "64MiB": 64 * MiB, "partial-tile": REDUCE_NP * (MiB + 5 * 16)}[size]
-    rc, out = _run_reduce_gin_sdma(request, total_bytes, dtype, op, root)
+    # LL off, so every size runs the tiled kernel.
+    rc, out = _run_reduce_gin_sdma(request, total_bytes, dtype, op, root,
+                                   xenv=["NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES=0"])
     _assert_reduce_ok(rc, out, "-D 3 at {} bytes, dtype={}, op={}, root={}".format(
-        total_bytes, dtype, op, root), total_bytes, REDUCE_NP)
+        total_bytes, dtype, op, root), total_bytes, REDUCE_NP, expect_tier="tiled")
+
+
+# LL tier of deviceImpl 3 (GinReduceLLKernel): messages up to
+# NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES go to the root as LL packets with no
+# barrier. "tiny" is the smallest aligned message (one CTA, a few units),
+# "uneven" splits unevenly across several CTAs, and "max" forces the 1 MiB
+# ceiling (256 CTAs). The perf binary runs in-place and out-of-place, and its
+# warmup and timed iterations run back to back, which exercises the root's ack.
+@_reduce_gin_skip
+@pytest.mark.parametrize("size", ["tiny", "uneven", "max"])
+@pytest.mark.parametrize("dtype, op", [
+    ("float", "sum"),
+    ("bfloat16", "avg"),
+    ("int8", "max"),
+    ("double", "prod"),
+])
+@pytest.mark.parametrize("root_pos", ["first", "last"])
+def test_ReduceGinSdmaLL(request, size, dtype, op, root_pos):
+    root = 0 if root_pos == "first" else REDUCE_NP - 1
+    total_bytes = {"tiny": REDUCE_NP * 16, "uneven": REDUCE_NP * 16 * 1001, "max": MiB}[size]
+    rc, out = _run_reduce_gin_sdma(request, total_bytes, dtype, op, root,
+                                   xenv=["NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES=1048576"])
+    _assert_reduce_ok(rc, out, "-D 3 LL at {} bytes, dtype={}, op={}, root={}".format(
+        total_bytes, dtype, op, root), total_bytes, REDUCE_NP, expect_tier="ll")
+
+
+# With NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES unset: the printed cap is the
+# documented default, a message at the cap takes the LL tier, and the next
+# aligned size up takes the tiled kernel.
+@_reduce_gin_skip
+@pytest.mark.gin_ci
+@pytest.mark.parametrize("where, tier", [("at-cap", "ll"), ("above-cap", "tiled")])
+def test_ReduceGinSdmaLLDefaultCap(request, where, tier):
+    cap = _default_ll_cap(REDUCE_NP)
+    step = REDUCE_NP * 16
+    total_bytes = cap if where == "at-cap" else _aligned_bytes(cap, REDUCE_NP) + step
+    rc, out = _run_reduce_gin_sdma(request, total_bytes, "float", "sum", 0)
+    _assert_reduce_ok(rc, out, "-D 3 default cap, {} ({} bytes)".format(where, total_bytes),
+                      total_bytes, REDUCE_NP, expect_tier=tier)
+    printed = REDUCE_LL_CAP_RE.search(out or "")
+    assert printed and int(printed.group(1)) == cap, (
+        "Reduce -D 3 printed LL cap {}, expected the default {}".format(
+            printed.group(1) if printed else "nothing", cap))
 
 
 # -D 3 runs on LSA alone, so it needs no GIN.
 @_reduce_gin_skip
-def test_ReduceGinSdmaNoGin(request):
-    total_bytes = 4 * MiB
+@pytest.mark.parametrize("tier, total_bytes", [("ll", 64 * 1024), ("tiled", 4 * MiB)])
+def test_ReduceGinSdmaNoGin(request, tier, total_bytes):
     rc, out = _run_reduce_gin_sdma(request, total_bytes, "float", "sum", REDUCE_NP - 1,
                                    gin_kv=["NCCL_GIN_ENABLE=0"])
     _assert_reduce_ok(rc, out, "-D 3 without GIN at {} bytes".format(total_bytes),
-                      total_bytes, REDUCE_NP)
+                      total_bytes, REDUCE_NP, expect_tier=tier)
 
 
-# In-kernel timing for the -D 3 kernel. -B 1 adds a #[reduce-devtime] line for
-# the timed kernel. -H 1 only checks the timed kernel's output with -B 2, which
-# reports that kernel's latency as the metric.
+# Two host threads per process (-t 2) with the default -p 0: the main thread
+# builds every devComm, so the worker thread must see the same LL cap and
+# resource handles, or its ranks launch another kernel and the run hangs.
+@_reduce_gin_skip
+@pytest.mark.gin_ci
+@pytest.mark.parametrize("tier, total_bytes", [("ll", 64 * 1024), ("tiled", 4 * MiB)])
+def test_ReduceGinSdmaThreads(request, tier, total_bytes):
+    rc, out = _run_reduce_gin_sdma(request, total_bytes, "float", "sum", REDUCE_NP - 1,
+                                   threads=2)
+    _assert_reduce_ok(rc, out, "-D 3 -t 2 at {} bytes".format(total_bytes),
+                      total_bytes, REDUCE_NP, expect_tier=tier)
+
+
+# In-kernel timing for the -D 3 kernels. -B 1 adds a #[reduce-devtime] line
+# whose CTA count shows which kernel was timed: at 32 KiB the LL kernel runs 8
+# CTAs, the tiled kernel -V. -H 1 only checks the timed kernel's output with
+# -B 2, which reports that kernel's latency as the metric.
 @_reduce_gin_skip
 @pytest.mark.parametrize("mode", ["augment", "check"])
-def test_ReduceGinSdmaDevtime(request, mode):
-    total_bytes = 4 * MiB
+@pytest.mark.parametrize("tier, total_bytes", [("ll", 32 * 1024), ("tiled", 4 * MiB)])
+def test_ReduceGinSdmaDevtime(request, tier, total_bytes, mode):
     timing = ["-B", "1"] if mode == "augment" else ["-B", "2", "-H", "1"]
     rc, out = _run_reduce_gin_sdma(request, total_bytes, "float", "sum", 0,
                                    extra=timing + ["-L", "5", "-P", "2"])
     _assert_reduce_ok(rc, out, "-D 3 {} at {} bytes".format(" ".join(timing), total_bytes),
-                      total_bytes, REDUCE_NP)
+                      total_bytes, REDUCE_NP, expect_tier=tier)
     tail = out[-2000:]
     if mode == "check":
         assert "no in-kernel device-time measurement" not in out, (
@@ -281,10 +357,14 @@ def test_ReduceGinSdmaDevtime(request, mode):
         assert "ERROR: --devtime_check:" not in out, "timed-kernel data check failed:\n{}".format(tail)
         return
     want = _aligned_bytes(total_bytes, REDUCE_NP)
+    ll_ctas = max(1, min(-(-want // 8 // 512), 256))
+    if ll_ctas == int(REDUCE_CTAS):
+        pytest.skip("both -D 3 kernels launch {} CTAs at {} bytes".format(ll_ctas, want))
     lines = REDUCE_DEVTIME_RE.findall(out or "")
     assert lines, "no #[reduce-devtime] line. Output tail:\n{}".format(tail)
-    assert all(int(s) == want and int(c) == int(REDUCE_CTAS) for s, c in lines), (
-        "devtime lines {} expected size {} and {} CTAs".format(lines, want, REDUCE_CTAS))
+    expect_ctas = ll_ctas if tier == "ll" else int(REDUCE_CTAS)
+    assert all(int(s) == want and int(c) == expect_ctas for s, c in lines), (
+        "devtime lines {} expected size {} and {} CTAs".format(lines, want, expect_ctas))
 
 
 # Requests the device modes cannot serve fail on every rank instead of hanging
