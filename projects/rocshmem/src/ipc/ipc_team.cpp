@@ -23,11 +23,11 @@
  *****************************************************************************/
 
 #include "ipc_team.hpp"
-#include <cstring>
 
 #include "constants.hpp"
 #include "backend_type.hpp"
 #include "backend_ipc.hpp"
+#include "util.hpp"
 
 namespace rocshmem {
 
@@ -49,10 +49,13 @@ IPCTeam::IPCTeam(Backend *backend, const TeamInfo& team_info_parent,
   pWrk = reinterpret_cast<char *>(b->pWrk_pool) + ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) * pool_index;
 
   // Zero pSync arrays to prevent stale values from a recycled pool index.
-  memset(barrier_pSync, 0, ROCSHMEM_BARRIER_SYNC_SIZE * sizeof(long));
-  memset(reduce_pSync, 0, ROCSHMEM_REDUCE_SYNC_SIZE * sizeof(long));
-  memset(bcast_pSync, 0, ROCSHMEM_BCAST_SYNC_SIZE * sizeof(long));
-  memset(alltoall_pSync, 0, ROCSHMEM_ALLTOALL_SYNC_SIZE * sizeof(long));
+  // These point into device-allocated pools, so zeroing must go through
+  // the HIP runtime rather than a host-side memset, which would crash
+  // on systems without BAR access to device memory.
+  CHECK_HIP(hipMemset(barrier_pSync, 0, ROCSHMEM_BARRIER_SYNC_SIZE * sizeof(long)));
+  CHECK_HIP(hipMemset(reduce_pSync, 0, ROCSHMEM_REDUCE_SYNC_SIZE * sizeof(long)));
+  CHECK_HIP(hipMemset(bcast_pSync, 0, ROCSHMEM_BCAST_SYNC_SIZE * sizeof(long)));
+  CHECK_HIP(hipMemset(alltoall_pSync, 0, ROCSHMEM_ALLTOALL_SYNC_SIZE * sizeof(long)));
 }
 
 IPCTeam::~IPCTeam() {}
