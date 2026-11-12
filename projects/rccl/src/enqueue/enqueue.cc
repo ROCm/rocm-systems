@@ -1505,8 +1505,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     }
   }
 
-  // Under NCCL_PROTO=NaN the per-peer halves of float AlltoAll, Direct AllGather and
-  // Direct ReduceScatter ride the NaN-flag protocol at every size on intra-node links.
+  // Under NCCL_PROTO=NaN (or RCCL_NAN_PROTO_AUTO=1 in a winning window) the per-peer halves of float
+  // AlltoAll, Direct AllGather and Direct ReduceScatter ride the NaN-flag protocol on intra-node links.
   // Both ends of a link derive this from the same collective call and see the same
   // link type, so they agree; network links stay on the usual protocols. Not with
   // LL128 send/recv opted in: the NaN kernel variant runs legacy LL for whatever
@@ -1517,7 +1517,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     useNaN[dir] = !useLL128OptIn && hasNaN[dir] && !network[dir] && t &&
                   (t->collAPI == ncclFuncAlltoAll || t->collAPI == ncclFuncAllGather ||
                    t->collAPI == ncclFuncReduceScatter) &&
-                  rcclNanProtoForced() && rcclNanProtoDtype(t->datatype);
+                  rcclNanProtoFor(comm, t->collAPI, t->datatype, t->bytes * comm->nRanks);
   }
 
   ssize_t paramChunkSize = ncclParamChunkSize();
@@ -3114,12 +3114,13 @@ static void initCollCostTable(float** collCostTable) {
 // The NaN-flag protocol (src/device/prims_nan.h) is opt-in and narrow. It never
 // competes on cost: readiness is "no element is NaN", which is only meaningful for
 // floating-point data and hangs outright if the user's data contains a real NaN.
-// Unreachable unless the caller sets NCCL_PROTO=NaN, and then it is the only
+// Unreachable unless the caller sets NCCL_PROTO=NaN, or RCCL_NAN_PROTO_AUTO=1 and
+// the size is in a winning window (rcclNanProtoFor), and then it is the only
 // protocol wherever it can run: intra-node float AllReduce (ring and tree) and
 // ring AllGather and ReduceScatter. AlltoAll takes it on the send/recv path
 // (addP2pToPlan). Everything else keeps the default protocol set.
-static bool nanProtoOnly(struct ncclComm* comm, struct ncclTaskColl* info) {
-  return rcclNanProtoForcedFor(comm->nRanks, info->datatype) && rcclNanProtoFunc(info->func);
+static bool nanProtoOnly(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
+  return rcclNanProtoFor(comm, info->func, info->datatype, nBytes) && rcclNanProtoFunc(info->func);
 }
 
 // numPipeOps: number of pipelined ops. Can be greater than 1 in aggregation mode. Used to adjust latency.
@@ -3152,7 +3153,7 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
   // fails at 4 MiB, or works only on an all-XGMI node.
   auto algNamed = [&](int a, int p) { return ((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) != 0; };
 
-  const bool nanOnly = nanProtoOnly(comm, info);
+  const bool nanOnly = nanProtoOnly(comm, info, nBytes);
   for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
     if ((a == NCCL_ALGO_COLLNET_DIRECT || a == NCCL_ALGO_COLLNET_CHAIN) && collNetSupport != 1) continue;
     // CollNetDirect is only supported for up to 8 local GPUs
@@ -3380,7 +3381,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
 #endif
   if (info->func == ncclFuncAllReduce && comm->topo->pivotA2ANumBiRings == 3) {
     static const bool userAlgoTune = getenv("NCCL_ALGO") != nullptr;
-    const bool userTuneInput = userAlgoTune || rcclProtoPinned(comm->nRanks, info->func, info->datatype);
+    const bool userTuneInput = userAlgoTune || rcclProtoPinned(comm, info->func, info->datatype, nBytes);
     info->nMaxChannels = nc;
     if (!userTuneInput) {
       // always respect user settings
@@ -3503,7 +3504,7 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
     size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
     // This hardcode names a protocol, so it has to stand down when the caller
     // named one too -- otherwise NCCL_PROTO=<x> silently lands on Tree/LL here.
-    const bool userProtoInput = rcclProtoPinned(comm->nRanks, info->func, info->datatype);
+    const bool userProtoInput = rcclProtoPinned(comm, info->func, info->datatype, nBytes);
     if (!userAlgoInput && !userProtoInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") &&
         comm->nNodes == 1 && (info->func == ncclFuncAllReduce) && sizePerRank >= 64 && sizePerRank <= 262144) {
       info->algorithm = NCCL_ALGO_TREE;
@@ -4268,7 +4269,7 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     // so keep the original dtype only where NaN is the protocol that will run;
     // elsewhere (multi-node) an int8-only kernel would be looked up as float.
     if ((t->func == ncclFuncAllGather &&
-         !rcclNanProtoForcedFor(comm->nRanks, t->datatype)) ||
+         !rcclNanProtoFor(comm, t->func, t->datatype, t->count * elementSize * comm->nRanks)) ||
         t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAlltoAllGda ||
         t->func == ncclFuncAlltoAllvGda) {
       t->count *= elementSize;

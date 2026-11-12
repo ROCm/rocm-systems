@@ -81,14 +81,6 @@ static inline const char* rcclTunerProtoEnv() {
   return rcclNanProtoForced() ? nullptr : ncclGetEnv("NCCL_PROTO");
 }
 
-// Whether NCCL_PROTO decides this collective's protocol: the user named a
-// protocol list, or NCCL_PROTO=NaN and a NaN kernel serves it. Heuristics that
-// hardcode a protocol must stand down when it does.
-static inline bool rcclProtoPinned(int nRanks, ncclFunc_t func, ncclDataType_t datatype) {
-  static const bool named = rcclTunerProtoEnv() != nullptr;
-  return named || (rcclNanProtoForcedFor(nRanks, datatype) && rcclNanProtoFunc(func));
-}
-
 typedef enum RcclTunableColls {
   RCCL_UNSUPPORTED_TUNABLE = -1,
   RCCL_RS_TUNABLE = 0,    // reduce_scatter index

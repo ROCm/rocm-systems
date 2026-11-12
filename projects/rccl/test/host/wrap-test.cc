@@ -683,6 +683,112 @@ TEST(WrapMicrotest, HierarchicalTempBufferSize_ReduceScatterThresholds) {
   EXPECT_EQ(HIERARCHICAL_TEMP_BUFFER_SIZE, rcclHierarchicalTempBufferSize(16, false, true));
 }
 
+// ===========================================================================
+// rcclNanProtoAutoWins -- comm.h. Windows in total bytes, 8 GPUs per node.
+// ===========================================================================
+
+namespace {
+constexpr size_t kNanKiB = 1ULL << 10, kNanMiB = 1ULL << 20, kNanGiB = 1ULL << 30;
+
+bool NanAutoWins(int nNodes, ncclFunc_t func, size_t bytes) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = nNodes;
+  comm->nRanks = nNodes * 8;
+  const bool wins = rcclNanProtoAutoWins(comm, func, bytes);
+  DeleteCommWithArch(comm);
+  return wins;
+}
+} // namespace
+
+TEST(WrapMicrotest, NanProtoAutoWins_AllReduceMultiNodeOnly) {
+  for (size_t bytes : {64 * kNanKiB, 16 * kNanMiB, 128 * kNanMiB, 1 * kNanGiB})
+    EXPECT_FALSE(NanAutoWins(1, ncclFuncAllReduce, bytes));
+  for (int nNodes : {2, 4, 7}) {
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 16 * kNanMiB - 1));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 16 * kNanMiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 256 * kNanMiB));
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 512 * kNanMiB));
+  }
+  EXPECT_TRUE(NanAutoWins(8, ncclFuncAllReduce, 512 * kNanMiB));
+  EXPECT_FALSE(NanAutoWins(8, ncclFuncAllReduce, 1 * kNanGiB));
+}
+
+TEST(WrapMicrotest, NanProtoAutoWins_AllReduceMultiNodeMidSizes) {
+  for (int nNodes : {2, 4, 8, 16, 32}) {
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 384 * kNanKiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 512 * kNanKiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 2 * kNanMiB));
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 2176 * kNanKiB));
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 4 * kNanMiB));
+  }
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncAllReduce, 1 * kNanMiB));
+}
+
+TEST(WrapMicrotest, NanProtoAutoWins_ReduceScatterSmallWindows) {
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncReduceScatter, 4 * kNanMiB));
+  EXPECT_TRUE(NanAutoWins(1, ncclFuncReduceScatter, 6 * kNanMiB));
+  EXPECT_TRUE(NanAutoWins(1, ncclFuncReduceScatter, 8 * kNanMiB));
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncReduceScatter, 9 * kNanMiB));
+  for (int nNodes : {2, 3}) {
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncReduceScatter, 256 * kNanKiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncReduceScatter, 384 * kNanKiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncReduceScatter, 1 * kNanMiB));
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncReduceScatter, 1152 * kNanKiB));
+  }
+  EXPECT_FALSE(NanAutoWins(4, ncclFuncReduceScatter, 1 * kNanMiB));
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncAllGather, 8 * kNanMiB));
+  EXPECT_FALSE(NanAutoWins(2, ncclFuncAllGather, 1 * kNanMiB));
+}
+
+TEST(WrapMicrotest, NanProtoAutoWins_AllReduceSixteenNodesSkipsQuarterGiB) {
+  for (int nNodes : {16, 32}) {
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 8 * kNanMiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 128 * kNanMiB));
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 256 * kNanMiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 512 * kNanMiB));
+    EXPECT_TRUE(NanAutoWins(nNodes, ncclFuncAllReduce, 2 * kNanGiB));
+    EXPECT_FALSE(NanAutoWins(nNodes, ncclFuncAllReduce, 4 * kNanGiB));
+  }
+}
+
+TEST(WrapMicrotest, NanProtoAutoWins_AllGatherReduceScatterFollowPerRankShare) {
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncReduceScatter}) {
+    EXPECT_FALSE(NanAutoWins(1, func, 64 * kNanMiB));
+    for (int nNodes : {2, 4, 8, 16}) {
+      const size_t nRanks = nNodes * 8;
+      EXPECT_FALSE(NanAutoWins(nNodes, func, nRanks * 2 * kNanMiB));
+      EXPECT_TRUE(NanAutoWins(nNodes, func, nRanks * 4 * kNanMiB));
+      EXPECT_TRUE(NanAutoWins(nNodes, func, nRanks * 16 * kNanMiB));
+      EXPECT_FALSE(NanAutoWins(nNodes, func, nRanks * 32 * kNanMiB));
+    }
+  }
+}
+
+TEST(WrapMicrotest, NanProtoAutoWins_AlltoAllSingleNodeOnly) {
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncAlltoAll, 32 * kNanKiB));
+  EXPECT_TRUE(NanAutoWins(1, ncclFuncAlltoAll, 64 * kNanKiB));
+  EXPECT_TRUE(NanAutoWins(1, ncclFuncAlltoAll, 256 * kNanKiB));
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncAlltoAll, 512 * kNanKiB));
+  EXPECT_FALSE(NanAutoWins(1, ncclFuncAlltoAll, 1 * kNanMiB));
+  EXPECT_TRUE(NanAutoWins(1, ncclFuncAlltoAll, 2 * kNanMiB));
+  EXPECT_TRUE(NanAutoWins(1, ncclFuncAlltoAll, 4 * kNanGiB));
+  EXPECT_FALSE(NanAutoWins(2, ncclFuncAlltoAll, 4 * kNanMiB));
+}
+
+TEST(WrapMicrotest, NanProtoAutoWins_OtherCollectivesNever) {
+  for (ncclFunc_t func : {ncclFuncBroadcast, ncclFuncReduce, ncclFuncSendRecv})
+    for (int nNodes : {1, 2, 16}) EXPECT_FALSE(NanAutoWins(nNodes, func, 64 * kNanMiB));
+}
+
+TEST(WrapMicrotest, NanProtoFor_OffWithoutNcclProtoOrAuto) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nNodes = 2;
+  comm->nRanks = 16;
+  EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 64 * kNanMiB));
+  EXPECT_FALSE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 64 * kNanMiB));
+  DeleteCommWithArch(comm);
+}
+
 // nNodes=9: the allGather arm alone gives 32MB (>=8,<16); the reduceScatter arm
 // alone gives 64MB (>=8). Only if BOTH arms actually ran and std::max compared
 // them does the result come out as reduceScatter's 64MB -- a test that only

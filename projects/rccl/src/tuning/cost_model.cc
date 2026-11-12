@@ -522,7 +522,7 @@ ncclResult_t ncclTuningCostModelSimModel(int id, struct ncclTuningInput_t* const
   {
     int algo = NCCL_ALGO_UNDEF, proto = NCCL_PROTO_UNDEF;
     if (ncclTuningExpandId(id, &algo, &proto, nullptr, nullptr) == ncclSuccess) {
-      const bool nanOnly = rcclNanProtoForcedFor(input->comm->nRanks, input->datatype) &&
+      const bool nanOnly = rcclNanProtoFor(input->comm, input->func, input->datatype, input->nBytes) &&
                            rcclNanProtoFunc(input->func);
       if (proto == NCCL_PROTO_NAN ? !(nanOnly && rcclNanProtoKernel(input->func, algo)) : nanOnly) {
         goto not_valid;

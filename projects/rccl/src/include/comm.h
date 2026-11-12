@@ -30,6 +30,7 @@
 #include "argcheck.h"
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
+#include "archinfo.h"
 #include "recorder.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "mem_manager.h"
@@ -1315,6 +1316,64 @@ static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
   hipEvent_t stopEvent = comm->addonStopEvent;
   comm->addonStopEvent = nullptr;
   return stopEvent;
+}
+
+// RCCL_NAN_PROTO_AUTO=1 turns the NaN-flag protocol on only where it measured faster than the
+// default selection: gfx950 with 8 GPUs per node, 1 to 16 nodes. NCCL_PROTO, when set, wins.
+static inline bool rcclNanProtoAutoTuned(const struct ncclComm* comm) {
+  static const bool on = [] {
+    const char* env = ncclGetEnv("RCCL_NAN_PROTO_AUTO");
+    return env != nullptr && strtol(env, nullptr, 0) != 0 && ncclGetEnv("NCCL_PROTO") == nullptr;
+  }();
+  return on && comm->nRanks == comm->nNodes * 8 && IsArchMatch(comm->archName, "gfx950");
+}
+
+// Windows are half-open in total bytes. Node counts between the measured ones use the next
+// smaller one's, and anything past 16 nodes uses the 16-node windows.
+static inline bool rcclNanProtoAutoWins(const struct ncclComm* comm, ncclFunc_t func, size_t bytes) {
+  constexpr size_t KiB = 1ULL << 10, MiB = 1ULL << 20, GiB = 1ULL << 30;
+  const int nNodes = comm->nNodes;
+  switch (func) {
+  case ncclFuncAllReduce:
+    if (nNodes < 2) return false;
+    if (bytes >= 512 * KiB && bytes < 2176 * KiB) return true;
+    if (bytes < 16 * MiB) return false;
+    if (nNodes < 8) return bytes < 512 * MiB;
+    if (nNodes < 16) return bytes < 1 * GiB;
+    return bytes < 256 * MiB || (bytes >= 512 * MiB && bytes < 4 * GiB);
+  case ncclFuncAllGather:
+  case ncclFuncReduceScatter: {
+    if (func == ncclFuncReduceScatter) {
+      if (nNodes == 1) return bytes >= 6 * MiB && bytes < 9 * MiB;
+      if (nNodes < 4 && bytes >= 384 * KiB && bytes < 1152 * KiB) return true;
+    }
+    // The large window follows the per-rank share at every measured node count.
+    const size_t perRank = bytes / comm->nRanks;
+    return nNodes >= 2 && perRank >= 4 * MiB && perRank < 32 * MiB;
+  }
+  case ncclFuncAlltoAll:
+    return nNodes == 1 && ((bytes >= 64 * KiB && bytes < 512 * KiB) || bytes >= 2 * MiB);
+  default:
+    return false;
+  }
+}
+
+// Whether this collective runs the NaN-flag protocol where it has a NaN path: under NCCL_PROTO=NaN
+// always, under RCCL_NAN_PROTO_AUTO=1 only inside rcclNanProtoAutoWins. bytes is the collective's
+// total size: count * element size, times nRanks for AllGather, ReduceScatter and AlltoAll.
+static inline bool rcclNanProtoFor(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype,
+                                   size_t bytes) {
+  if (comm->nRanks <= 1 || !rcclNanProtoDtype(datatype)) return false;
+  return rcclNanProtoForced() || (rcclNanProtoAutoTuned(comm) && rcclNanProtoAutoWins(comm, func, bytes));
+}
+
+// Whether the protocol is decided for this collective: the user named a protocol
+// list, or the NaN protocol serves it. Heuristics that hardcode a protocol must
+// stand down when it is.
+static inline bool rcclProtoPinned(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype,
+                                   size_t bytes) {
+  static const bool named = rcclTunerProtoEnv() != nullptr;
+  return named || (rcclNanProtoFor(comm, func, datatype, bytes) && rcclNanProtoFunc(func));
 }
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);

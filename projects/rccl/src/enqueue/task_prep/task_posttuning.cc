@@ -97,7 +97,8 @@ static ncclResult_t fillCollTaskFromRaw(struct ncclComm* comm, struct ncclTaskTu
   task->root = raw->root;
   task->datatype = raw->datatype;
   size_t elementSize = ncclTypeSize(task->datatype);
-  if ((task->func == ncclFuncAllGather && !rcclNanProtoForcedFor(comm->nRanks, task->datatype)) ||
+  if ((task->func == ncclFuncAllGather &&
+       !rcclNanProtoFor(comm, task->func, task->datatype, task->count * elementSize * comm->nRanks)) ||
       task->func == ncclFuncBroadcast) {
     task->count *= elementSize;
     task->datatype = ncclInt8;
