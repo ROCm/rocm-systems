@@ -59,11 +59,9 @@
 #include <array>
 #include <bit>
 #include <cassert>
-#include <exception>
-#include <format>
+#include <cstdlib>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -96,8 +94,7 @@ constexpr std::array<TargetInfo, static_cast<size_t>(FuzzTarget::Count)> kTarget
 
 const TargetInfo &target_info(FuzzTarget target) {
   const size_t index = static_cast<size_t>(target);
-  if (index >= kTargets.size())
-    throw std::invalid_argument("invalid execution fuzz target");
+  assert(index < kTargets.size() && "metadata requires a valid execution fuzz target");
   return kTargets[index];
 }
 
@@ -205,15 +202,15 @@ private:
 };
 
 template <typename Encodings>
-std::vector<std::vector<uint8_t>> make_instruction_seeds(FuzzTarget target,
-                                                         const Encodings &encodings) {
+util::FailureOr<std::vector<std::vector<uint8_t>>>
+make_instruction_seeds(FuzzTarget target, const Encodings &encodings) {
   std::vector<std::vector<uint8_t>> result;
   const TargetInfo &info = target_info(target);
   auto decoder = info.id == ROCJITSU_CODE_TARGET_INVALID
                      ? Decoder::create(default_isa_target_registry(), info.arch)
                      : Decoder::create(default_isa_target_registry(), info.id);
   if (!decoder)
-    throw std::logic_error(std::format("{} decoder is unavailable", info.name));
+    return util::Result::failure();
   for (const auto &encoding : encodings) {
     // Keep generated campaigns moving forward; arbitrary raw campaigns still
     // cover control flow and termination encodings.
@@ -238,8 +235,9 @@ std::vector<std::vector<uint8_t>> make_instruction_seeds(FuzzTarget target,
   return result;
 }
 
-const std::vector<std::vector<uint8_t>> &instruction_seeds(FuzzTarget target) {
-  static const std::array<std::vector<std::vector<uint8_t>>, static_cast<size_t>(FuzzTarget::Count)>
+const util::FailureOr<std::vector<std::vector<uint8_t>>> &instruction_seeds(FuzzTarget target) {
+  static const std::array<util::FailureOr<std::vector<std::vector<uint8_t>>>,
+                          static_cast<size_t>(FuzzTarget::Count)>
       seeds = {
           make_instruction_seeds(FuzzTarget::Gfx908, cdna1::test_data::ENCODINGS),
           make_instruction_seeds(FuzzTarget::Gfx90a, cdna2::test_data::ENCODINGS),
@@ -282,7 +280,8 @@ uint32_t terminating_instruction(FuzzTarget target) {
   case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::build_sopp(cdna5::kSEndpgmSopp)[0];
   default:
-    throw std::logic_error("execution fuzz target has no terminating instruction");
+    assert(false && "every execution fuzz target has a terminating instruction");
+    std::abort();
   }
 }
 
@@ -354,10 +353,11 @@ std::vector<uint8_t> terminated_program(std::span<const uint8_t> instructions, F
 }
 
 namespace {
-RunStats run_input_once(
+util::FailureOr<RunStats> run_input_once(
     std::span<const uint8_t> input, std::span<const uint8_t> instructions,
     FuzzTarget resolved_target,
-    const std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> &async_resources) {
+    const std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> &async_resources,
+    util::DiagnosticEmitter diagnostic) {
   const std::vector<uint8_t> code = terminated_program(instructions, resolved_target);
 
   // Keep a mapped data island near the program. Address-bearing initial state
@@ -376,13 +376,13 @@ RunStats run_input_once(
   for (auto &byte : data)
     byte = static_cast<uint8_t>(next_random(seed));
 
-  util::StringDiagnostic diagnostic;
-  auto maybe_loaded =
+  util::StringDiagnostic config_diagnostic;
+  util::FailureOr<config::LoadedConfig> maybe_loaded =
       config::load_config_from_string(fuzz_config(resolved_target, check_waits), kEmbeddedSchema,
-                                      diagnostic.emitter(), 1, async_resources);
+                                      config_diagnostic.emitter(), 1, async_resources);
   if (maybe_loaded.failed())
-    throw std::runtime_error("execution fuzz config failed: " + diagnostic.message());
-  auto loaded = std::move(maybe_loaded).value();
+    return diagnostic.emit() << "execution fuzz config failed: " << config_diagnostic.message();
+  config::LoadedConfig loaded = std::move(maybe_loaded).value();
   auto *memory = loaded.memory();
   auto *soc = loaded.soc();
   amdgpu::Xcd *xcd = soc->xcd(0);
@@ -396,22 +396,22 @@ RunStats run_input_once(
   const auto address_space = gpu_vm.register_address_space(
       1, translator, physical_memory, [](uint64_t, auto) {}, (control & kCacheMemoryBit) != 0);
   if (!address_space)
-    throw std::runtime_error("execution fuzz address-space registration failed");
+    return diagnostic.emit() << "execution fuzz address-space registration failed";
   cu->set_gpu_vm(&gpu_vm);
   RunStats stats;
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   if (!group->add(std::make_unique<ExecutionCounter>(stats)))
-    throw std::logic_error("cannot attach execution fuzz counter");
+    return diagnostic.emit() << "cannot attach execution fuzz counter";
   cu->set_plugin_group(group);
 
   const TargetInfo &info = target_info(resolved_target);
   const uint32_t vgprs_per_wf = isa_properties(info.arch).max_addressable_vgprs_per_wf;
   auto *wf = cu->dispatch_wf(0, kCodeBase, 128, vgprs_per_wf);
   if (!wf)
-    throw std::runtime_error("execution fuzz wave allocation failed");
+    return diagnostic.emit() << "execution fuzz wave allocation failed";
   wf->set_process_id(1);
   // Arbitrary streams may contain a GWS barrier without a preceding GWS INIT.
-  // A compute unit without a CP or engine rejects such a barrier by throwing.
+  // A compute unit without a CP or engine rejects such a barrier.
   // Arm every process-scoped resource at zero so fuzzing starts from a defined
   // state and can exercise GWS instructions. This deliberately trades detection
   // of missing guest setup for that coverage; a direct compute-unit test still
@@ -462,16 +462,20 @@ RunStats run_input_once(
 }
 } // namespace
 
-RunStats run_input(std::span<const uint8_t> input, std::optional<FuzzTarget> target,
-                   std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> async_resources,
-                   AsyncMode async_mode, std::optional<unsigned> issuers) {
+util::FailureOr<RunStats>
+run_input(std::span<const uint8_t> input, std::optional<FuzzTarget> target,
+          std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> async_resources,
+          AsyncMode async_mode, std::optional<unsigned> issuers,
+          util::DiagnosticEmitter diagnostic) {
   if (input.empty() || input.size() > kMaxInputSize)
-    throw std::invalid_argument("execution fuzz input must contain 1..1024 bytes");
+    return diagnostic.emit() << "execution fuzz input must contain 1..1024 bytes";
   if (issuers && (*issuers == 0 || *issuers > 8))
-    throw std::invalid_argument("execution fuzz issuers must be 1..8");
+    return diagnostic.emit() << "execution fuzz issuers must be 1..8";
   if (async_mode == AsyncMode::Enabled && !async_resources)
-    throw std::invalid_argument("enabled asynchronous execution requires helper resources");
+    return diagnostic.emit() << "enabled asynchronous execution requires helper resources";
 
+  if (target && !indexed_target(static_cast<uint8_t>(*target)))
+    return diagnostic.emit() << "invalid execution fuzz target";
   const std::optional<FuzzTarget> selected = target ? target : indexed_target(input.front());
   if (!selected)
     return RunStats{.inputs = 1};
@@ -488,16 +492,15 @@ RunStats run_input(std::span<const uint8_t> input, std::optional<FuzzTarget> tar
   const unsigned issuer_count =
       issuers.value_or((control & kConcurrentIssuerMask) == kConcurrentIssuerMask ? 2 : 1);
 
-  std::vector<RunStats> results(issuer_count);
-  std::vector<std::exception_ptr> failures(issuer_count);
+  std::vector<util::FailureOr<RunStats>> results(issuer_count, util::Result::failure());
+  std::vector<std::string> failures(issuer_count);
   std::vector<std::jthread> workers;
   workers.reserve(issuer_count > 1 ? issuer_count : 0);
   const auto execute = [&](unsigned issuer) {
-    try {
-      results[issuer] = run_input_once(input, instructions, resolved_target, async_resources);
-    } catch (...) {
-      failures[issuer] = std::current_exception();
-    }
+    util::StringDiagnostic failure;
+    results[issuer] =
+        run_input_once(input, instructions, resolved_target, async_resources, failure.emitter());
+    failures[issuer] = failure.message();
   };
   if (issuer_count == 1) {
     execute(0);
@@ -507,14 +510,15 @@ RunStats run_input(std::span<const uint8_t> input, std::optional<FuzzTarget> tar
     for (auto &worker : workers)
       worker.join();
   }
-  for (const auto &failure : failures)
-    if (failure)
-      std::rethrow_exception(failure);
+  for (unsigned issuer = 0; issuer != issuer_count; ++issuer)
+    if (results[issuer].failed())
+      return diagnostic.emit() << failures[issuer];
 
   RunStats total;
   bool halted = false;
   bool stopped = false;
-  for (const RunStats &result : results) {
+  for (const util::FailureOr<RunStats> &maybe_result : results) {
+    const RunStats &result = maybe_result.value();
     total.executed += result.executed;
     total.async_executed += result.async_executed;
     total.waves_halted += result.waves_halted;
@@ -538,28 +542,39 @@ RunStats run_input(std::span<const uint8_t> input, std::optional<FuzzTarget> tar
   return total;
 }
 
-std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
-make_async_execution_resources(unsigned helpers) {
+util::FailureOr<std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>>
+make_async_execution_resources(unsigned helpers, util::DiagnosticEmitter diagnostic) {
   if (helpers == 0 || helpers > 128)
-    throw std::invalid_argument("async helper count must be 1..128");
+    return diagnostic.emit() << "async helper count must be 1..128";
   return std::make_shared<amdgpu::matrix_coexecution::ExecutionResources>(helpers);
 }
 
-std::vector<uint8_t> generated_kernel_input(uint64_t seed, size_t size, FuzzTarget target) {
+util::FailureOr<std::vector<uint8_t>> generated_kernel_input(uint64_t seed, size_t size,
+                                                             FuzzTarget target,
+                                                             util::DiagnosticEmitter diagnostic) {
+  if (!indexed_target(static_cast<uint8_t>(target)))
+    return diagnostic.emit() << "invalid execution fuzz target";
   if (size < kHeaderSize + kMinGeneratedKernelBytes || size > kMaxInputSize)
-    throw std::invalid_argument("invalid generated kernel input size");
+    return diagnostic.emit() << "invalid generated kernel input size";
   std::vector<uint8_t> result(size);
   result[0] = static_cast<uint8_t>(target);
   const uint64_t seed_round = seed / kTargets.size();
   result[1] =
       kWaitCheckingBit | cache_mode_for_seed(seed) | ((seed_round & 4) ? kFullExecMaskBit : 0);
-  write_generated_kernel(std::span(result).subspan(kHeaderSize), target_info(target).arch, seed);
+  if (write_generated_kernel(std::span(result).subspan(kHeaderSize), target_info(target).arch, seed,
+                             diagnostic)
+          .failed())
+    return util::Result::failure();
   return result;
 }
 
-std::vector<uint8_t> random_input(uint64_t seed, size_t size, std::optional<FuzzTarget> target) {
+util::FailureOr<std::vector<uint8_t>> random_input(uint64_t seed, size_t size,
+                                                   std::optional<FuzzTarget> target,
+                                                   util::DiagnosticEmitter diagnostic) {
+  if (target && !indexed_target(static_cast<uint8_t>(*target)))
+    return diagnostic.emit() << "invalid execution fuzz target";
   if (size == 0 || size > kMaxInputSize)
-    throw std::invalid_argument("execution fuzz input size must be 1..1024");
+    return diagnostic.emit() << "execution fuzz input size must be 1..1024";
   size_t cursor = std::min(size, kHeaderSize);
   const uint64_t mode_seed = seed;
   const FuzzTarget resolved_target =
@@ -579,7 +594,7 @@ std::vector<uint8_t> random_input(uint64_t seed, size_t size, std::optional<Fuzz
   // a pinned CDNA5 target.
   if (size >= kHeaderSize + kMinGeneratedKernelBytes && !async_wmma_bias && (seed & 7) != 0 &&
       (seed / kTargets.size()) % 4 == 2)
-    return generated_kernel_input(seed, size, resolved_target);
+    return generated_kernel_input(seed, size, resolved_target, diagnostic);
 
   // The final size is known. Fill in place to avoid GCC 14/15's -O3 false
   // positive -Wfree-nonheap-object in vector's reserve/push_back reallocation path.
@@ -603,7 +618,11 @@ std::vector<uint8_t> random_input(uint64_t seed, size_t size, std::optional<Fuzz
     while (cursor < size)
       result[cursor++] = static_cast<uint8_t>(next_random(seed));
   } else {
-    const auto &seeds = instruction_seeds(resolved_target);
+    const util::FailureOr<std::vector<std::vector<uint8_t>>> &maybe_seeds =
+        instruction_seeds(resolved_target);
+    if (maybe_seeds.failed())
+      return diagnostic.emit() << target_name(resolved_target) << " decoder is unavailable";
+    const auto &seeds = maybe_seeds.value();
     while (cursor < size) {
       const auto &instruction = seeds[next_random(seed) % seeds.size()];
       const size_t count = std::min(instruction.size(), size - cursor);

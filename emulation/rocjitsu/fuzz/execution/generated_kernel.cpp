@@ -35,10 +35,9 @@
 
 #include <algorithm>
 #include <array>
-#include <format>
+#include <cassert>
 #include <initializer_list>
 #include <random>
-#include <stdexcept>
 #include <vector>
 
 namespace rocjitsu::execution_fuzz {
@@ -104,8 +103,8 @@ struct KernelEncoding {
 };
 
 template <typename Vop2, typename Vopc, size_t FlatWords, typename FlatFields>
-void emit(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed,
-          const KernelEncoding<Vop2, Vopc, FlatWords, FlatFields> &encoding) {
+util::Result emit(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed,
+                  const KernelEncoding<Vop2, Vopc, FlatWords, FlatFields> &encoding) {
   std::mt19937_64 random(seed);
   const auto address_pair = [&] {
     return static_cast<uint8_t>(2 * (random() % kAddressPairCount));
@@ -239,20 +238,21 @@ void emit(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed,
         branch_word(branch.opcode, branch.word_index,
                     op_offsets[std::min(branch.target_op_index, op_offsets.size() - 1)]);
   words.push_back(build_s_endpgm(arch).value());
-  if (words.size() > capacity)
-    throw std::logic_error("generated kernel exceeded its instruction payload");
+  assert(words.size() <= capacity && "generated kernel exceeded its instruction payload");
   size_t offset = 0;
   for (uint32_t word : words)
     for (unsigned byte = 0; byte < sizeof(word); ++byte)
       payload[offset++] = static_cast<uint8_t>(word >> (8 * byte));
+  return util::Result::success();
 }
 
 } // namespace
 
-void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed) {
+util::Result write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed,
+                                    util::DiagnosticEmitter diagnostic) {
   if (payload.size() < kMinGeneratedKernelBytes)
-    throw std::invalid_argument(std::format(
-        "generated kernels require at least {} instruction bytes", kMinGeneratedKernelBytes));
+    return diagnostic.emit() << "generated kernels require at least " << kMinGeneratedKernelBytes
+                             << " instruction bytes";
   // Pick opcodes and waits from the generated definitions for each target.
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1: {
@@ -512,7 +512,7 @@ void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uin
                 });
   }
   default:
-    throw std::logic_error("no generated kernel encoding for target");
+    return diagnostic.emit() << "no generated kernel encoding for target";
   }
 }
 
