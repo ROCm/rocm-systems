@@ -5431,6 +5431,71 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
   }
 }
 
+TEST(RaceDetectorPluginOutputTest, LdsAtomicsDescribeRecordedReadAndWriteRoles) {
+  for (bool returning : {false, true}) {
+    for (bool write : {false, true}) {
+      SCOPED_TRACE(std::format("returning={}, write={}", returning, write));
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize(2));
+      PluginSinkConfig config;
+      StringSink &sink = config.emplace<StringSink>();
+      fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+      ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      fixture.soc->set_plugin_group(fixture.plugin_group_);
+      fixture.plugin_group_->onInit();
+      ComputeUnitCore &cu = *fixture.cu();
+      Wavefront *producer = cu.dispatch_wf(0, 0x1000, 104, 256);
+      Wavefront *consumer = cu.dispatch_wf(0, 0x2000, 104, 256);
+      ASSERT_NE(producer, nullptr);
+      ASSERT_NE(consumer, nullptr);
+      std::array waves{producer, consumer};
+      const uint32_t lds_base = cu.allocate_lds(256);
+      for (Wavefront *wave : waves) {
+        wave->set_lds_base(lds_base);
+        wave->set_lds_size(256);
+        wave->set_exec(1);
+        cu.write_vgpr(wave->vgpr_alloc().base, 0, 16);
+        cu.write_vgpr(wave->vgpr_alloc().base + 1, 0, 7);
+      }
+      fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves);
+      std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+      ASSERT_NE(decoder, nullptr);
+      auto issue = [&](Wavefront &wave, const std::array<uint32_t, 2> &words) {
+        std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+        ASSERT_NE(instruction, nullptr);
+        fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, *instruction, wave);
+        ASSERT_TRUE(cu.execute_instruction(instruction.get(), wave).succeeded());
+        ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(cu, std::move(instruction), wave),
+                  VmAccessOutcome::Complete);
+      };
+      const std::array<uint32_t, 2> atomic =
+          cdna4::build_ds(returning ? cdna4::kDsAddRtnU32Ds : cdna4::kDsAddU32Ds,
+                          {.addr = 0, .data0 = 1, .vdst = 8});
+      ASSERT_NO_FATAL_FAILURE(issue(*producer, atomic));
+      ASSERT_EQ(sink.str().find("RACE "), std::string::npos) << sink.str();
+      const std::array<uint32_t, 2> access =
+          write ? cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 0, .data0 = 1})
+                : cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+      ASSERT_NO_FATAL_FAILURE(issue(*consumer, access));
+      const std::string &report = sink.str();
+      EXPECT_NE(report.find(std::format("type=LDS access={} reg=16 wave=1 lane=0",
+                                        write ? "write" : "read")),
+                std::string::npos)
+          << report;
+      EXPECT_NE(report.find(write ? "write-after-read (WAR)" : "read-after-write (RAW)"),
+                std::string::npos)
+          << report;
+      EXPECT_NE(report.find(returning ? "Conflict: atomic update of LDS returning values to VGPRs "
+                                        "at PC 0x1000, wave 0."
+                                      : "Conflict: atomic update of LDS at PC 0x1000, wave 0."),
+                std::string::npos)
+          << report;
+      EXPECT_NE(report.find(returning ? "ds_add_rtn_u32" : "ds_add_u32"), std::string::npos)
+          << report;
+    }
+  }
+}
+
 TEST(RaceDetectorPluginOutputTest, CountsReportsInsteadOfTheirTwoPcsAndCountsSuppression) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1));

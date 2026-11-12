@@ -172,7 +172,8 @@ the destination (VGPRs, SGPRs, or TTMPs) without guessing the source memory spac
 Direct-to-LDS loads likewise say “load into LDS” because they can read global
 memory or scratch. A FLAT instruction can load from different spaces in
 different lanes, and scalar memory loads can read scratch. These events do
-not retain that source.
+not retain that source. For LDS conflicts, atomic operations are described as
+updates of LDS, with returned VGPR values mentioned when applicable.
 
 For a pending event, the report lists the completion counters that remain unsatisfied, using
 the architectural wait names for the target. Internal GFX11 subsets are

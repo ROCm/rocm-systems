@@ -315,9 +315,13 @@ namespace {
 
 // Load events do not retain a reliable source memory space: FLAT lanes can
 // resolve differently, and scalar and direct-to-LDS loads can read scratch.
-std::string_view event_description(MemoryEventType type, RaceViolation::Space space) {
+std::string_view event_description(const EventRegistry &events, EventId event,
+                                   RaceViolation::Space space) {
+  if (space == RaceViolation::Space::LDS && events.readsLds(event) && events.writesLds(event))
+    return events.registers(event).empty() ? "atomic update of LDS"
+                                           : "atomic update of LDS returning values to VGPRs";
   using enum MemoryEventType;
-  switch (type) {
+  switch (events.type(event)) {
   case GLOBAL_TO_VGPR:
     return "load into VGPRs";
   case VGPR_TO_GLOBAL:
@@ -353,8 +357,7 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
     throw std::invalid_argument("race report has an unsupported architecture");
   const EventId event = v.conflictingEvent;
   const int owner = events.waveId(event).value;
-  const MemoryEventType type = events.type(event);
-  const bool conflicting_read = v.space == RaceViolation::Space::LDS && isFromLds(type);
+  const bool conflicting_read = v.space == RaceViolation::Space::LDS && events.readsLds(event);
   const char *hazard = !v.isWrite         ? "read-after-write (RAW)"
                        : conflicting_read ? "write-after-read (WAR)"
                                           : "write-after-write (WAW)";
@@ -381,7 +384,7 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   oss << "]: " << hazard << ".\n";
   oss << "  Current access: " << (v.isWrite ? "write" : "read") << " at PC 0x" << std::hex
       << access_pc << std::dec << ".\n";
-  oss << "  Conflict: " << event_description(type, v.space);
+  oss << "  Conflict: " << event_description(events, event, v.space);
   oss << " at PC 0x" << std::hex << events.instruction(event).pc() << std::dec << ", wave " << owner
       << ".\n";
   if (events.status(event) == EventStatus::ACTIVE) {
