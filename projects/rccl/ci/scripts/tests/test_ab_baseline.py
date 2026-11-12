@@ -171,6 +171,58 @@ class ArtifactBuild(unittest.TestCase):
             self.assertEqual(tm.artifact_build("9", env=ENV),
                              {"event": "", "sha": "", "created_at": ""})
 
+    def test_a_published_build_is_not_looked_up(self):
+        with mock.patch.object(tm.urllib.request, "urlopen") as urlopen:
+            self.assertEqual(tm.artifact_build("release:10.1.0", env=ENV),
+                             {"event": "", "sha": "", "created_at": ""})
+        urlopen.assert_not_called()
+
+
+def comparison(precision: str, base: float | None, cand: float | None) -> dict:
+    rows = {phase: {"metric_value": v, "status": "pass"} if v else None
+            for phase, v in ((tm.BASELINE, base), (tm.CANDIDATE, cand))}
+    return {"precision": precision, **rows, "ratio": cand / base if base and cand else None}
+
+
+class ScoreComparisons(unittest.TestCase):
+    def test_a_regression_fails(self):
+        msgs, failed = tm.score_comparisons([comparison("BF16", 100.0, 90.0)], "training")
+        self.assertTrue(failed)
+        self.assertIn("REGRESSION DETECTED", msgs[0])
+
+    def test_report_only_keeps_the_regression_but_does_not_fail(self):
+        msgs, failed = tm.score_comparisons(
+            [comparison("BF16", 100.0, 90.0), comparison("FP8", 100.0, 101.0)],
+            "training", report_only=True,
+        )
+        self.assertFalse(failed)
+        self.assertIn("[BF16] REGRESSION DETECTED", msgs[0])
+        self.assertIn("[FP8] No regression", msgs[1])
+
+    def test_report_only_still_fails_a_missing_side(self):
+        _, failed = tm.score_comparisons([comparison("BF16", 100.0, None)], "training",
+                                         report_only=True)
+        self.assertTrue(failed)
+        _, failed = tm.score_comparisons([], "training", report_only=True)
+        self.assertTrue(failed)
+
+
+class SummaryReport(unittest.TestCase):
+    def report(self, **kwargs):
+        return tm.generate_summary_report(
+            "llama-3.1-70b-training", "2N/16GPU", 0, "[BF16] No regression", "c", "ruby",
+            **kwargs,
+        )
+
+    def test_names_a_ci_build_and_a_published_one(self):
+        text = self.report(builds={tm.CANDIDATE: "42768456967", tm.BASELINE: "release:10.1.0"})
+        self.assertIn("(release:10.1.0)", text)
+        self.assertIn("(CI build 42768456967)", text)
+
+    def test_report_only_says_so(self):
+        self.assertIn("Status:     PASSED (report only", self.report(report_only=True))
+        self.assertIn("Status:     PASSED\n", self.report())
+
 
 class StageBothPhases(unittest.TestCase):
     def setUp(self):
