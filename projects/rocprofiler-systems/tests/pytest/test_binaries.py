@@ -976,7 +976,9 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
         description is emitted verbatim, so it breaks the table: the text after the
         newline lands on a line that is not a table row. Every non-empty line of the
         output must therefore be a table row (``|...``), a separator (``-...``), or
-        a log message (``[...``).
+        a log message: either ``[...`` or a glog line such as
+        ``W20261110 20:02:13.387989 123 agent.cpp:608] ...``. The glog form shows up
+        on machines without GPU access (for example, a missing KFD sysfs path).
         """
         result = self.run_test(
             "baseline",
@@ -986,10 +988,13 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIOD_CLOCK_ID"])
 
+        glog_line = re.compile(r"^[IWEF]\d{8} \d{2}:\d{2}:\d{2}\.\d+ ")
         stray_lines = [
             line
             for line in result.test_output.splitlines()
-            if line.strip() and not line.startswith(("|", "-", "["))
+            if line.strip()
+            and not line.startswith(("|", "-", "["))
+            and not glog_line.match(line)
         ]
         if stray_lines:
             pytest.fail(
