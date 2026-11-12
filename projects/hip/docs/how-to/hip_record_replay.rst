@@ -74,8 +74,7 @@ Capture is off whenever the variable is unset, so nothing changes for an ordinar
 run. It also needs your consent, given in one of two ways:
 
 * Once per user, with the line ``yes`` in the file
-  ``${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent``
-  (``%APPDATA%\hrr\capture-consent`` on Windows). The file covers that user on
+  ``${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent``. The file covers that user on
   every host that shares the home directory.
 * With ``HIP_HRR_CAPTURE_CONSENT=yes``, where no such file can be kept, as in CI or
   a container. The variable applies to every process that inherits it, child
@@ -86,20 +85,12 @@ run. It also needs your consent, given in one of two ways:
 
 Without either, the application runs unrecorded and says why in one line on
 stderr. Whoever controls your environment or configuration directory can give
-consent for you. On Linux the file counts only if it is a regular file you own,
-not reached through a symbolic link and with no other hard link. On Windows it is
-not checked for an owner, so a redirected or shared ``%APPDATA%`` gives no
-per-user guarantee.
+consent for you. The file counts only if it is a regular file you own, not
+reached through a symbolic link and with no other hard link.
 
 .. code-block:: bash
 
   d="${XDG_CONFIG_HOME:-$HOME/.config}/hrr" && mkdir -p "$d" && echo yes > "$d/capture-consent"
-
-On Windows, in PowerShell:
-
-.. code-block:: powershell
-
-  New-Item -ItemType Directory -Force "$env:APPDATA\hrr" | Out-Null; Set-Content "$env:APPDATA\hrr\capture-consent" yes
 
 The archive is a directory, not a single file, and it holds one
 ``pid-<pid>/`` subdirectory per recorded process:
