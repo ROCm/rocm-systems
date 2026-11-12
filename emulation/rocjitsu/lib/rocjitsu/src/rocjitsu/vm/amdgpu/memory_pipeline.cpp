@@ -114,6 +114,8 @@ VmAccessOutcome MemoryPipeline::complete_entry(PipelineEntry entry) {
       entry.wf->wait_counters().decrement(entry.counters.types[index]);
     if (entry.wf->state() == WfState::VM_RETRY)
       entry.wf->set_state(WfState::RUNNING);
+    if (entry.wf->instruction_execution_failed())
+      entry.wf->preserve_instruction_execution_error_mnemonic(entry.inst->mnemonic());
     delete entry.inst;
     return VmAccessOutcome::Malformed;
   }
@@ -150,6 +152,8 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
       assert(cancelled && "Faulted memory issue has no matching wait-check producer");
     }
     release_wait_counters(wf, counters);
+    if (wf.instruction_execution_failed())
+      wf.preserve_instruction_execution_error_mnemonic(inst->mnemonic());
     delete inst;
     return access;
   }

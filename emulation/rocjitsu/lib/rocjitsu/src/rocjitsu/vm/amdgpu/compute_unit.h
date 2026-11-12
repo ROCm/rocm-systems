@@ -1188,7 +1188,7 @@ public:
 
 private:
   static bool nullify_unallocated_memory_result(Instruction &inst, const Wavefront &wf);
-  VmAccessOutcome route_prepared_memory_inst(Instruction *inst, Wavefront &wf);
+  VmAccessOutcome route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf);
 
   // RegisterAccess is the instruction-facing register boundary. These
   // ownership and SGPR access helpers validate the complete operation, fire
@@ -1499,8 +1499,10 @@ public:
 
   /// @brief Disassemble captured instruction bytes with this CU's target decoder.
   /// @details Call on the CU execution thread with a complete instruction encoding.
-  /// @throws std::logic_error if the encoding is empty, truncated, or undecodable.
-  std::string disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc) const;
+  /// Returns failure and emits a diagnostic if the encoding is empty, truncated, or undecodable.
+  util::FailureOr<std::string>
+  disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                          util::DiagnosticEmitter diagnostic = {}) const;
 
   /// @brief Replace the concrete decoder in scheduler-level tests.
   /// @details Some concrete targets intentionally remain unavailable to full
@@ -1679,9 +1681,10 @@ protected:
   void tick_pipelines();
 
   /// @brief Route a memory instruction into the appropriate pipeline.
-  /// @param inst The memory instruction (ownership transferred).
+  /// @param inst Ownership transfers when the pipeline accepts the instruction.
+  /// Rejected instructions stay with the issuer until it reports the failure.
   /// @param wf The issuing wavefront.
-  VmAccessOutcome route_memory_inst(Instruction *inst, Wavefront &wf);
+  VmAccessOutcome route_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf);
 
   [[nodiscard]] bool owns_memory_result_vgprs(const Wavefront &wf, uint32_t base,
                                               uint32_t count) const {
@@ -2083,9 +2086,10 @@ inline Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
 inline const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
 
 template <GpuIsa Isa>
-std::string IsaWavefront<Isa>::disassemble_instruction(std::span<const uint32_t> encoding,
-                                                       uint64_t pc) const {
-  return this->cu_.disassemble_instruction(encoding, pc);
+util::FailureOr<std::string>
+IsaWavefront<Isa>::disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                                           util::DiagnosticEmitter diagnostic) const {
+  return this->cu_.disassemble_instruction(encoding, pc, diagnostic);
 }
 
 inline InstructionCache &InstructionComputeUnitView::instruction_cache() {
