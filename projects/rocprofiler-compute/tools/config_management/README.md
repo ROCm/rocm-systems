@@ -55,12 +55,6 @@ analysis_configs/<arch>/*.yaml
 - Must conform strictly to the template schema
 - Are edited in-place using ruamel.yaml round-trip mode
 
-Automatic template selection first uses `<arch>_config_template.yaml` when
-present, then the gfx9, gfx11, or gfx12 family template. This lets Navi48 use
-its own panel contract while gfx1250 retains the gfx12 contract. An explicit
-`--gfx9-template`, `--gfx11-template`, or `--gfx12-template` option overrides
-automatic selection for all architectures in that family, including gfx1201.
-
 ### Hash Database
 
 - Stored at:
