@@ -29,17 +29,22 @@ pub(crate) fn svm_range(pointer: *mut c_void, size: usize) -> Result<(u64, u64),
 /// Maps an HSA agent to its SVM location identifier.
 pub(crate) fn svm_location_from_agent(
     runtime: &HsaState,
+    service: &MemoryAdvice,
     agent: HsaAgent,
     allow_null: bool,
 ) -> Result<SvmLocation, Status> {
     if agent.handle == 0 && allow_null {
-        return Ok(SvmLocation::Undefined);
+        return Ok(SvmLocation::UnspecifiedOrMixed);
     }
     if runtime.is_cpu_agent(agent) {
         return Ok(SvmLocation::System);
     }
     let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
-    Ok(SvmLocation::Device(runtime.gpus[index].endpoint.id))
+    Ok(SvmLocation::Device(
+        service
+            .target(&runtime.gpus[index].device)
+            .map_err(map_error)?,
+    ))
 }
 
 /// Maps a native SVM location identifier back to an HSA agent.
@@ -49,11 +54,11 @@ pub(crate) fn svm_agent_from_location(
 ) -> Result<HsaAgent, Status> {
     match location {
         SvmLocation::System => Ok(HsaAgent { handle: CPU_AGENT }),
-        SvmLocation::Undefined => Ok(HsaAgent { handle: 0 }),
+        SvmLocation::UnspecifiedOrMixed => Ok(HsaAgent { handle: 0 }),
         SvmLocation::Device(identity) => runtime
             .gpus
             .iter()
-            .position(|gpu| gpu.endpoint.id == identity)
+            .position(|gpu| gpu.endpoint.id == identity.endpoint_id())
             .map(|index| HsaAgent {
                 handle: GPU_AGENT_BASE + index as u64,
             })
@@ -61,22 +66,20 @@ pub(crate) fn svm_agent_from_location(
     }
 }
 
-/// Reserves attribute and agent-index storage for an SVM query.
-pub(crate) fn reserve_svm_attributes(
-    count: usize,
-) -> Result<(Vec<SvmAttribute>, Vec<Option<usize>>), Status> {
-    if count > SVM_MAX_ATTRIBUTES {
-        return Err(INVALID_ARGUMENT);
+/// Selects the provider of an explicit GPU, or requires a unique service.
+pub(crate) fn svm_service(
+    runtime: &HsaState,
+    agent: Option<HsaAgent>,
+) -> Result<MemoryAdvice, Status> {
+    let session = runtime.session().ok_or(ERROR)?;
+    if let Some(agent) = agent {
+        if let Some(index) = runtime.gpu_index(agent) {
+            return session
+                .memory_advice_for(&runtime.gpus[index].device)
+                .map_err(map_error);
+        }
     }
-    let mut attributes = Vec::new();
-    attributes
-        .try_reserve_exact(count.saturating_add(2))
-        .map_err(|_| OUT_OF_RESOURCES)?;
-    let mut indices = Vec::new();
-    indices
-        .try_reserve_exact(count)
-        .map_err(|_| OUT_OF_RESOURCES)?;
-    Ok((attributes, indices))
+    session.memory_advice().map_err(map_error)
 }
 
 /// Rolls back signal and allocation retention until the worker accepts them.
@@ -250,11 +253,11 @@ fn finish_async_copy_signal(
 
 #[allow(
     clippy::needless_pass_by_value,
-    reason = "the worker owns the session and stop token for its full asynchronous lifetime"
+    reason = "the worker owns the provider service and stop token for its full asynchronous lifetime"
 )]
 /// Runs SVM prefetch work after its dependency signals are satisfied.
 pub(crate) fn svm_prefetch_worker(
-    session: Session,
+    service: MemoryAdvice,
     stop: Arc<AtomicBool>,
     dependencies: &[HsaSignal],
     completion: HsaSignal,
@@ -266,11 +269,11 @@ pub(crate) fn svm_prefetch_worker(
         finish_async_signal(completion, false);
         return;
     }
-    let result = linux_interop::set_kfd_svm_attributes(
-        &session,
+    let result = service.prefetch(
         address,
         size,
-        &[SvmAttribute::PrefetchLocation(location)],
+        location,
+        rocddi::memory::advice::PrefetchCompletion::Migration,
     );
     finish_async_signal(completion, result.is_ok());
 }

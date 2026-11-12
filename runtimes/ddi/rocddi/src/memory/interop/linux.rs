@@ -189,50 +189,6 @@ pub struct KfdIpcMemoryHandle {
     pub words: [u32; 8],
 }
 
-/// Location value accepted by Linux KFD SVM attribute operations.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum KfdSvmLocation {
-    /// Host system memory.
-    System,
-    /// No uniform or preferred location.
-    Undefined,
-    /// One activated endpoint, identified without exposing KFD's GPU ID.
-    Device([u8; 16]),
-}
-
-/// Per-device accessibility accepted by Linux KFD SVM operations.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum KfdSvmAccess {
-    /// Faulting access with migration permitted.
-    Accessible,
-    /// Non-faulting access without migration.
-    AccessibleInPlace,
-    /// Access denied.
-    NoAccess,
-}
-
-/// One Linux KFD SVM operation attribute.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum KfdSvmAttribute {
-    /// Preferred physical location.
-    PreferredLocation(KfdSvmLocation),
-    /// Immediate migration target or most recent prefetch location.
-    PrefetchLocation(KfdSvmLocation),
-    /// Access mode for one activated GPU endpoint.
-    Access {
-        /// Opaque rocddi endpoint identity.
-        device: [u8; 16],
-        /// Requested or returned access mode.
-        access: KfdSvmAccess,
-    },
-    /// KFD SVM flags to set.
-    SetFlags(u32),
-    /// KFD SVM flags to clear.
-    ClearFlags(u32),
-    /// Base-two logarithm of the migration page count.
-    MigrationGranularity(u32),
-}
-
 /// One owned DMA-BUF file descriptor plus immutable backing facts.
 pub struct DmaBuf {
     /// Owned descriptor keeping the shared backing reachable.
@@ -555,34 +511,6 @@ pub fn import_kfd_ipc_memory(
 /// native export failure without changing ownership.
 pub fn export_kfd_ipc_memory(allocation: &Allocation) -> Result<KfdIpcMemoryHandle, Error> {
     crate::driver::KfdDriver::export_kfd_ipc_memory(allocation.inner.linux_kfd()?.driver_state())
-}
-
-/// Applies Linux KFD SVM attributes to a process virtual-address range.
-///
-/// # Errors
-/// Rejects invalid ranges, endpoint identities, flags, or attributes and
-/// reports the native KFD operation failure.
-pub fn set_kfd_svm_attributes(
-    session: &Session,
-    address: u64,
-    size: u64,
-    attributes: &[KfdSvmAttribute],
-) -> Result<(), Error> {
-    kfd_driver(session)?.set_kfd_svm_attributes(address, size, attributes)
-}
-
-/// Queries Linux KFD SVM attributes for a process virtual-address range.
-///
-/// # Errors
-/// Rejects invalid ranges or query attributes and reports malformed or failed
-/// native KFD results without publishing partial translated output.
-pub fn get_kfd_svm_attributes(
-    session: &Session,
-    address: u64,
-    size: u64,
-    attributes: &mut [KfdSvmAttribute],
-) -> Result<(), Error> {
-    kfd_driver(session)?.get_kfd_svm_attributes(address, size, attributes)
 }
 
 #[cfg(test)]

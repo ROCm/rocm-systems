@@ -143,6 +143,11 @@ pub(crate) struct TestDriver {
     kind: EndpointKind,
     lifetime: DriverContextLifetime,
     host_registration: bool,
+    pub(crate) advice_enabled: bool,
+    pub(crate) advice_prefetch_gate: Option<Arc<(std::sync::Barrier, std::sync::Barrier)>>,
+    pub(crate) advice_calls: AtomicUsize,
+    pub(crate) advice_results: Mutex<Vec<crate::memory::advice::AdviceValue>>,
+    pub(crate) advice_changes: Mutex<Vec<crate::memory::advice::AdviceChange>>,
     pub(crate) shutdowns: Arc<AtomicUsize>,
     pub(crate) fail_shutdown: Arc<AtomicBool>,
     pub(crate) enumerations: Arc<AtomicUsize>,
@@ -310,6 +315,11 @@ impl TestDriver {
             kind,
             lifetime,
             host_registration: false,
+            advice_enabled: false,
+            advice_prefetch_gate: None,
+            advice_calls: AtomicUsize::new(0),
+            advice_results: Mutex::new(Vec::new()),
+            advice_changes: Mutex::new(Vec::new()),
             shutdowns: Arc::new(AtomicUsize::new(0)),
             fail_shutdown: Arc::new(AtomicBool::new(false)),
             enumerations: Arc::new(AtomicUsize::new(0)),
@@ -635,5 +645,56 @@ impl super::GpuClockOperations for TestDriver {
             system_frequency: 1_000_000,
             gpu_frequency: 25_000_000,
         })
+    }
+}
+
+impl super::MemoryAdviceOperations for TestDriver {
+    fn advice_capabilities(&self) -> Result<crate::memory::advice::AdviceCapabilities, Error> {
+        Ok(crate::memory::advice::AdviceCapabilities {
+            prefetch_completion: crate::memory::advice::PrefetchCompletion::Migration,
+            range_alignment: 4096,
+            minimum_migration_granularity: 4096,
+            maximum_migration_granularity: 1 << 30,
+        })
+    }
+    fn advice_set(
+        &self,
+        _address: u64,
+        _size: u64,
+        changes: &[crate::memory::advice::AdviceChange],
+    ) -> Result<(), Error> {
+        self.advice_calls.fetch_add(1, Ordering::Relaxed);
+        self.advice_changes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend_from_slice(changes);
+        Ok(())
+    }
+    fn advice_query(
+        &self,
+        _address: u64,
+        _size: u64,
+        _queries: &[crate::memory::advice::AdviceQuery],
+    ) -> Result<Vec<crate::memory::advice::AdviceValue>, Error> {
+        self.advice_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(self
+            .advice_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone())
+    }
+    fn advice_prefetch(
+        &self,
+        _address: u64,
+        _size: u64,
+        _location: crate::memory::advice::AdviceLocation,
+        _completion: crate::memory::advice::PrefetchCompletion,
+    ) -> Result<(), Error> {
+        if let Some(gate) = &self.advice_prefetch_gate {
+            gate.0.wait();
+            gate.1.wait();
+        }
+        self.advice_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(())
     }
 }

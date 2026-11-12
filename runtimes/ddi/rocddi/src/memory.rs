@@ -25,6 +25,7 @@
 //! owner supplies its cache policy and full-range lifetime.
 //! Platform-specific sharing transports live under [`interop`].
 
+pub mod advice;
 pub mod constraints;
 pub mod device;
 #[cfg(test)]
