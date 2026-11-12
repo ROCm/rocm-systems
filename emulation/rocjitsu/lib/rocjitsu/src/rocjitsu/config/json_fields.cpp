@@ -235,12 +235,25 @@ Result skip_value(std::string_view json, size_t &at, const util::DiagnosticEmitt
 }
 
 struct FieldRange {
+  /// Byte offset into the original document. For an existing field this points
+  /// at the first byte of the value; for an absent field it is the insertion
+  /// point immediately after the opening object brace and any BOM.
   size_t begin;
+  /// Exclusive byte offset into the original document. Equal to begin when the
+  /// field is absent.
   size_t end;
+  /// Whether an inserted field needs a comma after its value because the object
+  /// already contains at least one field.
   bool insertion_needs_comma;
 };
 
 /// @brief Locate a top-level value, or the insertion point for an absent field.
+/// @details The returned offsets always refer to @p json. For present fields,
+/// the half-open range spans only the original value text and @c end is
+/// exclusive; callers can replace that slice without touching the field name,
+/// separator, comments, or neighboring fields. For absent fields, @c begin ==
+/// @c end and the range marks where a new field can be inserted inside the root
+/// object.
 FailureOr<FieldRange> find_top_level_field(std::string_view json, std::string_view field,
                                            const util::DiagnosticEmitter &emit_error) {
   size_t at = json.starts_with("\xef\xbb\xbf") ? 3 : 0;

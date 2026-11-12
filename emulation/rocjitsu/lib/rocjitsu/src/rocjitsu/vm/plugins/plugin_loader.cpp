@@ -13,6 +13,7 @@
 #include "flatbuffers/flexbuffers.h"
 #include "flatbuffers/idl.h"
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <memory>
@@ -37,6 +38,11 @@ std::vector<util::LibraryHandle> &open_handles() {
   static std::vector<util::LibraryHandle> handles;
   return handles;
 }
+
+struct PluginLoadResult {
+  int count = 0;
+  std::vector<std::string> names;
+};
 
 bool map_has_key(const flexbuffers::Reference &root, std::string_view key) {
   if (!root.IsMap())
@@ -75,6 +81,29 @@ util::FailureOr<size_t> configured_plugin_count(const flexbuffers::Reference &ro
     return 0;
   }
   return plugins.AsMap().size();
+}
+
+util::FailureOr<std::vector<std::string>>
+parse_required_plugins(const flexbuffers::Reference &root, util::DiagnosticEmitter emit_error) {
+  if (!map_has_key(root, "required_plugins"))
+    return std::vector<std::string>{};
+
+  auto value = root.AsMap()["required_plugins"];
+  if (!value.IsVector())
+    return emit_error.emit() << "top-level 'required_plugins' must be an array";
+
+  auto plugins = value.AsVector();
+  std::vector<std::string> names;
+  names.reserve(plugins.size());
+  for (size_t i = 0; i < plugins.size(); ++i) {
+    if (!plugins[i].IsString())
+      return emit_error.emit() << "top-level 'required_plugins' entries must be strings";
+    std::string name = plugins[i].AsString().c_str();
+    if (!is_valid_plugin_name(name))
+      return emit_error.emit() << "invalid required plugin name '" << name << "'";
+    names.push_back(std::move(name));
+  }
+  return names;
 }
 
 std::string resolve_plugin_path(const std::string &soname, const std::string &plugin_dir) {
@@ -229,32 +258,65 @@ PluginSinkConfig parse_sink_config(const flexbuffers::Reference &root) {
   return config;
 }
 
-} // namespace
-
-int PluginLoader::load_from_config(const std::string &config_json, ExecutionPluginGroup &group,
-                                   const std::string &plugin_dir) {
+PluginLoadResult load_plugins_from_config(const std::string &config_json,
+                                          ExecutionPluginGroup &group,
+                                          const std::string &plugin_dir) {
   flexbuffers::Builder root_fbb;
   if (!flexbuffer_from_json(config_json, root_fbb))
-    return 0;
+    return {};
 
   auto root = flexbuffers::GetRoot(root_fbb.GetBuffer());
   if (!root.IsMap())
-    return 0;
+    return {};
 
   auto plugins = root.AsMap()["plugins"];
   if (!plugins.IsMap())
-    return 0;
+    return {};
 
   auto pmap = plugins.AsMap();
   auto keys = pmap.Keys();
   auto vals = pmap.Values();
-  int added = 0;
+  PluginLoadResult result;
   for (size_t i = 0; i < keys.size(); ++i) {
     std::string name = keys[i].AsKey();
-    if (load_one(name, vals[i], group, plugin_dir))
-      ++added;
+    if (load_one(name, vals[i], group, plugin_dir)) {
+      ++result.count;
+      result.names.push_back(std::move(name));
+    }
   }
-  return added;
+  return result;
+}
+
+std::vector<std::string> missing_required_plugins(const std::vector<std::string> &required,
+                                                  const std::vector<std::string> &loaded) {
+  std::vector<std::string> missing;
+  for (const std::string &name : required)
+    if (std::find(loaded.begin(), loaded.end(), name) == loaded.end())
+      missing.push_back(name);
+  return missing;
+}
+
+util::FailureOr<std::shared_ptr<ExecutionPluginGroup>>
+report_missing_required_plugins(const std::vector<std::string> &missing,
+                                util::DiagnosticEmitter emit_error) {
+  if (missing.size() == 1)
+    return emit_error.emit() << "required plugin '" << missing.front() << "' failed to load";
+
+  auto diagnostic = emit_error.emit();
+  diagnostic << "required plugins failed to load: ";
+  for (size_t i = 0; i < missing.size(); ++i) {
+    if (i != 0)
+      diagnostic << ", ";
+    diagnostic << missing[i];
+  }
+  return diagnostic;
+}
+
+} // namespace
+
+int PluginLoader::load_from_config(const std::string &config_json, ExecutionPluginGroup &group,
+                                   const std::string &plugin_dir) {
+  return load_plugins_from_config(config_json, group, plugin_dir).count;
 }
 
 util::FailureOr<std::shared_ptr<ExecutionPluginGroup>>
@@ -306,13 +368,21 @@ PluginLoader::configure_plugin_group(const std::string &config_json, const std::
   if (requested.failed())
     return util::Result::failure();
   const size_t requested_plugins = requested.value();
+  const util::FailureOr<std::vector<std::string>> required_plugins =
+      parse_required_plugins(root, emit_error);
+  if (required_plugins.failed())
+    return util::Result::failure();
   auto group = std::make_shared<ExecutionPluginGroup>(parse_sink_config(root));
   group->defer_file_sinks();
-  const int loaded_plugins = load_from_config(config_json, *group, plugin_dir);
-  if (require_all_plugins && static_cast<size_t>(loaded_plugins) != requested_plugins) {
-    return emit_error.emit() << "required plugin loading failed: loaded " << loaded_plugins
-                             << " of " << requested_plugins << " configured plugins";
+  const PluginLoadResult loaded = load_plugins_from_config(config_json, *group, plugin_dir);
+  if (require_all_plugins && static_cast<size_t>(loaded.count) != requested_plugins) {
+    return emit_error.emit() << "required plugin loading failed: loaded " << loaded.count << " of "
+                             << requested_plugins << " configured plugins";
   }
+  const std::vector<std::string> missing =
+      missing_required_plugins(required_plugins.value(), loaded.names);
+  if (!missing.empty())
+    return report_missing_required_plugins(missing, emit_error);
   return group;
 }
 
