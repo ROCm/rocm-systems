@@ -24,7 +24,8 @@ mod graph;
 pub mod host;
 pub mod platform;
 pub use gpu::{
-    GpuInfo, GpuQueueCapabilities, GpuScratchEncoding, GpuSdmaDialect, GpuTargetProfile,
+    GpuCopyTransport, GpuInfo, GpuQueueCapabilities, GpuScratchEncoding, GpuSdmaDialect,
+    GpuTargetProfile,
 };
 pub use graph::{
     AttachmentKind, CpuNodeInfo, EndpointAttachment, MemoryBank, MemoryBankKind, MemoryLocation,

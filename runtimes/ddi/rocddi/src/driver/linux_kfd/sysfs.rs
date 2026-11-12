@@ -8,6 +8,7 @@
 //! current native identity before publication and again before activation.
 //! Parsers reject incomplete, duplicate, overflowing, or internally inconsistent
 //! properties rather than filling important device facts with defaults.
+use super::target::KfdTargetProfile;
 use super::{errno, error, native_error, sys};
 use crate::driver::{DriverInstanceId, KfdAccessTarget};
 use crate::memory::storage::Shared;
@@ -1199,6 +1200,20 @@ fn read_node(
                 ))
                 .is_ok_and(|path| File::open(path.path()).is_ok()),
                 queues: GpuQueueCapabilities {
+                    copy: if !cfg!(target_arch = "x86_64") || !sdma_qualified {
+                        None
+                    } else {
+                        match (target_profile.sdma_dialect(), sdma_ip) {
+                            (Some(GpuSdmaDialect::Gfx9), _) => {
+                                Some(crate::topology::GpuCopyTransport::User)
+                            }
+                            (Some(GpuSdmaDialect::Gfx1200), Some((7, 0, 1)))
+                            | (Some(GpuSdmaDialect::Gfx1250), Some((7, 1, 0))) => {
+                                Some(crate::topology::GpuCopyTransport::Kernel)
+                            }
+                            _ => None,
+                        }
+                    },
                     aql: supports_aql,
                     // GFX12 shares the AQL system-scope cache protocol.
                     aql_system_cache_control: cfg!(target_arch = "x86_64")
