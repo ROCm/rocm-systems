@@ -25,6 +25,7 @@
 
 #include "algorithms/dda/device/CollCommon.h"
 #include "algorithms/dda/device/CollCommon_ll128.h"
+#include "device/uniform.h"
 
 namespace dda::common {
 
@@ -38,9 +39,12 @@ constexpr size_t ddaLL128RsSlotWords(size_t bankSize, int nRanks) {
   return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
-// Phase-2 poll batch: peers read and re-read together; fp8 takes 2 because 3 costs its 4-rank kernel a wave per SIMD.
+// Block size the kernel is compiled for (its __launch_bounds__), so the launcher's default and its cap.
+constexpr unsigned kDdaLL128RsMaxThreads = 512;
+
+// Phase-2 poll batch: peers read and re-read together. fp8 takes half, its per-word upconverts need the registers.
 template <typename T>
-inline constexpr int kDdaLL128RsPollBatch = is_fp8_v<T> ? 2 : 3;
+inline constexpr int kDdaLL128RsPollBatch = is_fp8_v<T> ? 4 : 8;
 
 // (rank + 1) % nRanks without the divide.
 constexpr int ddaLL128RsNextRank(int rank, int nRanks) {
@@ -120,9 +124,7 @@ __device__ __forceinline__ bool ddaLL128RsWaitBatch(const uint64_t* const (&line
 // in-place call (recvbuff aliasing sendbuff[selfRank]) never has one warp's
 // write land on a range another warp still has to read.
 template <typename T, int NRANKS_CT>
-#if defined(USE_ROCM)
-__launch_bounds__(512)
-#endif
+__launch_bounds__(kDdaLL128RsMaxThreads)
   __global__ void ddaReduceScatterFabricLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: scratch bases
                                               T* __restrict__ recvbuff, // local user output (one shard)
                                               const T* __restrict__ sendbuff, // local user input (nRanks shards)
@@ -169,10 +171,10 @@ __launch_bounds__(512)
     const size_t sliceByte = s * (size_t)kDdaLL128DataBytesPerSlice;
     const size_t rem = shardBytes - sliceByte;
     const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-    const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
+    const size_t sliceWire = s * (size_t)kDdaLL128WireWordsPerSlice;
 
-    // Runtime-rank instance stages 4 peers per batch: 8 would spill.
-    constexpr int kSendBatch = NRANKS_CT ? kDdaLLPeerBatch : 4;
+    // 8 peers per batch fits the register budget of the 512-thread launch bound.
+    constexpr int kSendBatch = kDdaLLPeerBatch;
     for (int base = 1; base < nRanks; base += kSendBatch) {
       uint64_t regs[kSendBatch][kDdaLL128WordsPerThread];
 #pragma unroll
@@ -195,9 +197,10 @@ __launch_bounds__(512)
           ddaLL128LoadRegsFinish(regs[i], flagLane);
           // peer is wave-uniform; readfirstlane makes that explicit so the scratch base is a scalar load.
           const int peer = __builtin_amdgcn_readfirstlane((selfRank + r) % nRanks);
-          uint64_t* scatterSlot = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords +
-            (uint64_t)selfRank * (uint64_t)slotWords;
-          ddaLL128StoreWire(scatterSlot + wireOff, regs[i], flag, flagLane);
+          // A scalar slot base keeps the lane offset a 32-bit vector offset.
+          uint64_t* scatterSlot = wave::uniform(reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords +
+            (uint64_t)selfRank * (uint64_t)slotWords + sliceWire);
+          ddaLL128StoreWire(scatterSlot + 2 * lane, regs[i], flag, flagLane);
         }
       }
     }
@@ -205,7 +208,9 @@ __launch_bounds__(512)
 
   // Phase 2: fold every copy of my shard into recvbuff, peers selfRank + 1, selfRank + 2, ... in poll batches.
   const int laneWord = 2 * lane;
-  constexpr int kPollBatch = kDdaLL128RsPollBatch<T>;
+  // A fixed-rank instance polls at most its peers in one batch.
+  constexpr int kPollBatch =
+    NRANKS_CT && NRANKS_CT - 1 < kDdaLL128RsPollBatch<T> ? NRANKS_CT - 1 : kDdaLL128RsPollBatch<T>;
   const int firstRecvPeer = ddaLL128RsNextRank(selfRank, nRanks);
   // Abort exits via the common tail: a second ddaSetLLEpoch call would keep its epoch cell index live and spill it.
   bool aborted = false;

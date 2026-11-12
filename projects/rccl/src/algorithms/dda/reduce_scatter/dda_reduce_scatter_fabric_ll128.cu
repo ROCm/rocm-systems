@@ -26,13 +26,29 @@
 #include <cstdint>
 #include <utility>
 
+// Threads per block, overriding the arch table: a multiple of the warp up to kDdaLL128RsMaxThreads, else ignored.
+RCCL_PARAM(DdaLL128RSThreads, "DDA_LL128_RS_THREADS", 0);
+
 namespace {
 
 using dda::common::ddaBankSize;
 using dda::common::ddaLL128RsSlotWords;
 using dda::common::ddaLL128Slices;
+using dda::common::ddaLL128ValidThreads;
+using dda::common::kDdaLL128RsMaxThreads;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireWordsPerSlice;
+
+// A valid DDA_LL128_RS_THREADS, else the arch table's block size if the launch bound allows it, else the bound.
+static inline unsigned ddaLL128RSThreads(const ncclComm* comm) {
+  const auto fits = [](int64_t v) { return ddaLL128ValidThreads(v) && v <= (int64_t)kDdaLL128RsMaxThreads; };
+  const int64_t user = rcclParamDdaLL128RSThreads();
+  if (fits(user)) {
+    return (unsigned)user;
+  }
+  const int tuned = rcclDdaFabricRsLL128Threads(comm);
+  return fits(tuned) ? (unsigned)tuned : kDdaLL128RsMaxThreads;
+}
 
 // One warp carries one slice, so the grid is sized in slices rather than in
 // lines: blocks = ceil(slices / warpsPerBlock), capped by the grid budget. A
@@ -40,7 +56,7 @@ using dda::common::kDdaLL128WireWordsPerSlice;
 // takes several passes through the slice loop.
 static inline std::pair<dim3, dim3> ddaReduceScatterFabricLL128Geom(ncclComm* comm, size_t shardBytes) {
   const size_t slices = ddaLL128Slices(shardBytes);
-  const unsigned threads = 512;
+  const unsigned threads = ddaLL128RSThreads(comm);
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {

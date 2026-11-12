@@ -8930,6 +8930,30 @@ TEST(WrapMicrotestIsolated, DdaFabricAgLL128Shape_FromDpxTable) {
       });
 }
 
+// Only the gfx1250 SPX table runs the ReduceScatter LL128 kernel on 256 threads. The DPX table,
+// RCCL_IGNORE_ARCH_TABLE=1 and no comm leave 0, which keeps 512.
+TEST(WrapMicrotestIsolated, DdaFabricRsLL128Threads_FromSpxTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricRsLL128Threads_FromSpxTable",
+      []() {
+        int64_t ignoreTable = 0;
+        g_loadParam = [&ignoreTable](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_IGNORE_ARCH_TABLE") == 0 ? ignoreTable : def;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        EXPECT_EQ(0, rcclDdaFabricRsLL128Threads(comm)) << "DPX";
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        EXPECT_EQ(256, rcclDdaFabricRsLL128Threads(comm)) << "SPX";
+        ignoreTable = 1;
+        EXPECT_EQ(0, rcclDdaFabricRsLL128Threads(comm)) << "RCCL_IGNORE_ARCH_TABLE=1";
+        EXPECT_EQ(0, rcclDdaFabricRsLL128Threads(nullptr));
+        DeleteCommWithArch(comm);
+      });
+}
+
 // DDA LL128 AlltoAll reads its own ddaA2aLL128* window, inclusive at both ends; a synthetic table pins
 // the accessors. The real tables and no table keep 0 threads; SPX and no table keep the init cap, and DPX
 // caps the grid at 72 blocks from 256 KiB to 16 MiB, where DPX runs LL128 (LL stops at 128 KiB).
