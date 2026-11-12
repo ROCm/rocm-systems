@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { adaptPublishedDashboardData } from '../../../emulation/rocjitsu/website/dashboard/src/data/dashboardDataAdapter.js';
 import { publishedRunPath } from '../../../emulation/rocjitsu/website/dashboard/src/data/runSchema.js';
-import { buildBenchmarkSummary, readBenchmarkSummary } from '../../../emulation/rocjitsu/website/dashboard/scripts/benchmark-summary.mjs';
+import { buildBenchmarkSummary, readBenchmarkSummary } from '../rocjitsu_benchmark_report.js';
 
 const fixture = JSON.parse(await readFile(new URL('../../../emulation/rocjitsu/website/dashboard/tests/fixtures/fictional-producer-run.json', import.meta.url)));
 const candidateSha = 'c'.repeat(40);
@@ -39,85 +39,85 @@ function dataset(runs) {
   return { index: { generatedAt: '2026-11-03T00:00:00Z', runFiles: runs.map((entry) => publishedRunPath(entry)) }, runs };
 }
 
-function summarize(runs = publication()) {
+async function summarize(runs = publication()) {
   return buildBenchmarkSummary(adaptPublishedDashboardData(dataset(runs)).data, 'candidate', candidateSha);
 }
 
-test('uses dashboard comparisons for counts, timing rows and exact run links', () => {
-  const summary = summarize();
+test('uses dashboard comparisons for counts, timing rows and exact run links', async () => {
+  const summary = await summarize();
   assert.equal(summary.baselineRunId, 'baseline');
-  assert.match(summary.markdown, /3\/3 completed/);
-  assert.match(summary.markdown, /\| gfx950 \/ default \| 1 \| 1 \| 1 \| 0 \|/);
+  assert.match(summary.markdown, /3\/3 benchmarks completed/);
+  assert.match(summary.markdown, /gfx950 \/ default: 1 faster, 1 slower, 1 within band/);
   assert.match(summary.markdown, /\| 100 s \| 120 s \| \+20.0% \|/);
   assert.match(summary.markdown, /\| 100 s \| 80 s \| -20.0% \|/);
-  assert.match(summary.markdown, /first parent/);
-  assert.match(summary.markdown, /not a statistical significance test/);
-  const url = new URL(summary.markdown.match(/\[Compare these exact runs on the dashboard\]\(([^)]+)\)/)[1]);
+  assert.match(summary.markdown, /\*\*1 faster, 1 slower\*\*/);
+  assert.doesNotMatch(summary.markdown, /Lower duration|statistical significance/);
+  const url = new URL(summary.markdown.match(/Compared with \[.*?\]\(([^)]+)\)/)[1]);
   assert.equal(url.searchParams.get('compareBaseline'), 'baseline');
   assert.equal(url.searchParams.get('compareCandidate'), 'candidate');
   assert.equal(url.searchParams.get('view'), 'compare');
 });
 
-test('prefers the recorded parent over a more recent unrelated develop result', () => {
+test('prefers the recorded parent over a more recent unrelated develop result', async () => {
   const runs = publication();
   runs.push(run('other', 'd'.repeat(40), '2026-11-01T12:00:00Z'));
-  assert.equal(summarize(runs).baselineRunId, 'baseline');
+  assert.equal((await summarize(runs)).baselineRunId, 'baseline');
 });
 
-test('fallback identifies that the difference may include other changes and skips same-commit reruns', () => {
+test('does not compare against an earlier develop run when the recorded base is missing', async () => {
   const runs = publication();
   runs[1].publication.source.base.commit = 'd'.repeat(40);
   runs.push(run('previous-attempt', candidateSha, '2026-11-01T12:00:00Z'));
-  const summary = summarize(runs);
-  assert.equal(summary.baselineRunId, 'baseline');
-  assert.match(summary.markdown, /No result for the recorded base/);
-  assert.match(summary.markdown, /may include other changes/);
+  const summary = await summarize(runs);
+  assert.equal(summary.baselineRunId, null);
+  assert.match(summary.markdown, /Timing comparison unavailable/);
+  assert.doesNotMatch(summary.markdown, /faster|slower|Duration change|Compared with|earlier develop/);
 });
 
-test('does not invent a comparison when no baseline exists', () => {
-  const summary = summarize(publication().slice(1));
+test('does not invent a comparison when no baseline exists', async () => {
+  const summary = await summarize(publication().slice(1));
   assert.equal(summary.baselineRunId, null);
-  assert.match(summary.markdown, /3\/3 completed/);
-  assert.match(summary.markdown, /No published develop baseline/);
+  assert.match(summary.markdown, /3\/3 benchmarks completed/);
+  assert.match(summary.markdown, /Timing comparison unavailable/);
   assert.doesNotMatch(summary.markdown, /Duration change \|/);
 });
 
-test('separates failed and timed-out results from comparable timing changes', () => {
+test('separates failed and timed-out results from comparable timing changes', async () => {
   const runs = publication();
   runs[1].benchmark_results[0].status = 'failed';
   runs[1].benchmark_results[1].status = 'timeout';
-  const { markdown } = summarize(runs);
-  assert.match(markdown, /1\/3 completed.*1 failed.*1 timed out/);
-  assert.match(markdown, /\| gfx950 \/ default \| 0 \| 0 \| 1 \| 2 \|/);
+  const { markdown } = await summarize(runs);
+  assert.match(markdown, /1\/3 benchmarks completed.*1 failed.*1 timed out/);
+  assert.match(markdown, /gfx950 \/ default: 0 faster, 0 slower, 1 within band, 2 not comparable/);
   assert.doesNotMatch(markdown, /\+20.0%/);
 });
 
-test('flags changed environment, machine, dependencies and workload inputs', () => {
+test('flags changed environment, machine, dependencies and workload inputs', async () => {
   const runs = publication();
   runs[1].provenance.machine.cpu = 'other-cpu';
   runs[1].publication.machine_label = 'other-host';
   runs[1].publication.tensile_commit_sha = 'd'.repeat(40);
   runs[1].benchmark_results[0].problem.rows += 1;
-  const { markdown } = summarize(runs);
+  const { markdown } = await summarize(runs);
   assert.match(markdown, /Changed inputs:.*environment.*machine.*Tensile.*workload/);
   assert.match(markdown, /Timing differences may reflect these changes/);
 });
 
-test('escapes untrusted benchmark names in Markdown tables', () => {
+test('escapes untrusted benchmark names in Markdown tables', async () => {
   const runs = publication();
   runs[1].benchmark_results[0].name = '<img> | [link](url)\n@someone';
-  const { markdown } = summarize(runs);
+  const { markdown } = await summarize(runs);
   assert.ok(markdown.includes('&lt;img&gt; \\| \\[link\\]\\(url\\) &#64;someone'));
   assert.ok(!markdown.includes('<img>'));
 });
 
-test('uses medians from the dashboard adapter instead of the first sample', () => {
+test('uses medians from the dashboard adapter instead of the first sample', async () => {
   const runs = publication();
   runs[1].benchmark_results[0].timing_results_s = [1, 120, 130];
-  assert.match(summarize(runs).markdown, /\| 100 s \| 120 s \| \+20.0% \|/);
+  assert.match((await summarize(runs)).markdown, /\| 100 s \| 120 s \| \+20.0% \|/);
 });
 
-test('groups targets and thread policies separately and limits the largest changes', () => {
+test('groups targets and thread policies separately and limits the largest changes', async () => {
   const runs = publication();
   for (const entry of runs) {
     const extra = entry.benchmark_results.map((row) => ({ ...structuredClone(row), target: 'gfx1250', thread_policy: 'single' }));
@@ -126,16 +126,16 @@ test('groups targets and thread policies separately and limits the largest chang
       for (const row of entry.benchmark_results) row.timing_results_s = [150];
     }
   }
-  const { markdown } = summarize(runs);
-  assert.match(markdown, /\| gfx950 \/ default \| 0 \| 3 \| 0 \| 0 \|/);
-  assert.match(markdown, /\| gfx1250 \/ single \| 0 \| 3 \| 0 \| 0 \|/);
+  const { markdown } = await summarize(runs);
+  assert.match(markdown, /gfx950 \/ default: 0 faster, 3 slower, 0 within band/);
+  assert.match(markdown, /gfx1250 \/ single: 0 faster, 3 slower, 0 within band/);
   assert.equal(markdown.match(/\+50.0%/g).length, 5);
 });
 
-test('refuses a missing candidate or mismatched measured commit', () => {
+test('refuses a missing candidate or mismatched measured commit', async () => {
   const data = adaptPublishedDashboardData(dataset(publication())).data;
-  assert.throws(() => buildBenchmarkSummary(data, 'missing', candidateSha), /does not match/);
-  assert.throws(() => buildBenchmarkSummary(data, 'candidate', baselineSha), /does not match/);
+  await assert.rejects(buildBenchmarkSummary(data, 'missing', candidateSha), /does not match/);
+  await assert.rejects(buildBenchmarkSummary(data, 'candidate', baselineSha), /does not match/);
 });
 
 test('CLI reads the publication snapshot and writes an identified summary artifact', async (t) => {
@@ -145,7 +145,7 @@ test('CLI reads the publication snapshot and writes an identified summary artifa
   await mkdir(join(directory, 'runs/default-branch'), { recursive: true });
   await writeFile(join(directory, 'index.json'), JSON.stringify(source.index));
   for (const entry of source.runs) await writeFile(join(directory, publishedRunPath(entry)), JSON.stringify(entry));
-  const script = fileURLToPath(new URL('../../../emulation/rocjitsu/website/dashboard/scripts/benchmark-summary.mjs', import.meta.url));
+  const script = fileURLToPath(new URL('../rocjitsu_benchmark_report.js', import.meta.url));
   const output = join(directory, 'summary.json');
   execFileSync(process.execPath, [script, '--data-dir', directory, '--run-id', 'candidate', '--head-sha', candidateSha, '--output', output]);
   const summary = JSON.parse(await readFile(output, 'utf8'));
@@ -158,10 +158,20 @@ test('CLI reads the publication snapshot and writes an identified summary artifa
 });
 
 
-test('a zero baseline is unavailable rather than a measured speedup', () => {
+test('a zero baseline is unavailable rather than a measured speedup', async () => {
   const runs = publication();
   runs[0].benchmark_results[0].timing_results_s = [0];
-  const { markdown } = summarize(runs);
-  assert.match(markdown, /\| gfx950 \/ default \| 1 \| 0 \| 1 \| 1 \|/);
+  const { markdown } = await summarize(runs);
+  assert.match(markdown, /gfx950 \/ default: 1 faster, 0 slower, 1 within band, 1 not comparable/);
   assert.doesNotMatch(markdown, /Infinity/);
+});
+
+
+test('a run without a recorded base does not report timing comparisons', async () => {
+  const runs = publication();
+  runs[1].publication.source.base = null;
+  const summary = await summarize(runs);
+  assert.equal(summary.baselineRunId, null);
+  assert.match(summary.markdown, /3\/3 benchmarks completed/);
+  assert.doesNotMatch(summary.markdown, /faster|slower|Duration change|Compared with/);
 });

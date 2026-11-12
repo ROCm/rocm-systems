@@ -697,7 +697,7 @@ jobs:
         # A summary failure must not discard otherwise publishable measurements.
         continue-on-error: true
         run: |
-          node "${ROCJITSU_SOURCE_DIR}/website/dashboard/scripts/benchmark-summary.mjs" \
+          node "${GITHUB_WORKSPACE}/rocm-systems/.github/scripts/rocjitsu_benchmark_report.js" \
             --data-dir "${DATA_DIR}" --run-id "${RUN_ID}" \
             --head-sha "${BENCHMARK_SHA}" \
             --output "${DIAGNOSTICS_DIR}/summary.json"
@@ -755,7 +755,6 @@ jobs:
           BENCHMARK_RESULT: ${{ needs.benchmark.result }}
           PUBLICATION_RESULT: ${{ needs.publish.result }}
           PUBLISHED_RUN_ID: ${{ needs.publish.outputs.run_id }}
-          BENCHMARK_RUN_ATTEMPT: ${{ needs.benchmark.outputs.run_attempt }}
           SOURCE_SHA: ${{ needs.source-metadata.outputs.source_sha }}
         with:
           script: |
@@ -771,7 +770,6 @@ jobs:
               runNumber: process.env.GITHUB_RUN_NUMBER,
               runAttempt: process.env.GITHUB_RUN_ATTEMPT,
               publishedRunId: process.env.PUBLISHED_RUN_ID,
-              benchmarkAttempt: process.env.BENCHMARK_RUN_ATTEMPT,
               headSha: process.env.SOURCE_SHA,
               summaryPath: process.env.PUBLICATION_RESULT === 'success'
                 ? `${process.env.GITHUB_WORKSPACE}/benchmark-summary/summary.json` : undefined,

@@ -169,16 +169,11 @@ def test_report_includes_cancelled_pr_and_post_merge_benchmarks(
         'BENCHMARK_RESULT': '${{ needs.benchmark.result }}',
         'PUBLICATION_RESULT': '${{ needs.publish.result }}',
         'PUBLISHED_RUN_ID': '${{ needs.publish.outputs.run_id }}',
-        'BENCHMARK_RUN_ATTEMPT': '${{ needs.benchmark.outputs.run_attempt }}',
         'SOURCE_SHA': '${{ needs.source-metadata.outputs.source_sha }}',
     }
     assert 'runNumber: process.env.GITHUB_RUN_NUMBER' in report['with']['script']
     assert 'runAttempt: process.env.GITHUB_RUN_ATTEMPT' in report['with']['script']
     assert 'publishedRunId: process.env.PUBLISHED_RUN_ID' in report['with']['script']
-    assert (
-        'benchmarkAttempt: process.env.BENCHMARK_RUN_ATTEMPT'
-        in report['with']['script']
-    )
     assert 'headSha: process.env.SOURCE_SHA' in report['with']['script']
     assert 'reportBenchmark' in report['with']['script']
 
