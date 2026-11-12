@@ -1088,30 +1088,6 @@ class TestCorrectSysInfo:
         assert sys_info["num_xcd"].item() == "4"
         assert sys_info["cu_per_gpu"].item() == "64"
 
-    @pytest.mark.parametrize(
-        ("correction", "expected", "deprecated"),
-        [
-            ("num_xcd:4,cu_per_gpu:64", {"num_xcd": "4", "cu_per_gpu": "64"}, True),
-            ("num_xcd:4, cu_per_gpu:64", {"num_xcd": "4", "cu_per_gpu": "64"}, True),
-            ("sbios:Vendor, Build:42", {"sbios": "Vendor, Build:42"}, False),
-            (
-                "sbios:American Megatrends International, LLC.X",
-                {"sbios": "American Megatrends International, LLC.X"},
-                False,
-            ),
-        ],
-    )
-    def test_commas_split_only_between_spec_pairs(
-        self, monkeypatch, correction, expected, deprecated
-    ) -> None:
-        """Comma-separated pairs are split with a warning; other commas stay."""
-        mocks = common.patch_console(monkeypatch, "utils.parser", "warning")
-        mspec = make_mi350_machine_specs(monkeypatch)
-        correct_sys_info(mspec, [correction])
-
-        assert {name: getattr(mspec, name) for name in expected} == expected
-        assert mocks["warning"].called == deprecated
-
     def test_surrounding_whitespace_is_stripped(self, monkeypatch) -> None:
         """Spaces around names and values do not break the override."""
         sys_info = correct_sys_info(
@@ -1136,16 +1112,13 @@ class TestCorrectSysInfo:
         assert sys_info["gpu_model"].item() == "MI350"
         assert sys_info["total_l2_chan"].item() == "128"
 
-    def test_value_keeps_everything_after_the_first_colon(self, monkeypatch) -> None:
-        """Only the first ':' separates name from value."""
-        sys_info = correct_sys_info(
-            make_mi350_machine_specs(monkeypatch), ["command:./vcopy -n 1:2"]
-        )
-
-        assert sys_info["command"].item() == "./vcopy -n 1:2"
-
-    def test_unknown_spec_name_errors_and_exits(self, monkeypatch) -> None:
-        """An unknown spec name reports the name and aborts."""
+    @pytest.mark.parametrize(
+        "pair",
+        ["not_a_spec:1", "num_xcd", "num_xcd:4,cu_per_gpu:64"],
+        ids=["unknown_name", "no_colon", "comma_separated_pairs"],
+    )
+    def test_invalid_pair_errors_and_exits(self, monkeypatch, pair) -> None:
+        """A pair without exactly one ':' or with an unknown name aborts."""
         error_calls = []
 
         def record_and_exit(*args, **_kwargs):
@@ -1157,7 +1130,7 @@ class TestCorrectSysInfo:
         )
 
         with pytest.raises(SystemExit):
-            correct_sys_info(make_mi350_machine_specs(monkeypatch), ["not_a_spec:1"])
+            correct_sys_info(make_mi350_machine_specs(monkeypatch), [pair])
 
-        assert "not_a_spec" in str(error_calls[0])
-        assert "--specs" in str(error_calls[0])
+        assert pair in str(error_calls[0])
+        assert "sysinfo.csv" in str(error_calls[0])

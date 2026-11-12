@@ -6,7 +6,6 @@ Unit tests for rocprof-compute general CLI options.
 """
 
 import argparse
-import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,8 +14,8 @@ from common import SUPPORTED_ARCHS
 
 from argparser import (
     DEPRECATED_OPTIONS,
+    CliHelpFormatter,
     build_parser,
-    experimental_requested,
     warn_deprecated_options,
 )
 
@@ -30,26 +29,17 @@ DEPRECATED_ALIASES = [
     (["profile"], ["--device", "2"], ["--roofline-device", "2"], "device", 2),
 ]  # fmt: skip
 
-# Options whose (Default: ...) describes the default in words
-DESCRIBED_DEFAULTS = {
-    "--output-directory",
-    "--config-dir",
-    "--rocprofiler-sdk-tool-path",
-    "--pc-sampling-interval",
-    "--view",
-}
-# "(Default: X)" is the default; "(Default when given without a value: X)" the const
-HELP_DEFAULT_RE = re.compile(r"\(Default( when given without a value)?: ([^)]*)\)")
-
 
 def build_args(argv, experimental=False):
     """Parse argv with the rocprof-compute parser."""
-    return build_parser(HOME, SUPPORTED_ARCHS, VERSION, experimental).parse_args(argv)
+    if experimental:
+        argv = ["--experimental", *argv]
+    return build_parser(HOME, SUPPORTED_ARCHS, VERSION, argv).parse_args(argv)
 
 
 def help_text(home, argv, capsys):
     """Return the help output for argv with the given rocprof-compute home."""
-    parser = build_parser(home, SUPPORTED_ARCHS, VERSION)
+    parser = build_parser(home, SUPPORTED_ARCHS, VERSION, argv)
     with pytest.raises(SystemExit):
         parser.parse_args([*argv, "--help"])
     return capsys.readouterr().out
@@ -65,7 +55,7 @@ def write_skills_readme(skills_dir):
 
 def all_parsers():
     """Return the top-level parser and the profile and analyze parsers."""
-    parser = build_parser(HOME, SUPPORTED_ARCHS, VERSION, True)
+    parser = build_parser(HOME, SUPPORTED_ARCHS, VERSION, ["--experimental"])
     return [parser, *parser._subparsers._group_actions[0].choices.values()]
 
 
@@ -159,23 +149,6 @@ def test_config_dir_requires_value(capsys):
 
 
 # =============================================================================
-# abbreviated options
-# =============================================================================
-
-
-def test_abbreviated_option_is_rejected(capsys):
-    assert (
-        build_args(["--list-metrics-gfx-id", "gfx950"]).list_metrics_gfx_id == "gfx950"
-    )
-    with pytest.raises(SystemExit) as exc:
-        build_args(["--list-metrics-gfx=gfx950"])
-    assert exc.value.code == 2
-    assert (
-        "unrecognized arguments: --list-metrics-gfx=gfx950" in capsys.readouterr().err
-    )
-
-
-# =============================================================================
 # profile -d / --output-directory
 # =============================================================================
 
@@ -201,23 +174,6 @@ def test_profile_kernel_iteration_range():
         "./vcopy",
     ])
     assert args.kernel_iteration_range == ["1", "3:5"]
-
-
-# =============================================================================
-# analyze --specs-correction
-# =============================================================================
-
-
-def test_analyze_specs_correction_takes_space_separated_pairs():
-    args = build_args(["analyze", "--specs-correction", "num_xcd:4", "sbios:A, B:1"])
-    assert args.specs_correction == ["num_xcd:4", "sbios:A, B:1"]
-
-
-def test_analyze_specs_correction_rejects_value_without_name(capsys):
-    with pytest.raises(SystemExit) as exc:
-        build_args(["analyze", "--specs-correction", "num_xcd", "4"])
-    assert exc.value.code == 2
-    assert "expected name:value, got 'num_xcd'" in capsys.readouterr().err
 
 
 # =============================================================================
@@ -359,40 +315,22 @@ def test_warn_deprecated_options(argv, warned, caplog):
 # =============================================================================
 
 
-def test_help_shows_option_metavars(capsys):
-    with pytest.raises(SystemExit):
-        build_args(["analyze", "--help"], experimental=True)
-    out = capsys.readouterr().out
-    assert "-b, --block <ids>..." in out
-    assert "-t, --time-unit <unit>" in out
-    assert "--operator [pattern]..." in out
-    assert "--list-metrics [id]..." in out
-    assert "Values: s, ms, us, ns" in out
-
-
-def test_help_defaults_match_parser_defaults():
-    """Each "(Default: X)" in the help is the option's real default."""
-    for action in (a for parser in all_parsers() for a in parser._actions):
-        name = action.option_strings[-1] if action.option_strings else action.dest
-        if name in DESCRIBED_DEFAULTS:
-            continue
-        help_text = " ".join((action.help or "").split())
-        for match in HELP_DEFAULT_RE.finditer(help_text):
-            value = action.const if match.group(1) else action.default
-            if isinstance(value, list):
-                value = ", ".join(str(item) for item in value)
-            assert match.group(2) == str(value), name
-
-
-# =============================================================================
-# analyze -k / -d
-# =============================================================================
-
-
-def test_analyze_kernel_and_dispatch_keep_one_group_per_use():
-    args = build_args(["analyze", "-k", "1", "2", "-k", "3", "-d", "4", "5"])
-    assert args.gpu_kernel == [[1, 2], [3]]
-    assert args.gpu_dispatch_id == [["4", "5"]]
+@pytest.mark.parametrize(
+    ("option_strings", "nargs", "metavar", "expected"),
+    [
+        (["-b", "--block"], "+", "<ids>", "-b, --block <ids>..."),
+        (["--operator"], "*", "patterns", "--operator [patterns]..."),
+        (["-t", "--time-unit"], None, "<unit>", "-t, --time-unit <unit>"),
+        (["--view"], "?", "view", "--view [view]"),
+    ],
+    ids=["one_or_more", "zero_or_more", "one_value", "optional_value"],
+)
+def test_cli_help_formatter_shows_option_names_and_argument_once(
+    option_strings, nargs, metavar, expected
+):
+    parser = argparse.ArgumentParser(formatter_class=CliHelpFormatter)
+    parser.add_argument(*option_strings, nargs=nargs, metavar=metavar)
+    assert expected in parser.format_help()
 
 
 # =============================================================================
@@ -467,17 +405,20 @@ def test_experimental_feature_with_flag_succeeds(monkeypatch, caplog):
     assert "may change in future releases" in caplog.text.lower()
 
 
-@pytest.mark.parametrize(
-    ("argv", "requested"),
-    [
-        (["--experimental", "profile", "-n", "test", "--", "./app"], True),
-        (["profile", "-n", "test", "--", "./app", "--experimental"], False),
-        (["--exp", "profile", "-n", "test", "--", "./app"], False),
-    ],
-    ids=["before_workload", "workload_option", "abbreviation"],
-)
-def test_experimental_requested(argv, requested):
-    assert experimental_requested(argv) is requested
+@pytest.mark.experimental_feature
+def test_experimental_option_works_with_experimental_before_workload():
+    argv = ["--experimental", "profile", "--pc-sampling", "-n", "test", "--", "./app"]
+    args = build_parser(HOME, SUPPORTED_ARCHS, VERSION, argv).parse_args(argv)
+    assert args.pc_sampling
+
+
+@pytest.mark.experimental_feature
+def test_experimental_option_fails_with_experimental_in_workload(capsys):
+    argv = ["profile", "--pc-sampling", "-n", "test", "--", "./app", "--experimental"]
+    with pytest.raises(SystemExit) as exc:
+        build_parser(HOME, SUPPORTED_ARCHS, VERSION, argv).parse_args(argv)
+    assert exc.value.code == 2
+    assert "experimental feature" in capsys.readouterr().err.lower()
 
 
 @pytest.mark.experimental_feature

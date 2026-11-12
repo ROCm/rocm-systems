@@ -26,11 +26,120 @@ All pull requests must pass CI checks before merging. For `rocprofiler-compute`,
 > [!TIP]
 > Run our pre-commit hooks locally before pushing to catch formatting issues early. See [Using Pre-Commit Hooks](#using-pre-commit-hooks) below for setup instructions.
 
-## Adding Experimental Features
+## Adding or Changing Command-Line Options
+
+Follow these rules for every new or changed option in
+[`src/argparser.py`](src/argparser.py) and any other user-facing CLI.
+
+### Filtering
+
+Filter options match with **glob patterns** by default (`fnmatch`), not regex.
+Glob covers most filtering cases and is much easier for users to write.
+
+```console
+rocprof-compute --select-kernel '*my-kernel*'
+```
+
+Regex may be offered **in addition** to glob where it is genuinely needed, never
+as the replacement.
+
+### Naming
+
+An option that is only valid together with another option must be named with
+that option as a prefix.
+
+```text
+--pc-sampling --pc-sampling-method stochastic
+```
+
+If an option already exists with the same meaning in another mode,
+keep its name. Don't add a prefix. For example, an `--example-ids`
+filter in `profile` is also `--example-ids` in `analyze`.
+
+Options that belong to one feature share its name as a prefix even when they can
+be used on their own, such as `--roofline-device`.
+
+Frequently used options get a short alias: a single lowercase letter with a
+single dash, such as `-v`.
+
+Options are named for what they enable, not what they disable: use
+`--roofline`, not `--no-roofline`.
+
+### Arguments
+
+To pass several values, list them after the flag, separated by spaces:
+
+```text
+--example-ids 0 1 2
+```
+
+Don't split values on commas, so that a value can contain a comma.
+
+### Help Messages
+
+Always set `metavar` so the help shows what the option takes. Never leave it
+empty (`metavar=""`).
+
+- If the value is required, use `metavar="<arg>"`.
+- If the value is optional (`nargs="?"` or `nargs="*"`), use `metavar="arg"`.
+  The help adds the `[]` automatically.
+
+`CliHelpFormatter` adds `...` to options that take a list, so `<args>` shows as
+`<args>...` and `args` shows as `[args]...`.
+
+For an option that takes an argument, the help message follows these rules:
+
+| Case | Notation |
+|------|----------|
+| Required argument | `<arg>` |
+| Optional argument | `[arg]` |
+| Array of required arguments | `<args>...` |
+| Array of optional arguments | `[args]...` |
+
+An argument with a fixed set of accepted values sets `choices`, so that argparse
+rejects any other value, and its help ends with `Values: %(choices)s`. An
+argument with a default states it at the end of the description as
+`(Default: value)`.
+
+```text
+--option <arg>   Description of the option (Default: value).
+                 Values: <value1>, <value2>, ..., <valueN>
+```
+
+### Renaming and Deprecation
+
+A renamed option must keep its old name working for now. Add the old name as an
+extra option string of the new option, and note it at the end of the help:
+
+```python
+group.add_argument(
+    "--roofline-device",
+    "--device",
+    dest="device",
+    help="... (Default: 0).\nDeprecated alias: --device.",
+)
+```
+
+Keep the same `dest` as before, so the rest of the code does not need to change.
+
+Add every deprecated option, renamed or not, to `DEPRECATED_OPTIONS` in
+[`src/argparser.py`](src/argparser.py) with what to use instead. A warning
+is then printed whenever it is used. An option deprecated without a rename
+starts its help with `DEPRECATED:` and what to do instead.
+
+Every rename also needs these updates:
+
+- Add the new name to `CHANGELOG.md` under "Changed"
+- Add the old name to `CHANGELOG.md` under "Upcoming changes", since it will be removed later
+
+An experimental option may be renamed or removed without keeping the old name
+working, but the change still needs a `CHANGELOG.md` entry.
+
+### Adding Experimental Features
 
 New features that aren't yet stable can be introduced behind the `--experimental` flag. This lets users opt in to preview functionality while keeping the default experience stable.
 
-### How It Works
+#### How It Works
 
 The `--experimental` flag acts as a master toggle:
 
@@ -44,7 +153,7 @@ To see available experimental features:
 rocprof-compute profile --experimental --help
 ```
 
-### Adding a New Experimental Feature
+#### Adding a New Experimental Feature
 
 Follow these three steps to add a new experimental flag.
 
@@ -81,8 +190,8 @@ profile_group.add_argument(
     base_action="store",  # Required — see supported actions below
     type=str,
     nargs="*",
-    metavar="",
-    help="\t\t\tDescription of your feature",
+    metavar="values",
+    help="Description of your feature",
 )
 
 # For a boolean toggle flag
@@ -97,7 +206,7 @@ analyze_group.add_argument(
     base_action="store_const",  # Required — see supported actions below
     nargs=0,
     const=True,
-    help="\t\tDescription of your feature",
+    help="Description of your feature",
 )
 ```
 
@@ -126,7 +235,7 @@ rocprof-compute profile --help
 rocprof-compute profile --experimental --help
 ```
 
-### Promoting a Feature to Stable
+#### Promoting a Feature to Stable
 
 When a feature is ready for general availability:
 
@@ -134,14 +243,6 @@ When a feature is ready for general availability:
 2. Replace `action=ExperimentalAction` with a standard argparse action (e.g. `action="store"`).
 3. Remove the `experimental_enabled`, `feature_label`, and `base_action` parameters.
 4. Update documentation and tests accordingly.
-
-## Adding or Changing Command-Line Options
-
-[`.ai/rules/cli-options.md`](.ai/rules/cli-options.md) is the single source of truth
-for how options are named, how their help text is written, and how an option is
-renamed or deprecated
-(see [Renaming and Deprecation](.ai/rules/cli-options.md#renaming-and-deprecation)).
-Follow it for every new or changed option.
 
 ## Using Pre-Commit Hooks
 
@@ -302,6 +403,7 @@ For detailed vendoring workflow (adding/updating packages), see [`src/vendored/R
 This project uses AI coding assistants (Claude Code, Cursor, GitHub Copilot). All AI-specific guidelines live in [`AGENTS.md`](AGENTS.md), which serves as the single source of truth. Tool-specific adapter files (e.g., `CLAUDE.md`, `.github/copilot-instructions.md`) reference `AGENTS.md` without duplicating content.
 
 To add or update AI guidelines, edit the appropriate file under `.ai/` and add a reference in `AGENTS.md`.
+
 ## Profile Mode Dependency Policy
 
 Profile mode code should not use non-standard Python libraries.
