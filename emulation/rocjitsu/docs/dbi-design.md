@@ -257,6 +257,43 @@ the orchestrator. Trampolines live inside `.text` as a local code cave (the same
 layout DBT uses) rather than a separate section, so cave offsets are plain
 `.text`-relative bytes in `[text_size, text_size + cave_bytes)`.
 
+#### Text growth safety
+
+The checked anchor batch validates edits against the original image. Appending
+code can create new relocation-write or mapping overlaps, so `replace_text()`
+also validates the loader-visible effects of text growth:
+
+- Before inserting file bytes, every `PT_LOAD` whose file range would grow,
+  including a range ending at the insertion point, must map that point to the
+  end of the original `.text`. Extending a mapping at another virtual address
+  would expose the inserted bytes there as well.
+- After remapping relocation destinations in moved sections, supported ROCr
+  dynamic writes must clear the complete final `.text` range. A write left at
+  the original text end can overwrite a trampoline; a destination that moves
+  clear with its allocated section remains eligible.
+- After segment layout, every overlap between appended text and a `PT_LOAD`
+  memory range must be entirely file-backed. At each overlapping virtual address,
+  the segment must load the same file bytes as `.text`. Different file backing
+  or overlap with a segment's zero-fill storage rejects the patch.
+- Every originally loaded part of another allocated section must retain its
+  backing after layout. A moved section or descriptor symbol must still name
+  the corresponding file bytes or zero-fill range in its LOAD; moving section
+  metadata without moving its backing rejects the patch.
+- For linked ROCr images, every final LOAD memory extent must fit the combined
+  allocation calculated from the first LOAD's base and the last LOAD's end.
+  This includes alignment padding outside `.text`, not just appended instructions.
+
+The final mapping check includes segments that neither grow nor move. For
+example, a data segment stored before `.text` in the file can map at the original
+text end. The source ranges are disjoint, but the appended trampoline then
+occupies the data segment's address. A loader copy from that segment would
+overwrite the trampoline even though the original anchor passed admission.
+
+The final overlap check permits touching memory ranges, empty memory mappings,
+and overlaps with matching file backing. Segments moved clear of the appended
+text remain eligible. A failed growth check returns through the existing patcher
+error path; Instrumentor publishes neither ELF bytes nor successful site records.
+
 ### Checked edits (`code/patch/checked_text_edits.h`)
 
 The checked operation is local to one original-text anchor batch. It requires
@@ -267,6 +304,27 @@ It does not cache source facts, create a fallback decoder or patcher,
 or expose a reusable context. All edits are validated before writing the
 orchestrator's private text buffer. Probe admission, layout, and resource policy
 remain with Instrumentor, and CodeObjectPatcher remains the ELF writer.
+
+Source admission checks the complete write interval of supported ROCr dynamic
+relocations against the original `.text`. A write can start before the section
+and still overwrite its first instruction. Overflowing write ends reject; an
+interval ending exactly at the section's start does not overlap it. Existing
+static, inert and unsupported-form policies remain separate.
+
+The batch also checks aliases of edited bytes in `PT_LOAD` file ranges. Every
+mapping of those shared file bytes must expose them at the same virtual address;
+otherwise, editing an anchor would also modify bytes visible at another address.
+
+At each edited virtual address, every LOAD file copy must also read the anchor's
+own file bytes. A disjoint file range containing another copy of the original
+instruction could otherwise restore that instruction over the patched branch.
+Empty file ranges perform no copy: modern ROCr zeroes the shared allocation
+once, rather than zeroing each segment's tail after copying it.
+
+Aliases outside the edited anchors do not participate in these source checks.
+The separate [text growth checks](#text-growth-safety) validate appended code,
+moved storage, and the final loader layout. Descriptor ownership and whole-kernel
+mapping qualification remain consumer responsibilities.
 
 The reference checks cover decoded direct-branch destinations, text-symbol
 start/end offsets, raw symbol-less RELATIVE64 destinations under the existing

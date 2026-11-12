@@ -21,6 +21,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -783,6 +784,171 @@ TEST(RelocationFunctionTable, ResolvesBackwardTableAddress) {
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);
   EXPECT_EQ(dispatches[0].source_table_address_vaddr, 0x2000u);
+}
+
+TEST(RelocationFunctionTable, RocrDynamicWriteSizesMatchSupportedLoaderForms) {
+  struct ExpectedWrite {
+    uint32_t type;
+    uint64_t bytes;
+  };
+  constexpr std::array<ExpectedWrite, 5> writes = {{
+      {.type = R_AMDGPU_ABS32_LO, .bytes = 4},
+      {.type = R_AMDGPU_ABS32_HI, .bytes = 4},
+      {.type = R_AMDGPU_ABS32, .bytes = 4},
+      {.type = R_AMDGPU_ABS64, .bytes = 8},
+      {.type = R_AMDGPU_RELATIVE64, .bytes = 8},
+  }};
+  for (const ExpectedWrite &write : writes) {
+    SCOPED_TRACE(write.type);
+    const std::optional<uint64_t> size = rocr_dynamic_relocation_write_size(write.type);
+    ASSERT_TRUE(size);
+    EXPECT_EQ(*size, write.bytes);
+  }
+  // Modern REL32/REL64, GOT/REL32 split forms and REL16 have static ABI
+  // encodings, but ROCr does not implement them as dynamic writes.
+  for (const uint32_t type : {R_AMDGPU_NONE, 4u, 5u, 7u, 8u, 9u, 10u, 11u, 12u, 14u,
+                              std::numeric_limits<uint32_t>::max()}) {
+    SCOPED_TRACE(type);
+    EXPECT_FALSE(rocr_dynamic_relocation_write_size(type));
+  }
+}
+
+TEST(RelocationFunctionTable, PatcherChecksCompleteDynamicWriteIntervalsAndKeepsOtherPolicies) {
+  constexpr uint64_t text_address = 0x1000;
+  struct Case {
+    const char *name;
+    uint32_t type;
+    uint64_t place;
+    uint32_t target = SHN_UNDEF;
+    uint16_t elf_type = ET_DYN;
+    uint32_t section_type = SHT_RELA;
+    uint64_t stride = sizeof(Elf64_Rela);
+    uint64_t table_size = sizeof(Elf64_Rela);
+    bool valid_image = true;
+    bool overlaps;
+  };
+  const std::array<Case, 20> cases = {{
+      {.name = "ABS64 crosses",
+       .type = R_AMDGPU_ABS64,
+       .place = text_address - 4,
+       .overlaps = true},
+      {.name = "ABS64 touches",
+       .type = R_AMDGPU_ABS64,
+       .place = text_address - 8,
+       .overlaps = false},
+      {.name = "ABS32 crosses",
+       .type = R_AMDGPU_ABS32,
+       .place = text_address - 2,
+       .overlaps = true},
+      {.name = "ABS32 touches",
+       .type = R_AMDGPU_ABS32,
+       .place = text_address - 4,
+       .overlaps = false},
+      {.name = "after text", .type = R_AMDGPU_ABS64, .place = text_address + 16, .overlaps = false},
+      {.name = "inside text", .type = R_AMDGPU_ABS64, .place = text_address + 12, .overlaps = true},
+      {.name = "write end overflows",
+       .type = R_AMDGPU_ABS64,
+       .place = std::numeric_limits<uint64_t>::max() - 3,
+       .overlaps = true},
+      {.name = "unsupported dynamic REL64",
+       .type = 5,
+       .place = text_address - 4,
+       .overlaps = false},
+      {.name = "dynamic NONE checked separately",
+       .type = R_AMDGPU_NONE,
+       .place = text_address,
+       .overlaps = false},
+      {.name = "static NONE ignored",
+       .type = R_AMDGPU_NONE,
+       .place = text_address,
+       .target = 1,
+       .overlaps = false},
+      {.name = "static prefix retains place policy",
+       .type = R_AMDGPU_ABS64,
+       .place = text_address - 4,
+       .target = 1,
+       .overlaps = false},
+      {.name = "static in-text retains rejection",
+       .type = R_AMDGPU_ABS64,
+       .place = text_address,
+       .target = 1,
+       .overlaps = true},
+      {.name = "ET_REL section offset",
+       .type = R_AMDGPU_ABS64,
+       .place = 0,
+       .target = 1,
+       .elf_type = ET_REL,
+       .overlaps = true},
+      {.name = "ET_REL touches end",
+       .type = R_AMDGPU_ABS64,
+       .place = 16,
+       .target = 1,
+       .elf_type = ET_REL,
+       .overlaps = false},
+      {.name = "malformed dynamic stride rejected before patcher",
+       .type = R_AMDGPU_ABS64,
+       .place = text_address - 4,
+       .stride = 1,
+       .valid_image = false,
+       .overlaps = false},
+      {.name = "dynamic complete record before partial tail",
+       .type = R_AMDGPU_ABS64,
+       .place = text_address - 4,
+       .table_size = sizeof(Elf64_Rela) + 1,
+       .overlaps = true},
+      {.name = "SHT_REL retains place policy",
+       .type = R_AMDGPU_ABS64,
+       .place = text_address - 4,
+       .section_type = SHT_REL,
+       .stride = sizeof(Elf64_Rel),
+       .table_size = sizeof(Elf64_Rel),
+       .overlaps = false},
+      {.name = "ABS32_LO crosses",
+       .type = R_AMDGPU_ABS32_LO,
+       .place = text_address - 2,
+       .overlaps = true},
+      {.name = "ABS32_HI crosses",
+       .type = R_AMDGPU_ABS32_HI,
+       .place = text_address - 2,
+       .overlaps = true},
+      {.name = "RELATIVE64 crosses",
+       .type = R_AMDGPU_RELATIVE64,
+       .place = text_address - 4,
+       .overlaps = true},
+  }};
+  for (const Case &item : cases) {
+    SCOPED_TRACE(item.name);
+    std::vector<uint8_t> image = make_relocation_function_table_elf();
+    Elf64_Ehdr header = {};
+    std::memcpy(&header, image.data(), sizeof(header));
+    header.e_ident[EI_DATA] = ELFDATA2LSB;
+    header.e_ident[EI_VERSION] = 1;
+    header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+    header.e_type = item.elf_type;
+    std::memcpy(image.data(), &header, sizeof(header));
+    std::vector<Elf64_Shdr> sections(header.e_shnum);
+    std::memcpy(sections.data(), image.data() + header.e_shoff,
+                sections.size() * sizeof(Elf64_Shdr));
+    Elf64_Shdr &relocations = sections[5];
+    relocations.sh_type = item.section_type;
+    relocations.sh_info = item.target;
+    relocations.sh_entsize = item.stride;
+    relocations.sh_size = item.table_size;
+    const Elf64_Rela relocation = {
+        .r_offset = item.place, .r_info = relocation_info(1, item.type), .r_addend = 0};
+    std::memcpy(image.data() + relocations.sh_offset, &relocation, sizeof(relocation));
+    std::memcpy(image.data() + header.e_shoff, sections.data(),
+                sections.size() * sizeof(Elf64_Shdr));
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_EQ(object.is_valid(), item.valid_image);
+    if (!item.valid_image)
+      continue; // The parser rejects this form before shared patcher admission.
+    const CodeObjectPatcher patcher(object);
+    EXPECT_EQ(patcher.has_relocations_within_text(), item.overlaps);
+    if (item.type == R_AMDGPU_NONE) {
+      EXPECT_EQ(patcher.has_rocr_rejected_none_relocation(), item.target == SHN_UNDEF);
+    }
+  }
 }
 
 } // namespace
