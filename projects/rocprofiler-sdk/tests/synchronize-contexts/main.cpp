@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Regression test for rocprofiler_synchronize_contexts.
+// Tests for rocprofiler_synchronize_context.
 //
 // Reproduces the usage that exposed the gap: a tool that opens a short profiling window, runs one
 // GPU operation, synchronizes on it, and reads its records immediately. Records for asynchronous
@@ -33,6 +33,7 @@
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
+#include <rocprofiler-sdk/experimental/synchronize_contexts.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
@@ -198,7 +199,7 @@ main(int, char**)
     for(int i = 0; i < 10; ++i)
         touch_kernel<<<1, 64>>>(dev_a);
     CHECK_HIP(hipDeviceSynchronize());
-    CHECK_ROCP(rocprofiler_synchronize_contexts(&g_ctx, 1));
+    CHECK_ROCP(rocprofiler_synchronize_context(&g_ctx, 1));
     CHECK_ROCP(rocprofiler_flush_buffer(g_buffer));
     {
         auto _lk = std::lock_guard<std::mutex>{g_mu};
@@ -222,7 +223,7 @@ main(int, char**)
         CHECK_HIP(hipDeviceSynchronize());
 
         // The behavior under test. Without it, the flush below routinely delivers nothing.
-        CHECK_ROCP(rocprofiler_synchronize_contexts(&g_ctx, 1));
+        CHECK_ROCP(rocprofiler_synchronize_context(&g_ctx, 1));
         CHECK_ROCP(rocprofiler_flush_buffer(g_buffer));
 
         // The kind is checked, not just the window: accepting either would let a run pass

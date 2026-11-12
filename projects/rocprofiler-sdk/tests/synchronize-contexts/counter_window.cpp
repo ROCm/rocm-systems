@@ -32,6 +32,7 @@
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
+#include <rocprofiler-sdk/experimental/synchronize_contexts.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>

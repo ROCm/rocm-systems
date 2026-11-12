@@ -102,11 +102,15 @@ device_counting_service_finalize();
 rocprofiler_status_t
 device_counting_service_hsa_registration();
 
-// Blocks until this context's device-counting samples already in flight have been written. Waits
-// only: no status transition and no end packet, so a context sampling before this call is still
-// sampling after it.
-void
-drain_device_counting_samples(const context::context* ctx);
+// Blocks until this context's device-counting samples already in flight have been written or
+// timeout is hit. Waits only: no status transition and no end packet, so a context sampling before
+// this call is still sampling after it.
+uint64_t
+drain_device_counting_samples(const context::context* ctx, const uint64_t timeout_ns = 0);
+
+// Return number of pending samples
+uint64_t
+peek_device_counting_samples(const context::context* ctx);
 
 // Send the AQL start packet to a queue on the agent to start
 // collecting counter data. This function is synchronous and will

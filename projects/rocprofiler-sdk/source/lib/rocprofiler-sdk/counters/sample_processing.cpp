@@ -249,13 +249,19 @@ callback_thread_stop()
         callback_thread_get().exit();
 }
 
-void
-callback_thread_drain()
+uint64_t
+callback_thread_drain(const uint64_t timeout_ns)
 {
     // Deliberately not holding callback_thread_mut: the wait is open-ended and the consumer
     // synchronizes the drain internally, so taking it here would stall any concurrent
     // context stop for the duration of the wait.
-    callback_thread_get().drain();
+    return callback_thread_get().drain(timeout_ns);
+}
+
+uint64_t
+callback_thread_peek()
+{
+    return callback_thread_get().peek_pending_records();
 }
 
 /**

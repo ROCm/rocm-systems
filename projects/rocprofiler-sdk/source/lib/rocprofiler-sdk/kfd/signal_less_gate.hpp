@@ -68,10 +68,9 @@ void
 signal_less_fence_completions();
 
 // Waits out the reader and joins outstanding completion tasks, leaving signal-less running.
-// Returns whether it finished within its budget; never abandons, stops or disables. True when
-// signal-less is inactive, since nothing is then outstanding to wait for.
-bool
-drain_signal_less_completions();
+// Returns outstanding records if timeout value is set.
+uint64_t
+drain_signal_less_completions(const uint64_t timeout_ns = 0);
 
 // Every stage of eligible-batch -> registered -> EOP proven -> handed off ->
 // finalized bumps a counter, so a break in the chain is visible without a

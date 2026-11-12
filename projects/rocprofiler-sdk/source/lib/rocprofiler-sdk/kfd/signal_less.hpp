@@ -128,8 +128,8 @@ void
 drain_signal_less_queues_hw(uint64_t deadline_ns);
 
 // Wait for every already-submitted completion to finish executing.
-void
-join_signal_less_tasks();
+uint64_t
+join_signal_less_tasks(const uint64_t timeout_ns = 0);
 
 // Processor-side handoff for a proven completion. Submits to the task group;
 // if it is gone, defers the entry for the teardown thread. Never runs a client
@@ -140,6 +140,9 @@ hand_off_proven(signal_less_hub_t::proven&& p);
 // Finalize every deferred completion on the CALLING thread. Returns how many.
 size_t
 flush_deferred_completions();
+
+uint64_t
+peek_active_signal_less_packets();
 
 }  // namespace kfd
 }  // namespace rocprofiler

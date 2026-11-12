@@ -239,13 +239,21 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
     return true;
 }
 
-void
-wait_for_sample_handler(rocprofiler::counters::agent_callback_data& callback_data)
+bool
+wait_for_sample_handler(rocprofiler::counters::agent_callback_data& callback_data,
+                        const uint64_t                              timeout_ns = 0)
 {
+    const auto timeout_enabled = timeout_ns > 0;
+    const auto timeout = std::chrono::steady_clock::now() + std::chrono::nanoseconds{timeout_ns};
     while(callback_data.sample_in_flight.load(std::memory_order_acquire))
     {
+        if(timeout_enabled && std::chrono::steady_clock::now() > timeout)
+        {
+            return false;
+        }
         std::this_thread::yield();
     }
+    return true;
 }
 
 /**
@@ -420,18 +428,33 @@ read_agent_ctx(const context::context*                    ctx,
  * Special Case: if constants are the only counters being collected, we skip
  * packet injection.
  */
-void
-drain_device_counting_samples(const context::context* ctx)
+uint64_t
+drain_device_counting_samples(const context::context* ctx, const uint64_t timeout_ns)
 {
     // Before HSA is up no sample can be in flight and the agent data is not constructed.
-    if(hsa_inited().load() == false) return;
-    if(ctx == nullptr || !ctx->device_counter_collection) return;
+    if(hsa_inited().load() == false) return 0;
+    if(ctx == nullptr || !ctx->device_counter_collection) return 0;
 
     // sample_in_flight is the only field read, and it is atomic. Reading anything else here --
     // packet, for instance, which start rewrites -- would race with no latch held, and taking the
     // latch would make a lost acquisition silently skip a context this call must still drain.
+    auto remaining_samples = uint64_t{0};
     for(auto& _cb_data : ctx->device_counter_collection->agent_data)
-        wait_for_sample_handler(_cb_data);
+        remaining_samples += wait_for_sample_handler(_cb_data, timeout_ns) ? 0 : 1;
+    return remaining_samples;
+}
+
+uint64_t
+peek_device_counting_samples(const context::context* ctx)
+{
+    // Before HSA is up no sample can be in flight and the agent data is not constructed.
+    if(hsa_inited().load() == false) return 0;
+    if(ctx == nullptr || !ctx->device_counter_collection) return 0;
+
+    auto num_samples = uint64_t{0};
+    for(auto& _cb_data : ctx->device_counter_collection->agent_data)
+        if(_cb_data.sample_in_flight.load(std::memory_order_relaxed)) ++num_samples;
+    return num_samples;
 }
 
 rocprofiler_status_t

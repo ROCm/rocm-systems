@@ -47,10 +47,14 @@ callback_thread_start();
 void
 callback_thread_stop();
 
-// Blocks until counter records for samples handed off before this call have been written.
+// Blocks until counter records for samples handed off before this call have been written
+// or if timeout is hit
 // Non-destructive: the consumer keeps running and collecting contexts keep collecting.
-void
-callback_thread_drain();
+uint64_t
+callback_thread_drain(const uint64_t timeout_ns = 0);
+
+uint64_t
+callback_thread_peek();
 
 void
 process_callback_data(completed_cb_params_t&& params);
