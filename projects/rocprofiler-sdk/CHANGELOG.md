@@ -8,6 +8,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+- ELFIO now comes from `shared/elfio`, the one ELFIO copy maintained for rocm-systems projects, instead of the `external/elfio` submodule. Sparse checkouts that build ROCprofiler-SDK must include `shared/elfio`. `ROCPROFILER_BUILD_ELFIO=OFF` still uses an installed ELFIO.
+
 ### Resolved issues
 
 ### Known issues

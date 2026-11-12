@@ -8,6 +8,7 @@ on:
       - '.github/actions/rocprofiler-sdk-util/action.yml'
       - 'projects/rocprofiler-sdk/**'
       - 'shared/sha256/**'
+      - 'shared/elfio/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -26,6 +27,7 @@ on:
       - '.github/actions/rocprofiler-sdk-util/action.yml'
       - 'projects/rocprofiler-sdk/**'
       - 'shared/sha256/**'
+      - 'shared/elfio/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -107,6 +109,7 @@ jobs:
           .github/actions/rocprofiler-sdk-util
           projects/rocprofiler-sdk
           shared/sha256
+          shared/elfio
           projects/clr
           projects/hip
           .github/workflows/rocprofiler-sdk-codeql.yml

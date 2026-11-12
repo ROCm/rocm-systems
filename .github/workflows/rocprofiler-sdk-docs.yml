@@ -79,6 +79,7 @@ jobs:
           sparse-checkout: |
             projects/rocprofiler-sdk
             shared/sha256
+            shared/elfio
           submodules: false
           set-safe-directory: true
       - name: Init/Update submodules
@@ -145,6 +146,7 @@ jobs:
             .github/actions/rocprofiler-sdk-util
             projects/rocprofiler-sdk
             shared/sha256
+            shared/elfio
             projects/rocr-runtime
             projects/clr
             projects/hip
