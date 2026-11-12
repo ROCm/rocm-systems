@@ -621,3 +621,19 @@ impl AllocationOperations for TestDriver {
         })?)
     }
 }
+
+// A clock-only provider needs no PC sampling, SPM, or trap implementation.
+impl super::GpuClockOperations for TestDriver {
+    fn clock_counters(
+        &self,
+        _device: &TestDevice,
+    ) -> Result<crate::device::gpu::profiling::ClockCounters, Error> {
+        Ok(crate::device::gpu::profiling::ClockCounters {
+            gpu: 17,
+            host: 29,
+            system: 41,
+            system_frequency: 1_000_000,
+            gpu_frequency: 25_000_000,
+        })
+    }
+}
