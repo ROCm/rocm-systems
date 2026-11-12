@@ -1046,16 +1046,20 @@ struct sdma_queue_t
             const size_t padding = queue.ring_size - offset;
             queue.wait_for_space(write_index + padding);
             std::memset(static_cast<char*>(queue.ring) + offset, 0, padding);
+            // Leave the NOP tail unpublished. Doorbelling it now lets the engine
+            // wrap and re-execute the previous packets at offset 0 before this
+            // command is written, which retires the fence while the copy is
+            // still running. Queue destroy then times out and hangs the GPU.
             write_index += padding;
-            store_release(queue.wptr, write_index);
-            *queue.doorbell = write_index;
-            offset          = 0;
+            offset = 0;
         }
         queue.wait_for_space(write_index + bytes);
         std::memcpy(static_cast<char*>(queue.ring) + offset, data, bytes);
         write_index += bytes;
         store_release(queue.wptr, write_index);
-        *queue.doorbell = write_index;
+        // Release-store the doorbell so the ring writes and the write pointer
+        // are visible before the engine is woken.
+        __atomic_store_n(const_cast<uint64_t*>(queue.doorbell), write_index, __ATOMIC_RELEASE);
     }
 
     bool copy(void* dst, const void* src, size_t size)
