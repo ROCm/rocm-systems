@@ -43,22 +43,6 @@ Set up the environment
 To check the setup, run ``rocprofv3 --doctor``. For details, see
 :ref:`using-rocprofv3-doctor`.
 
-Use a different librocdxg without replacing the installed one
--------------------------------------------------------------
-
-To test a newer ``librocdxg`` without changing ``/opt/rocm``, put a symlink
-named ``librocdxg.so`` first on ``LD_LIBRARY_PATH``. Both the HSA runtime and
-ROCprofiler-SDK load the library by that name.
-
-.. code-block:: bash
-
-   mkdir -p ~/wsl-dxg-lib
-   ln -sf <path-to-librocdxg>/librocdxg.so ~/wsl-dxg-lib/librocdxg.so
-   export LD_LIBRARY_PATH=~/wsl-dxg-lib:${LD_LIBRARY_PATH}
-
-Don't use ``LD_PRELOAD`` with an absolute path to ``librocdxg``. The loader
-still loads the installed copy alongside it.
-
 Profile an application
 ======================
 
@@ -114,21 +98,11 @@ it.
 GRBM counters can read zero at the start of a session
 -----------------------------------------------------
 
-All ``GRBM_*`` counters can read zero on the first dispatches of a profiling
-session, for up to about 300 ms, even though the dispatches ran. Treat these zeros as
-missing data. Metrics derived from these counters are also wrong for those
-dispatches, including ``GPU_UTIL``, ``CU_UTILIZATION``, ``VALUBusy``,
-``SALUBusy``, ``MemUnitStalled``, ``LDSBankConflict``, and
-``MeanOccupancyPerCU``.
-
-If you need GRBM-based metrics, do one of the following:
-
-* Discard dispatches from the first 300 ms of the session.
-* Add a short warm-up phase to the application before the region you want to
-  measure.
-
-The issue doesn't occur in every session, so a clean run doesn't mean later
-runs are unaffected.
+In some sessions, ``GRBM_*`` counters read zero for up to the first 300 ms.
+Metrics derived from them, such as ``GPU_UTIL`` and ``VALUBusy``, are also
+wrong for those dispatches. If you need GRBM-based metrics, discard the first
+300 ms of dispatches or add a short warm-up phase to the application. A clean
+run doesn't mean later runs are unaffected.
 
 Troubleshooting
 ===============
@@ -185,11 +159,13 @@ Environment variables
    sets it to ``1`` automatically on WSL2 unless you've already set it. If it's
    ``0``, every counter reads zero.
 
+The following variables are for diagnosis only. You don't need them in normal
+use.
+
 ``ROCPROFILER_FORCE_GFX``
    Overrides the ``gfx`` target used to look up counter definitions, for
    example ``gfx1150``. Takes precedence over ``HSA_OVERRIDE_GFX_VERSION``. An
    invalid value is ignored with a warning.
 
 ``ROCPROFILER_FORCE_PLATFORM``
-   Overrides platform detection. Accepts ``gnulinux`` or ``wsl``. Use it only
-   for diagnosis.
+   Overrides platform detection. Accepts ``gnulinux`` or ``wsl``.
