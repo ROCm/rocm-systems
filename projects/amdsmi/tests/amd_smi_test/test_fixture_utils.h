@@ -9,16 +9,32 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <limits>
+#include <map>
+#include <optional>
 #include <string>
 #include <utility>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_drm.h"
+#include "amd_smi/impl/amd_smi_gpu_device.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 
 namespace amd::smi {
 class AMDSmiProcessor;
 }  // namespace amd::smi
+
+// Setters for the hooks in amd_smi_test_overrides.h, declared here and not there so product code
+// cannot call them. Change a hook only through ScopedOverride<T>, never bare from a test body.
+namespace amd::smi::test_hooks {
+void SetSysfsDrmRoot(const std::string& root);
+void SetKfdDevicePath(const std::string& path);
+}  // namespace amd::smi::test_hooks
+
+// Linker-wrapped ioctl(); see ScopedFakeIoctl. Not for tests to call.
+extern "C" int __wrap_ioctl(int fd, unsigned long request, ...);
 
 // Generic (not RAS-specific) fake-sysfs fixture tree, reusable by any unit
 // test that needs a real, temporary, hardware-inert file tree -- e.g. for
@@ -90,6 +106,55 @@ class ScopedOverride {
   std::function<void(const T&)> setter_;
   T old_value_;
 };
+
+// RAII: fakes the ioctl() calls product code issues, per request code. The test binary is linked
+// with -Wl,--wrap=ioctl (tests/amd_smi_test/CMakeLists.txt), so every ioctl() in the library -- C++
+// and the vendored C sources alike -- reaches the active fake with no change to product code. While
+// a fake is active, a request no handler claims fails with ENOTTY and never reaches a real device;
+// with none active, ioctl() behaves as usual. Fakes nest: an inner fake answers the requests it has
+// handlers for and passes the rest to the outer one, so independent fixtures compose. Only code
+// linked into the test binary is reached; ioctls issued inside a shared library (libdrm) are not.
+class ScopedFakeIoctl {
+ public:
+  // Returns what ioctl() returns, setting errno when it returns -1. `arg` is the request's
+  // argument.
+  using Handler = std::function<int(void* arg)>;
+
+  ScopedFakeIoctl();
+  ~ScopedFakeIoctl();
+
+  ScopedFakeIoctl(const ScopedFakeIoctl&) = delete;
+  ScopedFakeIoctl& operator=(const ScopedFakeIoctl&) = delete;
+
+  // Answers ioctl `request` with `handler`; a later call for the same request replaces it.
+  void RegisterHandler(unsigned long request, Handler handler);
+
+  // Same, with the argument as its real type:
+  // RegisterHandler<kfd_ioctl_get_version_args>(REQ, [](auto& args) { ...; return 0; });
+  template <typename Arg, typename Fn>
+  void RegisterHandler(unsigned long request, Fn fn) {
+    RegisterHandler(
+        request, Handler([fn = std::move(fn)](void* arg) { return fn(*static_cast<Arg*>(arg)); }));
+  }
+
+  // Answers `request` by failing: ioctl() returns -1 with errno set to `error`.
+  void RegisterFailure(unsigned long request, int error);
+
+  // How many times this fake's handler for `request` has run.
+  int CallCount(unsigned long request) const;
+
+ private:
+  friend int ::__wrap_ioctl(int fd, unsigned long request, ...);
+  static int Dispatch(unsigned long request, void* arg);
+  static ScopedFakeIoctl* active_;
+
+  std::map<unsigned long, Handler> handlers_;
+  std::map<unsigned long, int> calls_;
+  ScopedFakeIoctl* previous_active_;
+};
+
+// Answers AMDKFD_IOC_GET_VERSION on `ioctl` with the given KFD ioctl version.
+void RegisterFakeKfdVersion(ScopedFakeIoctl& ioctl, uint32_t major, uint32_t minor);
 
 // RAII: registers/unregisters a synthetic processor with AMDSmiSystem so
 // amd-smi's real public API dispatch (handle_to_processor()) can find it
@@ -197,4 +262,61 @@ class ScopedAmdsmiInit {
 
   ScopedAmdsmiInit(const ScopedAmdsmiInit&) = delete;
   ScopedAmdsmiInit& operator=(const ScopedAmdsmiInit&) = delete;
+};
+
+// RAII: a synthetic GPU registered with amd-smi, so the public APIs reach it as they would a real
+// one: a rocm_smi device at `<tree root>/<card>`, an AMDSmiDrm, an AMDSmiGPUDevice and the
+// registration. Create it after ScopedAmdsmiInit when the test needs amdsmi_init().
+class FakeGpu {
+ public:
+  explicit FakeGpu(const FakeSysfsTree& tree, const std::string& card = "card0")
+      : card_(card),
+        rocm_device_(tree.root() + "/" + card),
+        gpu_device_(rocm_device_.index(), card, amdsmi_bdf_t{}, drm_),
+        registration_(&gpu_device_) {}
+
+  FakeGpu(const FakeGpu&) = delete;
+  FakeGpu& operator=(const FakeGpu&) = delete;
+
+  amdsmi_processor_handle handle() const { return registration_.handle(); }
+  uint32_t index() const { return rocm_device_.index(); }
+  const std::string& card() const { return card_; }
+
+ private:
+  std::string card_;
+  ScopedRocmSmiDevice rocm_device_;
+  amd::smi::AMDSmiDrm drm_;
+  amd::smi::AMDSmiGPUDevice gpu_device_;
+  amd::smi::testing::ScopedProcessorRegistration registration_;
+};
+
+// RAII: stands in for /dev/kfd and the KFD SMI event stream it hands out, so the real
+// amdsmi_init_gpu_event_notification(), amdsmi_set_gpu_event_notification_mask(),
+// amdsmi_get_gpu_event_notification() and amdsmi_stop_gpu_event_notification() run without
+// hardware. Built on ScopedFakeIoctl. Like the kernel, the stream starts with an empty event mask
+// and only queues events whose bit the library has written with the mask call. Declare it after
+// the ScopedRocmSmiDevice it serves; the test must call init before and stop after the other calls.
+class ScopedFakeKfdEventStream {
+ public:
+  explicit ScopedFakeKfdEventStream(uint32_t rocm_smi_device_index);
+  ~ScopedFakeKfdEventStream();
+
+  ScopedFakeKfdEventStream(const ScopedFakeKfdEventStream&) = delete;
+  ScopedFakeKfdEventStream& operator=(const ScopedFakeKfdEventStream&) = delete;
+
+  // Queues one line as the kernel writes it ("<event number in hex> <payload>\n"), unless the mask
+  // written so far excludes `event`. Event numbers outside 1..64 have no mask bit and always queue.
+  void Write(uint32_t event, const std::string& payload);
+
+  // How many times the library has asked this fake for the KFD version.
+  int VersionQueryCount() const;
+
+ private:
+  uint32_t device_index_;
+  FakeSysfsTree kfd_tree_;  // holds a plain file for the library to open as /dev/kfd
+  amd::smi::testing::ScopedFakeIoctl ioctl_;
+  int stream_fd_ = -1;  // this end of the socket pair
+  int device_fd_ = -1;  // the library's end, until the library asks KFD for the stream
+  uint64_t mask_ = 0;
+  std::optional<amd::smi::testing::ScopedOverride<std::string>> path_override_;
 };

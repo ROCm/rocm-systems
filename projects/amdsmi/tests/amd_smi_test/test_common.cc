@@ -4,11 +4,15 @@
 #include "test_common.h"
 
 #include <getopt.h>
+#include <limits.h>
+#include <unistd.h>
 
 #include <cassert>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <map>
+#include <sstream>
 #include <string>
 
 #include "amd_smi/amdsmi.h"
@@ -130,7 +134,37 @@ static void PrintHelp(void) {
 static uint32_t sGlobalVerbosity = 0;
 
 uint32_t GetTestVerbosity() { return sGlobalVerbosity; }
+
+std::string FindTestDataFile(const std::string& installed_subdir, const std::string& name,
+                             const std::string& source_path) {
+  char binary[PATH_MAX];
+  const ssize_t length = readlink("/proc/self/exe", binary, sizeof(binary) - 1);
+  if (length > 0) {
+    binary[length] = '\0';
+    const std::string path(binary);
+    const std::string installed =
+        path.substr(0, path.find_last_of('/')) + "/" + installed_subdir + "/" + name;
+    if (access(installed.c_str(), R_OK) == 0) {
+      return installed;
+    }
+  }
+  return source_path;
+}
 void SetTestVerbosity(uint32_t verbosity) { sGlobalVerbosity = verbosity; }
+
+std::string ReadTextFile(const std::string& path) {
+  std::ifstream in(path);
+  std::stringstream text;
+  text << in.rdbuf();
+  return text.str();
+}
+
+std::string ReadFirstLine(const std::string& path) {
+  std::ifstream in(path);
+  std::string line;
+  std::getline(in, line);
+  return line;
+}
 
 uint32_t ProcessCmdline(AMDSMITstGlobals* test, int arg_cnt, char** arg_list) {
   int a;

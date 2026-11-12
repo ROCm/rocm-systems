@@ -22,6 +22,8 @@
 #include <fstream>
 #include <string>
 
+#include "test_common.h"
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -51,10 +53,7 @@ class TempBoardDir {
   }
 
   std::string ReadFile(const std::string& filename) const {
-    std::ifstream ifs(path_ / filename);
-    std::string line;
-    std::getline(ifs, line);
-    return line;
+    return ReadFirstLine((path_ / filename).string());
   }
 
  private:
