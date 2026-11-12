@@ -697,13 +697,29 @@ add_custom_command(
 set(DEVICE_LINKER_OBJECTS ${COMMON_FAT_OBJ})
 
 # dl_add_fat_object(<name> <source> [SUPPRESS_WARNINGS] [DEPFILE_TRACKING]
-#                   [DEFINES ...] [EXTRA_FLAGS ...] [EXTRA_DEPENDS ...])
+#                   [GPU_TARGETS ...] [DEFINES ...] [EXTRA_FLAGS ...]
+#                   [EXTRA_DEPENDS ...])
 # Builds ${DEVICE_BUILD_DIR}/<name>.o and appends it to DEVICE_LINKER_OBJECTS.
+# GPU_TARGETS (bare names, e.g. gfx942) limits the object to those of the
+# build's targets; if none of them are being built, the object is skipped.
 function(dl_add_fat_object NAME SRC)
   cmake_parse_arguments(FO "SUPPRESS_WARNINGS;DEPFILE_TRACKING" ""
-    "DEFINES;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
+    "GPU_TARGETS;DEFINES;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
   if(FO_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR "dl_add_fat_object(${NAME}): unknown arguments: ${FO_UNPARSED_ARGUMENTS}")
+  endif()
+  set(_arch_flags ${DL_OFFLOAD_ARCH_FLAGS})
+  if(FO_GPU_TARGETS)
+    set(_arch_flags "")
+    foreach(_gpu ${DL_GPU_TARGETS})
+      if(_gpu IN_LIST FO_GPU_TARGETS)
+        list(APPEND _arch_flags "--offload-arch=${DL_TARGET_ID_${_gpu}}")
+      endif()
+    endforeach()
+    if(NOT _arch_flags)
+      message(STATUS "Device Linker: skipping ${NAME}, none of ${FO_GPU_TARGETS} in GPU_TARGETS")
+      return()
+    endif()
   endif()
   set(_obj "${DEVICE_BUILD_DIR}/${NAME}.o")
   list(TRANSFORM FO_DEFINES PREPEND "-D")
@@ -721,7 +737,7 @@ function(dl_add_fat_object NAME SRC)
   add_custom_command(
     OUTPUT  ${_obj}
     COMMAND ${DL_CLANG}
-      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+      -x hip ${_arch_flags}
       ${DL_HIP_COMPILER_FLAGS}
       -DRCCL_DEVICE_LINKER
       ${FO_DEFINES}
@@ -801,6 +817,38 @@ if(ENABLE_ROCSHMEM_GIN)
   dl_add_fat_object(gin_anvil_conn_check_device
     ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
     DEFINES ENABLE_ROCSHMEM_GIN)
+endif()
+
+# ===========================================================================
+# rccl_ep_capi.hip: the expert-parallel C ABI and its kernels, when
+# ENABLE_RCCL_EP_IN_LIBRCCL is set. Off by default: the standalone
+# librccl_ep.so is the normal artifact and librccl's ABI is unchanged.
+#
+# HIP-native, so read from the source tree rather than ${HIPIFY_DIR}.
+# gfx9 only: its wave64 kernels build silently for wave32 and run wrong there.
+# ROCM_VERSION is passed explicitly because <nccl_device.h> is gated on it.
+# src/CMakeLists.txt checks after the link that librccl.so exports the C ABI.
+# ===========================================================================
+if(ENABLE_RCCL_EP_IN_LIBRCCL)
+  set(_rccl_ep_dir "${PROJECT_SOURCE_DIR}/src/algorithms/rccl_ep")
+  set(_rccl_ep_targets "")
+  foreach(_gpu IN LISTS DL_GPU_TARGETS)
+    if(_gpu MATCHES "^gfx9")
+      list(APPEND _rccl_ep_targets "${_gpu}")
+    endif()
+  endforeach()
+  if(NOT _rccl_ep_targets)
+    message(FATAL_ERROR
+      "ENABLE_RCCL_EP_IN_LIBRCCL needs a gfx9 target in GPU_TARGETS; this build "
+      "has none (${DL_GPU_TARGETS}). The kernels are wave64 and have no wave32 "
+      "equivalent -- leave the option off to get the standalone librccl_ep.so.")
+  endif()
+  dl_add_fat_object(rccl_ep_capi ${_rccl_ep_dir}/python/rccl_ep_capi.hip
+    DEPFILE_TRACKING
+    GPU_TARGETS ${_rccl_ep_targets}
+    DEFINES ROCM_VERSION=${ROCM_VERSION}
+    EXTRA_FLAGS -I${_rccl_ep_dir})
+  message(STATUS "Device Linker: rccl_ep in librccl for ${_rccl_ep_targets}")
 endif()
 
 # ===========================================================================
