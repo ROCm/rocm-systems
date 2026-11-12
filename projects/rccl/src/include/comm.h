@@ -844,6 +844,9 @@ struct ncclComm {
   // Channels (per peer) for p2p
   int p2pnChannels;
   int p2pnChannelsPerPeer;
+  // Per-peer count before the single-node MLOPart halving loop. Gather and scatter
+  // use it as their part count; p2pnChannelsPerPeer stays the device channel stride.
+  int p2pnChannelsPerPeerBase;
   int p2pChannelShiftSize;
   int p2pSchedGroupSize;
   int p2pMaxPeers;

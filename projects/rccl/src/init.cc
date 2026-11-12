@@ -1884,6 +1884,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     bool ll128Enabled;
     char hostname[128];
     int p2pnChannelsPerPeer;
+    int p2pnChannelsPerPeerBase;
     int p2pMaxPeers;
     float minNetBw;
     int localNetDeviceCount;
@@ -2472,6 +2473,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].treeCompact = ncclParamTreeCompact() ? 1 : 0;
   (void)getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
   allGather3Data[rank].p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
+  allGather3Data[rank].p2pnChannelsPerPeerBase = comm->p2pnChannelsPerPeerBase;
   allGather3Data[rank].p2pMaxPeers = comm->p2pMaxPeers;
 
   allGather3Data[rank].localNetDeviceCount = localNetDeviceCount;
@@ -2687,6 +2689,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
     comm->maxTreePattern = std::max(comm->maxTreePattern, allGather3Data[i].graphInfo[NCCL_ALGO_TREE].pattern);
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, allGather3Data[i].p2pnChannelsPerPeer);
+    // Base is what gather/scatter use per peer. Taking the min with the stride keeps every rank on the
+    // same halved-or-not decision, so a pair never disagrees on its part count.
+    comm->p2pnChannelsPerPeerBase = std::min(comm->p2pnChannelsPerPeerBase, allGather3Data[i].p2pnChannelsPerPeerBase);
     comm->p2pMaxPeers = std::max(comm->p2pMaxPeers, allGather3Data[i].p2pMaxPeers);
     comm->minNetBw = std::min(comm->minNetBw, allGather3Data[i].minNetBw);
   }
@@ -2897,19 +2902,26 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
         while (comm->p2pSchedule[sendRound].sendRank != peer) sendRound++;
         while (comm->p2pSchedule[recvRound].recvRank != peer) recvRound++;
         int p2pBatchEnable = rcclEffectiveP2pBatchEnable(comm);
-        uint8_t sendBase = ncclP2pChannelBaseForRound(comm, sendRound, p2pBatchEnable);
-        uint8_t recvBase = ncclP2pChannelBaseForRound(comm, recvRound, p2pBatchEnable);
-        for (int c = 0; c < comm->p2pnChannelsPerPeer; c++) {
-          int channelId;
-          channelId = ncclP2pChannelForPart(comm->p2pnChannels, sendBase, c, comm->p2pnChannelsPerPeer, comm->nNodes,
-                                            comm->p2pChannelShiftSize);
-          if (comm->channels[channelId].peers[peer]->send[1].connected == 0) {
-            comm->connectSend[peer].masks[channelId / 64] |= (1UL << (channelId % 64));
-          }
-          channelId = ncclP2pChannelForPart(comm->p2pnChannels, recvBase, c, comm->p2pnChannelsPerPeer, comm->nNodes,
-                                            comm->p2pChannelShiftSize);
-          if (comm->channels[channelId].peers[peer]->recv[1].connected == 0) {
-            comm->connectRecv[peer].masks[channelId / 64] |= (1UL << (channelId % 64));
+        // Gather/scatter use a scaled base and the unhalved part count on a halved single-node
+        // comm; connect that block and the unscaled one a mixed pair uses (see rcclP2pWorkBase).
+        int gatherScale = rcclP2pBaseScale(comm, ncclFuncGather);
+        int nParts = rcclP2pPartCount(comm, ncclFuncGather);
+        for (int s = 0; s < (gatherScale > 1 ? 2 : 1); s++) {
+          int scale = s == 0 ? gatherScale : 1;
+          uint8_t sendBase = (uint8_t)(ncclP2pChannelBaseForRound(comm, sendRound, p2pBatchEnable) * scale);
+          uint8_t recvBase = (uint8_t)(ncclP2pChannelBaseForRound(comm, recvRound, p2pBatchEnable) * scale);
+          for (int c = 0; c < nParts; c++) {
+            int channelId;
+            channelId = ncclP2pChannelForPart(comm->p2pnChannels, sendBase, c, comm->p2pnChannelsPerPeer, comm->nNodes,
+                                              comm->p2pChannelShiftSize);
+            if (comm->channels[channelId].peers[peer]->send[1].connected == 0) {
+              comm->connectSend[peer].masks[channelId / 64] |= (1UL << (channelId % 64));
+            }
+            channelId = ncclP2pChannelForPart(comm->p2pnChannels, recvBase, c, comm->p2pnChannelsPerPeer, comm->nNodes,
+                                              comm->p2pChannelShiftSize);
+            if (comm->channels[channelId].peers[peer]->recv[1].connected == 0) {
+              comm->connectRecv[peer].masks[channelId / 64] |= (1UL << (channelId % 64));
+            }
           }
         }
       }
