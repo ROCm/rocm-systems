@@ -4,6 +4,7 @@
 // Tests for DS gather/scatter and lane swizzling.
 
 #include "register/helpers.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 namespace {
 static const uint16_t swizzle_offsets[] = {31, 0, 0x7c1f, 0x80b1, 0xc020, 0xc47f, 0xe000, 0xe015};

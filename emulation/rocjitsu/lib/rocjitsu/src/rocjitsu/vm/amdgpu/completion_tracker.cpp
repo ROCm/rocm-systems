@@ -356,20 +356,21 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
                                                  : CompletionPublicationPhase::CaptureAccess;
       continue;
 
-    case CompletionPublicationPhase::CaptureAccess:
+    case CompletionPublicationPhase::CaptureAccess: {
       if (!entry.address_space)
         return VmAccessOutcome::Faulted;
       if (std::optional<GpuVmAccess> access = gpu_vm_.snapshot_pinned(entry.address_space))
         state.access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(std::move(*access));
       else
         return VmAccessOutcome::Faulted;
+      const auto arch = cus_.empty() ? ROCJITSU_CODE_ARCH_INVALID : cus_.front()->arch();
       state.start_timestamp = entry.profiling_start_timestamp;
       if (state.start_timestamp == 0)
-        state.start_timestamp = hsa_system_timestamp();
-      state.end_timestamp = std::max(hsa_system_timestamp(), state.start_timestamp + 1);
+        state.start_timestamp = gpu_timestamp(arch);
+      state.end_timestamp = std::max(gpu_timestamp(arch), state.start_timestamp + 1);
       state.phase = CompletionPublicationPhase::ReadMailboxPointer;
       continue;
-
+    }
     case CompletionPublicationPhase::ReadMailboxPointer: {
       const VmAccessOutcome outcome =
           read_gpu(state.access->value, entry.completion_signal + kMailboxPointerOffset,

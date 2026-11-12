@@ -5,9 +5,9 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "integer/boolean.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <stdint.h>
 
