@@ -58,11 +58,13 @@ inline Uint128 division_shift_jam(Uint128 value, int distance) {
 }
 
 // Round significand * 2^exponent with rocjitsu div_round guest rounding. With OMOD, round first at
-// normal precision without gradual underflow, then flush a tiny result to +0.
+// normal precision without gradual underflow, then flush a tiny result to +0. With flush_output,
+// tininess is judged after rounding at normal precision: a value that reaches the smallest normal
+// only on the subnormal grid flushes to a signed zero.
 template <int Width>
 inline typename IeeeFormat<Width>::Bits
 division_round(Uint128 significand, int exponent, bool negative, bool omod,
-               uint32_t *exceptions = nullptr, unsigned rounding = 0) {
+               uint32_t *exceptions = nullptr, unsigned rounding = 0, bool flush_output = false) {
   using F = IeeeFormat<Width>;
   using T = typename F::Bits;
   T sign = negative ? F::sign : 0;
@@ -104,6 +106,24 @@ division_round(Uint128 significand, int exponent, bool negative, bool omod,
       *exceptions |= RJ_ARITH_EXCEPTION_UNDERFLOW;
     }
   }
+  if (flush_output && shift > normal_shift) {
+    // Below the normal range, only a value one binade under the smallest normal can round up to
+    // it at normal precision: its kept bits are all ones and the rounding increments them.
+    bool reaches_normal = false;
+    if (highest + exponent == -F::bias && normal_shift > 0) {
+      const Uint128 ones = (Uint128(1) << (F::fraction + 1)) - 1;
+      const bool normal_guard = ((significand >> (normal_shift - 1)) & 1) != 0;
+      const bool normal_sticky =
+          normal_shift > 1 && (significand & ((Uint128(1) << (normal_shift - 1)) - 1)) != 0;
+      reaches_normal =
+          (significand >> normal_shift) == ones &&
+          (rounding == 0 ? normal_guard
+                         : (normal_guard || normal_sticky) && rounding == (negative ? 2U : 1U));
+    }
+    if (!reaches_normal) {
+      return sign;
+    }
+  }
   if ((rounding == 0 && guard && (sticky || (kept & 1) != 0)) ||
       ((guard || sticky) && rounding == (negative ? 2U : 1U))) {
     ++kept;
@@ -139,7 +159,7 @@ inline typename IeeeFormat<Width>::Bits
 division_fmas(typename IeeeFormat<Width>::Bits a, typename IeeeFormat<Width>::Bits b,
               typename IeeeFormat<Width>::Bits c, bool post_scale, uint32_t mode,
               uint32_t *exceptions = nullptr, unsigned rounding = 0, bool dx10_clamp_off = false,
-              bool quiet_nan = true) {
+              bool quiet_nan = true, bool flush_output = false) {
   using F = IeeeFormat<Width>;
   using T = typename F::Bits;
 
@@ -189,9 +209,11 @@ division_fmas(typename IeeeFormat<Width>::Bits a, typename IeeeFormat<Width>::Bi
     if (product == 0 && addend == 0) {
       result = (pn == cn ? pn : rounding == 2) ? F::sign : 0;
     } else if (product == 0) {
-      result = division_round<Width>(addend, se + adjustment, cn, omod, exceptions, rounding);
+      result = division_round<Width>(addend, se + adjustment, cn, omod, exceptions, rounding,
+                                     flush_output);
     } else if (addend == 0) {
-      result = division_round<Width>(product, pe + adjustment, pn, omod, exceptions, rounding);
+      result = division_round<Width>(product, pe + adjustment, pn, omod, exceptions, rounding,
+                                     flush_output);
     } else {
       int pt = division_top_bit(product), ct = division_top_bit(addend);
       int exponent = pe + pt > se + ct ? pe + pt : se + ct;
@@ -202,7 +224,7 @@ division_fmas(typename IeeeFormat<Width>::Bits a, typename IeeeFormat<Width>::Bi
                     : product > addend ? product - addend
                                        : addend - product;
       result = division_round<Width>(sum, exponent - 126 + adjustment, negative, omod, exceptions,
-                                     rounding);
+                                     rounding, flush_output);
     }
   }
   unsigned omod = (mode >> 6) & 3;

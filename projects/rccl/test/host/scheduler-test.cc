@@ -23,9 +23,11 @@
 #include "fakes/dev_runtime_fakes.h"
 #include "fakes/enqueue_fakes.h"
 #include "fakes/nccl_stubs.h"
+#include "fakes/rccl_wrap_fakes.h"
 #include "fakes/sym_kernels_fakes.h"
 #include "fakes/sym_kernels_index_fakes.h"
 #include "fakes/tuning_fakes.h"
+#include "warp_speed_plan.h"
 
 // ENABLE_WARP_SPEED is this binary's own compile definition (CMakeLists.txt), not shared with any other TU.
 
@@ -222,6 +224,7 @@ class SchedulerMicrotest : public ::testing::Test {
     ResetSymKernelsIndexFakes(); // g_symkGetKernelIndex's kernel-table arrays: plain globals, same reason
     ResetBootstrapStubs();       // covers g_bootstrapAllGather
     ResetDevRuntimeFakes();      // covers g_devrFindWindow/g_devrInitOnce/g_devrWindowHasSysmemSegment
+    ResetRcclWrapFakes();        // covers the plan-wide WarpSpeed eligibility predicate
     ResetTuningFakes();          // g_tuningCompute's canonical reset (its default is ncclSystemError, not success)
   }
 
@@ -235,6 +238,40 @@ class SchedulerMicrotest : public ::testing::Test {
  private:
   std::unique_ptr<ncclComm> alignComm_;
 };
+
+TEST_F(SchedulerMicrotest, WarpSpeedPlanCap_UsesLeadingEligiblePrefix) {
+  auto comm = std::make_unique<ncclComm>();
+  auto plan = std::make_unique<ncclKernelPlan>();
+  ncclTaskColl head{};
+  comm->nNodes = 2;
+
+  EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &head, /*nPlanColls=*/3));
+  EXPECT_EQ(0, g_rcclWarpSpeedSupportedCalls);
+
+  g_rcclWarpSpeedSupported = true;
+  EXPECT_TRUE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &head, /*nPlanColls=*/5));
+  EXPECT_EQ(1, g_rcclWarpSpeedSupportedCalls);
+  EXPECT_EQ(&head, g_rcclWarpSpeedSupportedLastCollHead);
+  EXPECT_EQ(RCCL_WARP_SPEED_MAX_PLAN_COLLS, g_rcclWarpSpeedSupportedLastNCollTasks);
+
+  g_rcclWarpSpeedSupported = false;
+  EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &head, /*nPlanColls=*/5));
+}
+
+TEST_F(SchedulerMicrotest, WarpSpeedPlanCap_Ordinary58LayerGraphDoesNotSplitAtThree) {
+  auto comm = std::make_unique<ncclComm>();
+  auto plan = std::make_unique<ncclKernelPlan>();
+  ncclTaskColl head{};
+  comm->nNodes = 2;
+  g_rcclWarpSpeedSupported = false;
+
+  for (int nPlanColls = 0; nPlanColls <= 58; ++nPlanColls) {
+    EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &head, nPlanColls))
+        << "nPlanColls=" << nPlanColls;
+  }
+  EXPECT_EQ(55, g_rcclWarpSpeedSupportedCalls);
+  EXPECT_EQ(RCCL_WARP_SPEED_MAX_PLAN_COLLS, g_rcclWarpSpeedSupportedLastNCollTasks);
+}
 
 TEST_F(SchedulerMicrotest, AgvChannelCount_MultiplierAtMost1_ReturnsTunedChannelsUnchanged) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});

@@ -50,5 +50,11 @@ target_link_libraries(
         $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
         $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
 )
+# Linking the objects by path adds no build dependency, so build them first.
+add_dependencies(
+    rocjitsu_vm_amdgpu
+    rocjitsu_wait_counter_policy
+    rocjitsu_waitcheck_target
+)
 
 add_subdirectory(pci)

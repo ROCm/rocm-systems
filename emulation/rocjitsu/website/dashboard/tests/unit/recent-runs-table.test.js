@@ -18,7 +18,7 @@ test('recent canonical runs summarizes twenty per page and renders six equal sti
   expect(source.summaryCount).toBe(20);
   expect(html.match(/data-run-id="/g)).toHaveLength(20);
   const headings = [...html.matchAll(/<th\b[^>]*>(.*?)<\/th>/g)].map((match) => match[1].replace(/<[^>]+>/g, ''));
-  expect(headings).toEqual(['Commit', 'Run time', 'Commit time', 'Coverage', 'Duration', 'Status']);
+  expect(headings).toEqual(['Commit', 'Run time (local time)', 'Commit time (local time)', 'Coverage', 'Duration', 'Status']);
   expect(html).toContain('✓ OK');
   expect(html).toContain('× Fail');
   expect(html).toContain('Unavailable');
@@ -44,7 +44,7 @@ test('an empty history says so, and a run with no recorded results shows one row
   expect(html).not.toContain('0/0');
 });
 
-test('both recent-run clocks retain compact UTC text and full accessible time metadata', () => {
+test('both recent-run clocks retain compact local text and full accessible time metadata', () => {
   const timestamp = '2026-10-05T23:07:00-04:00';
   const commitTimestamp = '2026-10-05T00:07:00Z';
   source.rows = [{ run: { runId: 'clocks', timestamp, commitTimestamp }, total: 0, completed: 0 }];
@@ -53,7 +53,7 @@ test('both recent-run clocks retain compact UTC text and full accessible time me
   for (const [index, value] of [timestamp, commitTimestamp].entries()) {
     expect(times[index]).toContain(`dateTime="${value}"`);
     expect(times[index]).toContain(`aria-label="${formatFullDate(value)}"`);
-    expect(times[index]).toContain(`>${new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })}</time>`);
+    expect(times[index]).toContain(`>${new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}</time>`);
   }
 });
 

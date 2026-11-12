@@ -50,7 +50,8 @@ struct InvalidCheckpoint {
   size_t vgpr_bytes = 0;
 };
 
-test::ScopedTempFile write_checkpoint(const InvalidCheckpoint &input) {
+[[nodiscard]] testing::AssertionResult write_checkpoint(test::ScopedTempFile &file,
+                                                        const InvalidCheckpoint &input) {
   flatbuffers::FlatBufferBuilder builder;
   auto arch = builder.CreateString(input.arch);
   auto cu = fb::CreateComputeUnitConfig(builder, 1, 104, 256, 64);
@@ -75,76 +76,88 @@ test::ScopedTempFile write_checkpoint(const InvalidCheckpoint &input) {
   auto checkpoint =
       fb::CreateSimulationCheckpoint(builder, 0, input.missing_config ? 0 : simulation, cus);
   builder.Finish(checkpoint);
-  test::ScopedTempFile file("rocjitsu-restore-errors-");
-  file.write(std::string_view(reinterpret_cast<const char *>(builder.GetBufferPointer()),
-                              builder.GetSize()));
-  return file;
+  if (testing::AssertionResult result = file.initialize("rocjitsu-restore-errors-"); !result)
+    return result;
+  return file.write(std::string_view(reinterpret_cast<const char *>(builder.GetBufferPointer()),
+                                     builder.GetSize()));
 }
 
 TEST(CheckpointRestoreErrorsTest, MissingFileReturnsFailure) {
-  test::ScopedTempDirectory directory("rocjitsu-restore-errors-");
+  test::ScopedTempDirectory directory;
+  ASSERT_TRUE(directory.initialize("rocjitsu-restore-errors-"));
   const std::string path = directory.path() + "/absent";
   expect_restore_failure(path, "Cannot open checkpoint file: " + path);
 }
 
 TEST(CheckpointRestoreErrorsTest, EmptyFileReturnsFailure) {
-  test::ScopedTempFile file("rocjitsu-restore-errors-");
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-restore-errors-"));
   expect_restore_failure(file.path(), "Empty or unreadable checkpoint file: " + file.path());
 }
 
 TEST(CheckpointRestoreErrorsTest, InvalidFormatReturnsFailure) {
-  test::ScopedTempFile file("rocjitsu-restore-errors-");
-  file.write("not a checkpoint");
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-restore-errors-"));
+  ASSERT_TRUE(file.write("not a checkpoint"));
   expect_restore_failure(file.path(), "Invalid checkpoint format: " + file.path());
 }
 
 TEST(CheckpointRestoreErrorsTest, MissingConfigReturnsFailure) {
-  auto file = write_checkpoint({.missing_config = true});
+  test::ScopedTempFile file;
+  ASSERT_TRUE(write_checkpoint(file, {.missing_config = true}));
   expect_restore_failure(file.path(), "Checkpoint missing config section: " + file.path());
 }
 
 TEST(CheckpointRestoreErrorsTest, MissingVmReturnsFailure) {
-  auto file = write_checkpoint({.missing_vm = true});
+  test::ScopedTempFile file;
+  ASSERT_TRUE(write_checkpoint(file, {.missing_vm = true}));
   expect_restore_failure(file.path(), "Checkpoint missing simulation config");
 }
 
 TEST(CheckpointRestoreErrorsTest, MissingOrInvalidArchitectureReturnsFailure) {
   for (const char *arch : {"", "unknown"}) {
     SCOPED_TRACE(arch);
-    auto file = write_checkpoint({.arch = arch});
+    test::ScopedTempFile file;
+    ASSERT_TRUE(write_checkpoint(file, {.arch = arch}));
     expect_restore_failure(file.path(), "Checkpoint has missing or invalid architecture");
   }
 }
 
 TEST(CheckpointRestoreErrorsTest, CuCapacityOverflowReturnsFailure) {
-  auto file = write_checkpoint(
-      {.num_shader_engines = std::numeric_limits<uint32_t>::max(), .num_compute_units = 2});
+  test::ScopedTempFile file;
+  ASSERT_TRUE(write_checkpoint(
+      file, {.num_shader_engines = std::numeric_limits<uint32_t>::max(), .num_compute_units = 2}));
   expect_restore_failure(file.path(), "Checkpoint execution capacity exceeds uint32 range");
 }
 
 TEST(CheckpointRestoreErrorsTest, TotalCapacityOverflowReturnsFailure) {
-  auto file =
-      write_checkpoint({.num_xcds = std::numeric_limits<uint32_t>::max(), .num_compute_units = 3});
+  test::ScopedTempFile file;
+  ASSERT_TRUE(write_checkpoint(
+      file, {.num_xcds = std::numeric_limits<uint32_t>::max(), .num_compute_units = 3}));
   expect_restore_failure(file.path(), "Checkpoint execution capacity exceeds uint32 range");
 }
 
 TEST(CheckpointRestoreErrorsTest, UnavailableWavefrontSlotReturnsFailure) {
-  auto file = write_checkpoint({.wavefront = true, .wf_id = 1});
+  test::ScopedTempFile file;
+  ASSERT_TRUE(write_checkpoint(file, {.wavefront = true, .wf_id = 1}));
   expect_restore_failure(file.path(), "Failed to restore wavefront into its recorded slot");
 }
 
 TEST(CheckpointRestoreErrorsTest, InvalidVgprLaneCountReturnsFailure) {
-  auto file = write_checkpoint({.wavefront = true, .vgpr_lane_count = 16});
+  test::ScopedTempFile file;
+  ASSERT_TRUE(write_checkpoint(file, {.wavefront = true, .vgpr_lane_count = 16}));
   expect_restore_failure(file.path(), "Invalid VGPR checkpoint lane count");
 }
 
 TEST(CheckpointRestoreErrorsTest, InvalidVgprPayloadReturnsFailure) {
-  auto file = write_checkpoint({.wavefront = true, .vgpr_bytes = 1});
+  test::ScopedTempFile file;
+  ASSERT_TRUE(write_checkpoint(file, {.wavefront = true, .vgpr_bytes = 1}));
   expect_restore_failure(file.path(), "Invalid VGPR checkpoint payload size");
 }
 
 TEST(CheckpointRestoreErrorsTest, UnrecognizedLegacyVgprWidthReturnsFailure) {
-  auto file = write_checkpoint({.wavefront = true, .vgpr_lane_count = 0, .vgpr_bytes = 1});
+  test::ScopedTempFile file;
+  ASSERT_TRUE(write_checkpoint(file, {.wavefront = true, .vgpr_lane_count = 0, .vgpr_bytes = 1}));
   expect_restore_failure(file.path(), "Invalid VGPR checkpoint lane count");
 }
 

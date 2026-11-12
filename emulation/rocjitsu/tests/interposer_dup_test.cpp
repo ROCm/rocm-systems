@@ -3905,6 +3905,36 @@ TEST_F(InterposerPm4Test, GridProductOverflowFailsFence) {
   EXPECT_EQ(errno, EIO);
 }
 
+TEST_F(InterposerPm4Test, IndirectBranchFetchesHighVaShader) {
+  constexpr uint64_t page = 0xffff800012345000ull;
+  drm_amdgpu_gem_va va{};
+  va.handle = bo_;
+  va.operation = AMDGPU_VA_OP_MAP;
+  va.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_EXECUTABLE;
+  va.va_address = page;
+  va.offset_in_bo = 4096;
+  va.map_size = 4096;
+  ASSERT_EQ(ioctl(drm_, DRM_AMDGPU_GEM_VA_request(), &va), 0);
+
+  // Enter at page + 512. GETPC, AND and SETPC jump back to ENDPGM at the
+  // start of the page. The GFX9 profiles use wave64 and different opcodes.
+  drm_amdgpu_info_device device{};
+  ASSERT_TRUE(query_drm_device_info(drm_, &device));
+  const bool gfx9 = device.wave_front_size == 64;
+  constexpr uint32_t gfx9_branch[] = {0xbe801c00, 0x8600ff00, 0xfffff000, 0xbe801d00};
+  constexpr uint32_t gfx11_branch[] = {0xbe804700, 0x8b00ff00, 0xfffff000, 0xbe804800};
+  memory_[1024] = gfx9 ? 0xbf810000 : 0xbfb00000;
+  std::memcpy(memory_ + 1152, gfx9 ? gfx9_branch : gfx11_branch, sizeof(gfx9_branch));
+  constexpr uint64_t code = page + 512;
+  const uint32_t packet[] = {
+      0xc0037600,           0x207,      1, 1, 1, 0xc0027600,         0x20c, uint32_t(code >> 8),
+      uint32_t(code >> 40), 0xc0031500, 1, 1, 1, gfx9 ? 1u : 0x8001u};
+  std::memcpy(memory_, packet, sizeof(packet));
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(std::size(packet), false, &sequence), 0);
+  EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
+}
+
 TEST_F(InterposerPm4Test, UnmappedShaderFailsFence) {
   const uint64_t code = kAddress + 0x100000;
   const uint32_t packet[] = {
@@ -5741,7 +5771,8 @@ TEST(InterposerForkTest, ChildRefusesMmap64OnInheritedGpuFd) {
 // (files came out mode 0000) and the "x" exclusive modifier (truncating instead of
 // failing EEXIST).
 void check_child_fopen_modes() {
-  rocjitsu::test::ScopedTempDirectory tmp("rj_fopen_");
+  rocjitsu::test::ScopedTempDirectory tmp;
+  ASSERT_TRUE(tmp.initialize("rj_fopen_"));
   const std::string target = tmp.path() + "/created";
 
   const pid_t child = fork();
@@ -5818,7 +5849,8 @@ TEST(InterposerForkTest, ChildClassifiesGpuEndpointsByIdentityNotName) {
   if (::stat("/dev/kfd", &kfd_st) != 0 || !S_ISCHR(kfd_st.st_mode))
     GTEST_SKIP() << "host has no real /dev/kfd to alias";
 
-  rocjitsu::test::ScopedTempDirectory tmp("rj_alias_");
+  rocjitsu::test::ScopedTempDirectory tmp;
+  ASSERT_TRUE(tmp.initialize("rj_alias_"));
   const std::string aliased = tmp.path() + "/gpu";          // -> /dev/kfd
   const std::string chained = tmp.path() + "/chained";      // -> gpu -> /dev/kfd
   const std::string lookalike = tmp.path() + "/kfd_shaped"; // -> /dev/null

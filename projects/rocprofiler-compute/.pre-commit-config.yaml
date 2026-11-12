@@ -70,6 +70,17 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+  # Local hook: metric library schema validation
+  - repo: local
+    hooks:
+      - id: metric-library-check
+        name: Metric library validation
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_metric_library.py'
+        language: system
+        files: (metric_library/.*\.(yaml|py)|mi_gpu_spec\.yaml|tools/(validate_metric_library|format_yaml)\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # Local hook: membw tree spec metric drift validation
   - repo: local
     hooks:
@@ -93,12 +104,12 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
-  # Local hook: memory chart layout formatting (layout checks run as unit tests)
+  # Local hook: memory chart layout formatting check (layout checks run as unit tests)
   - repo: local
     hooks:
       - id: memory-chart-layout-format
         name: Memory chart layout formatting
-        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/memory_chart_layout_format.py'
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/memory_chart_layout_format.py --check'
         language: system
         files: ^projects/rocprofiler-compute/src/memory_chart/layouts/.*\.json$
         pass_filenames: false
@@ -112,6 +123,6 @@ repos:
         entry: python projects/rocprofiler-compute/tools/format_yaml.py --fix
         language: python
         additional_dependencies: [pyyaml==6.0.3]
-        files: ^projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/gfx.*\.yaml$
+        files: ^projects/rocprofiler-compute/src/rocprof_compute_soc/(analysis_configs|metric_library)/gfx.*\.yaml$
         pass_filenames: true
         stages: [pre-commit]

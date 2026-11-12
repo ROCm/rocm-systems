@@ -15,6 +15,9 @@ struct ImageAddressConfig {
   uint32_t gb_addr_config = 0; ///< GB_ADDR_CONFIG value shared with KFD and DRM.
 };
 
+/// @brief Maximum number of mip levels supported by thin image addressing.
+inline constexpr uint32_t kMaxImageMipLevels = 17;
+
 /// @brief Addressing shape of an image and its mip chain.
 struct ImageLayout {
   uint32_t width = 1;  ///< Level-zero width in texels.
