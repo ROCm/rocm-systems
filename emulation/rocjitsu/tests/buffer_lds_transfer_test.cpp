@@ -5,6 +5,8 @@
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -72,10 +74,31 @@ protected:
   amdgpu::Wavefront *wave_ = nullptr;
 };
 
+TEST(BufferLdsDecode, Gfx10RejectsUnsupportedLdsLoads) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    auto decoder = Decoder::create(arch);
+    SCOPED_TRACE(arch);
+    const auto valid = rdna1::build_mubuf(rdna1::kBufferLoadFormatXMubuf, {.lds = 1});
+    EXPECT_TRUE(decoder->decode(valid.data()).succeeded());
+    for (const auto words : {
+             rdna1::build_mubuf(rdna1::kBufferLoadDwordx3Mubuf, {.lds = 1}),
+             rdna1::build_mubuf(rdna1::kBufferLoadFormatD16XMubuf, {.lds = 1, .opm = 1}),
+             rdna1::build_mubuf(rdna1::kBufferLoadDwordMubuf, {.lds = 1, .tfe = 1}),
+         }) {
+      EXPECT_TRUE(decoder->decode(words.data()).failed());
+    }
+  }
+}
+
 TEST_P(BufferLdsTransfer, BufferNarrowAndX3TransfersUseDwordLaneLayout) {
   for (unsigned opcode :
        {cdna4::kBufferLoadSbyteMubuf,
         cdna4::kBufferLoadDwordx3Mubuf}) { // BUFFER_LOAD_SBYTE / BUFFER_LOAD_DWORDX3.
+    if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4 && opcode == cdna4::kBufferLoadDwordx3Mubuf) {
+      const auto words = cdna4::build_mubuf(opcode, {.lds = 1});
+      EXPECT_TRUE(decoder_->decode(words.data()).failed());
+      continue;
+    }
     clear_lds();
     wave_->set_exec(0x25);
     wave_->set_m0(0xfffc0040);

@@ -24,10 +24,11 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
+  const bool clamp_overflow = Scaled && (flags & RJ_ARITH_FP16_OVFL);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     if constexpr (Scaled) {
-      mfma_scaled_x86_64_v4<M, K>(controls, d, a, b, c, scale_a, scale_b);
+      mfma_scaled_x86_64_v4<M, K>(controls, d, a, b, c, scale_a, scale_b, clamp_overflow);
     } else {
       mfma_mixed_x86_64_v4<M, K>(controls, d, a, b, c);
     }
@@ -37,14 +38,14 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     if constexpr (Scaled) {
-      mfma_scaled_x86_64_v3<M, K>(controls, d, a, b, c, scale_a, scale_b);
+      mfma_scaled_x86_64_v3<M, K>(controls, d, a, b, c, scale_a, scale_b, clamp_overflow);
     } else {
       mfma_mixed_x86_64_v3<M, K>(controls, d, a, b, c);
     }
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  mfma_mixed_kernel<M, K, Scaled>(controls, d, a, b, c, scale_a, scale_b);
+  mfma_mixed_kernel<M, K, Scaled>(controls, d, a, b, c, scale_a, scale_b, clamp_overflow);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace

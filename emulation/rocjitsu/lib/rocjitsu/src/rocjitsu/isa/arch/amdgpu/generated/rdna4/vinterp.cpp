@@ -79,6 +79,8 @@ VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  src2.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 2));
   flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
@@ -106,6 +108,8 @@ VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  vdst.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 3));
   flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
@@ -139,6 +143,8 @@ VInterpP10RtzF16F32Vinterp::VInterpP10RtzF16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  src2.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 2));
   flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
@@ -167,6 +173,8 @@ VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  src0.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  vdst.set_register_byte_mask(amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 3));
   flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 

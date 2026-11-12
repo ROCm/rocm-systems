@@ -499,6 +499,7 @@ add_executable(
     kfd_events_test.cpp
     decode_smoke_test.cpp
     rdna4_dot_dpp_test.cpp
+    rdna1_valu_test.cpp
     readlane_selector_test.cpp
     pc_extension_test.cpp
     pc_fetch_test.cpp
@@ -595,6 +596,7 @@ add_executable(
     scalar_atomic_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
+    rdna4_scalar_test.cpp
     scalar_f16_constant_test.cpp
     vector16_inline_constant_test.cpp
     scalar_scc_test.cpp

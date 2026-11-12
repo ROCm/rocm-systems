@@ -3227,6 +3227,26 @@ TEST_F(Cdna4BlockScaleMfmaExecutionTest, Bare16x16x128Fp8Fp4AccumulatesFullK) {
   }
 }
 
+TEST_F(Cdna4BlockScaleMfmaExecutionTest, GprIndexAppliesToMatricesAndPrefixScaleOperands) {
+  constexpr uint32_t offset = 8;
+  seed_inputs(0);
+  seed_accumulator(0, 4);
+  for (uint32_t reg = 0; reg < 4; ++reg) {
+    seed_scale(kSrc0 + offset + reg, 0x22222222); // eight FP4 ones
+    seed_scale(kSrc1 + offset + reg, 0x22222222);
+    seed_scale(kAccumulator + offset + reg, std::bit_cast<uint32_t>(1.f));
+    seed_scale(kDst + reg, 0xdeadbeef);
+  }
+  seed_scale(kScaleA, 0xff);
+  seed_scale(kScaleB, 0xff);
+  seed_scale(kScaleA + offset, 127);
+  seed_scale(kScaleB + offset, 128); // 2.0
+  wf->set_mode_raw(amdgpu::Wavefront::GPR_IDX_EN_BIT);
+  wf->set_m0(0xf000u | offset);
+  EXPECT_EQ(execute(16, true, 1, vgpr_src(kScaleA), vgpr_src(kScaleB)), 0xdeadbeefu);
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + kDst + offset, 0), std::bit_cast<uint32_t>(257.f));
+}
+
 TEST_F(Cdna4BlockScaleMfmaExecutionTest, VgprScaleByteSelectorsAreIndependent) {
   seed_inputs(0x22222222u); // Eight packed FP4 1.0 values.
   seed_accumulator(std::bit_cast<uint32_t>(0.0f), 4);
@@ -3377,6 +3397,39 @@ TEST_F(Cdna4BlockScaleMfmaExecutionTest, PrefixAndAbidMarkerEnableScaling) {
             std::bit_cast<uint32_t>(512.0f));
   EXPECT_EQ(execute(16, false, 0, vgpr_src(kScaleA), vgpr_src(kScaleB)),
             std::bit_cast<uint32_t>(128.0f));
+}
+
+TEST_F(Cdna4BlockScaleMfmaExecutionTest, ClampsScaleOverflowAndPreservesTrueInfinity) {
+  struct Case {
+    uint32_t a, c, normal, clamped;
+  };
+  constexpr Case cases[] = {
+      {0x3c3c3c3c, 0, 0x7f800000, 0x7f7fffff}, // BF8 +1 times a large scale
+      {0xbcbcbcbc, 0, 0xff800000, 0xff7fffff}, // BF8 -1 times a large scale
+      {0xfcfcfcfc, 0, 0xff800000, 0xff800000}, // genuine negative infinity in A
+      {0, 0x7f800000, 0x7f800000, 0x7f800000}, // infinite initial C
+  };
+  seed_inputs(0x3c3c3c3cu); // BF8 ones
+  seed_scale(kScaleA, 0xfefefefe);
+  seed_scale(kScaleB, 0x7f7f7f7f);
+  for (const auto &tc : cases) {
+    for (uint32_t r = 0; r < 8; ++r)
+      seed_scale(kSrc0 + r, tc.a);
+    seed_accumulator(tc.c, 16);
+    for (bool force_scalar : {false, true}) {
+      ForceScalarGuard guard(force_scalar);
+      for (bool clamp : {false, true}) {
+        wf->set_mode_raw(3u | (clamp ? amdgpu::Wavefront::FP16_OVFL_BIT : 0));
+        for (uint32_t m : {16u, 32u}) {
+          SCOPED_TRACE(::testing::Message() << "M=" << m << " A=" << tc.a << " C=" << tc.c
+                                            << " clamp=" << clamp << " scalar=" << force_scalar);
+          EXPECT_EQ(execute(m, true, 1, vgpr_src(kScaleA), vgpr_src(kScaleB), 0, 0, false, false,
+                            vgpr_src(kAccumulator), /*cbsz=*/1, /*blgp=*/1),
+                    clamp ? tc.clamped : tc.normal);
+        }
+      }
+    }
+  }
 }
 
 TEST_F(Cdna4BlockScaleMfmaExecutionTest, E8m0FfScaleProducesNan) {
@@ -7596,6 +7649,7 @@ TEST(Rdna4ScalarF16Test, AddAndFmacConsumeFp16OvflMode) {
       wf->set_mode_raw(saturate ? amdgpu::Wavefront::FP16_OVFL_BIT : 0);
       ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
       EXPECT_EQ(cu->read_sgpr(sb + 2) & 0xffffu, saturate ? 0x7bffu : 0x7c00u);
+      EXPECT_EQ(wf->trapsts() & 0x3fu, 0x28u);
     }
   }
 
@@ -7858,7 +7912,7 @@ TEST(Cdna3CvtFp8Test, Bf8AndStochasticPathsHonorFp16OvflMode) {
     wf->halt();
 }
 
-TEST(Cdna4CvtScaleTest, ScaledFp8Bf8OverflowHonorsFp16OvflMode) {
+TEST(Cdna4CvtScaleTest, ScaledFp8Bf8ConversionsHonorDenormAndOverflowModes) {
   amdgpu::GpuMemory gpu_mem("cdna4_cvt_scale_fp8_bf8_overflow_mem");
   amdgpu::L2Cache l2("cdna4_cvt_scale_fp8_bf8_overflow_l2");
 
@@ -7901,6 +7955,17 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8OverflowHonorsFp16OvflMode) {
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
   EXPECT_TRUE(cu->execute_instruction(scaled_fp8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FE7Eu);
+
+  // +/-2^-127 divided by the E8M0 scale 2^-127 becomes +/-1 only when input denorms survive.
+  cu->write_vgpr(vb + 5, 0, 0x00400000u);
+  cu->write_vgpr(vb + 6, 0, 0x80400000u);
+  cu->write_vgpr(vb + 7, 0, 0);
+  for (uint32_t mode : {0u, 1u, 2u, 3u}) {
+    wf->set_mode_raw(mode << 4);
+    cu->write_vgpr(vb + 2, 0, 0xa5a50000);
+    ASSERT_TRUE(cu->execute_instruction(scaled_fp8_inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_vgpr(vb + 2, 0), (mode & 1) ? 0xa5a5b838u : 0xa5a58000u);
+  }
 
   cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(std::numeric_limits<float>::infinity()));
   cu->write_vgpr(vb + 6, 0, std::bit_cast<uint32_t>(-std::numeric_limits<float>::infinity()));
@@ -8694,6 +8759,172 @@ TEST(DsAddtidExecutionTest, ByteBaseAndOffsetApplyToLoadsAndStoresAcrossArchitec
       }
     wf->halt();
   }
+}
+
+TEST(Cdna1ValuTest, AccumulatorInputsAndVectorResults) {
+  amdgpu::GpuMemory memory("gfx908_valu");
+  amdgpu::L2Cache cache("gfx908_valu_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA1;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 104;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      test::initialize_compute_unit(cu, "gfx908_valu_cu", config, &memory, &cache));
+  auto decoder = Decoder::create(config.arch);
+  auto *wf = cu->dispatch_wf(0, 0, 96, 128, 64);
+  ASSERT_NE(wf, nullptr);
+  auto run = [&](uint32_t first, uint32_t second = 0) {
+    const uint32_t words[] = {first, second, 0};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded()) << inst->disassemble();
+  };
+
+  const uint32_t base = wf->vgpr_alloc().base, acc = base + amdgpu::ACC_VGPR_OFFSET;
+  wf->set_exec(~uint64_t{0});
+  for (unsigned lane = 0; lane != 64; ++lane) {
+    cu->write_vgpr(base, lane, 0x3f800000);     // v0 = 1
+    cu->write_vgpr(base + 4, lane, 0x3f800000); // v4 = 1
+    cu->write_vgpr(acc, lane, 0x40000000);      // a0 = 2
+    cu->write_vgpr(acc + 4, lane, 0x40400000);  // a4 = 3
+    for (unsigned r = 64; r != 68; ++r)
+      cu->write_vgpr(acc + r, lane, 0x3f800000); // C tile = 1
+  }
+  constexpr float expected[] = {5, 9, 13, 25};
+  for (unsigned banks = 0; banks < 4; ++banks) {
+    SCOPED_TRACE(banks);
+    // v_mfma_f32_16x16x4f32 a[32:35], [va]0, [va]4, a[64:67]
+    ASSERT_NO_FATAL_FAILURE(run(0xd3c50020, 0x05020900 | (banks << 27)));
+    for (unsigned r = 32; r != 36; ++r)
+      for (unsigned lane = 0; lane != 64; ++lane)
+        EXPECT_EQ(cu->read_vgpr(acc + r, lane), std::bit_cast<uint32_t>(expected[banks]));
+  }
+
+  wf->set_exec(1);
+  wf->set_mode_raw(0x2f0);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  cu->lds().write32(wf->lds_base() + 16, 0x123480ff);
+  for (const auto &[type, value] : std::array<std::pair<unsigned, uint32_t>, 5>{
+           {{0, 0xff}, {1, 0x80ff}, {2, 0x123480ff}, {4, 0xffffffff}, {5, 0xffff80ff}}}) {
+    wf->set_m0((type << 16) | 16);
+    ASSERT_NO_FATAL_FAILURE(run(0x7e0002fe)); // v_mov_b32 v0,src_lds_direct
+    EXPECT_EQ(cu->read_vgpr(base, 0), value);
+  }
+  wf->set_m0((2u << 16) | 16);
+  ASSERT_NO_FATAL_FAILURE(run(0x7e0a04fe)); // v_readfirstlane_b32 s5,src_lds_direct
+  EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 5), 0x123480ffu);
+  cu->write_sgpr(wf->sgpr_alloc().base + 5, 0);
+  ASSERT_NO_FATAL_FAILURE(run(0xd2890005, 0x000004fe)); // v_readlane_b32 s5,src_lds_direct,s2
+  EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 5), 0x123480ffu);
+  // The wave owns 128 architectural registers; its physical simulator slot is larger.
+  cu->write_vgpr(base, 0, 0xcafef00d);
+  cu->write_vgpr(base + 255, 0, 0xdeadcafe);
+  for (const bool scalar : {false, true}) {
+    ForceScalarGuard scalar_guard(scalar);
+    ASSERT_NO_FATAL_FAILURE(run(0x7e0203ff)); // v_mov_b32 v1,v255
+    EXPECT_EQ(cu->read_vgpr(base + 1, 0), 0xcafef00du);
+    ASSERT_NO_FATAL_FAILURE(run(0x7e0a05ff)); // v_readfirstlane_b32 s5,v255
+    EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 5), 0xcafef00du);
+    cu->write_vgpr(base + 127, 0, 42);
+    cu->write_vgpr(base + 2, 0, 42);
+    cu->write_vgpr(base + 3, 0, 0xcafef00d);
+    ASSERT_NO_FATAL_FAILURE(run(0x7dd4057f)); // compare [v127,v0] with v[2:3]
+    EXPECT_EQ(wf->vcc(), 1u);
+    wf->set_vcc(0);
+    cu->write_vgpr(base + 1, 0, 0xffffffff);
+    cu->write_vgpr(base + 2, 0, 1);
+    ASSERT_NO_FATAL_FAILURE(run(0x33fe0501)); // v_add_co_u32 v255,vcc,v1,v2
+    EXPECT_EQ(wf->vcc(), 0u);
+    EXPECT_EQ(cu->read_vgpr(base + 255, 0), 0xdeadcafeu);
+  }
+  cu->write_vgpr(base, 0, 0xaaaaaaaau);
+  ASSERT_NO_FATAL_FAILURE(run(0xd1196400, 0x00020501)); // v_add_co_u32 v0,s[100:101],v1,v2
+  EXPECT_EQ(cu->read_vgpr(base, 0), 0xaaaaaaaau);
+  struct MadCase {
+    uint32_t first, second, dst, a, b, c, result;
+  };
+  constexpr uint32_t hi = 0x3f800001, lo = 0x3f7ffffe, neg_one = 0xbf800000;
+  for (const auto &op : {
+           MadCase{0x2c000501, 0, neg_one, hi, lo, 0, 0},                             // MAC
+           MadCase{0x2e000501, lo, 0, hi, neg_one, 0, 0},                             // MADMK
+           MadCase{0x30000501, neg_one, 0, hi, lo, 0, 0},                             // MADAK
+           MadCase{0xd1c10000, 0x040e0501, 0, hi, lo, neg_one, 0},                    // MAD
+           MadCase{0xd1c10000, 0x040e0501, 0, 0x00800000, 0x3f000000, 0, 0},          // flush
+           MadCase{0xd1c00000, 0x040e0501, 0, 0, 0x7f800000, 0x3f800000, 0x3f800000}, // DX9
+       }) {
+    SCOPED_TRACE(op.first);
+    for (auto [reg, bits] : std::array<std::pair<unsigned, uint32_t>, 4>{
+             {{0, op.dst}, {1, op.a}, {2, op.b}, {3, op.c}}})
+      cu->write_vgpr(base + reg, 0, bits);
+    ASSERT_NO_FATAL_FAILURE(run(op.first, op.second));
+    EXPECT_EQ(cu->read_vgpr(base, 0), op.result);
+  }
+  // The rounded product cancels completely; a fused F32 operation retains -2^-14.
+  for (const bool scalar : {false, true}) {
+    ForceScalarGuard scalar_guard(scalar);
+    cu->write_vgpr(base + 1, 0, 0x47800001);
+    cu->write_vgpr(base + 2, 0, 0x477ffffe);
+    cu->write_vgpr(base + 3, 0, 0xcf800000);
+    for (auto [word, answer] : std::array<std::pair<uint32_t, uint32_t>, 3>{
+             {{0xd3a00000, 0xb8800000}, {0xd3a10000, 0xdead8400}, {0xd3a20000, 0x8400beef}}}) {
+      cu->write_vgpr(base, 0, 0xdeadbeef);
+      ASSERT_NO_FATAL_FAILURE(run(word, 0x040e0501)); // MIX F32, F16 low and F16 high.
+      EXPECT_EQ(cu->read_vgpr(base, 0), answer);
+    }
+    // An exact result just above the F16 midpoint rounds to that midpoint in F32.
+    cu->write_vgpr(base + 1, 0, 0x3f800001);
+    cu->write_vgpr(base + 2, 0, 0x3f800001);
+    cu->write_vgpr(base + 3, 0, std::bit_cast<uint32_t>(0x1p-11f - 0x1p-22f));
+    cu->write_vgpr(base, 0, 0);
+    ASSERT_NO_FATAL_FAILURE(run(0xd3a10000, 0x040e0501));
+    EXPECT_EQ(cu->read_vgpr(base, 0), 0x3c00u);
+  }
+  wf->set_trapsts(0x100);
+  cu->write_vgpr(base + 1, 0, 0);
+  cu->write_vgpr(base + 2, 0, 0x7f800000);
+  ASSERT_NO_FATAL_FAILURE(run(0x0a000501)); // MUL 0 * INF
+  EXPECT_EQ(wf->trapsts(), 0x101u);
+  cu->write_vgpr(base + 1, 0, 0x7f7fffff);
+  cu->write_vgpr(base + 2, 0, 0x7f7fffff);
+  ASSERT_NO_FATAL_FAILURE(run(0x02000501)); // ADD maximum finite to itself
+  EXPECT_EQ(wf->trapsts(), 0x129u);
+  wf->set_trapsts(0x100u);
+  cu->write_vgpr(base + 1, 0, 0x7fc00000);
+  ASSERT_NO_FATAL_FAILURE(run(0xd042006a, 0x00020501)); // Quiet CMP_EQ_F32
+  EXPECT_EQ(wf->trapsts(), 0x100u);
+  ASSERT_NO_FATAL_FAILURE(run(0xd042806a, 0x00020501)); // Signaling CMP_EQ_F32
+  EXPECT_EQ(wf->trapsts(), 0x101u);
+  // Constant predicates still inspect their operands for CLAMP's exception.
+  for (auto [word, mask] :
+       std::array<std::pair<uint32_t, uint64_t>, 2>{{{0xd040006a, 0}, {0xd04f006a, 1}}}) {
+    for (bool signaling : {false, true}) {
+      wf->set_trapsts(0x100);
+      ASSERT_NO_FATAL_FAILURE(run(word | (signaling ? 0x8000u : 0), 0x00020501));
+      EXPECT_EQ(wf->vcc_mask(), mask);
+      EXPECT_EQ(wf->trapsts(), signaling ? 0x101u : 0x100u);
+    }
+  }
+  wf->set_trapsts(0);
+  wf->set_mode_raw(0);
+  cu->write_vgpr(base + 1, 0, 0x7f000000);
+  cu->write_vgpr(base + 2, 0, 0);
+  ASSERT_NO_FATAL_FAILURE(run(0x020204f9, 0x06064601)); // SDWA ADD, vdst==src0, mul:2
+  EXPECT_EQ(wf->trapsts(), 0x28u);
+  wf->set_mode_raw(0x2f0);
+  wf->set_trapsts(0);
+  cu->write_vgpr(base + 1, 0, 0x7f800000);
+  cu->write_vgpr(base + 2, 0, 0);
+  ASSERT_NO_FATAL_FAILURE(run(0x0a0204fa, 0xef00e401)); // DPP masks out the only active row.
+  EXPECT_EQ(wf->trapsts(), 0u);
+  cu->write_vgpr(base + 1, 0, 0x7f800000);
+  cu->write_vgpr(base + 2, 0, 0x7f800000);
+  ASSERT_NO_FATAL_FAILURE(run(0x020204f9, 0x06160601)); // SDWA -inf + inf with an aliased vdst
+  EXPECT_EQ(wf->trapsts(), 1u);
+  wf->halt();
 }
 
 TEST(MfmaExecMaskTest, DenseInstructionsIgnoreExecAndUseTheAccumulatorBank) {
@@ -10942,6 +11173,8 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
     uint32_t source_modifiers = 0;
   };
   for (const ArchCase &architecture : kArchitectures) {
+    const bool gfx10 = architecture.arch == ROCJITSU_CODE_ARCH_RDNA1 ||
+                       architecture.arch == ROCJITSU_CODE_ARCH_RDNA2;
     const std::array values{
         ValueCase{architecture.frexp_exp_f32, true, false, 0x3f800000u, 0, 2, 0, 1},
         ValueCase{architecture.add_f32, false, false, 0xbf800000u, 0x3f800000u, 1, 0, 0x40800000u,
@@ -10985,8 +11218,7 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
                   amdgpu::sdwa::WORD_1},
         ValueCase{architecture.min_f16, false, true, 0x3c00u, 0x4000u, 2, 0, 0x3c00u,
                   amdgpu::sdwa::DWORD, true},
-        // Current emulator SDWA behavior, not capture-backed: scaling and
-        // directed guest rounding apply to the same wide result.
+        // Directed guest rounding before exact power-of-two scaling.
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x1000u, 1, 1u << 2, 0x4001u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x1000u, 1, 2u << 2, 0x4000u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 2u << 6, 0x4000u},
@@ -10995,12 +11227,10 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 2u << 4, 0x4400u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 0, 0x4400beefu,
                   amdgpu::sdwa::WORD_1},
-        // Pin the emulator's scaling before F16 narrowing for overflow and tiny
-        // results. On gfx1030, SDWA ADD_F16 0x7bff + 0x7bff with div:2 gives
-        // 0x7c00, so the overflow case differs from hardware until SDWA
-        // arithmetic migrates; the tiny cases are not captured.
-        ValueCase{architecture.add_f16, false, true, 0x7bffu, 0x7bffu, 3, 0, 0x7bffu},
-        ValueCase{architecture.mul_f16, false, true, 0x0400u, 0x3800u, 2, 0, 0x0800u},
+        // GFX10 rounds and flushes the arithmetic result before OMOD.
+        ValueCase{architecture.add_f16, false, true, 0x7bffu, 0x7bffu, 3, 0,
+                  gfx10 ? 0x7c00u : 0x7bffu},
+        ValueCase{architecture.mul_f16, false, true, 0x0400u, 0x3800u, 2, 0, gfx10 ? 0u : 0x0800u},
         ValueCase{architecture.mul_f16, false, true, 0x0400u, 0x3c00u, 3, 0, 0},
         ValueCase{architecture.mul_f16, false, true, 0x8000u, 0x3c00u, 1, 0, 0},
         ValueCase{architecture.rcp_f16, true, true, 0x4000u, 0, 2, 0, 0x4000u},

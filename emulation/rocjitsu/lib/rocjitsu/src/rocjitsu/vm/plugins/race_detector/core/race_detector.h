@@ -57,7 +57,8 @@ public:
                           std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                           IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
+                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
+                          LdsAccess ldsAccess = {});
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
@@ -75,7 +76,8 @@ public:
   /// Same-wave operations are ordered only when both belong to the same
   /// non-UNORDERED completion class.
   void validateRead(int addr, WaveId, int lane, int nBytes,
-                    MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
+                    MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                    uint8_t atomicBytes = 0) const;
 
   /// Check for WAR hazards: no outstanding LDS reads overlap the range.
   /// Same-wave operations are ordered only when both belong to the same
@@ -83,7 +85,8 @@ public:
   /// TODO(newling): WAW detection (write vs outstanding writes) is not
   /// implemented.
   void validateWrite(int addr, WaveId, int lane, int nBytes,
-                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
+                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                     uint8_t atomicBytes = 0) const;
 
   /// @brief Conservatively check an instruction's LDS intervals for conflicts.
   /// @details The intervals must describe valid LDS byte ranges. False proves
