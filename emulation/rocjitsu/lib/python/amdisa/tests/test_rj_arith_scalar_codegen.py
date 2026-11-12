@@ -37,7 +37,6 @@ from amdisa.codegen.execute.rj_arith_scalar import (
     FLOAT_ARITHMETIC,
     FLOAT_ROUNDING,
     IMMEDIATE,
-    ROUNDED_RESULTS,
     SCALAR,
     gen_scalar,
 )
@@ -121,20 +120,27 @@ def test_generated_rdna4_scalar_float_arithmetic_routes_to_rj_arith():
         assert f'amdgpu::execute_{name.lower()}_' not in text, name
 
 
+# gfx1201: FP32 results round by MODE[1:0]; FP16 results, including S_CVT_F16_F32, by
+# MODE[3:2]. Other forms do not round to a float. Kept independent of ROUNDED_RESULTS.
+MODE_ROUNDING = {
+    **{f'S_{op}_F32': 'f32' for op in ('ADD', 'SUB', 'MUL', 'FMAC', 'FMAAK', 'FMAMK')},
+    **{f'S_{op}_F16': 'f16' for op in ('ADD', 'SUB', 'MUL', 'FMAC')},
+    'S_CVT_F32_I32': 'f32',
+    'S_CVT_F32_U32': 'f32',
+    'S_CVT_F16_F32': 'f16',
+}
+
+
 @pytest.mark.parametrize('name', sorted(FLOAT_ARITHMETIC))
 def test_scalar_float_rounding_reads_destination_mode_field(name):
-    # gfx1201: FP32 results round by MODE[1:0]; FP16 results, including
-    # S_CVT_F16_F32, by MODE[3:2]. Other forms do not round to a float.
     operation = FLOAT_ARITHMETIC[name]
     src = [f'src{i}' for i in range(operation.inputs)]
     body = gen_scalar(context('rdna4', name, ['dst'], src))
     f32 = 'flags |= uint64_t(wf.fp_round_mode_f32()) << 24;' in body
     f16 = 'flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;' in body
-    assert (f32, f16) == (
-        name in ROUNDED_RESULTS and operation.output_fp_bits == 32,
-        name in ROUNDED_RESULTS and operation.output_fp_bits == 16,
-    )
-    if name in ROUNDED_RESULTS:
+    expected = MODE_ROUNDING.get(name)
+    assert (f32, f16) == (expected == 'f32', expected == 'f16')
+    if expected:
         assert body.index('<< 24;') < body.index('status != RJ_ARITH_SUCCESS')
 
 

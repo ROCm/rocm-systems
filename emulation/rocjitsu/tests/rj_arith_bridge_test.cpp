@@ -5161,25 +5161,30 @@ TEST(ArithBridgeTest, ScalarFmaFormsPreserveAccumulatorLiteralOrderAndGuestRound
   }
 }
 
-// gfx1201: FP32 results round by MODE[1:0], FP16 results (S_CVT_F16_F32 too) by
-// MODE[3:2]. Expected values are captures; S_SUB negates a NaN B.
+// gfx1201: FP32 results round by MODE[1:0], FP16 results (S_FMAC_F16 and S_CVT_F16_F32 too)
+// by MODE[3:2], in decoded Compatibility and through rj-arith. Expected values are captures;
+// S_SUB negates a NaN B.
 TEST(ArithBridgeTest, ScalarFloatArithmeticUsesDestinationRoundingField) {
   struct Case {
     uint16_t opcode;
     bool sop1;
-    uint32_t mode, a, b, expected;
+    uint32_t mode, a, b, d, expected;
   };
-  const Case cases[] = {{rdna4::kSAddF32Sop2, false, 0xf1, 0x3f800000, 0x1, 0x3f800001},
-                        {rdna4::kSAddF32Sop2, false, 0xf4, 0x3f800000, 0x1, 0x3f800000},
-                        {rdna4::kSSubF16Sop2, false, 0xfc, 0x3c00, 0x1, 0x3bff},
-                        {rdna4::kSSubF16Sop2, false, 0xf3, 0x3c00, 0x1, 0x3c00},
-                        {rdna4::kSSubF32Sop2, false, 0xf0, 0x0, 0x7fc00000, 0xffc00000},
-                        {rdna4::kSCvtF32I32Sop1, true, 0xf1, 0x80000001, 0, 0xceffffff},
-                        {rdna4::kSCvtF16F32Sop1, true, 0xf4, 0x40490fdb, 0, 0x4249},
-                        {rdna4::kSCvtF16F32Sop1, true, 0xf1, 0x40490fdb, 0, 0x4248}};
+  // d is the S_FMAC_F16 accumulator; other forms overwrite it.
+  const Case cases[] = {{rdna4::kSAddF32Sop2, false, 0xf1, 0x3f800000, 0x1, 0, 0x3f800001},
+                        {rdna4::kSAddF32Sop2, false, 0xf4, 0x3f800000, 0x1, 0, 0x3f800000},
+                        {rdna4::kSSubF16Sop2, false, 0xfc, 0x3c00, 0x1, 0, 0x3bff},
+                        {rdna4::kSSubF16Sop2, false, 0xf3, 0x3c00, 0x1, 0, 0x3c00},
+                        {rdna4::kSSubF32Sop2, false, 0xf0, 0x0, 0x7fc00000, 0, 0xffc00000},
+                        {rdna4::kSFmacF16Sop2, false, 0xf4, 0x3c00, 0x3c00, 0x0c00, 0x3c01},
+                        {rdna4::kSFmacF16Sop2, false, 0xf0, 0x3c00, 0x3c00, 0x0c00, 0x3c00},
+                        {rdna4::kSCvtF32I32Sop1, true, 0xf1, 0x80000001, 0, 0, 0xceffffff},
+                        {rdna4::kSCvtF16F32Sop1, true, 0xf4, 0x40490fdb, 0, 0, 0x4249},
+                        {rdna4::kSCvtF16F32Sop1, true, 0xf1, 0x40490fdb, 0, 0, 0x4248}};
   for (const auto &test : cases)
-    for (auto semantics : {ArithmeticSemantics::BitExactEmpiricalAllowLoose,
-                           ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+    for (auto semantics :
+         {ArithmeticSemantics::Compatibility, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+          ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
       ArithmeticPolicy policy{semantics};
       BridgeFixture fixture(false, 32, policy);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -5189,15 +5194,20 @@ TEST(ArithBridgeTest, ScalarFloatArithmeticUsesDestinationRoundingField) {
       const auto base = fixture.wave->sgpr_alloc().base;
       fixture.cu->write_sgpr(base, test.a);
       fixture.cu->write_sgpr(base + 1, test.b);
+      fixture.cu->write_sgpr(base + 2, test.d);
       const auto words = test.sop1
-                             ? rdna4::build_sop1(test.opcode, {.ssrc0 = 0, .sdst = 0})
-                             : rdna4::build_sop2(test.opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0});
+                             ? rdna4::build_sop1(test.opcode, {.ssrc0 = 0, .sdst = 2})
+                             : rdna4::build_sop2(test.opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2});
       auto instruction = fixture.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
       ASSERT_TRUE(
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
-      EXPECT_EQ(fixture.cu->read_sgpr(base), test.expected) << std::hex << test.mode;
-      EXPECT_EQ(fixture.wave->trapsts(), 0x80000000u);
+      EXPECT_EQ(fixture.cu->read_sgpr(base + 2), test.expected)
+          << std::hex << test.opcode << " mode 0x" << test.mode;
+      // Only Compatibility (decoded RDNA4 scalar path) records FP causes.
+      if (semantics != ArithmeticSemantics::Compatibility) {
+        EXPECT_EQ(fixture.wave->trapsts(), 0x80000000u);
+      }
     }
 }
 
@@ -5575,8 +5585,8 @@ TEST(ArithBridgeTest, DecodedSparseIu4NormalizesSelectorAndObservesConsumedLanes
 
 TEST(ArithBridgeTest, DecodedMatrixUsesConfiguredSemantics) {
   for (int kind = 0; kind < 3; ++kind) {
-    for (auto semantics : {ArithmeticSemantics::BitExactEmpiricalAllowLoose,
-                           ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+    for (auto semantics :
+         {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
       const bool sparse = kind == 2;
       BridgeFixture fixture(kind == 0, 32, {semantics});
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
