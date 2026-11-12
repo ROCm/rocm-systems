@@ -20,11 +20,16 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
@@ -32,7 +37,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/operand.h"
@@ -51,6 +58,8 @@
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -63,6 +72,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <span>
@@ -178,7 +188,8 @@ struct Fixture {
 
   explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4,
                    uint32_t requested_sgprs = kSgprsPerWave, uint32_t wavefront_slots = 1,
-                   uint32_t vgprs_per_wave = kVgprsPerWave, uint32_t wave_size = 0)
+                   uint32_t vgprs_per_wave = kVgprsPerWave, uint32_t wave_size = 0,
+                   uint32_t requested_vgprs = 0)
       : execution_backend_scope(arch == ROCJITSU_CODE_ARCH_CDNA5   ? &cdna5::execution_backend()
                                 : arch == ROCJITSU_CODE_ARCH_RDNA4 ? &rdna4::execution_backend()
                                                                    : &cdna4::execution_backend()) {
@@ -198,7 +209,8 @@ struct Fixture {
     plugin_group->add(std::move(recorder));
     cu->set_plugin_group(plugin_group);
 
-    wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, requested_sgprs, vgprs_per_wave, wave_size);
+    wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, requested_sgprs,
+                         requested_vgprs ? requested_vgprs : vgprs_per_wave, wave_size);
   }
 
   uint32_t sgpr_base() const { return wf->sgpr_alloc().base; }
@@ -261,6 +273,94 @@ void check_derived_operand_rejections(Fixture &fx, const IsaExecutionBackend &ba
     check_failure([&] { registers.write_chunk(op, 0, 2, values, 3); }, unsupported);
   }
   fx.wf->clear_instruction_execution_error();
+}
+
+TEST(RegisterAccessTest, RelativeScalarReadsPreserveTrapTemporaryIdentity) {
+  for (const auto &[arch, movrels] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA3, 42u}, std::pair{ROCJITSU_CODE_ARCH_CDNA4, 42u},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA3, 64u}, std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, 64u}}) {
+    Fixture fx(arch);
+    ASSERT_NE(fx.wf, nullptr);
+    auto decoder = Decoder::create(arch);
+    ASSERT_TRUE(decoder);
+    for (unsigned reg = 0; reg < 4; ++reg) {
+      fx.wf->set_ttmp(reg, 0xabcd0000u + reg);
+      fx.cu->write_sgpr(fx.sgpr_base() + reg, 0x12340000u + reg);
+    }
+    for (bool privileged : {false, true}) {
+      fx.wf->set_in_trap_handler(privileged);
+      for (uint32_t offset : {0u, 2u, 16u}) {
+        fx.wf->set_m0(offset);
+        for (unsigned width : {1u, 2u}) {
+          SCOPED_TRACE(testing::Message() << unsigned(arch) << " privilege " << privileged << " M0 "
+                                          << offset << " width " << width);
+          // S_MOVRELS_B32/B64 s4 or s[4:5], ttmp0 with M0 indexing the source.
+          const uint32_t word = 0xbe84006cu | ((movrels + width - 1) << 8);
+          auto inst = decoder->decode_window(std::span{&word, 1});
+          ASSERT_TRUE(inst.succeeded());
+          ASSERT_TRUE(fx.cu->execute_instruction(inst.value().get(), *fx.wf).succeeded());
+          for (unsigned i = 0; i < width; ++i) {
+            const uint32_t expected = offset == 16 ? 0x12340000u + i
+                                      : privileged ? 0xabcd0000u + offset + i
+                                                   : 0u;
+            EXPECT_EQ(fx.wf->debug_read_sgpr(4 + i), expected);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(RegisterAccessTest, Cdna3SgprTailSharesVccAndFlatScratchStorage) {
+  for (unsigned requested : {8u, 16u, 24u}) {
+    Fixture fx(ROCJITSU_CODE_ARCH_CDNA3, requested);
+    ASSERT_NE(fx.wf, nullptr);
+    ScopedIsaExecutionBackend backend(&cdna3::execution_backend());
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+    ASSERT_NE(decoder, nullptr);
+    const unsigned vcc = requested <= 16 ? 14 : 30;
+    const unsigned scratch = vcc - 4;
+    fx.cu->write_sgpr(fx.sgpr_base(), 0x01234567);
+    fx.cu->write_sgpr(fx.sgpr_base() + 1, 0x89abcdef);
+    auto mov_pair = [&](unsigned dst, unsigned src) {
+      uint32_t words[] = {0xbe800100u | (dst << 16) | src, 0};
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+    };
+    ASSERT_NO_FATAL_FAILURE(mov_pair(vcc, 0));
+    EXPECT_EQ(fx.wf->vcc(), 0x89abcdef01234567ull);
+    fx.plugin->scalar_reads.clear();
+    ASSERT_NO_FATAL_FAILURE(mov_pair(2, 106)); // Public observers retain the named register.
+    EXPECT_EQ(fx.plugin->scalar_reads, (std::vector<RegisterRef>{{RegClass::VCC, 0, 2}}));
+    EXPECT_EQ(fx.wf->debug_read_sgpr(2), 0x01234567u);
+    fx.plugin->scalar_writes.clear();
+    ASSERT_NO_FATAL_FAILURE(mov_pair(106, 129)); // Write inline integer 1 to VCC.
+    EXPECT_EQ(fx.plugin->scalar_writes, (std::vector<RegisterRef>{{RegClass::VCC, 0, 2}}));
+    EXPECT_EQ(fx.wf->debug_read_sgpr(vcc), 1u);
+    EXPECT_EQ(fx.wf->debug_read_sgpr(vcc + 1), 0u);
+    ASSERT_NO_FATAL_FAILURE(mov_pair(scratch, 0));
+    EXPECT_EQ(fx.wf->scratch_base(), 0x89abcdef01234567ull);
+    fx.plugin->scalar_reads.clear();
+    ASSERT_NO_FATAL_FAILURE(mov_pair(2, 102));
+    EXPECT_EQ(fx.plugin->scalar_reads, (std::vector<RegisterRef>{{RegClass::FLAT_SCRATCH, 0, 2}}));
+    fx.wf->set_scratch_base(0xabcdef0123456789ull);
+    EXPECT_EQ(fx.wf->debug_read_sgpr(scratch), 0x23456789u);
+    EXPECT_EQ(fx.wf->debug_read_sgpr(scratch + 1), 0xabcdef01u);
+
+    // Scalar-memory completion reaches the same physical register as VALU/SALU.
+    fx.l2.set_backing_memory(&fx.gpu_mem);
+    fx.wf->debug_write_sgpr(0, 0x1000);
+    fx.wf->debug_write_sgpr(1, 0);
+    fx.gpu_mem.write32(0x1000, 0xaabbccdd);
+    auto words = cdna3::build_smem(0, {.sdata = static_cast<uint8_t>(vcc), .imm = 1});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+    ScalarMemPipeline pipe(&fx.cu->l1_scalar());
+    ASSERT_EQ(pipe.issue(inst.release(), *fx.wf), VmAccessOutcome::Complete);
+    EXPECT_EQ(fx.wf->vcc(), 0xaabbccddull);
+  }
 }
 
 TEST(RegisterAccessTest, DerivedOperandRejectionsRetainFailureWithoutAccessOrObservation) {
@@ -986,6 +1086,7 @@ TEST(ScalarOperandSelectorsTest, SelectsM0AndNullLayoutByArchitecture) {
 TEST(ScalarOperandSelectorsTest, RejectsRangesThatCrossArchitecturalRegisterFiles) {
   Fixture fx(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_in_trap_handler(true); // Exercise the privileged TTMP storage and its range bounds.
 
   auto ttmps = resolve_scalar_register_range(*fx.wf, kTtmpSelectorFirst, kTtmpRegisterCount);
   ASSERT_TRUE(ttmps.has_value());
@@ -1061,6 +1162,7 @@ TEST(RegisterAccessTest, LanePair32PreservesRegisterPairsAndSplatsSingleWords) {
   EXPECT_EQ(pair.lo, 0x33333333u);
   EXPECT_EQ(pair.hi, 0x44444444u);
 
+  fx.wf->set_in_trap_handler(true);
   fx.wf->set_ttmp(0, 0x55555555u);
   fx.wf->set_ttmp(1, 0x66666666u);
   cdna4::Operand ttmp_pair(64, cdna4::OperandType::OPR_SRC_SIMPLE, 108);
@@ -1229,6 +1331,8 @@ TEST(RegisterAccessTest, Gfx10NullDiscardsCarryDestinations) {
     ASSERT_NE(fx.wf, nullptr);
     fx.wf->set_exec_raw(0x123456789abcdef0ull);
     fx.wf->set_vcc_raw(0x13579bdf2468ace0ull);
+    EXPECT_EQ(resolve_src_scalar(*fx.wf, kGfx10NullSelector, 124), 0u);
+    EXPECT_EQ(resolve_src_scalar64(*fx.wf, kGfx10NullSelector, 124), 0u);
     resolve_dst_write(*fx.wf, kGfx10NullSelector, ~uint32_t{0}, 124);
     resolve_dst_write64(*fx.wf, kGfx10NullSelector, ~uint64_t{0});
     EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
@@ -1243,6 +1347,7 @@ TEST(RegisterAccessTest, TrapSelectorsUseDedicatedWaveStorage) {
   ASSERT_NE(fx.wf, nullptr);
 
   constexpr int kTtmp0 = 108;
+  fx.wf->set_in_trap_handler(true);
   fx.wf->set_ttmp(0, 0x11223344u);
   fx.wf->set_ttmp(1, 0x55667788u);
 
@@ -1265,6 +1370,399 @@ TEST(RegisterAccessTest, TrapSelectorsUseDedicatedWaveStorage) {
                                   [&](const Wavefront *wf) { return wf == fx.wf; }));
   EXPECT_TRUE(std::ranges::all_of(fx.plugin->scalar_write_wavefronts,
                                   [&](const Wavefront *wf) { return wf == fx.wf; }));
+}
+
+TEST(RegisterAccessTest, IssuedScalarReturningAtomicChecksTtmpWritePermission) {
+  class ChangePrivilege final : public ExecutionPlugin {
+  public:
+    ChangePrivilege() : ExecutionPlugin("change_privilege") {}
+    void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &, Wavefront &wave) override {
+      wave.set_in_trap_handler(!wave.in_trap_handler());
+    }
+  };
+
+  for (bool privileged : {false, true}) {
+    SCOPED_TRACE(privileged);
+    Fixture fx(ROCJITSU_CODE_ARCH_CDNA2);
+    ASSERT_NE(fx.wf, nullptr);
+    ASSERT_TRUE(fx.plugin_group->add(std::make_unique<ChangePrivilege>()));
+    fx.cu->set_plugin_group(fx.plugin_group);
+    fx.l2.set_backing_memory(&fx.gpu_mem);
+    constexpr uint64_t code = 0x1000, data = 0x4000;
+    fx.wf->pc = code;
+    fx.wf->set_in_trap_handler(privileged);
+    fx.wf->set_ttmp(4, 5);
+    fx.wf->debug_write_sgpr(0, data);
+    fx.wf->debug_write_sgpr(1, 0);
+    fx.gpu_mem.write32(data, 12);
+    const auto words =
+        cdna2::build_smem(cdna2::kSAtomicAddSmem, {.sbase = 0, .sdata = 112, .glc = 1, .imm = 1});
+    fx.gpu_mem.write32(code, words[0]);
+    fx.gpu_mem.write32(code + 4, words[1]);
+    fx.gpu_mem.write32(code + 8, 0xbe860070u); // s_mov_b32 s6, ttmp4
+    ASSERT_TRUE(fx.cu->step());
+    EXPECT_EQ(fx.wf->in_trap_handler(), !privileged);
+    EXPECT_EQ(fx.gpu_mem.read32(data), 17u);
+    EXPECT_EQ(fx.wf->ttmp(4), privileged ? 12u : 5u);
+    EXPECT_EQ(fx.wf->ensure_memory_wait_scoreboard().outstanding(WaitCounterKind::Ds), 1u);
+    ASSERT_TRUE(fx.cu->step());
+    EXPECT_EQ(fx.wf->debug_read_sgpr(6), privileged ? 12u : 5u);
+    EXPECT_EQ(fx.cu->memory_wait_diagnostic_count(), unsigned(privileged));
+  }
+}
+
+TEST(RegisterAccessTest, ScalarLoadWaitsFollowTtmpWritePrivilege) {
+  constexpr uint64_t code = 0x1000, data = 0x4000;
+  constexpr uint32_t load = 0xf4001c00, offset = 0xfa000000; // s_load_dword ttmp4, s[0:1], 0
+  constexpr uint32_t read = 0xbe850370;                      // s_mov_b32 s5, ttmp4
+  constexpr uint32_t read_indexed = 0xbe852e6f;              // s_movrels_b32 s5, ttmp3 with M0=1
+  auto check = [&](bool load_privileged, bool consumer_privileged,
+                   std::initializer_list<uint32_t> consumer, uint32_t result, unsigned warnings) {
+    SCOPED_TRACE(testing::Message()
+                 << "consumer opcode " << *consumer.begin() << ", load privileged "
+                 << load_privileged << ", consumer privileged " << consumer_privileged);
+    Fixture fx(ROCJITSU_CODE_ARCH_RDNA2, kSgprsPerWave, 1, 16, 64);
+    ASSERT_NE(fx.wf, nullptr);
+    fx.l2.set_backing_memory(&fx.gpu_mem);
+    fx.wf->pc = code;
+    fx.wf->set_exec(1);
+    fx.wf->set_in_trap_handler(load_privileged);
+    fx.wf->set_ttmp(4, 5);
+    fx.wf->set_m0(1);
+    fx.wf->debug_write_sgpr(7, 17);
+    fx.cu->write_vgpr(fx.vgpr_base(), 0, 77);
+    fx.wf->debug_write_sgpr(0, data);
+    fx.wf->debug_write_sgpr(1, 0);
+    fx.wf->debug_write_sgpr(2, code + 12);
+    fx.wf->debug_write_sgpr(3, 0);
+    fx.gpu_mem.write32(data, 12);
+    fx.gpu_mem.write32(data + 4, 22);
+    fx.gpu_mem.write32(code, load);
+    fx.gpu_mem.write32(code + 4, offset);
+    // Return to the consumer with S_RFE_B64 s[2:3], or keep privilege with S_NOP.
+    fx.gpu_mem.write32(code + 8, load_privileged && !consumer_privileged ? 0xbe802202 : 0xbf800000);
+    uint64_t pc = code + 12;
+    for (uint32_t word : consumer) {
+      fx.gpu_mem.write32(pc, word);
+      pc += 4;
+    }
+    fx.gpu_mem.write32(pc, read);
+    ASSERT_TRUE(fx.cu->step());
+    ASSERT_EQ(fx.wf->ensure_memory_wait_scoreboard().outstanding(WaitCounterKind::Ds), 1u);
+    ASSERT_TRUE(fx.cu->step());
+    ASSERT_EQ(fx.wf->pc, code + 12);
+    ASSERT_EQ(fx.wf->in_trap_handler(), consumer_privileged);
+    ASSERT_TRUE(fx.cu->step());
+    EXPECT_EQ(fx.wf->pc, pc);
+    EXPECT_EQ(fx.wf->ttmp(4), result);
+    EXPECT_EQ(fx.cu->memory_wait_diagnostic_count(), warnings);
+    if (load_privileged && !consumer_privileged && *consumer.begin() != read &&
+        *consumer.begin() != read_indexed) {
+      ASSERT_TRUE(fx.cu->step());
+      EXPECT_EQ(fx.cu->memory_wait_diagnostic_count(), warnings + 1);
+    }
+    if (*consumer.begin() == read || *consumer.begin() == read_indexed) {
+      EXPECT_EQ(fx.wf->debug_read_sgpr(5), result);
+    }
+  };
+
+  for (bool privileged : {false, true}) {
+    check(privileged, false, {read}, privileged ? 12 : 5, unsigned(privileged));
+    check(true, privileged, {load, offset + 4}, privileged ? 22 : 12, unsigned(privileged));
+    // s_mov_b32 ttmp4, 17 and v_readfirstlane_b32 ttmp4, v0
+    check(true, privileged, {0xbef00391}, privileged ? 17 : 12, unsigned(privileged));
+    check(true, privileged, {0x7ee00500}, privileged ? 77 : 12, unsigned(privileged));
+    // M0 selects TTMP4 in s_movreld_b32 ttmp3, s7 and s_movrels_b32 s5, ttmp3.
+    check(true, privileged, {0xbeef3007}, privileged ? 17 : 12, unsigned(privileged));
+    check(true, privileged, {read_indexed}, 12, 1);
+    // v_cmp_eq_u32_e64 ttmp[4:5], v0, v0 writes the active lane mask.
+    check(true, privileged, {0xd4c20070, 0x02020100}, privileged ? 1 : 12, unsigned(privileged));
+  }
+}
+
+TEST(RegisterAccessTest, CdnaMemoryRequiresTheWholeReturningDestination) {
+  constexpr uint64_t code = 0x1000;
+  constexpr uint64_t data = 0x4000;
+  constexpr uint32_t sentinel = 0xcafecafe;
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    for (bool acc : {false, true}) {
+      SCOPED_TRACE(acc);
+      for (bool atomic : {false, true}) {
+        for (bool in_range : {false, true}) {
+          SCOPED_TRACE(testing::Message() << "atomic " << atomic << " in range " << in_range);
+          Fixture fx(arch, 16, 1, 32, 64, 16);
+          ASSERT_NE(fx.wf, nullptr);
+          fx.wf->set_accum_offset(8);
+          fx.l2.set_backing_memory(&fx.gpu_mem);
+          fx.wf->pc = code;
+          fx.wf->set_exec(1);
+          fx.wf->debug_write_sgpr(4, data);
+          fx.wf->debug_write_sgpr(5, 0);
+          fx.cu->write_vgpr(fx.vgpr_base(), 0, 0);
+          fx.cu->write_vgpr(fx.vgpr_base() + (acc ? amdgpu::ACC_VGPR_OFFSET : 0) + 1, 0, 1);
+          for (uint32_t i = 0; i < 4; ++i)
+            fx.gpu_mem.write32(data + 4 * i, 5 + i);
+          const uint32_t dst = atomic ? (in_range ? 7 : 8) : (in_range ? 4 : 6);
+          const uint32_t words = atomic ? 1 : 4;
+          const uint32_t result = dst + (acc ? amdgpu::ACC_VGPR_OFFSET : 0);
+          for (uint32_t i = 0; i < words; ++i)
+            fx.cu->write_vgpr(fx.vgpr_base() + result + i, 0, sentinel);
+          // global_load_dwordx4 or global_atomic_add (glc), followed by s_waitcnt vmcnt(0).
+          fx.gpu_mem.write32(code, atomic ? 0xdd098000 : 0xdc5c8000);
+          fx.gpu_mem.write32(code + 4,
+                             (dst << 24) | (uint32_t(acc) << 23) | (atomic ? 0x40100 : 0x40000));
+          fx.gpu_mem.write32(code + 8, 0xbf8c0f70);
+          ASSERT_TRUE(fx.cu->step());
+          ASSERT_TRUE(fx.cu->step());
+          for (uint32_t i = 0; i < words; ++i)
+            EXPECT_EQ(fx.cu->read_vgpr_storage(fx.vgpr_base() + result + i, 0),
+                      in_range ? 5 + i : sentinel);
+          fx.cu->l1_vector().flush_all();
+          fx.l2.flush_all();
+          EXPECT_EQ(fx.gpu_mem.read32(data), atomic && in_range ? 6u : 5u);
+        }
+      }
+    }
+  }
+}
+
+TEST(RegisterAccessTest, CdnaValuAllocationRedirectsSourcesAndSuppressesEveryResult) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                          ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    for (bool split : {false, true}) {
+      if (split && arch == ROCJITSU_CODE_ARCH_CDNA1)
+        continue;
+      SCOPED_TRACE(split);
+      Fixture fx(arch, kSgprsPerWave, 1, 64, 64, split ? 16 : 8);
+      ASSERT_NE(fx.wf, nullptr);
+      if (split)
+        fx.wf->set_accum_vgpr_base(8);
+      constexpr uint64_t code = 0x1000;
+      fx.wf->pc = code;
+      fx.wf->set_exec(1);
+      fx.wf->set_vcc(0);
+      fx.cu->write_vgpr(fx.vgpr_base(), 0, 0xcafef00du);
+      fx.cu->write_vgpr(fx.vgpr_base() + 12, 0, 0x5eed5eedu);
+      fx.gpu_mem.write32(code, 0x7e02030cu);     // v_mov_b32 v1, v12
+      fx.gpu_mem.write32(code + 4, 0x32180501u); // v_add_co_u32 v12, vcc, v1, v2
+      ASSERT_TRUE(fx.cu->step());
+      EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base() + 1, 0), 0xcafef00du);
+      fx.cu->write_vgpr(fx.vgpr_base() + 1, 0, 0xffffffffu);
+      fx.cu->write_vgpr(fx.vgpr_base() + 2, 0, 1);
+      ASSERT_TRUE(fx.cu->step());
+      EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base() + 12, 0), 0x5eed5eedu);
+      EXPECT_EQ(fx.wf->vcc(), 0u);
+    }
+  }
+}
+
+TEST(RegisterAccessTest, OutOfRangeScalarWritesDoNotAcquirePendingDestinations) {
+  constexpr uint64_t code = 0x1000, data = 0x4000;
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                          ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    for (unsigned count : {16u, 24u, 104u}) {
+      for (unsigned dst : {9u, 26u, 40u}) {
+        for (bool indexed : {false, true}) {
+          for (bool waited : {false, true}) {
+            SCOPED_TRACE(testing::Message() << "sgprs " << count << " destination " << dst
+                                            << " indexed " << indexed << " waited " << waited);
+            Fixture fx(arch, count);
+            ASSERT_NE(fx.wf, nullptr);
+            fx.l2.set_backing_memory(&fx.gpu_mem);
+            fx.wf->pc = code;
+            fx.wf->set_m0(1);
+            fx.wf->debug_write_sgpr(4, data);
+            fx.wf->debug_write_sgpr(5, 0);
+            fx.wf->debug_write_sgpr(7, 0x77777777);
+            fx.cu->write_sgpr(fx.sgpr_base() + dst, 0xcafecafe);
+            fx.gpu_mem.write32(data, 17);
+            fx.gpu_mem.write32(code, 0xc0020002u | (dst << 6)); // s_load_dword sdst, s[4:5], 0
+            fx.gpu_mem.write32(code + 4, 0);
+            if (waited)
+              fx.gpu_mem.write32(code + 8, 0xbf8cc07f); // s_waitcnt lgkmcnt(0)
+            const unsigned encoded_dst = indexed ? dst - 1 : dst;
+            const uint32_t mov = indexed ? 0xbe802c07u : 0xbe800007u;
+            fx.gpu_mem.write32(code + (waited ? 12 : 8), mov | (encoded_dst << 16));
+            ASSERT_TRUE(fx.cu->step());
+            const bool allocated = dst < ((count + 15u) & ~15u);
+            if (!allocated) {
+              EXPECT_EQ(fx.cu->read_sgpr(fx.sgpr_base() + dst), 0xcafecafeu);
+            }
+            if (waited) {
+              ASSERT_TRUE(fx.cu->step());
+              EXPECT_EQ(fx.cu->read_sgpr(fx.sgpr_base() + dst), allocated ? 17u : 0xcafecafeu);
+            }
+            ASSERT_TRUE(fx.cu->step());
+            EXPECT_EQ(fx.cu->memory_wait_diagnostic_count(), unsigned(allocated && !waited));
+            EXPECT_EQ(fx.cu->read_sgpr(fx.sgpr_base() + dst),
+                      allocated ? 0x77777777u : 0xcafecafeu);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(RegisterAccessTest, UnallocatedScalarSourceWaitsForSgprZero) {
+  constexpr uint64_t code = 0x1000, data = 0x4000;
+  constexpr uint32_t loaded = 0x12345678, original = 0x89abcdef;
+  constexpr uint32_t mov = 0xbe860028;     // s_mov_b32 s6, s40
+  constexpr uint32_t movrels = 0xbe862a27; // s_movrels_b32 s6, s39 with M0=1
+  constexpr uint32_t cndmask = 0xd1000003; // v_cndmask_b32_e64 v3, v4, v5, s[40:41]
+  struct Consumer {
+    uint32_t opcode;
+    unsigned load_word;
+  };
+  for (unsigned count : {16u, 64u}) {
+    for (auto [opcode, load_word] : {Consumer{mov, 0}, {movrels, 0}, {cndmask, 0}, {cndmask, 1}}) {
+      const bool mask = opcode == cndmask;
+      for (bool wait : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "sgprs=" << count << ", wait=" << wait
+                                        << ", opcode=" << opcode << ", load word=" << load_word);
+        Fixture fx(ROCJITSU_CODE_ARCH_CDNA2, count);
+        ASSERT_NE(fx.wf, nullptr);
+        fx.l2.set_backing_memory(&fx.gpu_mem);
+        fx.wf->pc = code;
+        fx.wf->set_m0(1);
+        fx.wf->set_exec((uint64_t{1} << 32) | 1);
+        fx.wf->debug_write_sgpr(0, 0);
+        fx.wf->debug_write_sgpr(1, 1);
+        for (unsigned lane : {0u, 32u}) {
+          fx.cu->write_vgpr(fx.vgpr_base() + 4, lane, 11);
+          fx.cu->write_vgpr(fx.vgpr_base() + 5, lane, 22);
+        }
+        fx.wf->debug_write_sgpr(4, data);
+        fx.wf->debug_write_sgpr(5, 0);
+        fx.cu->write_sgpr(fx.sgpr_base() + 40, original);
+        fx.cu->write_sgpr(fx.sgpr_base() + 41, 0);
+        fx.gpu_mem.write32(data, loaded);
+        fx.gpu_mem.write32(code, 0xc0020002 | (load_word << 6)); // s_load_dword s0 or s1, s[4:5], 0
+        fx.gpu_mem.write32(code + 4, 0);
+        if (wait)
+          fx.gpu_mem.write32(code + 8, 0xbf8cc07f); // s_waitcnt lgkmcnt(0)
+        const auto consumer = code + (wait ? 12 : 8);
+        fx.gpu_mem.write32(consumer, opcode);
+        if (mask)
+          fx.gpu_mem.write32(consumer + 4, 0x00a20b04);
+        ASSERT_TRUE(fx.cu->step());
+        if (wait) {
+          ASSERT_TRUE(fx.cu->step());
+        }
+        ASSERT_TRUE(fx.cu->step());
+        if (mask) {
+          EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base() + 3, 0), count == 16 ? 11u : 22u);
+          EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base() + 3, 32),
+                    count == 16 && load_word == 0 ? 22u : 11u);
+        } else {
+          EXPECT_EQ(fx.wf->debug_read_sgpr(6), count == 16 ? loaded : original);
+        }
+        EXPECT_EQ(fx.cu->memory_wait_diagnostic_count(), unsigned(count == 16 && !wait));
+      }
+    }
+  }
+}
+
+TEST(RegisterAccessTest, Gfx942WaitsTrackNamedAndBackingScalarRegisters) {
+  constexpr uint64_t code = 0x1000, data = 0x4000;
+  constexpr uint32_t loaded = 0x12345678;
+  struct Selectors {
+    unsigned load, read;
+  };
+  // With 16 allocated SGPRs FLAT_SCRATCH is s[10:11] and VCC is s[14:15].
+  for (auto [load, read] : {Selectors{10, 102},
+                            {102, 10},
+                            {11, 103},
+                            {103, 11},
+                            {14, 106},
+                            {106, 14},
+                            {15, 107},
+                            {107, 15},
+                            {14, 12}}) {
+    for (bool wait : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "load=" << load << ", read=" << read << ", wait=" << wait);
+      Fixture fx(ROCJITSU_CODE_ARCH_CDNA3, 16);
+      ASSERT_NE(fx.wf, nullptr);
+      fx.l2.set_backing_memory(&fx.gpu_mem);
+      fx.wf->pc = code;
+      fx.wf->debug_write_sgpr(4, data);
+      fx.wf->debug_write_sgpr(5, 0);
+      fx.wf->debug_write_sgpr(12, 17);
+      fx.gpu_mem.write32(data, loaded);
+      fx.gpu_mem.write32(code, 0xc0020002 | (load << 6)); // s_load_dword SDATA, s[4:5], 0
+      fx.gpu_mem.write32(code + 4, 0);
+      if (wait)
+        fx.gpu_mem.write32(code + 8, 0xbf8cc07f);                    // s_waitcnt lgkmcnt(0)
+      fx.gpu_mem.write32(code + (wait ? 12 : 8), 0xbe860000 | read); // s_mov_b32 s6, SSRC0
+      ASSERT_TRUE(fx.cu->step());
+      if (wait) {
+        ASSERT_TRUE(fx.cu->step());
+      }
+      ASSERT_TRUE(fx.cu->step());
+      EXPECT_EQ(fx.wf->debug_read_sgpr(6), read == 12 ? 17u : loaded);
+      EXPECT_EQ(fx.cu->memory_wait_diagnostic_count(), unsigned(read != 12 && !wait));
+    }
+  }
+}
+
+TEST(RegisterAccessTest, DeferredScalarLoadChecksTtmpDependenciesAtIssuePrivilege) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    Fixture fx(arch);
+    ASSERT_NE(fx.wf, nullptr);
+    auto &wave = *fx.wf;
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    constexpr uint32_t address = 0x4080, payload = 0xbeef, sentinel = 0x11223344;
+    fx.l2.set_backing_memory(&fx.gpu_mem);
+    fx.gpu_mem.write32(0, 0xf00d);
+    fx.gpu_mem.write32(address, payload);
+    // S_LOAD_DWORD / S_LOAD_B32 ttmp2, ttmp[0:1], 0.
+    const auto words =
+        arch == ROCJITSU_CODE_ARCH_CDNA4
+            ? cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sbase = 54, .sdata = 110})
+            : rdna3::build_smem(rdna3::kSLoadB32Smem, {.sbase = 54, .sdata = 110, .soffset = 124});
+    unsigned hazards = 0;
+    auto &scoreboard = wave.ensure_memory_wait_scoreboard();
+    scoreboard.bind(0x100, &hazards, [](void *count, const MemoryWaitScoreboard::Hazard &) {
+      ++*static_cast<unsigned *>(count);
+    });
+    for (bool privileged : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "arch=" << arch << " privileged=" << privileged);
+      wave.set_in_trap_handler(privileged);
+      wave.set_ttmp(0, address);
+      wave.set_ttmp(1, 0);
+      wave.set_ttmp(2, sentinel);
+      auto inst = std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      hazards = 0;
+      scoreboard.clear();
+      scoreboard.add({scoreboard.issue(WaitCounterKind::Ds),
+                      0x80,
+                      ~uint64_t{0},
+                      {RegClass::TTMP, 0, 2},
+                      WaitCounterKind::Ds,
+                      0xf});
+      scoreboard.check_instruction(*inst, wave);
+      EXPECT_EQ(hazards, unsigned(privileged));
+      ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), wave).succeeded());
+      const auto *request = inst->data_as<ScalarMemState>();
+      ASSERT_NE(request, nullptr);
+      EXPECT_EQ(request->addr, privileged ? address : 0u);
+      const auto storage =
+          privileged ? ScalarRegisterStorage::TTMP : ScalarRegisterStorage::DISCARD;
+      EXPECT_EQ(request->dst_register.storage, storage);
+      const auto source = resolve_scalar_register_range(wave, 108, 2);
+      ASSERT_TRUE(source.has_value());
+      EXPECT_EQ(source->storage, storage);
+      wave.set_in_trap_handler(!privileged);
+      ScalarMemPipeline pipeline(&fx.cu->l1_scalar());
+      ASSERT_EQ(pipeline.issue(inst.release(), wave), VmAccessOutcome::Complete);
+      EXPECT_EQ(wave.ttmp(2), privileged ? payload : sentinel);
+    }
+  }
 }
 
 TEST(RegisterAccessTest, Vgpr64AccessRequiresOneOwnerForCompleteRange) {

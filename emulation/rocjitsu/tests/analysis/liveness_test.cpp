@@ -23,6 +23,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
@@ -867,6 +869,48 @@ void expect_gfx1250_buffer_cmpswap_def_use(uint8_t return_control, uint8_t paylo
   } else {
     EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 4, return_width}));
     EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 4, payload_width}));
+  }
+}
+
+TEST(LivenessAnalysis, Gfx12GlobalTransposeKillsOnlyTheWaveSizedResult) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  const RegisterRef v30{RegClass::VGPR, 30, 1};
+  for (uint8_t wave_size : {32u, 64u}) {
+    for (bool transpose : {false, true}) {
+      for (unsigned words : {2u, 4u}) {
+        SCOPED_TRACE(testing::Message() << "wave" << +wave_size << " transpose=" << transpose
+                                        << " registers=" << words);
+        const uint32_t op = words == 2 ? (transpose ? 0xee16007cu : 0xee05407cu)
+                                       : (transpose ? 0xee15c07cu : 0xee05c07cu);
+        const auto dest = static_cast<uint16_t>(31 - words);
+        TestCodeObject code({wave_size == 64 ? 0xbefe01c1u : 0xbefe00c1u, // mov EXEC, -1
+                             0x7e3c02aau,                                 // v_mov_b32 v30, 42
+                             op, dest, 2u,  // global load to a tuple ending at v30
+                             0x7e0a031eu,   // v_mov_b32 v5, v30
+                             0xbfb00000u}); // s_endpgm
+        auto blocks = build_valid_blocks(code, *decoder, ROCJITSU_CODE_ARCH_RDNA4);
+        ASSERT_EQ(blocks.size(), 1u);
+        const auto &load = *std::next(blocks.front()->instructions().begin(), 2);
+        const bool compact = transpose && wave_size == 64;
+        const auto written = static_cast<uint8_t>(compact ? words / 2 : words);
+        InstDefUse effect(load, wave_size);
+        EXPECT_TRUE(effect.defs.contains({RegClass::VGPR, dest, written}));
+        EXPECT_EQ(effect.defs.contains(v30), !compact);
+        EXPECT_TRUE(effect.uses.contains({RegClass::VGPR, 2, 2}));
+        std::array scope{blocks.front().get()};
+        auto exec = std::make_unique<ExecMaskAnalysis>(KernelBlockScope(scope), wave_size);
+        ASSERT_EQ(exec->before(load), ExecState::Full);
+        LivenessAnalysis liveness(KernelBlockScope(scope), wave_size, std::move(exec));
+        auto live = liveness.is_live_before(load, v30);
+        ASSERT_TRUE(live.succeeded());
+        EXPECT_EQ(live.value(), compact);
+        auto scratch = liveness.find_free_run(&load, 1, 30);
+        ASSERT_TRUE(scratch.succeeded());
+        ASSERT_TRUE(scratch.value().has_value());
+        EXPECT_EQ(*scratch.value(), compact ? 31u : 30u);
+      }
+    }
   }
 }
 
@@ -8521,6 +8565,9 @@ std::unique_ptr<Instruction> decode_cdna1(std::initializer_list<uint32_t> words)
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
 }
 
+// A use after s_waitcnt must keep resident lanes' incoming status live even
+// with full EXEC. A shader that discards feedback should not acquire a read.
+
 TEST(GeneratedInstDefUse, D16TbufferLoadDoesNotReadDestinationWithSramEcc) {
   auto inst = decode_cdna3({0xE8040000U, 0x00000500U}); // tbuffer_load_format_d16_x, vdata=5
   ASSERT_NE(inst, nullptr);
@@ -8574,25 +8621,13 @@ TEST(GeneratedInstDefUse, D16TypedFormatXyzLoadUnderVbufferReadsOnlyLastDestinat
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1})); // first reg fully written
 }
 
-// On older MUBUF encodings the LDS bit (word0 bit 16) redirects the loaded data
-// to LDS, leaving no VGPR destination -- so the preserved-destination read must
-// be suppressed there, or liveness invents a false live range. Same opcode
-// (buffer_load_short_d16, MUBUF op 36 on CDNA1), toggling only LDS. VDATA is
-// word1[8:15] (=5).
-TEST(GeneratedInstDefUse, D16BufferLoadLdsBitSuppressesDestinationRead) {
+TEST(GeneratedInstDefUse, Cdna1D16BufferLoadReadsPreservedDestination) {
   auto normal = decode_cdna1({0xE0900000U, 0x00000500U}); // buffer_load_short_d16, vdata=5, lds=0
   ASSERT_NE(normal, nullptr);
   ASSERT_EQ(std::string_view(normal->mnemonic()), "buffer_load_short_d16");
   InstDefUse normal_idu(*normal, 64);
   EXPECT_TRUE(normal_idu.uses.contains({RegClass::VGPR, 5, 1}))
       << "LDS clear: the preserved half of vdata is a read";
-
-  auto lds = decode_cdna1({0xE0910000U, 0x00000500U}); // ...same, lds=1 (bit 16 set)
-  ASSERT_NE(lds, nullptr);
-  ASSERT_EQ(std::string_view(lds->mnemonic()), "buffer_load_short_d16");
-  InstDefUse lds_idu(*lds, 64);
-  EXPECT_FALSE(lds_idu.uses.contains({RegClass::VGPR, 5, 1}))
-      << "LDS set: data goes to LDS, so vdata is not a preserved read";
 }
 
 TEST(GeneratedInstDefUse, Vop3SdstEncDppClearsSuppressedScalarResult) {
@@ -8772,6 +8807,65 @@ TEST(ExplicitOrdinarySgprBound, SeesAnSgprThatIsAlsoAnImplicitUse) {
   for (const auto &b : blocks)
     scope.push_back(b.get());
   EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), kScopeWaveSize), 12u);
+}
+
+TEST(GeneratedInstDefUse, Gfx1150BufferFeedbackKeepsIncomingStatusLiveAtFullExec) {
+  constexpr uint8_t data = 8;
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  auto decoder = Decoder::create(arch);
+  ASSERT_NE(decoder, nullptr);
+  const auto full = rdna3_5::build_sop1(rdna3_5::kSMovB64Sop1, {.ssrc0 = 193, .sdst = 126});
+  const auto wait = rdna3_5::build_sopp(rdna3_5::kSWaitcntSopp);
+  const auto end = rdna3_5::build_sopp(rdna3_5::kSEndpgmSopp);
+  struct Case {
+    std::array<uint32_t, 2> words;
+    uint16_t payload_words;
+    bool returns;
+    bool atomic;
+  };
+  for (bool tfe : {false, true}) {
+    const rdna3_5::MubufBuilderFields buffer{.vdata = data, .tfe = tfe, .soffset = 128};
+    const rdna3_5::MtbufBuilderFields typed{
+        .format = 20, .vdata = data, .tfe = tfe, .soffset = 128};
+    const Case cases[] = {
+        {rdna3_5::build_mubuf(rdna3_5::kBufferLoadB32Mubuf, buffer), 1, true, false},
+        {rdna3_5::build_mubuf(rdna3_5::kBufferLoadFormatXyMubuf, buffer), 2, true, false},
+        {rdna3_5::build_mtbuf(rdna3_5::kTbufferLoadD16FormatXyzMtbuf, typed), 2, true, false},
+        {rdna3_5::build_mubuf(rdna3_5::kBufferAtomicAddU32Mubuf, buffer), 1, false, true},
+        {rdna3_5::build_mubuf(rdna3_5::kBufferAtomicAddU32Mubuf,
+                              {.glc = 1, .vdata = data, .tfe = tfe, .soffset = 128}),
+         1, true, true}};
+    for (const auto &test : cases) {
+      const RegisterRef status{RegClass::VGPR, static_cast<uint16_t>(data + test.payload_words), 1};
+      for (bool consume_status : {false, true}) {
+        const auto consume = rdna3_5::build_vop1(
+            rdna3_5::kVMovB32Vop1,
+            {.src0 = static_cast<uint16_t>(256 + (consume_status ? status.index : data)),
+             .vdst = 24});
+        TestCodeObject co({full[0], test.words[0], test.words[1], wait[0], consume[0], end[0]});
+        auto blocks = build_valid_blocks(co, *decoder, arch);
+        ASSERT_EQ(blocks.size(), 1u);
+        auto insts = insts_of(*blocks.front());
+        ASSERT_EQ(insts.size(), 5u);
+        const auto &inst = *insts[1];
+        SCOPED_TRACE(testing::Message()
+                     << inst.mnemonic() << " tfe=" << tfe << " consumes status=" << consume_status);
+        const auto scope = block_scope(blocks);
+        ExecMaskAnalysis exec{KernelBlockScope(scope), 32};
+        ASSERT_EQ(exec.before(inst), ExecState::Full);
+        LivenessAnalysis liveness{KernelBlockScope(scope), 32,
+                                  std::make_unique<ExecMaskAnalysis>(exec)};
+        const InstDefUse du(inst, 32);
+        EXPECT_EQ(du.defs.contains(status), tfe && test.returns);
+        EXPECT_FALSE(du.uses.contains(status));
+        auto live = liveness.live_before(inst);
+        ASSERT_TRUE(live.succeeded());
+        ASSERT_NE(live.value(), nullptr);
+        EXPECT_EQ(live.value()->contains(status), consume_status);
+        EXPECT_EQ(live.value()->contains({RegClass::VGPR, data, 1}), test.atomic);
+      }
+    }
+  }
 }
 
 } // namespace

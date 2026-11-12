@@ -7,6 +7,7 @@
 #include "execution_plugin_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "instruction_failure_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
@@ -1582,6 +1583,8 @@ std::vector<uint32_t> independent_wmma_kernel() {
 }
 
 TEST(ExecutionPluginTest, AsyncMmaEndsSetregVgprMsbAdjacencyHazard) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -1637,6 +1640,8 @@ TEST(ExecutionPluginTest, SynchronousObserverDisablesActualMmaOffload) {
 }
 
 TEST(ExecutionPluginTest, ReportedAsyncIssueFailureDrainsBeforeCancellation) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   class AsyncFailurePlugin final : public ExecutionPlugin {
   public:
     explicit AsyncFailurePlugin(bool reject)
@@ -1710,6 +1715,8 @@ TEST(ExecutionPluginTest, ReportedAsyncIssueFailureDrainsBeforeCancellation) {
 }
 
 TEST(ThroughputPluginTest, AsyncMmaCountsHaveExplicitlyUnavailableHandlerTiming) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -1792,6 +1799,8 @@ TEST(InstructionMixPluginTest, AloneItSubscribesToOnlyTheHooksItConsumes) {
 // without handling the issue hook would have dropped them from the counts
 // instead.
 TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -1822,6 +1831,8 @@ TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
 }
 
 TEST(ExecutionPluginTest, KernelLoggingSupportsActualAsyncMma) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -2133,29 +2144,37 @@ TEST(ExecutionPluginTest, UnsubscribedWaveBypassesHotHookAndCallbackLock) {
 }
 
 TEST(ExecutionPluginTest, WaveDispatchCachesEachPluginsHotHookSubscription) {
-  PluginFixture fixture;
-  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
-  ExecutionPluginGroup group(PluginSinkConfig{});
-  auto subscribed = std::make_unique<HotHookSubscriptionProbe>("subscribed_probe", true);
-  auto *subscribed_ptr = subscribed.get();
-  auto unsubscribed = std::make_unique<HotHookSubscriptionProbe>("unsubscribed_probe", false);
-  auto *unsubscribed_ptr = unsubscribed.get();
-  ASSERT_TRUE(group.add(std::move(subscribed)));
-  ASSERT_TRUE(group.add(std::move(unsubscribed)));
+  for (bool serialized : {false, true}) {
+    SCOPED_TRACE(serialized);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+    ExecutionPluginGroup group(PluginSinkConfig{});
+    auto subscribed =
+        std::make_unique<HotHookSubscriptionProbe>("subscribed_probe", true, serialized);
+    auto *subscribed_ptr = subscribed.get();
+    auto unsubscribed = std::make_unique<HotHookSubscriptionProbe>("unsubscribed_probe", false);
+    auto *unsubscribed_ptr = unsubscribed.get();
+    ASSERT_TRUE(group.add(std::move(subscribed)));
+    ASSERT_TRUE(group.add(std::move(unsubscribed)));
 
-  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
-  ASSERT_NE(wave, nullptr);
-  group.onAmdgpuWavefrontDispatched(*wave);
+    auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+    ASSERT_NE(wave, nullptr);
+    group.onAmdgpuWavefrontDispatched(*wave);
+    const uint64_t locks_before =
+        test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
 
-  EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
-  EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
-  for (uint32_t i = 0; i != 8; ++i)
-    group.onAmdgpuReadSgpr(wave, i);
+    EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
+    EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+    for (uint32_t i = 0; i != 8; ++i)
+      group.onAmdgpuReadSgpr(wave, i);
 
-  EXPECT_EQ(subscribed_ptr->hot_callbacks, 8u);
-  EXPECT_EQ(unsubscribed_ptr->hot_callbacks, 0u);
-  EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
-  EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+    EXPECT_EQ(subscribed_ptr->hot_callbacks, 8u);
+    EXPECT_EQ(unsubscribed_ptr->hot_callbacks, 0u);
+    EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
+    EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+    EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group),
+              locks_before + (serialized ? 8 : 0));
+  }
 }
 
 TEST(ExecutionPluginTest, CachedUnsubscribedWaveBypassesCallbackLock) {

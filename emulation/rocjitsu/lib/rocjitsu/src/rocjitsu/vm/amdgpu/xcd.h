@@ -17,8 +17,6 @@
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
 
-#include "util/diagnostic.h"
-
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -92,9 +90,9 @@ public:
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via their SPIs.
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
-                     uint64_t private_limit) {
+                     uint64_t private_limit, bool ptr32 = false) {
     for (auto *se : shader_engines_)
-      se->spi().set_apertures(shared_base, shared_limit, private_base, private_limit);
+      se->spi().set_apertures(shared_base, shared_limit, private_base, private_limit, ptr32);
   }
 
   /// @brief Set the execution plugin group on CP and all CUs (shared ownership).
