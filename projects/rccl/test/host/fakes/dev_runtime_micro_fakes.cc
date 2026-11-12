@@ -506,15 +506,22 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 // this binary, so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
 
-#undef ASSERT_HOOK_MATCHES_PROD
-
-// The enqueue-rearch job path: collective_stubs.cc pins
-// ncclParamEnqueueRearchEnable to 0, so every call site takes the in-group task
-// branch instead and nothing here enqueues a job.
-ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
-                                 ncclComm_t) {
+// The enqueue-rearch job path: collective_stubs.cc reads ncclParamEnqueueRearchEnable
+// through g_loadParam (default 0), so it is reached only when a test sets
+// ENQUEUE_REARCH_ENABLE. The default accepts the job without running or freeing it.
+static ncclResult_t DefaultMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
+                                           void (*)(void*), ncclComm_t) {
   return ncclSuccess;
 }
+std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*), ncclComm_t)>
+    g_devrMgmtTaskEnqueue = DefaultMgmtTaskEnqueue;
+ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob* task, ncclResult_t (*func)(struct ncclAsyncJob*),
+                                 void (*destructor)(void*), ncclComm_t comm) {
+  return g_devrMgmtTaskEnqueue(task, func, destructor, comm);
+}
+ASSERT_HOOK_MATCHES_PROD(g_devrMgmtTaskEnqueue, ncclMgmtTaskEnqueue);
+
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // ---------------------------------------------------------------------------
 // Params are not cached here (see fakes/dev_runtime_micro_fakes.h), so the default just
@@ -555,6 +562,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapBarrier                        = DefaultBootstrapBarrier;
   g_devrIntruAddressMapInsert                   = DefaultIntruAddressMapInsert;
   g_devrNcclCommWindowDeregister                = DefaultCommWindowDeregister;
+  g_devrMgmtTaskEnqueue                         = DefaultMgmtTaskEnqueue;
   ResetNcclDeviceCoreFakes();
   g_devrComputeCftSize                          = DefaultComputeCftSize;
   g_devrComputeCftMcSize                        = DefaultComputeCftMcSize;

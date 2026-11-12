@@ -9,6 +9,7 @@
 
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/config/pci_device_config.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 
 #include <cstdint>
 #include <string>
@@ -31,6 +32,7 @@ public:
     // Identification
     uint32_t gpu_id = 0;
     uint32_t gfx_target_version = 0;
+    [[nodiscard]] uint32_t clock_frequency_mhz() const;
     uint32_t vendor_id = 0x1002; // AMD
     uint32_t device_id = 0;
     uint32_t family_id = 0;
@@ -160,8 +162,9 @@ private:
   std::string topology_dir_;
   std::string drm_dir_;
   GpuInfo gpu_info_{};
+  std::vector<BackingFile> pending_files_;
 
-  void write_file(const std::string &path, const std::string &content);
+  void queue_file(const std::string &path, const std::string &content);
   void make_dir(const std::string &path);
   void write_generation_id();
   void write_system_properties(uint32_t num_devices);

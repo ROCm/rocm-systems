@@ -14,7 +14,9 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 
+#if defined(USE_CONSTMEM)
 #include "constmem.hpp"
+#endif
 #include "gda_enums.hpp"
 #include "log.hpp"
 #include "util.hpp"
@@ -95,23 +97,34 @@ private:
   QueuePairUnion qp;
 
   /**
-   * @brief Underlying GDA Provider.
-   * Only used by __host__ code, __device__ code should use constmem.gda_provider instead.
+   * @brief Per-instance GDA provider.
+   * With !USE_CONSTMEM the device dispatch reads this member (no __constant__
+   * constmem, so a consumer kernel that includes this header inherits no hidden
+   * device global). Placed adjacent to the QP union so it shares the cacheline
+   * the device dispatch already loads. Always set host-side by the constructors.
+   */
+  GDAProvider provider_{GDAProvider::UNSET};
+
+  /**
+   * @brief Underlying GDA Provider (host static).
+   * Used by __host__ code and by the host-only static helpers (can_inline,
+   * to_provider_endianness). With USE_CONSTMEM the device path uses
+   * constmem.gda_provider instead; otherwise it uses the provider_ member.
    */
   static inline GDAProvider provider{GDAProvider::UNSET};
 
 public:
 #if defined(GDA_IONIC)
   __host__ QueuePairMux(QueuePairIONIC&& ionic)
-    : qp{.ionic = std::move(ionic)} { provider = GDAProvider::IONIC; }
+    : qp{.ionic = std::move(ionic)} { provider = provider_ = GDAProvider::IONIC; }
 #endif
 #if defined(GDA_BNXT)
   __host__ QueuePairMux(QueuePairBNXT&& bnxt)
-    : qp{.bnxt = std::move(bnxt)}  { provider = GDAProvider::BNXT;  }
+    : qp{.bnxt = std::move(bnxt)}  { provider = provider_ = GDAProvider::BNXT;  }
 #endif
 #if defined(GDA_MLX5)
   __host__ QueuePairMux(QueuePairMLX5&& mlx5)
-    : qp{.mlx5 = std::move(mlx5)}  { provider = GDAProvider::MLX5;  }
+    : qp{.mlx5 = std::move(mlx5)}  { provider = provider_ = GDAProvider::MLX5;  }
 #endif
 
   __host__ QueuePairMux(const QueuePairMux& other)            = delete;
@@ -206,12 +219,33 @@ public:
   static __host__ __device__ __forceinline__ T to_provider_endianness(T val);
 
 private:
-  static __host__   __forceinline__ GDAProvider get_provider() { return provider; }
-  static __device__ __forceinline__ GDAProvider get_provider() { return constmem.gda_provider; }
+  // Static provider accessor (no `this`). Used by the static helpers can_inline /
+  // to_provider_endianness and host invalid_provider. The host overload reads the
+  // host-static `provider`; the device overload reads __constant__ constmem and
+  // exists only when USE_CONSTMEM — in the !USE_CONSTMEM build (e.g. RCCL's GIN
+  // path) the static helpers are only ever instantiated host-side, and can_inline's
+  // single device use is a constant-evaluated static_assert that never reaches the
+  // runtime switch, so the device overload is never odr-used and need not exist.
+  static __host__   __forceinline__ GDAProvider get_static_provider() { return provider; }
+#if defined(USE_CONSTMEM)
+  static __device__ __forceinline__ GDAProvider get_static_provider() { return constmem.gda_provider; }
+#endif
+
+  // Instance provider accessor (has `this`), used by the device dispatch methods.
+  // With USE_CONSTMEM it reads __constant__ constmem (rocSHMEM's historical
+  // behavior); otherwise the per-instance provider_ member, so a consumer kernel
+  // that embeds these headers inherits no __constant__ device global.
+  __device__ __forceinline__ GDAProvider get_provider() const {
+#if defined(USE_CONSTMEM)
+    return constmem.gda_provider;
+#else
+    return provider_;
+#endif
+  }
 
   [[noreturn]] static __host__ __forceinline__ void invalid_provider() {
     static_assert(std::is_same_v<std::underlying_type_t<GDAProvider>, int>);
-    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_provider()));
+    LOG_ERROR_ABORT("Invalid GDAProvider (%d)", static_cast<int>(get_static_provider()));
   }
 
   [[noreturn]] static __device__ __forceinline__ void invalid_provider() {
@@ -476,7 +510,7 @@ __host__ __device__ __forceinline__ constexpr bool QueuePairMux::can_inline(size
     }
   } else {
     // At runtime, dispatch to the selected GDA provider.
-    switch (get_provider()) {
+    switch (get_static_provider()) {
 #if defined(GDA_IONIC)
     case GDAProvider::IONIC:
       return QueuePairIONIC::can_inline<provider_op<Op, QueuePairIONIC>()>(size);
@@ -497,7 +531,7 @@ __host__ __device__ __forceinline__ constexpr bool QueuePairMux::can_inline(size
 
 template <typename T>
 __host__ __device__ __forceinline__ T QueuePairMux::to_provider_endianness(T val) {
-  switch (get_provider()) {
+  switch (get_static_provider()) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return QueuePairIONIC::to_provider_endianness<T>(val);

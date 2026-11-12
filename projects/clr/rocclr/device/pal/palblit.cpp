@@ -2674,9 +2674,10 @@ bool KernelBlitManager::runScheduler(device::Memory& vqueue, device::Memory& par
   return result;
 }
 
-void KernelBlitManager::writeRawData(device::Memory& memory, size_t size, const void* data) const {
+void KernelBlitManager::writeRawData(device::Memory& memory, size_t offset, size_t size,
+                                     const void* data) const {
   std::scoped_lock k(lockXferOps_);
-  static_cast<pal::Memory&>(memory).writeRawData(gpu(), 0, size, data, false);
+  static_cast<pal::Memory&>(memory).writeRawData(gpu(), offset, size, data, false);
 
   synchronize();
 }

@@ -3,6 +3,7 @@ import { fixtureRunPath } from '../fixtures/runPath.js';
 import { act, Children, createElement, isValidElement, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import App from '../../src/App.jsx';
 import BenchmarksView from '../../src/components/views/BenchmarksView.jsx';
@@ -46,7 +47,7 @@ afterEach(() => {
 // instead of mounting MUI/ECharts host DOM. Loader is the only data boundary mock.
 function mountApp(storage = new Map(), blockedStorage = false) {
   const { browser, container } = createReactRootSurface();
-  browser.location = { href: 'https://example.test/app/?view=benchmarks&campaign=keep#anchor' };
+  browser.location = { href: 'https://example.test/app/?view=benchmarks&benchmarkRange=ALL&campaign=keep#anchor' };
   if (blockedStorage) Object.defineProperty(browser, 'localStorage', { get() { throw new Error('Storage denied'); } });
   else browser.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
   browser.matchMedia = () => ({ matches: false });
@@ -229,7 +230,7 @@ it('UI-004 preserves standalone initialBenchmarkIds and distinguishes controlled
   const data = adaptPublishedDashboardData(createMaintainedPublication()).data;
   const filters = { targets: ['gfx1250'], suites: data.suites, modes: ['single', 'default'] };
   const onBenchmarksChange = vi.fn();
-  const markup = (props) => renderToStaticMarkup(createElement(BenchmarksView, { data, filters, onBenchmarksChange, ...props }));
+  const markup = (props) => renderToStaticMarkup(themed(BenchmarksView, { data, filters, onBenchmarksChange, ...props }));
   const initialEmpty = markup({ initialBenchmarkIds: [] });
   expect(initialEmpty).not.toContain('data-testid="benchmark-grid-card"');
   const initialMissing = markup({ initialBenchmarkIds: ['exact-missing-id'] });

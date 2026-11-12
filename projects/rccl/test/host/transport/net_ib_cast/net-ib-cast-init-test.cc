@@ -545,6 +545,21 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_OneRoceHca_AddsOnePhysicalAndO
   EXPECT_EQ(g_ibCastReportMatchingSchemeCalls, 1);
 }
 
+TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_RequestedCap_OverridesThePortLimit) {
+  params_.Set("RCCL_IB_MAX_MSG_SIZE", 4 * 1024 * 1024);
+  World().AddHca("ionic_0").ports[0].max_msg_sz = 1024 * 1024;
+  ASSERT_EQ(Init(), ncclSuccess);
+  EXPECT_EQ(IbCastMaxPostSendBytes, 4u * 1024u * 1024u);
+}
+
+TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_UnsetMaxMsgSize_UsesTheSmallerPort) {
+  World().AddHca("ionic_0").ports[0].max_msg_sz = 4u * 1024u * 1024u;
+  World().AddHca("ionic_1").ports[0].max_msg_sz = 2u * 1024u * 1024u;
+  ASSERT_EQ(Init(), ncclSuccess);
+  ASSERT_EQ(IbCastNDevs, 2);
+  EXPECT_EQ(IbCastMaxPostSendBytes, 2u * 1024u * 1024u);
+}
+
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_SecondCall_OnlyTakesAReference) {
   World().AddHca("ionic_0");
   ASSERT_EQ(Init(), ncclSuccess);
@@ -927,13 +942,13 @@ TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_NoDataDirectPath_KeepsThePl
   EXPECT_EQ(IbCastDevs[0].capsProvider.mlx5.dataDirect, 0);
 }
 
-// The error returns past the fail: label, so the device list and the open context are never released.
-// Pins AICOMRCCL-3090; a fix flips this pin.
-TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_KnownBug_DataDirectLookupErrorLeaksTheDeviceList) {
+// The error goes through the fail: label, so the device list and the open context are released (AICOMRCCL-3090).
+TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_DataDirectLookupErrorReleasesTheDeviceListAndContext) {
   DataDirect(ncclSystemError);
   EXPECT_EQ(Init(), ncclSystemError);
-  EXPECT_EQ(World().freeDeviceList.calls, 0);
-  EXPECT_EQ(World().hcas[0].closes, 0);
+  EXPECT_EQ(World().freeDeviceList.calls, 1);
+  EXPECT_EQ(World().hcas[0].closes, 1);
+  EXPECT_EQ(IbCastNDevs, 0);
 }
 
 TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_DataDirectOff_SkipsTheProbe) {

@@ -192,7 +192,7 @@ class Sampler : public device::Sampler {
   );
 
  private:
-  void fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescriptor,
+  void fillSampleDescriptor(hsa_ext_sampler_descriptor_v3_t& samplerDescriptor,
                             const amd::Sampler& sampler) const;
   Sampler& operator=(const Sampler&);
 
@@ -231,7 +231,8 @@ class NullDevice : public amd::Device {
   // List of dummy functions which are disabled for NullDevice
 
   //! Create a new virtual device environment.
-  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) override {
+  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
+                                             bool cooperative = false) override {
     ShouldNotReachHere();
     return nullptr;
   }
@@ -328,6 +329,12 @@ class NullDevice : public amd::Device {
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override {
     ShouldNotReachHere();
     return true;
+  }
+
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override {
+    ShouldNotReachHere();
+    return false;
   }
 
   //! Determine if we can use device memory for SVM
@@ -470,7 +477,8 @@ class Device : public NullDevice {
   ///////////////////////////////////////////////////////////////////////////////
 
   //! Instantiate a new virtual device
-  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) override;
+  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
+                                                     bool cooperative = false) override;
 
   //! Construct an device program object from the ELF assuming it is valid
   virtual device::Program* createProgram(amd::Program& owner,
@@ -606,6 +614,12 @@ class Device : public NullDevice {
   bool CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uint64_t attributes,
                      bool batched, bool device_memory, hsa_signal_t* signals,
                      bool& in_device_memory) const;
+  //! True if pooled graph signals are batched in device memory
+  bool GraphDeviceSignals() const { return graph_device_signals_; }
+  //! A gate signal for a graph end marker (DEBUG_CLR_GRAPH_FAST_LAUNCH), armed; nullptr if none.
+  //! The gate comes with a reference of its own, the checkout, which the caller releases once
+  //! the command that uses the gate holds it (or at once if the gate goes unused)
+  ProfilingSignal* AcquireGateSignal();
   //! True if queue completion signals are batched in device memory
   bool QueueDeviceSignals() const { return queue_device_signals_; }
   //! A batched command keeps its completion signal until the batch completes, and replacing a
@@ -651,6 +665,9 @@ class Device : public NullDevice {
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
   //! return a new device pointer accessible by the GPU agent.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
+
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override;
 
   //! Returns transfer engine object
   const device::BlitManager& xferMgr() const { return xferQueue()->blitMgr(); }
@@ -699,6 +716,9 @@ class Device : public NullDevice {
   VirtualGPUs vgpus_;  //!< The list of all running virtual gpus (lock protected)
 
   VirtualGPU* xferQueue() const;
+
+  //! Cooperative-launch queue, created on first cooperative launch
+  VirtualGPU* coopQueue() const;
 
   struct QueueExtras {
     void* metadataRingBuffer = nullptr;
@@ -852,6 +872,10 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t gpu_ext_fine_grained_segment_;
   hsa_amd_memory_pool_t device_signal_pool_{0};  //!< Pool for signals in device memory, if any
   bool graph_device_signals_ = false;  //!< Graph signals live in device_signal_pool_
+  std::mutex gate_lock_;                        //!< Guards the gate pool
+  std::vector<ProfilingSignal*> gate_signals_;  //!< AcquireGateSignal()'s pool
+  size_t gate_next_ = 0;                        //!< Where AcquireGateSignal() starts its search
+  bool gate_short_ = false;                     //!< The pool ran out: grow when it is not
   bool queue_device_signals_ = false;  //!< Queue signals live in device_signal_pool_
   //! Armed HW events that graphs take their signal sets from and give back when destroyed
   mutable std::vector<void*> graph_hw_events_;
@@ -866,6 +890,8 @@ class Device : public NullDevice {
   static constexpr bool offlineDevice_ = false;
   VirtualGPU* xferQueue_;  //!< Transfer queue, created on demand
   mutable std::once_flag xferQueueOnce_;  //!< Serialises lazy creation of xferQueue_
+  VirtualGPU* coopQueue_;  //!< Cooperative-launch queue, created on demand
+  mutable std::once_flag coopQueueOnce_;  //!< Serialises lazy creation of coopQueue_
 
   std::atomic<size_t> freeMem_;       //!< Total of free memory available
   mutable std::recursive_mutex vgpusAccess_;  //!< Lock to serialise virtual gpu list access

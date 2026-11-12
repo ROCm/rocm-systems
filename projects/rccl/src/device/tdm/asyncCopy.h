@@ -331,6 +331,28 @@ __device__ inline void asyncWait() {
   __builtin_amdgcn_s_wait_asynccnt(WAIT_CNT);
 }
 
+// Wait until at most `keep` async ops are in flight, `keep` rounded down to a rung STEP * (2^k - 1), k = RUNGS..1, or 0.
+template <int STEP, int RUNGS>
+__device__ inline void asyncWaitAtMost(int keep) {
+  if constexpr (RUNGS == 0) {
+    asyncWait<0>();
+  } else {
+    constexpr int kRung = STEP * ((1 << RUNGS) - 1);
+    if (keep >= kRung) {
+      asyncWait<kRung>();
+    } else {
+      asyncWaitAtMost<STEP, RUNGS - 1>(keep);
+    }
+  }
+}
+
+// Async ops each lane issues in an Aligned copy of SIZE bytes on LANES lanes: one b128 per warp-wide row, no tail.
+template <size_t SIZE, size_t LANES>
+constexpr int asyncAlignedCopyOps() {
+  static_assert(SIZE % (LANES * async_detail::BYTES_PER_LANE_B128) == 0, "a tail would issue more ops per lane");
+  return (int)(SIZE / (LANES * async_detail::BYTES_PER_LANE_B128));
+}
+
 template <SyncPolicy sp, CachePolicy cp, bool Aligned>
 __device__ inline void asyncLoadToLDS(const uint8_t* globalSrc, uint8_t* ldsDst, size_t sizeInBytes) {
   async_detail::warpAsyncCopy<async_detail::AsyncDir::Load, cp, Aligned>(globalSrc, ldsDst, sizeInBytes);

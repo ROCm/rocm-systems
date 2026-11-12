@@ -3439,22 +3439,46 @@ hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
                              *hip_stream, true, /*failIdx=*/nullptr));
 }
 
-hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
-                                 unsigned long long flags, hipStream_t stream) {
-  HIP_INIT_API(hipMemcpy3DBatchAsync, numOps, opList, failIdx, flags, stream);
-  size_t ignored_fail_idx = SIZE_MAX;
-  if (failIdx == nullptr) {
-    failIdx = &ignored_fail_idx;
-  }
-  if (flags != 0 || opList == nullptr || numOps == 0) {
-    *failIdx = SIZE_MAX;
-    HIP_RETURN(hipErrorInvalidValue);
-  }
+hipError_t hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size,
+                                        hipMemcpyAttributes* attr, hipStream_t stream) {
+  HIP_INIT_API(hipMemcpyWithAttributesAsync, dst, src, size, attr, stream);
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
   CHECK_STREAM_DETACHED_API(stream);
 
+  if (dst == nullptr || src == nullptr || size == 0 || attr == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Legacy flag set; other bits are ignored, matching hipMemcpyBatchAsync.
+  constexpr unsigned int kLegacyFlagMask =
+      hipMemcpyFlagPreferOverlapWithCompute | hipMemcpyFlagExtPreferCE |
+      hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
+
+  hipExtMemcpyAttributes extAttr{};
+  extAttr.srcAccessOrder = attr->srcAccessOrder;
+  extAttr.srcLocHint = attr->srcLocHint;
+  extAttr.dstLocHint = attr->dstLocHint;
+  extAttr.flags = attr->flags & kLegacyFlagMask;
+
+  // A single entry batch is exactly this copy. ihipMemcpyBatch validates the attribute itself.
+  void* dsts[1] = {dst};
+  void* srcs[1] = {const_cast<void*>(src)};
+  size_t sizes[1] = {size};
+  size_t attrsIdxs[1] = {0};
+
+  HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizes, /*sizesDst=*/nullptr,
+                             /*waits=*/nullptr, /*signals=*/nullptr, 1,
+                             &extAttr, attrsIdxs, 1,
+                             *hip::getStream(stream), true, /*failIdx=*/nullptr));
+}
+
+// ================================================================================================
+// Shared implementation behind hipMemcpy3DBatchAsync and hipMemcpy3DWithAttributesAsync. Callers
+// validate flags, opList and the stream before handing the operations over.
+static hipError_t ihipMemcpy3DBatch(size_t numOps, struct hipMemcpy3DBatchOp* opList,
+                                    size_t* failIdx, hipStream_t stream) {
   *failIdx = SIZE_MAX;
   hip::Stream* hip_stream = hip::getStream(stream);
 
@@ -3465,18 +3489,18 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
     const hipMemcpySrcAccessOrder access_order = opList[i].srcAccessOrder;
     if (access_order < hipMemcpySrcAccessOrderStream || access_order > hipMemcpySrcAccessOrderAny) {
       *failIdx = i;
-      HIP_RETURN(hipErrorInvalidValue);
+      return hipErrorInvalidValue;
     }
     hipMemcpy3DParms parms = getMemcpy3DParms(opList[i]);
     hipError_t status = ihipMemcpy3D_validate(&parms);
     if (status != hipSuccess) {
       *failIdx = i;
-      HIP_RETURN(status);
+      return status;
     }
     HIP_MEMCPY3D desc = getDrvMemcpy3DDesc(parms);
     if (desc.WidthInBytes == 0 || desc.Height == 0 || desc.Depth == 0) {
       *failIdx = i;
-      HIP_RETURN(hipErrorInvalidValue);
+      return hipErrorInvalidValue;
     }
 
     hipMemoryType src_memory_type;
@@ -3494,7 +3518,7 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
                                       &dst_rect, &src_image, &dst_image);
     if (status != hipSuccess) {
       *failIdx = i;
-      HIP_RETURN(status);
+      return status;
     }
     if (src_memory_type == hipMemoryTypeArray || dst_memory_type == hipMemoryTypeArray) {
       per_entry_copies.emplace_back(i, desc);
@@ -3575,7 +3599,7 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
   }
   status = EnqueueBatchMarker(status, *hip_stream, marker_wait_list);
   if (status != hipSuccess) {
-    HIP_RETURN(status);
+    return status;
   }
 
   for (auto& [index, desc] : per_entry_copies) {
@@ -3585,7 +3609,43 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
       break;
     }
   }
-  HIP_RETURN(status);
+  return status;
+}
+
+// ================================================================================================
+hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
+                                 unsigned long long flags, hipStream_t stream) {
+  HIP_INIT_API(hipMemcpy3DBatchAsync, numOps, opList, failIdx, flags, stream);
+  size_t ignored_fail_idx = SIZE_MAX;
+  if (failIdx == nullptr) {
+    failIdx = &ignored_fail_idx;
+  }
+  if (flags != 0 || opList == nullptr || numOps == 0) {
+    *failIdx = SIZE_MAX;
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  CHECK_STREAM_DETACHED_API(stream);
+
+  HIP_RETURN(ihipMemcpy3DBatch(numOps, opList, failIdx, stream));
+}
+
+// ================================================================================================
+hipError_t hipMemcpy3DWithAttributesAsync(struct hipMemcpy3DBatchOp* op, unsigned long long flags,
+                                          hipStream_t stream) {
+  HIP_INIT_API(hipMemcpy3DWithAttributesAsync, op, flags, stream);
+  if (flags != 0 || op == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  CHECK_STREAM_DETACHED_API(stream);
+
+  size_t ignored_fail_idx = SIZE_MAX;
+  HIP_RETURN(ihipMemcpy3DBatch(1, op, &ignored_fail_idx, stream));
 }
 
 hipError_t ihipMemset_validate(amd::Memory* dstMemory, int64_t value, size_t valueSize,
@@ -4219,14 +4279,6 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     if (attributes->isManaged) {
       attributes->type = hipMemoryTypeManaged;
     }
-  } else if (ptr != nullptr &&
-             PlatformState::Instance().StatCO().FindDeferredManagedVar(ptr) != nullptr) {
-    attributes->type = hipMemoryTypeManaged;
-    attributes->hostPointer = const_cast<void*>(ptr);
-    attributes->devicePointer = const_cast<void*>(ptr);
-    attributes->isManaged = true;
-    attributes->allocationFlags = 0;
-    attributes->device = hip::getCurrentDevice() ? hip::getCurrentDevice()->deviceId() : 0;
   } else {
     attributes->type = hipMemoryTypeUnregistered;
     attributes->devicePointer = nullptr;
@@ -4287,8 +4339,9 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_MEMORY_TYPE: {
-      if (memObj) {  // checks for host type or device type
-        *reinterpret_cast<uint32_t*>(data) = getMemoryType(memObj);
+      if (memObj) {
+        *reinterpret_cast<uint32_t*>(data) =
+            IsManagedMemory(memObj->getMemFlags()) ? hipMemoryTypeManaged : getMemoryType(memObj);
         break;
       }
       hipArray* arr = static_cast<hipArray*>(ptr);
@@ -4314,9 +4367,6 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
           *reinterpret_cast<uint32_t*>(data) = 0;
           return hipErrorInvalidValue;
         }
-      } else if (ptr != nullptr &&
-                 PlatformState::Instance().StatCO().FindDeferredManagedVar(ptr) != nullptr) {
-        *reinterpret_cast<uint32_t*>(data) = hipMemoryTypeManaged;
       } else {
         // Unregistered host memory (allocated on stack, heap etc.)
         *reinterpret_cast<uint32_t*>(data) = hipMemoryTypeUnregistered;
