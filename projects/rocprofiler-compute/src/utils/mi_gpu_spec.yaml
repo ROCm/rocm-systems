@@ -472,7 +472,7 @@ mi_gpu_spec:
             chip_ids:
               physical: 6402
 
-  # RDNA 4 (gfx120x). Navi 48 uses L2, Infinity Cache, and GDDR6.
+  # RDNA 4 (gfx120x). Navi 48 uses L2, Infinity Cache, and VRAM.
   - gpu_series: rdna4
     gpu_archs:
       - gpu_arch: gfx1201

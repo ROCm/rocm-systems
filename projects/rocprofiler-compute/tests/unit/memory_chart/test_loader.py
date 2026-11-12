@@ -126,16 +126,16 @@ def test_gfx1201_memory_demand_belongs_to_l2():
     # DRAM Read/Write Requests and Read/Write Bandwidth
     memory_demand = {"3.9.0", "3.9.1", "3.9.2", "3.9.3"}
     assert memory_demand <= {item.metric_id for item in blocks["l2"].items}
-    # GDDR6 Read/Write Bandwidth
-    assert {item.metric_id for item in blocks["gddr6"].items} == {"3.11.1", "3.11.2"}
+    # VRAM Read/Write Bandwidth
+    assert {item.metric_id for item in blocks["vram"].items} == {"3.11.1", "3.11.2"}
 
 
 @pytest.mark.parametrize(
     "name",
     [
         "Infinity Cache Hit Rate",
-        "GDDR6 Read Bandwidth",
-        "GDDR6 Write Bandwidth",
+        "VRAM Read Bandwidth",
+        "VRAM Write Bandwidth",
         "ICache-GL1 Read Bandwidth",
         "DCache-GL1 Read Bandwidth",
     ],

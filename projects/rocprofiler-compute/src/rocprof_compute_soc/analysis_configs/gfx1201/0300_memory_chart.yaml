@@ -139,7 +139,7 @@ Panel Config:
       cli_style: mem_chart
   - metric_table:
       id: 311
-      title: Infinity Cache and GDDR6
+      title: Infinity Cache and VRAM
       header:
         metric: Metric
         value: Value
@@ -148,10 +148,10 @@ Panel Config:
         Infinity Cache Hit Rate:
           value: None
           unit: Percent
-        GDDR6 Read Bandwidth:
+        VRAM Read Bandwidth:
           value: None
           unit: Bytes/s
-        GDDR6 Write Bandwidth:
+        VRAM Write Bandwidth:
           value: None
           unit: Bytes/s
       cli_style: mem_chart
@@ -194,25 +194,25 @@ Panel Config:
       Percentage of L2 lookups that hit.
     DRAM Read Requests: >-
       L2 read requests over EA destined for DRAM. Infinity Cache can serve
-      them before they reach GDDR6.
+      them before they reach VRAM.
     DRAM Write Requests: >-
       L2 write requests over EA destined for DRAM. Infinity Cache can absorb
-      them before they reach GDDR6.
+      them before they reach VRAM.
     DRAM Read Bandwidth: >-
       Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity
-      Cache hits are included, so this can exceed the GDDR6 bandwidth peak.
+      Cache hits are included, so this can exceed the VRAM bandwidth peak.
     DRAM Write Bandwidth: >-
       Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity
       Cache hits are included.
     Infinity Cache Hit Rate: >-
       Not collected by this implementation. Memory-destined L2 traffic can be
       served by Infinity Cache; its hit rate cannot be inferred from that traffic.
-    GDDR6 Read Bandwidth: >-
+    VRAM Read Bandwidth: >-
       Not collected by this implementation. Memory-destined L2 read bandwidth
-      includes Infinity Cache hits and does not measure traffic reaching GDDR6.
-    GDDR6 Write Bandwidth: >-
+      includes Infinity Cache hits and does not measure traffic reaching VRAM.
+    VRAM Write Bandwidth: >-
       Not collected by this implementation. Memory-destined L2 write bandwidth
-      does not measure traffic reaching GDDR6.
+      does not measure traffic reaching VRAM.
     Wavefront Occupancy: >-
       Estimated resident waves relative to the configured maximum. Navi48
       living-wave counter units, instance reduction, and WGP normalization

@@ -114,33 +114,33 @@ Memory chart - GL2 Cache (L2):
     unit: Percent
 Memory chart - EA to DRAM:
   DRAM Read Requests:
-    plain: L2 read requests over EA destined for DRAM. Infinity Cache can serve them before they reach GDDR6.
-    rst: L2 read requests over EA destined for DRAM. Infinity Cache can serve them before they reach GDDR6.
+    plain: L2 read requests over EA destined for DRAM. Infinity Cache can serve them before they reach VRAM.
+    rst: L2 read requests over EA destined for DRAM. Infinity Cache can serve them before they reach VRAM.
     unit: Requests per Normalization Unit
   DRAM Write Requests:
-    plain: L2 write requests over EA destined for DRAM. Infinity Cache can absorb them before they reach GDDR6.
-    rst: L2 write requests over EA destined for DRAM. Infinity Cache can absorb them before they reach GDDR6.
+    plain: L2 write requests over EA destined for DRAM. Infinity Cache can absorb them before they reach VRAM.
+    rst: L2 write requests over EA destined for DRAM. Infinity Cache can absorb them before they reach VRAM.
     unit: Requests per Normalization Unit
   DRAM Read Bandwidth:
-    plain: Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the GDDR6 bandwidth peak.
-    rst: Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the GDDR6 bandwidth peak.
+    plain: Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the VRAM bandwidth peak.
+    rst: Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the VRAM bandwidth peak.
     unit: Bytes/s
   DRAM Write Bandwidth:
     plain: Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included.
     rst: Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included.
     unit: Bytes/s
-Memory chart - Infinity Cache and GDDR6:
+Memory chart - Infinity Cache and VRAM:
   Infinity Cache Hit Rate:
     plain: Not collected by this implementation. Memory-destined L2 traffic can be served by Infinity Cache; its hit rate cannot be inferred from that traffic.
     rst: Not collected by this implementation. Memory-destined L2 traffic can be served by Infinity Cache; its hit rate cannot be inferred from that traffic.
     unit: Percent
-  GDDR6 Read Bandwidth:
-    plain: Not collected by this implementation. Memory-destined L2 read bandwidth includes Infinity Cache hits and does not measure traffic reaching GDDR6.
-    rst: Not collected by this implementation. Memory-destined L2 read bandwidth includes Infinity Cache hits and does not measure traffic reaching GDDR6.
+  VRAM Read Bandwidth:
+    plain: Not collected by this implementation. Memory-destined L2 read bandwidth includes Infinity Cache hits and does not measure traffic reaching VRAM.
+    rst: Not collected by this implementation. Memory-destined L2 read bandwidth includes Infinity Cache hits and does not measure traffic reaching VRAM.
     unit: Bytes/s
-  GDDR6 Write Bandwidth:
-    plain: Not collected by this implementation. Memory-destined L2 write bandwidth does not measure traffic reaching GDDR6.
-    rst: Not collected by this implementation. Memory-destined L2 write bandwidth does not measure traffic reaching GDDR6.
+  VRAM Write Bandwidth:
+    plain: Not collected by this implementation. Memory-destined L2 write bandwidth does not measure traffic reaching VRAM.
+    rst: Not collected by this implementation. Memory-destined L2 write bandwidth does not measure traffic reaching VRAM.
     unit: Bytes/s
 Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
@@ -383,12 +383,12 @@ GL2 Cache Request Statistics:
     rst: L2 atomic requests, normalized by the chosen unit.
     unit: Count per Normalization Unit
   EA Read Requests (DRAM):
-    plain: L2 read requests over EA destined for memory. Infinity Cache can serve these requests before they reach GDDR6.
-    rst: L2 read requests over EA destined for memory. Infinity Cache can serve these requests before they reach GDDR6.
+    plain: L2 read requests over EA destined for memory. Infinity Cache can serve these requests before they reach VRAM.
+    rst: L2 read requests over EA destined for memory. Infinity Cache can serve these requests before they reach VRAM.
     unit: Count per Normalization Unit
   EA Write Requests (DRAM):
-    plain: L2 write requests over EA destined for memory. Infinity Cache can absorb these requests before they reach GDDR6.
-    rst: L2 write requests over EA destined for memory. Infinity Cache can absorb these requests before they reach GDDR6.
+    plain: L2 write requests over EA destined for memory. Infinity Cache can absorb these requests before they reach VRAM.
+    rst: L2 write requests over EA destined for memory. Infinity Cache can absorb these requests before they reach VRAM.
     unit: Count per Normalization Unit
 GL2 Cache Performance:
   GL2 Cache Hit Rate:

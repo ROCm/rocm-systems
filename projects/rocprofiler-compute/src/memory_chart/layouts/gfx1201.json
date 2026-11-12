@@ -1,7 +1,7 @@
 {
   "archs": ["gfx1201"],
-  "description": "RDNA 4 Navi 48: WGPs, LDS/GL0/SQC, GL1, GL2, Infinity Cache, GDDR6.",
-  "scope": {"labels": ["GPU", "GDDR6"], "split": "gddr6"},
+  "description": "RDNA 4 Navi 48: WGPs, LDS/GL0/SQC, GL1, GL2, Infinity Cache, VRAM.",
+  "scope": {"labels": ["GPU", "VRAM"], "split": "vram"},
   "blocks": [
     {"id": "cu", "title": "WGPs", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
       {"metric_id": "3.10.0", "title": "Wave Occ", "category": "util", "bar": false},
@@ -43,7 +43,7 @@
       {"metric_id": "3.11.0", "title": "Hit Rate", "category": "hit", "bar": true}
     ]},
 
-    {"id": "gddr6", "title": "GDDR6", "column": 5, "row": 0, "order": 0, "style": "panel", "content": [
+    {"id": "vram", "title": "VRAM", "column": 5, "row": 0, "order": 0, "style": "panel", "content": [
       {"metric_id": "3.11.1", "title": "Read BW", "category": "read", "bar": false},
       {"metric_id": "3.11.2", "title": "Write BW", "category": "write", "bar": false}
     ]}

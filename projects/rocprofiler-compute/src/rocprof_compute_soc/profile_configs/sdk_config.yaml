@@ -24190,14 +24190,14 @@ rocprofiler-sdk:
       - gfx1201
       expression: reduce(SQ_WMMA_VALU_INSTS,sum)
   - name: GL2C_EA_RDREQ_DRAM_32B_sum
-    description: Sum of GL2C/EA DRAM-destined read requests in 32-byte units across counter instances. Infinity Cache may serve this traffic before GDDR6.
+    description: Sum of GL2C/EA DRAM-destined read requests in 32-byte units across counter instances. Infinity Cache may serve this traffic before VRAM.
     properties: []
     definitions:
     - architectures:
       - gfx1201
       expression: reduce(GL2C_EA_RDREQ_DRAM_32B,sum)
   - name: GL2C_EA_WRREQ_DRAM_32B_sum
-    description: Sum of GL2C/EA DRAM-destined write requests in 32-byte units across counter instances. Infinity Cache may absorb this traffic before GDDR6.
+    description: Sum of GL2C/EA DRAM-destined write requests in 32-byte units across counter instances. Infinity Cache may absorb this traffic before VRAM.
     properties: []
     definitions:
     - architectures:

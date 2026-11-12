@@ -31,13 +31,13 @@ Panel Config:
   - metric_table:
       id: 311
       metric:
-        Physical GDDR6 Reads:
+        Physical VRAM Reads:
           value: None
           unit: Bytes/s
   metrics_description:
     GL2 Requests: Requests that reach GL2.
     DRAM-Bound Reads: Traffic may be served by Infinity Cache.
-    Physical GDDR6 Reads: This measurement is unavailable.
+    Physical VRAM Reads: This measurement is unavailable.
 """
 
 
@@ -69,8 +69,8 @@ def test_navi48_descriptions_use_distinct_memory_sections(memory_arch_dir):
                 "unit": "Bytes/s",
             }
         },
-        "Memory chart - Infinity Cache and GDDR6": {
-            "Physical GDDR6 Reads": {
+        "Memory chart - Infinity Cache and VRAM": {
+            "Physical VRAM Reads": {
                 "plain": "This measurement is unavailable.",
                 "rst": "This measurement is unavailable.",
                 "unit": "Bytes/s",

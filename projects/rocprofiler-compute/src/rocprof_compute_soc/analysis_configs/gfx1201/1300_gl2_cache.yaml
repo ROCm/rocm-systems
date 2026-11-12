@@ -79,10 +79,10 @@ Panel Config:
       L2 atomic requests, normalized by the chosen unit.
     EA Read Requests (DRAM): >-
       L2 read requests over EA destined for memory. Infinity Cache can serve
-      these requests before they reach GDDR6.
+      these requests before they reach VRAM.
     EA Write Requests (DRAM): >-
       L2 write requests over EA destined for memory. Infinity Cache can absorb
-      these requests before they reach GDDR6.
+      these requests before they reach VRAM.
     GL2 Cache Hit Rate: >-
       Percentage of L2 lookups that hit.
     GL2 Cache Hits: >-

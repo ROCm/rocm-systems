@@ -54,7 +54,7 @@ panels:
     title: Workgroup Processors (WGPs)
   - type: metric_table
     id: 11
-    title: Infinity Cache and GDDR6
+    title: Infinity Cache and VRAM
 - file: workgroup_manager_spi.yaml
   panel_id: 6
   panel_title: Workgroup Manager (SPI)
