@@ -26,6 +26,7 @@
 
 #include <rocshmem/rocshmem.hpp>
 #include <hip/hip_runtime.h>
+#include <hip/hip_version.h>
 #include <cstring>
 #include <vector>
 #include <stdlib.h>
@@ -60,7 +61,9 @@ REDUCE_ON_STREAM_DEF(int,              int)
 REDUCE_ON_STREAM_DEF(float,            float)
 REDUCE_ON_STREAM_DEF(double,           double)
 REDUCE_ON_STREAM_DEF(__half,           half)
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
 REDUCE_ON_STREAM_DEF(__hip_bfloat16,   bfloat16)
+#endif
 
 /******************************************************************************
  * HOST TESTER CLASS METHODS

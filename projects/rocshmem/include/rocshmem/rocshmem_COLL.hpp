@@ -25,6 +25,8 @@
 #ifndef LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP
 #define LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP
 
+#include <hip/hip_version.h>
+
 namespace rocshmem {
 
 /**
@@ -1853,6 +1855,7 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_half_max_reduce_scatter_wg(
 __device__ ATTR_NO_INLINE int rocshmem_ctx_half_prod_reduce_scatter_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest, const __half *source,
     int nreduce);
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
 __device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_sum_reduce_scatter_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
     int nreduce);
@@ -1865,6 +1868,7 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_max_reduce_scatter_wg(
 __device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_prod_reduce_scatter_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
     int nreduce);
+#endif
 
 /**
  * @name SHMEM_REDUCE_SCATTER_WAVE device-side (wave-level)
@@ -2349,6 +2353,7 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_half_max_reduce_scatter_wave(
 __device__ ATTR_NO_INLINE int rocshmem_ctx_half_prod_reduce_scatter_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest, const __half *source,
     int nreduce);
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
 __device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_sum_reduce_scatter_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
     int nreduce);
@@ -2361,6 +2366,7 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_max_reduce_scatter_wave(
 __device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_prod_reduce_scatter_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
     int nreduce);
+#endif
 
 /**
  * @name SHMEM_REDUCE_SCATTER host-side
@@ -2685,6 +2691,7 @@ __host__ int rocshmem_ctx_half_max_reduce_scatter(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest, const __half *source, int nreduce);
 __host__ int rocshmem_ctx_half_prod_reduce_scatter(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest, const __half *source, int nreduce);
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
 __host__ int rocshmem_ctx_bfloat16_sum_reduce_scatter(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source, int nreduce);
 __host__ int rocshmem_ctx_bfloat16_min_reduce_scatter(
@@ -2693,6 +2700,7 @@ __host__ int rocshmem_ctx_bfloat16_max_reduce_scatter(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source, int nreduce);
 __host__ int rocshmem_ctx_bfloat16_prod_reduce_scatter(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source, int nreduce);
+#endif
 
 /**
  * @name SHMEM_REDUCTIONS
@@ -3823,6 +3831,7 @@ __host__ int rocshmem_ctx_half_prod_reduce(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest, const __half *source,
     int nreduce);
 
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
 __device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_sum_reduce_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
     int nreduce);
@@ -3851,6 +3860,7 @@ __host__ int rocshmem_ctx_bfloat16_prod_reduce(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
     int nreduce);
 
+#endif
 /**
  * @name ROCSHMEM_CTX_REDUCE_WAVE
  * @brief Perform an allreduce between PEs in the active set. The caller
@@ -4345,6 +4355,7 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_half_max_reduce_wave(
 __device__ ATTR_NO_INLINE int rocshmem_ctx_half_prod_reduce_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __half *dest, const __half *source,
     int nreduce);
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
 __device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_sum_reduce_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
     int nreduce);
@@ -4357,6 +4368,7 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_max_reduce_wave(
 __device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_prod_reduce_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, __hip_bfloat16 *dest, const __hip_bfloat16 *source,
     int nreduce);
+#endif
 
 /**
  * @brief kernel for performing a barrier synchronization.
@@ -5295,6 +5307,7 @@ ATTR_NO_INLINE int rocshmem_ctx_half_prod_reduce_on_stream(
   rocshmem_ctx_t ctx, rocshmem_team_t team,
   __half *dest, const __half *source, int nreduce, hipStream_t stream);
 
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
 ATTR_NO_INLINE int rocshmem_ctx_bfloat16_sum_reduce_on_stream(
   rocshmem_ctx_t ctx, rocshmem_team_t team,
   __hip_bfloat16 *dest, const __hip_bfloat16 *source, int nreduce, hipStream_t stream);
@@ -5311,6 +5324,7 @@ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_prod_reduce_on_stream(
   rocshmem_ctx_t ctx, rocshmem_team_t team,
   __hip_bfloat16 *dest, const __hip_bfloat16 *source, int nreduce, hipStream_t stream);
 
+#endif
 }  // namespace rocshmem
 
 #endif  // LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP
