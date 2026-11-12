@@ -15,26 +15,10 @@ namespace rocprofsys::parser
 {
 namespace
 {
-std::string_view
-type_name(param_type type)
-{
-    switch(type)
-    {
-        case param_type::boolean: return "bool";
-        case param_type::integer: return "integer";
-        case param_type::number: return "double";
-        case param_type::string: return "string";
-        case param_type::path: return "path";
-        case param_type::enumeration: return "enum";
-        case param_type::enumeration_list: return "enum_list";
-    }
-    return "value";
-}
-
 bool
-include_param(const schema_param& param, help_style style)
+include_param(const schema_param& param, param_level max_level)
 {
-    return style == help_style::full || param.level == param_level::basic;
+    return param.level == param_level::basic || max_level == param_level::advanced;
 }
 
 bool
@@ -115,18 +99,14 @@ append_choices(std::ostream& out, const schema_param& param,
 }
 
 void
-append_details(std::ostream& out, const schema_param& param, help_style style,
+append_details(std::ostream& out, const schema_param& param,
                const backend_registry* backends)
 {
     if(!param.description.empty())
     {
         out << "      " << param.description << '\n';
     }
-    if(style == help_style::full)
-    {
-        out << "      type: " << type_name(param.type) << '\n';
-        append_choices(out, param, backends);
-    }
+    append_choices(out, param, backends);
     if(param.env)
     {
         out << "      env: " << *param.env << '\n';
@@ -139,20 +119,20 @@ append_details(std::ostream& out, const schema_param& param, help_style style,
 }
 
 void
-append_param(std::ostream& out, const schema_param& param, help_style style,
+append_param(std::ostream& out, const schema_param& param, param_level max_level,
              const backend_registry* backends)
 {
-    if(!include_param(param, style))
+    if(!include_param(param, max_level))
     {
         return;
     }
     append_usage(out, param);
-    append_details(out, param, style, backends);
+    append_details(out, param, backends);
 }
 }  // namespace
 
 std::string
-format_help(const schema& config_schema, help_style style, std::string_view topic,
+format_help(const schema& config_schema, param_level max_level, std::string_view topic,
             const backend_registry* backends)
 {
     std::ostringstream out;
@@ -168,7 +148,7 @@ format_help(const schema& config_schema, help_style style, std::string_view topi
         out << category << '\n';
         for(const auto* param : config_schema.params_in_category(category))
         {
-            append_param(out, *param, style, backends);
+            append_param(out, *param, max_level, backends);
         }
     }
     if(topic.empty())
@@ -180,7 +160,7 @@ format_help(const schema& config_schema, help_style style, std::string_view topi
                 continue;
             }
             matched = true;
-            append_param(out, param, style, backends);
+            append_param(out, param, max_level, backends);
         }
     }
     if(!matched)
