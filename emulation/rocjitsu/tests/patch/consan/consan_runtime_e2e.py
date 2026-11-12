@@ -42,6 +42,16 @@ CASES = (
     'barrier_separated',
     'barrier_multiple',
     'barrier_missing_second',
+    'loop_zero',
+    'loop_one',
+    'loop_three',
+    'loop_access_loss',
+    'loop_sync_loss',
+    'loop_no_b0',
+    'loop_no_b0_full_journal',
+    'loop_no_b0_sync_loss',
+    'loop_no_b1',
+    'loop_late',
     'wide_u16',
     'wide_i16',
     'wide_b64',
@@ -243,7 +253,17 @@ class Driver:
                 'barrier_high': 20,
                 'barrier_separated': 21,
                 'barrier_multiple': 24,
-                'barrier_missing_second': 27,
+                'barrier_missing_second': 39,
+                'loop_zero': 25,
+                'loop_one': 26,
+                'loop_three': 27,
+                'loop_access_loss': 28,
+                'loop_sync_loss': 29,
+                'loop_no_b0': 30,
+                'loop_no_b0_full_journal': 34,
+                'loop_no_b0_sync_loss': 35,
+                'loop_no_b1': 31,
+                'loop_late': 32,
             }[fixture_name]
             prefix = 'hip' if args.fixture_kind == 'hip' else 'native'
             fixture = fixture_directory / f'{prefix}-{case_number}.hsaco'
@@ -272,10 +292,15 @@ class Driver:
                 'grouped_repeat',
                 'barrier_multiple',
             )
+            or args.case.startswith('loop_')
             else 1
         )
         defined = fixture_name in ('disjoint', 'alias')
-        synchronized = fixture_name.startswith('barrier')
+        synchronized = fixture_name.startswith('barrier') or (
+            fixture_name.startswith('loop_')
+            and not fixture_name.startswith('loop_no_b0')
+            and fixture_name != 'loop_no_b1'
+        )
         mode = 'synchronized' if synchronized else ('defined' if defined else 'observe')
         wide = fixture_name.startswith('wide_')
         if wide:
@@ -461,7 +486,67 @@ class Driver:
         shutil.copyfile(fixture, original)
         return 'lds_producer_consumer'
 
+    def assert_loop_observations(self, decoded, fixture):
+        iterations = {
+            'loop_zero': 0,
+            'loop_one': 1,
+            'loop_three': 3,
+            'loop_access_loss': 6,
+            'loop_sync_loss': 20,
+            'loop_no_b0': 3,
+            'loop_no_b0_full_journal': 16,
+            'loop_no_b0_sync_loss': 20,
+            'loop_no_b1': 3,
+            'loop_late': 10,
+        }[fixture]
+        groups = 1 if fixture.startswith('loop_no_b0') or fixture == 'loop_no_b1' else 2
+        late = fixture == 'loop_late'
+        retained = 1 if late else min(iterations, 4)
+        for index, execution in enumerate(decoded['executions']):
+            assert execution['serial'] == index + 1
+            assert execution['argument_u32'] == 7 + 16 * index
+            assert len(execution['rows']) == 2
+            for wave, row in enumerate(execution['rows']):
+                assert row['serial'] == index + 1 and row['wave'] == wave
+                assert row['final_sequence'] == (1 if late else iterations) + (
+                    wave == 0
+                )
+                assert row['final_phase'] == groups * iterations
+                assert row['loss'] == (0 if late else iterations - retained)
+                assert row['sync_loss'] == max(groups * iterations - 16, 0)
+                assert row['counter_exhausted'] == 0
+                assert len(row['completions']) == min(groups * iterations, 16)
+                for slot, completion in enumerate(row['completions']):
+                    assert completion['commit'] == 0x43534243
+                    assert completion['group'] == slot % groups
+                    assert completion['occurrence'] == slot // groups + 1
+                    assert completion['phase'] == slot + 1
+                    assert completion['participants'] == 2
+                assert len(row['records']) == retained + (wave == 0)
+                for bank, record in enumerate(row['records'][:retained]):
+                    assert record['commit'] == 0x43534143
+                    assert record['site'] == wave
+                    assert record['sequence'] == bank + 1
+                    assert record['offset'] == 0 and record['width'] == 4
+                    assert record['mask'] == 1 << bank and record['flags'] == 1
+                    iteration = 9 if late else bank
+                    assert record['phase'] == groups * iteration + (
+                        wave == 1 and not fixture.startswith('loop_no_b0')
+                    )
+                if wave == 0:
+                    tail = row['records'][-1]
+                    assert (
+                        tail['site'] == 2 and tail['offset'] == 4 and tail['mask'] == 1
+                    )
+                    assert tail['sequence'] == row['final_sequence']
+                assert row['status'] == 3 + (
+                    4 if row['loss'] or row['sync_loss'] else 0
+                )
+
     def assert_observations(self, decoded, fixture):
+        if fixture.startswith('loop_'):
+            self.assert_loop_observations(decoded, fixture)
+            return
         if fixture.startswith(('wide_', 'mixed_')):
             self.assert_width_observations(decoded, fixture)
             return

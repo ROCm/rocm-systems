@@ -37,6 +37,8 @@ bool admitted_instruction(std::string_view name) {
       "s_waitcnt_vscnt",    "s_mov_b32",
       "s_and_saveexec_b32", "s_and_b32",
       "s_or_b32",           "s_cmp_eq_u32",
+      "s_add_u32",          "s_sub_u32",
+      "s_add_co_u32",       "s_sub_co_u32",
       "s_branch",           "s_cbranch_scc0",
       "s_cbranch_scc1",     "s_cbranch_vccz",
       "s_cbranch_vccnz",    "s_cbranch_execz",
@@ -82,11 +84,14 @@ Result qualify_lds_race_entry(const InputProgram &program, InputError &error) {
 }
 
 Result qualify_lds_race_block(const BasicBlock &block, InputError &error) {
-  // Static per-site reservations and occurrence ordering require acyclic flow.
+  // Defer the conditional self-loop to whole-program barrier qualification.
   for (const BasicBlock *successor : block.successors())
-    if (successor->start_offset() <= block.start_offset())
-      return reject_instruction(error, InputErrorCode::UnsupportedFlow,
-                                "MVP does not admit CFG backedges", block.start_offset());
+    if ((successor != &block && successor->start_offset() <= block.start_offset()) ||
+        (successor == &block && block.successors().size() != 2))
+      return reject_instruction(
+          error, InputErrorCode::UnsupportedFlow,
+          "only a conditional single-block backedge can enter barrier qualification",
+          block.start_offset());
   return Result::success();
 }
 
@@ -191,6 +196,24 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
                        .original_wait = instructions[wait_index]->src_loc()});
     }
   }
+  // One block containing every group gives each completed loop cycle the same
+  // group order, allowing a retained phase ordinal to identify its occurrence.
+  const BasicBlock *loop = nullptr;
+  for (const BasicBlock *block : blocks)
+    for (const BasicBlock *successor : block->successors())
+      if (successor == block) {
+        if (loop || block->successors().size() != 2 || program.target->id != 1250 ||
+            program.wave_size != 32 || members == 0)
+          return reject_instruction(error, InputErrorCode::UnsupportedFlow,
+                                    "requires one conditional single-block barrier loop");
+        loop = block;
+      }
+  if (loop) {
+    if (std::ranges::any_of(barrier_blocks, [&](const BasicBlock *block) { return block != loop; }))
+      return reject_instruction(error, InputErrorCode::UnsupportedFlow,
+                                "all repeated barrier groups must belong to the single loop block");
+    program.repeated = true;
+  }
   if (members == 0)
     return Result::success();
   if (program.maximum_workgroup_size <= program.wave_size)
@@ -201,7 +224,7 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
       program.barriers.size() > kSyncCapacity)
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
                               "incomplete or repeated workgroup barrier group");
-  // In this closed forward CFG, deleting the group block must leave no path
+  // For the acyclic profile, deleting the group block must leave no path
   // from the hardware entry to an exit. This also rejects divergent bypasses;
   // scalar barriers themselves execute independently of the current EXEC.
   const auto entry =
@@ -209,22 +232,26 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
   if (entry == blocks.end())
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
                               "missing barrier entry");
-  for (const BasicBlock *barrier_block : barrier_blocks) {
-    std::vector<const BasicBlock *> pending{*entry};
-    std::set<const BasicBlock *> visited;
-    while (!pending.empty()) {
-      const BasicBlock *block = pending.back();
-      pending.pop_back();
-      if (block == barrier_block || !visited.insert(block).second)
-        continue;
-      if (block->successors().empty())
-        return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
-                                  "workgroup barrier does not converge on every exit",
-                                  block->start_offset());
-      for (const BasicBlock *successor : block->successors())
-        pending.push_back(successor);
+  // A preheader may bypass the loop for zero iterations. Do not require loop
+  // groups to dominate exits or infer uniform trip counts; classification needs
+  // actual matching completion witnesses from every required wave.
+  if (!program.repeated)
+    for (const BasicBlock *barrier_block : barrier_blocks) {
+      std::vector<const BasicBlock *> pending{*entry};
+      std::set<const BasicBlock *> visited;
+      while (!pending.empty()) {
+        const BasicBlock *block = pending.back();
+        pending.pop_back();
+        if (block == barrier_block || !visited.insert(block).second)
+          continue;
+        if (block->successors().empty())
+          return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
+                                    "workgroup barrier does not converge on every exit",
+                                    block->start_offset());
+        for (const BasicBlock *successor : block->successors())
+          pending.push_back(successor);
+      }
     }
-  }
   std::ranges::sort(program.barriers, {}, &BarrierFacts::original_signal);
   return Result::success();
 }

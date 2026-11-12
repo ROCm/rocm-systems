@@ -32,7 +32,7 @@ TEST(ConSanDigest, OptionsIdentityNamesTheSoftwareAddressGroupReservation) {
       "address-groups-per-site=" + std::to_string(kAddressGroupsPerSite) + ";";
   EXPECT_NE(kMvpOptions.find(reservation), std::string_view::npos);
   EXPECT_EQ(hex(mvp_options_digest()),
-            "5b9bfee7f3ffd5348342fc932f2a7f251256b20ac1894aaadb50ada03da5b1b8");
+            "c581d4da9c5d8ef58ba2c21b4955e4aed86ea84c72473c310d63113fb05fb437");
 }
 
 TEST(ConSanDigest, KnownAnswersIncludePaddingAndMultipleBlocks) {
