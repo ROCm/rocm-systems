@@ -75,6 +75,18 @@ fill_catalog(reader_catalog_t& catalog, pytorch_store_t& store)
             process->command = it->second;
         }
         process->node_info = node;
+        std::string extdata;
+        if(const auto sort = store.process_sort.find(pid);
+           sort != store.process_sort.end())
+        {
+            extdata = "\"sort_index\":" + std::to_string(sort->second);
+        }
+        if(pid == store.busiest_pid && !store.trace_info.empty())
+        {
+            if(!extdata.empty()) extdata.push_back(',');
+            extdata += store.trace_info;
+        }
+        if(!extdata.empty()) process->extdata = "{" + extdata + "}";
         catalog.processes.push_back(process);
         catalog.processes_by_id.emplace(process->id, process);
     }
@@ -160,6 +172,11 @@ fill_catalog(reader_catalog_t& catalog, pytorch_store_t& store)
             if(it != store.thread_names.end())
             {
                 thread->name = it->second;
+            }
+            if(const auto sort = store.thread_sort.find({ source.pid, source.tid });
+               sort != store.thread_sort.end())
+            {
+                thread->extdata = "{\"sort_index\":" + std::to_string(sort->second) + "}";
             }
             thread->node_info    = node;
             thread->process_info = track->process_info;
