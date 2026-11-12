@@ -41,6 +41,51 @@ using namespace rccl_host_dispatch;
 
 namespace {
 
+// ── helpers shared by the tests that use real processes ────────────
+
+// The dispatcher's real signal handling, for the duration of one test, with the previous
+// dispositions put back afterwards. Installed rather than faked because what is under test here
+// is the handling itself: that a signal reaches a wait, which no stand-in can demonstrate.
+class ScopedStopHandling {
+public:
+    ScopedStopHandling()
+    {
+        sigaction(SIGTERM, nullptr, &term_);
+        sigaction(SIGINT, nullptr, &int_);
+        sigaction(SIGCHLD, nullptr, &child_);
+        installStopHandler();
+        g_stopRequested = 0;
+    }
+
+    ~ScopedStopHandling()
+    {
+        sigaction(SIGTERM, &term_, nullptr);
+        sigaction(SIGINT, &int_, nullptr);
+        sigaction(SIGCHLD, &child_, nullptr);
+        g_stopRequested = 0;
+        g_wake.drain();
+    }
+
+private:
+    struct sigaction term_ {};
+    struct sigaction int_ {};
+    struct sigaction child_ {};
+};
+
+// Kill *pid* and collect it, so a test that ends early leaves nothing behind.
+void discardChild(pid_t pid)
+{
+    signalChildGroup(pid, SIGKILL);
+    int discarded = 0;
+    waitpid(pid, &discarded, 0);
+}
+
+std::chrono::milliseconds since(std::chrono::steady_clock::time_point start)
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start);
+}
+
 // ── parseListTests ──────────────────────────────────────────────────
 
 TEST(HostDispatchListingMicrotest, SuiteLinesQualifyTheCasesBeneathThem)
@@ -929,8 +974,9 @@ TEST(HostDispatchManifestMicrotest, ABinaryTheManifestNamesButThatIsMissingWillN
     // ABinaryThatWillNotListIsReportedNotDropped).
     const ScopedDir tree("rccl-dispatch-test");
 
-    EXPECT_FALSE(listTestsOutput((std::filesystem::path(tree.path()) / "rccl-UnitTestsMicroGone")
-                                     .string())
+    EXPECT_FALSE(listTestsOutput(
+                     (std::filesystem::path(tree.path()) / "rccl-UnitTestsMicroGone").string(),
+                     std::chrono::seconds{5})
                      .has_value());
 }
 
@@ -968,6 +1014,131 @@ TEST(HostDispatchManifestMicrotest, AManifestEntryThatIsAPathIsRefused)
 
     EXPECT_EQ(manifestBinaries(binaryDirectory(tree.path())),
               std::vector<std::string>{"rccl-UnitTestsMicroCrypt"});
+}
+
+// ── the listing each binary is asked for ───────────────────────────
+//
+// What is worth proving is the part that used to be impossible: a listing is a child like any
+// other now, so it can be bounded and it can be stopped. The binary that hangs when ASKED what
+// it holds -- a static constructor that never returns -- used to hang the whole run before a
+// single test had been chosen, with nothing able to interrupt it.
+
+namespace {
+
+// An executable shell script named *name* under *dir*, or an empty string when this filesystem
+// will not let us run one. TMPDIR is mounted noexec on some developer machines and in some
+// containers, and a test that needs to exec a fixture has nothing to say there.
+std::string addScript(const ScopedDir &dir, const std::string &name, const std::string &body)
+{
+    const std::filesystem::path file = std::filesystem::path(dir.path()) / name;
+    std::ofstream(file) << "#!/bin/sh\n" << body;
+    std::error_code ec;
+    std::filesystem::permissions(file, std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::add, ec);
+    return ::access(file.c_str(), X_OK) == 0 ? file.string() : std::string();
+}
+
+// How long a bounded listing test allows before it calls the bound broken. Generous enough for a
+// loaded machine, far below the sleeps the fixtures use.
+constexpr std::chrono::seconds kListingSlack{5};
+
+}  // namespace
+
+TEST(HostDispatchListTestsMicrotest, ABinaryThatAnswersIsListed)
+{
+    const ScopedDir dir("rccl-host-dispatch-listing");
+    const std::string script = addScript(dir, "lister", "echo 'Suite.'\necho '  Case'\n");
+    if (script.empty()) {
+        GTEST_SKIP() << "TMPDIR is mounted noexec, so a fixture binary cannot be run here";
+    }
+
+    const std::optional<std::string> output = listTestsOutput(script, std::chrono::seconds{0});
+
+    ASSERT_TRUE(output.has_value());
+    EXPECT_EQ(*output, "Suite.\n  Case\n");
+}
+
+TEST(HostDispatchListTestsMicrotest, WhatABinarySaysOnStderrStaysOutOfItsListing)
+{
+    // The listing is parsed, and a line of noise in the middle of it is indistinguishable from a
+    // suite name. This used to be a 2>/dev/null in a shell command; the shell has gone, so the
+    // redirection has to be done to the child itself.
+    const ScopedDir dir("rccl-host-dispatch-listing");
+    const std::string script =
+        addScript(dir, "noisy", "echo 'Loading plugin' >&2\necho 'Suite.'\necho '  Case'\n");
+    if (script.empty()) {
+        GTEST_SKIP() << "TMPDIR is mounted noexec, so a fixture binary cannot be run here";
+    }
+
+    const std::optional<std::string> output = listTestsOutput(script, std::chrono::seconds{0});
+
+    ASSERT_TRUE(output.has_value());
+    EXPECT_EQ(*output, "Suite.\n  Case\n");
+}
+
+TEST(HostDispatchListTestsMicrotest, ABinaryThatWillNotAnswerIsKilledAtItsTimeout)
+{
+    // The failure this exists for. A listing was a popen(), which hands back no pid, so there
+    // was nothing to time out and nothing to signal: one binary hanging in a static constructor
+    // hung the entire run, and the child timeout the caller had set did not apply to it.
+    const ScopedDir dir("rccl-host-dispatch-listing");
+    const std::string script = addScript(dir, "hanger", "exec sleep 600\n");
+    if (script.empty()) {
+        GTEST_SKIP() << "TMPDIR is mounted noexec, so a fixture binary cannot be run here";
+    }
+
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    const std::optional<std::string> output = listTestsOutput(script, std::chrono::seconds{1});
+    const std::chrono::milliseconds elapsed = since(start);
+
+    EXPECT_FALSE(output.has_value()) << "a killed listing was taken at face value";
+    EXPECT_LT(elapsed, kListingSlack) << "the listing ran for " << elapsed.count() << " ms";
+}
+
+TEST(HostDispatchListTestsMicrotest, AStopEndsAListingThatHasNoTimeout)
+{
+    // An unbounded listing is still the default, and must not be the one phase of the run that
+    // a stop cannot reach.
+    const ScopedStopHandling handling;
+    const ScopedDir dir("rccl-host-dispatch-listing");
+    const std::string script = addScript(dir, "hanger", "exec sleep 600\n");
+    if (script.empty()) {
+        GTEST_SKIP() << "TMPDIR is mounted noexec, so a fixture binary cannot be run here";
+    }
+
+    std::thread stopper([] {
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        ::kill(::getpid(), SIGTERM);
+    });
+
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    const std::optional<std::string> output = listTestsOutput(script, std::chrono::seconds{0});
+    const std::chrono::milliseconds elapsed = since(start);
+    stopper.join();
+
+    EXPECT_FALSE(output.has_value());
+    EXPECT_LT(elapsed, kListingSlack) << "the listing ran for " << elapsed.count() << " ms";
+}
+
+TEST(HostDispatchEnumerateMicrotest, AStopEndsTheEnumerationAndNamesWhatItNeverAsked)
+{
+    // Carrying on would cost one timeout per remaining binary, on a run that is already ending.
+    // Dropping them instead would leave a report indistinguishable from a tree that never had
+    // them -- the one failure this enumeration must not have.
+    bool stopped = false;
+    const Enumeration enumeration = enumerate(
+        "/build", {"rccl-UnitTestsMicroAlpha", "rccl-UnitTestsMicroBeta", "rccl-UnitTestsMicroGamma"},
+        [&stopped](const std::string &) -> std::optional<std::string> {
+            stopped = true;   // the stop lands while the first binary is being listed
+            return listingOf("Suite", "Case");
+        },
+        [&stopped] { return stopped; });
+
+    EXPECT_EQ(enumeration.unlisted, (std::vector<std::string>{"rccl-UnitTestsMicroBeta",
+                                                              "rccl-UnitTestsMicroGamma"}));
+    EXPECT_TRUE(enumeration.unlistable.empty());
+    ASSERT_EQ(enumeration.candidates.size(), 1u);
+    EXPECT_EQ(enumeration.candidates[0].suite, "MicroAlpha/Suite");
 }
 
 // ── child logs ──────────────────────────────────────────────────────
@@ -2446,52 +2617,6 @@ TEST(HostDispatchSignalMicrotest, AChildWithNoGroupOfItsOwnIsStillSignalled)
 // for this everywhere else, so dropping the WNOHANG would otherwise cost nothing here and a
 // timed run would wait for the hung binary it exists to time out.
 
-namespace {
-
-// The dispatcher's real signal handling, for the duration of one test, with the previous
-// dispositions put back afterwards. Installed rather than faked because what is under test here
-// is the handling itself: that a signal reaches a wait, which no stand-in can demonstrate.
-class ScopedStopHandling {
-public:
-    ScopedStopHandling()
-    {
-        sigaction(SIGTERM, nullptr, &term_);
-        sigaction(SIGINT, nullptr, &int_);
-        sigaction(SIGCHLD, nullptr, &child_);
-        installStopHandler();
-        g_stopRequested = 0;
-    }
-
-    ~ScopedStopHandling()
-    {
-        sigaction(SIGTERM, &term_, nullptr);
-        sigaction(SIGINT, &int_, nullptr);
-        sigaction(SIGCHLD, &child_, nullptr);
-        g_stopRequested = 0;
-        g_wake.drain();
-    }
-
-private:
-    struct sigaction term_ {};
-    struct sigaction int_ {};
-    struct sigaction child_ {};
-};
-
-// Kill *pid* and collect it, so a test that ends early leaves nothing behind.
-void discardChild(pid_t pid)
-{
-    signalChildGroup(pid, SIGKILL);
-    int discarded = 0;
-    waitpid(pid, &discarded, 0);
-}
-
-std::chrono::milliseconds since(std::chrono::steady_clock::time_point start)
-{
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start);
-}
-
-}  // namespace
 
 TEST(HostDispatchReapMicrotest, ABoundedWaitComesBackWhileTheChildIsStillRunning)
 {

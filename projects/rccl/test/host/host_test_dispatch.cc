@@ -1033,55 +1033,22 @@ std::string childProfileFile(const std::string &path)
                             path);
 }
 
-// *path*'s --gtest_list_tests output, or nullopt when the binary failed to produce one.
-//
-// The two are deliberately distinguishable: a healthy binary that holds no cases lists nothing
-// and is not a problem, whereas one that cannot start (missing .so, an abort in static init)
-// fails here FIRST, before anything else the dispatcher does to it, and must not be mistaken
-// for the former. See enumerate().
-std::optional<std::string> listTestsOutput(const std::string &path)
-{
-    // The listing children are fork sites like any other, so they get the same stripped
-    // environment. popen() hands them this process's one, which must keep its originals, so the
-    // strip is expressed to the shell instead -- same list, same guarantee.
-    std::string environment;
-    for (const std::string &name : gtestVariablesToStrip()) {
-        environment += fmt::format("-u {} ", shellQuote(name));
-    }
-
-    const std::string profile = childProfileFile(path);
-    if (!profile.empty()) {
-        environment += fmt::format("LLVM_PROFILE_FILE={} ", shellQuote(profile));
-    }
-    const std::string command =
-        fmt::format("env {}{} --gtest_list_tests 2>/dev/null", environment, shellQuote(path));
-    std::unique_ptr<FILE, int (*)(FILE *)> pipe(popen(command.c_str(), "r"), pclose);
-    if (pipe == nullptr) {
-        return std::nullopt;
-    }
-    std::string output;
-    char buffer[4096];
-    while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
-        output += buffer;
-    }
-    // pclose() is the child's exit status, so it has to be read before the handle is released;
-    // a non-zero status means the listing is partial, whatever arrived on stdout.
-    if (pclose(pipe.release()) != 0) {
-        return std::nullopt;
-    }
-    return output;
-}
-
 // ── enumeration ───────────────────────────────────────────────────
 
 // What the discovered binaries hold, and which of them would not say.
 struct Enumeration {
     std::vector<CandidateCase> candidates;
     std::vector<std::string> unlistable;   // binaries whose --gtest_list_tests failed
+    std::vector<std::string> unlisted;     // binaries a stop reached before they were asked
 };
 
 // How a binary is asked for its cases. A seam so the enumeration can be tested without one.
 using ListingFn = std::function<std::optional<std::string>(const std::string &)>;
+
+// Whether the run has been asked to stop since it was last consulted. Shared by the enumeration
+// and the scheduler, which is the point: there is one answer to that question, and every phase
+// of the run asks it.
+using TerminatedFn = std::function<bool()>;
 
 // Every case every discovered binary holds, published name and all, in discovery order.
 //
@@ -1091,10 +1058,17 @@ using ListingFn = std::function<std::optional<std::string>(const std::string &)>
 // unrun, unreported, absent from the coverage manifest, and the run would still exit 0. The
 // hand-kept list this replaced caught exactly this, by checking each binary wrote a report.
 Enumeration enumerate(const std::string &directory, const std::vector<std::string> &binaries,
-                      const ListingFn &listing)
+                      const ListingFn &listing, const TerminatedFn &terminated = {})
 {
     Enumeration enumeration;
     for (size_t i = 0; i < binaries.size(); ++i) {
+        // A stop during enumeration ends it, and the binaries it did not reach are recorded as
+        // such. Carrying on would cost one timeout per remaining binary; dropping them silently
+        // would leave a report that looks like a tree that never had them.
+        if (terminated && terminated()) {
+            enumeration.unlisted.assign(binaries.begin() + static_cast<long>(i), binaries.end());
+            break;
+        }
         const std::optional<std::string> output =
             listing((fs::path(directory) / binaries[i]).string());
         if (!output) {
@@ -1220,7 +1194,7 @@ size_t defaultParallelism(size_t processors)
 // *logPath*, when set, is the file the child's stdout and stderr are redirected to.
 // Empty means inherit this process's stdio.
 pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
-                 const std::string &logPath = "")
+                 const std::string &logPath = "", const std::string &errPath = "")
 {
     std::vector<char *> argv;
     argv.push_back(const_cast<char *>(path.c_str()));
@@ -1261,6 +1235,20 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
                            logPath, std::strerror(errno), path);
             } else {
                 dup2(fd, STDOUT_FILENO);
+                if (errPath.empty()) {
+                    dup2(fd, STDERR_FILENO);
+                }
+                if (fd > STDERR_FILENO) {
+                    close(fd);
+                }
+            }
+        }
+        // Only the listing sets this, to keep a binary's stderr out of output that is about to
+        // be parsed: a line of noise in the middle of a listing is indistinguishable from a
+        // suite name.
+        if (!errPath.empty()) {
+            const int fd = open(errPath.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644);
+            if (fd >= 0) {
                 dup2(fd, STDERR_FILENO);
                 if (fd > STDERR_FILENO) {
                     close(fd);
@@ -1472,6 +1460,119 @@ std::string readFile(const std::string &path)
     std::ostringstream contents;
     contents << file.rdbuf();
     return contents.str();
+}
+
+// ── the listing each binary is asked for ───────────────────────────
+
+// A file this process creates, owns and removes. Used for a listing's output, which has to go
+// somewhere the child can write freely: a pipe would have to be drained while the parent waits,
+// and the biggest binary's listing is larger than a pipe will hold, so the two would deadlock
+// at exactly the size where it matters.
+class ScopedTempFile {
+public:
+    explicit ScopedTempFile(const std::string &pattern)
+    {
+        std::vector<char> name(pattern.begin(), pattern.end());
+        name.push_back('\0');
+        const int fd = mkstemp(name.data());
+        if (fd >= 0) {
+            close(fd);
+            path_ = name.data();
+        }
+    }
+
+    ~ScopedTempFile()
+    {
+        if (!path_.empty()) {
+            std::error_code ec;
+            fs::remove(path_, ec);
+        }
+    }
+
+    ScopedTempFile(const ScopedTempFile &) = delete;
+    ScopedTempFile &operator=(const ScopedTempFile &) = delete;
+
+    const std::string &path() const { return path_; }
+    bool valid() const { return !path_.empty(); }
+
+private:
+    std::string path_;
+};
+
+// *path*'s --gtest_list_tests output, or nullopt when the binary failed to produce one.
+//
+// The two are deliberately distinguishable: a healthy binary that holds no cases lists nothing
+// and is not a problem, whereas one that cannot start (missing .so, an abort in static init)
+// fails here FIRST, before anything else the dispatcher does to it, and must not be mistaken
+// for the former. See enumerate().
+//
+// A listing is a child like any other, and gets what the test children get: its own process
+// group, the stripped environment, its own profile, *timeout* to produce an answer in, and an
+// end if the run is stopped. It used to be a popen(), which gives no pid -- so a binary that
+// hung in a static constructor, or at exit after printing its list, hung the whole run with
+// nothing able to interrupt it, before a single test had been chosen.
+std::optional<std::string> listTestsOutput(const std::string &path, std::chrono::seconds timeout)
+{
+    const ScopedTempFile listing(
+        (fs::temp_directory_path() / "rccl-host-dispatch-listing-XXXXXX").string());
+    if (!listing.valid()) {
+        return std::nullopt;
+    }
+
+    const pid_t pid = spawnChild(path, {"--gtest_list_tests"}, listing.path(), "/dev/null");
+    if (pid < 0) {
+        return std::nullopt;
+    }
+
+    const std::optional<std::chrono::steady_clock::time_point> due =
+        timeout.count() > 0
+            ? std::optional<std::chrono::steady_clock::time_point>(
+                  std::chrono::steady_clock::now() + timeout)
+            : std::nullopt;
+
+    bool killed = false;
+    for (;;) {
+        std::optional<std::chrono::milliseconds> within;
+        if (due) {
+            within = std::max(std::chrono::milliseconds{0},
+                              std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  *due - std::chrono::steady_clock::now()));
+        }
+        int status = 0;
+        const pid_t finished = reapAnyChild(status, within);
+        if (finished == pid) {
+            // The exit status has to be read before the output is trusted: a non-zero one means
+            // the listing is partial, whatever arrived on the way there.
+            return (status == 0 && !killed) ? std::optional<std::string>(readFile(listing.path()))
+                                            : std::nullopt;
+        }
+        if (finished < 0) {
+            return std::nullopt;   // nothing left to wait for; the child is gone unaccounted for
+        }
+        if (finished > 0) {
+            continue;   // some other child of ours; not possible today, and harmless if it were
+        }
+        // Either the run is ending or this binary has had its time. Both end the same way, and
+        // the same way a test child's deadline does: SIGTERM first, SIGKILL if it is ignored.
+        signalChildGroup(pid, SIGTERM);
+        killed = true;
+        break;
+    }
+
+    // Collect this child specifically, rather than through reapAnyChild: a stop leaves the flag
+    // set, so a general reap would keep returning at once and the child would be left behind.
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        int status = 0;
+        const pid_t done = waitpid(pid, &status, WNOHANG);
+        if (done == pid || (done < 0 && errno != EINTR)) {
+            break;
+        }
+        if (attempt == 50) {
+            signalChildGroup(pid, SIGKILL);   // half a second to act on the SIGTERM
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    return std::nullopt;
 }
 
 // The directory LLVM_PROFILE_FILE points into, or empty when coverage is not being collected.
@@ -1857,8 +1958,6 @@ using ReapFn =
 using KillFn = std::function<void(pid_t pid, int signal)>;
 using NowFn = std::function<std::chrono::steady_clock::time_point()>;
 using ReportPathFn = std::function<std::string(const std::string &qualifier, size_t part)>;
-// Whether the run has been asked to stop since it was last consulted.
-using TerminatedFn = std::function<bool()>;
 
 struct SchedulerOperations {
     SpawnFn spawn;
@@ -2217,7 +2316,20 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    const Enumeration enumeration = enumerate(directory, binaries, listTestsOutput);
+    // Before the enumeration, not after it: listing the binaries is the first thing that runs
+    // one, and a binary that hangs in a static constructor hangs it. Installed here, the stop
+    // ends the listing the same way it ends a test child.
+    installStopHandler();
+    const std::chrono::seconds childTimeout =
+        resolveChildTimeout(std::getenv(std::string(kChildTimeoutEnv).c_str()));
+    const TerminatedFn terminated = [] { return g_stopRequested != 0; };
+
+    const Enumeration enumeration = enumerate(
+        directory, binaries,
+        [childTimeout](const std::string &binary) {
+            return listTestsOutput(binary, childTimeout);
+        },
+        terminated);
     for (const std::string &binary : enumeration.unlistable) {
         fmt::print(stderr, "host-test-dispatch: {} could not list its tests\n", binary);
     }
@@ -2233,7 +2345,7 @@ int main(int argc, char **argv)
         // A listing missing a binary's cases is wrong, not merely short, and a caller building
         // a work list from it cannot tell. The warnings above name the binaries; this makes the
         // incompleteness something a script notices too.
-        return enumeration.unlistable.empty() ? status : 1;
+        return enumeration.unlistable.empty() && enumeration.unlisted.empty() ? status : 1;
     }
 
     // Suppressed counts as selected here: a filter that matched only DISABLED_ cases runs
@@ -2273,8 +2385,6 @@ int main(int argc, char **argv)
         }
     }
 
-    installStopHandler();
-
     std::vector<SuiteFragment> fragments;
     std::vector<std::string> ran;
     int failures = 0;
@@ -2287,6 +2397,13 @@ int main(int argc, char **argv)
                                           "failed to start"));
         ++failures;
     }
+    // Stopped before they were even asked what they hold. Named for the same reason: a binary
+    // that is absent from the report is indistinguishable from one the tree never had.
+    for (const std::string &binary : enumeration.unlisted) {
+        fragments.push_back(crashFragment(qualifierFor(binary),
+                                          "run was stopped before this binary was listed"));
+        ++failures;
+    }
 
     const size_t jobs = resolveParallelism(std::getenv(std::string(kParallelismEnv).c_str()),
                                            defaultParallelism(detectedParallelism()));
@@ -2297,8 +2414,6 @@ int main(int argc, char **argv)
         filters.push_back(childFilters(selection));
         ran.push_back(selection.path);
     }
-    const std::chrono::seconds childTimeout =
-        resolveChildTimeout(std::getenv(std::string(kChildTimeoutEnv).c_str()));
     const ScheduleOptions schedule{jobs, options.outputFormat, options.passthrough, logDir,
                                    childTimeout};
     const SchedulerOperations ops{
@@ -2310,7 +2425,7 @@ int main(int argc, char **argv)
         [&reportDir, &options](const std::string &qualifier, size_t part) {
             return reportDir.reportPath(qualifier, part, options.outputFormat);
         },
-        [] { return g_stopRequested != 0; },
+        terminated,
     };
     std::vector<SuiteFragment> ranFragments =
         runSelections(selections, filters, schedule, ops, failures);
