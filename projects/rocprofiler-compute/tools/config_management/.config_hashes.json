@@ -30,7 +30,8 @@
         "0900_gl0_cache_and_lds.yaml": "a1cd626bfe5f664ac65f390c89ce3d0e",
         "1100_gl1_cache.yaml": "d7e31935d9b98b097b9d0740fe86e07a",
         "1300_gl2_cache.yaml": "12345bdb2c35ebb68bcbf23ff099666a",
-        "1700_graphics_register_bus_manager_grbm.yaml": "446b764e30899a06f01d20a3385516e7"
+        "1700_graphics_register_bus_manager_grbm.yaml": "446b764e30899a06f01d20a3385516e7",
+        "collectables.yaml": "a071f69a7f94b794423cc27a40a03427"
       }
     },
     "gfx1250": {

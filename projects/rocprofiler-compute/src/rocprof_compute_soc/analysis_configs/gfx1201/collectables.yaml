@@ -1,0 +1,3 @@
+# One definition per collectable on this architecture. A panel metric_table
+# that names _collect.<name> gets the row appended when the panel is loaded.
+collectables: {}

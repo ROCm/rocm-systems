@@ -28,6 +28,7 @@ ARCH_DIRS = sorted(path for path in _CONFIGS.glob("gfx*") if path.is_dir())
 # rows are the ones the panel files held inline before the collectables file.
 ROWS_AND_IDS_BY_ARCH = {
     "gfx115x": (5, 5),
+    "gfx1201": (0, 0),
     "gfx1250": (7, 7),
     "gfx908": (35, 29),
     "gfx90a": (42, 33),
