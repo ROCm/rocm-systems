@@ -817,7 +817,9 @@ TEST(WaitcheckStream, PartialMemoryInstructionsAreIncomplete) {
 
 TEST(WaitcheckStream, DirectToLdsParityOrderingIsIncomplete) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    const auto report = analyze({0xe05d1000u, 0x80100008u}, arch);
+    // CDNA3 supports buffer_load_dword lds. CDNA4 also supports buffer_load_dwordx4 lds.
+    const uint32_t load = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 0xe0511000u : 0xe05d1000u;
+    const auto report = analyze({load, 0x80100008u}, arch);
     ASSERT_TRUE(report.incomplete);
     EXPECT_EQ(report.instructions_analyzed, 0u);
     EXPECT_NE(report.incomplete->reason.find("parity"), std::string::npos);

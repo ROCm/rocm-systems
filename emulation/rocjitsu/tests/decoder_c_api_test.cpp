@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -269,6 +270,39 @@ TEST(DecoderPoolTest, UnusedDecoderPreservesNullContextAllocatorHooks) {
   EXPECT_EQ(rocjitsu::Instruction::alloc_pool_, nullptr);
   EXPECT_EQ(rocjitsu::Instruction::alloc_fn_, alloc_fn);
   EXPECT_EQ(rocjitsu::Instruction::dealloc_fn_, dealloc_fn);
+}
+
+TEST(Cdna1Decode, FloatAtomicReturnRequiresCdna2) {
+  auto mi100 = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  auto mi200 = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_TRUE(mi100 && mi200);
+  for (uint32_t op : {77u, 78u}) {
+    for (bool buffer : {false, true}) {
+      std::array<uint32_t, 2> words{(buffer ? 0xe0000000u : 0xdc008000u) | (op << 18),
+                                    buffer ? 0u : 0x007f0000u};
+      EXPECT_TRUE(mi100->decode(words.data()).succeeded());
+      words[0] |= buffer ? (1u << 14) : (1u << 16);
+      EXPECT_TRUE(mi100->decode(words.data()).failed());
+      EXPECT_TRUE(mi200->decode(words.data()).succeeded());
+    }
+  }
+}
+
+TEST(Cdna1Decode, InterpolationSeparatesAttributeChannelAndHalf) {
+  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  ASSERT_NE(decoder, nullptr);
+  for (uint32_t channel = 0; channel != 4; ++channel) {
+    for (uint32_t high = 0; high != 2; ++high) {
+      std::array<uint32_t, 2> words{0xd2740005u, 0x00020400u | (high << 8) | (channel << 6) | 7u};
+      auto result = decoder->decode(words.data());
+      ASSERT_TRUE(result.succeeded());
+      std::string expected = "v_interp_p1ll_f16 v5, v2, attr7.";
+      expected += "xyzw"[channel];
+      if (high)
+        expected += " high";
+      EXPECT_EQ(result.value()->disassemble(), expected);
+    }
+  }
 }
 
 } // namespace

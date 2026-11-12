@@ -518,7 +518,7 @@ void SAndSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -558,7 +558,7 @@ void SOrSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -598,7 +598,7 @@ void SXorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -638,7 +638,7 @@ void SNandSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -678,7 +678,7 @@ void SNorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -718,7 +718,7 @@ void SXnorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -758,7 +758,7 @@ void SAndNot0SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -798,7 +798,7 @@ void SOrNot0SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -838,7 +838,7 @@ void SAndNot1SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -878,7 +878,7 @@ void SOrNot1SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -918,7 +918,7 @@ void SAndNot0WrexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -958,7 +958,7 @@ void SAndNot1WrexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 

@@ -354,6 +354,8 @@ The optional top-level `arithmetic` object selects one semantics mode for
 instructions executed through rj-arith, regardless of GPU architecture.
 Instructions not yet migrated to rj-arith retain their existing implementations
 and do not use this setting.
+On RDNA2 this includes FP32 FMA/FMAC, FP64 FMA, FP16 add/subtract/multiply,
+and VOP3 floating-point comparisons.
 
 ```json
 "arithmetic": {

@@ -397,6 +397,29 @@ _CDNA5_VOPD_SLOT_OPS = _VOPD_COMMON_F32_SLOT_OPS + (
 )
 
 
+# Direct-to-LDS loads listed in the CDNA1–3 and RDNA1–2 buffer chapters.
+_MUBUF_SINGLE_DWORD_LDS_LOADS = frozenset(
+    {
+        'BUFFER_LOAD_FORMAT_X',
+        'BUFFER_LOAD_UBYTE',
+        'BUFFER_LOAD_SBYTE',
+        'BUFFER_LOAD_USHORT',
+        'BUFFER_LOAD_SSHORT',
+        'BUFFER_LOAD_DWORD',
+    }
+)
+
+_SEPARATELY_ROUNDED_F32_MAD = frozenset(
+    {
+        'V_MAC_F32',
+        'V_MAD_F32',
+        'V_MAD_LEGACY_F32',
+        'V_MADMK_F32',
+        'V_MADAK_F32',
+    }
+)
+
+
 class IsaProfile(ABC):
     """Defines ISA-specific encoding rules and constants.
 
@@ -426,6 +449,13 @@ class IsaProfile(ABC):
         max_enc_order: Maximum order value for primary encoding types.
         flt_name_map: Maps floating-point literal values to C++ enum names.
     """
+
+    paired_special_register_names: frozenset[str] = frozenset()
+    # Saturation of V_PK_MUL_LO_U16 is target-specific.
+    packed_mul_lo_u16_clamp = False
+    # The VOP2 form of V_MUL_LO_U16 carries CLAMP in its SDWA extension.
+    mul_lo_u16_clamp_encodings: frozenset[str] = frozenset()
+    cndmask_b32_uses_f32_modifiers = False
 
     @property
     def uses_rj_arith_matrix(self) -> bool:
@@ -1141,6 +1171,12 @@ class IsaProfile(ABC):
         """Return the normalized type used by an instruction operand."""
         return operand_type
 
+    def normalize_instruction_operand_type(
+        self, inst_name: str, available_encodings: frozenset[str], operand_type: str
+    ) -> str:
+        """Correct an operand type when its instruction's encoding forms require it."""
+        return operand_type
+
     @property
     def lowercase_operand_selector_names(self) -> bool:
         """Whether predefined symbolic operand names normalize to lowercase."""
@@ -1483,6 +1519,9 @@ class _AmdgpuProfileBase(IsaProfile):
         if upper == 'ENC_FLAT':
             return MnemonicRule(use_flat_mnemonic=True)
         return MnemonicRule()
+
+    mubuf_lds_loads: frozenset[str] = frozenset()
+    separately_rounded_mad_opcodes: frozenset[str] = frozenset()
 
     # FLAT encoding facts used by load execution and operand metadata.
     legacy_flat_lds = False
@@ -1870,6 +1909,28 @@ class CdnaProfile(_AmdgpuProfileBase):
       struct already spans the full instruction width.
     """
 
+    paired_special_register_names = frozenset(
+        {'flat_scratch_lo', 'xnack_mask_lo', 'vcc_lo', 'exec_lo'}
+    )
+    mubuf_lds_loads = _MUBUF_SINGLE_DWORD_LDS_LOADS
+
+    def normalize_instruction_operand_type(
+        self, inst_name: str, available_encodings: frozenset[str], operand_type: str
+    ) -> str:
+        # CDNA1–4 list literal-selector forms of G_FORK, but mark both sources NOLIT.
+        if (
+            inst_name == 'S_CBRANCH_G_FORK'
+            and 'SOP2_INST_LITERAL' in available_encodings
+            and operand_type == 'OPR_SSRC_NOLIT'
+        ):
+            return 'OPR_SSRC'
+        return super().normalize_instruction_operand_type(
+            inst_name, available_encodings, operand_type
+        )
+
+    packed_mul_lo_u16_clamp = True
+    mul_lo_u16_clamp_encodings = frozenset({'ENC_VOP3', 'ENC_VOP2'})
+
     flat_offset_bits = 13
     flat_lds_m0_mask = 0x3FFFC
     scratch_has_vaddr_expr = 'inst_.lds != 0'
@@ -2055,6 +2116,15 @@ class CdnaProfile(_AmdgpuProfileBase):
 class Cdna4Profile(CdnaProfile):
     """ISA profile for CDNA4-only encoding capabilities."""
 
+    # CDNA4 ISA section 9.1.9 adds the three- and four-dword loads.
+    mubuf_lds_loads = _MUBUF_SINGLE_DWORD_LDS_LOADS | {
+        'BUFFER_LOAD_DWORDX3',
+        'BUFFER_LOAD_DWORDX4',
+    }
+
+    packed_mul_lo_u16_clamp = False
+    mul_lo_u16_clamp_encodings = frozenset()
+
     @property
     def gds_uses_expcnt(self) -> bool:
         # CDNA4 ISA, sections 3.1 and 4.4: EXPCNT is unused.
@@ -2098,6 +2168,11 @@ class Cdna1Profile(CdnaProfile):
     - ENC_VOP3PX2 does not exist in CDNA1 XML.
     - The current runtime ISA trait leaves SRAM ECC disabled.
     """
+
+    separately_rounded_mad_opcodes = _SEPARATELY_ROUNDED_F32_MAD
+
+    packed_mul_lo_u16_clamp = False
+    mul_lo_u16_clamp_encodings = frozenset()
 
     legacy_flat_lds = True
     scratch_has_vaddr_expr = 'inst_.saddr == 0x7F'
@@ -2181,6 +2256,8 @@ class Cdna2Profile(CdnaProfile):
     - ENC_VOP3PX2 does not exist in CDNA2 XML.
     """
 
+    mul_lo_u16_clamp_encodings = frozenset()
+
     legacy_flat_lds = True
     scratch_has_vaddr_expr = 'inst_.saddr == 0x7F'
 
@@ -2197,10 +2274,6 @@ class Cdna2Profile(CdnaProfile):
     @property
     def descriptor_vgpr_count_granule_wave64(self) -> int:
         return 8
-
-    @property
-    def dpp_64bit_input_row_select_only(self) -> bool:
-        return False
 
     @property
     def flat_scratch_mechanism(self) -> str:
@@ -2229,16 +2302,6 @@ class Cdna2Profile(CdnaProfile):
     @property
     def skip_encodings(self) -> frozenset[str]:
         return frozenset()
-
-    def dpp_opcode_rule(
-        self,
-        enc_name: str,
-        inst_name: str,
-        *,
-        src0_size_bits: int | None = None,
-    ) -> DppOpcodeRule:
-        del enc_name, src0_size_bits
-        return _legacy_dpp_opcode_rule(inst_name)
 
 
 class Rdna1Profile(_AmdgpuProfileBase):
@@ -2273,6 +2336,8 @@ class Rdna1Profile(_AmdgpuProfileBase):
     _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
     _SKIP_DPP_SDWA = True
 
+    mubuf_lds_loads = _MUBUF_SINGLE_DWORD_LDS_LOADS
+    separately_rounded_mad_opcodes = _SEPARATELY_ROUNDED_F32_MAD | {'V_MAC_LEGACY_F32'}
     legacy_flat_lds = True
     legacy_flat_d16_lds = True
     flat_offset_bits = 12
@@ -2297,6 +2362,18 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     @property
     def dpp_reverse_shifts_use_src1(self) -> bool:
+        return True
+
+    @property
+    def dpp_supports_wave_controls(self) -> bool:
+        return False
+
+    @property
+    def dpp_supports_row_broadcast_controls(self) -> bool:
+        return False
+
+    @property
+    def dpp_supports_row_xmask(self) -> bool:
         return True
 
     @property
@@ -2389,6 +2466,11 @@ class Rdna2Profile(Rdna1Profile):
     Inherits the RDNA1 Wave32 default and Wave64 maximum. DPP/SDWA variants
     remain skipped (``_SKIP_DPP_SDWA = True``).
     """
+
+    separately_rounded_mad_opcodes = frozenset()
+    packed_mul_lo_u16_clamp = True
+    mul_lo_u16_clamp_encodings = frozenset({'ENC_VOP3'})
+    cndmask_b32_uses_f32_modifiers = True
 
     # GFX10.3 assigns SADDR=127 to the immediate-only scratch form.
     scratch_has_vaddr_expr = 'inst_.saddr == 0x7D'
@@ -2767,6 +2849,19 @@ class Rdna4Profile(_AmdgpuProfileBase):
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
     _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
+
+    def normalize_operand_type(
+        self, enc_name: str, field_name: str, operand_type: str
+    ) -> str:
+        # The five V_S_*_F16 operations can source M0, EXEC or SCC on GFX12.
+        # The XML's narrower class omits them from the otherwise scalar input.
+        if (
+            enc_name.upper() == 'ENC_VOP3'
+            and field_name == 'src0'
+            and operand_type == 'OPR_SREG_LITERAL'
+        ):
+            return 'OPR_SSRC'
+        return super().normalize_operand_type(enc_name, field_name, operand_type)
 
     def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
         if enc_name.upper() == 'ENC_SOP1' and cond_name == self._SOP1_BASE_COND:
