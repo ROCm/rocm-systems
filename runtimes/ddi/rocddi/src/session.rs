@@ -972,6 +972,47 @@ mod tests {
     }
 
     #[test]
+    fn clock_only_provider_routes_without_other_instrumentation_facets() {
+        let id = [0x35; 16];
+        let driver = TestDriver::new(
+            id,
+            EndpointKind::Gpu {
+                info: GpuInfo::default(),
+            },
+            DriverContextLifetime::Session,
+        );
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let endpoint = session.open_endpoint(id).unwrap();
+        let device = session.activate(&endpoint).unwrap();
+        let gpu = device.gpu().unwrap();
+        let clocks = gpu.clock_counters().unwrap();
+        assert_eq!(clocks.gpu, 17);
+        assert_eq!(clocks.system_frequency, 1_000_000);
+        assert_eq!(
+            gpu.pc_sampling_configurations(
+                crate::device::gpu::profiling::PcSamplingConfigurationSet::Supported
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::Unsupported
+        );
+        assert_eq!(
+            gpu.spm_acquire().unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+        assert_eq!(
+            gpu.available_memory().unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+        drop(device);
+        session.destroy().unwrap();
+    }
+
+    #[test]
     fn populated_gpu_endpoint_keeps_discovery_identity_for_activation() {
         let id = [0x34; 16];
         let driver = TestDriver::new(
