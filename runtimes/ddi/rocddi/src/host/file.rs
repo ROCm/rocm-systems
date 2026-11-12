@@ -6,22 +6,32 @@
 //! Callers retain a `File` for the operation. Positioned reads and writes do
 //! not change its shared cursor. Native-handle acquisition stays in the OS
 //! adapter; a descriptor, HANDLE, and C stream are different contracts.
+//! Native file requests use signed 64-bit positions so offsets cannot be
+//! interpreted as an append sentinel.
 
 use std::{fs::File, io, path::PathBuf};
 
 /// Reads bytes at an explicit offset without changing the shared file cursor.
 ///
 /// # Errors
-/// Reports the native file error; a short read is returned as progress.
+/// Reports invalid input for offsets above `i64::MAX`, or the native file error.
+/// A short read is returned as progress.
 pub fn read_at(file: &File, bytes: &mut [u8], offset: u64) -> io::Result<usize> {
+    if offset > i64::MAX as u64 {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
     crate::os::file::read_at(file, bytes, offset)
 }
 
 /// Writes bytes at an explicit offset without changing the shared file cursor.
 ///
 /// # Errors
-/// Reports the native file error; a short write is returned as progress.
+/// Reports invalid input for offsets above `i64::MAX`, or the native file error.
+/// A short write is returned as progress.
 pub fn write_at(file: &File, bytes: &[u8], offset: u64) -> io::Result<usize> {
+    if offset > i64::MAX as u64 {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
     crate::os::file::write_at(file, bytes, offset)
 }
 

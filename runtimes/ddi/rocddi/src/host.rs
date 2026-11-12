@@ -14,3 +14,8 @@ pub mod file;
 #[cfg(target_os = "linux")]
 #[doc(hidden)]
 pub mod linux;
+
+/// Windows native file acquisition for sibling runtime adapters.
+#[cfg(windows)]
+#[doc(hidden)]
+pub mod windows;
