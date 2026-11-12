@@ -224,10 +224,16 @@ impl Gpu {
             .unwrap_or("AMD Radeon Graphics")
     }
 
-    /// Selects the populated DRM family when it is available.
+    /// Returns the provider-resolved family from the activated device.
+    #[allow(
+        clippy::expect_used,
+        reason = "Gpu is constructed only after confirming an activated GPU endpoint"
+    )]
     pub(crate) fn asic_family_id(&self) -> u32 {
-        let info = self.info();
-        info.drm_asic_family_id.unwrap_or(info.asic_family_id)
+        self.device
+            .gpu()
+            .expect("activated HSA GPU endpoint")
+            .asic_family_id()
     }
 
     /// Returns the optional native timestamp frequency as an HSA value.
