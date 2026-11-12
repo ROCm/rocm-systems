@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi static --bus` reporting a PCIe link on GPUs that connect to the CPU over xGMI, such as MI450**.  
+  - `MAX_PCIE_WIDTH`, `MAX_PCIE_SPEED` and `PCIE_INTERFACE_VERSION` now show `N/A` instead of the emulated link's values, and `amdsmi_get_pcie_info()` returns the maximum value for these fields.
+
 - **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
   - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
 
@@ -329,9 +332,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed xGMI read and write data counters reading as unavailable on MI450**.  
   - On MI450 the GPU connects to the CPU over xGMI, and the driver reports that link's traffic as a single counter. It was dropped instead of being stored as the first link, so `xgmi_read_data_acc` and `xgmi_write_data_acc` from `amdsmi_get_gpu_metrics_info()`, and the link `read`/`write` from `amdsmi_get_link_metrics()`, read `UINT64_MAX` (`N/A`).
-
-- **Fixed `amd-smi static --bus` reporting a PCIe link on GPUs that connect to the CPU over xGMI, such as MI450**.  
-  - `MAX_PCIE_WIDTH`, `MAX_PCIE_SPEED` and `PCIE_INTERFACE_VERSION` now show `N/A` instead of the emulated link's values, and `amdsmi_get_pcie_info()` returns the maximum value for these fields.
 
 - **Fixed `amdsmi_get_processor_count_from_handles()` crashing on NULL output pointers**.  
   - It wrote through a NULL `nr_cpusockets`, `nr_cpucores` or `nr_gpus` and crashed. It now returns `AMDSMI_STATUS_INVAL`.
