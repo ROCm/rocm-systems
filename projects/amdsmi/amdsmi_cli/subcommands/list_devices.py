@@ -370,10 +370,9 @@ class ListDevicesCommands:
         """List CPU identification for target cpu.
 
         Always reports the model name, BIOS (SMBIOS processor) model name and
-        cores per socket. With -e (args.enumeration) also reports family, model and
-        stepping. Model name and cores come from the amd-smi APIs; stepping
-        is read from /proc/cpuinfo and the BIOS model name from the SMBIOS table
-        via the helpers.
+        cores per socket. With -e (args.enumeration) also reports family and model.
+        Family, model, model name and cores come from the amd-smi APIs; the BIOS
+        model name is read from the SMBIOS table via the helpers.
 
         Args:
             args (Namespace): Namespace containing the parsed CLI args
@@ -447,11 +446,8 @@ class ListDevicesCommands:
                 model = "N/A"
                 logging.debug("Failed to get cpu model for cpu %s | %s", cpu_id, e.get_error_info())
 
-            stepping = self.helpers.get_cpu_stepping()
-
             self.logger.store_cpu_output(args.cpu, "family", _as_hex(family))
             self.logger.store_cpu_output(args.cpu, "model", _as_hex(model))
-            self.logger.store_cpu_output(args.cpu, "stepping", _as_hex(stepping))
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
@@ -463,7 +459,7 @@ class ListDevicesCommands:
 
         # `list` reports GPU information. --cpu reports CPU identification
         # (model name, BIOS model name and cores per socket; with -e also
-        # family/model/stepping); --core is still not serviced and is rejected.
+        # family/model); --core is still not serviced and is rejected.
         if getattr(args, "core", None):
             raise AmdSmiCommandNotSupportedException(
                 "list",

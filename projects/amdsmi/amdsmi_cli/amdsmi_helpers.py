@@ -1502,21 +1502,6 @@ class AMDSMIHelpers:
             "Unable to find core ID from device_handle",
         )
 
-    def get_cpu_stepping(self):
-        """Return the CPU stepping id parsed from /proc/cpuinfo.
-
-        amd-smi/e_smi expose family and model but not stepping, so read it from
-        the kernel-provided CPUID decode. Returns "N/A" if unavailable.
-        """
-        try:
-            with open("/proc/cpuinfo", "r") as cpuinfo:
-                for line in cpuinfo:
-                    if line.startswith("stepping"):
-                        return int(line.split(":", 1)[1].strip())
-        except (OSError, ValueError) as e:
-            logging.debug("Failed to read cpu stepping from /proc/cpuinfo | %s", e)
-        return "N/A"
-
     def get_cpu_bios_model_name(self, cpu_id: int) -> str:
         """Return the SMBIOS Processor Version for a CPU socket, or "N/A".
 

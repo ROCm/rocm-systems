@@ -1614,7 +1614,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF.\
                             \nUse --cpu to list CPU model name, BIOS model name, and cores per socket.\
-                            \nUse --cpu -e to also list CPU family, model, and stepping.\
+                            \nUse --cpu -e to also list CPU family and model.\
                             \n--core is not supported for this command."
         enumeration_help = "Enumeration mapping to other features.\
                             \n    Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, OAM_ID, and PHYSICAL_ACC_ID"
