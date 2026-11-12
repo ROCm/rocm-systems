@@ -1367,6 +1367,32 @@ TEST(RegisterAccessTest, Gfx10NullDiscardsCarryDestinations) {
   }
 }
 
+TEST(RegisterAccessTest, Gfx10TtmpWritesCheckPrivilegeAtIssue) {
+  Fixture fx(ROCJITSU_CODE_ARCH_RDNA2);
+  ASSERT_NE(fx.wf, nullptr);
+  constexpr auto selector = kTtmpSelectorFirst;
+  fx.wf->set_ttmp(0, 0x12345678);
+  const auto ignored = resolve_scalar_destination_range(*fx.wf, selector, 2);
+  ASSERT_TRUE(ignored);
+  EXPECT_EQ(ignored->storage, ScalarRegisterStorage::DISCARD);
+  resolve_dst_write(*fx.wf, selector, 0, 124);
+  EXPECT_TRUE(fx.plugin->scalar_writes.empty());
+  EXPECT_EQ(fx.wf->ttmp(0), 0x12345678u);
+
+  fx.wf->set_in_trap_handler(true);
+  RegisterAccess(*fx.wf).write_scalar_unobserved(*ignored, 0, 0);
+  EXPECT_EQ(fx.wf->ttmp(0), 0x12345678u);
+  const auto allowed = resolve_scalar_destination_range(*fx.wf, selector, 2);
+  ASSERT_TRUE(allowed);
+  EXPECT_EQ(allowed->storage, ScalarRegisterStorage::TTMP);
+  resolve_dst_write64(*fx.wf, selector, 0x56780000abcduLL);
+  EXPECT_EQ(fx.wf->ttmp(0), 0xabcdu);
+  EXPECT_EQ(fx.wf->ttmp(1), 0x5678u);
+  fx.wf->set_in_trap_handler(false);
+  RegisterAccess(*fx.wf).write_scalar_unobserved(*allowed, 1, 0u);
+  EXPECT_EQ(fx.wf->ttmp(1), 0u);
+}
+
 TEST(RegisterAccessTest, TrapSelectorsUseDedicatedWaveStorage) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);

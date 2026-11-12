@@ -404,6 +404,14 @@ bool compute_pgm_rsrc1_mode_has_debug_field(rj_code_arch_t arch) {
   return false;
 }
 
+uint32_t initial_ib_sts2_gfx11(uint32_t rsrc1, rj_code_arch_t arch) {
+  using namespace rocjitsu::amdhsa;
+  // The W7900 encodes an ordered launch as 2 in IB_STS2.MEM_ORDER[9:8].
+  const unsigned ordered_bit = arch == ROCJITSU_CODE_ARCH_RDNA3 ? 9u : 8u;
+  return (RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED) << ordered_bit) |
+         (RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS) << 10);
+}
+
 uint32_t initial_mode_from_compute_pgm_rsrc1(uint32_t rsrc1, rj_code_arch_t arch) {
   using namespace rocjitsu::amdhsa;
 
@@ -2501,12 +2509,12 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_address_space(entry.address_space);
       wf->set_vm_access(entry.execution_access);
       wf->set_process_id(entry.process_id);
-      // Live PM4 applications share the host monotonic clock with DRM query
-      // timestamps. Internal simulation workloads retain the modeled clock.
-      wf->set_system_clock(entry.pm4_abi);
+      // Live queues share the host clock used for GPU timestamp calibration.
+      wf->set_system_clock(entry.uses_kfd_queue_abi || entry.pm4_abi);
       wf->set_drm_shader_addresses(entry.drm_shader_addresses);
       wf->set_pm4_failure(entry.pm4_failure);
       wf->set_mode_raw(entry.initial_mode_raw);
+      wf->set_ib_sts2_gfx11(entry.initial_ib_sts2);
       wf->set_queue_id(entry.queue_id);
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, wf->wf_size()));
       const uint32_t relative_wg_id = global_wg_id - entry.workgroup_id_offset;
@@ -3308,6 +3316,11 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   if (dp.vgprs_per_wf > cus_[0]->vgpr_allocation_block_size())
     return emit_error.emit() << "PM4 launch exceeds available VGPRs";
   dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(rsrc1, arch);
+  // The raw PM4 register programs this enable; the corresponding AQL descriptor bit is reserved.
+  if (arch == ROCJITSU_CODE_ARCH_RDNA2 && (rsrc2 & COMPUTE_PGM_RSRC2_ENABLE_EXCEPTION_MEMORY))
+    dp.initial_mode_raw |= Wavefront::kRdna2MemoryViolationEnable;
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+    dp.initial_ib_sts2 = initial_ib_sts2_gfx11(rsrc1, arch);
   dp.enable_wg_id_x = RJ_AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X);
   dp.enable_wg_id_y = RJ_AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y);
   dp.enable_wg_id_z = RJ_AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z);
@@ -4144,6 +4157,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
     scratch_wave_limit_per_se = std::min(scratch_wave_limit_per_se, scratch_waves_per_se_);
 
   DispatchEntry dp{};
+  dp.uses_kfd_queue_abi = uses_kfd_queue_abi;
   dp.queue_id = queue.queue_id;
   dp.enabled_cus = queue.enabled_cus;
   dp.queue_packet_id = queue_packet_id;
@@ -4186,6 +4200,8 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dp.kernel_wave_size = wave_size;
   dp.kernarg_preload = kd.kernarg_preload;
   dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(kd.compute_pgm_rsrc1, arch);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+    dp.initial_ib_sts2 = initial_ib_sts2_gfx11(kd.compute_pgm_rsrc1, arch);
   dp.private_segment_fixed_size = private_segment_fixed_size;
   dp.scratch_wave_limit_per_se = scratch_wave_limit_per_se;
   dp.scratch_wave_stride_per_se = scratch_wave_stride_per_se;
@@ -4242,7 +4258,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   // dispatch can now allocate scratch, publish queue metadata, flush caches,
   // notify plugins, and fan out work to peer XCDs.
   dp.dispatch_id = allocate_dispatch_id();
-  dp.profiling_start_timestamp = hsa_system_timestamp();
+  dp.profiling_start_timestamp = gpu_timestamp(arch);
 
   // For KFD dispatches, provide pointers the kernel may need via user SGPRs.
   // The queue_ptr and dispatch_ptr are GPU VAs that the kernel reads via SMEM.

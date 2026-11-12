@@ -4997,7 +4997,8 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
 
       switch (info->query) {
       case AMDGPU_INFO_TIMESTAMP: {
-        const uint64_t timestamp = rocjitsu::amdgpu::hsa_system_timestamp();
+        const uint64_t timestamp = rocjitsu::amdgpu::gpu_clock_from_ns(
+            rocjitsu::amdgpu::hsa_system_timestamp(), gpu->clock_frequency_mhz());
         std::memcpy(out, &timestamp, std::min<size_t>(info->return_size, sizeof(timestamp)));
         return 0;
       }
@@ -5085,7 +5086,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
         dev.num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
             gpu->array_count_per_xcc(), gpu->num_shader_arrays_per_engine);
         dev.num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
-        dev.gpu_counter_freq = 1000000; // kHz: the synthetic clock counts nanoseconds.
+        dev.gpu_counter_freq = 1000u * gpu->clock_frequency_mhz(); // kHz
         // KFD topology clocks are MHz; the DRM ABI reports kHz.
         dev.max_engine_clock = uint64_t{gpu->max_engine_clk_fcompute} * 1000;
         dev.max_memory_clock = uint64_t{gpu->mem_clk_max} * 1000;
