@@ -63,7 +63,10 @@ public:
   /// @brief Construct a named SoC from configuration.
   /// @param name Human-readable name (e.g., "mi300x").
   /// @param config SoC configuration parameters.
-  SoC(std::string name, const Config &config);
+  /// @param emit_error Destination for failure diagnostics.
+  /// @returns Null if a child configuration is rejected; emits the reason.
+  static std::unique_ptr<SoC> create(std::string name, const Config &config,
+                                     util::DiagnosticEmitter emit_error = {});
 
   /// @brief Construct an empty SoC (children added externally by the config loader).
   /// @param arch Architecture selecting ISA and SDMA packet semantics.
@@ -119,7 +122,8 @@ public:
   simdojo::ExecMode exec_mode() const { return exec_mode_; }
 
   /// @brief Wire topology links between XCDs, IODs, and memory.
-  void initialize() override;
+  /// @returns Failure with a diagnostic if cache maintenance has no backing memory.
+  util::Result initialize(util::DiagnosticEmitter emit_error = {}) override;
 
   /// @brief Return the number of XCDs.
   /// @returns Number of Accelerator Complex Dies.
@@ -287,6 +291,8 @@ public:
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
 
 private:
+  util::Result configure(const Config &config, util::DiagnosticEmitter emit_error);
+
   friend class test::SoCTestAccess;
 
   void apply_dispatch_threads();

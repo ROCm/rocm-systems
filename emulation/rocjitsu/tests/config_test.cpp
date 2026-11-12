@@ -3882,6 +3882,58 @@ void expect_config_target_failure(const std::string &json, const char *message) 
   EXPECT_EQ(validation_diagnostic.message(), message);
 }
 
+TEST(ConfigLoaderTest, RejectsInvalidComponentIntegersWithoutThrowing) {
+  const struct {
+    const char *type;
+    const char *key;
+  } fields[] = {{"compute_unit", "num_wf_slots"},   {"compute_unit", "sgprs_per_wf"},
+                {"compute_unit", "vgprs_per_wf"},   {"compute_unit", "lds_size_kb"},
+                {"compute_unit", "gws_wait_limit"}, {"compute_unit", "functional_quantum"},
+                {"iod", "num_hbm_stacks"}};
+  for (const auto &field : fields) {
+    for (const char *value : {"", "nonnumeric", "+", "18446744073709551616"}) {
+      SCOPED_TRACE(field.key);
+      SCOPED_TRACE(value);
+      const std::string json = std::string(R"({"num_threads":1,"vm":{"arch":"cdna3"},
+        "topology":{"root":{"name":"soc","type":"soc","children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"rejected","type":")") +
+                               field.type + R"(","config":[{"key":")" + field.key +
+                               R"(","value":")" + value + R"("}]}]}}})";
+      const std::string message =
+          std::string(field.key) + " must start with a decimal integer in unsigned long range";
+      EXPECT_NO_THROW(expect_config_target_failure(json, message.c_str()));
+      rj_vm_t sentinel;
+      rj_vm_t *output = &sentinel;
+      EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &output),
+                ROCJITSU_STATUS_INVALID_ARGUMENT);
+      EXPECT_EQ(output, &sentinel);
+    }
+  }
+}
+
+TEST(ConfigLoaderTest, PreservesComponentIntegerPrefixesSignsAndNarrowing) {
+  const struct {
+    const char *text;
+    uint32_t expected;
+  } cases[] = {{"0", 0},           {"4294967295", UINT32_MAX}, {"4294967296", 0},
+               {"-1", UINT32_MAX}, {" +7suffix", 7},           {"0x10", 0}};
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.text);
+    const std::string json = std::string(R"({"num_threads":1,"vm":{"arch":"cdna3"},
+      "topology":{"root":{"name":"soc","type":"soc","children":[
+        {"name":"vram","type":"gpu_memory"},
+        {"name":"cu","type":"compute_unit","config":[
+          {"key":"gws_wait_limit","value":")") +
+                             test_case.text + R"("}]}]}}})";
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+    auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(loaded.soc()->find_child("cu"));
+    ASSERT_NE(cu, nullptr);
+    EXPECT_EQ(cu->config().gws_wait_limit, test_case.expected);
+  }
+}
+
 TEST(ConfigLoaderTest, PropagatesRootComputeUnitFailure) {
   const std::string json = R"({"vm":{"arch":"cdna3"},"topology":{
     "root":{"name":"rejected","type":"compute_unit","config":[

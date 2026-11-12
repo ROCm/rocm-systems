@@ -22,7 +22,6 @@
 #include <fstream>
 #include <optional>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -35,11 +34,12 @@ namespace config {
 inline util::FailureOr<amdgpu::ArithmeticPolicy>
 parse_arithmetic_config(std::string_view semantics, util::DiagnosticEmitter emit_error,
                         std::string_view field = "arithmetic.semantics") {
-  try {
-    return amdgpu::parse_arithmetic_policy(semantics);
-  } catch (const std::invalid_argument &error) {
-    return emit_error.emit() << field << ": " << error.what();
-  }
+  auto policy = amdgpu::parse_arithmetic_policy(semantics);
+  if (policy.failed())
+    return emit_error.emit()
+           << field << ": Arithmetic semantics must be loose, bit_exact_empirical_allow_loose, "
+           << "bit_exact_empirical_no_fp_status, bit_exact_empirical, or compatibility";
+  return policy;
 }
 
 /// Decode policy, using Compatibility for omitted configuration/checkpoint fields.

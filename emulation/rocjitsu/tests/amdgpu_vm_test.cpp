@@ -45,10 +45,10 @@
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
+#include "rocjitsu/vm/virtual_machine.h"
 
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "simdojo/sim/simulation.h"
-#include "util/except.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -363,6 +363,26 @@ public:
   void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { ++completed_workgroups; }
   void onAmdgpuDispatchExecutionEnd(uint32_t) override { ++completed_dispatches; }
 };
+
+TEST(SoCLifecycleTest, MissingMaintenanceBackingRejectsEngineCreation) {
+  util::StringDiagnostic diagnostic;
+  simdojo::SimulationEngine engine({.num_threads = 1});
+  auto soc = std::make_unique<SoC>("soc", nullptr);
+  auto xcd = std::make_unique<amdgpu::Xcd>("xcd");
+  auto l2 = std::make_unique<amdgpu::L2Cache>("l2");
+  xcd->set_l2_cache(l2.get());
+  xcd->add_child(std::move(l2));
+  ASSERT_TRUE(soc->add_xcd(xcd.get(), diagnostic.emitter()).succeeded());
+  soc->add_child(std::move(xcd));
+  engine.topology().set_root(std::move(soc));
+
+  EXPECT_TRUE(engine.create(diagnostic.emitter()).failed());
+  EXPECT_NE(diagnostic.message().find("lacks legacy maintenance backing"), std::string::npos);
+  EXPECT_FALSE(engine.is_created());
+  EXPECT_FALSE(engine.wait_until_started());
+  EXPECT_EQ(engine.last_exit().code, 1);
+  engine.shutdown();
+}
 
 TEST(AmdgpuVmTest, Cdna3AqlDescriptorControlsVccAlias) {
   VmFixture f;
@@ -686,7 +706,7 @@ TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesUnsupportedExecutionMode) {
   EXPECT_EQ(diagnostic.message(), "Unsupported execution mode for ComputeUnit");
 }
 
-TEST(ComputeUnitConfigTest, ShaderEngineTranslatesRejectedConfigurationToConfigError) {
+TEST(ComputeUnitConfigTest, ShaderEngineRejectsInvalidConfiguration) {
   const amdgpu::ShaderEngine::Config config{
       .num_compute_units = 1,
       .compute_unit =
@@ -698,12 +718,40 @@ TEST(ComputeUnitConfigTest, ShaderEngineTranslatesRejectedConfigurationToConfigE
               .lds_size_kb = 64,
           },
   };
-  try {
-    amdgpu::ShaderEngine shader_engine("rejected", config, ROCJITSU_CODE_ARCH_CDNA3, nullptr,
-                                       nullptr);
-    FAIL() << "Expected rejected CU configuration to throw ConfigError";
-  } catch (const util::ConfigError &error) {
-    EXPECT_STREQ(error.what(), "Config error: num_wf_slots exceeds the ISA maximum of 32");
+  util::StringDiagnostic diagnostic;
+  auto shader_engine =
+      amdgpu::ShaderEngine::create("rejected", config, ROCJITSU_CODE_ARCH_CDNA3, nullptr, nullptr,
+                                   simdojo::ExecMode::FUNCTIONAL, diagnostic.emitter());
+  EXPECT_EQ(shader_engine, nullptr);
+  EXPECT_EQ(diagnostic.message(), "num_wf_slots exceeds the ISA maximum of 32");
+}
+
+TEST(ComputeUnitConfigTest, ConfiguredTopologyRejectsInvalidChildren) {
+  VirtualMachine::Config config{};
+  config.soc.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  config.soc.num_xcds = 2;
+  config.soc.xcd.num_shader_engines = 2;
+  config.soc.xcd.shader_engine.num_compute_units = 2;
+  config.soc.xcd.shader_engine.compute_unit = {
+      .arch = ROCJITSU_CODE_ARCH_CDNA3,
+      .num_wf_slots = 33,
+      .sgprs_per_wf = 104,
+      .vgprs_per_wf = 256,
+      .lds_size_kb = 64,
+  };
+  util::StringDiagnostic diagnostic;
+  auto xcd = amdgpu::Xcd::create(
+      "rejected", config.soc.xcd, config.soc.arch, nullptr, simdojo::ExecMode::FUNCTIONAL,
+      std::make_shared<amdgpu::DeviceCacheCoherence>(), diagnostic.emitter());
+  EXPECT_EQ(xcd, nullptr);
+  EXPECT_EQ(diagnostic.message(), "num_wf_slots exceeds the ISA maximum of 32");
+  for (uint32_t num_iods : {0u, 1u}) {
+    SCOPED_TRACE(num_iods);
+    config.soc.num_iods = num_iods;
+    util::StringDiagnostic topology_diagnostic;
+    auto vm = VirtualMachine::create(config, topology_diagnostic.emitter());
+    EXPECT_EQ(vm, nullptr);
+    EXPECT_EQ(topology_diagnostic.message(), "num_wf_slots exceeds the ISA maximum of 32");
   }
 }
 

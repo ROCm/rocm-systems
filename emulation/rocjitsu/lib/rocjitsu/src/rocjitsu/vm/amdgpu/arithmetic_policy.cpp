@@ -4,7 +4,8 @@
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rj_arith/rj_arith.h"
 
-#include <stdexcept>
+#include <cassert>
+#include <cstdlib>
 
 namespace rocjitsu::amdgpu {
 namespace {
@@ -29,16 +30,14 @@ uint64_t detected_cpu_flags() {
 
 } // namespace
 
-ArithmeticPolicy parse_arithmetic_policy(std::string_view semantics) {
+util::FailureOr<ArithmeticPolicy> parse_arithmetic_policy(std::string_view semantics) {
   for (auto mode : {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
                     ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
                     ArithmeticSemantics::BitExactEmpirical, ArithmeticSemantics::Compatibility}) {
     if (semantics == arithmetic_semantics_name(mode))
-      return {mode};
+      return ArithmeticPolicy{mode};
   }
-  throw std::invalid_argument(
-      "Arithmetic semantics must be loose, bit_exact_empirical_allow_loose, "
-      "bit_exact_empirical_no_fp_status, bit_exact_empirical, or compatibility");
+  return util::Result::failure();
 }
 
 const char *arithmetic_semantics_name(ArithmeticSemantics semantics) {
@@ -54,7 +53,8 @@ const char *arithmetic_semantics_name(ArithmeticSemantics semantics) {
   case ArithmeticSemantics::BitExactEmpirical:
     return "bit_exact_empirical";
   }
-  throw std::invalid_argument("Invalid arithmetic semantics");
+  assert(false && "invalid arithmetic semantics");
+  std::abort();
 }
 
 ArithmeticExecution::ArithmeticExecution(ArithmeticPolicy policy)

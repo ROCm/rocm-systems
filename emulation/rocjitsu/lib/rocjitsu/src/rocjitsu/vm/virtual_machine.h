@@ -36,7 +36,11 @@ public:
     SoC::Config soc;
   };
 
-  explicit VirtualMachine(const Config &config);
+  /// @brief Build the configured topology.
+  /// @param emit_error Destination for failure diagnostics.
+  /// @returns Null if a child configuration is rejected.
+  static std::unique_ptr<VirtualMachine> create(const Config &config,
+                                                util::DiagnosticEmitter emit_error = {});
   VirtualMachine(std::unique_ptr<SoC> soc, bool daemon_mode = false);
   VirtualMachine(std::vector<std::unique_ptr<SoC>> socs, std::vector<uint32_t> gpu_ids,
                  bool daemon_mode = false);
@@ -61,6 +65,8 @@ public:
   SimulatedKfd *driver() { return driver_.get(); }
 
 private:
+  VirtualMachine();
+
   Config config_;
   SoC *soc_ = nullptr;
   std::vector<SoC *> socs_;
