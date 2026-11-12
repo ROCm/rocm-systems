@@ -86,7 +86,7 @@ Memory chart: GCEA to system memory
 ===================================
 
 The following memory chart table aligns with the on-screen flow out of this stage.
-gfx115x leaves toward system memory. The RDNA4 tab is the EA-to-DRAM row.
+gfx115x leaves toward system memory. The RDNA4 tab is the L2 to Memory table.
 
 Memory chart - GCEA to system memory
 ------------------------------------
@@ -104,7 +104,7 @@ Memory chart - GCEA to system memory
       .. jinja:: rdna4-memory-chart-ea-to-dram-gfx1201
          :file: _templates/metrics_table.j2
 
-``DRAM Read Bandwidth`` and ``DRAM Write Bandwidth`` count requests that L2 sends
+``Memory Read Bandwidth`` and ``Memory Write Bandwidth`` count requests that L2 sends
 toward memory, including requests served or absorbed by the Infinity Cache. They
 do not measure the bytes that physically reach VRAM. A value above the VRAM
 peak does not by itself indicate an invalid counter.
