@@ -86,6 +86,33 @@ pub(crate) fn supports_dma_buf(endpoint: &Endpoint) -> bool {
     }
 }
 
+/// Checks the public graphics handle without interpreting another OS's bits.
+pub(crate) fn valid_graphics_handle(handle: crate::ffi::HsaHandle) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        handle >= 0
+    }
+    #[cfg(windows)]
+    {
+        !handle.is_null()
+    }
+}
+
+/// Retains a qualified graphics transport without consuming the caller handle.
+pub(crate) fn duplicate_graphics_handle(
+    handle: crate::ffi::HsaHandle,
+) -> Result<Descriptor, Error> {
+    #[cfg(target_os = "linux")]
+    {
+        duplicate_descriptor(handle)
+    }
+    #[cfg(windows)]
+    {
+        let _ = handle;
+        Err(unsupported())
+    }
+}
+
 /// Duplicates a caller descriptor without consuming its ownership.
 pub(crate) fn duplicate_descriptor(descriptor: i32) -> Result<Descriptor, Error> {
     #[cfg(target_os = "linux")]
