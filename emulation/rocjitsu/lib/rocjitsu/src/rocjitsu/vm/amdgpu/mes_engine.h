@@ -94,15 +94,18 @@ public:
   using QueuePointerPublisher = std::function<void(uint64_t read_pointer, uint64_t write_pointer)>;
   using DoorbellResolver =
       std::function<QueueDoorbellBinding(uint32_t offset, QueuePacketFormat packet_format)>;
+  using VmFaultSubscriptionFactory = std::function<InterruptSubscription()>;
 
   /// @brief Construct an empty callback set for a detached MES engine.
   MesFrontendCallbacks() = default;
   /// @brief Construct the complete set of frontend-specific MES operations.
   MesFrontendCallbacks(Pm4UconfigWriter pm4_uconfig_writer, QueuePointerPublisher pointer_publisher,
-                       DoorbellResolver doorbell_resolver)
+                       DoorbellResolver doorbell_resolver,
+                       VmFaultSubscriptionFactory vm_fault_subscription_factory = {})
       : pm4_uconfig_writer_(std::move(pm4_uconfig_writer)),
         pointer_publisher_(std::move(pointer_publisher)),
-        doorbell_resolver_(std::move(doorbell_resolver)) {}
+        doorbell_resolver_(std::move(doorbell_resolver)),
+        vm_fault_subscription_factory_(std::move(vm_fault_subscription_factory)) {}
 
   /// @brief Return the register-write callback used by the PM4 packet processor.
   [[nodiscard]] const Pm4UconfigWriter &pm4_uconfig_writer() const { return pm4_uconfig_writer_; }
@@ -117,11 +120,16 @@ public:
     return doorbell_resolver_ ? doorbell_resolver_(offset, packet_format)
                               : QueueDoorbellBinding{.offset = offset};
   }
+  [[nodiscard]] InterruptSubscription make_vm_fault_subscription() const {
+    return vm_fault_subscription_factory_ ? vm_fault_subscription_factory_()
+                                          : InterruptSubscription{};
+  }
 
 private:
   Pm4UconfigWriter pm4_uconfig_writer_;
   QueuePointerPublisher pointer_publisher_;
   DoorbellResolver doorbell_resolver_;
+  VmFaultSubscriptionFactory vm_fault_subscription_factory_;
 };
 
 /// @brief MES semantic engine shared by transport adapters.
@@ -204,6 +212,7 @@ private:
     AddressSpaceHandle handle;
     uint64_t page_table_base = 0;
     uint64_t process_context_address = 0;
+    InterruptSubscription vm_fault_subscription;
   };
 
   class QueueLookup {
