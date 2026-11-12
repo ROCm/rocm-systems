@@ -1,6 +1,14 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#![cfg_attr(
+    windows,
+    allow(
+        clippy::forget_non_drop,
+        reason = "resource Drop glue is absent until a native provider is installed"
+    )
+)]
+
 //! Linear copy and dword fill through a bounded native SDMA submission context.
 
 use std::mem::ManuallyDrop;

@@ -19,6 +19,42 @@ use crate::memory::storage::Shared;
 use crate::os;
 use std::mem::ManuallyDrop;
 
+/// Host address reservation and replacement geometry supported by the OS.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HostReservationCapabilities {
+    /// Required reservation size multiple.
+    pub reservation_granularity: u64,
+    /// Independently replaceable native page unit.
+    pub mapping_granularity: u64,
+    /// Largest supported reservation, independent of live VA availability.
+    pub maximum_size: u64,
+    /// Largest power-of-two base alignment accepted by this implementation.
+    pub maximum_alignment: u64,
+    /// Inclusive usable host address lower bound.
+    pub minimum_address: u64,
+    /// Inclusive usable host address upper bound.
+    pub maximum_address: u64,
+}
+
+/// OS-qualified host backing and replacement support, independent of GPUs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HostMemoryCapabilities {
+    /// Geometry of ordinary committed CPU backing.
+    pub allocation: super::constraints::AllocationLimits,
+    /// Backing can be projected into independent reservation views.
+    pub remappable_backing: bool,
+    /// Reservation support, absent until replacement and release are implemented.
+    pub reservation: Option<HostReservationCapabilities>,
+}
+
+/// Reports supported host mechanisms without acquiring backing or a GPU.
+///
+/// # Errors
+/// Fails if native host geometry cannot be determined.
+pub fn capabilities() -> Result<HostMemoryCapabilities, Error> {
+    os::host_memory_capabilities()
+}
+
 /// Cached host-only storage facts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HostAllocationInfo {
@@ -69,7 +105,7 @@ impl HostReservation {
             detail: "host reservation alignment exceeds address width",
         })?;
         let inner = os::HostReservation::create(size, alignment, std::process::id())
-            .map_err(|source| os::native_error("host reservation mmap", source))?;
+            .map_err(|source| os::native_error("host address reservation", source))?;
         let (address, size) = inner.extent();
         Ok(Self {
             inner,
@@ -128,7 +164,7 @@ impl HostReservation {
     pub fn free(&mut self) -> Result<(), Error> {
         self.inner
             .free()
-            .map_err(|error| os::native_error("host reservation munmap", error))
+            .map_err(|error| os::native_error("host reservation release", error))
     }
 }
 
@@ -203,7 +239,7 @@ impl HostAllocation {
     /// Returns whether this owner supplies stable reservation backing.
     #[must_use]
     pub fn is_remappable(&self) -> bool {
-        self.inner.source().is_some()
+        self.inner.is_remappable()
     }
 
     /// Copies the original host address and native extent without a system call.

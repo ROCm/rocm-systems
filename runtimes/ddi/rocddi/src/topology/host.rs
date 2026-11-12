@@ -181,3 +181,22 @@ pub fn graph_snapshot() -> HostTopologyGraphSnapshot {
 
 #[cfg(target_os = "linux")]
 pub(crate) use linux::attached_numa_node_for_render;
+
+/// Windows observations are explicitly incomplete until CPU/cache/NUMA
+/// discovery has a native implementation. Missing data is never fabricated.
+#[cfg(windows)]
+#[must_use]
+pub fn graph_snapshot() -> HostTopologyGraphSnapshot {
+    HostTopologyGraphSnapshot {
+        memory_bytes: None,
+        cpu: None,
+        cpu_apic_ids: Vec::new(),
+        online_cpus: None,
+        caches: HostCaches {
+            records: Vec::new(),
+            complete: false,
+        },
+        domains: Vec::new(),
+        domains_complete: false,
+    }
+}

@@ -1,6 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#![cfg_attr(
+    windows,
+    allow(
+        unused_imports,
+        unused_variables,
+        reason = "native provider routes are absent on this host target"
+    )
+)]
+
 //! Memory whose access is qualified for activated devices.
 //!
 //! Placement and access belong to an activated

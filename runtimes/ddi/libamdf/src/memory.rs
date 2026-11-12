@@ -650,7 +650,11 @@ unsafe fn profile(
             } else {
                 0
             }
-            | if host_only {
+            | if host_only
+                && memory::host::capabilities()
+                    .map_err(|error| native(&error))?
+                    .remappable_backing
+            {
                 AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE
             } else {
                 0

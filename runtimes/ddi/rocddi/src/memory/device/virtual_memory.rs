@@ -1,6 +1,14 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#![cfg_attr(
+    windows,
+    allow(
+        clippy::forget_non_drop,
+        reason = "resource Drop glue is absent until a native provider is installed"
+    )
+)]
+
 //! Virtual-address reservations, detached memory, mappings, and interval ownership.
 
 use super::{
@@ -994,6 +1002,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires a qualified GPU and live DRM virtual-memory mapping"]
+    #[cfg(target_os = "linux")]
     fn live_device_mapping_rejects_overlap_and_reuses_freed_interval() {
         use crate::session::{DriverContextLifetime, Session};
 
@@ -1076,6 +1085,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     #[ignore = "requires a qualified GPU and live KFD virtual-memory mapping"]
     fn live_host_mapping_rejects_overlap_and_reuses_freed_interval() {
         use crate::session::{DriverContextLifetime, Session};

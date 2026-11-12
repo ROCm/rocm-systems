@@ -1,6 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#![cfg_attr(
+    windows,
+    allow(
+        unused_imports,
+        unused_variables,
+        reason = "native provider routes are absent on this host target"
+    )
+)]
+
 //! Private interface implemented by each concrete device driver.
 //!
 //! [`Driver`] owns discovery, activation, and shutdown. GPU capabilities are
@@ -23,8 +32,11 @@ mod tests;
 
 pub(crate) use instance::{
     DeviceDriverState, DriverInstance, DriverInstanceId, EndpointSelector, EventSubscription,
-    GpuDriverRef, KfdAccessTarget, KfdAllocation, KfdDeviceState, new_driver_instance,
+    GpuDriverRef, new_driver_instance,
 };
+#[cfg(target_os = "linux")]
+pub(crate) use instance::{KfdAccessTarget, KfdAllocation, KfdDeviceState};
+#[cfg(target_os = "linux")]
 pub(crate) use linux_kfd::KfdEventSubscription;
 #[cfg(all(
     target_os = "linux",

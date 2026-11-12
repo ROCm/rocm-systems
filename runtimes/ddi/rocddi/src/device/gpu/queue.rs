@@ -15,6 +15,7 @@ pub use super::kernel_queue::*;
 pub use exception::{
     AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, replace_scratch_owner,
 };
+#[cfg(target_os = "linux")]
 pub(crate) use layout::{AqlControlLayout, AqlQueueHeader};
 pub use scratch::{MAX_PRIVATE_SEGMENT_BYTES, ScratchPlan, plan_scratch};
 pub use types::*;
