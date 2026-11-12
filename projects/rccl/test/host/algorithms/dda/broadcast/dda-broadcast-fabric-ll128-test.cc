@@ -287,11 +287,11 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadsDefaultIs512) {
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadsEnvVarOverridesDefault) {
   ScopedEnv envGuard("RCCL_DDA_LL128_BC_THREADS");
   const std::pair<int64_t, unsigned> cases[] = {
-      {256, 256}, {32, 32}, {1024, 1024},
+      {256, 256}, {32, 32}, {512, 512},
       {16,  512},   // not a warp multiple -> fall back
       {0,   512},   // zero -> fall back
       {-32, 512},   // negative -> fall back
-      {1056, 512},  // > 1024 -> fall back
+      {1024, 512},  // > kDdaBcMaxThreads=512 -> fall back
   };
   for (const auto& [env, expected] : cases) {
     params_["RCCL_DDA_LL128_BC_THREADS"] = env;
@@ -300,25 +300,19 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadsEnvVarOverridesDefault) {
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ArchTableThreadsUsedWhenEnvAbsent) {
-  rcclArchThresholds fakeTable{};
-  fakeTable.ddaLL128BcTwoShotThreads = 256;
-  comm().archThresholds = &fakeTable;
+  g_rcclDdaFabricBcLL128Threads = [](const ncclComm*) { return 256; };
   EXPECT_EQ(RunOne(4).block.x, 256u);
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_EnvVarOverridesArchTable) {
   ScopedEnv envGuard("RCCL_DDA_LL128_BC_THREADS");
-  rcclArchThresholds fakeTable{};
-  fakeTable.ddaLL128BcTwoShotThreads = 256;
-  comm().archThresholds = &fakeTable;
-  params_["RCCL_DDA_LL128_BC_THREADS"] = 1024;
-  EXPECT_EQ(RunOne(4).block.x, 1024u);
+  g_rcclDdaFabricBcLL128Threads = [](const ncclComm*) { return 256; };
+  params_["RCCL_DDA_LL128_BC_THREADS"] = 384;
+  EXPECT_EQ(RunOne(4).block.x, 384u);
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ArchTableZeroFallsBackToDefault) {
-  rcclArchThresholds fakeTable{};
-  fakeTable.ddaLL128BcTwoShotThreads = 0;
-  comm().archThresholds = &fakeTable;
+  g_rcclDdaFabricBcLL128Threads = [](const ncclComm*) { return 0; };
   EXPECT_EQ(RunOne(4).block.x, 512u);
 }
 
