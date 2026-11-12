@@ -6,6 +6,7 @@
 //! mapping would violate the kernel contract. Compute queues also retain EOP
 //! and context-save storage; the process/device VM retains its doorbell slice.
 
+use super::target::KfdTargetProfile;
 use crate::memory::storage::TryPush;
 use crate::memory::storage::{Owned, Shared};
 use std::io;

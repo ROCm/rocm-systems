@@ -9,6 +9,7 @@
 
 use super::*;
 use crate::driver::AllocationOperations;
+use crate::driver::linux_kfd::target::KfdTargetProfile;
 use crate::memory::host::HostAllocation;
 use crate::memory::{HostMappingPolicy, MemoryKind};
 use std::os::fd::{AsRawFd, IntoRawFd};

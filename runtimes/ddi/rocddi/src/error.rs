@@ -18,7 +18,7 @@ use std::io;
 pub enum NativeStatusDomain {
     /// POSIX error number.
     Errno,
-    /// Windows system error returned by GetLastError.
+    /// Windows system error returned by `GetLastError`.
     Win32,
     /// Windows NT status, preserving all 32 bits.
     NtStatus,
