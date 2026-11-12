@@ -3244,7 +3244,8 @@ TEST(ConfigLoaderTest, RoundTripsRuntimeConfigHandoff) {
   dbt.enabled = true;
   dbt.host.gpu_id = 28851;
 
-  ASSERT_TRUE(config::write_dbt_runtime_config_handoff("/tmp/config.json", dbt, getpid()));
+  ASSERT_TRUE(config::write_dbt_runtime_config_handoff(
+      "/tmp/config.json", dbt, rocjitsu::rpc_invocation_runtime_dir(getpid())));
   std::ifstream handoff(rocjitsu::rpc_invocation_config_file_path(getpid()));
   const std::string contents((std::istreambuf_iterator<char>(handoff)),
                              std::istreambuf_iterator<char>());
@@ -3457,8 +3458,8 @@ TEST(EffectiveConfigTest, WritesTheLaunchCopyBesideTheInvocationHandoff) {
   ASSERT_TRUE(source_before_result.succeeded()) << source_before_diagnostic.message();
   const auto source_before = std::move(source_before_result).value();
 
-  FailureOr<std::string> copy =
-      config::write_effective_config(source, {.cpu_thread_budget = 12}, getpid());
+  FailureOr<std::string> copy = config::write_effective_config(
+      source, {.cpu_thread_budget = 12}, rocjitsu::rpc_invocation_runtime_dir(getpid()));
   ASSERT_TRUE(copy.succeeded());
 
   EXPECT_EQ(copy.value(),
@@ -3531,8 +3532,9 @@ TEST(EffectiveConfigTest, GraphFailureDoesNotPublishLaunchCopy) {
     test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
     std::vector<std::string> messages;
     auto sink = [&](std::string_view message) { messages.emplace_back(message); };
-    const auto result = config::write_effective_config(source.path(), {.local_node = "missing"},
-                                                       getpid(), util::DiagnosticEmitter(sink));
+    const auto result = config::write_effective_config(
+        source.path(), {.local_node = "missing"}, rocjitsu::rpc_invocation_runtime_dir(getpid()),
+        util::DiagnosticEmitter(sink));
     EXPECT_TRUE(result.failed());
     ASSERT_EQ(messages.size(), 1u);
     EXPECT_THAT(messages.front(), testing::HasSubstr(invalid_graph ? "duplicate system node id"
@@ -3565,9 +3567,9 @@ TEST(EffectiveConfigTest, ReportsAnUnwritableRuntimeDirectory) {
   test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", blocked_root.string());
 
   util::StringDiagnostic diagnostic;
-  FailureOr<std::string> written =
-      config::write_effective_config(test::config_path("gfx942_cdna3.json"),
-                                     {.cpu_thread_budget = 12}, getpid(), diagnostic.emitter());
+  FailureOr<std::string> written = config::write_effective_config(
+      test::config_path("gfx942_cdna3.json"), {.cpu_thread_budget = 12},
+      rocjitsu::rpc_invocation_runtime_dir(getpid()), diagnostic.emitter());
   EXPECT_TRUE(written.failed());
   EXPECT_THAT(diagnostic.message(), testing::HasSubstr("cannot create runtime directory"));
 }
@@ -3659,7 +3661,8 @@ TEST(ConfigLoaderTest, RejectsUnresolvedAutomaticDbtHandoffWrite) {
   config::DbtGuestConfig dbt;
   dbt.enabled = true;
 
-  EXPECT_FALSE(config::write_dbt_runtime_config_handoff("/tmp/config.json", dbt, getpid()));
+  EXPECT_FALSE(config::write_dbt_runtime_config_handoff(
+      "/tmp/config.json", dbt, rocjitsu::rpc_invocation_runtime_dir(getpid())));
   EXPECT_FALSE(std::filesystem::exists(rocjitsu::rpc_invocation_config_file_path(getpid())));
 }
 
@@ -3673,7 +3676,8 @@ TEST(ConfigLoaderTest, RuntimeConfigHandoffReportsDirectoryCreationFailure) {
   dbt.enabled = true;
   dbt.host.gpu_id = 28851;
 
-  EXPECT_FALSE(config::write_dbt_runtime_config_handoff("/tmp/config.json", dbt, getpid()));
+  EXPECT_FALSE(config::write_dbt_runtime_config_handoff(
+      "/tmp/config.json", dbt, rocjitsu::rpc_invocation_runtime_dir(getpid())));
 }
 
 TEST(ConfigLoaderTest, RejectsEmptyResolvedGpuIdLineForEnabledDbt) {

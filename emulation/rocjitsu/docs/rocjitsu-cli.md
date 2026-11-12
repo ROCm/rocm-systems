@@ -98,9 +98,15 @@ Usage: rocjitsu [options] -- <app> [args...]
 |--------|-------------|
 | `--config <path>` | Path to simulation config JSON. Cannot be combined with `--profile`. |
 | `--profile <name>` | Bundled profile config to run. Defaults to `mi350x` when neither `--config` nor `--profile` is supplied outside attach mode. |
-| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. Not available with `--attach`. |
-| `--cpu-thread-budget <n>`, `--cpu-thread-budget=<n>` | Replace `cpu_thread_budget` for this launch only; the source JSON is left unchanged. Zero selects automatic sizing. Not available with `--attach`. |
-| `--wait-checking <mode>`, `--wait-checking=<mode>` | Override wait checking for this launch only. `on` enables ordinary checks, `off` disables them, and `all` also enables gfx1250 XCNT checks. The source JSON is left unchanged. Not available with `--attach`. |
+| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. Not available with `--attach` or `dbt_guest` mode. |
+| `--cpu-thread-budget <n>`, `--cpu-thread-budget=<n>` | Replace `cpu_thread_budget` for this launch only; the source JSON is left unchanged. Zero selects automatic sizing. Not available with `--attach`. Dedicated flags win over `--option`, regardless of argument order. |
+| `--wait-checking <mode>`, `--wait-checking=<mode>` | Override wait checking for this launch only. `on` enables ordinary checks, `off` disables them, and `all` also enables gfx1250 XCNT checks. The source JSON is left unchanged. Not available with `--attach`. Dedicated flags win over `--option`, regardless of argument order. |
+| `--option KEY=VALUE`, `-o KEY=VALUE` | Override a supported top-level config value for this launch. Supported keys are `cpu_thread_budget` and `wait_checking`; `--cpu-thread-budget` and `--wait-checking` take precedence. |
+| `--env KEY=VALUE` | Add or replace an environment variable for the launched app/debugger. Attach socket lookup uses these child runtime-directory overrides before validating the socket. |
+| `--clear-env-vars` | Start the launched app/debugger from a clean environment, preserving `PATH`, `HOME`, `TERM`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, and `TMPDIR`, then applying `--env`. |
+| `--workdir <dir>` | Change to an existing directory before executing the target. Relative app paths are resolved from this directory. |
+| `--gdb` | Run the launched app under `rocgdb`. Unless `--attach` is used, debugger launches implicitly start a daemon so ROCgdb and the inferior share one simulated GPU backend. |
+| `--gdb-ex <cmd>` | Add a `rocgdb` command before the program. May be repeated, implies `--gdb`, and runs ROCgdb in batch mode when commands are present. |
 | `--thread-budget-table` | Print engine and dispatch allocations without running a VM. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
 | `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
@@ -126,6 +132,15 @@ rocjitsu paths --json
 # Show launch-time CPU thread allocation without starting a VM
 rocjitsu --profile mi350x --cpu-thread-budget 8 --thread-budget-table
 
+# Override app environment and working directory
+rocjitsu --profile mi350x --env HIP_VISIBLE_DEVICES=0 --workdir /tmp/run -- ./app
+
+# Debug through ROCgdb; this implicitly starts a daemon unless --attach is used
+rocjitsu --profile mi350x --gdb-ex 'break add_one' --gdb-ex run -- ./app
+
+# Propagate the app's exit status from a scripted ROCgdb run
+rocjitsu --profile mi350x --gdb-ex run --gdb-ex 'quit $_exitcode' -- ./app
+
 # Daemon mode: fork daemon + launch app
 rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- ./app args...
 
@@ -150,6 +165,17 @@ rocjitsu --config tests/fixtures/fabric_node_projection.json --node tray7 \
 
 See [QEMU VFIO-user compute](qemu-vfio.md) for the supported guest contract and
 launcher.
+
+Batch debugger launches return ROCgdb's exit status by default. Use
+`--gdb-ex 'quit $_exitcode'` after `--gdb-ex run` when a script should receive
+the debuggee's exit status instead.
+
+Environment variables that configure the simulator daemon itself must be set on
+the `rocjitsu` process, not only with `--env`, when `--gdb` or `--gdb-ex`
+implicitly starts a daemon. For example, set `RJ_FORCE_SCALAR=1 rocjitsu
+--profile mi350x --gdb -- ./app` if the daemon must see that variable; `--env
+RJ_FORCE_SCALAR=1` reaches ROCgdb and the inferior, but not the daemon that was
+already forked.
 
 ## Architecture
 

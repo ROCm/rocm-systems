@@ -215,17 +215,16 @@ util::Result apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_
 }
 
 bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
-                                      pid_t pid) {
+                                      const std::filesystem::path &invocation_runtime_dir) {
   if (config.enabled && config.host.gpu_id == 0)
     return false;
 
-  const std::string handoff_file = rpc_invocation_config_file_path(pid);
+  const std::filesystem::path handoff_file = invocation_runtime_dir / "config_path";
   std::error_code directory_error;
-  std::filesystem::create_directories(std::filesystem::path(handoff_file).parent_path(),
-                                      directory_error);
+  std::filesystem::create_directories(handoff_file.parent_path(), directory_error);
   if (directory_error)
     return false;
-  const std::string temp_file = handoff_file + ".tmp";
+  const std::filesystem::path temp_file = handoff_file.string() + ".tmp";
   std::ofstream output(temp_file);
   if (!output)
     return false;
@@ -290,7 +289,7 @@ load_dbt_guest_config_from_runtime_config(util::DiagnosticEmitter emit_error) {
   //      init(); an empty value would otherwise build "/config_path".
   //   2. this process's PID-scoped path (execvp preserves the launcher's PID for the
   //      direct child) — also the fallback if the env var is set but stale/misdirected.
-  //   3. the well-known location for attach / daemon-only scenarios.
+  //   3. the well-known location for direct daemon-only or legacy attach scenarios.
   // Falling straight from tier 1 to tier 3 (skipping tier 2) would miss a valid
   // per-PID handoff when the env var is set but its config_path is absent.
   std::vector<std::string> candidates;

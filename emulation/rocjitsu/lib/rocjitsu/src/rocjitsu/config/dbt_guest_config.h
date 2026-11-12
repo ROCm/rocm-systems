@@ -10,6 +10,7 @@
 #include "util/diagnostic.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -132,7 +133,7 @@ util::Result apply_resolved_dbt_host_gpu_id(DbtGuestConfig &config, std::string_
 /// @brief Atomically write the per-invocation runtime config handoff.
 /// @returns false when enabled DBT lacks a resolved host GPU or the handoff cannot be published.
 bool write_dbt_runtime_config_handoff(const std::string &config_path, const DbtGuestConfig &config,
-                                      pid_t pid);
+                                      const std::filesystem::path &invocation_runtime_dir);
 
 /// @brief Parse the config path and optional resolved GPU ID from a runtime handoff.
 /// @returns std::nullopt when the first line does not contain a config path.
