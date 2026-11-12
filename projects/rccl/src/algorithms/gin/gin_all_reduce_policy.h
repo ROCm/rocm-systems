@@ -154,7 +154,7 @@ GIN_AR_HD size_t ginAllReduceGinScatterChunkSize(int chunk, int nChunks, size_t 
 // Staged scratch is [slot][rank] columns of slotBytes. Unstaged is one column
 // per rank of perRankBytes, plus the chunk offset within that column.
 GIN_AR_HD size_t ginScatterPutDestOff(size_t scratchOff, int rank, int nRanks, size_t perRankBytes, size_t slotBytes,
-                                       int slot, size_t chunkOff, bool staged) {
+                                      int slot, size_t chunkOff, bool staged) {
   if (!staged) {
     return scratchOff + static_cast<size_t>(rank) * perRankBytes + chunkOff;
   }

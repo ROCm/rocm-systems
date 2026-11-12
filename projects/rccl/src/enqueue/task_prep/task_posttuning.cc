@@ -84,8 +84,8 @@ static void postTuningSetChunkSteps(struct ncclComm* comm, struct ncclTaskColl* 
     break;
   }
   // RCCL: on one node the ring Simple kernels take one slice per chunk (rcclUseOneSlice), and one step on gfx950.
-  if (comm->rcclUseOneSlice && (task->func == ncclFuncAllReduce || task->func == ncclFuncAllGather ||
-                                task->func == ncclFuncReduceScatter)) {
+  if (comm->rcclUseOneSlice &&
+      (task->func == ncclFuncAllReduce || task->func == ncclFuncAllGather || task->func == ncclFuncReduceScatter)) {
     if (IsArchMatch(comm->archName, "gfx950")) task->chunkSteps = 1;
     task->sliceSteps = task->chunkSteps;
   }

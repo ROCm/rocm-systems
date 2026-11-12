@@ -1338,8 +1338,7 @@ int ncclMaxP2pNchannels() {
 int ncclP2pChannelsUpperBound(struct ncclComm* comm, bool* userOptedHigherOut) {
   int64_t userMaxP2pParam = ncclParamMaxP2pNChannels();
   // gfx1250 full pool on single node only; the NET path stays at the historical bound.
-  bool gfx1250SingleNode =
-    comm->nNodes == 1 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+  bool gfx1250SingleNode = comm->nNodes == 1 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
   // Clamp by CU count; pow2Down since ncclP2pChannelForPart masks with (n - 1).
   // cu <= 0 means the topology never reported it: leave the pool unclamped.
   int cu = comm->topo->nodes[GPU].nodes[0].gpu.cu;
@@ -1496,8 +1495,8 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
       // Restore the pre-2.29 count of max(netCountByBw, nChannelsMax) wherever the channel pool can hold it (was available up to 8 nodes).
       bool atScale = comm->nNodes > 8 && 2 * comm->nRanks > comm->p2pnChannels;
       int nChannelsMax = atScale ? 1 : 2;
-      comm->p2pnChannelsPerPeer = std::max(
-        comm->p2pnChannelsPerPeer, std::min(std::max(comm->minNetCount, nChannelsMax), comm->p2pnChannels));
+      comm->p2pnChannelsPerPeer =
+        std::max(comm->p2pnChannelsPerPeer, std::min(std::max(comm->minNetCount, nChannelsMax), comm->p2pnChannels));
     }
   } else {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
@@ -1537,8 +1536,7 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // remote peer, so halving it here would undo it. Multi-node is the network's bottleneck to
     // size against, not the on-package fabric's.
     if (comm->nNodes == 1 && comm->hasMloPart) {
-      while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >
-               comm->p2pnChannels &&
+      while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) > comm->p2pnChannels &&
              comm->p2pnChannelsPerPeer > 1)
         comm->p2pnChannelsPerPeer /= 2;
     }

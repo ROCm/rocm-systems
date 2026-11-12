@@ -494,7 +494,7 @@ extern "C" ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastG
   for (int i = 0; i < n; i++) {
     struct ncclIbQp* qp = base->activeQps[i];
     out->linkLayer[i] = qp ? qp->rtrAttr.linkLayer : 0;
-    out->qpNum[i]     = (qp && qp->qp) ? qp->qp->qp_num : 0;
+    out->qpNum[i] = (qp && qp->qp) ? qp->qp->qp_num : 0;
     if (qp && qp->qp) {
       struct ibv_qp_attr attr;
       struct ibv_qp_init_attr initAttr;

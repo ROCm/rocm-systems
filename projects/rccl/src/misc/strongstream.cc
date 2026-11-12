@@ -417,8 +417,7 @@ ncclResult_t ncclStreamAdvanceToStream(cudaStream_t s, cudaStream_t source) {
     CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, nullptr, count,
                                                      cudaStreamSetCaptureDependencies));
 #else
-    CUDACHECK(cudaStreamUpdateCaptureDependencies(s, (cudaGraphNode_t*)nodes, count,
-                                                  cudaStreamSetCaptureDependencies));
+    CUDACHECK(cudaStreamUpdateCaptureDependencies(s, (cudaGraphNode_t*)nodes, count, cudaStreamSetCaptureDependencies));
 #endif
   }
   return ncclSuccess;

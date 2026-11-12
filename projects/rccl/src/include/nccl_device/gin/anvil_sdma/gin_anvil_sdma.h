@@ -218,9 +218,8 @@ NCCL_DEVICE_INLINE void fenceBeforeStrongFusedSignal(ncclGinAnvilSdmaGPUContext*
 }
 
 NCCL_DEVICE_INLINE void maybeFenceBeforeSignal(ncclGinAnvilSdmaGPUContext* rsCtx, int peer, int blockId,
-                                               ::sdma_anvil::SdmaQueueDeviceHandle** handle,
-                                               bool issuedSdmaThisCall, bool hasSignal, bool hasCounter,
-                                               bool strongSignal) {
+                                               ::sdma_anvil::SdmaQueueDeviceHandle** handle, bool issuedSdmaThisCall,
+                                               bool hasSignal, bool hasCounter, bool strongSignal) {
   if (hasSignal && strongSignal) {
     // signalPeer releases before the atomic. A fence here would only duplicate
     // that, and when the signal address is missing no signal is sent at all.
@@ -268,8 +267,8 @@ NCCL_DEVICE_INLINE uint64_t ownedSdmaDirtyMask(int nRanks, int numCh, int thread
 // fetch_and is cleared here, and is only covered if its doorbell rang before
 // this quiet(). Distinguishing that needs a monotone per-queue submission
 // counter rather than one bit.
-NCCL_DEVICE_INLINE void quietOwnedSdmaDirtyBits(ncclGinAnvilSdmaGPUContext* rsCtx, uint64_t* sdmaDirty,
-                                                int nRanks, int threadRank, int stride) {
+NCCL_DEVICE_INLINE void quietOwnedSdmaDirtyBits(ncclGinAnvilSdmaGPUContext* rsCtx, uint64_t* sdmaDirty, int nRanks,
+                                                int threadRank, int stride) {
   if (sdmaDirty == nullptr) return;
   auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
   int numCh = loadConst(&rsCtx->numChannels);
@@ -639,8 +638,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
       return;
     }
     uint64_t* sdmaDirty = loadConst(&rsCtx->sdmaDirty);
-    nccl::gin::anvil::detail::quietOwnedSdmaDirtyBits(rsCtx, sdmaDirty, ctx.nRanks, coop.thread_rank(),
-                                                      coop.size());
+    nccl::gin::anvil::detail::quietOwnedSdmaDirtyBits(rsCtx, sdmaDirty, ctx.nRanks, coop.thread_rank(), coop.size());
     coop.sync();
     __threadfence_system();
   }
@@ -682,10 +680,9 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
 template <>
 struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t remoteWin,
-                                      size_t remoteOff, ncclGinWindow_t localWin, size_t localOff, size_t bytes,
-                                      bool hasDescriptor, ncclGinDescriptorSmem* descriptor,
-                                      uint32_t optFlags = ncclGinOptFlagsDefault) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t remoteWin, size_t remoteOff,
+                                      ncclGinWindow_t localWin, size_t localOff, size_t bytes, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, uint32_t optFlags = ncclGinOptFlagsDefault) {
     (void)hasDescriptor;
     (void)descriptor;
     (void)optFlags;
@@ -751,8 +748,7 @@ struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     if (nccl::gin::anvil::detail::anvilCtxValid(rsCtx)) {
       uint64_t* dirtyPtr = loadConst(&rsCtx->sdmaDirty);
       uint64_t dirty =
-        dirtyPtr == nullptr ? 0
-                            : __scoped_atomic_load_n(dirtyPtr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        dirtyPtr == nullptr ? 0 : __scoped_atomic_load_n(dirtyPtr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
       uint32_t mask = nccl::gin::anvil::detail::dirtyChannelMask(dirty, peer, loadConst(&rsCtx->numChannels));
       request->channelMask = mask;
       if (__builtin_popcount(mask) > 1) {

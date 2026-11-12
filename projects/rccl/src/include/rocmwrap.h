@@ -86,8 +86,7 @@
 // Kernel version packing used by ncclGetKernelVersionCode(). cuMem works below 6.8; 6.8 is a performance recommendation.
 #define NCCL_KERNEL_VERSION_CODE(major, minor) (((major) << 16) | ((minor) << 8))
 #define NCCL_CUMEM_PERF_KERNEL_VERSION NCCL_KERNEL_VERSION_CODE(6, 8)
-#define NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(kernelVersionCode) \
-  ((kernelVersionCode) >= NCCL_CUMEM_PERF_KERNEL_VERSION)
+#define NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(kernelVersionCode) ((kernelVersionCode) >= NCCL_CUMEM_PERF_KERNEL_VERSION)
 
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).

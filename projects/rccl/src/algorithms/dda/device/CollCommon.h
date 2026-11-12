@@ -55,13 +55,13 @@ template <typename T>
 inline constexpr bool is_fp8_v = std::is_same<T, fp8e4m3>::value || std::is_same<T, fp8e5m2>::value;
 
 template <typename T>
-inline constexpr bool is_supported_type_v = (std::is_same<T, float>::value || std::is_same<T, half>::value ||
-                                             std::is_same<T, int8_t>::value || std::is_same<T, bf16>::value
+inline constexpr bool is_supported_type_v =
+  (std::is_same<T, float>::value || std::is_same<T, half>::value || std::is_same<T, int8_t>::value ||
+   std::is_same<T, bf16>::value
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
-                                             || std::is_same<T, __hip_bfloat16>::value ||
-                                             std::is_same<T, fp8e4m3>::value || std::is_same<T, fp8e5m2>::value
+   || std::is_same<T, __hip_bfloat16>::value || std::is_same<T, fp8e4m3>::value || std::is_same<T, fp8e5m2>::value
 #endif
-);
+  );
 
 // Adds the eight fp8 lanes of an 8-byte word with the pk8 add the core reduce
 // kernels use (hadd8 / hadd8_b), so DDA rounds as they do. Only gfx1250 admits
@@ -231,8 +231,7 @@ inline bool ddaAlltoAllSingleBlockGrid(size_t count, int typeSize) {
 // copyFromSrcToDest loads user buffers as uint4, so both pointers have to be
 // 16-byte aligned. Shared by the IPC eligibility checks.
 inline bool ddaUserBuffers16ByteAligned(const void* sendbuff, const void* recvbuff) {
-  return (reinterpret_cast<uintptr_t>(sendbuff) % 16) == 0 &&
-         (reinterpret_cast<uintptr_t>(recvbuff) % 16) == 0;
+  return (reinterpret_cast<uintptr_t>(sendbuff) % 16) == 0 && (reinterpret_cast<uintptr_t>(recvbuff) % 16) == 0;
 }
 
 // Reduce-scatter IPC copies each shard inside the kernel at or below this size.
@@ -356,16 +355,24 @@ struct DdaPeerColumns {
   struct Iter {
     int x;
     int step;
-    __device__ int operator*() const { return x; }
+    __device__ int operator*() const {
+      return x;
+    }
     __device__ Iter& operator++() {
       x += step;
       return *this;
     }
-    __device__ bool operator!=(const Iter& end) const { return x < end.x; }
+    __device__ bool operator!=(const Iter& end) const {
+      return x < end.x;
+    }
   };
   int nPeers;
-  __device__ Iter begin() const { return {(int)blockIdx.x, (int)gridDim.x}; }
-  __device__ Iter end() const { return {nPeers, 0}; }
+  __device__ Iter begin() const {
+    return {(int)blockIdx.x, (int)gridDim.x};
+  }
+  __device__ Iter end() const {
+    return {nPeers, 0};
+  }
 };
 
 // Peers staged in one pass. A runtime-sized array, or a runtime index into
@@ -607,22 +614,21 @@ __device__ __forceinline__ bool ddaLLWaitLineFlagsBatched(const uint32_t* const 
   }
 }
 
-__device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId, uint32_t inc) {
+__device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId,
+                                                     uint32_t inc) {
   uint32_t flag = epochDev[flatBlockId] + inc;
   if (flag == 0u) flag = 2u; // skip 0 sentinel; keep bank parity
   __syncthreads();
   return flag;
 }
 
-__device__ __forceinline__ void ddaSetLLEpoch(uint32_t* __restrict__ epochDev, int epochLen,
-                                              int flatBlockId, int total, uint32_t flag) {
+__device__ __forceinline__ void ddaSetLLEpoch(uint32_t* __restrict__ epochDev, int epochLen, int flatBlockId, int total,
+                                              uint32_t flag) {
   // Bump every cell this block owns (cell e belongs to block e % total), split
   // across the block's threads. The barrier is what makes the flag read above
   // safe: thread 0 rewrites cell flatBlockId here, so every thread must have
   // read it first. Cells at or above `total` are never read this launch.
-  for (int e = flatBlockId + (int)threadIdx.x * total;
-       e < epochLen;
-       e += total * (int)blockDim.x) {
+  for (int e = flatBlockId + (int)threadIdx.x * total; e < epochLen; e += total * (int)blockDim.x) {
     epochDev[e] = flag;
   }
 }

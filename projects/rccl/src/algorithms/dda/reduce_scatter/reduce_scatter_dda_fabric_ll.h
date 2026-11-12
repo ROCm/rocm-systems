@@ -34,7 +34,7 @@ namespace dda::common {
 // Per-shard payload cap, enforced by eligibility. The slot stride is fixed so
 // every rank addresses the same geometry. One bank is nRanks slots with the
 // 8B payload expanded to 16B: 8 MiB at 1 MiB/rank and 4 ranks.
-constexpr size_t kDdaLLRsMaxBytes = 1ULL*1024*1024;         // 1 MiB per-rank (= 4 MiB total at 4 ranks)
+constexpr size_t kDdaLLRsMaxBytes = 1ULL * 1024 * 1024;         // 1 MiB per-rank (= 4 MiB total at 4 ranks)
 constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 131072
 
 // Bytes in one bank: nRanks slots at the fixed stride.

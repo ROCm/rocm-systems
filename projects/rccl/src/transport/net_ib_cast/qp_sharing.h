@@ -78,35 +78,35 @@ static inline int IbCastQpSharingDepthMultiplier(void) {
 }
 
 #define IBCAST_MAX_SHARED_QPS 1024
-#define IBCAST_MAX_COMMS      4096
-#define IBCAST_FLUSH_QP_IDX  -1   // sentinel qpIdx for flush QPs in the shared pool
+#define IBCAST_MAX_COMMS 4096
+#define IBCAST_FLUSH_QP_IDX -1   // sentinel qpIdx for flush QPs in the shared pool
 
 // Pool key -- uniquely identifies a shared QP
 // peerProcTag is required: peerAddr has its port stripped, so without it two
 // processes on the same remote host share a key and bind to one RC QP.
 struct IbCastSharedQpKey {
-    int             ibDevN;              // local IB device index
-    union ncclSocketAddress peerAddr;    // remote peer address (port stripped)
-    uint64_t        peerProcTag;         // remote *process* identity (host+pid hash)
-    int             remIbDevIdx;         // remote IB device index for disambiguation
-    bool            isSend;              // send vs recv direction
-    int             groupIdx;            // sharing group (0..m-1)
-    int             qpIdx;              // QP slot within the group (0..nqps-1)
+  int ibDevN;              // local IB device index
+  union ncclSocketAddress peerAddr;    // remote peer address (port stripped)
+  uint64_t peerProcTag;         // remote *process* identity (host+pid hash)
+  int remIbDevIdx;         // remote IB device index for disambiguation
+  bool isSend;              // send vs recv direction
+  int groupIdx;            // sharing group (0..m-1)
+  int qpIdx;              // QP slot within the group (0..nqps-1)
 };
 
 // Pool entry -- one per physical shared QP
 struct IbCastSharedQp {
-    IbCastSharedQpKey key;
-    struct ibv_qp*    qp;                  // the physical QP
-    struct ibv_cq*    primaryCq;           // CQ for this device in this group
-    int      primaryIbDevN;                // local IB device index of the primary comm's device,
+  IbCastSharedQpKey key;
+  struct ibv_qp* qp;                  // the physical QP
+  struct ibv_cq* primaryCq;           // CQ for this device in this group
+  int primaryIbDevN;                // local IB device index of the primary comm's device,
                                             // captured by value: the primary comm (and its inline
                                             // devs[]) may be freed while secondaries or this pool
                                             // entry still reference the group
-    int      devIndex;                     // local device index within comm->devs[]
-    int      refcount;                     // number of comms using this QP
-    int      cqRefcount;                   // comms using this group's CQs (tracked on qpIdx==0 only)
-    bool     used;                         // slot in use
+  int devIndex;                     // local device index within comm->devs[]
+  int refcount;                     // number of comms using this QP
+  int cqRefcount;                   // comms using this group's CQs (tracked on qpIdx==0 only)
+  bool used;                         // slot in use
     // Note: ctsQpSlot is NOT tracked in the shared pool.  CTS offload is
     // mutually exclusive with QP sharing (disabled at init when sharing is on).
     // In the sharing-enabled, non-offload path, CTS signaling uses
@@ -117,21 +117,21 @@ struct IbCastSharedQp {
 
 // Global comm table for completion routing (commId -> comm pointer)
 struct IbCastCommTableEntry {
-    void*    comm;          // ncclIbSendComm* or ncclIbRecvComm*
-    bool     isSend;
-    bool     used;
+  void* comm;          // ncclIbSendComm* or ncclIbRecvComm*
+  bool isSend;
+  bool used;
 };
 
 // Pool and comm table globals (defined in qp_sharing.cc)
-extern struct IbCastSharedQp       g_IbCastSharedQpPool[IBCAST_MAX_SHARED_QPS];
-extern int                         g_IbCastSharedQpPoolCount;
-extern int                         g_IbCastSharedQpFreeStack[IBCAST_MAX_SHARED_QPS];
-extern int                         g_IbCastSharedQpFreeTop;
+extern struct IbCastSharedQp g_IbCastSharedQpPool[IBCAST_MAX_SHARED_QPS];
+extern int g_IbCastSharedQpPoolCount;
+extern int g_IbCastSharedQpFreeStack[IBCAST_MAX_SHARED_QPS];
+extern int g_IbCastSharedQpFreeTop;
 extern struct IbCastCommTableEntry g_IbCastCommTable[IBCAST_MAX_COMMS];
-extern uint16_t                    g_IbCastNextCommId;
-extern uint16_t                    g_IbCastCommIdFreeStack[IBCAST_MAX_COMMS];
-extern int                         g_IbCastCommIdFreeTop;
-extern std::mutex                  g_IbCastQpSharingGlobalMutex;
+extern uint16_t g_IbCastNextCommId;
+extern uint16_t g_IbCastCommIdFreeStack[IBCAST_MAX_COMMS];
+extern int g_IbCastCommIdFreeTop;
+extern std::mutex g_IbCastQpSharingGlobalMutex;
 
 // Strip port from socket address for peer matching
 void IbCastStripPort(union ncclSocketAddress* addr);
@@ -149,21 +149,20 @@ struct IbCastSharedQp* IbCastFindSharedQp(const IbCastSharedQpKey* key);
 struct IbCastSharedQp* IbCastFindSharedQpByQpn(uint32_t qpn, bool isSend);
 
 // Register a new shared QP in the pool
-struct IbCastSharedQp* IbCastRegisterSharedQp(const IbCastSharedQpKey* key,
-    struct ibv_qp* qp, struct ibv_cq* primaryCq,
-    int primaryIbDevN, int devIndex, int initialRefcount);
+struct IbCastSharedQp* IbCastRegisterSharedQp(const IbCastSharedQpKey* key, struct ibv_qp* qp, struct ibv_cq* primaryCq,
+                                              int primaryIbDevN, int devIndex, int initialRefcount);
 
 // Undo a registration for a slot whose last user is closing outside of
 // IbCastCleanupGroupCqs (the flush-QP path).
 void IbCastUnregisterSharedQpLocked(struct IbCastSharedQp* entry);
 
 // Count QP slots registered by the primary for a given group
-int IbCastCountGroupQpSlots(const union ncclSocketAddress* peerAddr,
-    uint64_t peerProcTag, int remIbDevIdx, bool isSend, int groupIdx);
+int IbCastCountGroupQpSlots(const union ncclSocketAddress* peerAddr, uint64_t peerProcTag, int remIbDevIdx, bool isSend,
+                            int groupIdx);
 
 // Count total comms connected to a peer (for channelSeq computation)
-int IbCastCountPeerTotalRefcount(int ibDevN, const union ncclSocketAddress* peerAddr,
-    uint64_t peerProcTag, int remIbDevIdx, bool isSend);
+int IbCastCountPeerTotalRefcount(int ibDevN, const union ncclSocketAddress* peerAddr, uint64_t peerProcTag,
+                                 int remIbDevIdx, bool isSend);
 
 // Allocate a commId and register in the global comm table (mutex-protected)
 uint16_t IbCastAllocCommId(void* comm, bool isSend);
@@ -188,8 +187,7 @@ void IbCastValidateSharedQpPool(void);
 // corrupt the commId. The cleared slot bytes are never read on the
 // completion path — only byte 0 is used to recover the request slot.
 static inline uint64_t IbCastEncodeCommId(uint64_t wr_id, uint16_t commId) {
-  return (wr_id & ~WR_ID_RX_COMM_ID_MASK) |
-         (((uint64_t)commId << WR_ID_RX_COMM_ID_BIT_POS) & WR_ID_RX_COMM_ID_MASK);
+  return (wr_id & ~WR_ID_RX_COMM_ID_MASK) | (((uint64_t)commId << WR_ID_RX_COMM_ID_BIT_POS) & WR_ID_RX_COMM_ID_MASK);
 }
 
 // Encode receiver commId into immData for BY_ID matching scheme:

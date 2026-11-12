@@ -1,4 +1,3 @@
-
 /*
 Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
@@ -69,7 +68,7 @@ void permute_array_inplace(int* input, int length, int* permutation) {
       permutation[i] = -permutation[i] - 1;
       continue;
     }
-  
+
     // Standard cycle-following for a "Gather" operation
     int current_hole = i;
     int save_val = input[i]; // Take the value out to create a 'hole'

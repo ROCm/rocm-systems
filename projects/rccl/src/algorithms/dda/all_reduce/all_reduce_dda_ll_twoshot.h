@@ -147,10 +147,11 @@ __launch_bounds__(1024)
     // After an abort acc0/acc1 are partial sums; publishing them under this
     // epoch's flag would let a peer that has not aborted accept them as final.
     if (aborted) continue;
-    #pragma unroll
+#pragma unroll
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
-      LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts_next + (size_t)selfRank * slot;
+      LLPacket16* dst =
+        reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts_next + (size_t)selfRank * slot;
       ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), acc0, flag, acc1, flag);
     }
   }
@@ -158,10 +159,10 @@ __launch_bounds__(1024)
   // Phase 3: poll my slots for the other ranks, read data and write to output.
   myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts_next;
   for (size_t pk = gtid; pk < nPk_rank; pk += stride) {
-    #pragma unroll
+#pragma unroll
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
-      uint32_t *peer_out = reinterpret_cast<uint32_t*>(recvbuff) + peer * nPk_rank * 2;
+      uint32_t* peer_out = reinterpret_cast<uint32_t*>(recvbuff) + peer * nPk_rank * 2;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
       uint32_t d0 = 0, f0, d1 = 0, f1;
       if (!aborted) aborted = !ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1);

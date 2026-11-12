@@ -302,9 +302,8 @@ static ncclResult_t ginDevCommSetupWithBackend(struct ncclComm* comm, struct ncc
     // ginContextCount is a hint; 0 is the documented "use a default" value (see
     // niinInit). An active GIN connection still needs at least one context, so
     // fall back to one context per GIN connection.
-    INFO(NCCL_INIT,
-         "devCommCreate: ginContextCount=0 with an active GIN connection; "
-         "defaulting to one context per GIN connection");
+    INFO(NCCL_INIT, "devCommCreate: ginContextCount=0 with an active GIN connection; "
+                    "defaulting to one context per GIN connection");
   }
 
   nContextsTotal = ncclGinContextCount(nContextsTotal, backend->ginCommCount);
@@ -582,8 +581,8 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
                              void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
                              ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
-                             uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS],
-                             int winFlags, bool multiSegment, int memType) {
+                             uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS], int winFlags, bool multiSegment,
+                             int memType) {
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
   int mrFlags = (winFlags & NCCL_WIN_STRICT_ORDERING) ? NCCL_NET_MR_FLAG_FORCE_SO : 0;
   for (int backendIdx = 0; backendIdx < ginState->numActiveBackends; backendIdx++) {

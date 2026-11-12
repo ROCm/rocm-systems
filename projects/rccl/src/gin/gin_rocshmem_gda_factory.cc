@@ -136,7 +136,8 @@ struct GinFinegrainedAllocator {
     if (pfn_hsa_amd_portable_export_dmabuf == nullptr) return hipErrorNotSupported;
     int fd = -1;
     uint64_t offset = 0;
-    if (pfn_hsa_amd_portable_export_dmabuf(dev_ptr, size, &fd, &offset) != HSA_STATUS_SUCCESS) return hipErrorInvalidValue;
+    if (pfn_hsa_amd_portable_export_dmabuf(dev_ptr, size, &fd, &offset) != HSA_STATUS_SUCCESS)
+      return hipErrorInvalidValue;
     *dmabuf_fd = fd;
     *dmabuf_offset = offset;
     return hipSuccess;
@@ -279,13 +280,16 @@ static int gin_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr,
 static GDAProvider gin_detect_provider(struct ibv_device_attr* attr) {
   switch (static_cast<gda::vendor_id>(attr->vendor_id)) {
 #if defined(GDA_BNXT)
-  case gda::vendor_id::BNXT:  return GDAProvider::BNXT;
+  case gda::vendor_id::BNXT:
+    return GDAProvider::BNXT;
 #endif
 #if defined(GDA_IONIC)
-  case gda::vendor_id::IONIC: return GDAProvider::IONIC;
+  case gda::vendor_id::IONIC:
+    return GDAProvider::IONIC;
 #endif
 #if defined(GDA_MLX5)
-  case gda::vendor_id::MLX5:  return GDAProvider::MLX5;
+  case gda::vendor_id::MLX5:
+    return GDAProvider::MLX5;
 #endif
   }
   return GDAProvider::UNSET;
@@ -431,11 +435,11 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
       // n < 0 (e.g. kernel -EINVAL) also yields pos < 0 via the empty loop. Skip a
       // device with no usable GID rather than opening it with a zero GID, which
       // would produce an unreachable endpoint at RTR.
-      int pos = (n < 0) ? -1 : gin_select_gid_pos(gid_entries, (int)n, port,
-                                                  (int)ncclParamGinRocshmemRoutableFlidGidIndex());
+      int pos =
+        (n < 0) ? -1 : gin_select_gid_pos(gid_entries, (int)n, port, (int)ncclParamGinRocshmemRoutableFlidGidIndex());
       if (pos < 0) {
-        LOG_WARN("GIN QP factory: device %s port %d has no usable GID, skipping",
-                 gin_ibv_get_device_name(dev_list[d]), port);
+        LOG_WARN("GIN QP factory: device %s port %d has no usable GID, skipping", gin_ibv_get_device_name(dev_list[d]),
+                 port);
         free(gid_entries);
         gin_ibv_close_device(ctx);
         continue;
@@ -644,8 +648,8 @@ static int gin_create_cqs(rocshmem_gin_qp_set* set) {
       // (pfn_... is NULL when NCCL_DMABUF_ENABLE=0 or ROCr lacks the export).
       // Otherwise GetDmabufHandle below returns hipErrorNotSupported and connect
       // hard-fails instead of falling back to VA registration (dmabuf_fd = 0).
-      int dmabuf_enabled = gin_ibv_is_dmabuf_supported(set->nic.pd_orig) &&
-                           pfn_hsa_amd_portable_export_dmabuf != nullptr;
+      int dmabuf_enabled =
+        gin_ibv_is_dmabuf_supported(set->nic.pd_orig) && pfn_hsa_amd_portable_export_dmabuf != nullptr;
 
       for (int i = 0; i < n; i++) {
         auto* ctx = set->nic.context;
@@ -793,8 +797,7 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
         if (set->bnxt_re_dv.qp_mem_alloc(pd, &ib_qp_attr, &set->bnxt_qps[i].mem_info) != 0) return -1;
 
         // Gate on NIC capability AND rccl's resolved DMA-BUF gate (see CQ path above).
-        int dmabuf_enabled = gin_ibv_is_dmabuf_supported(pd) &&
-                             pfn_hsa_amd_portable_export_dmabuf != nullptr;
+        int dmabuf_enabled = gin_ibv_is_dmabuf_supported(pd) && pfn_hsa_amd_portable_export_dmabuf != nullptr;
 
         void* sq_ptr = nullptr;
         set->qp_allocator->allocate(&sq_ptr, set->bnxt_qps[i].mem_info.sq_len);
@@ -928,11 +931,16 @@ static int gin_modify_qps_rst_to_init(rocshmem_gin_qp_set* set) {
 
 static int gin_ibv_mtu_to_int(enum ibv_mtu mtu) {
   switch (mtu) {
-  case IBV_MTU_256: return 256;
-  case IBV_MTU_512: return 512;
-  case IBV_MTU_1024: return 1024;
-  case IBV_MTU_2048: return 2048;
-  case IBV_MTU_4096: return 4096;
+  case IBV_MTU_256:
+    return 256;
+  case IBV_MTU_512:
+    return 512;
+  case IBV_MTU_1024:
+    return 1024;
+  case IBV_MTU_2048:
+    return 2048;
+  case IBV_MTU_4096:
+    return 4096;
   default:
     LOG_WARN("GIN QP factory: invalid ibv_mtu %d", mtu);
     return 0;
@@ -1132,21 +1140,20 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
       // QueuePairIONIC constructor arguments
       uint32_t qpn = ibv_qps[idx]->qp_num;
 
-      ionic_v1_wqe* sq_buf   = reinterpret_cast<ionic_v1_wqe*>(dvqp.sq.ptr);
-      uint64_t*     sq_dbreg = &gpu_db_ptr[dvctx.sq_qtype];
-      uint64_t      sq_dbval = dvqp.sq.db_val;
-      uint16_t      sq_mask  = dvqp.sq.mask;
+      ionic_v1_wqe* sq_buf = reinterpret_cast<ionic_v1_wqe*>(dvqp.sq.ptr);
+      uint64_t* sq_dbreg = &gpu_db_ptr[dvctx.sq_qtype];
+      uint64_t sq_dbval = dvqp.sq.db_val;
+      uint16_t sq_mask = dvqp.sq.mask;
 
-      ionic_v1_cqe* cq_buf   = reinterpret_cast<ionic_v1_cqe*>(dvcq.q.ptr);
-      uint64_t*     cq_dbreg = &gpu_db_ptr[dvctx.cq_qtype];
-      uint64_t      cq_dbval = dvcq.q.db_val;
-      uint16_t      cq_mask  = dvcq.q.mask;
+      ionic_v1_cqe* cq_buf = reinterpret_cast<ionic_v1_cqe*>(dvcq.q.ptr);
+      uint64_t* cq_dbreg = &gpu_db_ptr[dvctx.cq_qtype];
+      uint64_t cq_dbval = dvcq.q.db_val;
+      uint16_t cq_mask = dvcq.q.mask;
 
       // QueuePair is either QueuePairIONIC or QueuePairMux
-      new (host_gpu_qp)
-          QueuePair{QueuePairIONIC{qpn, &fetch_atomic_dummy, fetch_atomic_dummy_mr->lkey,
-                                   ionic_device_sq{sq_buf, sq_dbreg, sq_dbval, sq_mask},
-                                   ionic_device_cq{cq_buf, cq_dbreg, cq_dbval, cq_mask}}};
+      new (host_gpu_qp) QueuePair{QueuePairIONIC{qpn, &fetch_atomic_dummy, fetch_atomic_dummy_mr->lkey,
+                                                 ionic_device_sq{sq_buf, sq_dbreg, sq_dbval, sq_mask},
+                                                 ionic_device_cq{cq_buf, cq_dbreg, cq_dbval, cq_mask}}};
       return 0;
     }
 #endif
@@ -1176,37 +1183,34 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
       void* gpu_dbr_ptr = nullptr;
       if (hipHostRegister(bnxt_qps[idx].db_region_attr->dbr, getpagesize(), hipHostRegisterDefault) != hipSuccess)
         return -1;
-      if (hipHostGetDevicePointer(&gpu_dbr_ptr, bnxt_qps[idx].db_region_attr->dbr, 0) != hipSuccess)
-        return -1;
+      if (hipHostGetDevicePointer(&gpu_dbr_ptr, bnxt_qps[idx].db_region_attr->dbr, 0) != hipSuccess) return -1;
 
       // QueuePairBNXT constructor arguments
       uint32_t qpn = ibv_qps[idx]->qp_num;
 
       uint64_t* dbr = static_cast<uint64_t*>(gpu_dbr_ptr);
 
-      void*    sq_buf      = bnxt_qps[idx].sq_buf;
-      uint32_t sq_depth    = bnxt_qps[idx].mem_info.sq_slots;
-      void*    msntbl      = bnxt_qps[idx].msntbl;
-      uint32_t msn_tbl_sz  = bnxt_qps[idx].msn_tbl_sz;
+      void* sq_buf = bnxt_qps[idx].sq_buf;
+      uint32_t sq_depth = bnxt_qps[idx].mem_info.sq_slots;
+      void* msntbl = bnxt_qps[idx].msntbl;
+      uint32_t msn_tbl_sz = bnxt_qps[idx].msn_tbl_sz;
       uint32_t psn_sz_log2 = bit_log2(bnxt_qps[idx].mem_info.sq_psn_sz);
       // Negotiated (not local-only) MTU: feeds fill_psns_for_msntbl's packet-count math.
-      uint32_t mtu         = gin_ibv_mtu_to_int(negotiated_mtu[idx]);
+      uint32_t mtu = gin_ibv_mtu_to_int(negotiated_mtu[idx]);
 
-      void*    cq_buf   = bnxt_scqs[idx].buf;
+      void* cq_buf = bnxt_scqs[idx].buf;
       uint32_t cq_depth = bnxt_scqs[idx].depth;
 
       // QueuePair is either QueuePairBNXT or QueuePairMux
-      new (host_gpu_qp)
-          QueuePair{QueuePairBNXT{qpn, &fetch_atomic_dummy, fetch_atomic_dummy_mr->lkey, dbr,
-                                  bnxt_device_sq{sq_buf, sq_depth, msntbl, msn_tbl_sz,
-                                                 psn_sz_log2, mtu},
-                                  bnxt_device_cq{cq_buf, cq_depth}}};
+      new (host_gpu_qp) QueuePair{QueuePairBNXT{qpn, &fetch_atomic_dummy, fetch_atomic_dummy_mr->lkey, dbr,
+                                                bnxt_device_sq{sq_buf, sq_depth, msntbl, msn_tbl_sz, psn_sz_log2, mtu},
+                                                bnxt_device_cq{cq_buf, cq_depth}}};
 
       LOG_TRACE("gin_qp init[%d]: qp_num=%u sq.buf=%p sq.depth=%u sq.id=%u "
                 "cq.buf=%p cq.depth=%u cq.id=%u dbr=%p (host=%p) "
                 "msntbl=%p msn_tbl_sz=%u psn_sz_log2=%u mtu=%u",
-                idx, qpn, sq_buf, sq_depth, qpn, cq_buf, cq_depth, dv_cq.cqn, dbr,
-                bnxt_qps[idx].db_region_attr->dbr, msntbl, msn_tbl_sz, psn_sz_log2, mtu);
+                idx, qpn, sq_buf, sq_depth, qpn, cq_buf, cq_depth, dv_cq.cqn, dbr, bnxt_qps[idx].db_region_attr->dbr,
+                msntbl, msn_tbl_sz, psn_sz_log2, mtu);
       return 0;
     }
 #endif
@@ -1225,20 +1229,19 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
       // QueuePairMLX5 constructor arguments
       uint32_t qpn = qp.qpn;
 
-      gda_mlx5_wqe*      sq_buf   = reinterpret_cast<gda_mlx5_wqe*>(qp.sq);
+      gda_mlx5_wqe* sq_buf = reinterpret_cast<gda_mlx5_wqe*>(qp.sq);
       // qp.dbrec points to two __be32 values: RQ dbrec at MLX5_RCV_DBR and SQ dbrec at MLX5_SND_DBR
-      __be32*            sq_dbrec = &qp.qp_dbrec[MLX5_SND_DBR];
-      gda_mlx5_doorbell* sq_db    = reinterpret_cast<gda_mlx5_doorbell*>(gpu_db_ptr);
-      uint16_t           sq_depth = static_cast<uint16_t>(qp.sq_depth);
+      __be32* sq_dbrec = &qp.qp_dbrec[MLX5_SND_DBR];
+      gda_mlx5_doorbell* sq_db = reinterpret_cast<gda_mlx5_doorbell*>(gpu_db_ptr);
+      uint16_t sq_depth = static_cast<uint16_t>(qp.sq_depth);
 
-      mlx5_cqe64* cq_buf   = reinterpret_cast<mlx5_cqe64*>(qp.cq);
-      __be32*     cq_dbrec = qp.cq_dbrec;
+      mlx5_cqe64* cq_buf = reinterpret_cast<mlx5_cqe64*>(qp.cq);
+      __be32* cq_dbrec = qp.cq_dbrec;
 
       // QueuePair is either QueuePairMLX5 or QueuePairMux
-      new (host_gpu_qp)
-          QueuePair{QueuePairMLX5{qpn, &fetch_atomic_dummy, fetch_atomic_dummy_mr->lkey,
-                                  gda_mlx5_device_sq{sq_buf, sq_dbrec, sq_db, sq_depth},
-                                  gda_mlx5_device_cq{cq_buf, cq_dbrec}}};
+      new (host_gpu_qp) QueuePair{QueuePairMLX5{qpn, &fetch_atomic_dummy, fetch_atomic_dummy_mr->lkey,
+                                                gda_mlx5_device_sq{sq_buf, sq_dbrec, sq_db, sq_depth},
+                                                gda_mlx5_device_cq{cq_buf, cq_dbrec}}};
 
       return 0;
     }
@@ -1375,8 +1378,8 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     if (!set->host_qps) goto fail;
 
     // Register dummy fetch atomic location to return atomic fetch values (never read)
-    set->fetch_atomic_dummy_mr = gin_ibv_reg_mr(set->nic.pd_orig, &set->fetch_atomic_dummy,
-                                            sizeof(uint64_t), IBV_ACCESS_LOCAL_WRITE);
+    set->fetch_atomic_dummy_mr =
+      gin_ibv_reg_mr(set->nic.pd_orig, &set->fetch_atomic_dummy, sizeof(uint64_t), IBV_ACCESS_LOCAL_WRITE);
     if (!set->fetch_atomic_dummy_mr) goto fail;
 
     for (int i = 0; i < nRanks; i++) {
@@ -1384,8 +1387,7 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
       if (set->initialize_host_gpu_qp(&set->host_qps[i], i) != 0) goto fail;
     }
 
-    if (hipMemcpy(set->gpu_qps, set->host_qps, qp_size, hipMemcpyHostToDevice) != hipSuccess)
-      goto fail;
+    if (hipMemcpy(set->gpu_qps, set->host_qps, qp_size, hipMemcpyHostToDevice) != hipSuccess) goto fail;
 
     // Build array of QueuePair pointers for the GPU context
     QueuePair** host_ptrs = (QueuePair**)malloc(nRanks * sizeof(QueuePair*));
@@ -1406,8 +1408,8 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     *out_gpu_qps = gpu_ptr_array;
   }
 
-  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d, tc=%d)", nRanks, set->nic.nic_name.c_str(), myRank,
-            nRanks, set->traffic_class);
+  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d, tc=%d)", nRanks, set->nic.nic_name.c_str(), myRank, nRanks,
+            set->traffic_class);
   *out_qp_set = set;
   return 0;
 

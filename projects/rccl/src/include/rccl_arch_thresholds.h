@@ -18,7 +18,9 @@
 // All collectives compare total message bytes against the table values.
 // 0 disables that tier for that collective. No parallel built-in defaults:
 // an unset env var uses this table, and an arch with no table gets 0.
-enum { RCCL_DDA_FUNC_COUNT = ncclFuncAlltoAll + 1 };
+enum {
+  RCCL_DDA_FUNC_COUNT = ncclFuncAlltoAll + 1
+};
 
 // Sentinel for symMaxR2/symMaxR2Graph: no upper-bound suppression (keep symk at all sizes).
 // Use this instead of 0 in symMaxR2 arrays -- 0 in a DDA array means disabled, which is

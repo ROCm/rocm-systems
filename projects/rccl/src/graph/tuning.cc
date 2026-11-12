@@ -1038,7 +1038,7 @@ static struct tuningModel tuning_model_9{
 
 /**
  * This tuning model is owned by gfx110x, borrowed .hwLat,
- * bwRatio, treeCorrectionFactor, ringCorrectionFactor from 
+ * bwRatio, treeCorrectionFactor, ringCorrectionFactor from
  * tuning_model_0, channelThresholds from tuning_model_7 (gfx120x)
  */
 static struct tuningModel tuning_model_10{
@@ -1196,39 +1196,51 @@ static struct tuningModel tuning_model_11{
   .treeCorrectionFactor =
     {
       // LL: Tree[0-13] Ring[14-16]
-      {2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
-       0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      {
+        2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
+        0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+      },
       // LL128: Tree[14-15] Ring[16-21]
-      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-       2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      {
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        2.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0,
+      },
       // Simple: Ring[22-26]
-      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-       1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5,},
+      {
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5,
+      },
     },
   .ringCorrectionFactor =
     {
       // LL: Ring[14-16] Tree[0-13]
-      {0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
-       2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      {
+        0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
+        2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+      },
       // LL128: Ring[16-21] Tree[14-15]
-      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-       0.5, 0.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0,},
+      {
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        0.5, 0.5, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+      },
       // Simple: Ring[22-26]
-      {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-       1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0,},
+      {
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0,
+      },
     },
   .llProtoRanges =
     {
       // sizePerRank = totalBytes / nRanks (4 ranks default on gfx1250).
       // Breakpoints from 8_29 (Helios) sweep data.
       /*ReduceScatter*/
-      {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
+      {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576, 1, 16},
        /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 4194304, 1, 64}},
       /*AllGather*/
-      {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
+      {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576, 1, 16},
        /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 16777216, 1, 64}},
       /*AllReduce*/
-      {/*LL  (min/max/factor/thread_threshold)*/ {0, 131072,    1, 0},
+      {/*LL  (min/max/factor/thread_threshold)*/ {0, 131072, 1, 0},
        /*LL128 (min/max/factor/thread_threshold)*/ {131072, 16777216, 3145728, 0}},
       /*Reduce*/
       {/*LL (min/max/factor/thread_threshold)*/ {0, 16383, 1, 0},
@@ -1243,9 +1255,8 @@ static struct tuningModel tuning_model_11{
 };
 
 static struct tuningModel rcclTuningModel[] = {
-  tuning_model_0, tuning_model_1, tuning_model_2, tuning_model_3, tuning_model_4,
-  tuning_model_5, tuning_model_6, tuning_model_7, tuning_model_8, tuning_model_9,
-  tuning_model_10, tuning_model_11,
+  tuning_model_0, tuning_model_1, tuning_model_2, tuning_model_3, tuning_model_4,  tuning_model_5,
+  tuning_model_6, tuning_model_7, tuning_model_8, tuning_model_9, tuning_model_10, tuning_model_11,
 };
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -1886,18 +1897,17 @@ void rcclApplyTuningOverrides(struct ncclTopoSystem* system) {
   }
 }
 
-
 /**
  * takes gfx arch name as C-style string and returns a tuning index to
  */
 int rcclGetTuningIndexForArch(const char* gfxarch) {
   static const std::vector<std::pair<std::string, int>> tuningIndexMap = {
-    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 5},  {"gfx950", 6},  {"gfx1250", 11}, {"gfx1030", 0},
+    {"gfx906", 0},   {"gfx908", 0},   {"gfx90a", 0},   {"gfx942", 5},  {"gfx950", 6},  {"gfx1250", 11}, {"gfx1030", 0},
     {"gfx1100", 10}, {"gfx1101", 10}, {"gfx1102", 10}, {"gfx1151", 9}, {"gfx1200", 7}, {"gfx1201", 7}
   };
 
   static const std::vector<std::pair<std::string, int>> tuningIndexMapAINIC = {
-    {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 8},  {"gfx950", 6},  {"gfx1250", 11},
+    {"gfx906", 0},  {"gfx908", 0},   {"gfx90a", 0},   {"gfx942", 8},  {"gfx950", 6}, {"gfx1250", 11},
     {"gfx1030", 0}, {"gfx1100", 10}, {"gfx1102", 10}, {"gfx1200", 7}, {"gfx1201", 7}
   };
 

@@ -103,7 +103,9 @@ static const struct rcclSymkTuningModel& rcclSymkModelFor(enum ncclSymkKernelId 
   bool isAR = ncclSymkARKernelMask() >> kernelId & 1;
   bool isAG = ncclSymkAGKernelMask() >> kernelId & 1;
   bool isLL = ncclSymkLLKernelMask() >> kernelId & 1;
-  *coll = static_cast<int>(isAR ? rcclSymkColl::AllReduce : isAG ? rcclSymkColl::AllGather : rcclSymkColl::ReduceScatter);
+  *coll = static_cast<int>(isAR ? rcclSymkColl::AllReduce :
+                           isAG ? rcclSymkColl::AllGather :
+                                  rcclSymkColl::ReduceScatter);
   *proto = static_cast<int>(isLL ? rcclSymkProto::LL : rcclSymkProto::Simple);
   return rcclSymkTuningModels[rcclSymkTuningModelIndex()];
 }

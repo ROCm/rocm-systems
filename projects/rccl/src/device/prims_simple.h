@@ -1207,9 +1207,9 @@ __device__ __forceinline__ void patScatter(struct ncclPatStep* ps, struct ncclPa
         void* src = (void*)(userInput + inpIx);
         void* dst = shmem->patScatterDsts[i];
         reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/1>(tid, nworkers,
-                                                                               ncclShmem.groups[group].redOpArgs,
-                                                                               /*postOp=*/false, 1, &src, 1, &dst,
-                                                                               workSize);
+                                                                                ncclShmem.groups[group].redOpArgs,
+                                                                                /*postOp=*/false, 1, &src, 1, &dst,
+                                                                                workSize);
       }
     }
   }
@@ -1257,10 +1257,9 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
   int nelem = ps->nelem < 0 ? 0 : ps->nelem;
   T* userInput = (T*)ncclShmem.groups[group].userInput;
   T* userOutput = (T*)ncclShmem.groups[group].userOutput;
-  T* localInput = needsNvlsReduce ?
-                    ((T*)nvlsReducePeer->buff) + (nvlsStep % NCCL_STEPS) * nvlsReducePeer->connStepSize +
-                      ps->nvlsOffset :
-                    userInput + ps->inpIx;
+  T* localInput = needsNvlsReduce ? ((T*)nvlsReducePeer->buff) +
+                                      (nvlsStep % NCCL_STEPS) * nvlsReducePeer->connStepSize + ps->nvlsOffset :
+                                    userInput + ps->inpIx;
 
   bool recv = ps->recvDim >= 0 && (flags & (RolePostRecv | RoleWaitRecv));
   bool send = ps->sendDim >= 0 && (flags & (RolePostSend | RoleWaitSend));
@@ -1386,11 +1385,9 @@ __device__ __forceinline__ void patNvlsBcast(struct ncclPatStep* ps, struct nccl
   }
   patBarrier</*isHierarchical=*/true>();
   if (workSize > 0) {
-    reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 1, 1, 1, /*PreOpSrcs*/ 0>(tid, nthreads,
-                                                                            ncclShmem.groups[group].redOpArgs,
-                                                                            /*postOp=*/false, 1,
-                                                                            ncclShmem.groups[group].srcs, 1,
-                                                                            ncclShmem.groups[group].dsts + 1, workSize);
+    reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 1, 1, 1, /*PreOpSrcs*/ 0>(
+      tid, nthreads, ncclShmem.groups[group].redOpArgs,
+      /*postOp=*/false, 1, ncclShmem.groups[group].srcs, 1, ncclShmem.groups[group].dsts + 1, workSize);
   }
   patBarrier</*isHierarchical=*/true>();
 
@@ -1576,4 +1573,5 @@ __device__ __forceinline__ void patGather(struct ncclPatStep* ps, struct ncclPat
     st_relaxed_sys_global(connStepPtr, step);
   }
 }
-};
+}
+;

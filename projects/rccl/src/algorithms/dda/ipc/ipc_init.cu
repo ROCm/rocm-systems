@@ -244,8 +244,8 @@ ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
   }
 
   auto* barrierState = comm->ddaIpcBarrierState;
-  const bool hasBarrierMappings = barrierState != nullptr && barrierState->resources != nullptr &&
-                                  barrierState->resources->ipcMemHandler != nullptr;
+  const bool hasBarrierMappings =
+    barrierState != nullptr && barrierState->resources != nullptr && barrierState->resources->ipcMemHandler != nullptr;
   if ((hasBarrierMappings || comm->ddaIpcMemHandler != nullptr) && comm->doneEvent != nullptr) {
     // DDA kernels and CE-scratch copies run on the user stream, which the
     // hostStream/deviceStream syncs in commDestroySync do not cover. doneEvent
@@ -260,15 +260,13 @@ ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
   if (hasBarrierMappings) {
     ncclResult_t closeResult = barrierState->resources->ipcMemHandler->closePeerMappings();
     if (closeResult != ncclSuccess) {
-      WARN("ncclDdaIpcCommClosePeerMappings: barrier peer mapping close failed (%d); continuing cleanup",
-           closeResult);
+      WARN("ncclDdaIpcCommClosePeerMappings: barrier peer mapping close failed (%d); continuing cleanup", closeResult);
     }
   }
   if (comm->ddaIpcMemHandler != nullptr) {
     ncclResult_t closeResult = comm->ddaIpcMemHandler->closePeerMappings();
     if (closeResult != ncclSuccess) {
-      WARN("ncclDdaIpcCommClosePeerMappings: scratch peer mapping close failed (%d); continuing cleanup",
-           closeResult);
+      WARN("ncclDdaIpcCommClosePeerMappings: scratch peer mapping close failed (%d); continuing cleanup", closeResult);
     }
   }
   return ncclSuccess;

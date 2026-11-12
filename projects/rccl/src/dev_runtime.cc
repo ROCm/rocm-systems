@@ -367,7 +367,7 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
         CUCHECKGOTO(cuMemAddressFree(flatAddr, flatBytes), fatalRet, cleanup);
       } else {
         INFO(NCCL_INIT, "ncclDevrFinalize: skipping lsaFlatBase cuMemAddressFree "
-             "(temporary gfx1250/NCCL_CUMEM_SKIP_FREE; VA unreclaimed until exit)");
+                        "(temporary gfx1250/NCCL_CUMEM_SKIP_FREE; VA unreclaimed until exit)");
       }
     }
     ncclSpaceDestruct(&devr->bigSpace);
@@ -466,8 +466,7 @@ static ncclResult_t symMemoryImportAndMapSegmentsForRank(struct ncclComm* comm, 
     symLsaMessage* msg = messages + r * maxSegments + segment;
     // memHandles is this rank's array. A peer can own a later host segment.
     bool reuseLocal = r == devr->lsaSelf ||
-                      (segment < nLocalHandles && ncclParamSymReuseSysmemHandles() &&
-                       ncclSymIsHostSegment(msg->type));
+                      (segment < nLocalHandles && ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type));
     if (reuseLocal && segment >= nLocalHandles) {
       ret = ncclInternalError;
       goto fail;
@@ -583,7 +582,7 @@ fail:
 static ncclResult_t symBindTeamMemory(struct ncclComm* comm, struct ncclDevrTeam* tm, struct ncclDevrMemory* mem) {
   if (ncclDevrWinRegEnabled(mem->winFlags, ncclDevrRegisterLsa) && comm->nvlsSupport && tm->mcBasePtr != nullptr) {
 #if CUDART_VERSION >= 12010
-      // Multimem teams are currently unsupported for memory containing CPU-backed physical segments
+    // Multimem teams are currently unsupported for memory containing CPU-backed physical segments
     if (mem->globalHasSysmemSegment) {
       INFO(NCCL_NVLS, "Skipping bind multicast for maxGlobalNumSegments = %d, big=%lx, team {%d x %d}",
            mem->maxGlobalNumSegments, mem->bigOffset, tm->team.nRanks, tm->team.stride);
@@ -830,9 +829,9 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     int ptrType;
     bool needDmabuf;
-    NCCLCHECKGOTO(
-        rcclDevrGinSegmentRegType(mem->globalHasSysmemSegment, mem->maxGlobalNumSegments, &ptrType, &needDmabuf),
-        ret, fail);
+    NCCLCHECKGOTO(rcclDevrGinSegmentRegType(mem->globalHasSysmemSegment, mem->maxGlobalNumSegments, &ptrType,
+                                            &needDmabuf),
+                  ret, fail);
 #else
     // CUDA HOST_NUMA is pin-able CPU pages (NCCL_PTR_HOST); device VMM is NCCL_PTR_CUDA.
     int ptrType = ncclSymIsHostSegment(cuMemLocType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
@@ -846,8 +845,7 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     }
     NCCLCHECKGOTO(ncclGinRegister(comm, (char*)mem->primaryAddr + offset, mem->ginSegmentInfos[segment].segmentSize,
                                   mem->ginSegmentInfos[segment].ginHostWins, mem->ginSegmentInfos[segment].ginDevWins,
-                                  mem->ginSegmentInfos[segment].ginWinGenerations,
-                                  mem->winFlags, needDmabuf, ptrType),
+                                  mem->ginSegmentInfos[segment].ginWinGenerations, mem->winFlags, needDmabuf, ptrType),
                   ret, fail);
     numSegmentsRegistered++;
     offset += mem->ginSegmentInfos[segment].segmentSize;
@@ -863,8 +861,7 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
   return ret;
 fail:
   for (int i = 0; mem->ginSegmentInfos != nullptr && i <= numSegmentsRegistered && i < mem->numGinSegments; i++) {
-    (void)ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins,
-                            mem->ginSegmentInfos[i].ginWinGenerations);
+    (void)ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins, mem->ginSegmentInfos[i].ginWinGenerations);
   }
   free(mem->ginSegmentInfos);
   mem->ginSegmentInfos = nullptr;
@@ -915,8 +912,8 @@ static void symGinActivationRollbackWindows(struct ncclDevrState* devr, cudaStre
     winHost->ginMultiSegmentWins = nullptr;
     winHost->numSegments = 0;
     for (int c = 0; c < NCCL_GIN_MAX_CONNECTIONS; c++) winHost->ginWinsDefaultBackend[c] = nullptr;
-    CUDACHECKIGNORE(
-      cudaMemcpyAsync(win->vidmem, winHost, sizeof(struct ncclWindow_vidmem), cudaMemcpyHostToDevice, stream));
+    CUDACHECKIGNORE(cudaMemcpyAsync(win->vidmem, winHost, sizeof(struct ncclWindow_vidmem), cudaMemcpyHostToDevice,
+                                    stream));
   }
 }
 
@@ -1548,14 +1545,13 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
     // builds can't use this single-descriptor path.
     exportCuMem = false;
     if (ncclCuMemEnable() && ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
-        CUPFN(cuMemRetainAllocationHandle(&localCuMemHandle,
-                                          reinterpret_cast<void*>(allocBase))) == CUDA_SUCCESS) {
+        CUPFN(cuMemRetainAllocationHandle(&localCuMemHandle, reinterpret_cast<void*>(allocBase))) == CUDA_SUCCESS) {
       haveLocalCuMemHandle = true;
       const size_t retainedSize = allocSize;
       CUdeviceptr rangeBase = 0;
       size_t rangeSize = 0;
       const bool rangeOk =
-          ncclCuMemGetAddressRange(userPtrCu, userSize, &rangeBase, &rangeSize, nullptr) == ncclSuccess;
+        ncclCuMemGetAddressRange(userPtrCu, userSize, &rangeBase, &rangeSize, nullptr) == ncclSuccess;
       // rangeOk false means a later segment failed the walk after the retain succeeded: a
       // multi-segment window ExchangeEntry's single handle+size can't describe. Legacy IPC is no
       // fallback either — it would export only the first segment.
@@ -2307,9 +2303,8 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
       rr = rr->next;
     }
     bufSizeTotal = alignUp(bufSizeTotal, 128);
-    nGinContextsTotal =
-      devr->ginEnabled ? devrGinContextsTotal(&comm->sharedRes->ginState, nGinContextsRequested)
-                       : nGinContextsRequested;
+    nGinContextsTotal = devr->ginEnabled ? devrGinContextsTotal(&comm->sharedRes->ginState, nGinContextsRequested) :
+                                           nGinContextsRequested;
     ginSignalShadowsOffset = bufSizeTotal;
     bufSizeTotal += (size_t)nGinContextsTotal * ginSignalTotal * sizeof(uint64_t); // include signal shadows
     ginAnvilNetSignalsOffset = bufSizeTotal;

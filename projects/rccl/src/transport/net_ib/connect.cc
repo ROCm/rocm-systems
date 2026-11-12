@@ -98,8 +98,8 @@ static int rcclIbMaxNqps(int qpPerDev, int localNdevs, int remoteNdevs, const ch
   int localNqps = qpPerDev * localNdevs;
   int remoteNqps = qpPerDev * remoteNdevs;
   int maxNqps = (remoteNqps > localNqps) ? remoteNqps : localNqps;
-  INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d, qpPerDev=%d", funcName, maxNqps,
-       localNqps, remoteNqps, qpPerDev);
+  INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d, qpPerDev=%d", funcName, maxNqps, localNqps,
+       remoteNqps, qpPerDev);
   return maxNqps;
 }
 
@@ -119,7 +119,8 @@ extern int64_t ncclParamIbOooRq();
 extern int64_t ncclParamIbReceiverSideMatchingScheme();
 extern int64_t ncclParamIbResiliencyPortFailover();
 
-static_assert(NCCL_IB_MAX_QPS * NCCL_GDR_FLUSH_FLAG_STRIDE <= GPU_PAGE_SIZE, "per-QP GDR flush flags must fit in one page");
+static_assert(NCCL_IB_MAX_QPS * NCCL_GDR_FLUSH_FLAG_STRIDE <= GPU_PAGE_SIZE,
+              "per-QP GDR flush flags must fit in one page");
 static_assert((NCCL_IB_MAX_QPS + NCCL_GDR_FLUSH_MAX_WAIT_QPS - 1) * NCCL_GDR_FLUSH_FLAG_STRIDE <= GPU_PAGE_SIZE,
               "the GPU polls NCCL_GDR_FLUSH_MAX_WAIT_QPS flags from any first QP, all within the page");
 static_assert(NCCL_IB_MAX_QPS < 256, "per-QP GDR flush flag first index and count are packed in 8 bits each");
@@ -1214,8 +1215,8 @@ ib_connect:
     comm->flagFlushRemAddr = remMeta.flagFlushAddr;
     comm->flagFlushRkey = remMeta.flagFlushRkey;
     comm->flagFlush = 1;
-    INFO(NCCL_NET, "NET/IB: %s: GDR flush flag enabled (remote flag 0x%lx rkey 0x%x)", __func__,
-         comm->flagFlushRemAddr, comm->flagFlushRkey);
+    INFO(NCCL_NET, "NET/IB: %s: GDR flush flag enabled (remote flag 0x%lx rkey 0x%x)", __func__, comm->flagFlushRemAddr,
+         comm->flagFlushRkey);
   }
 
   NCCLCHECKGOTO(ncclIbSenderQpsToRts(comm, &remMeta), ret, fail);
@@ -1606,9 +1607,9 @@ static ncclResult_t ncclIbSetupFlagFlush(struct ncclIbRecvComm* rComm, struct nc
     if (hsa_amd_portable_export_dmabuf(alignedPtr, alignedSize, &rComm->flagFlushDmabufFd, &exportOffset) ==
           HSA_STATUS_SUCCESS &&
         rComm->flagFlushDmabufFd >= 0) {
-      regRes = wrap_ibv_reg_dmabuf_mr(&rComm->flagFlushMr, rComm->devs[0].base.pd, exportOffset, GPU_PAGE_SIZE,
-                                      (uint64_t)ptr, rComm->flagFlushDmabufFd,
-                                      IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+      regRes =
+        wrap_ibv_reg_dmabuf_mr(&rComm->flagFlushMr, rComm->devs[0].base.pd, exportOffset, GPU_PAGE_SIZE, (uint64_t)ptr,
+                               rComm->flagFlushDmabufFd, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
     }
   } else {
     regRes = wrap_ibv_reg_mr(&rComm->flagFlushMr, rComm->devs[0].base.pd, ptr, GPU_PAGE_SIZE,
@@ -2017,10 +2018,9 @@ ib_recv:
             }
           } else if (peermemAvailable) {
             // Registered without IBV_ACCESS_RELAXED_ORDERING so the flush write to it is strictly ordered.
-            if (wrap_ibv_reg_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, rCommDev->gpuFlush.gpuFlushGpuMem,
-                                sizeof(int),
-                                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) ==
-                ncclSuccess) {
+            if (wrap_ibv_reg_mr(
+                  &rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int),
+                  IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) == ncclSuccess) {
               gpuFlushRegistered = true;
               std::call_once(gpuFlushRegLogOnce[rCommDev->base.ibDevN], [&] {
                 INFO(NCCL_INIT | NCCL_NET, "NET/IB: GDR flush scratchpad registered via peermem on device %d (%s)",

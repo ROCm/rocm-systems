@@ -42,8 +42,12 @@ typedef __hip_bfloat16 hip_bfloat16;
 #if SQTT_ENABLED
 #include <rocprof-trace-decoder/rocprof_trace_decoder/cxx/markers.hpp>
 #else
-#define sqtt_marker_enter(name) do {} while(0)
-#define sqtt_marker_exit(name) do {} while(0)
+#define sqtt_marker_enter(name) \
+  do { \
+  } while (0)
+#define sqtt_marker_exit(name) \
+  do { \
+  } while (0)
 #endif
 
 extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4];
@@ -122,7 +126,6 @@ struct ncclDevRedOpFull {
   bool scalarArgIsPtr;
   uint64_t scalarArg;
 };
-
 
 #include "nccl_device/rccl_ptr.h"
 
@@ -247,7 +250,8 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_P2P_WRITE 0x01
 #define NCCL_P2P_READ 0x02
 #define NCCL_DIRECT_NIC 0x04
-#define NCCL_GPU_PRODUCER 0x40 // RCCL: a peer GPU kernel publishes this conn's head/tail steps, not a proxy or copy engine
+#define NCCL_GPU_PRODUCER \
+  0x40 // RCCL: a peer GPU kernel publishes this conn's head/tail steps, not a proxy or copy engine
 #define NCCL_NVLS_MIN_POLL 0x80
 static_assert((NCCL_GPU_PRODUCER & (NCCL_P2P_WRITE | NCCL_P2P_READ | NCCL_DIRECT_NIC | NCCL_NVLS_MIN_POLL)) == 0,
               "NCCL_GPU_PRODUCER must not share a bit with another conn flag");
@@ -642,7 +646,7 @@ struct alignas(16) ncclDevWorkBatch {
       // nextExtends: should next one be merged into this one.
       // nextJump=0: end of this channel's batch list
       // nextJump>0: batches[thisIndex+nextJump] is next batch in this list
-      uint32_t nextJump : NCCL_DEV_WORK_BATCH_NEXT_JUMP_BITS, nextExtends:1;
+      uint32_t nextJump:NCCL_DEV_WORK_BATCH_NEXT_JUMP_BITS, nextExtends:1;
       // func is the ncclFunc_t this batch's completions are counted under; the
       // device would otherwise have to translate funcId through a table in
       // global memory on the batch-entry path.

@@ -116,7 +116,7 @@ static __device__ __forceinline__ void ncclSymkTileLoad(void* smem, void const* 
 #else
   (void)bar, (void)pending, (void)lane;
   tdm::asyncLoadToLDS<SyncPolicy::Async, kNcclSymkTilePolicy, TileAligned>((uint8_t const*)global, (uint8_t*)smem,
-                                                                          bytes);
+                                                                           bytes);
 #endif
 }
 
@@ -147,7 +147,7 @@ static __device__ __forceinline__ void ncclSymkTileStore(void* global, void cons
 #else
   (void)lane;
   tdm::asyncStoreFromLDS<SyncPolicy::Async, kNcclSymkTilePolicy, TileAligned>((uint8_t const*)smem, (uint8_t*)global,
-                                                                             bytes);
+                                                                              bytes);
 #endif
 }
 

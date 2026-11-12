@@ -146,7 +146,9 @@ static int IbCastSpeed(int speed) {
   return ibvSpeeds[firstBitSet(speed, sizeof(ibvSpeeds) / sizeof(int) - 1)];
 }
 
-extern "C" int ncclIbCastTestSpeed(int speed) { return IbCastSpeed(speed); }
+extern "C" int ncclIbCastTestSpeed(int speed) {
+  return IbCastSpeed(speed);
+}
 
 extern "C" ncclResult_t ncclIbCastTestSpeedSource(int dev, int* fromQuery) {
   if (fromQuery == NULL || dev < 0 || dev >= IbCastNDevs) return ncclInvalidArgument;
@@ -154,7 +156,9 @@ extern "C" ncclResult_t ncclIbCastTestSpeedSource(int dev, int* fromQuery) {
   return ncclSuccess;
 }
 
-extern "C" int ncclIbCastTestGetNDevs(void) { return IbCastNDevs; }
+extern "C" int ncclIbCastTestGetNDevs(void) {
+  return IbCastNDevs;
+}
 
 // Determine whether RELAXED_ORDERING is enabled and possible
 static int IbCastRelaxedOrderingCapable(void) {
@@ -215,7 +219,8 @@ fail:
 // Typically 12 user-defined planes + 1 plane for undefined plane IDs
 #define NCCL_IB_PLANE_MAX_INDEX 14
 #define NCCL_IB_PLANE_VIRT_BIT (0x1 << NCCL_IB_PLANE_MAX_INDEX)
-static_assert(NCCL_IB_PLANE_MAX_INDEX < 15, "NCCL_IB_PLANE_MAX_INDEX must be < 15: plane IDs are stored in int16_t and bit 15 is the sign bit");
+static_assert(NCCL_IB_PLANE_MAX_INDEX < 15,
+              "NCCL_IB_PLANE_MAX_INDEX must be < 15: plane IDs are stored in int16_t and bit 15 is the sign bit");
 
 static ncclResult_t IbCastGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx) {
   int16_t p = 0;
@@ -424,8 +429,7 @@ static void IbCastInitMaxPostSendBytes() {
   IbCastMaxPostSendBytes = std::max(IbCastMaxPostSendBytes, kMinCap);
   // Round down to the IB_WRITE_CHUNK_ALIGNMENT
   IbCastMaxPostSendBytes -= IbCastMaxPostSendBytes % IB_WRITE_CHUNK_ALIGNMENT;
-  INFO(NCCL_ENV, "NET/IB: IB-CAST data posts default to %u bytes",
-    IbCastMaxPostSendBytes);
+  INFO(NCCL_ENV, "NET/IB: IB-CAST data posts default to %u bytes", IbCastMaxPostSendBytes);
 }
 
 ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
@@ -723,7 +727,8 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
 
       // CTS offload and QP sharing are mutually exclusive. disable CTS offload when QP sharing is enabled
       if (IbCastOffloadEnabled && IbCastQpSharingEnabled()) {
-        INFO(NCCL_INIT | NCCL_NET, "NET/IB : QP sharing enabled - disabling CTS Offload (not yet supported with QP sharing)");
+        INFO(NCCL_INIT | NCCL_NET,
+             "NET/IB : QP sharing enabled - disabling CTS Offload (not yet supported with QP sharing)");
         IbCastOffloadEnabled = false;
       }
 
@@ -775,11 +780,13 @@ exit:
     if (IbCastByOrderRequested()) {
       if (ncclParamIbCastResiliencyPortFailover() > 0) {
         WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling resiliency "
-             "(port failover and port recovery)", BY_ORDER);
+             "(port failover and port recovery)",
+             BY_ORDER);
       }
       if (ncclParamIbCastOooRq()) {
         WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d):"
-             " disabling out-of-order RQ", BY_ORDER);
+             " disabling out-of-order RQ",
+             BY_ORDER);
       }
     }
     IbCastReportMatchingScheme();

@@ -167,27 +167,16 @@ std::string facebook_rccl::ProxyTraceOp::str() {
            "createT:%lld, lastT:%lld, postT:%lld, sendT:%lld, cntNm:%d, %s, %s, %d->%d(%s), "
            "chan:%d, status:%s, ns:%d, nb:%u, po:%lld, ke:%lld, tail/h:%lld, recvT:%lld, "
            "connSz/h:%lld, trans:%lld, flushed:%lld, recvd:%lld, done:%lld\n",
-           (long long)ms(startTs),
-           (long long)ms(lastUpdateTs),
+           (long long)ms(startTs), (long long)ms(lastUpdateTs),
            (long long)ms(timestamps[facebook_rccl::ProxyCounterTypes::POSTED]),
            (long long)ms(timestamps[facebook_rccl::ProxyCounterTypes::KERNEL_COPY_READY]),
-           static_cast<int>(lastUpdatingCounter),
-           traceKey.str().c_str(),
-           extraInfo.str().c_str(),
-           myRank, peerRank,
-           opType == ProxyOpType::SEND ? "S" : "R",
-           channelId,
-           proxyStepStatusStrMap[status].c_str(),
-           nSteps, nbytes,
-           (long long)counters[ProxyCounterTypes::POSTED],
-           (long long)counters[ProxyCounterTypes::KERNEL_COPY_READY],
-           (long long)counters[ProxyCounterTypes::TAIL_OR_HEAD],
-           (long long)counters[ProxyCounterTypes::RECV_TAIL],
+           static_cast<int>(lastUpdatingCounter), traceKey.str().c_str(), extraInfo.str().c_str(), myRank, peerRank,
+           opType == ProxyOpType::SEND ? "S" : "R", channelId, proxyStepStatusStrMap[status].c_str(), nSteps, nbytes,
+           (long long)counters[ProxyCounterTypes::POSTED], (long long)counters[ProxyCounterTypes::KERNEL_COPY_READY],
+           (long long)counters[ProxyCounterTypes::TAIL_OR_HEAD], (long long)counters[ProxyCounterTypes::RECV_TAIL],
            (long long)counters[ProxyCounterTypes::FIFO_SZ_OR_HEAD_CACHE],
-           (long long)counters[ProxyCounterTypes::TRANSMITTED],
-           (long long)counters[ProxyCounterTypes::FLUSHED],
-           (long long)counters[ProxyCounterTypes::RECEIVED],
-           (long long)counters[ProxyCounterTypes::DONE]);
+           (long long)counters[ProxyCounterTypes::TRANSMITTED], (long long)counters[ProxyCounterTypes::FLUSHED],
+           (long long)counters[ProxyCounterTypes::RECEIVED], (long long)counters[ProxyCounterTypes::DONE]);
   return std::string(buf);
 }
 

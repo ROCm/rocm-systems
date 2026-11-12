@@ -55,18 +55,17 @@ struct rcclCollDecision {
   rcclDdaLaunchCap ddaCap;
 };
 
-
 // Defined here (not in rccl_common.h) so this header stays free of
 // rccl_common.h's heavy device-header chain
 // (sym_kernels.h -> gin_scratch.h -> gin_tmp.h).
 // rccl_common.h includes rccl_decision.h, so all its users get these types.
 typedef uint32_t rcclBackendMask_t;
 enum : rcclBackendMask_t {
-  RCCL_BACKEND_GIN_SDMA  = 1u << 0,
+  RCCL_BACKEND_GIN_SDMA = 1u << 0,
   RCCL_BACKEND_SYMMETRIC = 1u << 1,
-  RCCL_BACKEND_CE        = 1u << 2,
-  RCCL_BACKEND_DDA       = 1u << 3,
-  RCCL_BACKEND_ALL       = 0xfu,
+  RCCL_BACKEND_CE = 1u << 2,
+  RCCL_BACKEND_DDA = 1u << 3,
+  RCCL_BACKEND_ALL = 0xfu,
 };
 
 // Returns the preferred backend mask for this communicator given the active
@@ -79,11 +78,11 @@ rcclBackendMask_t rcclAllReducePreferredBackends(const struct ncclComm* comm);
 // rcclSelectXxx().  Each selector initialises its own instance; the preferred
 // mask may differ per collective based on what backends are available for it.
 struct rcclCandSearch {
-  rcclBackendMask_t  preferred;
-  rcclCollDecision*  decision;
-  rcclCollDecision   bestFallback;
-  bool               bestFallbackFound;
-  bool               bestPreferredFound;
+  rcclBackendMask_t preferred;
+  rcclCollDecision* decision;
+  rcclCollDecision bestFallback;
+  bool bestFallbackFound;
+  bool bestPreferredFound;
 };
 
 // Record one eligible candidate into the search state.  Called in priority
@@ -94,18 +93,15 @@ struct rcclCandSearch {
 //     (a) preferred is explicit (not ALL, so a deliberate policy choice), or
 //     (b) the candidate is in its tuning window.
 //   Existing callers omit inWindow and get true by default (no behaviour change).
-static inline void rcclCandSearchRecord(rcclCandSearch& s,
-                                        rcclBackendMask_t family,
-                                        const rcclCollDecision& cand,
+static inline void rcclCandSearchRecord(rcclCandSearch& s, rcclBackendMask_t family, const rcclCollDecision& cand,
                                         bool inWindow = true) {
   if (inWindow && !s.bestFallbackFound) {
-    s.bestFallback      = cand;
+    s.bestFallback = cand;
     s.bestFallbackFound = true;
   }
-  const bool qualifiesAsPreferred = (s.preferred & family) &&
-                                    (s.preferred != RCCL_BACKEND_ALL || inWindow);
+  const bool qualifiesAsPreferred = (s.preferred & family) && (s.preferred != RCCL_BACKEND_ALL || inWindow);
   if (!s.bestPreferredFound && qualifiesAsPreferred) {
-    *s.decision          = cand;
+    *s.decision = cand;
     s.bestPreferredFound = true;
   }
 }

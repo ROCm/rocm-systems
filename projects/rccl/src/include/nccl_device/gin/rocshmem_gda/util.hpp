@@ -17,34 +17,32 @@ namespace rocshmem {
 #define STRINGIFY_NX(name) #name
 #define STRINGIFY(name) STRINGIFY_NX(name)
 
-#define DLSYM_OPT_HELPER(func_struct, prefix, handle, func_name)                            \
-do {                                                                                        \
-  *(void **) (&func_struct.func_name) = dlsym(handle, STRINGIFY(PPCAT(prefix, func_name))); \
-} while (0)
+#define DLSYM_OPT_HELPER(func_struct, prefix, handle, func_name) \
+  do { \
+    *(void**)(&func_struct.func_name) = dlsym(handle, STRINGIFY(PPCAT(prefix, func_name))); \
+  } while (0)
 
-#define DLSYM_HELPER(func_struct, prefix, handle, func_name)                                \
-do {                                                                                        \
-  *(void **) (&func_struct.func_name) = dlsym(handle, STRINGIFY(PPCAT(prefix, func_name))); \
-  if (!func_struct.func_name) {                                                             \
-    LOG_WARN("Failed to find function %s",  STRINGIFY(PPCAT(prefix, func_name)));           \
-    dlclose(handle);                                                                        \
-    handle = nullptr;                                                                       \
-    return -1;                                                                              \
-  }                                                                                         \
-} while (0)
+#define DLSYM_HELPER(func_struct, prefix, handle, func_name) \
+  do { \
+    *(void**)(&func_struct.func_name) = dlsym(handle, STRINGIFY(PPCAT(prefix, func_name))); \
+    if (!func_struct.func_name) { \
+      LOG_WARN("Failed to find function %s", STRINGIFY(PPCAT(prefix, func_name))); \
+      dlclose(handle); \
+      handle = nullptr; \
+      return -1; \
+    } \
+  } while (0)
 
-#define DLSYM_VAR_HELPER(func_struct, handle, var_name)                     \
-do {                                                                        \
-  *(void **) (&func_struct.var_name) = dlsym(handle, STRINGIFY(var_name));  \
-  if (!func_struct.var_name) {                                              \
-    LOG_WARN("Failed to find function %s",  STRINGIFY(var_name));           \
-    dlclose(handle);                                                        \
-    handle = nullptr;                                                       \
-    return -1;                                                              \
-  }                                                                         \
-} while (0)
-
-
+#define DLSYM_VAR_HELPER(func_struct, handle, var_name) \
+  do { \
+    *(void**)(&func_struct.var_name) = dlsym(handle, STRINGIFY(var_name)); \
+    if (!func_struct.var_name) { \
+      LOG_WARN("Failed to find function %s", STRINGIFY(var_name)); \
+      dlclose(handle); \
+      handle = nullptr; \
+      return -1; \
+    } \
+  } while (0)
 
 /* Device-side internal functions */
 [[maybe_unused]] __device__ __forceinline__ uint64_t get_active_lane_mask() {
@@ -99,18 +97,18 @@ __device__ __forceinline__ bool is_last_active_lane() {
   return is_last_active_lane(get_active_lane_mask());
 }
 
-#define SPIN_LOCK_INVALID  0xdead
+#define SPIN_LOCK_INVALID 0xdead
 #define SPIN_LOCK_UNLOCKED 0x1234
-#define SPIN_LOCK_LOCKED   0xabcd
+#define SPIN_LOCK_LOCKED 0xabcd
 
 /*
  * Each thread in wave tries to acquire a different lock.
  */
-[[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_unique(uint32_t *lock) {
+[[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_unique(uint32_t* lock) {
   uint32_t lock_val = SPIN_LOCK_UNLOCKED;
 
-  __scoped_atomic_compare_exchange_n(lock, &lock_val, SPIN_LOCK_LOCKED, /* weak */ false,
-                                     __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
+  __scoped_atomic_compare_exchange_n(lock, &lock_val, SPIN_LOCK_LOCKED, /* weak */ false, __ATOMIC_ACQUIRE,
+                                     __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
 
   return lock_val == SPIN_LOCK_UNLOCKED;
 }
@@ -119,7 +117,7 @@ __device__ __forceinline__ bool is_last_active_lane() {
  * Each thread in wave acquires a different lock.
  * (deadlock if locks are not different)
  */
-[[maybe_unused]] __device__ __forceinline__ void spin_lock_acquire_unique(uint32_t *lock) {
+[[maybe_unused]] __device__ __forceinline__ void spin_lock_acquire_unique(uint32_t* lock) {
   while (!spin_lock_try_acquire_unique(lock)) {
     // spin
   }
@@ -128,20 +126,20 @@ __device__ __forceinline__ bool is_last_active_lane() {
 /*
  * Each thread in wave releases a different lock.
  */
-[[maybe_unused]] __device__ __forceinline__ void spin_lock_release_unique(uint32_t *lock) {
+[[maybe_unused]] __device__ __forceinline__ void spin_lock_release_unique(uint32_t* lock) {
   __scoped_atomic_store_n(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 }
 
 /*
  * Threads in activemask together try to acquire the same lock.
  */
-[[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_shared(uint32_t *lock, uint64_t activemask) {
+[[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_shared(uint32_t* lock, uint64_t activemask) {
   uint32_t lock_val = SPIN_LOCK_INVALID;
 
   if (is_first_active_lane(activemask)) {
     lock_val = SPIN_LOCK_UNLOCKED;
-    __scoped_atomic_compare_exchange_n(lock, &lock_val, SPIN_LOCK_LOCKED, /* weak */ false,
-                                       __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
+    __scoped_atomic_compare_exchange_n(lock, &lock_val, SPIN_LOCK_LOCKED, /* weak */ false, __ATOMIC_ACQUIRE,
+                                       __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
   }
   lock_val = __shfl(lock_val, get_first_active_lane_id(activemask));
 
@@ -151,7 +149,7 @@ __device__ __forceinline__ bool is_last_active_lane() {
 /*
  * Threads in activemask together acquire the same lock.
  */
-[[maybe_unused]] __device__ __forceinline__ void spin_lock_acquire_shared(uint32_t *lock, uint64_t activemask) {
+[[maybe_unused]] __device__ __forceinline__ void spin_lock_acquire_shared(uint32_t* lock, uint64_t activemask) {
   while (!spin_lock_try_acquire_shared(lock, activemask)) {
     // spin
   }
@@ -160,7 +158,7 @@ __device__ __forceinline__ bool is_last_active_lane() {
 /*
  * Threads in activemask together release the same lock.
  */
-[[maybe_unused]] __device__ __forceinline__ void spin_lock_release_shared(uint32_t *lock, uint64_t activemask) {
+[[maybe_unused]] __device__ __forceinline__ void spin_lock_release_shared(uint32_t* lock, uint64_t activemask) {
   if (is_first_active_lane(activemask)) {
     __scoped_atomic_store_n(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
   }
@@ -168,9 +166,7 @@ __device__ __forceinline__ bool is_last_active_lane() {
 
 /* Is ptr_b in range [ptr_a, ptr_a + len_a) */
 [[maybe_unused]]
-__host__ __device__ static bool
-is_ptr_in_range(uintptr_t ptr_a, size_t len_a, uintptr_t ptr_b) {
-
+__host__ __device__ static bool is_ptr_in_range(uintptr_t ptr_a, size_t len_a, uintptr_t ptr_b) {
   if ((len_a == 0) || (ptr_b < ptr_a)) {
     return false;
   }

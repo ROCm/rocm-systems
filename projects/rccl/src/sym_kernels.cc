@@ -32,13 +32,12 @@ constexpr uint32_t kernelMask_LL = 1 << ncclSymkKernelId_AllReduce_AGxLL_R | 1 <
                                    1 << ncclSymkKernelId_AllGather_LL | 1 << ncclSymkKernelId_AllGather_LLMC |
                                    1 << ncclSymkKernelId_ReduceScatter_LL;
 
-constexpr uint32_t kernelMask_AG = 1 << ncclSymkKernelId_AllGather_LL | 1 << ncclSymkKernelId_AllGather_LLMC |
-                                   1 << ncclSymkKernelId_AllGather_ST | 1 << ncclSymkKernelId_AllGather_STMC |
-                                   1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
-                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
-                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC |
-                                   1 << ncclSymkKernelId_AllGather_HierLsaST |
-                                   1 << ncclSymkKernelId_AllGather_HierLsaTmaST;
+constexpr uint32_t kernelMask_AG =
+  1 << ncclSymkKernelId_AllGather_LL | 1 << ncclSymkKernelId_AllGather_LLMC | 1 << ncclSymkKernelId_AllGather_ST |
+  1 << ncclSymkKernelId_AllGather_STMC | 1 << ncclSymkKernelId_AllGather_TmaST |
+  1 << ncclSymkKernelId_AllGather_TmaSTMC | 1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
+  1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC | 1 << ncclSymkKernelId_AllGather_HierLsaST |
+  1 << ncclSymkKernelId_AllGather_HierLsaTmaST;
 
 constexpr uint32_t kernelMask_AR = 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R | 1 << ncclSymkKernelId_AllReduce_AGxLL_R |
                                    1 << ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
@@ -59,10 +58,9 @@ constexpr uint32_t kernelMask_LSA =
   1 << ncclSymkKernelId_ReduceScatter_LL | 1 << ncclSymkKernelId_ReduceScatter_LD |
   1 << ncclSymkKernelId_ReduceScatter_LDMC | 1 << ncclSymkKernelId_ReduceScatter_TmaLD;
 
-constexpr uint32_t kernelMask_Gin = 1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
-                                    1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
-                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
-                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
+constexpr uint32_t kernelMask_Gin =
+  1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD | 1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
+  1 << ncclSymkKernelId_AllGather_RailRing_LsaST | 1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
 
 constexpr uint32_t kernelMask_Tma = 1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
                                     1 << ncclSymkKernelId_AllGather_HierLsaTmaST |
@@ -231,15 +229,13 @@ extern int64_t ncclParamSymCTAs();
 // The block width tuning is fitted to gfx950 and must not reach other architectures. It sizes the
 // shared LL slots and blockDim, which peers must agree on, so every rank has to share this arch.
 bool ncclSymkIsGfx950(struct ncclComm* comm) {
-  return comm->minCompCap == comm->maxCompCap && comm->archName != nullptr &&
-         IsArchMatch(comm->archName, "gfx950");
+  return comm->minCompCap == comm->maxCompCap && comm->archName != nullptr && IsArchMatch(comm->archName, "gfx950");
 }
 
 // The partition-mode AllGather tuning is fitted to gfx1250 and must not reach other architectures.
 // Peers must pick the same kernel, so every rank has to share this arch.
 bool ncclSymkIsGfx1250(struct ncclComm* comm) {
-  return comm->minCompCap == comm->maxCompCap && comm->archName != nullptr &&
-         IsArchMatch(comm->archName, "gfx1250");
+  return comm->minCompCap == comm->maxCompCap && comm->archName != nullptr && IsArchMatch(comm->archName, "gfx1250");
 }
 #endif
 
@@ -301,7 +297,8 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     if (ncclSymkAgHierAvailable(comm) && symk->kcomm.hierScaleInSize == 0) {
       INFO(NCCL_INIT,
            "Symmetric hierarchical AllGather off: ranks do not form two or more consecutive, equal-size groups "
-           "per physical device (nRanks %d)", comm->nRanks);
+           "per physical device (nRanks %d)",
+           comm->nRanks);
     }
     struct ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     // Disable LSA multicast for cross-clique since NVLS isn't available across cliques
@@ -342,8 +339,9 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     const bool needGin = ncclTeamLsa(comm).nRanks < comm->nRanks;
     symk->ginBackendUnsupported = needGin && ncclSymkGinBackendUnsupported(comm);
     if (symk->ginBackendUnsupported && ncclParamSymGinKernelsEnable()) {
-      INFO(NCCL_INIT, "Symmetric GIN kernels disabled: the Anvil SDMA GIN backend cannot reach rail peers outside "
-                      "the LSA team (lsaSize=%d, nRanks=%d)",
+      INFO(NCCL_INIT,
+           "Symmetric GIN kernels disabled: the Anvil SDMA GIN backend cannot reach rail peers outside "
+           "the LSA team (lsaSize=%d, nRanks=%d)",
            ncclTeamLsa(comm).nRanks, comm->nRanks);
     }
     if (ncclParamSymGinKernelsEnable() && needGin && !symk->ginBackendUnsupported) {

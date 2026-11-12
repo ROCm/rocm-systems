@@ -46,8 +46,7 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
 
   const size_t totalBytes = count * comm->nRanks;
   if (totalBytes > comm->ddaScratchBytes) {
-    WARN("DDA IPC alltoall: total %zu bytes exceeds comm scratch %zu bytes", totalBytes,
-         comm->ddaScratchBytes);
+    WARN("DDA IPC alltoall: total %zu bytes exceeds comm scratch %zu bytes", totalBytes, comm->ddaScratchBytes);
     return ncclInvalidArgument;
   }
 

@@ -70,8 +70,12 @@ constexpr GinA2ALsaBand kGinA2ALsaBands[] = {
   {SIZE_MAX, 8, 512},     // 512 KB/peer and up, 4 MB total and up: 8 chunks, 512 threads
 };
 
-inline size_t ginA2ADivUp(size_t a, size_t b) { return (a + b - 1) / b; }
-inline size_t ginA2AAlignUp(size_t a, size_t b) { return ginA2ADivUp(a, b) * b; }
+inline size_t ginA2ADivUp(size_t a, size_t b) {
+  return (a + b - 1) / b;
+}
+inline size_t ginA2AAlignUp(size_t a, size_t b) {
+  return ginA2ADivUp(a, b) * b;
+}
 
 // Whole CTA cooperates on one chunk, 16B vectors with a scalar tail. Eligibility
 // rejects anything that would leave these two pointers unaligned.

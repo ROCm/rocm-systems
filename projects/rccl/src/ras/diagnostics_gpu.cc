@@ -755,7 +755,7 @@ ncclResult_t rasDiagnosticsNvLinkSummarize(const struct rasDiagnosticsContext* c
     } else if (nCountMismatch == 0 && nInactive == 0 && nSpeedMismatch == 0) {
       NCCLCHECKGOTO(rasDiagnosticsReport(reporter, RAS_DIAG_TAG_OK,
                                          RAS_DIAG_LINK_LABEL ": %d links per GPU, all active" RAS_DIAG_LINK_SPEED_OK
-                                         " across %d ranks in comm 0x%lx",
+                                                             " across %d ranks in comm 0x%lx",
                                          refData->nLinks, commNRanks, startRank->commId.commHash),
                     ret, exit);
     } else {

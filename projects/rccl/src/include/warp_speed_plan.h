@@ -13,8 +13,8 @@
 #ifdef ENABLE_WARP_SPEED
 constexpr int RCCL_WARP_SPEED_MAX_PLAN_COLLS = 3;
 
-inline bool rcclShouldCapGroupedPlan(struct ncclComm* comm, struct ncclKernelPlan* plan,
-                                     struct ncclTaskColl* collHead, int nPlanColls) {
+inline bool rcclShouldCapGroupedPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclTaskColl* collHead,
+                                     int nPlanColls) {
   if (nPlanColls <= RCCL_WARP_SPEED_MAX_PLAN_COLLS) return false;
 
   // The single-node gfx950 corruption boundary is not characterized narrowly enough

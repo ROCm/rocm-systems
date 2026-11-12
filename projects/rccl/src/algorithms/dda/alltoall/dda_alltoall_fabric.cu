@@ -126,12 +126,11 @@ constexpr int kA2ATdmUnrollPeers = dda::common::kDdaA2ATdmWindowBytes / kA2ATdmT
 static inline std::pair<dim3, dim3> ddaAllToAllFabricTdmGeom(ncclComm* comm, size_t bytesPerRank, int tileBytes) {
   const size_t unrollPeers = dda::common::kDdaA2ATdmWindowBytes / tileBytes;
   const size_t tilesPerPeer = (bytesPerRank + tileBytes - 1) / tileBytes;
-  const size_t warpsNeeded =
-      dda::common::divRoundUp(tilesPerPeer * static_cast<size_t>(comm->nRanks), unrollPeers);
-  const uint32_t blocks = dda::common::calcBlockCount(warpsNeeded, dda::common::kDdaA2ATdmMaxWarpsPerBlock,
-                                                      comm->ddaFabricMaxBlocks);
+  const size_t warpsNeeded = dda::common::divRoundUp(tilesPerPeer * static_cast<size_t>(comm->nRanks), unrollPeers);
+  const uint32_t blocks =
+    dda::common::calcBlockCount(warpsNeeded, dda::common::kDdaA2ATdmMaxWarpsPerBlock, comm->ddaFabricMaxBlocks);
   const uint32_t warpsPerBlock =
-      std::min<uint32_t>(dda::common::kDdaA2ATdmMaxWarpsPerBlock, dda::common::divRoundUp(warpsNeeded, blocks));
+    std::min<uint32_t>(dda::common::kDdaA2ATdmMaxWarpsPerBlock, dda::common::divRoundUp(warpsNeeded, blocks));
   return {dim3(blocks), dim3(warpsPerBlock * dda::common::kDdaA2ATdmWave)};
 }
 
@@ -183,8 +182,7 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   const int nRanks = comm->nRanks;
   const size_t totalBytes = count * nRanks;
   if (totalBytes > comm->ddaScratchBytes) {
-    WARN("DDA fabric alltoall: total %zu bytes exceeds comm scratch %zu bytes", totalBytes,
-         comm->ddaScratchBytes);
+    WARN("DDA fabric alltoall: total %zu bytes exceeds comm scratch %zu bytes", totalBytes, comm->ddaScratchBytes);
     return ncclInvalidArgument;
   }
 
@@ -213,10 +211,10 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
     const size_t tilesPerWave = dda::common::kDdaA2ATdmWindowBytes / tileBytes;
     const size_t tiles = (count + tileBytes - 1) / tileBytes;
     unsigned drain = ddaAllToAllFabricPeerDrain(comm, /*tdm=*/true);
-    const DdaA2APeerGeom pg = ddaAllToAllFabricPeerGeom(comm, (tiles + tilesPerWave - 1) / tilesPerWave,
-                                                        dda::common::kDdaA2ATdmMaxWarpsPerBlock,
-                                                        /*balanceRounds=*/true,
-                                                        static_cast<size_t>(drain) * (nRanks - 1));
+    const DdaA2APeerGeom pg =
+      ddaAllToAllFabricPeerGeom(comm, (tiles + tilesPerWave - 1) / tilesPerWave,
+                                dda::common::kDdaA2ATdmMaxWarpsPerBlock,
+                                /*balanceRounds=*/true, static_cast<size_t>(drain) * (nRanks - 1));
     if (pg.blocksPerPeer > 0) {
       drain = std::min<unsigned>(drain, static_cast<unsigned>(pg.blocksPerPeer));
       const dim3 peerGrid(pg.grid.x + drain * (nRanks - 1));
@@ -224,8 +222,8 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
       const uint8_t* sendBytes = static_cast<const uint8_t*>(sendbuff);
       uint8_t* recvBytes = static_cast<uint8_t*>(recvbuff);
       uint8_t* const* scratch = reinterpret_cast<uint8_t* const*>(d_ipcbuffs);
-      const ncclResult_t prep = ddaAllToAllFabricTdmPrepare<
-          dda::common::ddaAllToAllFabricTdmPushPeer<kA2ATdmTileBytes, kA2ATdmUnrollPeers>>();
+      const ncclResult_t prep =
+        ddaAllToAllFabricTdmPrepare<dda::common::ddaAllToAllFabricTdmPushPeer<kA2ATdmTileBytes, kA2ATdmUnrollPeers>>();
       if (prep == ncclSuccess) {
         const unsigned pieces = ddaAllToAllFabricPeerPieces(count, 32);
         INFO(NCCL_COLL,
@@ -255,7 +253,7 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
     uint8_t* const* scratch = reinterpret_cast<uint8_t* const*>(d_ipcbuffs);
 
     const ncclResult_t prep =
-        ddaAllToAllFabricTdmPrepare<dda::common::ddaAllToAllFabricTdmPush<kA2ATdmTileBytes, kA2ATdmUnrollPeers>>();
+      ddaAllToAllFabricTdmPrepare<dda::common::ddaAllToAllFabricTdmPush<kA2ATdmTileBytes, kA2ATdmUnrollPeers>>();
     if (prep == ncclSuccess) {
       INFO(NCCL_COLL,
            "DDA fabric AllToAll: launching TDM push kernel: nRanks=%d count=%zu tile=%d grid=%u block=%u smem=%d",
@@ -274,8 +272,8 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   if (rcclParamDdaA2APush() && rcclParamDdaA2APushPeer() && sendbuff != recvbuff) {
     const size_t vecWaves = (count * sizeof(T) / sizeof(uint4) + 31) / 32;
     unsigned drain = ddaAllToAllFabricPeerDrain(comm, /*tdm=*/false);
-    const DdaA2APeerGeom pg = ddaAllToAllFabricPeerGeom(comm, vecWaves, 8, /*balanceRounds=*/false,
-                                                        static_cast<size_t>(drain) * (nRanks - 1));
+    const DdaA2APeerGeom pg =
+      ddaAllToAllFabricPeerGeom(comm, vecWaves, 8, /*balanceRounds=*/false, static_cast<size_t>(drain) * (nRanks - 1));
     if (pg.blocksPerPeer > 0) {
       drain = std::min<unsigned>(drain, static_cast<unsigned>(pg.blocksPerPeer));
       const dim3 peerGrid(pg.grid.x + drain * (nRanks - 1));
@@ -287,8 +285,8 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
       const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
       hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricPushPeer<T>), peerGrid, pg.block, 0, stream,
                             /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
-                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, pg.blocksPerPeer, pieces,
-                            drain, barrierHost);
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, pg.blocksPerPeer, pieces, drain,
+                            barrierHost);
       CUDACHECK(cudaGetLastError());
       return ncclSuccess;
     }
@@ -297,8 +295,8 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   }
 
   if (rcclParamDdaA2APush()) {
-    INFO(NCCL_COLL, "DDA fabric AllToAll: launching push kernel: nRanks=%d count=%zu grid=%u block=%u%s", nRanks,
-         count, grid.x, block.x, unroll);
+    INFO(NCCL_COLL, "DDA fabric AllToAll: launching push kernel: nRanks=%d count=%zu grid=%u block=%u%s", nRanks, count,
+         grid.x, block.x, unroll);
 
     const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
     const T* sendPtr = static_cast<const T*>(sendbuff);

@@ -593,8 +593,7 @@ static ncclResult_t rasCollConnsMerge(struct rasCollective* coll, struct rasMsg*
 
   // The count inside the payload comes from the peer, and it sizes both the merged buffer and the copy
   // below, so it must fit within what the peer actually sent.
-  if (msgData->nNegativeMins < 0 ||
-      (int64_t)msgData->nNegativeMins * sizeof(*msgData->negativeMins) > avail) {
+  if (msgData->nNegativeMins < 0 || (int64_t)msgData->nNegativeMins * sizeof(*msgData->negativeMins) > avail) {
     WARN("RAS received a COLLRESP message with an invalid negative minimums count (%d for %d bytes of data)",
          msgData->nNegativeMins, msg->collResp.nData);
     return ncclRemoteError;
@@ -960,8 +959,8 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
         // out early), and a count that overstates what was written would break the
         // commNRanks >= nRanks + nMissingRanks invariant for the next hop, which rejects the whole response.
         int newRankIdx = 0;
-        for (int collRankIdx = 0, msgRankIdx = 0;
-             collRankIdx < collComm->nRanks || msgRankIdx < msgComm->nRanks; newRankIdx++) {
+        for (int collRankIdx = 0, msgRankIdx = 0; collRankIdx < collComm->nRanks || msgRankIdx < msgComm->nRanks;
+             newRankIdx++) {
           int cmpRank;
           if (newRankIdx == newComm->commNRanks) break; // Short of failing, the best we can do is skip...
           if (collRankIdx < collComm->nRanks && msgRankIdx < msgComm->nRanks) {

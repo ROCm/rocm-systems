@@ -99,13 +99,12 @@ typedef enum {
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
-
 // Tag written by rcclSelect* into ncclTaskColl::symkExtract so the extractor
 // (ncclMakeSymmetricTaskList) knows whether the selector already vetoed symk.
 enum rcclSymkExtract : int8_t {
-  RCCL_SYMK_EXTRACT_DENY  = -1,  // selector chose non-symk backend; do not extract
-  RCCL_SYMK_EXTRACT_NONE  =  0,  // no opinion; extractor uses windows + ncclSymkAvailable
-  RCCL_SYMK_EXTRACT_ALLOW =  1,  // rcclSelect* chose RCCL_SYMMETRIC; may extract
+  RCCL_SYMK_EXTRACT_DENY = -1,  // selector chose non-symk backend; do not extract
+  RCCL_SYMK_EXTRACT_NONE = 0,  // no opinion; extractor uses windows + ncclSymkAvailable
+  RCCL_SYMK_EXTRACT_ALLOW = 1,  // rcclSelect* chose RCCL_SYMMETRIC; may extract
   RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY = 2,  // admitted by the AllGather TDM window; offer only TDM kernels
 };
 
@@ -302,14 +301,14 @@ bool rcclForceCeAllReduceEnabled(const struct ncclComm* comm);
 bool rcclForceCeScratchEnabled(const struct ncclComm* comm);
 // Sets ceAllReduceFastPath on each queued CE task from its receive window; no bootstrap.
 void rcclSetCeAllReduceFastPath(struct ncclComm* comm);
-RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceNonRegMax[AR] (2-shot) from arch table
-RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes);  // -1 = use ceRegMax[AR] (registered) from arch table
-RCCL_PARAM_DECLARE(CeArStagingBytes);    // -1 = use NCCL_CE_AR_STAGING_BYTES; sizes ceARTmpBuf, not the cap
-RCCL_PARAM_DECLARE(CeCollMaxBytes);      // -1 = use arch table; overrides ceNonRegMax+ceRegMax for non-AR collectives
-RCCL_PARAM_DECLARE(SymKMaxBytes);       // -1 = use arch table; overrides symMaxR2+symMaxR2Graph for all collectives
-RCCL_PARAM_DECLARE(CeArMinMsgBytes);     // -1 = use arch table; AR CE non-reg lower bound
-RCCL_PARAM_DECLARE(CeCollMinBytes);      // -1 = use arch table; non-AR CE non-reg lower bound
-RCCL_PARAM_DECLARE(SymKMinBytes);        // -1 = use arch table; overrides symMinR2 for all collectives
+RCCL_PARAM_DECLARE(CeArMaxMsgBytes); // -1 = use ceNonRegMax[AR] (2-shot) from arch table
+RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes); // -1 = use ceRegMax[AR] (registered) from arch table
+RCCL_PARAM_DECLARE(CeArStagingBytes); // -1 = use NCCL_CE_AR_STAGING_BYTES; sizes ceARTmpBuf, not the cap
+RCCL_PARAM_DECLARE(CeCollMaxBytes); // -1 = use arch table; overrides ceNonRegMax+ceRegMax for non-AR collectives
+RCCL_PARAM_DECLARE(SymKMaxBytes); // -1 = use arch table; overrides symMaxR2+symMaxR2Graph for all collectives
+RCCL_PARAM_DECLARE(CeArMinMsgBytes); // -1 = use arch table; AR CE non-reg lower bound
+RCCL_PARAM_DECLARE(CeCollMinBytes); // -1 = use arch table; non-AR CE non-reg lower bound
+RCCL_PARAM_DECLARE(SymKMinBytes); // -1 = use arch table; overrides symMinR2 for all collectives
 // True when NCCL_ALGO is set by the user. Used to skip CE/DDA/Symmetric in
 // both the selector (rccl_wrap.cc) and taskAppend (enqueue.cc).
 bool rcclNcclAlgoEnvIsSet();
@@ -370,11 +369,11 @@ extern int64_t ncclParamP2pDisable();
 // Value of RCCL_DDA_THRESHOLD / RCCL_DDA_LL_THRESHOLD / RCCL_DDA_LL128_THRESHOLD
 // meaning "the user did not set this". 0 already means "disable this tier", so
 // unset needs a value of its own for the arch tables to act as defaults.
-constexpr int64_t kDdaThresholdUnset  = -1;
+constexpr int64_t kDdaThresholdUnset = -1;
 // Pre-arch-table env var defaults, used as fallbacks when RCCL_IGNORE_ARCH_TABLE=1.
-constexpr size_t  kDdaLLBaseDefault   =    65536;  // 64 KiB  (develop default)
-constexpr size_t  kDdaLL128BaseDefault =        0;  // off     (develop default: DDA_LL128=0)
-constexpr size_t  kDdaVmmBaseDefault  = 134217728;  // 128 MiB
+constexpr size_t kDdaLLBaseDefault = 65536; // 64 KiB  (develop default)
+constexpr size_t kDdaLL128BaseDefault = 0; // off     (develop default: DDA_LL128=0)
+constexpr size_t kDdaVmmBaseDefault = 134217728; // 128 MiB
 
 // Per-tier DDA size caps for this collective: env var (when set) else arch table.
 // RCCL_IGNORE_ARCH_TABLE or a NULL/unknown-arch table restores the pre-table
@@ -436,8 +435,8 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm);
 // Returns true when the DDA fast path should be attempted for this arch/size.
 // `threshold` is the per-collective cap from rcclDdaEntryThreshold(). 0 disables
 // DDA for the call.
-bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
-                    bool query = false, const char* prefix = nullptr);
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold, bool query = false,
+                    const char* prefix = nullptr);
 
 // Element types the DDA fabric kernels accept on this comm's arch: ncclSum for
 // the reducing collectives, a raw byte copy for AllGather and AlltoAll. fp8 is
@@ -486,9 +485,9 @@ inline ssize_t rcclGfx1250SendRecvLl128MaxBytes(int cudaArch, int nNodes, int nR
   // MNNVL folds multi-host gfx1250 into nNodes=1 (one NVL domain). 4 GPU/node
   // SendRecv windows are keyed off nRanks: 4 / 8 / 16.
   (void)nNodes;
-  if (nRanks == 4) return 1 << 20;     // 1 host, 0 .. 1 MiB
-  if (nRanks == 8) return 512 << 10;   // 2 host, 0 .. 512 KiB
-  if (nRanks == 16) return 256 << 10;  // 4 host, 0 .. 256 KiB
+  if (nRanks == 4) return 1 << 20; // 1 host, 0 .. 1 MiB
+  if (nRanks == 8) return 512 << 10; // 2 host, 0 .. 512 KiB
+  if (nRanks == 16) return 256 << 10; // 4 host, 0 .. 256 KiB
   return 0;
 }
 
@@ -532,8 +531,8 @@ ncclResult_t rcclDevrGinSegmentRegType(bool globalHasSysmemSegment, int maxGloba
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels);
-bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
-                            struct ncclTaskColl* collHead, int nCollTasks);
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclTaskColl* collHead,
+                            int nCollTasks);
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
 int rcclGetMaxWarpsPerBlock(struct ncclComm* comm);
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes);

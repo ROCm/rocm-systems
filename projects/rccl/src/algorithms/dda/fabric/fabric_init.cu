@@ -96,8 +96,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   const char* fabricMaxBlocksOverride = getenv("RCCL_DDA_FABRIC_MAXBLOCKS");
   DdaFabricMaxBlocksOverride parsedOverride;
-  const int localBlocksMax =
-    ddaFabricMaxNBlocksForScratch(comm->cuCount, fabricMaxBlocksOverride, &parsedOverride);
+  const int localBlocksMax = ddaFabricMaxNBlocksForScratch(comm->cuCount, fabricMaxBlocksOverride, &parsedOverride);
 
   if (parsedOverride.specified && !parsedOverride.valid) {
     WARN("ncclDdaFabricCommInit: Ignoring invalid RCCL_DDA_FABRIC_MAXBLOCKS='%s'; using CU-derived cap %d.",
@@ -239,9 +238,8 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
        "LL128 enabled=%lld threshold=%lld, Simple threshold=%lld, FabricGpuBarrier nBlocks=%d, peer table on device",
        nRanks, bytes, (long long)fabricScratchOverride, (long long)llEnabled, (long long)llThresh,
        (long long)ll128Enabled, (long long)ll128Thresh, (long long)simpleThresh, nBlocksMax);
-  INFO(NCCL_INIT,
-       "ncclDdaFabricCommInit: CU count=%d, local max blocks=%d, communicator max blocks=%d",
-       comm->cuCount, localBlocksMax, nBlocksMax);
+  INFO(NCCL_INIT, "ncclDdaFabricCommInit: CU count=%d, local max blocks=%d, communicator max blocks=%d", comm->cuCount,
+       localBlocksMax, nBlocksMax);
   return ncclSuccess;
 
 fail:

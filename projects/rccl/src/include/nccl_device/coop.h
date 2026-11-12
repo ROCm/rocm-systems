@@ -53,8 +53,7 @@ NCCL_DEVICE_INLINE int ncclCoopPopc(ncclCoopMask_t x) {
 #endif
 // AMD uses a 64-bit mask for wave64 compatibility, but wave32 parts must
 // ignore bits that do not correspond to physical lanes.
-static constexpr ncclCoopMask_t ncclCoopLaneWindow =
-  ~ncclCoopMask_t(0) >> (8 * sizeof(ncclCoopMask_t) - WARP_SIZE);
+static constexpr ncclCoopMask_t ncclCoopLaneWindow = ~ncclCoopMask_t(0) >> (8 * sizeof(ncclCoopMask_t) - WARP_SIZE);
 #endif
 
 #if NCCL_CHECK_CUDACC

@@ -361,9 +361,8 @@ static thread_local int pcieOrderedDropped = 0;
 // an ordered ring", and the search would then explore cross-host permutations this should pin.
 static int ringPcieOrdered(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
   return !pcieOrderedDropped && rcclParamPcieOrderedRing() && graph->pattern == NCCL_TOPO_PATTERN_RING &&
-         graph->collNet == 0 &&
-         system->nodes[GPU].count > 0 && system->nodes[GPU].count == system->nRanks && system->nHosts == 1 &&
-         IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+         graph->collNet == 0 && system->nodes[GPU].count > 0 && system->nodes[GPU].count == system->nRanks &&
+         system->nHosts == 1 && IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
 }
 
 ncclResult_t ncclTopoReplayGetGpu(struct ncclTopoSystem* system, struct ncclTopoGraph* graph, int step, int* g) {

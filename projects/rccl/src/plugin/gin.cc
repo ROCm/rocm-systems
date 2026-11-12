@@ -260,8 +260,7 @@ static void initPluginLibsOnceFunc() {
     uint64_t ginTypeMask;
     bool valid = ncclGinParseTypeList(envGinTypes, &ginTypeMask);
     if (const char* envGinType = ncclGinTypeEnv()) {
-      INFO(NCCL_ENV | NCCL_NET, "RCCL_GIN_TYPE_LIST=%s ignored: NCCL_GIN_TYPE is set to %s", envGinTypes,
-           envGinType);
+      INFO(NCCL_ENV | NCCL_NET, "RCCL_GIN_TYPE_LIST=%s ignored: NCCL_GIN_TYPE is set to %s", envGinTypes, envGinType);
     } else if (ginTypeMask == 0) {
       WARN("RCCL_GIN_TYPE_LIST=%s names no valid GIN type, ignoring it", envGinTypes);
     } else if (!valid) {
@@ -492,8 +491,7 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
   // is in the communicator (including multi-host MNNVL where nNodes folds to 1).
   for (int i = 0; i < initialNumActiveBackends; i++) {
     struct ncclGinBackendState* backend = &ginState->backends[i];
-    const bool anvilMultiHost =
-        comm->topo->nHosts > 1 && backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
+    const bool anvilMultiHost = comm->topo->nHosts > 1 && backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
     if (anvilMultiHost || !(BIT(backend->ginType) & globalBitMask)) {
       if (anvilMultiHost) {
         INFO(NCCL_INIT | NCCL_NET,

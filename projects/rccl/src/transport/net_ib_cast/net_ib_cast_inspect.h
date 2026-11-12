@@ -118,10 +118,10 @@ int ncclIbCastTestGetNDevs(void);
  * it reflects what the driver actually programmed at RTR, not just intent.
  * linkLayer is the rtrAttr.linkLayer used to configure the QP. */
 struct ncclIbCastGrhState {
-  int      nqps;
-  uint8_t  linkLayer[NCCL_IB_MAX_QPS];  /* IBV_LINK_LAYER_ETHERNET (RoCE) / _INFINIBAND */
-  uint8_t  isGlobal[NCCL_IB_MAX_QPS];   /* ah_attr.is_global read back from the QP */
-  bool     queryOk[NCCL_IB_MAX_QPS];    /* false if ibv_query_qp failed for this QP */
+  int nqps;
+  uint8_t linkLayer[NCCL_IB_MAX_QPS];  /* IBV_LINK_LAYER_ETHERNET (RoCE) / _INFINIBAND */
+  uint8_t isGlobal[NCCL_IB_MAX_QPS];   /* ah_attr.is_global read back from the QP */
+  bool queryOk[NCCL_IB_MAX_QPS];    /* false if ibv_query_qp failed for this QP */
   uint32_t qpNum[NCCL_IB_MAX_QPS];      /* ibv_qp.qp_num for CI diagnostics */
 };
 
@@ -132,10 +132,10 @@ ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastGrhState* ou
 /* ── UDMA pinning introspection (HW: reads per-QP UDMA index from driver). ── */
 
 struct ncclIbCastUdmaState {
-  int      nqps;                          /* number of active QPs */
-  uint8_t  udmaCount;                     /* from capsProvider.ionic.udmaCount */
-  uint8_t  udmaIdx[NCCL_IB_MAX_QPS];     /* per-QP UDMA index read back via ionic_dv_qp_get_udma_idx */
-  bool     queryOk[NCCL_IB_MAX_QPS];     /* false if readback unavailable for this QP */
+  int nqps;                          /* number of active QPs */
+  uint8_t udmaCount;                     /* from capsProvider.ionic.udmaCount */
+  uint8_t udmaIdx[NCCL_IB_MAX_QPS];     /* per-QP UDMA index read back via ionic_dv_qp_get_udma_idx */
+  bool queryOk[NCCL_IB_MAX_QPS];     /* false if readback unavailable for this QP */
 };
 
 /* Copy per-QP UDMA pinning state out of a connected sendComm.
@@ -183,7 +183,6 @@ ncclResult_t ncclIbCastGetRepostCount(void* sendComm, int* out);
 
 #endif /* ENABLE_FAULT_INJECTION */
 
-
 /* Host-only checks for the net_ib error-path port (AICOMRCCL-2750).
  * No NIC: the helpers build the arguments and call the real functions. */
 
@@ -203,7 +202,6 @@ ncclResult_t ncclIbCastTestRecvWrIdBound(void);
  * NULL (CTS not ready). *recvPolledBeforeSend is 1 when that happens.
  * Returns the allgather result. Not thread-safe: it swaps netIbCast ops. */
 ncclResult_t ncclIbCastTestGinAllGatherPollsRecv(int* recvPolledBeforeSend);
-
 
 #ifdef __cplusplus
 } /* extern "C" */

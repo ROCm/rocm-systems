@@ -49,12 +49,10 @@ static int ginAnvilSpreadChannelsFromEnv() {
 }
 
 extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
-                                     int (*allgather)(void* ctx, void* buf, size_t bytes_per_rank),
-                                     void* allgather_ctx, int num_channels,
-                                     gin_anvil_sdma_handle_t* out_handle, void** out_gpu_handles,
+                                     int (*allgather)(void* ctx, void* buf, size_t bytes_per_rank), void* allgather_ctx,
+                                     int num_channels, gin_anvil_sdma_handle_t* out_handle, void** out_gpu_handles,
                                      uint64_t** out_sdma_dirty) {
-  if (!out_handle || !out_gpu_handles || !out_sdma_dirty || !allgather || nRanks < 1 || myRank < 0 ||
-      myRank >= nRanks)
+  if (!out_handle || !out_gpu_handles || !out_sdma_dirty || !allgather || nRanks < 1 || myRank < 0 || myRank >= nRanks)
     return -1;
 
   const int numChannels = std::max(1, std::min(8, num_channels));
@@ -107,8 +105,7 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   }
 
   const int total = nRanks * numChannels;
-  std::vector<sdma_anvil::SdmaQueueDeviceHandle*> host_handles(
-      static_cast<size_t>(total), nullptr);
+  std::vector<sdma_anvil::SdmaQueueDeviceHandle*> host_handles(static_cast<size_t>(total), nullptr);
   int validHandles = 0;
   for (int local_pe = 0; local_pe < nRanks; ++local_pe) {
     const int remoteDev = devs[static_cast<size_t>(local_pe)];
@@ -127,9 +124,9 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   sdma_anvil::SdmaQueueDeviceHandle** dev_row = nullptr;
   if (checkHip(hipMalloc(&dev_row, static_cast<size_t>(total) * sizeof(void*)), "hipMalloc handles") != 0)
     return abandon();
-  if (checkHip(hipMemcpy(dev_row, host_handles.data(), static_cast<size_t>(total) * sizeof(void*),
-                         hipMemcpyHostToDevice),
-               "hipMemcpy handles") != 0) {
+  if (
+    checkHip(hipMemcpy(dev_row, host_handles.data(), static_cast<size_t>(total) * sizeof(void*), hipMemcpyHostToDevice),
+             "hipMemcpy handles") != 0) {
     checkHip(hipFree(dev_row), "hipFree handles (cleanup)");
     return abandon();
   }

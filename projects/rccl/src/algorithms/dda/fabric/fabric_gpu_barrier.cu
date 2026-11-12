@@ -21,8 +21,8 @@ namespace dda::common {
 FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager,
                                 DdaKernelParams params) {
   if (nRanks <= 0 || nRanks > kDdaMaxNranks || selfRank < 0 || selfRank >= nRanks || nBlocks <= 0) {
-    WARN("FabricGpuBarrier::mallocAndInit: invalid geometry nRanks=%d, selfRank=%d, nBlocks=%d",
-         nRanks, selfRank, nBlocks);
+    WARN("FabricGpuBarrier::mallocAndInit: invalid geometry nRanks=%d, selfRank=%d, nBlocks=%d", nRanks, selfRank,
+         nBlocks);
     return {nullptr, FabricGpuBarrier{}};
   }
 

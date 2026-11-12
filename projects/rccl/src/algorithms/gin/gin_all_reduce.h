@@ -76,7 +76,9 @@ ncclResult_t ncclGinAllReduceFinalize(ncclComm* comm);
 
 #else
 
-inline ncclResult_t ncclGinAllReduceFinalize(ncclComm*) { return ncclSuccess; }
+inline ncclResult_t ncclGinAllReduceFinalize(ncclComm*) {
+  return ncclSuccess;
+}
 
 #endif
 

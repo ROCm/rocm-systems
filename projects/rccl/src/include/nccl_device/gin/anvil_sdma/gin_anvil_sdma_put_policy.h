@@ -63,7 +63,7 @@ static constexpr size_t kGinSdmaSafeCopyBytes = 128ull * 1024 * 1024;  // 128 Mi
 // of the two constants above (correctness bound AND reliability bound). Compile-
 // time constant so the device loop and the host unit test share one value.
 static constexpr size_t kGinPutSegBytes =
-    kGinSdmaSafeCopyBytes < kGinPutMaxBytes ? kGinSdmaSafeCopyBytes : kGinPutMaxBytes;
+  kGinSdmaSafeCopyBytes < kGinPutMaxBytes ? kGinSdmaSafeCopyBytes : kGinPutMaxBytes;
 
 // ------------------------------ segment math ------------------------------
 //
@@ -78,7 +78,7 @@ static constexpr size_t kGinPutSegBytes =
 struct PutSegment {
   size_t offset;   // byte offset of this segment within the transfer
   size_t bytes;    // segment length in bytes (always <= maxSeg)
-  bool   isFinal;  // last segment: carries the caller's remote action (signal)
+  bool isFinal;  // last segment: carries the caller's remote action (signal)
 };
 
 // Number of copy segments a `bytes`-length transfer splits into when each copy

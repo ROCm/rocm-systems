@@ -177,15 +177,15 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
 
   int* localRankOrder = nullptr;
   int* cutIndices = nullptr;
-  if ( intraGraphGen ) {
-     NCCLCHECKGOTO(ncclCalloc(&localRankOrder, nChannels * localRanks),res,fail);
-     NCCLCHECKGOTO(generateRings(localRanks, nChannels, localRankOrder),res,fail);
-     for ( int c = 1; c < nChannels ; c++ ) {
-      memcpy(graphs[NCCL_ALGO_RING]->intra+c*localRanks, graphs[NCCL_ALGO_RING]->intra, localRanks*sizeof(int));
+  if (intraGraphGen) {
+    NCCLCHECKGOTO(ncclCalloc(&localRankOrder, nChannels * localRanks), res, fail);
+    NCCLCHECKGOTO(generateRings(localRanks, nChannels, localRankOrder), res, fail);
+    for (int c = 1; c < nChannels; c++) {
+      memcpy(graphs[NCCL_ALGO_RING]->intra + c * localRanks, graphs[NCCL_ALGO_RING]->intra, localRanks * sizeof(int));
     }
-    if ( interGraphGen ) {
-      NCCLCHECKGOTO(ncclCalloc(&cutIndices,nChannels),res,fail);
-      findRingCutIndices(nChannels, localRanks, localRankOrder,cutIndices);
+    if (interGraphGen) {
+      NCCLCHECKGOTO(ncclCalloc(&cutIndices, nChannels), res, fail);
+      findRingCutIndices(nChannels, localRanks, localRankOrder, cutIndices);
     }
   }
 
@@ -194,8 +194,8 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
 
     int* ringIntra = graphs[NCCL_ALGO_RING]->intra + c * localRanks;
     // Permute only when we need diversity in rings
-    if ( intraGraphGen && !disableRingDiversity) {
-      permute_array_inplace(ringIntra,localRanks,localRankOrder + c*localRanks); 
+    if (intraGraphGen && !disableRingDiversity) {
+      permute_array_inplace(ringIntra, localRanks, localRankOrder + c * localRanks);
     }
     int* treeIntra = graphs[NCCL_ALGO_TREE]->intra + c * localRanks;
     int* collNetIntra = graphs[NCCL_ALGO_COLLNET_CHAIN]->intra + c * localRanks;
@@ -206,11 +206,11 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
         topoRanks->ringSend[c] = ringIntra[localRanks - 1];
         topoRanks->ringPrev[c] = (i == 0) ? -1 : ringIntra[i - 1];
         topoRanks->ringNext[c] = (i == localRanks - 1) ? -1 : ringIntra[i + 1];
-        if ( intraGraphGen && interGraphGen ) {
-          topoRanks->ringRecv[c] = ringIntra[ ( cutIndices[c] + 1 ) % localRanks] ; 
+        if (intraGraphGen && interGraphGen) {
+          topoRanks->ringRecv[c] = ringIntra[(cutIndices[c] + 1) % localRanks];
           topoRanks->ringSend[c] = ringIntra[cutIndices[c]];
-          topoRanks->ringPrev[c] = ringIntra[ ( localRanks  +  i-1 ) % localRanks];
-          topoRanks->ringNext[c] = ringIntra[(i+1) % localRanks];
+          topoRanks->ringPrev[c] = ringIntra[(localRanks + i - 1) % localRanks];
+          topoRanks->ringNext[c] = ringIntra[(i + 1) % localRanks];
         }
       }
       if (treeIntra[i] == rank) {
@@ -261,10 +261,10 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
   free(cutIndices);
   return ncclSuccess;
 
-  fail:
-    free(localRankOrder);
-    free(cutIndices);
-    return res;
+fail:
+  free(localRankOrder);
+  free(cutIndices);
+  return res;
 }
 
 bool isRankHere(const char* s, int start, int end, int rank) {
@@ -431,11 +431,11 @@ static ncclResult_t connectRingsLoadBalanced(struct ncclComm* comm, int* ringRec
 
   // 1. Allocate flat memory for nodeOrder [nChannels * nNodes]
   int* nodeOrder = nullptr;
-  NCCLCHECKGOTO(ncclCalloc(&nodeOrder, nChannels * nNodes),res,fail);
+  NCCLCHECKGOTO(ncclCalloc(&nodeOrder, nChannels * nNodes), res, fail);
 
   // Note: generateRings needs to handle the flat indexing (c * nNodes + i)
   // 2. Populate the Diverse/Greedy Node Order
-  NCCLCHECKGOTO(generateRings(nNodes, nChannels, nodeOrder),res,fail);
+  NCCLCHECKGOTO(generateRings(nNodes, nChannels, nodeOrder), res, fail);
 
   for (int c = 0; c < nChannels; c++) {
     // Correct offsets for global arrays
@@ -472,9 +472,9 @@ static ncclResult_t connectRingsLoadBalanced(struct ncclComm* comm, int* ringRec
 
   return ncclSuccess;
 
-  fail:
-    free(nodeOrder);
-    return res;
+fail:
+  free(nodeOrder);
+  return res;
 }
 
 /**
@@ -552,8 +552,7 @@ static ncclResult_t connectTrees(struct ncclComm* comm, int* treeToParent, int* 
   // Use compact tree when enabled via NCCL_TREE_COMPACT=1
   const bool useCompactTree = ncclParamTreeCompact();
   if (useCompactTree) {
-    NCCLCHECK(ncclGetDtreeCompact(nNodes, node, &t0u, &t0d0, &t0d1, &t0ChildType,
-                                   &t1u, &t1d0, &t1d1, &t1ChildType));
+    NCCLCHECK(ncclGetDtreeCompact(nNodes, node, &t0u, &t0d0, &t0d1, &t0ChildType, &t1u, &t1d0, &t1d1, &t1ChildType));
     INFO(NCCL_GRAPH, "Using compact tree: nNodes=%d, node=%d", nNodes, node);
   } else {
     NCCLCHECK(ncclGetDtree(nNodes, node, &t0u, &t0d0, &t0d1, &t0ChildType, &t1u, &t1d0, &t1d1, &t1ChildType));
@@ -729,13 +728,11 @@ static ncclResult_t connectNvls(struct ncclComm* comm, int* nvlsHeads, int nHead
   // Use compact tree when enabled via NCCL_TREE_COMPACT=1
   const bool useCompactTree = ncclParamTreeCompact();
   if (useCompactTree) {
-    NCCLCHECK(ncclGetDtreeCompact(comm->nNodes, comm->node,
-          &tree0Parent, &tree0Child0, &tree0Child1, &pc0,
-          &tree1Parent, &tree1Child0, &tree1Child1, &pc1));
+    NCCLCHECK(ncclGetDtreeCompact(comm->nNodes, comm->node, &tree0Parent, &tree0Child0, &tree0Child1, &pc0,
+                                  &tree1Parent, &tree1Child0, &tree1Child1, &pc1));
   } else {
-    NCCLCHECK(ncclGetDtree(comm->nNodes, comm->node,
-          &tree0Parent, &tree0Child0, &tree0Child1, &pc0,
-          &tree1Parent, &tree1Child0, &tree1Child1, &pc1));
+    NCCLCHECK(ncclGetDtree(comm->nNodes, comm->node, &tree0Parent, &tree0Child0, &tree0Child1, &pc0, &tree1Parent,
+                           &tree1Child0, &tree1Child1, &pc1));
   }
 
   int* heads = NULL;
@@ -843,13 +840,11 @@ int getTreeNodeParity(int treeDir, int nNodes, int node, bool useCompactTree) {
 
   int parentNodes[2], child0Nodes[2], child1Nodes[2], childTypes[2];
   if (useCompactTree) {
-    ncclGetDtreeCompact(nNodes, node,
-                 &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
-                 &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]);
+    ncclGetDtreeCompact(nNodes, node, &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
+                        &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]);
   } else {
-    ncclGetDtree(nNodes, node,
-                 &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
-                 &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]);
+    ncclGetDtree(nNodes, node, &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0], &parentNodes[1],
+                 &child0Nodes[1], &child1Nodes[1], &childTypes[1]);
   }
 
   // Uptree and downtree have different parity
@@ -904,13 +899,11 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
   // Use compact tree when enabled via NCCL_TREE_COMPACT=1
   const bool useCompactTree = ncclParamTreeCompact();
   if (useCompactTree) {
-    NCCLCHECK(ncclGetDtreeCompact(nNodes, node,
-                                   &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
-                                   &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]));
+    NCCLCHECK(ncclGetDtreeCompact(nNodes, node, &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
+                                  &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]));
     INFO(NCCL_GRAPH, "Using compact tree (rail-optimized): nNodes=%d, node=%d", nNodes, node);
   } else {
-    NCCLCHECK(ncclGetDtree(nNodes, node,
-                           &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
+    NCCLCHECK(ncclGetDtree(nNodes, node, &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
                            &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]));
   }
 

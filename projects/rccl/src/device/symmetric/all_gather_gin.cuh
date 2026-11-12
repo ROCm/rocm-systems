@@ -106,16 +106,16 @@ static __device__ void bcastLsaEnds(int tn, int t, ncclSymPtr<char> input, ncclS
 }
 
 template <typename T>
-static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncclSymPtr<T> input,
-                                ncclSymPtr<T> output, size_t nElts, BoolTag</*multimem=*/true>) {
+static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncclSymPtr<T> input, ncclSymPtr<T> output,
+                                size_t nElts, BoolTag</*multimem=*/true>) {
   bcastMultimem(handler, tn, t, input, output, nElts);
 }
 
 // Intra-node bcast for railring without multimem.
 // Using same 16B/4B/byte tiers as the single node symmetric bcast.
 template <typename T>
-static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncclSymPtr<T> input,
-                                ncclSymPtr<T> output, size_t nElts, BoolTag</*multimem=*/false>) {
+static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncclSymPtr<T> input, ncclSymPtr<T> output,
+                                size_t nElts, BoolTag</*multimem=*/false>) {
   ncclTeam lsa = ncclTeamLsa(handler.comm);
   int selfSkip = (input == output) ? 1 : 0;
   size_t nBytes = nElts * sizeof(T);
@@ -131,8 +131,7 @@ static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncc
     size_t tiles = (nBytes - cursor) / BytePerTile;
     if (tiles != 0) {
       bcastLsaDeep<BytePerPack, UnrollPacks, UnrollPeers>(tn, t, (ncclSymPtr<char>)input + cursor,
-                                                          (ncclSymPtr<char>)output + cursor, lsa, selfSkip,
-                                                          (int)tiles);
+                                                          (ncclSymPtr<char>)output + cursor, lsa, selfSkip, (int)tiles);
       cursor += tiles * BytePerTile;
     }
     size_t packs = (nBytes - cursor) / BytePerPack;
@@ -149,8 +148,7 @@ static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncc
     size_t tiles = (nBytes - cursor) / BytePerTile;
     if (tiles != 0) {
       bcastLsaDeep<BytePerPack, UnrollPacks, UnrollPeers>(tn, t, (ncclSymPtr<char>)input + cursor,
-                                                          (ncclSymPtr<char>)output + cursor, lsa, selfSkip,
-                                                          (int)tiles);
+                                                          (ncclSymPtr<char>)output + cursor, lsa, selfSkip, (int)tiles);
       cursor += tiles * BytePerTile;
     }
     size_t packs = (nBytes - cursor) / BytePerPack;

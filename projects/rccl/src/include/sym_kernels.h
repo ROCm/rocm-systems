@@ -48,7 +48,7 @@ constexpr __host__ __device__ int ncclSymkAgHierGroupBlocks(int nBlocks, int nGr
 }
 
 // [RCCL] Launch width for the GIN and Tma symmetric kernels. The rest default to ncclSymkMaxThreads.
-// This was tuned for TDM, so if you need to change it, please add a constexpr function that 
+// This was tuned for TDM, so if you need to change it, please add a constexpr function that
 // selects an appropriate value for the architecture and method of transfer (TDM or non-TDM).
 constexpr int ncclSymkWarpsPerBlock = 16;
 

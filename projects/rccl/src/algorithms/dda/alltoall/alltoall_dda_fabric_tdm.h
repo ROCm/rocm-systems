@@ -30,9 +30,9 @@ constexpr CachePolicy kDdaA2ATdmDevPolicy = createCachePolicy(TemporalHint::NT, 
 // (tileIdx, k) reads, and a tile's nRanks items can sit in different blocks, which that barrier does not order.
 template <int TileBytes, int UnrollPeers>
 __global__ void __launch_bounds__(kDdaA2ATdmMaxWarpsPerBlock* kDdaA2ATdmWave)
-ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __restrict__ recvbuff,
-                          const uint8_t* __restrict__ sendbuff, size_t bytesPerRank, int selfRank, int nRanks,
-                          FabricGpuBarrier barrier) {
+  ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __restrict__ recvbuff,
+                           const uint8_t* __restrict__ sendbuff, size_t bytesPerRank, int selfRank, int nRanks,
+                           FabricGpuBarrier barrier) {
   static_assert(TileBytes * UnrollPeers == kDdaA2ATdmWindowBytes, "tiles must fill one wave window");
   static_assert(TileBytes % kDdaA2ATdmAlign == 0, "tiles must be whole 256 B rows");
   static_assert(UnrollPeers < 10, "tdm unroll must be less than 10");
@@ -61,7 +61,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
         const size_t off = (item / nRanks) * TileBytes;
         const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
         tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmDevPolicy, /*Aligned=*/false>(
-            sendbuff + static_cast<size_t>(peer) * bytesPerRank + off, window + u * TileBytes, n);
+          sendbuff + static_cast<size_t>(peer) * bytesPerRank + off, window + u * TileBytes, n);
       }
     }
     tdm::tdmWait();
@@ -73,7 +73,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
         const size_t off = (item / nRanks) * TileBytes;
         const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
         tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmSysPolicy, /*Aligned=*/false>(
-            window + u * TileBytes, peerScratch[peer] + selfSlot + off, n);
+          window + u * TileBytes, peerScratch[peer] + selfSlot + off, n);
       }
     }
     tdm::tdmWait();
@@ -93,7 +93,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
         const size_t off = (item / nRanks) * TileBytes;
         const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
         tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmSysPolicy, /*Aligned=*/false>(
-            selfScratch + static_cast<size_t>(src) * bytesPerRank + off, window + u * TileBytes, n);
+          selfScratch + static_cast<size_t>(src) * bytesPerRank + off, window + u * TileBytes, n);
       }
     }
     tdm::tdmWait();
@@ -105,7 +105,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
         const size_t off = (item / nRanks) * TileBytes;
         const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
         tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmDevPolicy, /*Aligned=*/false>(
-            window + u * TileBytes, recvbuff + static_cast<size_t>(src) * bytesPerRank + off, n);
+          window + u * TileBytes, recvbuff + static_cast<size_t>(src) * bytesPerRank + off, n);
       }
     }
     tdm::tdmWait();
@@ -166,9 +166,9 @@ __device__ __forceinline__ void ddaA2ATdmPeerCopy(uint8_t* window, uint8_t* dst,
 // with the same block index on all ranks, so the scratch is not reused (e.g. by LL/LL128) before every rank is done.
 template <int TileBytes, int UnrollPeers>
 __global__ void __launch_bounds__(kDdaA2ATdmMaxWarpsPerBlock* kDdaA2ATdmWave)
-ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* __restrict__ recvbuff,
-                              const uint8_t* __restrict__ sendbuff, size_t bytesPerRank, int selfRank, int nRanks,
-                              int blocksPerPeer, unsigned pieces, unsigned drain, FabricGpuBarrier barrier) {
+  ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* __restrict__ recvbuff,
+                               const uint8_t* __restrict__ sendbuff, size_t bytesPerRank, int selfRank, int nRanks,
+                               int blocksPerPeer, unsigned pieces, unsigned drain, FabricGpuBarrier barrier) {
   static_assert(TileBytes * UnrollPeers == kDdaA2ATdmWindowBytes, "tiles must fill one wave window");
   static_assert(TileBytes % kDdaA2ATdmAlign == 0, "tiles must be whole 256 B rows");
   static_assert(UnrollPeers < 10, "tdm unroll must be less than 10");
@@ -204,8 +204,8 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
         barrier.waitPeer(fromRank, epoch, static_cast<unsigned>(p), r * blocksPerPeer + static_cast<int>(j));
         const size_t jFirst = (static_cast<size_t>(j) * warps + warp) * UnrollPeers;
         ddaA2ATdmPeerCopy<kDdaA2ATdmSysPolicy, kDdaA2ATdmDevPolicy, TileBytes, UnrollPeers>(
-            window, recvbuff + fromOff, peerScratch[selfRank] + fromOff, pieceBegin(jFirst, p),
-            pieceBegin(jFirst, p + 1), stride, nTiles, bytesPerRank);
+          window, recvbuff + fromOff, peerScratch[selfRank] + fromOff, pieceBegin(jFirst, p), pieceBegin(jFirst, p + 1),
+          stride, nTiles, bytesPerRank);
       }
     }
     barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
@@ -235,12 +235,12 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
   for (size_t p = 0; p <= nPieces; ++p) {
     if (p < nPieces) {
       ddaA2ATdmPeerCopy<kDdaA2ATdmDevPolicy, kDdaA2ATdmSysPolicy, TileBytes, UnrollPeers>(
-          window, dst, src, pieceBegin(first, p), pieceBegin(first, p + 1), stride, nTiles, bytesPerRank);
+        window, dst, src, pieceBegin(first, p), pieceBegin(first, p + 1), stride, nTiles, bytesPerRank);
     }
     if (p > 0 && drainHere) {
       barrier.waitPeer(from, epoch, static_cast<unsigned>(p - 1));
       ddaA2ATdmPeerCopy<kDdaA2ATdmSysPolicy, kDdaA2ATdmDevPolicy, TileBytes, UnrollPeers>(
-          window, out, slot, pieceBegin(first, p - 1), pieceBegin(first, p), stride, nTiles, bytesPerRank);
+        window, out, slot, pieceBegin(first, p - 1), pieceBegin(first, p), stride, nTiles, bytesPerRank);
     }
     if (p < nPieces) barrier.postPeer(peer, epoch, static_cast<unsigned>(p));
   }

@@ -541,8 +541,8 @@ ncclResult_t IbCastRmaIbProxyCloseColl(void* collComm) {
 }
 
 static ncclResult_t IbCastPostDataChunks(struct ibv_qp* qp, struct ibv_send_wr* wr_template, uint32_t lkey,
-                                         uintptr_t localAddr, uint64_t remoteAddr, size_t size,
-                                         int sendFlagsLast, struct ibv_send_wr* tail) {
+                                         uintptr_t localAddr, uint64_t remoteAddr, size_t size, int sendFlagsLast,
+                                         struct ibv_send_wr* tail) {
   struct ibv_send_wr stackWrs[IB_CAST_MAX_STACK_WRS];
   struct ibv_sge stackSges[IB_CAST_MAX_STACK_WRS];
   struct ibv_send_wr* extraWrs = NULL;
@@ -597,8 +597,7 @@ out:
 }
 
 ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
-                                  uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags,
-                                  void** request) {
+                                  uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags, void** request) {
   (void)optFlags;
   struct IbCastRmaIbProxyCtx* ginProxyCtx = &((struct IbCastRmaIbProxyCtx*)ginCtx)[context];
 
@@ -632,9 +631,7 @@ ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, vo
   wr_template.sg_list = NULL;
   wr_template.num_sge = 1;
 
-  NCCLCHECK(IbCastPostDataChunks(qp->qp, &wr_template,
-                                 lkey, (uintptr_t)srcPtr,
-                                 (uint64_t)dstPtr, size,
+  NCCLCHECK(IbCastPostDataChunks(qp->qp, &wr_template, lkey, (uintptr_t)srcPtr, (uint64_t)dstPtr, size,
                                  IBV_SEND_SIGNALED, NULL));
   IbCastAddEvent(req, qp->devIndex);
 
@@ -679,9 +676,7 @@ ncclResult_t IbCastRmaIbProxyIGet(void* ginCtx, int context, uint64_t remoteOffs
   wr_template.num_sge = 1;
 
   // Same split as iput: only the last read is signaled. TODO: Potentially optimize this?
-  NCCLCHECK(IbCastPostDataChunks(qp->qp, &wr_template,
-                                 lkey, (uintptr_t)localPtr,
-                                 (uint64_t)remotePtr, size,
+  NCCLCHECK(IbCastPostDataChunks(qp->qp, &wr_template, lkey, (uintptr_t)localPtr, (uint64_t)remotePtr, size,
                                  IBV_SEND_SIGNALED, NULL));
   IbCastAddEvent(req, qp->devIndex);
 
@@ -763,8 +758,7 @@ ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
   signalSge.lkey = comm->devs[devIndex].putSignalScratchpadMr->lkey;
 
   if (postData) {
-    NCCLCHECK(IbCastPostDataChunks(qp->qp, &wr[0], lkey, (uintptr_t)srcPtr, (uint64_t)dstPtr, size,
-                                   0, &wr[1]));
+    NCCLCHECK(IbCastPostDataChunks(qp->qp, &wr[0], lkey, (uintptr_t)srcPtr, (uint64_t)dstPtr, size, 0, &wr[1]));
   } else {
     struct ibv_send_wr* bad_wr;
     NCCLCHECK(wrap_ibv_post_send(qp->qp, size > 0 ? &wr[0] : &wr[1], &bad_wr));
@@ -975,20 +969,29 @@ static char castGinSendReq;
 static char castGinRecvReq;
 
 static ncclResult_t castGinFakeRegMr(void* comm, void* data, size_t size, int type, void** mhandle) {
-  (void)comm; (void)data; (void)size; (void)type;
+  (void)comm;
+  (void)data;
+  (void)size;
+  (void)type;
   static int mr;
   *mhandle = &mr;
   return ncclSuccess;
 }
 
 static ncclResult_t castGinFakeDeregMr(void* comm, void* mhandle) {
-  (void)comm; (void)mhandle;
+  (void)comm;
+  (void)mhandle;
   return ncclSuccess;
 }
 
 static ncclResult_t castGinFakeIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
-                                    void** request) {
-  (void)sendComm; (void)data; (void)size; (void)tag; (void)mhandle; (void)phandle;
+                                     void** request) {
+  (void)sendComm;
+  (void)data;
+  (void)size;
+  (void)tag;
+  (void)mhandle;
+  (void)phandle;
   if (castGinRecvPolls == 0) {
     // CTS not ready. Give up if nothing ever polls the receive, so the old
     // post-then-wait loop fails the test instead of spinning.
@@ -1002,8 +1005,14 @@ static ncclResult_t castGinFakeIsend(void* sendComm, void* data, size_t size, in
 }
 
 static ncclResult_t castGinFakeIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles,
-                                    void** phandles, void** request) {
-  (void)recvComm; (void)n; (void)data; (void)sizes; (void)tags; (void)mhandles; (void)phandles;
+                                     void** phandles, void** request) {
+  (void)recvComm;
+  (void)n;
+  (void)data;
+  (void)sizes;
+  (void)tags;
+  (void)mhandles;
+  (void)phandles;
   *request = &castGinRecvReq;
   return ncclSuccess;
 }

@@ -25,11 +25,11 @@ extern "C" {
 
 struct ncclIbQpSharingState {
   uint16_t commId;             /* 0 = not shared */
-  bool     isSharedQpPrimary;
-  int      sharedGroupIdx;     /* -1 = not shared */
-  int      refcount;           /* comms sharing this physical QP (0 if not shared) */
-  int      cqRefcount;         /* comms sharing this group's CQ (0 if not shared) */
-  int      nqps;
+  bool isSharedQpPrimary;
+  int sharedGroupIdx;     /* -1 = not shared */
+  int refcount;           /* comms sharing this physical QP (0 if not shared) */
+  int cqRefcount;         /* comms sharing this group's CQ (0 if not shared) */
+  int nqps;
   uint32_t qpn[NCCL_IB_MAX_QPS];
 };
 
@@ -42,8 +42,8 @@ ncclResult_t ncclIbCastGetQpSharingState(void* comm, struct ncclIbQpSharingState
  * Only meaningful once init() has run. */
 struct ncclIbQpSharingConfig {
   bool enabled;            /* IbCastQpSharingEnabled() */
-  int  ngroups;            /* RCCL_IB_COMM_NGROUPS */
-  int  depthMultiplier;    /* IbCastQpSharingDepthMultiplier() */
+  int ngroups;            /* RCCL_IB_COMM_NGROUPS */
+  int depthMultiplier;    /* IbCastQpSharingDepthMultiplier() */
   bool resiliencyEnabled;  /* NCCL_IB_RESILIENCY_PORT_FAILOVER or _RECOVERY */
 };
 

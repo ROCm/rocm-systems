@@ -3887,14 +3887,15 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           nets[net_offset] = digit + 'N';
           status = 3;
           break;
-        case 3: {
+        case 3:
+          {
           // Held biased by 'N', so the number itself may only reach INT_MAX - 'N'.
-          int net = nets[net_offset] - 'N';
-          NCCLCHECK(accumulateDigit(&net, digit, INT_MAX - 'N',
-                                    "NET number too large in user-defined rings (NCCL_RINGS)"));
-          nets[net_offset] = net + 'N';
-          break;
-        }
+            int net = nets[net_offset] - 'N';
+            NCCLCHECK(accumulateDigit(&net, digit, INT_MAX - 'N',
+                                      "NET number too large in user-defined rings (NCCL_RINGS)"));
+            nets[net_offset] = net + 'N';
+            break;
+          }
         }
       } else {
         if (status == 1) {
@@ -3952,8 +3953,9 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
             // A slot the ring did not name is still 0 here, which reads as a negative
             // NET id. Without the lower bound it passes the limit and lands in inter[],
             // where multi-node init then fails in ncclTopoIdToNetDev.
-            if (nets[0] - 'N' < 0 || nets[0] - 'N' >= nnets ||
-                nets[ngpus * 2 - 1] - 'N' < 0 || nets[ngpus * 2 - 1] - 'N' >= nnets) goto newchannel;
+            if (nets[0] - 'N' < 0 || nets[0] - 'N' >= nnets || nets[ngpus * 2 - 1] - 'N' < 0 ||
+                nets[ngpus * 2 - 1] - 'N' >= nnets)
+              goto newchannel;
             graph->inter[nChannels * 2] = nets[0] - 'N';
             graph->inter[nChannels * 2 + 1] = nets[ngpus * 2 - 1] - 'N';
           } else if (nnets) {
@@ -4039,7 +4041,8 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
       switch (status) {
       case 0:
         if (gpu >= NCCL_TOPO_MAX_NODES) {
-          WARN("Too many GPUs in one tree (max %d) in user-defined trees (RCCL_TREES); initialization will fail", NCCL_TOPO_MAX_NODES);
+          WARN("Too many GPUs in one tree (max %d) in user-defined trees (RCCL_TREES); initialization will fail",
+               NCCL_TOPO_MAX_NODES);
           return ncclInvalidUsage;
         }
         gpus[gpu] = digit;
@@ -4112,7 +4115,8 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
         // Every number the scanner found must have been transcribed, or a stray separator
         // swallowed one and the tree would silently lose a GPU.
         if (r != gpu) {
-          WARN("Fewer GPU numbers transcribed than parsed in a user-defined tree (RCCL_TREES); initialization will fail");
+          WARN(
+            "Fewer GPU numbers transcribed than parsed in a user-defined tree (RCCL_TREES); initialization will fail");
           return ncclInvalidUsage;
         }
         graph->treeBase[x][y] = 0;

@@ -26,12 +26,12 @@ public:
    *
    * GIN-GDA only needs a stub FreeList definition.
    */
-  __host__ FreeList()                           = delete;
-  __host__ FreeList(const FreeList&)            = delete;
-  __host__ FreeList(FreeList&&)                 = delete;
+  __host__ FreeList() = delete;
+  __host__ FreeList(const FreeList&) = delete;
+  __host__ FreeList(FreeList&&) = delete;
   __host__ FreeList& operator=(const FreeList&) = delete;
-  __host__ FreeList& operator=(FreeList&&)      = delete;
-  __host__ ~FreeList()                          = delete;
+  __host__ FreeList& operator=(FreeList&&) = delete;
+  __host__ ~FreeList() = delete;
 
   /**
    * @brief  Inserts new element at the end of the FreeList.
@@ -45,10 +45,14 @@ public:
    * @param val The value to insert in the FreeList.
    * @return @c true if the operation succeed, and @c false otherwise.
    */
-  __device__ bool push_back(const TYPE& val) { return false; }
+  __device__ bool push_back(const TYPE& val) {
+    return false;
+  }
 
   /// @copydoc bool FreeList<TYPE>::push_back(const TYPE&)
-  __device__ bool push_back(TYPE&& val) { return false; }
+  __device__ bool push_back(TYPE&& val) {
+    return false;
+  }
 
   /**
    * @brief Removes the first element in FreeList, reducing its size by one.

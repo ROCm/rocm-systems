@@ -223,8 +223,8 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
     if (ginDev >= 0 && ginRocshmemGdaGetProperties(ginDev, &props) == ncclSuccess && props.name != nullptr) {
       snprintf(preferredNicName, sizeof(preferredNicName), "%s", props.name);
       preferredNic = preferredNicName;
-      INFO(NCCL_INIT, "GIN rocshmem-gda: comm rank %d GIN NIC: %s (ginDev %d)",
-           cctx->comm->rank, preferredNicName, ginDev);
+      INFO(NCCL_INIT, "GIN rocshmem-gda: comm rank %d GIN NIC: %s (ginDev %d)", cctx->comm->rank, preferredNicName,
+           ginDev);
     }
   }
 
@@ -445,7 +445,7 @@ static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_t*
     gpuCtx->nCounters = config->nCounters;
     gpuCtx->qps = (rocshmem::QueuePair**)cctx->gpu_qp_ptrs;
     gpuCtx->counters =
-        ctx->countersBase != nullptr ? ctx->countersBase + (size_t)contextId * (size_t)config->nCounters : nullptr;
+      ctx->countersBase != nullptr ? ctx->countersBase + (size_t)contextId * (size_t)config->nCounters : nullptr;
 
     if (config->nSignals > 0) {
       if (hipMalloc(&gpuCtx->signal_raddrs, sizeof(uintptr_t) * (size_t)ctx->nRanks) != hipSuccess) {

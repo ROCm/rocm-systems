@@ -857,8 +857,7 @@ static ncclResult_t ncclPrepareTasksAndCollPreconnect(
   // Symmetric task selection performs a bootstrap consensus in ncclPrepareTasks.
   // When this process owns multiple ranks, prepare them concurrently so the
   // first rank cannot block before its sibling ranks enter the same consensus.
-  bool const needsConcurrentSymmetricPrepare =
-    comm->intraRanks > 1 && comm->symmetricSupport && !comm->p2pCrossClique;
+  bool const needsConcurrentSymmetricPrepare = comm->intraRanks > 1 && comm->symmetricSupport && !comm->p2pCrossClique;
   if (needsConcurrentSymmetricPrepare) {
     struct ncclPrepareTasksAndCollPreconnectJob* job;
     NEW_NOTHROW(job, ncclPrepareTasksAndCollPreconnectJob);
@@ -1264,7 +1263,8 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
     // After ncclIntruQueueTransfer above, ncclAsyncJobs is empty; the jobs
     // live on groupJob->asyncJobs. Checking the emptied queue would take the
     // blocking path and hang when a peer rank is missing (ROCM-30165).
-    if (ncclGroupBlocking == 0 && (ncclGroupCommPreconnectHead != nullptr || !ncclIntruQueueEmpty(&groupJob->asyncJobs))) {
+    if (ncclGroupBlocking == 0 &&
+        (ncclGroupCommPreconnectHead != nullptr || !ncclIntruQueueEmpty(&groupJob->asyncJobs))) {
       /* nonblocking group */
       if (!ncclIntruQueueEmpty(&groupJob->asyncJobs)) {
         ncclAsyncJob* job = ncclIntruQueueHead(&groupJob->asyncJobs);

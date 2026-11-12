@@ -39,11 +39,10 @@ int gin_anvil_sdma_probe(void);
  * @param out_sdma_dirty  Device pointer to a single uint64_t dirty bitmask (device memory).
  * @return 0 on success, -1 on failure.
  */
-int gin_anvil_sdma_create(
-    int nRanks, int myRank, int my_device_id,
-    int (*allgather)(void* ctx, void* buf, size_t bytes_per_rank), void* allgather_ctx,
-    int num_channels, gin_anvil_sdma_handle_t* out_handle, void** out_gpu_handles,
-    uint64_t** out_sdma_dirty);
+int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
+                          int (*allgather)(void* ctx, void* buf, size_t bytes_per_rank), void* allgather_ctx,
+                          int num_channels, gin_anvil_sdma_handle_t* out_handle, void** out_gpu_handles,
+                          uint64_t** out_sdma_dirty);
 
 void gin_anvil_sdma_destroy(gin_anvil_sdma_handle_t handle);
 

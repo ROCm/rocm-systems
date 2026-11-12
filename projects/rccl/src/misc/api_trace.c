@@ -3,7 +3,7 @@
 //
 
 #if defined(__cplusplus)
-#    error "C source file compiling as C++"
+#error "C source file compiling as C++"
 #endif
 
 #include "api_trace.h"

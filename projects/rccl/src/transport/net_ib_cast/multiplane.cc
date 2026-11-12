@@ -24,8 +24,8 @@ struct xmlHandler {
   const char* name;
   xmlHandlerFunc_t func;
 };
-ncclResult_t xmlLoadSub(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head,
-                        struct xmlHandler handlers[], int nHandlers);
+ncclResult_t xmlLoadSub(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head, struct xmlHandler handlers[],
+                        int nHandlers);
 
 // Module-scoped VIP GID string -> list of PIP entries
 static std::map<std::string, std::vector<ncclIbPipInfo>> gidToPipMap;
@@ -35,12 +35,9 @@ static ncclResult_t loadResult = ncclSuccess;
 
 // Convert a 16-byte GID to colon-separated hex string (e.g. "fe80:0000:...:0002")
 static void ibCastGidToString(const union ibv_gid* gid, char* buf, size_t bufLen) {
-  snprintf(buf, bufLen,
-    "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
-    gid->raw[0],  gid->raw[1],  gid->raw[2],  gid->raw[3],
-    gid->raw[4],  gid->raw[5],  gid->raw[6],  gid->raw[7],
-    gid->raw[8],  gid->raw[9],  gid->raw[10], gid->raw[11],
-    gid->raw[12], gid->raw[13], gid->raw[14], gid->raw[15]);
+  snprintf(buf, bufLen, "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x", gid->raw[0],
+           gid->raw[1], gid->raw[2], gid->raw[3], gid->raw[4], gid->raw[5], gid->raw[6], gid->raw[7], gid->raw[8],
+           gid->raw[9], gid->raw[10], gid->raw[11], gid->raw[12], gid->raw[13], gid->raw[14], gid->raw[15]);
 }
 
 // Convert an IPv4 or IPv6 address string to an ibv_gid.

@@ -179,18 +179,16 @@ static int inverseRemapRankForCompactTree(int remappedRank, int nranks) {
 }
 
 // Compact Dtree optimized for sorted domain ordering
-ncclResult_t ncclGetDtreeCompact(int nranks, int rank, int* s0, int* d0_0, int* d0_1,
-                                  int* parentChildType0, int* s1, int* d1_0, int* d1_1,
-                                  int* parentChildType1) {
+ncclResult_t ncclGetDtreeCompact(int nranks, int rank, int* s0, int* d0_0, int* d0_1, int* parentChildType0, int* s1,
+                                 int* d1_0, int* d1_1, int* parentChildType1) {
   // Remap to half-interleaved space
   int remappedRank = remapRankForCompactTree(rank, nranks);
 
   // Get double tree structure in remapped space
   int remappedS0, remappedD0_0, remappedD0_1;
   int remappedS1, remappedD1_0, remappedD1_1;
-  ncclGetDtree(nranks, remappedRank,
-               &remappedS0, &remappedD0_0, &remappedD0_1, parentChildType0,
-               &remappedS1, &remappedD1_0, &remappedD1_1, parentChildType1);
+  ncclGetDtree(nranks, remappedRank, &remappedS0, &remappedD0_0, &remappedD0_1, parentChildType0, &remappedS1,
+               &remappedD1_0, &remappedD1_1, parentChildType1);
 
   // Map connections back to sorted ordering
   *s0 = remappedS0 == -1 ? -1 : inverseRemapRankForCompactTree(remappedS0, nranks);
