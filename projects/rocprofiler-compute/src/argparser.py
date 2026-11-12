@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Type
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
 # Standard argparse actions that the CustomAction subclasses delegate to
@@ -105,6 +106,7 @@ def add_general_group(
         "-s", "--specs", action="store_true", help="Print system specs and exit."
     )
 
+    experimental_archs = sorted(mi_gpu_specs.get_experimental_archs())
     general_group.add_argument(
         "--experimental",
         action="store_true",
@@ -116,6 +118,11 @@ def add_general_group(
             "   Memory Bandwidth Analysis (--membw-analysis)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
             "--pc-sampling-interval)\n"
+            + (
+                f"   GPUs ({', '.join(experimental_archs)})\n"
+                if experimental_archs
+                else ""
+            )
         ),
     )
     general_group.add_argument(

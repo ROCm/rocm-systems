@@ -76,7 +76,11 @@ def all_template_aliases_by_panel_id() -> dict[str, set[str]]:
 @pytest.mark.parametrize("arch", list_blocks_supported_archs())
 def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, arch):
     """Verify --list-blocks output matches on-disk panels and template aliases."""
-    return_code = binary_handler_analyze_rocprof_compute(["--list-blocks", arch])
+    return_code = binary_handler_analyze_rocprof_compute([
+        "--list-blocks",
+        arch,
+        "--experimental",
+    ])
     assert return_code == 0
 
     output = capsys.readouterr().out

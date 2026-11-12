@@ -477,6 +477,7 @@ mi_gpu_spec:
   - gpu_series: rdna4
     gpu_archs:
       - gpu_arch: gfx1201
+        experimental: true  # needs --experimental to profile or analyze
         perfmon_config:
           SQ: 8
           SQG: 8
