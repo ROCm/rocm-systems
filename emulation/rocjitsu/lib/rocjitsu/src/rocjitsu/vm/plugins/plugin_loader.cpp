@@ -5,6 +5,7 @@
 
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
 #include "rocjitsu/vm/plugins/plugin_exports.h"
+#include "rocjitsu/vm/plugins/plugin_library_name.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 
 #include "util/dynamic_loader.h"
@@ -147,7 +148,7 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
 
   // `name` is validated above, so it cannot contain a path separator; joining a
   // trusted `plugin_dir` in front of it stays inside that directory.
-  std::string soname = "librocjitsu_plugin_" + name + ".so";
+  std::string soname = plugin_library_name(name);
   std::string libpath = resolve_plugin_path(soname, plugin_dir);
   util::LibraryHandle handle = util::open_library(libpath.c_str());
   if (!handle) {
