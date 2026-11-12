@@ -333,9 +333,9 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
       {Space::LDS, MemoryEventType::LDS_TO_GLOBAL, true, 1, false, "LDS byte 2", "WAR",
        "transfer from LDS into global memory"},
       {Space::LDS, MemoryEventType::GLOBAL_TO_LDS, false, 0, false, "LDS byte 2", "RAW",
-       "transfer from global memory into LDS"},
+       "load into LDS"},
       {Space::LDS, MemoryEventType::GLOBAL_TO_LDS, false, 1, true, "LDS byte 2", "RAW",
-       "transfer from global memory into LDS"},
+       "load into LDS"},
   };
   for (const auto &test : cases) {
     SCOPED_TRACE(test.operation);
