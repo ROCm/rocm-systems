@@ -8,6 +8,9 @@ set(trace_cache_tests_sources
     test_buffer_storage.cpp
     test_cache_integration.cpp
     test_cacheable.cpp
+    test_collection_sink.cpp
+    test_counter_records.cpp
+    test_counter_schema_table.cpp
     test_discovery.cpp
     test_enabled_formats.cpp
     test_flush_worker.cpp
@@ -15,6 +18,7 @@ set(trace_cache_tests_sources
     test_metadata_registry_json.cpp
     test_metadata_registry.cpp
     test_record_format.cpp
+    test_rocpd_counter_batch.cpp
     test_rocpd_processor.cpp
     test_rocpd_xcp_output.cpp
     test_sample_type.cpp
@@ -24,6 +28,16 @@ set(trace_cache_tests_sources
 )
 
 add_library(trace-cache-tests OBJECT ${trace_cache_tests_sources})
+
+# The rocpd counter tests read pmc_event rows with SQLite directly: profiler-hub's
+# reader cannot return them yet. rocprof-sys-unit-tests links it too.
+add_library(trace-cache-tests-sqlite INTERFACE)
+if(TARGET profiler-hub-sqlite3)
+    target_link_libraries(trace-cache-tests-sqlite INTERFACE profiler-hub-sqlite3)
+else()
+    find_package(SQLite3 REQUIRED)
+    target_link_libraries(trace-cache-tests-sqlite INTERFACE SQLite::SQLite3)
+endif()
 
 target_link_libraries(
     trace-cache-tests
@@ -36,6 +50,7 @@ target_link_libraries(
         rocprofiler-systems-rocm
         rocprofiler-systems-json
         rocprofiler-systems-timemory
+        trace-cache-tests-sqlite
 )
 
 target_include_directories(

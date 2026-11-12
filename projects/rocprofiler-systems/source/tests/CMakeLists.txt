@@ -5,6 +5,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-common-tests>
     $<TARGET_OBJECTS:lib-common-units-tests>
     $<TARGET_OBJECTS:trace-cache-tests>
+    $<TARGET_OBJECTS:core-collection-tests>
     $<TARGET_OBJECTS:demangler-tests>
     $<TARGET_OBJECTS:containers-tests>
     $<TARGET_OBJECTS:tracing-config-tests>
@@ -24,6 +25,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:process-environment-tests>
     $<TARGET_OBJECTS:rank-passes-filter-tests>
     $<TARGET_OBJECTS:state-tests>
+    $<TARGET_OBJECTS:categories-tests>
     $<TARGET_OBJECTS:progress-tests>
     $<TARGET_OBJECTS:logger-tests>
     $<TARGET_OBJECTS:lib-components-tests>
@@ -45,6 +47,7 @@ list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:procfs-backend-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:posix-backend-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:hipfile-backend-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-hipfile-collector-tests>)
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-pollers-tests>)
 list(
     APPEND UNIT_TEST_OBJECTS
     $<$<TARGET_EXISTS:rocprofiler-sdk-backend-tests>:$<TARGET_OBJECTS:rocprofiler-sdk-backend-tests>>
@@ -78,6 +81,7 @@ target_link_libraries(
         $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
         $<$<TARGET_EXISTS:rocprofiler-systems-rocsys-core>:rocprofiler-systems::rocprofiler-systems-rocsys-core>
         rocprofiler-systems::rocprofiler-systems-interface-library
+        trace-cache-tests-sqlite
 )
 
 target_include_directories(

@@ -106,3 +106,19 @@ target_include_directories(
     state-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
 )
+
+add_library(categories-tests OBJECT test_categories.cpp)
+
+target_link_libraries(
+    categories-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-headers
+        rocprofiler-systems-timemory
+)
+
+target_include_directories(
+    categories-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
+)
