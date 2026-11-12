@@ -55,14 +55,33 @@ TEST(LdsByteRangeTest, WholeElementsRespectExclusiveBounds) {
   };
   constexpr auto max = std::numeric_limits<uint64_t>::max();
   const Case cases[] = {
-      {64, 16, 4, 80, 16}, {64, 16, 4, 79, 12},     {64, 16, 1, 79, 15},
-      {80, 16, 4, 80, 0},  {81, 16, 4, 80, 0},      {64, 16, 0, 80, 0},
-      {64, 0, 4, 80, 0},   {max - 3, 8, 2, max, 2}, {max, 8, 1, max, 0},
+      {64, 16, 4, 80, 16},     {64, 16, 4, 79, 12},       {64, 16, 1, 79, 15},
+      {80, 16, 4, 80, 0},      {81, 16, 4, 80, 0},        {64, 16, 0, 80, 0},
+      {64, 0, 4, 80, 0},       {max - 3, 8, 2, max, 2},   {max, 8, 1, max, 0},
+      {64, 6, 4, 80, 4},       {64, 3, 4, 80, 0},         {64, 16, 3, 80, 15},
+      {0, max, max, max, max}, {0, max - 1, max, max, 0}, {max - 8, max, 8, max, 8},
   };
   for (const auto &c : cases) {
     SCOPED_TRACE(testing::Message()
                  << c.address << ", " << c.bytes << ", " << c.element_bytes << ", " << c.end);
     EXPECT_EQ(whole_element_bytes_in_range(c.address, c.bytes, c.element_bytes, c.end), c.retained);
+  }
+}
+
+TEST(LdsByteRangeTest, WholeElementsMatchBoundedEnumeration) {
+  for (uint64_t end = 0; end < 17; ++end) {
+    for (uint64_t address = 0; address < 19; ++address) {
+      for (uint64_t bytes = 0; bytes < 19; ++bytes) {
+        for (uint64_t element = 0; element < 9; ++element) {
+          SCOPED_TRACE(testing::Message()
+                       << address << ", " << bytes << ", " << element << ", " << end);
+          uint64_t expected = 0;
+          while (element != 0 && expected + element <= bytes && address + expected + element <= end)
+            expected += element;
+          ASSERT_EQ(whole_element_bytes_in_range(address, bytes, element, end), expected);
+        }
+      }
+    }
   }
 }
 
