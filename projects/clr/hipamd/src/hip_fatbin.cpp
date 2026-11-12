@@ -214,7 +214,7 @@ static bool IsCodeObjectElf(const void* image, size_t image_size) {
     return false;
   }
   const amd::Elf64_Ehdr* ehdr = reinterpret_cast<const amd::Elf64_Ehdr*>(image);
-  return ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA;
+  return ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[amd::EI_OSABI] == ELFOSABI_AMDGPU_HSA;
 }
 
 static size_t GetUncompressedImageSize(const void* image, size_t image_bound) {

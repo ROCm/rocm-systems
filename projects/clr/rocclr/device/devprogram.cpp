@@ -22,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include <iomanip>
+#include <iterator>
 #include <string>
 #include <sstream>
 #include <cstdio>
@@ -1957,7 +1958,7 @@ bool Program::FindGlobalVarSize(void* binary, size_t binSize) {
 
     auto numpHdrs = elfIn.getSegmentNum();
     for (unsigned int i = 0; i < numpHdrs; ++i) {
-      amd::ELFIO::segment* seg = nullptr;
+      ELFIO::segment* seg = nullptr;
       if (!elfIn.getSegment(i, seg)) {
         continue;
       }

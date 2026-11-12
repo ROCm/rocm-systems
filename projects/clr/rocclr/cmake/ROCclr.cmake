@@ -117,6 +117,19 @@ target_compile_definitions(rocclr PUBLIC
   LITTLEENDIAN_CPU
   ${AMD_OPENCL_DEFS})
 
+# ELFIO comes from shared/elfio, the one copy maintained for rocm-systems projects.
+set(ROCCLR_ELFIO_DIR "${ROCCLR_SRC_DIR}/../../../shared/elfio"
+    CACHE PATH "Path to the shared ELFIO component")
+if(NOT TARGET rocm-elfio)
+  if(NOT EXISTS "${ROCCLR_ELFIO_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "Shared ELFIO not found at ${ROCCLR_ELFIO_DIR}. Set ROCCLR_ELFIO_DIR "
+                        "when building CLR outside the rocm-systems tree.")
+  endif()
+  add_subdirectory("${ROCCLR_ELFIO_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/rocm-elfio" EXCLUDE_FROM_ALL)
+endif()
+# PUBLIC: elf/elf.hpp includes ELFIO and is included by HIP and OpenCL sources.
+target_link_libraries(rocclr PUBLIC $<BUILD_INTERFACE:rocm-elfio>)
+
 target_include_directories(rocclr PUBLIC
   ${ROCCLR_SRC_DIR}/../
   ${ROCCLR_SRC_DIR}

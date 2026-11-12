@@ -10,10 +10,10 @@
 #include <map>
 
 #include "top.hpp"
-#include "elfio/elfio.hpp"
+#include <elfio/elfio.hpp>
 #include <sstream>
-using amd::ELFIO::Elf64_Ehdr;
-using amd::ELFIO::Elf64_Shdr;
+using ELFIO::Elf64_Ehdr;
+using ELFIO::Elf64_Shdr;
 
 // Not sure where to put these in the libelf
 #define AMD_BIF2 2  // AMD BIF Version 2.0
@@ -45,7 +45,7 @@ using amd::ELFIO::Elf64_Shdr;
 #endif
 
 namespace amd {
-using namespace amd::ELFIO;
+using namespace ELFIO;
 
 class Elf {
  public:
@@ -112,36 +112,6 @@ class Elf {
     ELF_C_WRITE,
     ELF_C_NUM
   } ElfCmd;
-
-  struct SymbolInfo {
-    std::string sec_name;  //!   section name
-    const char* sec_addr;  //!   section address
-    uint64_t sec_size;     //!   section size
-    std::string sym_name;  //!   symbol name
-    const char* address;   //!   address of corresponding to symbol data
-    uint64_t size;         //!   size of data corresponding to symbol
-    SymbolInfo()
-        : sec_name(), sec_addr(nullptr), sec_size(0), sym_name(), address(nullptr), size(0) {}
-
-    SymbolInfo(const char* sename, const char* seaddr, uint64_t sesize, const char* syname,
-               const char* syaddr, uint64_t sysize)
-        : sec_name(sename),
-          sec_addr(seaddr),
-          sec_size(sesize),
-          sym_name(syname),
-          address(syaddr),
-          size(sysize) {}
-  };
-
-  /*
-   * Note descriptors.
-   * Follow https://docs.oracle.com/cd/E19683-01/816-1386/6m7qcoblj/index.html#chapter6-18048
-   */
-  struct ElfNote {
-    uint32_t n_namesz; /* Length of note's name. */
-    uint32_t n_descsz; /* Length of note's value. */
-    uint32_t n_type;   /* Type of note. */
-  };
 
  private:
   // elfio object for reading and writting
@@ -227,48 +197,6 @@ class Elf {
    * The memory pointed by <dst, sz> is owned by the Elf object.
    */
   bool getSection(ElfSections id, char** dst, size_t* sz) const;
-
-  /*
-   * Add a symbol with name 'symbolName' and data <buffer, size>
-   * into the ELF.  'id' indicates which section  <buffer, size> will go
-   * into.
-   */
-  bool addSymbol(ElfSections id,          // Section in which symbol is added
-                 const char* symbolName,  // Name of symbol
-                 const void* buffer,      // Symbol's data
-                 size_t size              // Symbol's size
-  );
-
-  /*
-   * Return the data associated with the symbol from the Elf.
-   * The memory pointed by <buffer, size> is owned by the Elf object
-   */
-  bool getSymbol(ElfSections id,          // Section in which symbol is in
-                 const char* symbolName,  // Name of the symbol to retrieve
-                 char** buffer,           // Symbol's data
-                 size_t* size             // Symbol's size
-  ) const;
-
-  /* Return number of symbols in SYMTAB section */
-  unsigned int getSymbolNum() const;
-
-  /* Return SymbolInfo of the index-th symbol in SYMTAB section */
-  bool getSymbolInfo(unsigned int index, SymbolInfo* symInfo) const;
-
-  /*
-   * Adds a note with name 'noteName' and description "noteDesc"
-   * into the .note section of ELF. Length of note description is "descSize'.
-   */
-  bool addNote(const char* noteName, const char* noteDesc, size_t descSize);
-
-  /*
-   * Return the description of a note whose name is 'noteName'
-   * in 'noteDesc'.
-   * Return the length of the description in 'descSize'.
-   * The memory pointed by <noteDesc, descSize> is owned by the Elf object.
-   */
-  bool getNote(const char* noteName, char** noteDesc, size_t* descSize);
-
 
   /* Set machine and platform (target) for which elf is built */
   bool setTarget(uint16_t machine);
