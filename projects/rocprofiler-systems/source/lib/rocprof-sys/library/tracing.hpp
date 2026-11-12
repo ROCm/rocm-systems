@@ -146,12 +146,25 @@ profile_pop_disabled()
            get_profile_stack<CategoryT>() <= 0;
 }
 
+inline std::atomic<bool>&
+has_timemory_components()
+{
+    static std::atomic<bool> s_value{ false };
+    return s_value;
+}
+
 template <typename CategoryT, typename... Args>
 inline void
 push_timemory(CategoryT, std::string_view name, Args&&... args)
 {
-    // skip if category is disabled
+    // skip if the category is disabled
     if(category_push_disabled<CategoryT>())
+    {
+        return;
+    }
+
+    ++get_profile_stack<CategoryT>();
+    if(!has_timemory_components().load(std::memory_order_relaxed))
     {
         return;
     }
@@ -162,8 +175,6 @@ push_timemory(CategoryT, std::string_view name, Args&&... args)
         // this generates a hash for the raw string array
         auto const _hash = tim::add_hash_id(name);
         _data->construct(_hash)->start(std::forward<Args>(args)...);
-        // increment the profile stack
-        ++get_profile_stack<CategoryT>();
     }
 }
 
@@ -243,8 +254,10 @@ template <typename CategoryT, typename... Args>
 inline void
 pop_timemory(CategoryT, std::string_view name, Args&&... args)
 {
-    // skip if category is disabled and not pushed on this thread
-    if(profile_pop_disabled<CategoryT>())
+    // skip if no component records regions, or the category is disabled and not
+    // pushed on this thread
+    if(!has_timemory_components().load(std::memory_order_relaxed) ||
+       profile_pop_disabled<CategoryT>())
     {
         return;
     }

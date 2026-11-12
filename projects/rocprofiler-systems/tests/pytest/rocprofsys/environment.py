@@ -279,7 +279,7 @@ def base_python_environment(
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_TREE_OUTPUT": "OFF",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
+        "ROCPROFSYS_TIMEMORY_COMPONENTS": "trip_count",
         "PYTHONPATH": os.pathsep.join(python_paths),
     }
 
@@ -310,7 +310,7 @@ def flat_environment() -> dict[str, str]:
         "ROCPROFSYS_COLLAPSE_PROCESSES": "ON",
         "ROCPROFSYS_COLLAPSE_THREADS": "ON",
         "ROCPROFSYS_SAMPLING_FREQ": "50",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
+        "ROCPROFSYS_TIMEMORY_COMPONENTS": "trip_count",
     }
 
 
@@ -354,7 +354,7 @@ def timemory_environment() -> dict[str, str]:
         "ROCPROFSYS_USE_SAMPLING": "ON",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
+        "ROCPROFSYS_TIMEMORY_COMPONENTS": "trip_count,peak_rss",
     }
 
 

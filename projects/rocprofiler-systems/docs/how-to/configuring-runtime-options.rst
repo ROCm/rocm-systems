@@ -493,7 +493,7 @@ Generating a default configuration file
    ROCPROFSYS_SAMPLING_FREQ                            = 10
    ROCPROFSYS_SAMPLING_GPUS                            = all
    ROCPROFSYS_TIME_OUTPUT                              = true
-   ROCPROFSYS_TIMEMORY_COMPONENTS                      = wall_clock
+   ROCPROFSYS_TIMEMORY_COMPONENTS                      =
    ROCPROFSYS_TRACE_THREAD_LOCKS                       = false
    ROCPROFSYS_VERBOSE                                  = 0
    ROCPROFSYS_COLLAPSE_PROCESSES                       = false
