@@ -4511,7 +4511,7 @@ TEST(CApiTest, CheckpointRoundTripPreservesAsyncHelperPolicy) {
   ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
             ROCJITSU_STATUS_SUCCESS);
   std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw, &rj_vm_destroy);
-  ASSERT_EQ(source->loaded.execution_threads.helpers, 2u);
+  ASSERT_EQ(source->loaded.execution_threads.helpers, 0u);
   ASSERT_EQ(source->loaded.async_helper_threads, -1);
   test::ScopedTempFile checkpoint_file;
   ASSERT_TRUE(checkpoint_file.initialize("rocjitsu-helper-policy-"));
@@ -4520,10 +4520,10 @@ TEST(CApiTest, CheckpointRoundTripPreservesAsyncHelperPolicy) {
   config::LoadedConfig restored;
   ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   EXPECT_EQ(restored.async_helper_threads, -1);
-  EXPECT_EQ(restored.execution_threads.helpers, 2u);
+  EXPECT_EQ(restored.execution_threads.helpers, 0u);
   EXPECT_EQ(restored.thread_allocations, source->loaded.thread_allocations);
   ASSERT_NE(restored.async_resources, nullptr);
-  EXPECT_EQ(restored.async_resources->helpers(), 2u);
+  EXPECT_EQ(restored.async_resources->helpers(), 0u);
 }
 
 TEST(CheckpointTest, PresentEmptyAllocationTableKeepsSerialFallback) {

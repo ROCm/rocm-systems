@@ -736,6 +736,7 @@ def test_gfx1250_model_include_graph_does_not_reach_vm(
     gfx1250_generated_root: Path,
 ):
     include_roots = (
+        rocjitsu_source_root / 'lib' / 'arith' / 'include',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
         rocjitsu_source_root / 'lib' / 'util' / 'include',
@@ -2455,7 +2456,7 @@ def _generated_matrix_call(body: str, callee: str) -> str:
             (
                 'V_WMMA_F32_16X16X128_F8F6F4',
                 'cdna5',
-                'exec_wmma_f32_mixed',
+                'arith::exec_dense_fp_matrix<16, 8, 32>',
                 False,
             ),
             # Standalone structured-sparse SMFMAC variants.
@@ -4643,6 +4644,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
         assert 'shared/execute_shared.h' not in source
 
     include_roots = (
+        rocjitsu_source_root / 'lib' / 'arith' / 'include',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
         runtime_api_headers_include_root,
@@ -4690,6 +4692,7 @@ def test_custom_identity_preprocesses_with_profile_handwritten_includes(
     assert '#include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"' in vglobal_source
 
     include_roots = (
+        rocjitsu_source_root / 'lib' / 'arith' / 'include',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
         runtime_api_headers_include_root,
@@ -7846,7 +7849,7 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     execution_impl = impls.execution[0]
     assert '0x7f7f7f7f7f7f7f7full' in execution_impl
     assert 'byte * 0x0101010101010101ull' in execution_impl
-    assert 'scale0_inline_zero ? 0u : matrix_a_scale_fmt' in execution_impl
+    assert 'scale0_inline_zero ? 0 : matrix_a_scale_fmt' in execution_impl
 
     decoder = (gfx1250_generated_root / 'decoder.cpp').read_text()
     decode_body = re.split(
@@ -10551,3 +10554,15 @@ def test_dense_integer_gfx1250_wmma_library_dispatch():
     assert 'exec_dense_fp_matrix<8, 8, 32>' in body
     assert 'rj_arith_v_wmma_i32_16x16x64_iu8_w32' in body
     assert 'inst_.neg & 3' in body and 'RJ_ARITH_WMMA_CLAMP' in body
+
+
+@pytest.mark.parametrize('m,k,outputs', [(16, 128, 4), (32, 64, 16)])
+def test_cdna4_mixed_mfma_delegates_with_independent_operand_widths(m, k, outputs):
+    body = _gen_mfma(
+        Instruction(f'V_MFMA_F32_{m}X{m}X{k}_F8F6F4', 'ENC_VOP3P_MFMA', 0, []), 'cdna4'
+    )
+    assert f'rj_arith_v_mfma_f32_{m}x{m}x{k}_f8f6f4_w64' in body
+    assert f'exec_dense_fp_matrix<8, {outputs}, 64>' in body
+    assert 'registers_for(inst_.cbsz), registers_for(inst_.blgp)' in body
+    assert 'inst_.cbsz > 4 || inst_.blgp > 4' in body
+    assert 'RJ_ARITH_MATRIX_FORMAT_B_SHIFT' in body
