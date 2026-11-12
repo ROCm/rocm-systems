@@ -45,10 +45,13 @@ get_dispatch_time(hsa_agent_t             _hsa_agent,
                   rocprofiler_kernel_id_t _kernel_id,
                   std::optional<uint64_t> _baseline)  // NOLINT(performance-unnecessary-value-param)
 {
-    auto ts                   = common::timestamp_ns();
     auto dispatch_time        = hsa_amd_profiling_dispatch_time_t{};
     auto dispatch_time_status = hsa::get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn(
         _hsa_agent, _signal, &dispatch_time);
+    // Any host time after the completion signal was observed bounds the end of the dispatch, so
+    // sample it after the query: a bound that also covers the query itself is crossed less often
+    // by the calibration uncertainty, and every crossing shortens the reported interval.
+    auto ts = common::timestamp_ns();
 
     auto _profile_time =
         tracing::profiling_time{dispatch_time_status, dispatch_time.start, dispatch_time.end};

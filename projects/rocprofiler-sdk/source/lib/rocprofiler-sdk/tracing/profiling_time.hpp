@@ -32,6 +32,7 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <cstdint>
 
 namespace rocprofiler
@@ -71,6 +72,11 @@ struct profiling_time
     profiling_time& operator*=(uint64_t scale);
 };
 
+// Reconciles a GPU-measured interval with the host-side bounds that must contain it: the host
+// timestamp of the API call that enqueued the operation precedes the real start, and the host
+// timestamp taken after the completion signal was observed follows the real end. The GPU
+// interval is mapped onto the host clock through a calibration that carries a small
+// uncertainty, so either endpoint may fall slightly outside those bounds.
 inline profiling_time
 adjust_profiling_time(std::string_view _label,
                       std::string_view _responsible,
@@ -134,12 +140,25 @@ adjust_profiling_time(std::string_view _label,
         std::swap(_value.start, _value.end);
     }
 
-    // below are hacks for clock skew issues:
-    //
-    // the timestamp of this handler will always be after when the profiling time ended
-    if(_bounds.end < _value.end) _value -= (_value.end - _bounds.end);
+    // Correct an endpoint that falls outside the host bounds by intersecting the interval with
+    // the bounds. Intersection only ever moves an endpoint inward, so it may shorten the reported
+    // interval by the calibration uncertainty but can never push it across a neighboring
+    // operation on the same queue: same-stream ordering is preserved. Shifting the whole
+    // interval instead (the previous behavior) kept the duration but moved the other endpoint
+    // outward by the same amount, which made consecutive dispatches on one stream overlap.
+    const auto _clipped_start = std::max(_value.start, _bounds.start);
+    const auto _clipped_end   = std::min(_value.end, _bounds.end);
+    if(_clipped_start < _clipped_end)
+    {
+        _value.start = _clipped_start;
+        _value.end   = _clipped_end;
+        return _value;
+    }
 
-    // the timestamp of the enqueue will always be before when the profiling time started
+    // The interval lies entirely outside the host window (e.g. the GPU timestamps use a
+    // different epoch) or has no duration, so there is nothing to intersect: shift it whole,
+    // preserving the duration. Ordering cannot be guaranteed for such intervals.
+    if(_bounds.end < _value.end) _value -= (_value.end - _bounds.end);
     if(_value.start < _bounds.start) _value += (_bounds.start - _value.start);
 
     return _value;

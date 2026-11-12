@@ -183,8 +183,9 @@ TEST(complete_signal_less_dispatch, recoverable_shapes_emit_and_retire_once)
 
 // a converted firmware end a few ms past `now` must be kept but
 // clamped to `now` (retirement samples a host clock just after now, so an
-// unclamped future end lands after retirement). The whole interval shifts down so
-// the duration is preserved -- same as tracing::adjust_profiling_time.
+// unclamped future end lands after retirement). Only the end moves: the start is
+// a real timestamp, and shifting it down by the same amount would overlap the
+// preceding dispatch on the stream -- same as tracing::adjust_profiling_time.
 TEST(complete_signal_less_dispatch, converted_end_past_now_is_clamped_to_now)
 {
     constexpr uint64_t now      = 1'000'000'000;
@@ -202,8 +203,46 @@ TEST(complete_signal_less_dispatch, converted_end_past_now_is_clamped_to_now)
     EXPECT_EQ(outcome, finalize_outcome::result_ready);
     EXPECT_EQ(obs.emits, 1);
     EXPECT_EQ(obs.retires, 1);
-    EXPECT_EQ(obs.end, now);  // clamped
-    EXPECT_EQ(obs.end - obs.start, duration);
+    EXPECT_EQ(obs.end, now);                      // clamped
+    EXPECT_EQ(obs.start, now + skew - duration);  // untouched
+}
+
+// Two consecutive dispatches on one queue share a boundary tick. Repairing the
+// later one against `now`, or the earlier one against its enqueue, must never move
+// the shared boundary: the repaired records stay ordered end <= next start.
+TEST(complete_signal_less_dispatch, repairs_never_cross_the_neighboring_dispatch)
+{
+    constexpr uint64_t now      = 1'000'000'000;
+    constexpr uint64_t boundary = now - 1'000;
+    auto               conv     = converter{true, /*epoch=*/0};
+
+    // The later dispatch's converted end overshoots now; its start is the boundary.
+    auto later = observer{};
+    ASSERT_EQ(run_complete_signal_less_dispatch(std::optional<uint64_t>{boundary},
+                                                now + 5'000,
+                                                /*enqueue_ts=*/0,
+                                                now,
+                                                conv.fn(),
+                                                later.emit_fn(),
+                                                later.retire_fn()),
+              finalize_outcome::result_ready);
+    EXPECT_EQ(later.start, boundary);
+    EXPECT_EQ(later.end, now);
+
+    // The earlier dispatch's converted start undershoots its enqueue; its end is the
+    // boundary.
+    auto earlier = observer{};
+    ASSERT_EQ(run_complete_signal_less_dispatch(std::optional<uint64_t>{boundary - 50'000},
+                                                boundary,
+                                                /*enqueue_ts=*/boundary - 45'000,
+                                                now,
+                                                conv.fn(),
+                                                earlier.emit_fn(),
+                                                earlier.retire_fn()),
+              finalize_outcome::result_ready);
+    EXPECT_EQ(earlier.start, boundary - 45'000);
+    EXPECT_EQ(earlier.end, boundary);
+    EXPECT_LE(earlier.end, later.start);
 }
 
 // ordering regression: retire() runs from the scope destructor,
@@ -315,15 +354,15 @@ TEST(complete_signal_less_dispatch, reports_the_exact_rejection_cause)
          finalize_outcome::result_ready,
          finalize_reason::bad_interval,
          "inverted interval -> swapped + emitted"},
-        // A before-enqueue skew whose 1 ms interval FITS the 2.5 ms window shifts
-        // up and emits; the finalizer only rejects when the interval cannot fit.
+        // A before-enqueue skew whose interval overlaps the window is clipped to it
+        // and emits; the finalizer only rejects when nothing of it fits.
         {now - 3'000'000,
          now - 2'000'000,
          now - 2'500'000,
          true,
          finalize_outcome::result_ready,
          finalize_reason::before_enqueue,
-         "starts before enqueue -> shifted + emitted (fits window)"},
+         "starts before enqueue -> clipped + emitted"},
         {1,
          now + kKfdFutureSlackNs + 1,
          0,
@@ -401,7 +440,8 @@ TEST(complete_signal_less_dispatch, grossly_stale_or_future_raw_terminal_is_reje
 
 // MI450 A0 dispatch timestamps carry a stable ~10.43 s epoch offset from the clock
 // ROCr calibrates against. Inside kMaxFutureNs it is clamped to now like the signal
-// path does, preserving the measured duration.
+// path does; the interval lies wholly outside [enqueue, now], so it is shifted whole
+// and the measured duration is preserved.
 TEST(complete_signal_less_dispatch, fixed_gpu_epoch_offset_is_clamped_and_emitted)
 {
     constexpr uint64_t now      = 20'000'000'000;

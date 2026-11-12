@@ -783,12 +783,14 @@ async_copy_handler(hsa_signal_value_t, void* arg)
         return false;
     }
 
-    auto  ts               = common::timestamp_ns();
     auto* _data            = static_cast<async_copy_data*>(arg);
     auto  _lk              = _data->get_lock();
     auto  copy_time        = hsa_amd_profiling_async_copy_time_t{};
     auto  copy_time_status = get_amd_ext_table()->hsa_amd_profiling_get_async_copy_time_fn(
         _data->rocp_signal, &copy_time);
+    // Any host time after the completion signal was observed bounds the end of the copy, so
+    // sample it after the query (see kernel_dispatch::get_dispatch_time).
+    auto ts = common::timestamp_ns();
 
     auto _profile_time = tracing::profiling_time{copy_time_status, copy_time.start, copy_time.end};
 
