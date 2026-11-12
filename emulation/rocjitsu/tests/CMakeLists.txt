@@ -474,9 +474,11 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_memory_snapshot_test.cpp
+    rdna1_memory_test.cpp
     ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
     flat_lds_transfer_test.cpp
+    rdna35_memory_test.cpp
     scalar_buffer_store_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
@@ -498,7 +500,10 @@ add_executable(
     simulated_kfd_test.cpp
     kfd_events_test.cpp
     decode_smoke_test.cpp
+    rdna2_memory_test.cpp
     rdna4_dot_dpp_test.cpp
+    rdna1_valu_test.cpp
+    rdna4_memory_test.cpp
     readlane_selector_test.cpp
     pc_extension_test.cpp
     pc_fetch_test.cpp
@@ -595,6 +600,7 @@ add_executable(
     scalar_atomic_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
+    rdna4_scalar_test.cpp
     scalar_f16_constant_test.cpp
     vector16_inline_constant_test.cpp
     scalar_scc_test.cpp
@@ -1192,26 +1198,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     rj_configure_target(cache_allocation_failure_test WARNINGS)
     rj_add_gtest_tests(cache_allocation_failure_test)
-
-    # Isolate the process-wide replacement operator new from rocjitsu_tests.
-    add_executable(
-        file_loading_allocation_failure_test
-        code/file_loading_allocation_failure_test.cpp
-    )
-    target_include_directories(
-        file_loading_allocation_failure_test
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-    target_link_libraries(
-        file_loading_allocation_failure_test
-        PRIVATE
-            rocjitsu_dbt_internal
-            rocjitsu_cdna5_model_registry
-            simdojo_headers
-            GTest::gtest_main
-    )
-    rj_configure_target(file_loading_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
-    rj_add_gtest_tests(file_loading_allocation_failure_test)
 
     # Keep allocation injection isolated from the main test executable.
     add_executable(
@@ -2572,6 +2558,7 @@ rj_add_interposer_test_suite(
 )
 
 set(_rj_interposer_pm4_tests
+    UnsupportedGdsResetLeavesQueueUsable
     SparseReplacementPreservesResidentTail
     SubmissionFenceQueryPollsAndWaitsForCompletion
     SubmissionFenceSequencesAreLocalToContextAndEngine

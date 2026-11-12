@@ -3937,6 +3937,10 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -4004,6 +4008,10 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -4071,6 +4079,10 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -4138,6 +4150,10 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -4205,6 +4221,10 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -4272,6 +4292,10 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -5010,6 +5034,10 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -5080,6 +5108,10 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -5150,6 +5182,10 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -5220,6 +5256,10 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -5290,6 +5330,10 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -5360,6 +5404,10 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -5821,6 +5869,10 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -5888,6 +5940,10 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -5955,6 +6011,10 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -6022,6 +6082,10 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -6089,6 +6153,10 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -6156,6 +6224,10 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -6577,6 +6649,10 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -6647,6 +6723,10 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -6717,6 +6797,10 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -6787,6 +6871,10 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -6857,6 +6945,10 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -6927,6 +7019,10 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -7504,6 +7600,10 @@ VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -7569,6 +7669,10 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -7634,6 +7738,10 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -7699,6 +7807,10 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -7764,6 +7876,10 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -7829,6 +7945,10 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -7894,6 +8014,10 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -7958,6 +8082,10 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -8561,6 +8689,10 @@ VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -8629,6 +8761,10 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -8697,6 +8833,10 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -8765,6 +8905,10 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -8833,6 +8977,10 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -8901,6 +9049,10 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -8969,6 +9121,10 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -9037,6 +9193,10 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -9390,6 +9550,10 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -9455,6 +9619,10 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -9520,6 +9688,10 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -9585,6 +9757,10 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -9650,6 +9826,10 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -9715,6 +9895,10 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -9780,6 +9964,10 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -10224,6 +10412,10 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -10292,6 +10484,10 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -10361,6 +10557,10 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -10430,6 +10630,10 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -10499,6 +10703,10 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -10568,6 +10776,10 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
@@ -10637,6 +10849,10 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
