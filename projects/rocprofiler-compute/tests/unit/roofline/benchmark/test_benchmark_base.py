@@ -21,11 +21,21 @@ from unittest import mock
 import pytest
 
 import roofline.benchmark.benchmark_base as benchmark_base
+import roofline.benchmark.gfx12.benchmark_gfx12_base as benchmark_gfx12_base
 import utils.utils_profile as utils_profile
 from roofline import run_benchmark
-from roofline.benchmark.gfx12.benchmark_gfx1201 import (
+from roofline.benchmark.gfx12.benchmark_gfx12_base import (
     CACHE_ELEMENT_BYTES,
+    ResidentReadRoof,
+    dram_pin_bandwidth_gbps,
+    percent_of_ceiling,
+    pipe_bandwidth_gbps,
+    resident_stream_plan,
+    shader_clock_hz,
+)
+from roofline.benchmark.gfx12.benchmark_gfx1201 import (
     CACHE_LOADS_IN_FLIGHT,
+    CACHE_WORKGROUPS_PER_CU,
     DRAM_BUS_BITS,
     DRAM_GBPS_PER_PIN,
     GL0_CAPACITY_BYTES,
@@ -34,16 +44,16 @@ from roofline.benchmark.gfx12.benchmark_gfx1201 import (
     GL2_BANKS,
     GL2_CAPACITY_BYTES,
     GL2_HIT_RETURN_BYTES_PER_CLOCK,
+    INFINITY_CACHE_BYTES,
     L0_LOADS_IN_FLIGHT,
+    L0_ROOF,
+    L0_WORKGROUPS_PER_CU,
     L0_WORKING_SET_BYTES,
+    L1_ROOF,
     L1_WORKING_SET_BYTES,
+    L2_ROOF,
     L2_WORKING_SET_BYTES,
-    Bench_gfx1201,
-    dram_pin_bandwidth_gbps,
-    percent_of_ceiling,
-    pipe_bandwidth_gbps,
-    resident_stream_plan,
-    shader_clock_hz,
+    MALL_WORKING_SET_DIVISOR,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 
@@ -244,7 +254,15 @@ def test_gfx1201_measures_gddr6_in_its_own_column():
 
     assert not runs_benchmark(bench, "HBM")
     assert runs_benchmark(bench, "GDDR6")
-    assert bench.tests["GDDR6"] == bench.dram_bw_benchmark
+    gddr6 = bench.tests["GDDR6"]
+    assert gddr6.func == bench.dram_pin_rated_bw_benchmark
+    assert gddr6.keywords == {
+        "kernel_name": "DRAM_bw",
+        "label": "GDDR6",
+        "bus_bits": DRAM_BUS_BITS,
+        "gbps_per_pin": DRAM_GBPS_PER_PIN,
+    }
+    assert list(bench.tests)[0] == "GDDR6"
     assert bench.csv_cols_map["GDDR6"] == "GDDR6Bw"
     assert "HBM" not in bench.csv_cols_map
     assert_source_defines(bench.hbm_bw_src, "DRAM_bw", "gfx1201 DRAM")
@@ -259,9 +277,31 @@ def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
     """
     bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
 
-    assert bench.tests["L0"].__func__ is Bench_gfx1201.l0_bw_bench
-    assert bench.tests["L1"].__func__ is Bench_gfx1201.l1_bw_bench
-    assert bench.tests["L2"].__func__ is Bench_gfx1201.l2_bw_bench
+    for level, roof in (("L0", L0_ROOF), ("L1", L1_ROOF), ("L2", L2_ROOF)):
+        assert bench.tests[level].func == bench.cache_resident_bw
+        assert bench.tests[level].keywords == {"label": level, "roof": roof}
+    assert L0_ROOF == ResidentReadRoof(
+        L0_WORKING_SET_BYTES,
+        GL0_INSTANCES,
+        GL0_READ_BYTES_PER_CLOCK,
+        "GL0 read return",
+        L0_WORKGROUPS_PER_CU,
+        L0_LOADS_IN_FLIGHT,
+        "cache_l0_bw",
+    )
+    for roof, working_set in (
+        (L1_ROOF, L1_WORKING_SET_BYTES),
+        (L2_ROOF, L2_WORKING_SET_BYTES),
+    ):
+        assert roof == ResidentReadRoof(
+            working_set,
+            GL2_BANKS,
+            GL2_HIT_RETURN_BYTES_PER_CLOCK,
+            "GL2 hit return",
+            CACHE_WORKGROUPS_PER_CU,
+            CACHE_LOADS_IN_FLIGHT,
+            "cache_resident_bw",
+        )
     assert_source_defines(
         bench.cache_resident_src, "cache_resident_bw", "gfx1201 cache"
     )
@@ -305,7 +345,12 @@ def test_gfx1201_measures_infinity_cache_with_its_own_kernel():
     bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
 
     assert runs_benchmark(bench, "MALL")
-    assert bench.tests["MALL"] == bench.mall_bw_bench
+    assert bench.tests["MALL"].func == bench.cache_stream_bw_bench
+    assert bench.tests["MALL"].keywords == {
+        "level": "MALL",
+        "default_capacity_bytes": INFINITY_CACHE_BYTES,
+        "working_set_divisor": MALL_WORKING_SET_DIVISOR,
+    }
     assert bench.csv_cols_map["MALL"] == "MALLBw"
     assert_source_defines(bench.mall_bw_src, "MALL_bw", "gfx1201 MALL")
 
@@ -333,7 +378,7 @@ def test_gfx1201_gddr6_test_runs_the_device_memory_benchmark_under_the_gddr6_nam
 
     monkeypatch.setattr(bench, "hbm_bw_benchmark", fake_device_memory_benchmark)
 
-    assert bench.dram_bw_benchmark(0) == 480.0
+    assert bench.tests["GDDR6"](0) == 480.0
     assert calls == [(0, "DRAM_bw", "GDDR6")]
     assert "(75.0%)" in capsys.readouterr().out
 
@@ -415,8 +460,123 @@ def test_gfx1201_cache_roof_rejects_a_working_set_it_cannot_stream(
     power-of-two element count of at least that many loads."""
     bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
 
+    roof = L1_ROOF._replace(
+        working_set_bytes=working_set_bytes,
+        instances=1,
+        bytes_per_clock=1,
+        pipe_name="test pipe",
+    )
+
     with pytest.raises(ValueError, match="cache working set"):
-        bench.cache_resident_bw(0, "test", working_set_bytes, 1, 1, "test pipe")
+        bench.cache_resident_bw(0, "test", roof)
+
+
+@pytest.fixture
+def fake_gfx12_runtime(monkeypatch):
+    """A HIP runtime for the gfx12 launchers with 32 multiprocessors. Event
+    timings cycle through 4, 2, and 8 ms, and every in-kernel clock reading is
+    2.97e9 shader cycles over 1e8 wall-clock ticks, 2.97 GHz. Returns a
+    function that routes a benchmark's kernels through this runtime and returns
+    the list of (kernel, grid, args) launches."""
+    elapsed_ms = iter([4.0, 2.0, 8.0] * 10)
+    launches = []
+
+    class FakeMemory:
+        def __init__(self, size):
+            self.size = size
+
+    def copy_clock_spans(spans, clocks, size):
+        spans[0] = 2_970_000_000
+        spans[1] = 100_000_000
+
+    fake_hip = SimpleNamespace(
+        hipSetDevice=lambda device: None,
+        hipGetDeviceProperties=lambda device: SimpleNamespace(multiProcessorCount=32),
+        hipMalloc=FakeMemory,
+        hipDeviceSynchronize=lambda: None,
+        hipEventCreate=lambda: None,
+        hipEventRecord=lambda event: None,
+        hipEventElapsedTime=lambda start, stop: next(elapsed_ms),
+        hipMemcpyHtoD=lambda clocks, zeros, size: None,
+        hipMemcpyDtoH=copy_clock_spans,
+        HIPDeviceMemory=FakeMemory,
+    )
+    monkeypatch.setattr(benchmark_base, "hip", fake_hip)
+    monkeypatch.setattr(benchmark_gfx12_base, "hip", fake_hip)
+
+    def record_launch(func, grid, block, shared_mem_size, stream, args):
+        launches.append((
+            func,
+            grid,
+            [
+                arg.size if isinstance(arg, FakeMemory) else getattr(arg, "value", arg)
+                for arg in args
+            ],
+        ))
+
+    def install(bench):
+        program = SimpleNamespace(get_kernel=lambda name: name)
+        monkeypatch.setattr(bench, "Program", lambda source: program)
+        monkeypatch.setattr(bench, "launch_kernel", record_launch)
+        return launches
+
+    return install
+
+
+def test_gfx1201_cache_roof_reports_the_fastest_launch_at_its_measured_clock(
+    fake_gfx12_runtime, capsys
+):
+    """The L1 roof reads a 1 MiB set from 8 x 32 workgroups, 256 passes to
+    reach 64 GiB. The 2 ms launch is the peak, and the GL2 hit return at the
+    measured 2.97 GHz is 12,165.12 GB/s."""
+    bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
+    launches = fake_gfx12_runtime(bench)
+
+    peak = bench.tests["L1"](0)
+
+    assert peak == pytest.approx(68_719_476_736 / 2.0 / 1e6)
+    assert len(launches) == 1 + benchmark_base.DEFAULT_NUM_EXPERIMENTS
+    kernel, grid, args = launches[0]
+    assert kernel == "cache_resident_bw"
+    assert grid == [256, 1, 1]
+    assert args == [L1_WORKING_SET_BYTES, 65_536, 256, CACHE_ELEMENT_BYTES, 16]
+    log = capsys.readouterr().out
+    assert "L1 BW, GPU ID: 0" in log
+    assert "GL2 hit return ceiling:12165.1 GB/sec (282.4% at 2970 MHz)" in log
+
+
+@pytest.mark.parametrize(
+    "reported_bytes, buffer_bytes, steps, passes",
+    [
+        (None, 33_554_432, 4, 1024),
+        (48 * 1024 * 1024, 25_165_824, 3, 1365),
+    ],
+    ids=["no-reported-infinity-cache", "reported-48-MiB"],
+)
+def test_gfx1201_infinity_cache_streams_half_its_capacity(
+    fake_gfx12_runtime, capsys, reported_bytes, buffer_bytes, steps, passes
+):
+    """The MALL test streams half the Infinity Cache that AMD-SMI reports, or
+    half of 64 MB when it reports none, in whole 8 MiB grid steps."""
+    cache_sizes = {
+        level: size for level, size in CACHE_SIZES.items() if level != "MALL"
+    }
+    if reported_bytes is not None:
+        cache_sizes["MALL"] = reported_bytes
+    bench = BENCH_CLASSES["gfx1201"](0, cache_sizes, "gfx1201")
+    launches = fake_gfx12_runtime(bench)
+
+    peak = bench.tests["MALL"](0)
+
+    total_bytes = passes * buffer_bytes
+    assert peak == pytest.approx(total_bytes / 2.0 / 1e6)
+    kernel, grid, args = launches[0]
+    assert kernel == "MALL_bw"
+    assert grid == [128, 1, 1]
+    assert args == [buffer_bytes, steps, passes, CACHE_ELEMENT_BYTES]
+    assert (
+        f"working set:{buffer_bytes} bytes, passes:{passes}" in capsys.readouterr().out
+    )
 
 
 # =============================================================================

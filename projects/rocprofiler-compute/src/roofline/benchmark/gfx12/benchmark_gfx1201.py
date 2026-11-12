@@ -15,13 +15,10 @@
 # supported precisions to what RDNA4 actually implements.
 # -----------------------------------------------------------------------------
 
-from ctypes import c_int64, c_uint64, sizeof
-from typing import Tuple
+from functools import partial
 
-import utils.hip_interface as hip
-
-from .. import benchmark_base
 from . import benchmark_gfx12_base
+from .benchmark_gfx12_base import ResidentReadRoof
 
 # One wmma.16x16x16 issues 16*16*16 = 4096 MACs = 8192 FLOPs (multiply + add).
 # Each kernel below runs WMMA_ACC independent accumulator chains per iteration so
@@ -36,10 +33,6 @@ INFINITY_CACHE_BYTES = 64 * 1024 * 1024
 # The Infinity Cache benchmark streams half the Infinity Cache capacity: four times
 # the 8 MB L2, so repeated passes miss in L2 and hit in the Infinity Cache.
 MALL_WORKING_SET_DIVISOR = 2
-MALL_WORKGROUPS_PER_CU = 4
-MALL_UNROLL = 16
-MALL_ELEMENT_BYTES = 16  # sizeof(__uint128_t)
-MALL_TRAFFIC_BYTES = 32 * 1024 * 1024 * 1024
 
 # Navi 48 cache pipes from the gfx1201 cache-hierarchy spec.
 # GL0 is 32 KB per TCP, 64 TCPs, and the read return is 128 B per clock.
@@ -71,62 +64,33 @@ CACHE_WORKGROUPS_PER_CU = 8
 CACHE_LOADS_IN_FLIGHT = 4
 L0_WORKGROUPS_PER_CU = 128
 L0_LOADS_IN_FLIGHT = 8
-# Long enough that kernel launch is a small part of the timed region.
-# 8 GB at the first reading lasted under 2 ms.
-CACHE_TRAFFIC_BYTES = 64 * 1024 * 1024 * 1024
-CACHE_ELEMENT_BYTES = 16
 
+# GL1 has no cache, so L1 is not an 8 x 128 B GL1 roof: the bytes come back on
+# the 32-bank GL2 read return, as they do for L2 over a larger set.
+L0_ROOF = ResidentReadRoof(
+    L0_WORKING_SET_BYTES,
+    GL0_INSTANCES,
+    GL0_READ_BYTES_PER_CLOCK,
+    "GL0 read return",
+    L0_WORKGROUPS_PER_CU,
+    L0_LOADS_IN_FLIGHT,
+    "cache_l0_bw",
+)
+L1_ROOF = ResidentReadRoof(
+    L1_WORKING_SET_BYTES,
+    GL2_BANKS,
+    GL2_HIT_RETURN_BYTES_PER_CLOCK,
+    "GL2 hit return",
+    CACHE_WORKGROUPS_PER_CU,
+    CACHE_LOADS_IN_FLIGHT,
+    "cache_resident_bw",
+)
+L2_ROOF = L1_ROOF._replace(working_set_bytes=L2_WORKING_SET_BYTES)
 
 # Navi 48 device memory: 256-bit GDDR6 at 20 Gbps per pin (AMD RX 9070 XT
 # spec). A read-only stream cannot exceed the pin rate.
 DRAM_BUS_BITS = 256
 DRAM_GBPS_PER_PIN = 20
-
-
-def dram_pin_bandwidth_gbps(bus_bits: int, gbps_per_pin: float) -> float:
-    """Peak DRAM bandwidth in decimal GB/s from bus width and pin data rate."""
-    return bus_bits * gbps_per_pin / 8
-
-
-def pipe_bandwidth_gbps(instances: int, bytes_per_clock: int, clock_hz: float) -> float:
-    """Aggregate pipe bandwidth in decimal GB/s. Matches the benchmark, which
-    reports bytes/s divided by 1e9."""
-    return instances * bytes_per_clock * clock_hz / 1e9
-
-
-def percent_of_ceiling(peak: float, ceiling: float) -> str:
-    """Format peak as a percentage of ceiling. The ceiling is a diagnostic only,
-    so an unusable one, such as a zero clock reading, prints n/a and never stops
-    the benchmark."""
-    if ceiling <= 0:
-        return "n/a"
-    return f"{100.0 * peak / ceiling:.1f}%"
-
-
-def resident_stream_plan(
-    compute_units: int, workgroup_size: int, working_set_bytes: int
-) -> Tuple[int, int, int, int, int]:
-    """Size the grid-stride resident stream and return (workgroups, num_steps,
-    buffer_bytes, num_passes, total_bytes). compute_units is HIP's
-    multiProcessorCount. The buffer is a whole number of grid steps of at least
-    one, and the pass count brings the traffic up to MALL_TRAFFIC_BYTES."""
-    workgroups = MALL_WORKGROUPS_PER_CU * compute_units
-    step_bytes = workgroups * workgroup_size * MALL_UNROLL * MALL_ELEMENT_BYTES
-    num_steps = max(1, working_set_bytes // step_bytes)
-    buffer_bytes = num_steps * step_bytes
-    num_passes = max(1, MALL_TRAFFIC_BYTES // buffer_bytes)
-    return workgroups, num_steps, buffer_bytes, num_passes, num_passes * buffer_bytes
-
-
-# wall_clock64() on gfx12 counts a constant 100 MHz reference.
-WALL_CLOCK_HZ = 100e6
-
-
-def shader_clock_hz(shader_cycles: int, wall_ticks: int) -> float:
-    """Shader clock measured in one workgroup: clock64 cycles per wall second."""
-    if wall_ticks <= 0:
-        return 0.0
-    return shader_cycles * WALL_CLOCK_HZ / wall_ticks
 
 
 # =============================================================================
@@ -136,24 +100,38 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
     def __init__(self, device_id: int, cache_sizes: dict, gpu_arch: str) -> None:
         super().__init__(device_id, cache_sizes)
 
-        # GDDR6 is the device-memory roofline test (CSV column GDDR6Bw).
+        # GDDR6 is the device-memory roofline test (CSV column GDDR6Bw). It runs
+        # the DRAM_bw kernel and prints the share of the pin rate it reached.
         # Infinity Cache uses the MALL column. mi_gpu_spec.yaml lists no
         # F4/F6/F32/F64/I8 matrix path, so those tests are marked unsupported
         # by apply_roofline_spec. GDDR6 keeps HBM's place in the CSV column order.
+        dram_bw_benchmark = partial(
+            self.dram_pin_rated_bw_benchmark,
+            kernel_name="DRAM_bw",
+            label="GDDR6",
+            bus_bits=DRAM_BUS_BITS,
+            gbps_per_pin=DRAM_GBPS_PER_PIN,
+        )
         ordered_tests = {}
         for name, func in self.tests.items():
             if name == "HBM":
-                ordered_tests["GDDR6"] = self.dram_bw_benchmark
+                ordered_tests["GDDR6"] = dram_bw_benchmark
             else:
                 ordered_tests[name] = func
         self.tests = ordered_tests
         # The gfx12 base stored the shared scalar cache benchmarks. Rebind
         # them: those kernels use the whole reported cache and a 4-byte load,
         # so L2 misses out of the 8 MB GL2 and L0 cannot reach the 128 B return.
-        self.tests["L0"] = self.l0_bw_bench
-        self.tests["L1"] = self.l1_bw_bench
-        self.tests["L2"] = self.l2_bw_bench
-        self.tests["MALL"] = self.mall_bw_bench
+        self.tests["L0"] = partial(self.cache_resident_bw, label="L0", roof=L0_ROOF)
+        self.tests["L1"] = partial(self.cache_resident_bw, label="L1", roof=L1_ROOF)
+        self.tests["L2"] = partial(self.cache_resident_bw, label="L2", roof=L2_ROOF)
+        # The Infinity Cache holds a set that L2 does not.
+        self.tests["MALL"] = partial(
+            self.cache_stream_bw_bench,
+            level="MALL",
+            default_capacity_bytes=INFINITY_CACHE_BYTES,
+            working_set_divisor=MALL_WORKING_SET_DIVISOR,
+        )
         # V_WMMA_F32_16X16X16_BF8_BF8 is the same 16x16x16 shape as FP8.
         self.tests["WMMA-BF8"] = self.matrix_bf8_bench
         self.matrix_kernel_selector = {
@@ -172,218 +150,6 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
             "F16": WMMA_FLOPS_PER_INSTRUCTION * WMMA_ACC,
             "BF16": WMMA_FLOPS_PER_INSTRUCTION * WMMA_ACC,
         }
-
-    def dram_bw_benchmark(self, device: int) -> float:
-        """Measure sustained DRAM read bandwidth for Navi 48.
-
-        The result is stored under the GDDR6 roofline test (CSV column GDDR6Bw).
-        """
-        peak = self.hbm_bw_benchmark(device, "DRAM_bw", "GDDR6")
-        ceiling = dram_pin_bandwidth_gbps(DRAM_BUS_BITS, DRAM_GBPS_PER_PIN)
-        print(
-            f"DRAM pin-rate reference: {DRAM_BUS_BITS}-bit x {DRAM_GBPS_PER_PIN} Gbps "
-            f"= {ceiling:.1f} GB/sec ({percent_of_ceiling(peak, ceiling)})"
-        )
-        return peak
-
-    # -----------------------------------------------------------------------------
-    # Infinity Cache (MALL) bandwidth benchmark
-    # -----------------------------------------------------------------------------
-    def l0_bw_bench(self, device: int) -> float:
-        """GL0-resident read bandwidth. The working set fits in one 32 KB TCP."""
-        return self.cache_resident_bw(
-            device,
-            "L0",
-            L0_WORKING_SET_BYTES,
-            GL0_INSTANCES,
-            GL0_READ_BYTES_PER_CLOCK,
-            "GL0 read return",
-            L0_WORKGROUPS_PER_CU,
-            L0_LOADS_IN_FLIGHT,
-            "cache_l0_bw",
-        )
-
-    def l1_bw_bench(self, device: int) -> float:
-        """GL2-hit read bandwidth for a set that misses GL0.
-
-        GL1 has no cache, so this is not an 8 x 128 B GL1 roof. The bytes come
-        back on the 32-bank GL2 read return.
-        """
-        return self.cache_resident_bw(
-            device,
-            "L1",
-            L1_WORKING_SET_BYTES,
-            GL2_BANKS,
-            GL2_HIT_RETURN_BYTES_PER_CLOCK,
-            "GL2 hit return",
-        )
-
-    def l2_bw_bench(self, device: int) -> float:
-        """GL2-hit read bandwidth over a larger set that still fits in 8 MB."""
-        return self.cache_resident_bw(
-            device,
-            "L2",
-            L2_WORKING_SET_BYTES,
-            GL2_BANKS,
-            GL2_HIT_RETURN_BYTES_PER_CLOCK,
-            "GL2 hit return",
-        )
-
-    def cache_resident_bw(
-        self,
-        device: int,
-        label: str,
-        working_set_bytes: int,
-        instances: int,
-        bytes_per_clock: int,
-        pipe_name: str,
-        workgroups_per_cu: int = CACHE_WORKGROUPS_PER_CU,
-        loads_in_flight: int = CACHE_LOADS_IN_FLIGHT,
-        kernel_name: str = "cache_resident_bw",
-    ) -> float:
-        """Repeated 16-byte reads of one buffer, scored against one pipe."""
-        workgroup_size = benchmark_base.DEFAULT_WORKGROUP_SIZE
-        element_count = working_set_bytes // CACHE_ELEMENT_BYTES
-        loads_per_step = workgroup_size * loads_in_flight
-        if (
-            working_set_bytes % CACHE_ELEMENT_BYTES != 0
-            or element_count < loads_per_step
-            or element_count & (element_count - 1) != 0
-        ):
-            raise ValueError(
-                "cache working set must be a power of two of at least "
-                f"{loads_per_step * CACHE_ELEMENT_BYTES} bytes, "
-                f"got {working_set_bytes}"
-            )
-
-        hip.hipSetDevice(device)
-        num_experiments = benchmark_base.DEFAULT_NUM_EXPERIMENTS
-        cus = hip.hipGetDeviceProperties(device).multiProcessorCount
-        workgroups = workgroups_per_cu * cus
-        per_pass_bytes = workgroups * working_set_bytes
-        iters = max(1, CACHE_TRAFFIC_BYTES // per_pass_bytes)
-        total_bytes = iters * per_pass_bytes
-
-        src = hip.hipMalloc(working_set_bytes)
-        dummy = hip.hipMalloc(CACHE_ELEMENT_BYTES)
-        clocks = hip.hipMalloc(2 * sizeof(c_uint64))
-        program = self.Program(self.cache_resident_src)
-        func = program.get_kernel(kernel_name)
-        args = [src, element_count, iters, dummy, clocks]
-        grid = [workgroups, 1, 1]
-        block = [workgroup_size, 1, 1]
-
-        self.launch_kernel(func, grid, block, 0, None, args)
-        hip.hipDeviceSynchronize()
-
-        samples = []
-        for experiment in range(num_experiments):
-            samples.append(
-                self.timed_clocked_launch(func, grid, block, args, clocks, total_bytes)
-            )
-            self.show_progress(float(experiment + 1) / num_experiments)
-        print()
-
-        peak, clock_hz = max(samples)
-        ceiling = pipe_bandwidth_gbps(instances, bytes_per_clock, clock_hz)
-        print(
-            f"{label} BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
-            f"workgroups:{workgroups}, experiments:{num_experiments}, "
-            f"working set:{working_set_bytes} bytes, iters:{iters}, "
-            f"traffic:{total_bytes} bytes, "
-            f"duration:{total_bytes / peak / 1e6:.1f} ms, "
-            f"peak:{peak:.1f} GB/sec, {pipe_name} ceiling:{ceiling:.1f} GB/sec "
-            f"({percent_of_ceiling(peak, ceiling)} at {clock_hz / 1e6:.0f} MHz)"
-        )
-        return peak
-
-    def timed_clocked_launch(
-        self,
-        func: object,
-        grid: list,
-        block: list,
-        args: list,
-        clocks: hip.HIPDeviceMemory,
-        total_bytes: int,
-    ) -> tuple:
-        """One launch. Returns (GB/s, shader clock in Hz measured in-kernel).
-
-        The kernel records the longest workgroup's clock64 and wall_clock64
-        spans, so each sample is scored at the clock it actually ran at.
-        """
-        zeros = (c_uint64 * 2)(0, 0)
-        spans = (c_uint64 * 2)()
-        hip.hipMemcpyHtoD(clocks, zeros, sizeof(zeros))
-        event_start = hip.hipEventCreate()
-        event_stop = hip.hipEventCreate()
-        hip.hipEventRecord(event_start)
-        self.launch_kernel(func, grid, block, 0, None, args)
-        hip.hipEventRecord(event_stop)
-        hip.hipDeviceSynchronize()
-        event_ms = hip.hipEventElapsedTime(event_start, event_stop)
-        hip.hipMemcpyDtoH(spans, clocks, sizeof(spans))
-        return (
-            float(total_bytes) / event_ms / 1e6,
-            shader_clock_hz(spans[0], spans[1]),
-        )
-
-    def mall_bw_bench(self, device: int) -> float:
-        """Measure Infinity Cache bandwidth over a working set it holds but L2 does
-        not."""
-        capacity = self.cache_sizes.get("MALL", INFINITY_CACHE_BYTES)
-        return self.resident_stream_bw_bench(
-            device, "MALL", capacity // MALL_WORKING_SET_DIVISOR
-        )
-
-    def resident_stream_bw_bench(
-        self, device: int, label: str, working_set_bytes: int
-    ) -> float:
-        """Measure read bandwidth of repeated grid-stride passes over one buffer.
-
-        Every pass reads each 16-byte element once, so the bandwidth reflects the
-        cache level that holds the whole buffer.
-        """
-        hip.hipSetDevice(device)
-        num_experiments = benchmark_base.DEFAULT_NUM_EXPERIMENTS
-        workgroup_size = benchmark_base.DEFAULT_WORKGROUP_SIZE
-
-        cus = hip.hipGetDeviceProperties(device).multiProcessorCount
-        workgroups, num_steps, buffer_bytes, num_passes, total_bytes = (
-            resident_stream_plan(cus, workgroup_size, working_set_bytes)
-        )
-
-        src = hip.hipMalloc(buffer_bytes)
-        dummy = hip.hipMalloc(MALL_ELEMENT_BYTES)
-        # Keep the program alive: a temporary Program unloads the module before launch.
-        program = self.Program(self.mall_bw_src)
-        func = program.get_kernel("MALL_bw")
-        args = [src, c_int64(num_steps), num_passes, dummy]
-
-        self.launch_kernel(
-            func, [workgroups, 1, 1], [workgroup_size, 1, 1], 0, None, args
-        )
-        hip.hipDeviceSynchronize()
-
-        samples = self.run_get_samples(
-            num_experiments,
-            total_bytes,
-            func,
-            [workgroups, 1, 1],
-            [workgroup_size, 1, 1],
-            0,
-            None,
-            args,
-        )
-        peak = max(samples)
-
-        print(
-            f"{label} BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
-            f"workgroups:{workgroups}, experiments:{num_experiments}, "
-            f"working set:{buffer_bytes} bytes, passes:{num_passes}, "
-            f"traffic:{total_bytes} bytes, duration:{total_bytes / peak / 1e6:.1f} ms, "
-            f"peak:{peak:.1f} GB/sec"
-        )
-        return peak
 
     # -----------------------------------------------------------------------------
     # Benchmarking kernel source

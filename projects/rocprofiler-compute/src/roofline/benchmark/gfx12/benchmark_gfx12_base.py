@@ -8,7 +8,82 @@
 #
 # -----------------------------------------------------------------------------
 
+from ctypes import c_int64, c_uint64, sizeof
+from typing import NamedTuple, Tuple
+
+import utils.hip_interface as hip
+
 from .. import benchmark_base
+
+# wall_clock64() on gfx12 counts a constant 100 MHz reference.
+WALL_CLOCK_HZ = 100e6
+
+# Cache-resident reads. A child class's cache_resident_src loads 16-byte
+# elements. Long enough that kernel launch is a small part of the timed
+# region: 8 GB at the first reading lasted under 2 ms.
+CACHE_ELEMENT_BYTES = 16
+CACHE_TRAFFIC_BYTES = 64 * 1024 * 1024 * 1024
+
+# Resident stream. A child class's mall_bw_src runs grid-stride passes of
+# MALL_UNROLL 16-byte loads per step.
+MALL_WORKGROUPS_PER_CU = 4
+MALL_UNROLL = 16
+MALL_ELEMENT_BYTES = 16  # sizeof(__uint128_t)
+MALL_TRAFFIC_BYTES = 32 * 1024 * 1024 * 1024
+
+
+class ResidentReadRoof(NamedTuple):
+    """A cache-resident read benchmark and the pipe it is scored against."""
+
+    working_set_bytes: int
+    instances: int
+    bytes_per_clock: int
+    pipe_name: str
+    workgroups_per_cu: int
+    loads_in_flight: int
+    kernel_name: str
+
+
+def dram_pin_bandwidth_gbps(bus_bits: int, gbps_per_pin: float) -> float:
+    """Peak DRAM bandwidth in decimal GB/s from bus width and pin data rate."""
+    return bus_bits * gbps_per_pin / 8
+
+
+def pipe_bandwidth_gbps(instances: int, bytes_per_clock: int, clock_hz: float) -> float:
+    """Aggregate pipe bandwidth in decimal GB/s. Matches the benchmark, which
+    reports bytes/s divided by 1e9."""
+    return instances * bytes_per_clock * clock_hz / 1e9
+
+
+def percent_of_ceiling(peak: float, ceiling: float) -> str:
+    """Format peak as a percentage of ceiling. The ceiling is a diagnostic only,
+    so an unusable one, such as a zero clock reading, prints n/a and never stops
+    the benchmark."""
+    if ceiling <= 0:
+        return "n/a"
+    return f"{100.0 * peak / ceiling:.1f}%"
+
+
+def resident_stream_plan(
+    compute_units: int, workgroup_size: int, working_set_bytes: int
+) -> Tuple[int, int, int, int, int]:
+    """Size the grid-stride resident stream and return (workgroups, num_steps,
+    buffer_bytes, num_passes, total_bytes). compute_units is HIP's
+    multiProcessorCount. The buffer is a whole number of grid steps of at least
+    one, and the pass count brings the traffic up to MALL_TRAFFIC_BYTES."""
+    workgroups = MALL_WORKGROUPS_PER_CU * compute_units
+    step_bytes = workgroups * workgroup_size * MALL_UNROLL * MALL_ELEMENT_BYTES
+    num_steps = max(1, working_set_bytes // step_bytes)
+    buffer_bytes = num_steps * step_bytes
+    num_passes = max(1, MALL_TRAFFIC_BYTES // buffer_bytes)
+    return workgroups, num_steps, buffer_bytes, num_passes, num_passes * buffer_bytes
+
+
+def shader_clock_hz(shader_cycles: int, wall_ticks: int) -> float:
+    """Shader clock measured in one workgroup: clock64 cycles per wall second."""
+    if wall_ticks <= 0:
+        return 0.0
+    return shader_cycles * WALL_CLOCK_HZ / wall_ticks
 
 
 # =============================================================================
@@ -61,6 +136,182 @@ class Bench_gfx12(benchmark_base.Bench_base):
             "WMMA-F64": super().matrix_f64_bench,
             "WMMA-I8": super().matrix_i8_bench,
         }
+
+    # -----------------------------------------------------------------------------
+    # Device-memory, cache-resident, and resident-stream bandwidth benchmarks
+    # -----------------------------------------------------------------------------
+    def dram_pin_rated_bw_benchmark(
+        self,
+        device: int,
+        kernel_name: str,
+        label: str,
+        bus_bits: int,
+        gbps_per_pin: float,
+    ) -> float:
+        """Measure sustained device-memory read bandwidth and print it as a share
+        of the DRAM pin rate, which a read-only stream cannot exceed."""
+        peak = self.hbm_bw_benchmark(device, kernel_name, label)
+        ceiling = dram_pin_bandwidth_gbps(bus_bits, gbps_per_pin)
+        print(
+            f"DRAM pin-rate reference: {bus_bits}-bit x {gbps_per_pin} Gbps "
+            f"= {ceiling:.1f} GB/sec ({percent_of_ceiling(peak, ceiling)})"
+        )
+        return peak
+
+    def cache_resident_bw(
+        self, device: int, label: str, roof: ResidentReadRoof
+    ) -> float:
+        """Repeated 16-byte reads of one buffer from cache_resident_src, scored
+        against one pipe."""
+        workgroup_size = benchmark_base.DEFAULT_WORKGROUP_SIZE
+        working_set_bytes = roof.working_set_bytes
+        element_count = working_set_bytes // CACHE_ELEMENT_BYTES
+        loads_per_step = workgroup_size * roof.loads_in_flight
+        if (
+            working_set_bytes % CACHE_ELEMENT_BYTES != 0
+            or element_count < loads_per_step
+            or element_count & (element_count - 1) != 0
+        ):
+            raise ValueError(
+                "cache working set must be a power of two of at least "
+                f"{loads_per_step * CACHE_ELEMENT_BYTES} bytes, "
+                f"got {working_set_bytes}"
+            )
+
+        hip.hipSetDevice(device)
+        num_experiments = benchmark_base.DEFAULT_NUM_EXPERIMENTS
+        cus = hip.hipGetDeviceProperties(device).multiProcessorCount
+        workgroups = roof.workgroups_per_cu * cus
+        per_pass_bytes = workgroups * working_set_bytes
+        iters = max(1, CACHE_TRAFFIC_BYTES // per_pass_bytes)
+        total_bytes = iters * per_pass_bytes
+
+        src = hip.hipMalloc(working_set_bytes)
+        dummy = hip.hipMalloc(CACHE_ELEMENT_BYTES)
+        clocks = hip.hipMalloc(2 * sizeof(c_uint64))
+        program = self.Program(self.cache_resident_src)
+        func = program.get_kernel(roof.kernel_name)
+        args = [src, element_count, iters, dummy, clocks]
+        grid = [workgroups, 1, 1]
+        block = [workgroup_size, 1, 1]
+
+        self.launch_kernel(func, grid, block, 0, None, args)
+        hip.hipDeviceSynchronize()
+
+        samples = []
+        for experiment in range(num_experiments):
+            samples.append(
+                self.timed_clocked_launch(func, grid, block, args, clocks, total_bytes)
+            )
+            self.show_progress(float(experiment + 1) / num_experiments)
+        print()
+
+        peak, clock_hz = max(samples)
+        ceiling = pipe_bandwidth_gbps(roof.instances, roof.bytes_per_clock, clock_hz)
+        print(
+            f"{label} BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
+            f"workgroups:{workgroups}, experiments:{num_experiments}, "
+            f"working set:{working_set_bytes} bytes, iters:{iters}, "
+            f"traffic:{total_bytes} bytes, "
+            f"duration:{total_bytes / peak / 1e6:.1f} ms, "
+            f"peak:{peak:.1f} GB/sec, {roof.pipe_name} ceiling:{ceiling:.1f} GB/sec "
+            f"({percent_of_ceiling(peak, ceiling)} at {clock_hz / 1e6:.0f} MHz)"
+        )
+        return peak
+
+    def timed_clocked_launch(
+        self,
+        func: object,
+        grid: list,
+        block: list,
+        args: list,
+        clocks: hip.HIPDeviceMemory,
+        total_bytes: int,
+    ) -> tuple:
+        """One launch. Returns (GB/s, shader clock in Hz measured in-kernel).
+
+        The kernel records the longest workgroup's clock64 and wall_clock64
+        spans, so each sample is scored at the clock it actually ran at.
+        """
+        zeros = (c_uint64 * 2)(0, 0)
+        spans = (c_uint64 * 2)()
+        hip.hipMemcpyHtoD(clocks, zeros, sizeof(zeros))
+        event_start = hip.hipEventCreate()
+        event_stop = hip.hipEventCreate()
+        hip.hipEventRecord(event_start)
+        self.launch_kernel(func, grid, block, 0, None, args)
+        hip.hipEventRecord(event_stop)
+        hip.hipDeviceSynchronize()
+        event_ms = hip.hipEventElapsedTime(event_start, event_stop)
+        hip.hipMemcpyDtoH(spans, clocks, sizeof(spans))
+        return (
+            float(total_bytes) / event_ms / 1e6,
+            shader_clock_hz(spans[0], spans[1]),
+        )
+
+    def cache_stream_bw_bench(
+        self,
+        device: int,
+        level: str,
+        default_capacity_bytes: int,
+        working_set_divisor: int,
+    ) -> float:
+        """Stream a fraction of one cache level's capacity. The capacity is the
+        one AMD-SMI reports, or default_capacity_bytes when it reports none."""
+        capacity = self.cache_sizes.get(level, default_capacity_bytes)
+        return self.resident_stream_bw_bench(
+            device, level, capacity // working_set_divisor
+        )
+
+    def resident_stream_bw_bench(
+        self, device: int, label: str, working_set_bytes: int
+    ) -> float:
+        """Measure read bandwidth of repeated grid-stride passes over one buffer.
+
+        Every pass reads each 16-byte element once, so the bandwidth reflects the
+        cache level that holds the whole buffer.
+        """
+        hip.hipSetDevice(device)
+        num_experiments = benchmark_base.DEFAULT_NUM_EXPERIMENTS
+        workgroup_size = benchmark_base.DEFAULT_WORKGROUP_SIZE
+
+        cus = hip.hipGetDeviceProperties(device).multiProcessorCount
+        workgroups, num_steps, buffer_bytes, num_passes, total_bytes = (
+            resident_stream_plan(cus, workgroup_size, working_set_bytes)
+        )
+
+        src = hip.hipMalloc(buffer_bytes)
+        dummy = hip.hipMalloc(MALL_ELEMENT_BYTES)
+        # Keep the program alive: a temporary Program unloads the module before launch.
+        program = self.Program(self.mall_bw_src)
+        func = program.get_kernel("MALL_bw")
+        args = [src, c_int64(num_steps), num_passes, dummy]
+
+        self.launch_kernel(
+            func, [workgroups, 1, 1], [workgroup_size, 1, 1], 0, None, args
+        )
+        hip.hipDeviceSynchronize()
+
+        samples = self.run_get_samples(
+            num_experiments,
+            total_bytes,
+            func,
+            [workgroups, 1, 1],
+            [workgroup_size, 1, 1],
+            0,
+            None,
+            args,
+        )
+        peak = max(samples)
+
+        print(
+            f"{label} BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
+            f"workgroups:{workgroups}, experiments:{num_experiments}, "
+            f"working set:{buffer_bytes} bytes, passes:{num_passes}, "
+            f"traffic:{total_bytes} bytes, duration:{total_bytes / peak / 1e6:.1f} ms, "
+            f"peak:{peak:.1f} GB/sec"
+        )
+        return peak
 
     # -----------------------------------------------------------------------------
     # Benchmarking kernel source
