@@ -288,7 +288,6 @@ def make_soc(arch: str, membw_analysis: bool, filter_blocks: List[str]) -> OmniS
         config_dir=config.analysis_configs_dir,
         filter_blocks=filter_blocks,
         membw_analysis=membw_analysis,
-        roof_only=False,
         set_selected=None,
     )
     machine_specs = SimpleNamespace(
