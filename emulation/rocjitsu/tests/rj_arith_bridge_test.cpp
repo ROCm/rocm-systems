@@ -4988,22 +4988,21 @@ TEST(ArithBridgeTest, ScalarFloatBinaryOperationsHonorSemanticsAndFailureBoundar
   struct Case {
     uint16_t opcode;
     uint32_t a, b, expected;
-    bool exact;
   };
-  const Case cases[] = {{rdna4::kSAddF32Sop2, 0x40000000, 0x40400000, 0x40a00000, true},
-                        {rdna4::kSSubF32Sop2, 0x40000000, 0x40400000, 0xbf800000, true},
-                        {rdna4::kSMulF32Sop2, 0x40000000, 0x40400000, 0x40c00000, true},
-                        {rdna4::kSMinNumF32Sop2, 0x40000000, 0x40400000, 0x40000000, false},
-                        {rdna4::kSMaxNumF32Sop2, 0x40000000, 0x40400000, 0x40400000, false},
-                        {rdna4::kSMinimumF32Sop2, 0x40000000, 0x40400000, 0x40000000, false},
-                        {rdna4::kSMaximumF32Sop2, 0x40000000, 0x40400000, 0x40400000, false},
-                        {rdna4::kSAddF16Sop2, 0xdead4000, 0xbeef4200, 0x4500, true},
-                        {rdna4::kSSubF16Sop2, 0xdead4000, 0xbeef4200, 0xbc00, true},
-                        {rdna4::kSMulF16Sop2, 0xdead4000, 0xbeef4200, 0x4600, true},
-                        {rdna4::kSMinNumF16Sop2, 0xdead4000, 0xbeef4200, 0x4000, false},
-                        {rdna4::kSMaxNumF16Sop2, 0xdead4000, 0xbeef4200, 0x4200, false},
-                        {rdna4::kSMinimumF16Sop2, 0xdead4000, 0xbeef4200, 0x4000, false},
-                        {rdna4::kSMaximumF16Sop2, 0xdead4000, 0xbeef4200, 0x4200, false}};
+  const Case cases[] = {{rdna4::kSAddF32Sop2, 0x40000000, 0x40400000, 0x40a00000},
+                        {rdna4::kSSubF32Sop2, 0x40000000, 0x40400000, 0xbf800000},
+                        {rdna4::kSMulF32Sop2, 0x40000000, 0x40400000, 0x40c00000},
+                        {rdna4::kSMinNumF32Sop2, 0x40000000, 0x40400000, 0x40000000},
+                        {rdna4::kSMaxNumF32Sop2, 0x40000000, 0x40400000, 0x40400000},
+                        {rdna4::kSMinimumF32Sop2, 0x40000000, 0x40400000, 0x40000000},
+                        {rdna4::kSMaximumF32Sop2, 0x40000000, 0x40400000, 0x40400000},
+                        {rdna4::kSAddF16Sop2, 0xdead4000, 0xbeef4200, 0x4500},
+                        {rdna4::kSSubF16Sop2, 0xdead4000, 0xbeef4200, 0xbc00},
+                        {rdna4::kSMulF16Sop2, 0xdead4000, 0xbeef4200, 0x4600},
+                        {rdna4::kSMinNumF16Sop2, 0xdead4000, 0xbeef4200, 0x4000},
+                        {rdna4::kSMaxNumF16Sop2, 0xdead4000, 0xbeef4200, 0x4200},
+                        {rdna4::kSMinimumF16Sop2, 0xdead4000, 0xbeef4200, 0x4000},
+                        {rdna4::kSMaximumF16Sop2, 0xdead4000, 0xbeef4200, 0x4200}};
   for (const auto &test : cases)
     for (auto semantics :
          {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
@@ -5024,13 +5023,8 @@ TEST(ArithBridgeTest, ScalarFloatBinaryOperationsHonorSemanticsAndFailureBoundar
       const auto words = rdna4::build_sop2(test.opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0});
       auto instruction = fixture.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
-      // ADD/SUB/MUL support exact semantics but not FP status; selection requires
-      // exact support, so only loose/fallback modes run it.
-      const bool supported =
-          test.exact ? semantics != ArithmeticSemantics::BitExactEmpirical
-                     : semantics == ArithmeticSemantics::Loose ||
-                           semantics == ArithmeticSemantics::BitExactEmpiricalAllowLoose ||
-                           semantics == ArithmeticSemantics::Compatibility;
+      // Every form supports exact semantics but not FP status.
+      const bool supported = semantics != ArithmeticSemantics::BitExactEmpirical;
       EXPECT_EQ(
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded(),
           supported);
@@ -5046,27 +5040,24 @@ TEST(ArithBridgeTest, ScalarConversionsPreserveOperandFormatsAndRejectedOutputs)
   struct Case {
     uint16_t opcode;
     uint32_t a, b, expected;
-    bool packed, rounded;
+    bool packed;
   };
-  const Case cases[] = {
-      {rdna4::kSCvtF32I32Sop1, 0xfffffffd, 0, 0xc0400000, false, true},
-      {rdna4::kSCvtF32U32Sop1, 3, 0, 0x40400000, false, true},
-      {rdna4::kSCvtI32F32Sop1, 0xc0700000, 0, 0xfffffffd, false, false},
-      {rdna4::kSCvtU32F32Sop1, 0x40700000, 0, 3, false, false},
-      {rdna4::kSCvtF16F32Sop1, 0x3fc00000, 0, 0x3e00, false, true},
-      {rdna4::kSCvtF32F16Sop1, 0xdead3e00, 0, 0x3fc00000, false, false},
-      {rdna4::kSCvtHiF32F16Sop1, 0x3e00beef, 0, 0x3fc00000, false, false},
-      {rdna4::kSCvtPkRtzF16F32Sop2, 0x3fc00000, 0xc0200000, 0xc1003e00, true, false}};
+  const Case cases[] = {{rdna4::kSCvtF32I32Sop1, 0xfffffffd, 0, 0xc0400000, false},
+                        {rdna4::kSCvtF32U32Sop1, 3, 0, 0x40400000, false},
+                        {rdna4::kSCvtI32F32Sop1, 0xc0700000, 0, 0xfffffffd, false},
+                        {rdna4::kSCvtU32F32Sop1, 0x40700000, 0, 3, false},
+                        {rdna4::kSCvtF16F32Sop1, 0x3fc00000, 0, 0x3e00, false},
+                        {rdna4::kSCvtF32F16Sop1, 0xdead3e00, 0, 0x3fc00000, false},
+                        {rdna4::kSCvtHiF32F16Sop1, 0x3e00beef, 0, 0x3fc00000, false},
+                        {rdna4::kSCvtPkRtzF16F32Sop2, 0x3fc00000, 0xc0200000, 0xc1003e00, true}};
   for (const auto &test : cases)
     for (auto semantics :
          {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
           ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical,
           ArithmeticSemantics::Compatibility}) {
       ArithmeticPolicy policy{semantics};
-      // Rounding conversions support exact semantics but not FP status.
-      const bool exact =
-          semantics == ArithmeticSemantics::BitExactEmpirical ||
-          (!test.rounded && semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus);
+      // Every conversion supports exact semantics but not FP status.
+      const bool reporting = semantics == ArithmeticSemantics::BitExactEmpirical;
       BridgeFixture fixture(false, 64, policy);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_exec(0);
@@ -5084,9 +5075,9 @@ TEST(ArithBridgeTest, ScalarConversionsPreserveOperandFormatsAndRejectedOutputs)
       ASSERT_TRUE(instruction.succeeded());
       EXPECT_EQ(
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded(),
-          !exact);
-      EXPECT_EQ(fixture.recorder->scalar_writes.size(), exact ? 0u : 1u);
-      EXPECT_EQ(fixture.cu->read_sgpr(base), exact ? test.a : test.expected);
+          !reporting);
+      EXPECT_EQ(fixture.recorder->scalar_writes.size(), reporting ? 0u : 1u);
+      EXPECT_EQ(fixture.cu->read_sgpr(base), reporting ? test.a : test.expected);
       EXPECT_TRUE(fixture.wave->read_scc());
       EXPECT_EQ(fixture.wave->trapsts(), 0x80000010u);
     }

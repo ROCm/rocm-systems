@@ -460,12 +460,11 @@ int rj_arith_s_cmp_nlt_f16(uint64_t flags, uint64_t instruction_flags, uint32_t 
 
 // Scalar conversions execute once per wave and ignore EXEC, including zero;
 // d is required and SCC is unchanged. Operands are raw register bits. Sources
-// may originate from d storage. instruction_flags must be zero. Integer-to-FP32
-// and FP32-to-FP16 support loose and exact semantics and RJ_ARITH_FP_ROUND_MASK
-// (the destination format's MODE field); other conversions are loose only. Mode 3
-// FP status reporting is unsupported. Errors leave d unchanged. Requires host
-// nearest-even rounding and enabled denormals; preserves host rounding but may change
-// exception flags.
+// may originate from d storage. instruction_flags must be zero. Loose and exact
+// semantics are supported; mode 3 FP status reporting is unsupported. Integer-to-FP32
+// and FP32-to-FP16 accept RJ_ARITH_FP_ROUND_MASK (the destination format's MODE
+// field). Errors leave d unchanged. Requires host nearest-even rounding and enabled
+// denormals; preserves host rounding but may change exception flags.
 // Guest input flushing applies to floating inputs. Output flushing applies to
 // FP16 outputs, with tininess detected before destination subnormal rounding.
 // FP16_OVFL saturates finite narrowing overflow; it does not affect RTZ packing.
@@ -585,11 +584,11 @@ int rj_arith_s_fmamk_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 // to add/subtract/multiply; min/max ignore it. FP16_OVFL saturates finite FP16
 // overflow. Multiplication flushes tiny results before destination subnormal
 // rounding, so a value that would round up to the smallest normal may flush.
-// Add/subtract/multiply support loose and exact semantics and RJ_ARITH_FP_ROUND_MASK
-// (the destination format's MODE field); mode 3 FP status reporting is unsupported.
-// Exact results equal FMA(a, 1, b), FMA(a, 1, -b) and FMA(a, b, signed zero), so
-// subtraction negates a NaN b. Min/max are loose only; loose NaN signs/payloads are
-// unspecified.
+// Loose and exact semantics are supported; mode 3 FP status reporting is unsupported.
+// Add/subtract/multiply accept RJ_ARITH_FP_ROUND_MASK (the destination format's MODE
+// field). Exact results equal FMA(a, 1, b), FMA(a, 1, -b) and FMA(a, b, signed zero),
+// so subtraction negates a NaN b. A NaN selection result is the first NaN operand,
+// quieted. Loose NaN signs/payloads are unspecified.
 
 // Sum of a and b.
 int rj_arith_s_add_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,

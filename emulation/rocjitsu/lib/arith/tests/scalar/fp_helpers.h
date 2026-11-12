@@ -113,17 +113,21 @@ struct ScalarCapture {
 };
 
 // Translate captured MODE into the flags rocjitsu passes for one instruction. Input
-// flushing follows the source format, output flushing and rounding the destination.
-inline uint64_t scalar_capture_flags(uint32_t mode, int input_bits, int output_bits) {
+// flushing follows the source format, output flushing the destination; only rounded
+// results take the destination's rounding field and FP16_OVFL. Zero bits is an integer.
+inline uint64_t scalar_capture_flags(uint32_t mode, int input_bits, int output_bits, bool rounded) {
   auto denorm = [&](int bits) { return bits == 32 ? (mode >> 4) & 3 : (mode >> 6) & 3; };
-  uint64_t flags = uint64_t(output_bits == 32 ? mode & 3 : (mode >> 2) & 3) << 24;
+  uint64_t flags = 0;
+  if (rounded) {
+    flags |= uint64_t(output_bits == 32 ? mode & 3 : (mode >> 2) & 3) << 24;
+  }
   if (input_bits && !(denorm(input_bits) & 1)) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   }
-  if (!(denorm(output_bits) & 2)) {
+  if (output_bits && !(denorm(output_bits) & 2)) {
     flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
   }
-  if (output_bits == 16 && (mode >> 23) & 1) {
+  if (rounded && output_bits == 16 && (mode >> 23) & 1) {
     flags |= RJ_ARITH_FP16_OVFL;
   }
   return flags;
@@ -134,7 +138,7 @@ inline uint64_t scalar_capture_flags(uint32_t mode, int input_bits, int output_b
 // receives d preloaded with c.
 template <size_t N, typename Call>
 void check_scalar_captures(Call call, const ScalarCapture (&captures)[N], int input_bits,
-                           int output_bits) {
+                           int output_bits, bool rounded = true) {
   for (auto cpu : supported_cpu_levels()) {
     for (uint64_t semantics :
          {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
@@ -145,7 +149,7 @@ void check_scalar_captures(Call call, const ScalarCapture (&captures)[N], int in
                      << std::hex << cpu << '/' << semantics << " mode 0x" << test.mode << ": 0x"
                      << test.a << ", 0x" << test.b << ", 0x" << test.c);
         const uint64_t flags =
-            cpu | semantics | scalar_capture_flags(test.mode, input_bits, output_bits);
+            cpu | semantics | scalar_capture_flags(test.mode, input_bits, output_bits, rounded);
         const bool status = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
         uint32_t d = test.c, fp_status = 0x80000000U;
         ASSERT_EQ(call(flags, &d, test.a, test.b, test.c, &fp_status),
