@@ -1,5 +1,5 @@
 <system version="2">
-  <cpu host_hash="0x58e137603ea7ac35" numaid="1" affinity="ffffffff,ffffff00,00000000,0000ffff,ffffffff,ff000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="175" modelid="17">
+  <cpu host_hash="0x58e137603ea7ac35" numaid="1" affinity="ffffffff,ffffff00,00000000,0000ffff,ffffffff,ff000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="25" modelid="17">
     <pci busid="0000:32:00.0" class="0x060400" vendor="0x1000" device="0xc010" subsystem_vendor="0x1ce5" subsystem_device="0xff82" link_speed="16.0 GT/s PCIe" link_width="16">
       <pci busid="0000:34:00.0" class="0x060400" vendor="0x1000" device="0xc010" subsystem_vendor="0x1000" subsystem_device="0xa032" link_speed="16.0 GT/s PCIe" link_width="16">
         <pci busid="0000:36:00.0" class="0x060400" vendor="0x11f8" device="0x4000" subsystem_vendor="0x1ce5" subsystem_device="0xff83" link_speed="16.0 GT/s PCIe" link_width="16">
@@ -263,7 +263,7 @@
       </pci>
     </pci>
   </cpu>
-  <cpu host_hash="0x58e137603ea7ac35" numaid="0" affinity="00000000,000000ff,ffffffff,ffff0000,00000000,00ffffff,ffffffff" arch="x86_64" vendor="AuthenticAMD" familyid="175" modelid="17">
+  <cpu host_hash="0x58e137603ea7ac35" numaid="0" affinity="00000000,000000ff,ffffffff,ffff0000,00000000,00ffffff,ffffffff" arch="x86_64" vendor="AuthenticAMD" familyid="25" modelid="17">
     <pci busid="0000:01:00.0" class="0x020000" vendor="0x8086" device="0x1521" subsystem_vendor="0x8086" subsystem_device="0x0002" link_speed="5.0 GT/s PCIe" link_width="4">
       <nic>
         <net name="enp1s0f0" dev="0" speed="1000" port="0" latency="0.000000" guid="0x0" maxconn="65536" gdr="0"/>

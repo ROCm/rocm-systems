@@ -47,9 +47,6 @@ extern "C" __device__ __attribute__((const)) float __ocml_cvtrtn_f32_f64(double)
 extern "C" __device__ __attribute__((const)) float __ocml_cvtrtp_f32_f64(double);
 extern "C" __device__ __attribute__((const)) float __ocml_cvtrtz_f32_f64(double);
 
-extern "C" __device__ __attribute__((const)) _Float16 __ocml_cvtrtn_f16_f32(float);
-extern "C" __device__ __attribute__((const)) _Float16 __ocml_cvtrtp_f16_f32(float);
-extern "C" __device__ __attribute__((const)) _Float16 __ocml_cvtrtz_f16_f32(float);
 
 extern "C" __device__ __attribute__((const)) float __ocml_cvtrtn_f32_s32(int);
 extern "C" __device__ __attribute__((const)) float __ocml_cvtrtp_f32_s32(int);

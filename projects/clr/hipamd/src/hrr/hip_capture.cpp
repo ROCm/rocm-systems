@@ -36,6 +36,7 @@
 
 // hrr_api_args.h — for hrr_args_* struct types and hrr_api_id_t enum
 #include "hrr/hrr_api_args.h"
+#include "hrr/hrr_archive_notice.h"
 #include "hrr/hrr_host_rect.h"
 
 // HIP runtime internals
@@ -57,11 +58,14 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <climits>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <map>
@@ -70,6 +74,12 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 static std::once_flag g_hrr_atexit_once;
 
@@ -124,7 +134,152 @@ static bool hrr_capture_requested() {
   return false;
 }
 
-bool hip_capture_enabled() { return hrr_capture_requested() && !hrr_secure_exec(); }
+// The per-user file that records consent to capture, or "" when the
+// environment names no home for it.
+static std::string hrr_consent_file() {
+#if defined(_WIN32)
+  const char* appdata = std::getenv("APPDATA");
+  if (appdata == nullptr || *appdata == '\0') return "";
+  return std::string(appdata) + "\\hrr\\capture-consent";
+#else
+  const char* xdg = std::getenv("XDG_CONFIG_HOME");
+  if (xdg != nullptr && xdg[0] == '/') return std::string(xdg) + "/hrr/capture-consent";
+  const char* home = std::getenv("HOME");
+  if (home == nullptr || home[0] != '/') return "";
+  return std::string(home) + "/.config/hrr/capture-consent";
+#endif
+}
+
+// The consent file as ASCII after the UTF-8 or UTF-16LE byte order mark that Windows
+// PowerShell writes. UTF-16LE is decoded before the line end is looked for; a unit
+// outside ASCII, or an odd byte, yields "\x7F", which is never a yes.
+static std::string hrr_consent_text(const std::string& s) {
+  if (s.rfind("\xEF\xBB\xBF", 0) == 0) return s.substr(3);
+  if (s.rfind("\xFF\xFE", 0) != 0) return s;
+  if (s.size() % 2 != 0) return "\x7F";
+  std::string text;
+  for (size_t i = 2; i < s.size(); i += 2) {
+    if (s[i + 1] != '\0' || static_cast<unsigned char>(s[i]) > 0x7F) return "\x7F";
+    text.push_back(s[i]);
+  }
+  return text;
+}
+
+// Without trailing blanks and line ends.
+static std::string hrr_consent_trim(std::string s) {
+  while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+  return s;
+}
+
+// `s` for a terminal or a log: bytes outside printable ASCII become '?', so an
+// escape sequence in the environment does not reach either, and at most 64 are kept.
+static std::string hrr_printable(const std::string& s) {
+  std::string out = s.substr(0, 64);
+  for (char& c : out)
+    if (c < 0x20 || c > 0x7E) c = '?';
+  return s.size() > out.size() ? out + "..." : out;
+}
+
+struct HrrConsent {
+  // Where the yes came from for the manifest, "HIP_HRR_CAPTURE_CONSENT" or
+  // "file" (not its path, which names the user), or "" when there is none.
+  std::string source;
+  // Without consent, why not, for the notice; "" when nothing says no.
+  std::string refusal;
+};
+
+// The archive records the process's HIP calls and can hold its host buffers, kernel
+// arguments and code objects, so HIP_HRR_CAPTURE_OUTPUT alone does not start capture:
+// the user also has to say yes, in the consent file or in HIP_HRR_CAPTURE_CONSENT.
+static HrrConsent hrr_capture_consent() {
+  // A set variable decides the run: yes consents, any other value withholds consent.
+  // A blank one counts as unset. As in CLR's flag parser, double quotes that are the
+  // first and last characters other than ' ' are dropped.
+  const char* env = std::getenv("HIP_HRR_CAPTURE_CONSENT");
+  std::string value = env != nullptr ? env : "";
+  const size_t first = value.find_first_not_of(' ');
+  const size_t last = value.find_last_not_of(' ');
+  if (last > first && value[first] == '"' && value[last] == '"') {
+    value = value.substr(first + 1, last - first - 1);
+  }
+  const std::string answer = hrr_consent_trim(value);
+  if (answer == "yes") return {"HIP_HRR_CAPTURE_CONSENT", ""};
+  if (!answer.empty()) {
+    return {"", "HIP_HRR_CAPTURE_CONSENT is set to '" + hrr_printable(value) +
+                    "', which withholds consent."};
+  }
+  const std::string path = hrr_consent_file();
+  if (path.empty()) return {};
+  // A yes file is a few bytes; read at most this much of it at HIP's init.
+  constexpr size_t kMaxConsentFile = 4096;
+  std::string bytes(kMaxConsentFile + 1, '\0');
+#if defined(_WIN32)
+  // No owner check here: the file lives under %APPDATA%, which is per user.
+  std::error_code ec;
+  if (!std::filesystem::exists(path, ec)) return {"", path + " does not exist."};
+  if (!std::filesystem::is_regular_file(path, ec)) {
+    return {"", path + " is not a regular file."};
+  }
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return {"", path + " cannot be read."};
+  in.read(&bytes[0], static_cast<std::streamsize>(bytes.size()));
+  bytes.resize(static_cast<size_t>(in.gcount()));
+#else
+  // Only a regular file, checked by path so that a device is not opened, and
+  // again on the descriptor that is read: a FIFO planted there after the first
+  // check must not block HIP's init in open(). Not through a symbolic link, and
+  // with no other hard link: either can make a file someone else wrote say yes.
+  // The file must also belong to the effective user: a yes owned by someone
+  // else, say in an XDG_CONFIG_HOME shared by several users, is not theirs.
+  struct stat st{};
+  if (::stat(path.c_str(), &st) == 0 && !S_ISREG(st.st_mode)) {
+    return {"", path + " is not a regular file."};
+  }
+  const int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
+  if (fd < 0) {
+    return {"", path + (errno == ENOENT ? " does not exist."
+                        : errno == ELOOP ? " is a symbolic link."
+                                         : " cannot be read.")};
+  }
+  const char* bad = nullptr;
+  if (::fstat(fd, &st) != 0) {
+    bad = " cannot be read.";
+  } else if (!S_ISREG(st.st_mode)) {
+    bad = " is not a regular file.";
+  } else if (st.st_uid != ::geteuid()) {
+    bad = " is not owned by this user.";
+  } else if (st.st_nlink > 1) {
+    bad = " has more than one hard link.";
+  }
+  FILE* f = bad == nullptr ? ::fdopen(fd, "rb") : nullptr;
+  if (f == nullptr) {
+    ::close(fd);
+    return {"", path + (bad != nullptr ? bad : " cannot be read.")};
+  }
+  bytes.resize(std::fread(&bytes[0], 1, bytes.size(), f));
+  std::fclose(f);
+#endif
+  // The answer is the first line, so the line end is looked for in the decoded
+  // text. A file longer than the cap is not a yes.
+  std::string text = bytes.size() > kMaxConsentFile ? "\x7F" : hrr_consent_text(bytes);
+  text.erase(std::min(text.find('\n'), text.size()));
+  if (hrr_consent_trim(text) == "yes") return {"file", ""};
+  return {"", path + " does not say yes."};
+}
+
+// Read once: the answer must not change between hip_capture_init() and the
+// callers that ask later, and hip_capture_enabled() runs on the launch path.
+static const HrrConsent& hrr_consent() {
+  static const HrrConsent consent = hrr_capture_consent();
+  return consent;
+}
+
+// Consent is part of the predicate, so no caller sees capture on after
+// hip_capture_init() refused it. Short-circuits so that the consent file is
+// read only when capture was asked for.
+bool hip_capture_enabled() {
+  return hrr_capture_requested() && !hrr_secure_exec() && !hrr_consent().source.empty();
+}
 
 const char* hip_capture_output_dir() {
   return HIP_HRR_CAPTURE_OUTPUT;
@@ -322,7 +477,10 @@ struct PinnedSnapshot {
       if (!s.copy) continue;
       s.hash = hrr_cap::writer::write_blob(s.copy.get(), s.size);
       s.copy.reset();
-      s.record = (s.hash.lo || s.hash.hi) && (s.hash.lo != s.last.lo || s.hash.hi != s.last.hi);
+      // A snapshot write_blob() leaves out, as over HIP_HRR_CAPTURE_MAX_BLOB_MB, is
+      // recorded with hash {0,0} on every launch. Replay refuses such a launch
+      // unless it goes into a stream capture, where it restores nothing.
+      s.record = !(s.hash.lo || s.hash.hi) || s.hash.lo != s.last.lo || s.hash.hi != s.last.hi;
     }
   }
   ~PinnedSnapshot() { t_snaps.clear(); }
@@ -1338,6 +1496,22 @@ hipError_t capture_hipModuleLaunchCooperativeKernel(
   return r;
 }
 
+// hipExtModuleLaunchKernel records startEvent (marker before the kernel) and
+// stopEvent (bound to the kernel command) inside the runtime, not through
+// hipEventRecord. A later hipEventElapsedTime on that pair succeeds only
+// because of that side effect. The launch payload has no slot for the two
+// handles, so write the side effect as hipEventRecord events around the launch
+// record. Replay already knows how to play those, and hipEventElapsedTime then
+// sees markers instead of hipErrorInvalidHandle.
+static void record_ext_launch_event(hipEvent_t event, hipStream_t stream) {
+  if (!event) return;
+  hrr_args_hipEventRecord a{};
+  a.ret    = static_cast<int32_t>(hipSuccess);
+  a.event  = reinterpret_cast<uint64_t>(event);
+  a.stream = reinterpret_cast<uint64_t>(stream);
+  hrr_cap::writer::write_event_raw(HRR_API_HIPEVENTRECORD, &a.hdr, sizeof(a));
+}
+
 hipError_t capture_hipExtModuleLaunchKernel(
     hipFunction_t f,
     uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
@@ -1361,12 +1535,17 @@ hipError_t capture_hipExtModuleLaunchKernel(
     auto ceil_div = [](uint32_t a, uint32_t b) -> unsigned {
       return b ? static_cast<unsigned>((a + b - 1) / b) : static_cast<unsigned>(a);
     };
+    // Start marker first, then the launch, then the stop marker, matching the
+    // order hipEventElapsedTime observes. flags is a launch flag, not an event
+    // record flag; the runtime records these with hipEventRecordDefault.
+    record_ext_launch_event(startEvent, stream);
     record_launch(f,
                   ceil_div(globalWorkSizeX, localWorkSizeX),
                   ceil_div(globalWorkSizeY, localWorkSizeY),
                   ceil_div(globalWorkSizeZ, localWorkSizeZ),
                   localWorkSizeX,  localWorkSizeY,  localWorkSizeZ,
                   static_cast<unsigned>(sharedMemBytes), stream, kernelParams, extra);
+    record_ext_launch_event(stopEvent, stream);
   }
   return r;
 }
@@ -1679,7 +1858,7 @@ static hrr_cap::Hash128 write_fat_binary_blob(const void* blob, size_t blob_size
   std::vector<uint8_t> scrubbed(static_cast<const uint8_t*>(blob),
                                 static_cast<const uint8_t*>(blob) + blob_size);
   hrr_cap::scrub::scrub_code_object(scrubbed.data(), scrubbed.size());
-  return hrr_cap::writer::write_blob(scrubbed.data(), scrubbed.size());
+  return hrr_cap::writer::write_blob(scrubbed.data(), scrubbed.size(), /*capped=*/false);
 }
 
 void** capture___hipRegisterFatBinary(const void* data) {
@@ -2928,11 +3107,29 @@ void hrr_install_clr_exception_handler() {
 void hip_capture_init() {
   #if defined(HIP_HRR_CAPTURE_ENABLED)
     if (!hip_capture_enabled()) {
-      if (hrr_secure_exec() && hrr_capture_requested())
+      if (!hrr_capture_requested()) return;
+      if (hrr_secure_exec()) {
         fprintf(stderr,
                 "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: the program was started in "
                 "secure-execution mode (set-user-ID, set-group-ID, file capabilities or an "
                 "LSM transition).\n");
+        return;
+      }
+      // No consent. Deliberately not gated on AMD_LOG_LEVEL, like the start
+      // notice below: the user asked for an archive and must learn why there is
+      // none. Never prompts: the process may have no terminal, or many workers
+      // sharing one. Names what withheld it, so that a yes in the wrong place
+      // is not taken for a refused one.
+      const std::string file = hrr_consent_file();
+      const std::string& refusal = hrr_consent().refusal;
+      fprintf(stderr,
+              "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent. %s%s"
+              "The archive would record this process's HIP calls and could hold its host "
+              "buffers, kernel arguments and code objects. To consent, %s%s%sset "
+              "HIP_HRR_CAPTURE_CONSENT=yes in the environment of the processes to record.\n",
+              refusal.c_str(), refusal.empty() ? "" : " ",
+              file.empty() ? "" : "write the line yes to ", file.c_str(),
+              file.empty() ? "" : " once, or ");
       return;
     }
 
@@ -2978,7 +3175,7 @@ void hip_capture_init() {
 #endif
 
     hrr_cap::writer::set_capture_metadata_json(
-        hrr_cap::metadata::collect_json());
+        hrr_cap::metadata::collect_json(hrr_consent().source));
 
     hrr_install_clr_exception_handler();
 
@@ -3004,8 +3201,9 @@ void hip_capture_init() {
     fprintf(stderr,
             "[HRR capture] Recording this process's HIP calls, with their host buffers, kernel "
             "arguments and code objects, to %s/pid-%d (child processes record to their own "
-            "pid-* directories in %s)\n",
-            hip_capture_output_dir(), amd::Os::getProcessId(), hip_capture_output_dir());
+            "pid-* directories in %s). %s\n",
+            hip_capture_output_dir(), amd::Os::getProcessId(), hip_capture_output_dir(),
+            kHrrArchiveNoticeShort);
   #else
     // HRR capture is disabled
     // below to avoid -Wunused-function / -Wunused-variable

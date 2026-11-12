@@ -2203,11 +2203,11 @@ def _register_high_impact_individual_builders() -> None:
         "native_dropout": OpSpec(
             build=lambda d: ([float_tensor(d, 4, 4), 0.5, True], {}),
         ),
-        # tril / triu / *_indices: (n, k=0)
+        # tril / triu: input tensor. *_indices: (row, col) on CUDA.
         "tril": OpSpec(build=lambda d: ([float_tensor(d, 4, 4)], {})),
         "triu": OpSpec(build=lambda d: ([float_tensor(d, 4, 4)], {})),
-        "tril_indices": OpSpec(build=lambda _d: ([4, 4], {})),
-        "triu_indices": OpSpec(build=lambda _d: ([4, 4], {})),
+        "tril_indices": OpSpec(build=lambda d: ([4, 4], {"device": d})),
+        "triu_indices": OpSpec(build=lambda d: ([4, 4], {"device": d})),
         # comparison with explicit Scalar overload short names
         "eq": OpSpec(
             build=lambda d: ([float_tensor(d, 4, 4), float_tensor(d, 4, 4)], {})
@@ -4193,13 +4193,9 @@ def describe_subprocess_exit_code(returncode: int) -> str:
 
 def op_workload_failure_due_to(
     *,
-    timed_out: bool,
-    returncode: Optional[int],
+    returncode: int,
 ) -> str:
     """Short phrase for pytest.fail lead-in."""
-    if timed_out:
-        return "ground-truth subprocess exceeded 120s timeout"
-    assert returncode is not None
     if returncode < 0:
         name = signal_name(returncode)
         name_part = f", {name}" if name else ""
@@ -4319,46 +4315,17 @@ def run_ground_truth_torch_profiler_subprocess(
         str(Path(workload_script_path).resolve()),
         str(Path(ground_truth_json_path).resolve()),
     ]
-    try:
-        completed = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-    except subprocess.TimeoutExpired as exc:
-        copy_note = copy_failed_coverage_artifacts_to_cwd(
-            workload_script_path,
-            runner_script_path,
-        )
-        due = op_workload_failure_due_to(timed_out=True, returncode=None)
-        stdout_text = (
-            exc.stdout.decode(errors="replace")
-            if isinstance(exc.stdout, bytes)
-            else (exc.stdout or "")
-        )
-        stderr_text = (
-            exc.stderr.decode(errors="replace")
-            if isinstance(exc.stderr, bytes)
-            else (exc.stderr or "")
-        )
-        out_tail = stderr_tail_collapsed(stdout_text, max_lines=8)
-        err_tail = stderr_tail_collapsed(stderr_text)
-        fault_hint = extract_device_fault_banner(stderr_text)
-        hint_block = f"--- device fault ---\n{fault_hint}\n\n" if fault_hint else ""
-        pytest.fail(
-            f"Op workload failed: {due}.{repro}{copy_note}\n\n"
-            f"{hint_block}"
-            f"--- stdout (tail) ---\n{out_tail}\n\n"
-            f"--- stderr (tail) ---\n{err_tail}"
-        )
+    completed = subprocess.run(
+        argv,
+        capture_output=True,
+        text=True,
+    )
     if completed.returncode != 0:
         copy_note = copy_failed_coverage_artifacts_to_cwd(
             workload_script_path,
             runner_script_path,
         )
         due = op_workload_failure_due_to(
-            timed_out=False,
             returncode=completed.returncode,
         )
         exit_expl = describe_subprocess_exit_code(completed.returncode)

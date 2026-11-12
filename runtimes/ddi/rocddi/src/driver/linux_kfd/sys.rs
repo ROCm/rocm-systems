@@ -28,11 +28,11 @@ use std::sync::{Mutex, MutexGuard};
 
 use super::errno;
 use super::uapi;
+use crate::os::ProcessIdentity;
 use crate::os::linux::{
     file::{close_descriptor, close_file},
     invalid_data,
     memory::{Reservation, page_size},
-    process_identity::check_process,
 };
 use crate::session::DriverContextLifetime;
 
@@ -112,7 +112,7 @@ pub(super) struct Kfd {
     /// Exact native descriptor used for this context.
     file: Option<File>,
     /// Creating process identity checked before native calls.
-    process: u32,
+    process: ProcessIdentity,
     /// Serialized context selection and runtime enablement.
     runtime: Mutex<RuntimeControl>,
     /// Optional unit-test replacement for native ioctls.
@@ -153,10 +153,10 @@ pub(super) struct RuntimeGuard<'a> {
 }
 
 impl Kfd {
-    pub(super) fn new(file: File) -> Self {
+    pub(super) fn new(file: File, process: ProcessIdentity) -> Self {
         Self {
             file: Some(file),
-            process: std::process::id(),
+            process,
             runtime: Mutex::new(RuntimeControl {
                 context: ContextState::Primary,
                 enable: RuntimeState::Disabled,
@@ -167,10 +167,11 @@ impl Kfd {
     }
 
     #[cfg(test)]
+    #[allow(clippy::expect_used)]
     pub(super) fn with_hook(file: File, hook: IoctlHook) -> Self {
         Self {
             file: Some(file),
-            process: std::process::id(),
+            process: ProcessIdentity::capture().expect("test process identity"),
             runtime: Mutex::new(RuntimeControl {
                 context: ContextState::Primary,
                 enable: RuntimeState::Disabled,
@@ -186,7 +187,7 @@ impl Kfd {
     }
 
     pub(super) fn check_process(&self) -> io::Result<()> {
-        check_process(self.process)
+        self.process.check()
     }
 
     fn call(&self, call: Call<'_>) -> io::Result<()> {

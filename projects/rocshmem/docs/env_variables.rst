@@ -265,20 +265,28 @@ control the behavior of rocSHMEM.
         | ``rocshmem_query_tdm_lds_bytes()``. Wave put/get splits the
         | registered LDS buffer evenly across the block's waves, so each
         | wave's effective tile is smaller than this value.
-      - ``0``
-      - | ``0`` (default): auto-size the tile to use all LDS available per
-        | block on this device.
-        | Nonzero: use this tile size explicitly. Must be a multiple of 8
-        | bytes (the TDM element size); non-multiples are rounded down with
-        | a warning. If the requested size (doubled) doesn't fit in this
-        | device's shared memory per block, falls back to the auto-sized
-        | value instead.
+      - ``131072``
+      - | ``0``: auto-size the tile to use all LDS available per block on
+        | this device.
+        | Nonzero (default ``131072``): use this tile size explicitly. Must
+        | be a multiple of 8 bytes (the TDM element size); non-multiples are
+        | rounded down with a warning. If the requested size (doubled)
+        | doesn't fit in this device's shared memory per block, falls back
+        | to the auto-sized value instead.
 
-    * - | ``ROCSHMEM_TDM_THRESHOLD``
-        | Minimum transfer size in bytes to route through TDM for work-group
-        | or wave put/get on gfx1250 (requires ``USE_TDM`` build option).
-        | Transfers smaller than this use the normal (non-TDM) copy path
-        | instead, since TDM's issue latency isn't amortized for small
-        | transfers.
+    * - | ``ROCSHMEM_TDM_PUT_THRESHOLD``
+        | Minimum transfer size in bytes to route a put through TDM for
+        | work-group or wave put on gfx1250 (requires ``USE_TDM`` build
+        | option). Transfers smaller than this use the normal (non-TDM)
+        | copy path instead, since TDM's issue latency isn't amortized for
+        | small transfers.
       - ``16384``
+      - Size in bytes.
+
+    * - | ``ROCSHMEM_TDM_GET_THRESHOLD``
+        | Minimum transfer size in bytes to route a get through TDM for
+        | work-group or wave get on gfx1250 (requires ``USE_TDM`` build
+        | option). Gets are latency-bound on the remote read, so TDM pays
+        | off at a much smaller size than put.
+      - ``1024``
       - Size in bytes.

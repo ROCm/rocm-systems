@@ -173,6 +173,22 @@
         }
       ]
     },
+    "net_plugin_selection": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "description": "NCCL_NET name resolution. Pure logic, single rank, no NIC required.",
+      "tests": [
+        {
+          "name": "NetPlugin_Selection",
+          "description": "NCCL_NET resolves case-insensitively, ROCM-IB selects the ib-cast plugin, unset follows the detected NIC, and unknown names resolve to nothing instead of falling back to plain IB",
+          "test_filter": "NetPluginSelection.*"
+        }
+      ]
+    },
     "net_ib_base": {
       "extends": "default",
       "is_gtest": true,
@@ -222,7 +238,7 @@
       ]
     },
     "cast_multithread": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 600,
       "command_args": "--net_ib_nthreads=4",
       "env_variables": {
@@ -244,7 +260,7 @@
       ]
     },
     "fault_inject_multithread": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 600,
       "command_args": "--net_ib_nthreads=4",
       "env_variables": {
@@ -394,6 +410,16 @@
           "name": "NetIB_Init_GetDeviceCount",
           "description": "Query and validate InfiniBand device count",
           "test_filter": "NetIbMPITest.GetDeviceCount"
+        },
+        {
+          "name": "NetIB_Init_PluginMatchesEnv",
+          "description": "The plugin the fixture loaded is the one NCCL_NET names; inherited by the ib-cast and rocm-ib variants, which is where the strcmp mismatch used to go unnoticed",
+          "test_filter": "NetIbMPITest.PluginMatchesNcclNetEnv"
+        },
+        {
+          "name": "NetIB_Init_DefaultPluginIsIbCastOnAinic",
+          "description": "With NCCL_NET unset the fixture picks IB-CAST, the AINIC default; skips in the variants that set NCCL_NET",
+          "test_filter": "NetIbMPITest.DefaultPluginIsIbCastOnAinic"
         }
       ]
     },
@@ -624,7 +650,7 @@
         }
       ]
     },
-    "cast_base": {
+    "cast_scheduler_base": {
       "extends": "net_ib_base",
       "num_nodes": 2,
       "num_gpus": 1,
@@ -634,11 +660,33 @@
         "RCCL_IB_QP_SCHED_WEIGHT": "0",
         "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "50",
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "60000",
-        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536"
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
       }
     },
+    "cast_setup": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_SetupUnilateralConnectFailureReported",
+          "description": "One invalid connect-side device must fail setup on both ranks without hanging",
+          "test_filter": "NetIbMPITest.CastSetupUnilateralConnectFailureReported"
+        },
+        {
+          "name": "Cast_SetupPeerFailurePropagates",
+          "description": "A post-connect failure must reach the healthy peer through setup reduction",
+          "test_filter": "NetIbMPITest.CastSetupPeerFailurePropagates"
+        }
+      ]
+    },
+
     "cast_wrr_split": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -688,10 +736,11 @@
           "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
           "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
         }
+
       ]
     },
     "cast_wrr_no_split": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -730,7 +779,7 @@
       ]
     },
     "cast_single_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 60,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "1",
@@ -745,7 +794,7 @@
       ]
     },
     "cast_grh": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 60,
       "tests": [
         {
@@ -756,7 +805,7 @@
       ]
     },
     "cast_four_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "4",
@@ -776,7 +825,7 @@
       ]
     },
     "cast_max_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "128",
@@ -791,7 +840,7 @@
       ]
     },
     "cast_stress": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -806,7 +855,7 @@
       ]
     },
     "fault_inject_cast": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
@@ -881,7 +930,7 @@
       ]
     },
     "resiliency_failover": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
@@ -928,7 +977,7 @@
       ]
     },
     "resiliency_recovery": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
@@ -993,6 +1042,11 @@
           "name": "NetIB_Branch_NullCommClose",
           "description": "closeSend/closeRecv/closeListen on NULL comm returns ncclSuccess without crash",
           "test_filter": "NetIbMPITest.NullCommClose"
+        },
+        {
+          "name": "NetIB_Branch_NullCommCastDataPath",
+          "description": "IB-CAST isend/irecv/iflush reject a NULL comm instead of dereferencing it",
+          "test_filter": "NetIbMPITest.NullCommCastDataPath"
         },
         {
           "name": "NetIB_Branch_SetNetAttrNoOp",
@@ -1205,6 +1259,18 @@
       "extends": "net_ib_connection",
       "env_variables": {
         "NCCL_NET": "ib-cast"
+      }
+    },
+    "net_ib_initialization_rocm_ib": {
+      "extends": "net_ib_initialization",
+      "env_variables": {
+        "NCCL_NET": "ROCM-IB"
+      }
+    },
+    "net_ib_connection_rocm_ib": {
+      "extends": "net_ib_connection",
+      "env_variables": {
+        "NCCL_NET": "ROCM-IB"
       }
     },
     "net_ib_memory_cast": {
@@ -1991,6 +2057,11 @@
           "test_filter": "Register.ProcessIsolatedRegisterTests"
         },
         {
+          "name": "Register.P2pIpcSegmentReuse",
+          "description": "Verify a reused P2P IPC registration stays in bounds when the registered buffer spans multiple cuMem segments",
+          "test_filter": "Register.P2pIpcSegmentReuse"
+        },
+        {
           "name": "SendRecv.SinglePairs",
           "description": "SendRecv single pairs",
           "test_filter": "SendRecv.SinglePairs"
@@ -1999,6 +2070,11 @@
           "name": "SendRecv.UserBufferRegister",
           "description": "SendRecv user buffer register",
           "test_filter": "SendRecv.UserBufferRegister"
+        },
+        {
+          "name": "SendRecv.SingleRankGroupedSendRecvToSelf",
+          "description": "1-rank grouped send/recv to self, default env and forced 256 P2P channels per peer",
+          "test_filter": "SendRecv.SingleRankGroupedSendRecvToSelf"
         },
         {
           "name": "GroupCall.Identical",
@@ -2323,6 +2399,21 @@
         {
           "name": "GinSdmaPolicy_AllTests",
           "description": "All GIN-SDMA AllReduce/put policy unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_scatter_reduce_gpu": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinScatterReduceGpu",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "GinScatterReduceGpu_AllTests",
+          "description": "GinScatter local reduce, including 64 MiB and 1 GiB multi-rank sums",
           "test_filter": "*"
         }
       ]
@@ -2854,6 +2945,32 @@
         }
       ]
     },
+    "dda_alltoall_inplace_mpi_8rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "gfx1250 AlltoAll on the DDA fabric tiers at 4016 B, 64 KiB and 512 KiB per peer: in place at fp32 offsets 0, 4 and 16 bytes, bf16 +2 and fp8 +1, and out of place at 1- and 2-byte send and receive offsets. Every case checks that the call takes the tier the aligned buffer takes and that every received byte is exact; a size the arch table does not send to a DDA tier is passed over, and ranks skip off gfx1250. DdaAlltoAllPeerColumnsMPI repeats the cases with RCCL_DDA_FABRIC_MAXBLOCKS=2, so each LL128 column serves several peers.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "DdaAlltoAllInPlace_OffsetsStayOnDda_8rank",
+          "description": "AlltoAll at buffer offsets down to 1 byte, in and out of place, stays on DDA LL or LL128 with exact data (8 ranks)",
+          "test_filter": "DdaAlltoAllInPlaceMPI.OffsetsStayOnDda"
+        },
+        {
+          "name": "DdaAlltoAllPeerColumns_ColumnsServeSeveralPeers_8rank",
+          "description": "AlltoAll LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2, so each block column serves several peers, with exact data (8 ranks)",
+          "test_filter": "DdaAlltoAllPeerColumnsMPI.ColumnsServeSeveralPeers"
+        }
+      ]
+    },
     "ubr_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -3169,7 +3286,7 @@
         {
           "name": "AbortDda_IncompleteCollective",
           "description": "Rank np-1 skips a DDA fabric LL AllReduce/AllGather/ReduceScatter/AlltoAll; asserts LL via rcclGetCollImplInfo; ncclCommAbort must return and the blocked stream must drain",
-          "test_filter": "AbortDdaMPITest.*"
+          "test_filter": "AbortDdaMPITest.*-AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl"
         },
         {
           "name": "ShrinkAbort_InFlight_ChildWorks_RankRenumbering",
@@ -3477,7 +3594,10 @@
         {
           "name": "CE_Internal_Launch",
           "description": "ncclCeLaunchBatchOps: empty batch succeeds; 4-op batch transfers data correctly",
-          "test_filter": "CeInternalMPITest.Launch*"
+          "test_filter": "CeInternalMPITest.Launch*",
+          "env_variables": {
+            "RCCL_CE_BATCH_ASYNC_ENABLE": "1"
+          }
         },
         {
           "name": "CE_Internal_Neg",
@@ -5750,7 +5870,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.GinContextCount_ReportsRoundedUp",
           "timeout": 600
         },
         {
@@ -5767,6 +5887,14 @@
           "test_filter": "GinMPIDeviceTests.MultiContext_NonPowerOf2",
           "env_variables": {
             "NCCL_GIN_NCONTEXTS": "3"
+          }
+        },
+        {
+          "name": "GIN_ContextCount_ReportsRoundedUp",
+          "description": "ginContextCount reports the allocation after rounding up to NCCL_GIN_NCONNECTIONS=2",
+          "test_filter": "GinMPIDeviceTests.GinContextCount_ReportsRoundedUp",
+          "env_variables": {
+            "NCCL_GIN_NCONNECTIONS": "2"
           }
         },
         {
@@ -6708,6 +6836,54 @@
       "num_ranks": 8,
       "num_gpus": 8
     },
+    "symmetric_all_gather_tdm_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1"
+      },
+      "tests": [
+        {
+          "name": "Symmetric_AllGather_TDM_Window",
+          "description": "Registered AllGather on symmetric windows around the gfx1250 TDM window: floor, just below, in place, past the eager ceiling, and under graph capture at 512 MiB and just past it, and 1 MiB below the window; checks the reported algorithm, the logged kernel and every rank's data",
+          "test_filter": "SymWin_AllGatherTdm.*"
+        },
+        {
+          "name": "Symk_AllGatherHierLsaStData",
+          "description": "Forced AllGather_HierLsaST with position-dependent data, including a per-rank size that makes each block push several chunks; own process so RCCL_SYM_K_MIN/MAX_BYTES are not read earlier; skips outside partition mode with two or more packages",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGatherHierLsaST_PositionDependentData"
+        },
+        {
+          "name": "Symk_AllGatherHierLsaTmaStData",
+          "description": "Forced AllGather_HierLsaTmaST with position-dependent data, including a per-rank size that makes each block push several chunks; own process so RCCL_SYM_K_MIN/MAX_BYTES are not read earlier; skips outside partition mode with two or more packages",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGatherHierLsaTmaST_PositionDependentData"
+        }
+      ]
+    },
+    "symmetric_all_gather_tdm_2rank": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "symmetric_all_gather_tdm_4rank": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "symmetric_all_gather_tdm_8rank": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 8,
+      "num_gpus": 8
+    },
+    "symmetric_all_gather_tdm_2node": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 8,
+      "num_nodes": 2,
+      "num_gpus": 4
+    },
     "dda_fabric_allreduce_ll_base": {
       "extends": "default",
       "is_gtest": true,
@@ -6752,6 +6928,21 @@
           "name": "DDA_Fabric_AllReduce_LL128_OneShot_BitIdentical",
           "description": "DDA fabric AllReduce LL128 one-shot tier folds in rank order, so every rank gets the same bits back; own process",
           "test_filter": "DdaMPI_AllReduce.LL128OneShotBitIdenticalAcrossRanks"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL_FreshComm_NonBlockingStream",
+          "description": "32 fresh comms with staggered rank arrival, each running two LL one-shot AllReduces on a non-blocking stream right after init; catches the init zero fills landing after a rank's first LL kernel (about 35 s at 8 ranks)",
+          "test_filter": "DdaMPI_AllReduce.LLFreshCommNonBlockingStream"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_Registered_Captured",
+          "description": "Registered sum AllReduce under graph capture at 8 MiB and the capture bound picks DDA within the replaced Ring grid and returns exact sums",
+          "test_filter": "DdaMPI_AllReduceRegistered.CapturedSumsWithinRingGrid"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_Registered_Eager",
+          "description": "Registered eager sum AllReduce with 1 MiB shards picks DDA LL128 within the CE-registered grid and returns exact sums; skips below 8 ranks",
+          "test_filter": "DdaMPI_AllReduceRegistered.EagerSumsWithinCeGrid"
         }
       ]
     },
@@ -6767,6 +6958,65 @@
     },
     "dda_fabric_allreduce_ll_8rank": {
       "extends": "dda_fabric_allreduce_ll_base",
+      "num_ranks": 8,
+      "num_gpus": 8
+    },
+    "dda_fabric_broadcast_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1",
+        "RCCL_DDA_BC": "1",
+        "RCCL_DDA_LL_THRESHOLD": "262144"
+      },
+      "tests": [
+        {
+          "name": "DDA_Fabric_Broadcast_LL_AllRootsOutOfPlace",
+          "description": "DDA fabric Broadcast LL: every root, 16 B to the 256 KiB cap, out of place, every rank checks payload and guards",
+          "test_filter": "DdaMPI_BroadcastLL.AllRootsOutOfPlace"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL_AllRootsInPlace",
+          "description": "DDA fabric Broadcast LL: every root, 16 B to the 256 KiB cap, in place",
+          "test_filter": "DdaMPI_BroadcastLL.AllRootsInPlace"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL_RepeatedLaunches",
+          "description": "DDA fabric Broadcast LL: odd and even runs of launches, checked after each",
+          "test_filter": "DdaMPI_BroadcastLL.RepeatedLaunches"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL_UnalignedBuffers",
+          "description": "DDA fabric Broadcast LL: buffers off 16-byte and off 4-byte alignment (kAligned=false)",
+          "test_filter": "DdaMPI_BroadcastLL.UnalignedBuffers"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL_BackToBackNoSync",
+          "description": "DDA fabric Broadcast LL: seven launches with no sync between them, roots repeated and changed, slowed ranks varied",
+          "test_filter": "DdaMPI_BroadcastLL.BackToBackNoSync"
+        },
+        {
+          "name": "AbortDda_IncompleteCollective_BroadcastLl",
+          "description": "Rank np-1 skips a DDA fabric LL Broadcast (root 0); asserts LL via rcclGetCollImplInfo; ncclCommAbort must return and the blocked stream must drain",
+          "test_filter": "AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl"
+        }
+      ]
+    },
+    "dda_fabric_broadcast_2rank": {
+      "extends": "dda_fabric_broadcast_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "dda_fabric_broadcast_4rank": {
+      "extends": "dda_fabric_broadcast_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "dda_fabric_broadcast_8rank": {
+      "extends": "dda_fabric_broadcast_base",
       "num_ranks": 8,
       "num_gpus": 8
     }
@@ -6839,6 +7089,12 @@
       "enabled": true
     },
     {
+      "name": "NET - Plugin selection from NCCL_NET",
+      "description": "NCCL_NET name resolution guardrails: case-insensitive matching, the ROCM-IB alias, and no silent fallback to plain IB on an unknown name (single rank, no NIC required)",
+      "config": "net_plugin_selection",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Initialization Tests",
       "description": "InfiniBand plugin initialization and device enumeration. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "net_ib_initialization",
@@ -6902,6 +7158,12 @@
       "name": "NET IB - CAST WRR+Split (QPS=2, splitData=1)",
       "description": "White-box WRR scheduler tests with split-data path enabled: token counts, threshold boundary, split/WRR token accounting, sched enable/disable. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "cast_wrr_split",
+      "enabled": false
+    },
+    {
+      "name": "NET IB - CAST Setup Failure Propagation",
+      "description": "Rank-agreed CAST setup failures must report cleanly without hanging",
+      "config": "cast_setup",
       "enabled": false
     },
     {
@@ -7023,6 +7285,18 @@
       "description": "InfiniBand connection setup via ib-cast plugin (NCCL_NET=ib-cast). Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "net_ib_connection_cast",
       "enabled": false
+    },
+    {
+      "name": "NET IB - Initialization (rocm-ib)",
+      "description": "InfiniBand plugin initialization via ib-cast plugin (NCCL_NET=ROCM-IB); ROCM-IB selects the same plugin but configures it differently, so this is not a duplicate of the ib-cast suite. AINIC-only: ROCM-IB forces AINIC mode, which makes libionic.so a hard requirement in the cast plugin's init",
+      "config": "net_ib_initialization_rocm_ib",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Connection Setup (rocm-ib)",
+      "description": "InfiniBand listen/connect/accept via ib-cast plugin (NCCL_NET=ROCM-IB)",
+      "config": "net_ib_connection_rocm_ib",
+      "enabled": true
     },
     {
       "name": "NET IB - Memory Registration (ib-cast)",
@@ -7181,6 +7455,12 @@
       "enabled": true
     },
     {
+      "name": "Unit Tests - GinScatter reduce GPU",
+      "description": "All rccl-UnitTestsGinScatterReduceGpu cases",
+      "config": "unit_tests_gin_scatter_reduce_gpu",
+      "enabled": true
+    },
+    {
       "name": "Unit Tests - GIN-SDMA AllGather policy",
       "description": "All rccl-UnitTestsGinSdmaAllGatherPolicy cases",
       "config": "unit_tests_gin_sdma_allgather_policy",
@@ -7226,6 +7506,12 @@
       "name": "Comm MPI Tests - 8-Rank (persistent communicator)",
       "description": "All 15 persistent-communicator rows from CommMPITests.cpp on 8 GPUs/ranks, single node: Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
       "config": "comm_mpi_tests_8rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA AlltoAll In-Place - 8-Rank (gfx1250 buffer offsets)",
+      "description": "gfx1250 AlltoAll at any buffer offset, in place and out of place, stays on DDA LL or LL128 with exact data, also with several peers per LL128 column, single node",
+      "config": "dda_alltoall_inplace_mpi_8rank",
       "enabled": true
     },
     {
@@ -7767,6 +8053,30 @@
       "enabled": true
     },
     {
+      "name": "Symmetric AllGather TDM window - 2-Rank",
+      "description": "Symmetric AllGather TDM window on 2 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink LSA team and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_2rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 4-Rank",
+      "description": "Symmetric AllGather TDM window on 4 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink LSA team and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_4rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 8-Rank",
+      "description": "Symmetric AllGather TDM window on 8 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink LSA team and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_8rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 2 Nodes",
+      "description": "Symmetric AllGather TDM window on 8 GPUs across two UALink trays, where the graph-capture window ends at 512 MiB and is the only symmetric AllGather path. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink LSA team and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_2node",
+      "enabled": true
+    },
+    {
       "name": "DDA Fabric AllReduce LL/LL128 - 2-Rank",
       "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 2 GPUs, runtime-nRanks kernels. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_allreduce_ll_2rank",
@@ -7782,6 +8092,24 @@
       "name": "DDA Fabric AllReduce LL/LL128 - 8-Rank",
       "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 8 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_allreduce_ll_8rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric Broadcast LL - 2-Rank",
+      "description": "DDA fabric Broadcast one-shot data checks on 2 GPUs (RCCL_DDA_BC=1, own process: RCCL_PARAM caches the caps). Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_broadcast_2rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric Broadcast LL - 4-Rank",
+      "description": "DDA fabric Broadcast one-shot data checks on 4 GPUs (RCCL_DDA_BC=1, own process: RCCL_PARAM caches the caps). Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_broadcast_4rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric Broadcast LL - 8-Rank",
+      "description": "DDA fabric Broadcast one-shot data checks on 8 GPUs (RCCL_DDA_BC=1, own process: RCCL_PARAM caches the caps). Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_broadcast_8rank",
       "enabled": true
     }
   ]

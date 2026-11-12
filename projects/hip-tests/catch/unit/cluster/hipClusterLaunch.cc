@@ -107,6 +107,88 @@ HIP_TEST_CASE(Unit_hipClusterLaunch_LaunchApi_Basic) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Verifies that hipLaunchKernelExC rejects a cluster dimension whose product
+ *    exceeds the device maximum with hipErrorInvalidClusterSize.
+ *
+ * Test Source
+ * ------------------------
+ *  - catch/unit/cluster/hipClusterLaunch.cc
+ *
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ *  - Device with cluster launch support
+ */
+HIP_TEST_CASE(Unit_hipClusterLaunch_LaunchApi_Negative_OversizedCluster) {
+  if (!CheckTargetSupport()) {
+    HIP_SKIP_TEST("Target does not support cluster launch");
+  }
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, sizeof(int)));
+
+  hipLaunchAttribute attr{};
+  attr.id = hipLaunchAttributeClusterDimension;
+  attr.val.clusterDim = {32, 1, 1};
+
+  hipLaunchConfig_t config{};
+  config.gridDim = 32;
+  config.blockDim = 64;
+  config.attrs = &attr;
+  config.numAttrs = 1;
+
+  void* args[] = {&d};
+  HIP_CHECK_ERROR(hipLaunchKernelExC(&config,
+                      reinterpret_cast<const void*>(&ClusterLaunchKernelBasicL), args),
+                  hipErrorInvalidClusterSize);
+
+  HIP_CHECK(hipFree(d));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verifies that hipLaunchKernelExC rejects cluster dimensions whose product
+ *    overflows uint32_t (65536 * 65536 = 2^32) with hipErrorInvalidClusterSize.
+ *
+ * Test Source
+ * ------------------------
+ *  - catch/unit/cluster/hipClusterLaunch.cc
+ *
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ *  - Device with cluster launch support
+ */
+HIP_TEST_CASE(Unit_hipClusterLaunch_LaunchApi_Negative_OverflowClusterDim) {
+  if (!CheckTargetSupport()) {
+    HIP_SKIP_TEST("Target does not support cluster launch");
+  }
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, sizeof(int)));
+
+  hipLaunchAttribute attr{};
+  attr.id = hipLaunchAttributeClusterDimension;
+  attr.val.clusterDim = {65536, 65536, 1};
+
+  hipLaunchConfig_t config{};
+  config.gridDim = 32;
+  config.blockDim = 64;
+  config.attrs = &attr;
+  config.numAttrs = 1;
+
+  void* args[] = {&d};
+  HIP_CHECK_ERROR(hipLaunchKernelExC(&config,
+                      reinterpret_cast<const void*>(&ClusterLaunchKernelBasicL), args),
+                  hipErrorInvalidClusterSize);
+
+  HIP_CHECK(hipFree(d));
+}
+
+/**
 * End doxygen group ClusterTest.
 * @}
 */

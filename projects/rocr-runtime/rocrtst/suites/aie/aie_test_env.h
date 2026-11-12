@@ -30,8 +30,15 @@ namespace aie_test {
 // Agent discovery
 // ---------------------------------------------------------------------------
 
-// HSA agent iteration callback: appends every agent of type DeviceType to the
-// std::vector<hsa_agent_t>* stored in `data`.
+/**
+ * @brief HSA agent iteration callback: appends every agent of type DeviceType to the
+ * std::vector<hsa_agent_t>* stored in `data`.
+ *
+ * @tparam DeviceType device type to collect
+ * @param agent agent being visited
+ * @param data std::vector<hsa_agent_t>* to append a match to
+ * @return the status of the HSA call that failed, or HSA_STATUS_SUCCESS
+ */
 template <hsa_device_type_t DeviceType>
 hsa_status_t discover_agents(hsa_agent_t agent, void* data) {
   if (!data) {
@@ -92,12 +99,20 @@ class AieTestBase : public ::testing::Test {
 // Queue error reporting
 // ---------------------------------------------------------------------------
 
-// Captures the arguments of a queue error callback.
+/** @brief Captures the arguments of a queue error callback. */
 struct dispatch_error {
   std::atomic<bool> invoked{false};
   hsa_status_t status{HSA_STATUS_SUCCESS};
   hsa_queue_t* source{nullptr};
 
+  /**
+   * @brief HSA queue error callback that records its arguments into the dispatch_error passed as
+   * @p data.
+   *
+   * @param status error reported by the queue
+   * @param source queue the error came from
+   * @param data dispatch_error* to record into
+   */
   static void callback(hsa_status_t status, hsa_queue_t* source, void* data) {
     auto& self = *static_cast<dispatch_error*>(data);
     self.status = status;
@@ -106,7 +121,15 @@ struct dispatch_error {
   }
 };
 
-// Creates a queue whose errors land in @p err.
+/**
+ * @brief Creates a queue whose errors land in @p err.
+ *
+ * @param agent agent to create the queue on
+ * @param size queue size in packets
+ * @param err dispatch_error to report errors into
+ * @param queue receives the created queue
+ * @return the status of hsa_queue_create
+ */
 [[nodiscard]] inline hsa_status_t create_queue_with_error_callback(hsa_agent_t agent,
                                                                    std::uint32_t size,
                                                                    dispatch_error* err,
