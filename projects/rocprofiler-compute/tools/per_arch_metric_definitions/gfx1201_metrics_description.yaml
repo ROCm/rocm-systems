@@ -2,7 +2,7 @@ System Speed-of-Light:
   VALU Issue Rate:
     plain: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes. No percentage of FP32 peak is reported.
     rst: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes. No percentage of FP32 peak is reported.
-    unit: GInstr/s
+    unit: GInstructions/s
   WMMA FLOPs (F16->F32 16x16x16):
     plain: Estimated matrix FLOPs per second, assuming FP16 inputs with FP32 accumulation for 16x16x16 matrices. The conversion of 8192 FLOPs per counter increment and peak of 1024 FLOPs/CU/cycle are provisional. The raw counter counts WMMA issues per vec32 and does not distinguish FP16, BF16, FP8, or BF8. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports overlap with the general VALU instruction counter for that instruction. Counted wave population, other shapes/types, wave64 interpretation, and the applicable peak still require validation. Treat the FLOP conversion and percentage of peak as approximations. If this shows N/A, check SDK support for gfx1201 SQ event 233 and the configured SqcCounterBlockMaxEvent limit.
     rst: Estimated matrix FLOPs per second, assuming FP16 inputs with FP32 accumulation for 16x16x16 matrices. The conversion of 8192 FLOPs per counter increment and peak of 1024 FLOPs/CU/cycle are provisional. The raw counter counts WMMA issues per vec32 and does not distinguish FP16, BF16, FP8, or BF8. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports overlap with the general VALU instruction counter for that instruction. Counted wave population, other shapes/types, wave64 interpretation, and the applicable peak still require validation. Treat the FLOP conversion and percentage of peak as approximations. If this shows N/A, check SDK support for gfx1201 SQ event 233 and the configured SqcCounterBlockMaxEvent limit.
@@ -10,11 +10,11 @@ System Speed-of-Light:
   FP64 VALU Issue Rate:
     plain: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes. No percentage of FP64 peak is reported.
     rst: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes. No percentage of FP64 peak is reported.
-    unit: GInstr/s
+    unit: GInstructions/s
   IPC:
     plain: Instructions issued per busy SQ cycle, excluding internal instructions.
     rst: Instructions issued per busy SQ cycle, excluding internal instructions.
-    unit: Instr/cycle
+    unit: Instructions per Cycle
   Wavefront Occupancy:
     plain: Estimated average resident wave count over GPU-active cycles. Navi48 living-wave counter units and instance reduction still require validation; do not treat this as a validated occupancy or resource-limit measurement.
     rst: Estimated average resident wave count over GPU-active cycles. Navi48 living-wave counter units and instance reduction still require validation; do not treat this as a validated occupancy or resource-limit measurement.
@@ -175,7 +175,7 @@ Wave Dispatch Statistics:
   Wave Dispatch Rate:
     plain: Measured dispatched waves per GPU-active cycle. Navi48 wave-count normalization still requires validation; compare like workloads in the same performance state.
     rst: Measured dispatched waves per GPU-active cycle. Navi48 wave-count normalization still requires validation; compare like workloads in the same performance state.
-    unit: Waves/cycle
+    unit: Wavefronts per Cycle
 WGP Scalar Data Cache:
   Dcache Hit Rate:
     plain: Percentage of scalar data-cache requests that hit.
@@ -189,7 +189,7 @@ WGP Wavefront Dispatch:
   Dispatched Waves:
     plain: Measured dispatched waves reported by the SQ counter. Navi48 wave-count normalization still requires validation; this count need not match the application's launch geometry.
     rst: Measured dispatched waves reported by the SQ counter. Navi48 wave-count normalization still requires validation; this count need not match the application's launch geometry.
-    unit: Waves
+    unit: Wavefronts
 WGP Wavefront Launch Stats:
   Grid Size:
     plain: Number of work-items in the dispatch grid, from dispatch metadata.

@@ -72,7 +72,7 @@ Panel Config:
           avg: AVG(SQ_WAVES_sum)
           min: MIN(SQ_WAVES_sum)
           max: MAX(SQ_WAVES_sum)
-          unit: Waves
+          unit: Wavefronts
         Dispatched Threads:
           avg: AVG(SQ_ITEMS_sum)
           min: MIN(SQ_ITEMS_sum)

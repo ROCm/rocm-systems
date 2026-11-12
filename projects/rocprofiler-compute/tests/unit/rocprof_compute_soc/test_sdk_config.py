@@ -176,7 +176,7 @@ def test_gfx1201_valu_issue_rate_reports_instruction_count_per_nanosecond(
 ):
     definition = panel_metric("0200_system_speed_of_light.yaml", 201, metric_name)
 
-    assert definition["unit"] == "GInstr/s"
+    assert definition["unit"] == "GInstructions/s"
     assert definition["pct_of_peak"] is False
     assert dispatch_rate_evaluator.eval_expression(
         build_eval_string(definition["value"])

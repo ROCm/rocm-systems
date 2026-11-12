@@ -15,7 +15,7 @@ Panel Config:
       metric:
         VALU Issue Rate:
           value: SUM(SQ_INSTS_VALU_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GInstr/s
+          unit: GInstructions/s
           peak: None
           pct_of_peak: false
         WMMA FLOPs (F16->F32 16x16x16):
@@ -25,12 +25,12 @@ Panel Config:
           pct_of_peak: true
         FP64 VALU Issue Rate:
           value: SUM(SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GInstr/s
+          unit: GInstructions/s
           peak: None
           pct_of_peak: false
         IPC:
           value: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
-          unit: Instr/cycle
+          unit: Instructions per Cycle
           peak: 5
           pct_of_peak: true
         Wavefront Occupancy:

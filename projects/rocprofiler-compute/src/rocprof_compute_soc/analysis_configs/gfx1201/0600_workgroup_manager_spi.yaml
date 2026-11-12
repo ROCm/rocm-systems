@@ -22,7 +22,7 @@ Panel Config:
           avg: SUM(SQ_WAVES_sum) / SUM(GRBM_GUI_ACTIVE)
           min: MIN(SQ_WAVES_sum / GRBM_GUI_ACTIVE)
           max: MAX(SQ_WAVES_sum / GRBM_GUI_ACTIVE)
-          unit: Waves/cycle
+          unit: Wavefronts per Cycle
   metrics_description:
     Compute Wave Dispatches: >-
       Measured dispatched wave count, normalized by the chosen unit. Navi48
