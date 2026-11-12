@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
+  - When the `amdgpu` driver is not loaded, the command now exits with a clear driver-not-loaded message and exit code 206 instead of an unhandled exception.
+
 - **Fixed `amd-smi static --bus` reporting a PCIe link on GPUs that connect to the CPU over xGMI, such as MI450**.  
   - `MAX_PCIE_WIDTH`, `MAX_PCIE_SPEED` and `PCIE_INTERFACE_VERSION` now show `N/A` instead of the emulated link's values, and `amdsmi_get_pcie_info()` returns the maximum value for these fields.
 

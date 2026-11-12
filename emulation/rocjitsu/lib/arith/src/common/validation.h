@@ -4,8 +4,7 @@
 // Shared flag validation, semantics resolution, FP bit casts, and CPU level checks.
 // Internal helpers shared by instruction implementations; not part of the public C API.
 
-#ifndef RJ_ARITH_VALIDATION_H_
-#define RJ_ARITH_VALIDATION_H_
+#pragma once
 
 #include "common/bits.h"
 #include "common/exec_mask.h"
@@ -97,5 +96,3 @@ inline int validate(uint64_t flags, uint64_t unsupported_instruction_flags,
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
-
-#endif

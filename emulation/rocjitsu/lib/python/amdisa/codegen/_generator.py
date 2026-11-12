@@ -16907,11 +16907,28 @@ class CodeGenerator:
                 from amdisa.codegen.execute.rj_arith_float import (
                     FLOAT_NAMES,
                     GFX10_LEGACY_FMA,
+                    FP8_NARROW_NAMES,
+                    FP8_WIDEN_NAMES,
                 )
 
-                if self.isa_spec.arch_name in ('rdna2', 'rdna3', 'rdna4') and any(
-                    i.name in FLOAT_NAMES or i.name in GFX10_LEGACY_FMA
-                    for i in all_insts
+                if (
+                    self.isa_spec.arch_name in ('rdna2', 'rdna3', 'rdna4')
+                    and any(
+                        (i.name in FLOAT_NAMES | GFX10_LEGACY_FMA for i in all_insts)
+                    )
+                    or (
+                        self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5')
+                        and any((i.name in FP8_NARROW_NAMES for i in all_insts))
+                    )
+                ) or (
+                    self.isa_spec.arch_name in ('rdna2', 'rdna3', 'rdna4')
+                    and any(
+                        (i.name in FLOAT_NAMES | GFX10_LEGACY_FMA for i in all_insts)
+                    )
+                    or (
+                        self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5')
+                        and any((i.name in FP8_WIDEN_NAMES for i in all_insts))
+                    )
                 ):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
@@ -16970,6 +16987,7 @@ class CodeGenerator:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))
                 if any(
                     'amdgpu::arith::exec_dense_fp_matrix<' in str(impl)
+                    or 'amdgpu::arith::exec_sparse_matrix<' in str(impl)
                     for impl in class_func_impls.model + class_func_impls.execution
                 ):
                     cpp_includes.append(
