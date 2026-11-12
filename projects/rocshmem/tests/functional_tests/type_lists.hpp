@@ -25,6 +25,8 @@
 #ifndef _TYPE_LISTS_HPP_
 #define _TYPE_LISTS_HPP_
 
+#include <hip/hip_version.h>
+
 #include <string>
 
 /**
@@ -227,10 +229,31 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
   if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long long"))     \
     { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long long, args, testers)}
 
+// bfloat16 reductions (reduce, reduce_wave, reduce_scatter, reduce_scatter_wave,
+// reduce_on_stream) are compiled out of the library and the tester .cpp files
+// on HIP 7.16/7.17 due to a compiler bug (cannot select v2bf16
+// scalar_to_vector). The guard must match the one in src/rocshmem.cpp,
+// src/rocshmem_gpu.cpp and utils/header_files_gen/COLL.py. On those HIP
+// versions bfloat16 is dropped from the reduction lists -- even if requested
+// explicitly with -tc -- so a tester is never instantiated against the
+// generic no-op device stub. Tester::create() reports the skip.
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
+#define ROCSHMEM_BF16_REDUCE_SUPPORTED 1
+#else
+#define ROCSHMEM_BF16_REDUCE_SUPPORTED 0
+#endif
+
+#if ROCSHMEM_BF16_REDUCE_SUPPORTED
+#define ROCSHMEM_PUSH_REDUCTION_BF16(TESTER, args, testers)                               \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("bfloat16"))      \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, __hip_bfloat16, args, testers)}
+#else
+#define ROCSHMEM_PUSH_REDUCTION_BF16(TESTER, args, testers)
+#endif
+
 #define ROCSHMEM_PUSH_REDUCTION_NONRO(TESTER, args, testers)                              \
   if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("half"))          \
     { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, __half,      args, testers) }                 \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("bfloat16"))      \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, __hip_bfloat16, args, testers)}
+  ROCSHMEM_PUSH_REDUCTION_BF16(TESTER, args, testers)
 
 #endif // _TYPE_LISTS_HPP_

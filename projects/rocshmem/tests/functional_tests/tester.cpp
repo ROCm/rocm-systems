@@ -234,6 +234,20 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
   std::vector<TesterFactory> testers;
   std::string test_name;
 
+  // Types the user asked for (via -tc full or -tc <types>) that this build or
+  // backend cannot run. Reported under the test header so a skip is visible
+  // rather than silent. Minimal mode never asks for these types, so it never
+  // produces a note.
+  std::vector<std::string> skipped_types;
+  auto note_skip = [&](const char* name, const char* reason) {
+    if (args.type_enabled(name))
+      skipped_types.push_back(std::string(name) + " (" + reason + ")");
+  };
+  static constexpr const char* kSkipRO = "not supported on the RO backend";
+  static constexpr const char* kSkipBf16Reduce =
+      "reductions not supported with HIP 7.16/7.17";
+  #define NOTE_SKIP_RO(T, name) note_skip(name, kSkipRO);
+
   BackendType backend_type = rocshmem_query_backend_type();
   TestType type = (TestType)args.algorithm;
 
@@ -261,6 +275,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
       if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
         ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
+      } else {
+        ROCSHMEM_RMA_TYPES_NONRO(NOTE_SKIP_RO)
       }
       #undef PUSH_TYPED_RMA
       break;
@@ -273,6 +289,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
       if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
         ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
+      } else {
+        ROCSHMEM_RMA_TYPES_NONRO(NOTE_SKIP_RO)
       }
       #undef PUSH_TYPED_RMA
       break;
@@ -285,6 +303,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
       if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
         ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
+      } else {
+        ROCSHMEM_RMA_TYPES_NONRO(NOTE_SKIP_RO)
       }
       #undef PUSH_TYPED_RMA
       break;
@@ -297,6 +317,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
       if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
         ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
+      } else {
+        ROCSHMEM_RMA_TYPES_NONRO(NOTE_SKIP_RO)
       }
       #undef PUSH_TYPED_RMA
       break;
@@ -370,6 +392,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
       if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
         ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
+      } else {
+        ROCSHMEM_RMA_TYPES_NONRO(NOTE_SKIP_RO)
       }
       #undef PUSH_TYPED_RMA
       break;
@@ -382,6 +406,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
       if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
         ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
+      } else {
+        ROCSHMEM_RMA_TYPES_NONRO(NOTE_SKIP_RO)
       }
       #undef PUSH_TYPED_RMA
       break;
@@ -393,6 +419,10 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
         ROCSHMEM_PUSH_REDUCTION_ALWAYS(TeamReductionTester, args, testers)
         if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
           ROCSHMEM_PUSH_REDUCTION_NONRO(TeamReductionTester, args, testers)
+          if (!ROCSHMEM_BF16_REDUCE_SUPPORTED) note_skip("bfloat16", kSkipBf16Reduce);
+        } else {
+          note_skip("half", kSkipRO);
+          note_skip("bfloat16", kSkipRO);
         }
       }
       break;
@@ -404,6 +434,10 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
         ROCSHMEM_PUSH_REDUCTION_ALWAYS(TeamReduceScatterTester, args, testers)
         if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
           ROCSHMEM_PUSH_REDUCTION_NONRO(TeamReduceScatterTester, args, testers)
+          if (!ROCSHMEM_BF16_REDUCE_SUPPORTED) note_skip("bfloat16", kSkipBf16Reduce);
+        } else {
+          note_skip("half", kSkipRO);
+          note_skip("bfloat16", kSkipRO);
         }
       }
       break;
@@ -415,6 +449,10 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
         ROCSHMEM_PUSH_REDUCTION_ALWAYS(ReduceWaveTester, args, testers)
         if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
           ROCSHMEM_PUSH_REDUCTION_NONRO(ReduceWaveTester, args, testers)
+          if (!ROCSHMEM_BF16_REDUCE_SUPPORTED) note_skip("bfloat16", kSkipBf16Reduce);
+        } else {
+          note_skip("half", kSkipRO);
+          note_skip("bfloat16", kSkipRO);
         }
       }
       break;
@@ -426,6 +464,10 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
         ROCSHMEM_PUSH_REDUCTION_ALWAYS(TeamReduceScatterWaveTester, args, testers)
         if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
           ROCSHMEM_PUSH_REDUCTION_NONRO(TeamReduceScatterWaveTester, args, testers)
+          if (!ROCSHMEM_BF16_REDUCE_SUPPORTED) note_skip("bfloat16", kSkipBf16Reduce);
+        } else {
+          note_skip("half", kSkipRO);
+          note_skip("bfloat16", kSkipRO);
         }
       }
       break;
@@ -449,6 +491,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
         ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_BCAST)
         if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
           ROCSHMEM_COLL_TYPES_NONRO(PUSH_BCAST)
+        } else {
+          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
         }
       }
       #undef PUSH_BCAST
@@ -468,6 +512,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
         ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_BWAVE)
         if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
           ROCSHMEM_COLL_TYPES_NONRO(PUSH_BWAVE)
+        } else {
+          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
         }
       }
       #undef PUSH_BWAVE
@@ -484,6 +530,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
         ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_A2A)
         if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
           ROCSHMEM_COLL_TYPES_NONRO(PUSH_A2A)
+        } else {
+          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
         }
       }
       #undef PUSH_A2A
@@ -500,6 +548,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
         ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_A2AV)
         if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
           ROCSHMEM_COLL_TYPES_NONRO(PUSH_A2AV)
+        } else {
+          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
         }
       }
       #undef PUSH_A2AV
@@ -522,6 +572,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
         ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_A2AWAVE)
         if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
           ROCSHMEM_COLL_TYPES_NONRO(PUSH_A2AWAVE)
+        } else {
+          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
         }
       }
       #undef PUSH_A2AWAVE
@@ -690,6 +742,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
         ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_FCOL)
         if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
           ROCSHMEM_COLL_TYPES_NONRO(PUSH_FCOL)
+        } else {
+          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
         }
       }
       #undef PUSH_FCOL
@@ -712,6 +766,8 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
         ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_FWAVE)
         if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
           ROCSHMEM_COLL_TYPES_NONRO(PUSH_FWAVE)
+        } else {
+          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
         }
       }
       #undef PUSH_FWAVE
@@ -1508,7 +1564,11 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
               << " W=" << args.num_wgs
               << " Z=" << args.wg_size
               << " ###" << std::endl;
+    for (const auto& skipped : skipped_types) {
+      std::cout << "### Skipped type:\t" << skipped << " ###" << std::endl;
+    }
   }
+  #undef NOTE_SKIP_RO
 
   return testers;
 }

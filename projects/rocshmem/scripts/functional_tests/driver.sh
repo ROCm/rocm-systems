@@ -396,9 +396,9 @@ ExecTest_SLR() {
 
   # Add environment variables and application
   if (( NUM_WF > 0 )); then
-    cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" --num-wf "$NUM_WF" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+    cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" --num-wf "$NUM_WF" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
   else
-    cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+    cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
   fi
 
   if [[ "" != "$MAX_MSG_SIZE" ]]
