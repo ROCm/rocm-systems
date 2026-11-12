@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <streambuf>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -313,36 +314,7 @@ private:
         m_open.back().first = false;
     }
 
-    void quote(std::string_view text)
-    {
-        constexpr std::string_view hex = "0123456789abcdef";
-        m_out->push_back('"');
-        for(const char c : text)
-        {
-            switch(c)
-            {
-                case '"': m_out->append("\\\""); break;
-                case '\\': m_out->append("\\\\"); break;
-                case '\b': m_out->append("\\b"); break;
-                case '\f': m_out->append("\\f"); break;
-                case '\n': m_out->append("\\n"); break;
-                case '\r': m_out->append("\\r"); break;
-                case '\t': m_out->append("\\t"); break;
-                default:
-                    if(static_cast<unsigned char>(c) < 0x20)
-                    {
-                        m_out->append("\\u00");
-                        m_out->push_back(hex[static_cast<unsigned char>(c) >> 4]);
-                        m_out->push_back(hex[static_cast<unsigned char>(c) & 0xf]);
-                    }
-                    else
-                    {
-                        m_out->push_back(c);
-                    }
-            }
-        }
-        m_out->push_back('"');
-    }
+    void quote(std::string_view text) { append_json_string(*m_out, text); }
 
     std::string*         m_out  = nullptr;
     bool                 m_done = false;
@@ -368,19 +340,28 @@ public:
 
     bool null()
     {
-        if(m_text.active()) m_text.token("null");
+        if(m_text.active())
+            m_text.token("null");
+        else if(member_wanted())
+            add_member("null");
         return true;
     }
     bool boolean(bool val)
     {
-        if(m_text.active()) m_text.token(val ? "true" : "false");
+        if(m_text.active())
+            m_text.token(val ? "true" : "false");
+        else if(member_wanted())
+            add_member(val ? "true" : "false");
         return true;
     }
     static bool binary(binary_t& /*val*/) { return true; }
 
     bool number_integer(number_integer_t v)
     {
-        if(m_text.active()) m_text.token(std::to_string(v));
+        if(m_text.active())
+            m_text.token(std::to_string(v));
+        else if(member_wanted())
+            add_member(std::to_string(v));
         if(at_time_key())
         {
             const auto magnitude = v < 0 ? ~static_cast<std::uint64_t>(v) + 1
@@ -393,7 +374,10 @@ public:
     }
     bool number_unsigned(number_unsigned_t v)
     {
-        if(m_text.active()) m_text.token(std::to_string(v));
+        if(m_text.active())
+            m_text.token(std::to_string(v));
+        else if(member_wanted())
+            add_member(std::to_string(v));
         if(at_time_key())
         {
             set_time(integer_us_to_ns(v, false));
@@ -405,7 +389,10 @@ public:
     }
     bool number_float(number_float_t v, const string_t& text)
     {
-        if(m_text.active()) m_text.token(text);
+        if(m_text.active())
+            m_text.token(text);
+        else if(member_wanted())
+            add_member(text);
         if(at_time_key())
         {
             set_time(text_us_to_ns(text));
@@ -417,7 +404,16 @@ public:
 
     bool string(string_t& s)
     {
-        if(m_text.active()) m_text.string(s);
+        if(m_text.active())
+        {
+            m_text.string(s);
+        }
+        else if(member_wanted())
+        {
+            std::string quoted;
+            append_json_string(quoted, s);
+            add_member(quoted);
+        }
         if(m_depth == 3 && m_in_event)
         {
             if(m_k3 == "name")
@@ -459,7 +455,10 @@ public:
     bool start_object(std::size_t /*elements*/)
     {
         const bool nested = m_text.active();
-        if(nested) m_text.open('{');
+        if(nested)
+            m_text.open('{');
+        else if(member_wanted())
+            begin_member('{');
         ++m_depth;
         if(m_depth == 3 && m_k1 == "traceEvents")
         {
@@ -468,6 +467,7 @@ public:
         }
         else if(!nested && m_depth == 4 && m_in_event && m_k3 == "args")
         {
+            m_owner = capture_t::args;
             m_text.begin(m_args_text);
             m_text.open('{');
         }
@@ -476,6 +476,7 @@ public:
             m_in_device = true;
             m_dev_id    = -1;
             m_dev_name.clear();
+            m_owner = capture_t::device;
             m_text.begin(m_dev_text);
             m_text.open('{');
         }
@@ -484,7 +485,7 @@ public:
 
     bool end_object()
     {
-        if(close_text() && m_in_event) m_cur.has_args = true;
+        if(close_text()) finish_capture();
         if(m_depth == 3 && m_in_event)
         {
             finish_event();
@@ -501,13 +502,16 @@ public:
 
     bool start_array(std::size_t /*elements*/)
     {
-        if(m_text.active()) m_text.open('[');
+        if(m_text.active())
+            m_text.open('[');
+        else if(member_wanted())
+            begin_member('[');
         ++m_depth;
         return true;
     }
     bool end_array()
     {
-        close_text();
+        if(close_text()) finish_capture();
         --m_depth;
         return true;
     }
@@ -550,7 +554,48 @@ private:
         std::int64_t    corr = -1, ext = -1;
         bool            has_args = false;
         memory_sample_t memory;
+        std::int64_t    sort_index = 0;
+        bool            has_sort   = false;
     };
+
+    enum class capture_t
+    {
+        none,
+        args,    // an event's args object
+        device,  // a deviceProperties entry
+        member,  // a top-level member other than the ones read for something else
+    };
+
+    // The members that are not read for anything else are kept as JSON text, in file
+    // order.
+    [[nodiscard]] bool member_wanted() const
+    {
+        return m_depth == 1 && m_k1 != "traceEvents" && m_k1 != "deviceProperties" &&
+               m_k1 != "schemaVersion" && m_k1 != "baseTimeNanoseconds" &&
+               m_k1 != "host_name";
+    }
+
+    void add_member(std::string_view value)
+    {
+        if(!m_t.trace_info.empty()) m_t.trace_info.push_back(',');
+        append_json_string(m_t.trace_info, m_k1);
+        m_t.trace_info.push_back(':');
+        m_t.trace_info.append(value);
+    }
+
+    void begin_member(char bracket)
+    {
+        m_owner = capture_t::member;
+        m_text.begin(m_member_text);
+        m_text.open(bracket);
+    }
+
+    void finish_capture()
+    {
+        if(m_owner == capture_t::args) m_cur.has_args = true;
+        if(m_owner == capture_t::member) add_member(m_member_text);
+        m_owner = capture_t::none;
+    }
 
     // True when the value being re-serialised just ended.
     bool close_text()
@@ -636,6 +681,11 @@ private:
             {
                 m_cur.memory.reserved = i;
             }
+            else if(m_k4 == "sort_index")
+            {
+                m_cur.sort_index = i;
+                m_cur.has_sort   = true;
+            }
         }
         else if(m_depth == 3 && m_in_device && m_k3 == "id")
         {
@@ -692,6 +742,29 @@ private:
         m_t.link_by_correlation = m_cur.corr >= 0;
     }
 
+    // Moves the current event's args into the arena and gives their place; an empty
+    // object is not kept.
+    std::pair<std::uint64_t, std::uint32_t> keep_args()
+    {
+        if(!m_cur.has_args || m_args_text.size() <= 2) return { 0, 0 };
+        const std::pair<std::uint64_t, std::uint32_t> where{
+            m_t.args.size(), static_cast<std::uint32_t>(m_args_text.size())
+        };
+        m_t.args.append(m_args_text);
+        return where;
+    }
+
+    void add_marker()
+    {
+        marker_t marker;
+        marker.ts_ns                               = m_cur.ts_ns;
+        marker.pid                                 = m_cur.pid;
+        marker.tid                                 = m_cur.tid;
+        marker.name                                = m_cur.name;
+        std::tie(marker.args_off, marker.args_len) = keep_args();
+        m_t.markers.push_back(std::move(marker));
+    }
+
     std::uint32_t add_event(phase_t phase)
     {
         event_t e{};
@@ -701,21 +774,16 @@ private:
         {
             m_t.cat_classes.push_back(classify_category(m_cur.cat));
         }
-        e.pid    = m_cur.pid;
-        e.tid    = m_cur.tid;
-        e.stream = m_cur.stream;
-        e.device = m_cur.device;
-        e.ts_ns  = m_cur.ts_ns;
-        e.dur_ns = m_cur.dur_ns;
-        e.corr   = m_cur.corr;
-        e.ext    = m_cur.ext;
-        e.phase  = phase;
-        if(m_cur.has_args && m_args_text.size() > 2)
-        {
-            e.args_off = m_t.args.size();
-            e.args_len = static_cast<std::uint32_t>(m_args_text.size());
-            m_t.args.append(m_args_text);
-        }
+        e.pid                            = m_cur.pid;
+        e.tid                            = m_cur.tid;
+        e.stream                         = m_cur.stream;
+        e.device                         = m_cur.device;
+        e.ts_ns                          = m_cur.ts_ns;
+        e.dur_ns                         = m_cur.dur_ns;
+        e.corr                           = m_cur.corr;
+        e.ext                            = m_cur.ext;
+        e.phase                          = phase;
+        std::tie(e.args_off, e.args_len) = keep_args();
         m_t.events.push_back(e);
         return static_cast<std::uint32_t>(m_t.events.size() - 1);
     }
@@ -748,6 +816,7 @@ private:
                 else
                 {
                     ++d.other_events;
+                    if(m_cur.has_ts) add_marker();
                 }
                 break;
             case 's': ++d.flow_s; break;
@@ -761,6 +830,14 @@ private:
                 else if(m_cur.name == "process_name")
                 {
                     m_t.process_names[m_cur.pid] = m_cur.args_name;
+                }
+                else if(m_cur.name == "process_sort_index" && m_cur.has_sort)
+                {
+                    m_t.process_sort[m_cur.pid] = m_cur.sort_index;
+                }
+                else if(m_cur.name == "thread_sort_index" && m_cur.has_sort)
+                {
+                    m_t.thread_sort[{ m_cur.pid, m_cur.tid }] = m_cur.sort_index;
                 }
                 break;
             default: ++d.other_events; break;
@@ -789,10 +866,44 @@ private:
     json_text_t                                    m_text;
     std::string                                    m_args_text;
     std::string                                    m_dev_text;
+    std::string                                    m_member_text;
+    capture_t                                      m_owner = capture_t::none;
     std::unordered_map<std::string, std::int64_t>  m_lane_ids;
     std::int64_t m_next_lane = std::numeric_limits<std::int32_t>::max();
 };
 }  // namespace
+
+void
+append_json_string(std::string& out, std::string_view text)
+{
+    constexpr std::string_view hex = "0123456789abcdef";
+    out.push_back('"');
+    for(const char c : text)
+    {
+        switch(c)
+        {
+            case '"': out.append("\\\""); break;
+            case '\\': out.append("\\\\"); break;
+            case '\b': out.append("\\b"); break;
+            case '\f': out.append("\\f"); break;
+            case '\n': out.append("\\n"); break;
+            case '\r': out.append("\\r"); break;
+            case '\t': out.append("\\t"); break;
+            default:
+                if(static_cast<unsigned char>(c) < 0x20)
+                {
+                    out.append("\\u00");
+                    out.push_back(hex[static_cast<unsigned char>(c) >> 4]);
+                    out.push_back(hex[static_cast<unsigned char>(c) & 0xf]);
+                }
+                else
+                {
+                    out.push_back(c);
+                }
+        }
+    }
+    out.push_back('"');
+}
 
 loaded_trace_t
 load_kineto(const std::string& path, std::function<bool()> cancelled)

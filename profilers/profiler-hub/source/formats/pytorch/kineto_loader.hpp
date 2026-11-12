@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -53,6 +54,17 @@ struct load_diag_t
     std::uint64_t parse_ms{};
 };
 
+// An instant event that is not a memory event, such as an iteration start.
+struct marker_t
+{
+    std::int64_t  ts_ns{};
+    std::int64_t  pid{};
+    std::int64_t  tid{};
+    std::string   name;
+    std::uint64_t args_off{};  // as event_t
+    std::uint32_t args_len{};
+};
+
 // What a "[memory]" instant carries in its args. A total the event lacks is -1.
 struct memory_sample_t
 {
@@ -74,11 +86,15 @@ struct loaded_trace_t
     std::vector<category_class_t> cat_classes;
     std::vector<event_t>          events;
     std::vector<memory_sample_t>  memory;  // by event index
-    std::string                   args;
-    bool                          link_by_correlation{ true };
-    std::map<std::pair<std::int64_t, std::int64_t>, std::string> thread_names;
-    std::map<std::int64_t, std::string>                          process_names;
-    std::map<std::int64_t, std::string>                          device_names;
+    std::vector<marker_t>         markers;
+    std::string trace_info;  // the other top-level members as the inside of a JSON object
+    std::string args;
+    bool        link_by_correlation{ true };
+    std::map<std::pair<std::int64_t, std::int64_t>, std::string>  thread_names;
+    std::map<std::int64_t, std::string>                           process_names;
+    std::map<std::int64_t, std::int64_t>                          process_sort;
+    std::map<std::pair<std::int64_t, std::int64_t>, std::int64_t> thread_sort;
+    std::map<std::int64_t, std::string>                           device_names;
     std::map<std::int64_t, std::string>
         device_json;  // each deviceProperties entry as text
     std::map<std::int64_t, std::string> lane_names;
@@ -86,6 +102,10 @@ struct loaded_trace_t
     bool                                gzip{};
     load_diag_t                         diag{};
 };
+
+// Appends @p text to @p out as a JSON string.
+void
+append_json_string(std::string& out, std::string_view text);
 
 // Reads a plain or gzipped Kineto JSON file into memory. @p cancelled is polled before
 // each chunk of input is read; once it returns true the call throws operation_cancelled.

@@ -192,11 +192,40 @@ load_store(const std::string& path, std::function<bool()> cancelled)
     store.cats          = std::move(trace.cats);
     store.thread_names  = std::move(trace.thread_names);
     store.process_names = std::move(trace.process_names);
-    store.host_name     = std::move(trace.host_name);
-    store.device_names  = std::move(trace.device_names);
-    store.device_json   = std::move(trace.device_json);
-    store.diag          = trace.diag;
-    store.derive_ms     = common::elapsed_ms(t_derive);
+    store.process_sort  = std::move(trace.process_sort);
+    store.thread_sort   = std::move(trace.thread_sort);
+    store.busiest_pid   = busiest_pid;
+    store.trace_info    = std::move(trace.trace_info);
+    if(!trace.markers.empty())
+    {
+        auto& info = store.trace_info;
+        if(!info.empty()) info.push_back(',');
+        info += "\"markers\":[";
+        for(std::size_t i = 0; i < trace.markers.size(); ++i)
+        {
+            const auto& marker  = trace.markers[i];
+            bool        clamped = false;
+            if(i != 0) info.push_back(',');
+            info += "{\"name\":";
+            append_json_string(info, marker.name);
+            info += ",\"ts_ns\":" +
+                    std::to_string(to_ns(trace.base_time_ns, marker.ts_ns, clamped)) +
+                    ",\"pid\":" + std::to_string(marker.pid) +
+                    ",\"tid\":" + std::to_string(marker.tid);
+            if(marker.args_len != 0)
+            {
+                info += ",\"args\":";
+                info.append(trace.args, marker.args_off, marker.args_len);
+            }
+            info.push_back('}');
+        }
+        info.push_back(']');
+    }
+    store.host_name    = std::move(trace.host_name);
+    store.device_names = std::move(trace.device_names);
+    store.device_json  = std::move(trace.device_json);
+    store.diag         = trace.diag;
+    store.derive_ms    = common::elapsed_ms(t_derive);
     return store;
 }
 

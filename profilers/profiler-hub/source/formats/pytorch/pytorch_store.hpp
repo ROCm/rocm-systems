@@ -48,12 +48,16 @@ struct pytorch_store_t
     std::vector<memory_sample_t> memory;  // by event index
     std::uint64_t
         cpu_agent_id{};  // set by fill_catalog; 0 when no memory event is on the CPU
-    std::string                                                  args;
-    std::vector<std::string>                                     names;
-    std::vector<std::string>                                     cats;
-    std::map<std::pair<std::int64_t, std::int64_t>, std::string> thread_names;
-    std::map<std::int64_t, std::string>                          process_names;
-    std::map<std::int64_t, std::string>                          device_names;
+    std::string                                                   args;
+    std::vector<std::string>                                      names;
+    std::vector<std::string>                                      cats;
+    std::map<std::pair<std::int64_t, std::int64_t>, std::string>  thread_names;
+    std::map<std::int64_t, std::string>                           process_names;
+    std::map<std::int64_t, std::int64_t>                          process_sort;
+    std::map<std::pair<std::int64_t, std::int64_t>, std::int64_t> thread_sort;
+    std::int64_t busiest_pid{};  // the host process with the most events
+    std::string  trace_info;     // the trace-wide members as the inside of a JSON object
+    std::map<std::int64_t, std::string> device_names;
     std::map<std::int64_t, std::string>
                   device_json;  // each deviceProperties entry as text
     std::string   host_name;
