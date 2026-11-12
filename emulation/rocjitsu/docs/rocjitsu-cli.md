@@ -108,7 +108,7 @@ Usage: rocjitsu [options] -- <app> [args...]
 | `--check-vfio-user` | Exit successfully only when this binary was built with VFIO-user support. |
 | `--help`, `-h` | Print usage and exit. |
 | `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit. |
-| `paths [--json]` | Print config/runtime search paths. `--json` must follow `paths`, as in `rocjitsu paths --json`. |
+| `paths [--json]` | Print config/runtime search paths, the daemon socket, and `config_handoff_path`, the runtime file containing the config path opened by the interposer. `--json` must follow `paths`, as in `rocjitsu paths --json`. |
 | `--` | Separator between rocjitsu options and the target application command line. |
 
 ### Usage Examples
