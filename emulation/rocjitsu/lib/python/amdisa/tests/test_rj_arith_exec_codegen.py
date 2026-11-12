@@ -45,7 +45,7 @@ def test_exec_boolean_updates_snapshot_then_commit_in_order(name):
             'exec_mask =',
             'status != RJ_ARITH_SUCCESS',
             f'write_scalar{suffix}(d, result)',
-            'wf.write_exec(new_exec)' if wide else 'wf.set_exec(new_exec)',
+            'wf.write_exec(new_exec)' if wide else 'wf.write_exec_lo(new_exec)',
             'wf.write_scc(scc)',
         ]
         offsets = [body.index(x) for x in ordered]

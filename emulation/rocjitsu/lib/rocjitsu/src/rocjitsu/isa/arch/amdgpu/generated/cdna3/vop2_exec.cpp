@@ -5,11 +5,13 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/valu_status.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -1128,7 +1130,8 @@ void VAddF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_add_f16_vop2(*this, wf);
+  cdna3::execute_half_with_status<cdna3::HalfOp::Add>(
+      wf, src0, vsrc1, 0, 0, 0, [&] { amdgpu::execute_v_add_f16_vop2(*this, wf); });
 }
 
 RJ_NOINLINE void VAddF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1157,7 +1160,8 @@ RJ_NOINLINE void VAddF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_add_f16_vop2(*this, wf);
+  cdna3::execute_half_with_status<cdna3::HalfOp::Add>(
+      wf, src0, vsrc1, 0, 0, 0, [&] { amdgpu::execute_v_add_f16_vop2(*this, wf); });
   dpp_write_mask_scope_.restore();
 }
 
@@ -1166,7 +1170,8 @@ void VSubF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_sub_f16_vop2(*this, wf);
+  cdna3::execute_half_with_status<cdna3::HalfOp::Sub>(
+      wf, src0, vsrc1, 0, 0, 0, [&] { amdgpu::execute_v_sub_f16_vop2(*this, wf); });
 }
 
 RJ_NOINLINE void VSubF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1195,7 +1200,8 @@ RJ_NOINLINE void VSubF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_sub_f16_vop2(*this, wf);
+  cdna3::execute_half_with_status<cdna3::HalfOp::Sub>(
+      wf, src0, vsrc1, 0, 0, 0, [&] { amdgpu::execute_v_sub_f16_vop2(*this, wf); });
   dpp_write_mask_scope_.restore();
 }
 
@@ -1204,7 +1210,8 @@ void VSubrevF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_subrev_f16_vop2(*this, wf);
+  cdna3::execute_half_with_status<cdna3::HalfOp::Subrev>(
+      wf, src0, vsrc1, 0, 0, 0, [&] { amdgpu::execute_v_subrev_f16_vop2(*this, wf); });
 }
 
 RJ_NOINLINE void VSubrevF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1233,7 +1240,8 @@ RJ_NOINLINE void VSubrevF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_subrev_f16_vop2(*this, wf);
+  cdna3::execute_half_with_status<cdna3::HalfOp::Subrev>(
+      wf, src0, vsrc1, 0, 0, 0, [&] { amdgpu::execute_v_subrev_f16_vop2(*this, wf); });
   dpp_write_mask_scope_.restore();
 }
 
@@ -1242,7 +1250,8 @@ void VMulF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_mul_f16_vop2(*this, wf);
+  cdna3::execute_half_with_status<cdna3::HalfOp::Mul>(
+      wf, src0, vsrc1, 0, 0, 0, [&] { amdgpu::execute_v_mul_f16_vop2(*this, wf); });
 }
 
 RJ_NOINLINE void VMulF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1271,7 +1280,8 @@ RJ_NOINLINE void VMulF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_mul_f16_vop2(*this, wf);
+  cdna3::execute_half_with_status<cdna3::HalfOp::Mul>(
+      wf, src0, vsrc1, 0, 0, 0, [&] { amdgpu::execute_v_mul_f16_vop2(*this, wf); });
   dpp_write_mask_scope_.restore();
 }
 
@@ -1425,7 +1435,17 @@ void VMulLoU16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_mul_lo_u16_vop2(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, vdst, lane,
+        static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::vop3_integer_mul<uint16_t, 16>(
+            static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)),
+            static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)),
+            inst_.src0 == amdgpu::SRC_SDWA && sdwa_clamp_))));
+  }
 }
 
 RJ_NOINLINE void VMulLoU16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1452,7 +1472,17 @@ RJ_NOINLINE void VMulLoU16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_mul_lo_u16_vop2(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, vdst, lane,
+        static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::vop3_integer_mul<uint16_t, 16>(
+            static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)),
+            static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)),
+            inst_.src0 == amdgpu::SRC_SDWA && sdwa_clamp_))));
+  }
   dpp_write_mask_scope_.restore();
 }
 

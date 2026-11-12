@@ -4277,11 +4277,13 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t a
   state.scratch_scoreboard_id = wf.scratch_scoreboard_id();
   state.shader_engine_id = wf.shader_engine_id();
   state.spi_ttmps_setup = true;
-  state.num_sgprs = wf.num_sgprs();
+  state.num_sgprs = arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::physical_sgpr_count(wf.num_sgprs())
+                                                     : wf.num_sgprs();
   state.num_vgprs = wf.num_vgprs();
 
   state.sgprs.resize(state.num_sgprs);
-  for (uint32_t s = 0; s < state.num_sgprs; ++s)
+  const uint32_t backed_sgprs = std::min(state.num_sgprs, wf.debug_sgpr_capacity());
+  for (uint32_t s = 0; s < backed_sgprs; ++s)
     state.sgprs[s] = wf.debug_read_sgpr(s);
   // The CWSR record's VGPR stride is wave64-shaped (cwsr.cpp kVgprLaneBytes)
   // whatever the wave size is, but the physical register only has wf_size()
@@ -5748,21 +5750,16 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
   }
   wave.set_debug_wave_id(state.wave_id);
   wave.set_queue_packet_id(state.queue_packet_id);
-  const uint32_t stack_pointer = wave.debug_read_sgpr(32);
-  const uint32_t stack_frame = wave.debug_read_sgpr(33);
   // rocm-dbgapi may submit a lightweight control-state update with no register
   // payload after displaced stepping. Preserve the SGPR/VGPR values produced
   // by the displaced instruction in that case rather than restoring zeros.
   //
-  // Skip exactly the slots the codec treats as aliases, not everything above
-  // the architected count: s104/s105 sit between the FLAT_SCRATCH and VCC
-  // aliases and are ordinary registers the debugger may edit. Sharing
-  // cwsr_sgpr_slot_is_aliased() with the codec is what keeps the two ends of
-  // the round trip from disagreeing about which slots carry register state.
-  if (!state.sgprs.empty())
-    for (uint32_t s = 0; s < state.num_sgprs && s < state.sgprs.size(); ++s)
-      if (s != 32 && s != 33 && !kmd::cwsr_sgpr_slot_is_aliased(s, arch))
-        wave.debug_write_sgpr(s, state.sgprs[s]);
+  // Architectural aliases are restored from their own state fields. A small
+  // fixed CU backing block can be shorter than the physical CWSR granule.
+  const uint32_t backed_sgprs = std::min(state.num_sgprs, wave.debug_sgpr_capacity());
+  for (uint32_t s = 0; s < backed_sgprs && s < state.sgprs.size(); ++s)
+    if (s != 32 && s != 33 && !kmd::cwsr_sgpr_slot_is_aliased(s, arch, state.num_sgprs))
+      wave.debug_write_sgpr(s, state.sgprs[s]);
   if (!state.vgprs.empty())
     for (uint32_t r = 0; r < state.num_vgprs; ++r)
       for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
@@ -5770,13 +5767,8 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
         if (index < state.vgprs.size())
           wave.debug_write_vgpr(r, lane, state.vgprs[index]);
       }
-  // FLAT_SCRATCH travels in its own field because it aliases two SGPR slots the
-  // loop above skips. This used to save and re-install wave.scratch_base()
-  // around the loop, which the loop cannot reach anyway (scratch_base_ is a
-  // standalone member), so the only effect was discarding the debugger's edit.
+  // Install the debugger's FLAT_SCRATCH edit after restoring the ordinary SGPRs.
   wave.set_scratch_base(state.flat_scratch);
-  wave.debug_write_sgpr(32, stack_pointer);
-  wave.debug_write_sgpr(33, stack_frame);
   const bool single_step = !state.wave_stopped && (gfx12_5 ? (state.trap_ctrl & (1u << 9)) != 0
                                                            : (state.mode & kModeDebugEnMask) != 0);
   wave.set_debug_single_step(single_step);

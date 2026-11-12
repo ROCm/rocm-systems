@@ -30,8 +30,9 @@ int rj_arith_v_mfma_f64_4x4x4_4b_f64_w64(uint64_t flags, uint64_t controls, uint
                                          const uint32_t *const *c);
 
 // Signed-byte MFMA: A/B use M*K*batch/256 VGPRs, C/D use M*M*batch/64.
-// Accumulation wraps at 32 bits. CBSZ/ABID/BLGP use the floating MFMA lane controls.
-// All semantics share exact integer arithmetic; guest FP flags are ignored.
+// Accumulation wraps at 32 bits by default. On gfx942 and gfx950 RJ_ARITH_FP16_OVFL
+// saturates the final signed sum. CBSZ/ABID/BLGP select the MFMA source lanes.
+// All semantics share exact integer arithmetic.
 // All 64 lanes participate, EXEC is ignored, and operands may overlap D.
 int rj_arith_v_mfma_i32_32x32x4_2b_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                           const uint32_t *const *a, const uint32_t *const *b,
@@ -56,6 +57,7 @@ int rj_arith_v_mfma_i32_32x32x32_i8_w64(uint64_t flags, uint64_t controls, uint3
                                         const uint32_t *const *c);
 
 // FP32 factors use M*K*batch/64 VGPRs each; outputs use M*M*batch/64.
+// For gfx950, set RJ_ARITH_FP16_OVFL to saturate finite FP32 overflow at the final result.
 // Controls, semantics and overlap follow the dense MFMA contract below.
 int rj_arith_v_mfma_f32_32x32x1_2b_f32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                            const uint32_t *const *a, const uint32_t *const *b,
@@ -82,7 +84,8 @@ int rj_arith_v_mfma_f32_16x16x4_f32_w64(uint64_t flags, uint64_t controls, uint3
 // M*K*batch/128 VGPRs each, C and D use M*M*batch/64; each pointer addresses 64 words.
 // CBSZ 0..4 broadcasts A blocks; reserved 5..7 retain identity, and ABID wraps
 // within the chosen block count. BLGP 0..7 selects the legacy B lane permutation.
-// Guest FP controls are accepted but ignored, as in the existing MFMA executor.
+// For gfx950 BF16 instructions, set RJ_ARITH_FP16_OVFL to saturate finite FP32
+// overflow. Infinities from source operands are preserved.
 // Loose, allow-Loose and Compatibility use approximate arithmetic; strict exact
 // modes return UNSUPPORTED_SEMANTICS. All inputs are consumed before D is stored
 // in register order. Aliasing is supported; errors leave D unchanged.
@@ -143,8 +146,8 @@ int rj_arith_v_mfma_f32_32x32x16_bf16_w64(uint64_t flags, uint64_t instruction_f
                                           const uint32_t *const *b, const uint32_t *const *c);
 
 // gfx942 XF32 approximation: A/B two FP32 VGPRs, C/D four for 16x16 or sixteen
-// for 32x32. Like the legacy emulator, this uses full FP32 input precision rather
-// than claiming the GPU's XF32 rounding model. Loose/allow-Loose/Compatibility only.
+// for 32x32. Both inputs are truncated to ten fraction bits before the FP32 reduction.
+// Loose, allow-Loose and Compatibility are supported.
 // Source controls, whole-wave participation, aliasing and error rules above apply.
 int rj_arith_v_mfma_f32_16x16x8_xf32_w64(uint64_t flags, uint64_t instruction_flags,
                                          uint32_t *const *d, const uint32_t *const *a,
@@ -246,7 +249,8 @@ constexpr uint64_t RJ_ARITH_MFMA_SCALE_ABS_C = 1ULL << 11;
 // scale_a/scale_b each address 64 packed words (one VGPR); byte selectors choose
 // the E8M0 exponent for each lane. Scale lane M*block+row/column applies to one
 // fused 32-product dot, followed by combined-exponent scaling and addition to C.
-// Scale 0xff produces NaN. Inline scale sourcing is the caller's responsibility.
+// Scale 0xff produces NaN. RJ_ARITH_FP16_OVFL saturates final FP32 overflow for
+// finite inputs. Inline scale sourcing is the caller's responsibility.
 // Loose and Compatibility supported; strict empirical modes remain unsupported.
 int rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64(uint64_t flags, uint64_t controls,
                                                    uint32_t *const *d, const uint32_t *const *a,

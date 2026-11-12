@@ -385,7 +385,7 @@ def _gen_exec_update(mnemonic, dst, src):
     bits = 64 if wide else 32
     suffix = '64' if wide else ''
     read_exec = 'wf.exec_raw()' if wide else 'uint32_t(wf.exec())'
-    write_exec = 'write_exec' if wide else 'set_exec'
+    write_exec = 'write_exec' if wide else 'write_exec_lo'
     lines = [
         '  amdgpu::RegisterAccess registers(wf);',
         f'  const uint{bits}_t input = registers.read_scalar{suffix}({src[0]});',

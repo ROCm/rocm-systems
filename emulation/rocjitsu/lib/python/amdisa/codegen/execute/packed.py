@@ -102,6 +102,7 @@ def gen_pk_binop(
     op: str | None,
     dtype: str | None,
     opsel_exprs: tuple[str, str] = ('', ''),
+    multiply_clamp: bool = False,
 ) -> str:
     """Generate packed 16-bit binary op (V_PK_ADD_I16, V_PK_MUL_F16, etc.)."""
     d, s0, s1 = dst[0], src[0], src[1]
@@ -210,12 +211,13 @@ def gen_pk_binop(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
         )
     else:  # u16
+        clamp = 'inst_.clamp' if multiply_clamp else 'false'
         u_op_map = {
             'add': ('a_lo + b_lo', 'a_hi + b_hi'),
             'sub': ('a_lo - b_lo', 'a_hi - b_hi'),
             'mul': (
-                'static_cast<uint32_t>(a_lo) * b_lo',
-                'static_cast<uint32_t>(a_hi) * b_hi',
+                f'amdgpu::vop3_integer_mul<uint16_t, 16>(a_lo, b_lo, {clamp})',
+                f'amdgpu::vop3_integer_mul<uint16_t, 16>(a_hi, b_hi, {clamp})',
             ),
             'max': ('a_lo > b_lo ? a_lo : b_lo', 'a_hi > b_hi ? a_hi : b_hi'),
             'min': ('a_lo < b_lo ? a_lo : b_lo', 'a_hi < b_hi ? a_hi : b_hi'),
@@ -966,6 +968,7 @@ def gen_mad_mix_lo_hi(
     opsel_exprs: tuple[str, str] = ('', ''),
     use_cdna5_helpers: bool = False,
     fused_result: bool = False,
+    fused_f32_intermediate: bool = False,
 ) -> str:
     """Generate V_MAD_MIXLO_F16 / V_MAD_MIXHI_F16."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
@@ -1033,9 +1036,18 @@ def gen_mad_mix_lo_hi(
             ]
         )
     else:
-        L.append(
-            f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
-        )
+        if fused_f32_intermediate:
+            L.extend(
+                [
+                    '    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(',
+                    '        a, b, c, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(),',
+                    '        wf.cu().arch(), wf.ieee_mode());',
+                ]
+            )
+        else:
+            L.append(
+                f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
+            )
         L.append(
             '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
         )

@@ -8,7 +8,61 @@ include "simulation_config.fbs";
 
 namespace rocjitsu.fb;
 
+// Older checkpoints omit the GFX10 tables and retain machine launch defaults.
+struct Gfx10Apertures {
+  shared_base: ulong;
+  shared_limit: ulong;
+  private_base: ulong;
+  private_limit: ulong;
+  ptr32: bool;
+}
+
+struct Gfx10WaitLimits {
+  vm: ubyte;
+  lgkm: ubyte;
+  exp: ubyte;
+  vs: ubyte;
+}
+
+table Gfx10WaveResources {
+  apertures: Gfx10Apertures (required);
+  override_launch: bool;
+  wait_limits: Gfx10WaitLimits (required);
+  trapsts: uint;
+  scratch_base: ulong;
+  scratch_lane_size: uint;
+  lds_base: uint;
+  lds_size: uint;
+  dispatch_id: uint;
+  wave_in_group: uint;
+  queue_id: uint;
+  queue_packet_id: uint;
+  vgpr_count: uint;
+  self_halted: bool;
+}
+
+table Gfx10CuResources {
+  launch_apertures: Gfx10Apertures (required);
+  next_lds_alloc: uint;
+  lds: [ubyte];
+}
+
+/// Byte range owned by a workgroup within its CU's LDS.
+struct LdsWindow {
+  base: uint32;
+  size: uint32;
+}
+
 /// Serialized state of a single wavefront.
+// LaunchDefaults identifies a standalone writer that did not model frontend grants.
+enum GraphicsWait: ubyte { None, Export, Parameters, LaunchDefaults }
+
+struct WaveExceptionRegisters {
+  trapsts: uint32;
+  gfx12_user_extra: uint32;
+  gfx12_trap_ctrl: uint32;
+}
+
 table WavefrontState {
   wf_id: uint32;
   wg_id: uint32;
@@ -18,7 +72,7 @@ table WavefrontState {
   m0: uint32;
   halted: bool;
   status: uint32;
-  sgprs: [uint32]; // Scalar register file (NUM_SGPRS entries).
+  sgprs: [uint32]; // RDNA2 stores its full physical block, including fixed SGPRs.
   vgprs: [ubyte];  // Vector register file (raw bytes).
   mode: uint32;     // MODE register.
   wave_sched_mode: uint32; // WAVE_SCHED_MODE register.
@@ -45,6 +99,28 @@ table WavefrontState {
   // Transient gfx1250 instruction-adjacency state. Appended last so older
   // checkpoints restore it as false.
   setreg_vgpr_msb_hazard: bool;
+  gfx10_resources: Gfx10WaveResources;
+  dispatch_id: uint32;
+  // Active RDNA2 waves require an explicit owner, including the standalone process zero.
+  rdna2_process_id: uint32 = null;
+  rdna2_internal_address_space: bool;
+  process_id: uint32;
+  queue_id: uint32;
+  wave_in_group: uint32;
+  // CDNA3 may have additional addressable SGPRs in a partially requested physical block.
+  requested_sgprs: uint32 = null;
+  flat_scratch: uint64 = null;
+  lds_window: LdsWindow;
+  // Architectural VGPR allocation, distinct from the serialized physical register block.
+  // Older records omit the total and restore the configured VGPR count.
+  num_vgprs: uint32 = null;
+  accum_vgpr_base: uint32; // CDNA descriptor boundary in VGPRs; zero for descriptor-less waves.
+  // Requested SGPRs may differ from the physical SGPR payload on RDNA2,
+  // CDNA1, CDNA2 and CDNA4. Older records can omit this count.
+  num_sgprs: uint32 = null;
+  // None, Export and Parameters preserve the readiness bits supplied by the frontend.
+  graphics_wait: GraphicsWait = null;
+  exceptions: WaveExceptionRegisters;
 }
 
 /// Serialized state of a compute unit.
@@ -66,6 +142,14 @@ table ComputeUnitState {
   gws_wait_limit: uint32 = null;
   // Omission inherits the CU template policy, which need not be Compatibility.
   arithmetic: ArithmeticPolicyConfig;
+  gfx10_resources: Gfx10CuResources;
+  // Shared SGPR/VGPR physical block ordinal for each RDNA2 record in wavefronts order.
+  // Older files lack this vector and retain first-free register allocation on restore.
+  rdna2_register_blocks: [uint32];
+  // This CU-owned LDS prefix is shared by its resident waves. Earlier CDNA3
+  // records used its length as the bump allocator reservation.
+  lds: [ubyte];
+  lds_cursor: uint32 = null;
 }
 
 /// Serialized state of a command processor.
@@ -73,6 +157,8 @@ table CommandProcessorState {
   name: string;
   dispatched: uint64; // Number of packets already processed.
   next_cu: uint64;    // Round-robin CU index.
+  // Per-XCD dispatch ID sequences, shared by AQL and PM4 launches.
+  next_dispatch_ids: [uint32];
 }
 
 /// A single 4KB memory page.

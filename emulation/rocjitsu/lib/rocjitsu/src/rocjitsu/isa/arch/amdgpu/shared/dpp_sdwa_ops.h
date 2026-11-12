@@ -24,6 +24,7 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -116,6 +117,39 @@ private:
   simdojo::VectorReg<MAX_LANES, uint32_t> lo_{};
   simdojo::VectorReg<MAX_LANES, uint32_t> hi_{};
   int lane_count_ = 0;
+};
+
+/// A source shared by the status classifier and numeric execution of one VALU.
+class CapturedArithmeticSource {
+public:
+  CapturedArithmeticSource(amdgpu::Wavefront &wf, Operand &source, uint8_t bytes)
+      : CapturedArithmeticSource(wf, source, bytes, wf.exec() & wf.vgpr_write_mask()) {}
+
+  CapturedArithmeticSource(amdgpu::Wavefront &wf, Operand &source, uint8_t bytes, uint64_t active)
+      : values_(source, wf.wf_size()), binding_(source, capture(wf, source, bytes, active)) {}
+
+private:
+  StagedOperand values_;
+  ScopedOperandDelegate binding_;
+
+  Operand *capture(amdgpu::Wavefront &wf, const Operand &source, uint8_t bytes, uint64_t active) {
+    if (!active)
+      return &values_;
+    amdgpu::RegisterAccess regs(wf);
+    if (source.simd_capable()) {
+      const auto view = regs.read_operand(source, active, bytes);
+      for (uint64_t mask = active; mask; mask &= mask - 1) {
+        const unsigned lane = std::countr_zero(mask);
+        values_.set_lane(lane, view.lane(lane));
+      }
+    } else {
+      for (uint64_t mask = active; mask; mask &= mask - 1) {
+        const unsigned lane = std::countr_zero(mask);
+        values_.set_lane(lane, regs.read_lane(source, lane));
+      }
+    }
+    return &values_;
+  }
 };
 
 using DppOperand = StagedOperand;
@@ -555,8 +589,9 @@ namespace sdwa {
 /// For F32, FLUSH_NEAREST uses apply_omod_f32 under the producer's nearest-rounding
 /// environment; MODE uses scale_f32 with guest rounding. For F16, MODE expects the
 /// producer helper to have scaled already. ROUNDED marks an F16 result rounded
-/// without OMOD; the store scales it with output_modifier.h, as MODE does for F32.
-enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST, ROUNDED };
+/// without OMOD; the store scales it with output_modifier.h. ARITHMETIC uses
+/// that ordering on GFX10 and retains producer scaling on CDNA.
+enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST, ROUNDED, ARITHMETIC };
 
 /// @brief Return the architectural source bytes selected by an SDWA selector.
 inline uint8_t sdwa_src_byte_mask(uint32_t sel) {
@@ -768,15 +803,18 @@ inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float 
       fp_mode::apply_omod_f16(value, output_modifier<ResultFormat::F16>(inst, wf), fp16_ovfl));
 }
 
-/// @brief Apply SDWA scaling before guest-mode rounding of a wide F16 arithmetic result.
-/// @details Keeps the emulator's current order, which gfx1030 SDWA MUL_F16 and
-/// ADD_F16 captures contradict; migrated VOP3 arithmetic modifies the rounded half.
-/// See output_modifier.h.
+/// GFX10 SDWA ADD/MUL captures scale a rounded half, as VOP3 does.
+inline bool arithmetic_scales_rounded_half(const Wavefront &wf) {
+  return wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
+/// Round the arithmetic result, deferring GFX10 SDWA scaling to destination placement.
 template <typename Inst>
 inline uint16_t finish_arithmetic_f16(const Inst &inst, const Wavefront &wf, double value,
                                       uint32_t round_mode, uint32_t denorm_mode, bool fp16_ovfl) {
-  return fp_mode::finish_arithmetic_f16(value, round_mode, denorm_mode, fp16_ovfl,
-                                        output_modifier<ResultFormat::F16>(inst, wf));
+  const auto omod =
+      arithmetic_scales_rounded_half(wf) ? 0u : output_modifier<ResultFormat::F16>(inst, wf);
+  return fp_mode::finish_arithmetic_f16(value, round_mode, denorm_mode, fp16_ovfl, omod);
 }
 
 /// @brief Scale F32 bits with explicit rounding and OMOD output finalization.
@@ -826,13 +864,17 @@ inline uint32_t scale_f32(uint32_t value, uint32_t omod, uint32_t round_mode) {
 /// @brief Scale a floating-point SDWA result before destination placement.
 template <ResultFormat Format, OutputPolicy Policy = OutputPolicy::MODE, typename Inst>
 inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t value) {
-  static_assert(Policy != OutputPolicy::ROUNDED || Format == ResultFormat::F16);
-  constexpr OutputPolicy kOmodPolicy =
-      Policy == OutputPolicy::ROUNDED ? OutputPolicy::MODE : Policy;
+  constexpr bool half_policy =
+      Policy == OutputPolicy::ROUNDED || Policy == OutputPolicy::ARITHMETIC;
+  static_assert(!half_policy || Format == ResultFormat::F16);
+  constexpr OutputPolicy kOmodPolicy = half_policy ? OutputPolicy::MODE : Policy;
   const uint32_t omod = output_modifier<Format, kOmodPolicy>(inst, wf);
   if (omod == 0)
     return value;
-  if constexpr (Policy == OutputPolicy::ROUNDED) {
+  if constexpr (half_policy) {
+    if constexpr (Policy == OutputPolicy::ARITHMETIC)
+      if (!arithmetic_scales_rounded_half(wf))
+        return value; // finish_arithmetic_f16 already applied and finalized OMOD.
     // The producer rounded without OMOD; scale the half as VOP3 does.
     output_modifier::Policy policy;
     policy.omod = omod;

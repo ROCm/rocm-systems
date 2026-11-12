@@ -95,11 +95,29 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
     arch, mnemonic = ctx.arch_name, ctx.inst.name
     dst, src = ctx.dst_ops, ctx.src_ops
     is_vop3, result_writer = ctx.is_vop3, ctx.result_writer
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in FLOAT_COMPARISONS:
+    if (
+        arch not in ('rdna2', 'rdna3', 'rdna3_5', 'rdna4')
+        or mnemonic not in FLOAT_COMPARISONS
+    ):
+        return None
+    if arch == 'rdna2' and not is_vop3:
         return None
     if len(src) != 2 or len(dst) > 1:
         return None
     bits, constant = FLOAT_COMPARISONS[mnemonic]
+    if arch == 'rdna3_5':
+        relation = mnemonic.split('_')[2].title()
+        # Compact operands already select and normalize their encoded half.
+        selectors = (
+            'amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg' if is_vop3 else '0, 0, 0'
+        )
+        signaling = 'inst_.clamp' if is_vop3 else 'false'
+        writer = mask_result_writer(mnemonic, dst, result_writer)
+        return (
+            f'  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F{bits}, '
+            f'amdgpu::comparison::{relation}>(wf, {src[0]}, {src[1]}, {selectors}, '
+            f'exec_mask, !wf.dx10_clamp(), {signaling}, {writer});'
+        )
     # GFX12 removed the constant predicates; their rj-arith APIs describe RDNA3.
     if arch == 'rdna4' and constant:
         return None
@@ -113,7 +131,7 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
             '                       ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |',
             '                       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
         ]
-        if bits == 16:
+        if bits == 16 and arch != 'rdna2':
             lines += [
                 '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
                 '  modifiers |= ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |',
@@ -122,8 +140,9 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
         modifiers = 'modifiers'
     result_writer = mask_result_writer(mnemonic, dst, result_writer)
     api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
+    signaling = ', true' if arch == 'rdna2' else ''
     lines += [
-        f'  amdgpu::arith::execute_float_compare<{bits}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'  amdgpu::arith::execute_float_compare<{bits}{signaling}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
         f'      {src[0]}, {src[1]}, {str(constant).lower()},',
         f'      {result_writer}, exec_mask);',

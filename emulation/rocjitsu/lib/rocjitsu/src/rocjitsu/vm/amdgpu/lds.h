@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_LDS_H_
 #define ROCJITSU_VM_AMDGPU_LDS_H_
 
+#include "rocjitsu/code/rj_code.h"
 #include "simdojo/components/memory_interface.h"
 
 #include <algorithm>
@@ -15,6 +16,9 @@
 
 namespace rocjitsu {
 namespace amdgpu {
+
+/// Allocation granule used for this CU-owned LDS backing.
+constexpr uint32_t lds_allocation_granule(rj_code_arch_t) { return 256; }
 
 /// Reserved value used when an instruction lane has no valid LDS address.
 constexpr uint32_t kInvalidLdsAddress = UINT32_MAX;

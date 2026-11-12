@@ -20,7 +20,10 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <bit>
+#include <cmath>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace {
@@ -195,6 +198,44 @@ TEST_F(MatrixExecutionErrorTest, WmmaFormatsAndScaleFormatsFailBeforeWriting) {
     EXPECT_TRUE(decoder->decode(words.data()).failed());
     cdna5::VWmmaScaleF32Vop3px2 instruction(words.data());
     expect_rejected(instruction);
+  }
+}
+
+TEST_F(MatrixExecutionErrorTest, MixedMatricesDistinguishInlineMinusOneFromRegisterC) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    const bool mfma = arch == ROCJITSU_CODE_ARCH_CDNA4;
+    ScopedIsaExecutionBackend backend(mfma ? &cdna4::execution_backend()
+                                           : &cdna5::execution_backend());
+    ASSERT_NO_FATAL_FAILURE(initialize(arch));
+    auto decoder = Decoder::create(arch);
+    const auto base = wave->vgpr_alloc().base;
+    const auto lanes = wave->wf_size();
+    wave->set_exec(~uint64_t{0} >> (64 - lanes));
+    // Both factors are zero. C in v48 is 3.0, while inline integer -1 is a NaN as F32.
+    for (uint32_t reg = 48; reg < 64; ++reg)
+      for (uint32_t lane = 0; lane < lanes; ++lane)
+        cu->write_vgpr(base + reg, lane, std::bit_cast<uint32_t>(3.0f));
+    for (const uint32_t src2 : {193u, 256u + 48u}) {
+      for (const bool scaled : {false, true}) {
+        const auto words =
+            mfma ? mma_test::make_cdna4_mfma_scale_words(45, scaled ? 1 : 0, 242, 242, 0, 0, 4, 4,
+                                                         64, 256, 272, src2)
+                 : mma_test::make_cdna5_wmma_scale_words(4, 4, 128, 128, 64, 256, 272, src2);
+        SCOPED_TRACE(testing::Message() << arch << " src2=" << src2 << " scaled=" << scaled);
+        cu->write_vgpr(base + 64, 0, std::bit_cast<uint32_t>(1.0f));
+        auto instruction = decoder->decode_window(std::span(words).subspan(scaled ? 0 : 2));
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_EQ(instruction.value()->size(), scaled ? 16u : 8u);
+        ASSERT_TRUE(cu->execute_instruction(instruction.value().get(), *wave).succeeded());
+        const float result = std::bit_cast<float>(cu->read_vgpr(base + 64, 0));
+        if (src2 == 193) {
+          EXPECT_TRUE(std::isnan(result));
+        } else {
+          EXPECT_EQ(result, 3.0f);
+        }
+      }
+    }
+    wave->halt();
   }
 }
 

@@ -976,9 +976,8 @@ inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_
 
 /// @brief Round an F16 arithmetic destination and apply output-denormal policy.
 /// @details Migrated VOP3 callers leave omod=0 and modify the rounded bits
-/// afterward. SDWA supplies omod here to keep the emulator's pre-round scaling,
-/// which gfx1030 SDWA MUL_F16 and ADD_F16 captures contradict; see
-/// output_modifier.h.
+/// afterward. CDNA SDWA supplies omod for pre-round scaling here. GFX10 SDWA
+/// applies the modifier after arithmetic rounding, like VOP3.
 /// The unscoped form leaves the nearest-even environment to the caller, keeping
 /// the same rounding, output flushing and FP16_OVFL handling.
 inline uint16_t finish_arithmetic_f16_unscoped(double value, uint32_t round_mode,
@@ -1217,6 +1216,16 @@ inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
   if ((bits & 0x7fffffffu) > 0x7f800000u)
     return static_cast<uint16_t>(((bits >> 16) & 0x8000u) | 0x7c00u | ((bits >> 13) & 0x3ffu));
   return util::f32_to_f16_mode(value, fp16_ovfl);
+}
+
+/// Convert the F32 source of a scaled narrowing instruction before applying its E8M0 scale.
+/// A preserved F32 subnormal is normal in double, even if the host flushes F32 operands.
+inline double widen_scalef32_source(uint32_t bits, uint32_t denorm_mode) {
+  const uint32_t magnitude = bits & 0x7fffffffu;
+  if (magnitude >= 0x00800000u)
+    return static_cast<double>(std::bit_cast<float>(bits));
+  const double value = (denorm_mode & 1u) ? std::ldexp(static_cast<double>(magnitude), -149) : 0.0;
+  return (bits >> 31) ? -value : value;
 }
 
 struct FrexpF32Result {

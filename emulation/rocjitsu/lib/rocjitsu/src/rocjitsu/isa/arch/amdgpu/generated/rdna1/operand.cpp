@@ -69,7 +69,7 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
       defer_encoding_error(EncodingError::InvalidSelector);
     break;
   case OperandType::OPR_SIMM8:
-    if (!((encoding_value >= 0 && encoding_value <= 0)))
+    if (!((encoding_value >= 0 && encoding_value <= 255)))
       defer_encoding_error(EncodingError::InvalidSelector);
     break;
   case OperandType::OPR_SMEM_OFFSET:
@@ -382,11 +382,8 @@ std::string Operand::name() const {
       return "m0";
     break;
   }
-  case OperandType::OPR_SIMM8: {
-    if (encoding_value_ == OpSelSimm8::OPR_SIMM8_SRC_SIMM8)
-      return "src_simm8";
-    break;
-  }
+  case OperandType::OPR_SIMM8:
+    return std::to_string(encoding_value_);
   case OperandType::OPR_SMEM_OFFSET: {
     if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN &&
         encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MAX)
@@ -1067,9 +1064,8 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
   case OperandType::OPR_SDST_M0: {
     break;
   }
-  case OperandType::OPR_SIMM8: {
+  case OperandType::OPR_SIMM8:
     break;
-  }
   case OperandType::OPR_SMEM_OFFSET: {
     if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN &&
         encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MAX)

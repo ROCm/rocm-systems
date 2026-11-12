@@ -59,9 +59,9 @@ template <int M, int Batch, bool Wmma> MfmaWord matrix_i8_output(int row, int co
   }
 }
 
-// Reduce decoded byte matrices; MFMA wraps, WMMA may saturate once after adding C.
+// Reduce decoded byte matrices and apply optional signed saturation after adding C.
 template <int M, int K, int Batch, bool Wmma>
-void matrix_i8_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
+void matrix_i8_kernel(uint64_t controls, bool clamp, uint32_t *const *d, const uint32_t *const *a,
                       const uint32_t *const *b, const uint32_t *const *c) {
   constexpr int lanes = Wmma ? 32 : 64;
   alignas(64) uint32_t left[M * K * Batch], right[M * K * Batch];
@@ -122,15 +122,13 @@ void matrix_i8_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *con
       for (int col = 0; col < M; ++col) {
         auto out = matrix_i8_output<M, Batch, Wmma>(row, col, batch);
         uint32_t sum = result[batch][row][col], initial = c[out.reg][out.lane];
-        if constexpr (Wmma) {
-          if (controls & RJ_ARITH_WMMA_CLAMP) {
-            // The byte dot fits int32; only adding the accumulator can overflow.
-            int64_t wide = int64_t(bit_cast<int32_t>(sum)) + bit_cast<int32_t>(initial);
-            result[batch][row][col] = wide > 0x7fffffffLL    ? 0x7fffffffU
-                                      : wide < -0x80000000LL ? 0x80000000U
-                                                             : uint32_t(wide);
-            continue;
-          }
+        if (clamp) {
+          // The byte dot fits int32; only adding the accumulator can overflow.
+          int64_t wide = int64_t(bit_cast<int32_t>(sum)) + bit_cast<int32_t>(initial);
+          result[batch][row][col] = wide > 0x7fffffffLL    ? 0x7fffffffU
+                                    : wide < -0x80000000LL ? 0x80000000U
+                                                           : uint32_t(wide);
+          continue;
         }
         result[batch][row][col] = sum + initial;
       }

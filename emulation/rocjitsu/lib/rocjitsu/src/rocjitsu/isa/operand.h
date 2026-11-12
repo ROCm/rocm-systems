@@ -316,6 +316,8 @@ public:
 
   /// @brief Assign the GFX12 VGPR high-bank role for this operand.
   void set_vgpr_msb_role(amdgpu::VgprMsbRole role) { vgpr_msb_role_ = role; }
+  void set_vopd_source() { vopd_source_ = true; }
+  [[nodiscard]] bool is_vopd_source() const { return vopd_source_; }
 
   /// @brief Return the GFX12 VGPR high-bank role for this operand.
   [[nodiscard]] amdgpu::VgprMsbRole vgpr_msb_role() const { return vgpr_msb_role_; }
@@ -515,6 +517,7 @@ protected:
   LaneInlineFloatFormat lane_inline_float_format_ : 2 = LaneInlineFloatFormat::F16;
   bool preserve_unwritten_bytes_ : 1 = false;
   EncodingError encoding_error_ = EncodingError::None;
+  bool vopd_source_ = false;
 
 private:
   // Private SIMD fast-path backend for RegisterAccess.
