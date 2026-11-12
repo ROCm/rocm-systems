@@ -50,12 +50,15 @@
 #   RCCL_TESTS_A2A_CTAS      device CTA count (-V) (default: 16)
 #   RCCL_TESTS_A2A_TIMEOUT_S per-run hang timeout in seconds (default: 900)
 #   RCCL_TESTS_A2A_CONN_RETRIES  connectivity-gate retries (default: 5)
+#   RCCL_TESTS_A2A_EXPECT_LSA_LANE  set to 1 where the fabric LSA lane must arm
+#                            (MI450 fabric); otherwise lsa-on accepts either lane
 #
 # Verified on 8x MI355X (ROCm 7.13, NCCL_GIN_TYPE=7, force1ch): 256 MiB/peer and
 # 2 GiB/peer int32 and the 2 GiB-total guard all pass with #wrong=0, no hang
 # (busbw ~424-428 GB/s).
 
 import os
+import re
 import shlex
 
 import pytest
@@ -92,6 +95,8 @@ TIMEOUT_S = env_int("RCCL_TESTS_A2A_TIMEOUT_S", 900)
 CONN_RETRIES = env_int("RCCL_TESTS_A2A_CONN_RETRIES", 5)
 MPI_OPTS = shlex.split(os.environ.get("RCCL_TESTS_MPI_OPTS", ""))
 XENV = shlex.split(os.environ.get("RCCL_TESTS_A2A_XENV", ""))
+EXPECT_LSA_LANE = os.environ.get("RCCL_TESTS_A2A_EXPECT_LSA_LANE", "") not in ("", "0")
+A2A_LANE_RE = re.compile(r"^#\[a2a-lane\]\s+(\S+)", re.M)
 
 pytestmark = pytest.mark.skipif(
     not _enabled,
@@ -166,5 +171,19 @@ _FABRIC_LSA_ENV = ("RCCL_GIN_ANVIL_FABRIC_MEM=1", "RCCL_GIN_ANVIL_FABRIC_LSA_A2A
 @pytest.mark.parametrize("lane", [False, True], ids=["lsa-off", "lsa-on"])
 @pytest.mark.parametrize("dtype", ["float", "int32"])
 def test_AllToAllGinFabricLsaLane(request, lane, dtype):
-    rc, _ = _run_a2a(request, 64 * 1024 * NP, dtype, _FABRIC_LSA_ENV if lane else ())
+    env = ("RCCL_TESTS_A2A_LANE_LOG=1",) + (_FABRIC_LSA_ENV if lane else ())
+    rc, out = _run_a2a(request, 64 * 1024 * NP, dtype, env)
     assert rc == 0, "AllToAll data check failed (nonzero exit), lane={}, dtype={}".format(lane, dtype)
+    lanes = set(A2A_LANE_RE.findall(out or ""))
+    if not lane:
+        expected = {"gin-put"}
+    elif EXPECT_LSA_LANE:
+        expected = {"lsa"}
+    else:
+        expected = None
+    if expected is None:
+        assert lanes and lanes <= {"lsa", "gin-put"}, "no #[a2a-lane] line in the output: {}".format(lanes)
+    else:
+        assert lanes == expected, "AllToAll took lane(s) {}, expected {} (lane={}, dtype={})".format(
+            sorted(lanes), sorted(expected), lane, dtype
+        )

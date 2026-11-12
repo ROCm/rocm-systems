@@ -152,6 +152,16 @@ endif()
 add_rccl_test(all_gather)
 add_rccl_test(all_reduce)
 add_rccl_test(alltoall)
+add_rccl_test(alltoallv)
+add_rccl_test(broadcast)
+add_rccl_test(gather)
+add_rccl_test(hypercube)
+add_rccl_test(reduce_scatter)
+add_rccl_test(reduce)
+add_rccl_test(scatter)
+add_rccl_test(sendrecv)
+add_rccl_test(all_reduce_bias)
+
 if (ENABLE_DEVICE_API)
     set(_rccl_device_inc "")
     get_filename_component(_rccl_pkg_prefix "${RCCL_DIR}/../../.." ABSOLUTE)
@@ -170,27 +180,18 @@ if (ENABLE_DEVICE_API)
             endif()
         endforeach()
     endif()
-    # common.cu (rccl_common) must see the same ncclDevComm as librccl, and
-    # alltoall.cu the same nccl_device/gin headers. Keep the install prefix
-    # ahead of hip::device's /opt/rocm. Do not add ${RCCL_SOURCE_DIR}/src/include:
-    # it shadows rccl-tests os.h.
+    # rccl_common and every *_perf test read ncclDevComm and the nccl_device
+    # headers, and all of them must see the layout librccl was built with. Keep
+    # the install prefix ahead of hip::device's /opt/rocm. Do not add
+    # ${RCCL_SOURCE_DIR}/src/include: it shadows rccl-tests os.h.
     if (_rccl_device_inc)
-        foreach(_rccl_dev_tgt rccl_common alltoall_perf all_gather_perf)
-            if (TARGET ${_rccl_dev_tgt})
-                target_include_directories(${_rccl_dev_tgt} BEFORE PRIVATE "${_rccl_device_inc}")
-            endif()
+        get_property(_rccl_dir_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+        list(FILTER _rccl_dir_targets INCLUDE REGEX "_perf$")
+        foreach(_rccl_dev_tgt rccl_common ${_rccl_dir_targets})
+            target_include_directories(${_rccl_dev_tgt} BEFORE PRIVATE "${_rccl_device_inc}")
         endforeach()
     endif()
 endif()
-add_rccl_test(alltoallv)
-add_rccl_test(broadcast)
-add_rccl_test(gather)
-add_rccl_test(hypercube)
-add_rccl_test(reduce_scatter)
-add_rccl_test(reduce)
-add_rccl_test(scatter)
-add_rccl_test(sendrecv)
-add_rccl_test(all_reduce_bias)
 
 if (ENABLE_ROCSHMEM_GIN AND RCCL_SOURCE_DIR)
     add_executable(gin_rocshmem_gda_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu)
