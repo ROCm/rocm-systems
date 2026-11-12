@@ -4,6 +4,7 @@
 // Elementwise floating-point workload registration across CPU and semantics modes.
 
 #include "benchmark/workloads.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 namespace rocjitsu::arith::test {
 

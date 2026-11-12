@@ -156,10 +156,12 @@ target_include_directories(
 rj_configure_target(rj_code_object_fuzz_test PRIVATE_INCLUDES WARNINGS)
 add_dependencies(rj_code_object_fuzz_test rj_code_object_fuzz)
 rj_add_gtest_tests(rj_code_object_fuzz_test)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
     NAME CodeObjectFuzzCliTest
     COMMAND
         ${CMAKE_COMMAND} -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_code_object_fuzz>
+        -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}
         -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/code-object-fuzz-cli -P
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/code_object/test_code_object_fuzz_cli.cmake
 )
@@ -2463,7 +2465,7 @@ set(_rj_interposer_drm_tests
     PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
-    TimestampUsesAdvertisedNanosecondClock
+    TimestampUsesAdvertisedDeviceClock
 )
 set(_rj_interposer_gem_tests
     LowAddressMappingHonorsMap32Bit
@@ -4557,6 +4559,10 @@ if(RJ_ENABLE_HIP_TESTS)
     endif()
 
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        if(HSA_RUNTIME64)
+            rj_add_hip_test(hip_shader_rtc_test ARCH gfx950 EXTRA_LIBS ${HSA_RUNTIME64})
+            rj_add_hip_test_case(hip_shader_rtc_test "HipShaderRtcTest.AqlKernelReadsTheCalibratedGpuClock")
+        endif()
         rj_add_hip_test(hip_hw_id_test ARCH gfx950)
         rj_add_hip_test_case(
             hip_hw_id_test

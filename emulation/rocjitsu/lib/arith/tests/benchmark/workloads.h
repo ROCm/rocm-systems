@@ -7,7 +7,7 @@
 
 #include "benchmark/sampling.h"
 #include "common/cpu.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <atomic>
 #include <chrono>
