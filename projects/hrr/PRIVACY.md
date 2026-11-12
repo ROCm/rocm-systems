@@ -12,27 +12,52 @@ fails when the manifest fields written by capture and the table below disagree.
 
 ## Scope
 
-HRR is responsible for:
+### In scope for HRR
 
-- recording nothing without the user's [consent](#consent), and writing an archive only to
-  the directory named by `HIP_HRR_CAPTURE_OUTPUT`. Apart from the archive, capture writes
-  only to stderr and the HIP log, and opens no network connection;
-- saying what an archive holds, on this page and in the notice described under
-  [Sharing an archive](#sharing-an-archive);
-- on Linux, protecting the archive on the machine that wrote it, as described under
-  [How the archive is protected on disk](#how-the-archive-is-protected-on-disk);
-- treating an archive as untrusted input at replay, within the limits described under
+- **User consent.** Capture starts only after the user's explicit [consent](#consent):
+  `HIP_HRR_CAPTURE_CONSENT=yes`, or the line `yes` in their consent file.
+- **Controlled capture location.** Archives are written only to the directory named by
+  `HIP_HRR_CAPTURE_OUTPUT`.
+- **No network communication during capture.** Apart from the archive, capture writes only
+  to stderr and the HIP log, and opens no network connection.
+- **Archive content transparency.** This page and the notice described under
+  [Sharing an archive](#sharing-an-archive) say what an archive may contain.
+- **Local filesystem access control.** On Linux, capture creates the archive with
+  directories 0700 and files 0600, as described under
+  [How the archive is protected on disk](#how-the-archive-is-protected-on-disk).
+- **Secure replay handling.** Replay treats an archive as untrusted input, within the limits
+  described under
   [Replay runs GPU code taken from the archive](#replay-runs-gpu-code-taken-from-the-archive).
+  It caps host memory, event count, file size, thread count and wall time.
 
-Out of scope, and left to the user:
+### Out of scope for HRR
 
-- protecting, storing, sharing and deleting an archive once capture has written it;
-- encrypting it. HRR encrypts nothing, so encrypt an archive before it leaves the machine;
-- data-protection, export and sanctions rules, and the licences of third-party code and
-  model weights, when an archive is shared or crosses borders;
-- sending an archive to AMD. HRR provides no channel for that;
-- an application, or an application owner, that is itself malicious. A process can change
-  what it records, and HRR does not detect that.
+- **Post-capture lifecycle.** Secure storage, handling, copying, backup, retention and
+  deletion after HRR creates the archive.
+- **Encryption.** HRR does not encrypt archives. Encryption at rest and in transit is the
+  user's responsibility.
+- **Sensitive-data identification and redaction.** Identifying or removing secrets,
+  credentials, personal data, proprietary or confidential information, model data or similar
+  content. HRR removes only what this page says it removes.
+- **Archive sharing and transfer.** Transferring or sending an archive securely, including
+  to AMD. HRR provides no channel for that.
+- **Compliance obligations.** Privacy and data-protection requirements, export controls,
+  sanctions, third-party licences and cross-border transfer requirements.
+- **Integrity and authenticity after capture.** Preventing or detecting later changes to an
+  archive. HRR does not sign archives.
+- **Privileged access.** Protection against root, privileged processes, a compromised
+  account of the capturing user, or changes by the archive's owner.
+- **Protection after movement.** Keeping the original file permissions when an archive is
+  copied, moved, extracted, uploaded or backed up. On Windows, capture sets no access rights
+  of its own.
+- **Malicious applications.** Detecting an application, or its owner, deliberately changing
+  what is captured.
+- **Retention and secure deletion.** Setting retention periods or guaranteeing secure
+  erasure from the underlying storage.
+- **Replay environment security.** Securing or isolating the machine an archive is replayed
+  on, beyond what HRR itself provides.
+- **Resource exhaustion beyond replay's caps.** GPU memory is not capped, and
+  `hrr-playback --repair` has no time limit.
 
 ## Replay runs GPU code taken from the archive
 
