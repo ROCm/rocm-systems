@@ -198,13 +198,13 @@ Built only with `PROFILER_HUB_ENABLE_PYTORCH_KINETO`. The `pytorch` registry ent
 
 | File | Role | Purpose |
 |---|---|---|
-| `kineto_loader.hpp`, `kineto_loader.cpp` | Reader | Streams a plain or gzip Kineto JSON trace into a flat event list with its names, categories, thread and process names. An optional cancel check is polled on each 1 MiB refill. |
-| `category_class.hpp`, `category_class.cpp` | Reader | Maps a Kineto category name, including the older spellings, to device or host work, launch site, and event type. |
+| `kineto_loader.hpp`, `kineto_loader.cpp` | Reader | Streams a plain or gzip Kineto JSON trace into a flat event list with its names, categories, thread and process names, each event's args as JSON text, the memory events, flow arrows, iteration markers and device entries, and the trace-wide members. Text-valued pids and tids get numbers from INT32_MAX down. An optional cancel check is polled on each 1 MiB refill. |
+| `category_class.hpp`, `category_class.cpp` | Reader | Maps a Kineto category name, including the older spellings, to device or host work, launch site, and event type; MTIA and CUDA sync categories also have a name that sets the type. |
 | `kineto_format.hpp`, `kineto_format.cpp` | Reader | Decides from the first 64 KiB of a trace's text whether it is a Kineto trace. |
-| `kineto_probe.hpp`, `kineto_probe.cpp` | Reader | The entry's recogniser (reads the first two bytes, inflates up to 64 KiB of a gzip file, applies the format check) and its probe, which reports success with version 0.0.0 and no GUIDs. |
-| `pytorch_store.hpp`, `pytorch_store.cpp` | Reader | Parses a file with the loader and groups the events into host-thread and GPU-stream tracks with their rows, sorted by start. Fails on a trace with no usable event. |
-| `pytorch_catalog.hpp`, `pytorch_catalog.cpp` | Reader | Moves the store's strings into the shared catalog and builds its node, process, thread, agent, stream and track entries. |
-| `pytorch_source.hpp`, `pytorch_source.cpp` | Reader | `pytorch_source`, the `format_source` for a Kineto file: parses in `load_catalog`, serves tracks from memory through the connection-source interface, keeps the parsed events for the life of the context, answers `track_of` from a table of id runs and the histogram from the track reader. Details, correlated events and call stacks answer with nothing; the summary and table queries are declined. |
+| `kineto_probe.hpp`, `kineto_probe.cpp` | Reader | The entry's recogniser (reads the first two bytes, inflates up to 64 KiB of a gzip file, applies the format check) and its probe, which reports success with the file's `schemaVersion` as the major version (0.0.0 when the text has none) and no GUIDs. |
+| `pytorch_store.hpp`, `pytorch_store.cpp` | Reader | Parses a file with the loader and groups the events into host-thread and GPU-stream tracks with their rows, sorted by start, and binds flow arrows to their events. Keeps the events and their args for the source. Fails on a trace with no usable event. |
+| `pytorch_catalog.hpp`, `pytorch_catalog.cpp` | Reader | Moves the store's strings into the shared catalog and builds its node, process, thread, agent, stream, stream-link and track entries. An agent is made for every device entry and every device an event names. |
+| `pytorch_source.hpp`, `pytorch_source.cpp` | Reader | `pytorch_source`, the `format_source` for a Kineto file: parses in `load_catalog`, serves tracks from memory through the connection-source interface, keeps the parsed events for the life of the context, answers `track_of` from a table of id runs and the histogram from the track reader. Answers details, call stacks, correlated events, the summary and the table queries from those events, and builds the memory tracks. |
 
 ## source/queries
 

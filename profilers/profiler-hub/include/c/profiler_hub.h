@@ -569,9 +569,9 @@ extern "C"
      * @note Cancellation is cooperative and does not require the future to be
      *       attached. A synchronous call such as ph_event_query_read observes
      *       the stop without attaching the future, so the same future can be
-     *       reused. The SQLite statement that call is running is interrupted.
+     *       reused. The read that call is running is interrupted.
      *       An asynchronous operation that has not started is skipped. A
-     *       running one stops at its next check, or when its statement is
+     *       running one stops at its next check, or when its read is
      *       interrupted, and ends with PH_FUTURE_CANCELLED. Cancelling an
      *       operation that already ended does not change its result.
      */
@@ -642,7 +642,7 @@ extern "C"
      * @param future Optional cancellation source. This synchronous call does
      *        not attach or complete it, so the same future can be reused.
      *        ph_future_cancel requests the stop this call observes and
-     *        interrupts the SQLite statement reading the page.
+     *        interrupts the read of the page.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
      *         pointer is null, @p capacity is 0, or @p event_type is unknown,
      *         PH_RESULT_INVALID_CONTEXT if the query has no trace,
@@ -664,7 +664,7 @@ extern "C"
      * @param last_id Out parameter. Set to 0 if the table is empty.
      * @param future Optional cancellation source. This synchronous call does
      *        not attach or complete it. ph_future_cancel requests the stop
-     *        this call observes and interrupts its SQLite statement.
+     *        this call observes and interrupts its read.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
      *         pointer is null or @p event_type is unknown,
      *         PH_RESULT_INVALID_CONTEXT if the query has no trace,
@@ -692,11 +692,11 @@ extern "C"
         void*                             user_data);
 
     /**
-     * @brief Aggregates matching events by display name inside SQLite.
+     * @brief Aggregates matching events by display name.
      *        Durations are end minus start, in trace ticks.
      * @param future Optional cancellation source. This synchronous call does
      *        not attach or complete it. ph_future_cancel requests the stop
-     *        this call observes and interrupts its SQLite statement.
+     *        this call observes and interrupts its read.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
      *         pointer is null or @p event_type is unknown,
      *         PH_RESULT_INVALID_CONTEXT if the query has no trace,

@@ -116,9 +116,10 @@ the gzip magic it inflates up to 64 KiB, otherwise it reads up to 64 KiB of text
 After an optional UTF-8 BOM the text must start with `{` and name `traceEvents`
 and one of `schemaVersion`, `deviceProperties`, `distributedInfo`,
 `baseTimeNanoseconds` or `cpu_op`. Any read or inflate error means the file is
-not its own. Its probe reads nothing more and reports success with version 0.0.0
-and no GUIDs, so a file that starts like a Kineto trace but holds bad JSON fails
-later, at load. A SQLite file starts with `S`, so no file matches both entries.
+not its own. Its probe reads the same text and reports success with the file's
+`schemaVersion` as the major version, or 0.0.0 when the text has no integer
+`schemaVersion`, and no GUIDs, so a file that starts like a Kineto trace but
+holds bad JSON fails later, at load. A SQLite file starts with `S`, so no file matches both entries.
 
 The probed schema and version form a `trace_format_t`. The entry for that
 schema says which versions this build reads and maps the version to two
@@ -239,8 +240,9 @@ second with a path list and no cache.
       serially, and polls the load's cancel check on each 1 MiB refill of the
       input. It then fills the catalog and numbers the events: tracks run 0 to
       N-1, host threads by (pid, tid) and then GPU streams by (device, stream),
-      and event ids are dense per event type from 1 in track order. A Kineto file
-      is parsed on every open, also when a catalog cache folder is given.
+      then the memory tracks, and event ids are dense per event type from 1 in
+      track order. A Kineto file is parsed on every open, also when a catalog
+      cache folder is given.
    3. On a cache miss, `save_catalog_aggregates` (schema 2) or
       `save_derived_tracks` (schema 3) writes the catalog file.
    4. `initialize_track_list` publishes tracks and assigns global ids.
