@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
+  - When the `amdgpu` driver is not loaded, the command now exits with a clear driver-not-loaded message and exit code 206 instead of an unhandled exception.
+
 - **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
   - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
 
