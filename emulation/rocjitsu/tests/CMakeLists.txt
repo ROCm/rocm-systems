@@ -110,7 +110,7 @@ set_tests_properties(
     RocjitsuCpuThreadBudgetRejectsNonNumeric
     PROPERTIES
         PASS_REGULAR_EXPRESSION
-            "--cpu-thread-budget requires an unsigned integer"
+            "--cpu-thread-budget: expected unsigned decimal integer"
 )
 
 add_test(
@@ -156,10 +156,12 @@ target_include_directories(
 rj_configure_target(rj_code_object_fuzz_test PRIVATE_INCLUDES WARNINGS)
 add_dependencies(rj_code_object_fuzz_test rj_code_object_fuzz)
 rj_add_gtest_tests(rj_code_object_fuzz_test)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
     NAME CodeObjectFuzzCliTest
     COMMAND
         ${CMAKE_COMMAND} -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_code_object_fuzz>
+        -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}
         -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/code-object-fuzz-cli -P
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/code_object/test_code_object_fuzz_cli.cmake
 )
@@ -172,6 +174,31 @@ target_link_libraries(
 rj_configure_target(rj_execution_fuzz_test PRIVATE_INCLUDES WARNINGS)
 add_dependencies(rj_execution_fuzz_test rj_execution_fuzz)
 rj_add_gtest_tests(rj_execution_fuzz_test)
+
+add_executable(
+    rj_concurrent_dispatch_fuzz_test
+    fuzz/concurrent_dispatch/concurrent_dispatch_fuzz_test.cpp
+)
+target_link_libraries(
+    rj_concurrent_dispatch_fuzz_test
+    PRIVATE
+        rj_concurrent_dispatch_fuzz_core
+        rocjitsu_isa_registry
+        GTest::gtest_main
+)
+rj_configure_target(rj_concurrent_dispatch_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_concurrent_dispatch_fuzz_test rj_concurrent_dispatch_fuzz)
+rj_add_gtest_tests(rj_concurrent_dispatch_fuzz_test)
+add_test(
+    NAME ConcurrentDispatchFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND}
+        -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_concurrent_dispatch_fuzz>
+        -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/concurrent-dispatch-fuzz-cli
+        -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/concurrent_dispatch/test_concurrent_dispatch_fuzz_cli.cmake
+)
+set_tests_properties(ConcurrentDispatchFuzzCliTest PROPERTIES TIMEOUT 120)
 
 add_executable(
     rj_multiplexer_fuzz_test
@@ -193,6 +220,21 @@ add_test(
 )
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+if(
+    CMAKE_SYSTEM_NAME STREQUAL "Linux"
+    AND NOT CMAKE_CROSSCOMPILING
+    AND CMAKE_GENERATOR MATCHES "^Ninja"
+)
+    add_test(
+        NAME cmake.build_path_cache
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_build_path_cache.py
+            ${CMAKE_COMMAND} ${CMAKE_CXX_COMPILER} "${CMAKE_CXX_COMPILER_ARG1}"
+            ${CMAKE_MAKE_PROGRAM}
+    )
+    set_tests_properties(cmake.build_path_cache PROPERTIES SKIP_RETURN_CODE 77)
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Exercise the native runtime resolved by the configured Python environment.
     # Reinstall native changes first, or put an uninstalled build on PATH when
@@ -405,9 +447,9 @@ add_executable(
     legacy_page_table_cache_test.cpp
     config_test.cpp
     checkpoint_restore_errors_test.cpp
-    rj_arith_bridge_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
+    rj_arith_bridge_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
@@ -434,9 +476,11 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_memory_snapshot_test.cpp
+    rdna1_memory_test.cpp
     ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
     flat_lds_transfer_test.cpp
+    rdna35_memory_test.cpp
     scalar_buffer_store_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
@@ -446,6 +490,7 @@ add_executable(
     instruction_cache_test.cpp
     async_mma_policy_test.cpp
     matrix_coexecution_test.cpp
+    matrix_execution_error_test.cpp
     packed_fmac_constants_test.cpp
     matrix_coexecution_lifetime_test.cpp
     sparse_memory_test.cpp
@@ -457,7 +502,10 @@ add_executable(
     simulated_kfd_test.cpp
     kfd_events_test.cpp
     decode_smoke_test.cpp
+    rdna2_memory_test.cpp
     rdna4_dot_dpp_test.cpp
+    rdna1_valu_test.cpp
+    rdna4_memory_test.cpp
     readlane_selector_test.cpp
     pc_extension_test.cpp
     pc_fetch_test.cpp
@@ -466,6 +514,7 @@ add_executable(
     buffer_descriptor_vcc_test.cpp
     buffer_format_test.cpp
     image_access_test.cpp
+    image_addressing_test.cpp
     image_resource_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
@@ -484,6 +533,7 @@ add_executable(
     output_modifier_test.cpp
     source_modifier_test.cpp
     amdgpu_elf_test_support.cpp
+    amdgpu_elf_test_support_test.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
     patch/log_buffer_test.cpp
@@ -533,6 +583,7 @@ add_executable(
     register_access_test.cpp
     register_file_test.cpp
     simd_correctness/mfma_lazy_storage_test.cpp
+    simd_correctness/mfma_register_paths_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
     vop3_conversion_modifiers_test.cpp
@@ -551,6 +602,7 @@ add_executable(
     scalar_atomic_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
+    rdna4_scalar_test.cpp
     scalar_f16_constant_test.cpp
     vector16_inline_constant_test.cpp
     scalar_scc_test.cpp
@@ -558,6 +610,7 @@ add_executable(
     cbranch_fork_join_test.cpp
     isa_diagnostics_test.cpp
     clocked_issue_cycle_test.cpp
+    wavefront_slot_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp
@@ -749,11 +802,13 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_test_path(rocjitsu_tests PLUGIN_LOADER_FIXTURE_DIR "${PLUGIN_LOADER_FIXTURE_DIR}")
+    rj_add_test_path(rocjitsu_tests PLUGIN_LOADER_RACE_DIR "$<TARGET_FILE_DIR:rocjitsu_plugin_race_so>")
     add_dependencies(
         rocjitsu_tests
         plugin_loader_fixture_good
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
+        rocjitsu_plugin_race_so
     )
     if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
         rj_add_test_path(rocjitsu_tests PERFSIM_FAKE_BACKEND_PATH "$<TARGET_FILE:rocjitsu_perfsim_fake_backend>")
@@ -1032,6 +1087,23 @@ if(RJ_BUILD_CONSAN_ANALYZER)
     endif()
 endif()
 
+# Host-only checked anchor regressions use model ISA providers.
+add_executable(rocjitsu_text_edit_tests patch/checked_text_edits_test.cpp)
+target_include_directories(
+    rocjitsu_text_edit_tests
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(
+    rocjitsu_text_edit_tests
+    PRIVATE
+        rocjitsu_dbt_internal
+        rocjitsu_amdgpu_isa_model_registry
+        simdojo_headers
+        GTest::gtest_main
+)
+rj_configure_target(rocjitsu_text_edit_tests PRIVATE_INCLUDES WARNINGS)
+rj_add_gtest_tests(rocjitsu_text_edit_tests)
+
 # These existing suites exercise ELF inspection, CFG construction, kernel
 # reachability, and register queries using only the static-analysis composition.
 add_executable(
@@ -1129,42 +1201,140 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_configure_target(cache_allocation_failure_test WARNINGS)
     rj_add_gtest_tests(cache_allocation_failure_test)
 
-    # Isolate the process-wide replacement operator new from rocjitsu_tests.
+    # Keep allocation injection isolated from the main test executable.
     add_executable(
-        file_loading_allocation_failure_test
-        code/file_loading_allocation_failure_test.cpp
-    )
-    target_include_directories(
-        file_loading_allocation_failure_test
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+        queue_registration_allocation_failure_test
+        queue_registration_allocation_failure_test.cpp
     )
     target_link_libraries(
-        file_loading_allocation_failure_test
+        queue_registration_allocation_failure_test
         PRIVATE
-            rocjitsu_dbt_internal
-            rocjitsu_cdna5_model_registry
-            simdojo_headers
+            ${RJ_OBJECT_LIBS}
+            util
+            flatbuffers
+            Threads::Threads
             GTest::gtest_main
     )
-    rj_configure_target(file_loading_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
-    rj_add_gtest_tests(file_loading_allocation_failure_test)
+    rj_configure_target(queue_registration_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_gtest_tests(queue_registration_allocation_failure_test)
 
-    # Exercise the model ISA contract in a decoder-only final link.
-    add_executable(rocjitsu_model_only_test model_only_isa_test.cpp)
-    target_include_directories(
-        rocjitsu_model_only_test
-        PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR}
-    )
+    # Native dispatch must extract both the relative tables and their factories
+    # from a static archive, including when the C++ objects use LTO.
+    add_library(rocjitsu_cdna5_test_archive STATIC)
     target_link_libraries(
-        rocjitsu_model_only_test
-        PRIVATE
-            rocjitsu_dbt_internal
-            rocjitsu_cdna5_model_registry
-            simdojo_headers
-            GTest::gtest_main
+        rocjitsu_cdna5_test_archive
+        PRIVATE rocjitsu_cdna5_model_registry
     )
-    rj_configure_target(rocjitsu_model_only_test TEST)
+    function(rj_add_model_decoder_test target)
+        add_executable(${target} model_only_isa_test.cpp ${ARGN})
+        target_link_libraries(
+            ${target}
+            PRIVATE
+                rocjitsu_cdna5_test_archive
+                rocjitsu_dbt_internal
+                simdojo_headers
+                GTest::gtest_main
+        )
+        rj_configure_target(${target} PRIVATE_INCLUDES WARNINGS)
+    endfunction()
+
+    rj_add_model_decoder_test(rocjitsu_model_only_test)
     rj_add_gtest_tests(rocjitsu_model_only_test)
+    if(CMAKE_EXECUTABLE_FORMAT STREQUAL "ELF" AND CMAKE_NM AND CMAKE_READELF)
+        set(_decoder_sources
+            "${ROCJITSU_SRC_DIR}/rocjitsu/isa/arch/amdgpu/generated"
+        )
+        set(_check_decoder_layout
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/check_relative_decode_table.py"
+            "${CMAKE_NM}"
+            "${CMAKE_READELF}"
+            "${_decoder_sources}"
+        )
+        add_test(
+            NAME ModelOnlyIsaTest.DecodeTableLayout
+            COMMAND
+                ${_check_decoder_layout} $<TARGET_FILE:rocjitsu_model_only_test>
+                cdna5
+                "--table-object=$<FILTER:$<TARGET_OBJECTS:rocjitsu_isa_cdna5_model>,INCLUDE,/decode_tables[.]S[.]o$>"
+        )
+        # The model-only fixture records the expected mode for this build.
+        add_dependencies(rocjitsu_analysis_tests rocjitsu_model_only_test)
+        add_test(
+            NAME StaticAnalysis.DecodeTableLayout
+            COMMAND
+                ${_check_decoder_layout} $<TARGET_FILE:rocjitsu_analysis_tests>
+                --mode-from $<TARGET_FILE:rocjitsu_model_only_test>
+        )
+
+        if(
+            CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$"
+            AND CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$"
+            AND CMAKE_SIZEOF_VOID_P EQUAL 8
+        )
+            # GCC exercises the medium model. Clang needs the archive's LLVM
+            # code model under LTO, so expose the same fallback to its preprocessor.
+            rj_add_model_decoder_test(rocjitsu_model_switch_test "${_decoder_sources}/cdna5/decoder.cpp")
+            target_compile_options(
+                rocjitsu_model_switch_test
+                PRIVATE
+                    $<$<CXX_COMPILER_ID:GNU>:-mcmodel=medium>
+                    $<$<CXX_COMPILER_ID:Clang>:-U__code_model_small__>
+            )
+            rj_add_gtest_tests(rocjitsu_model_switch_test TEST_PREFIX Portable.)
+            add_test(
+                NAME Portable.ModelOnlyIsaTest.DecodeTableLayout
+                COMMAND
+                    ${_check_decoder_layout}
+                    $<TARGET_FILE:rocjitsu_model_switch_test> cdna5
+                    --expect-switch
+            )
+
+            # Noncanonical CFI traps a valid assembly target if the factory
+            # declaration loses its canonical jump-table attribute.
+            if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND _rj_ipo_ok)
+                set(_cfi_options
+                    -flto=thin
+                    -fsanitize=cfi-icall
+                    -fsanitize-trap=cfi-icall
+                    -fno-sanitize-cfi-canonical-jump-tables
+                )
+                add_executable(
+                    rocjitsu_decode_table_cfi_test
+                    decode_table_cfi_test.cpp
+                    decode_table_cfi_test.S
+                )
+                set_source_files_properties(
+                    decode_table_cfi_test.S
+                    PROPERTIES
+                        LANGUAGE CXX
+                        COMPILE_OPTIONS
+                            "-x;assembler-with-cpp;-Wno-unused-command-line-argument"
+                )
+                target_link_libraries(
+                    rocjitsu_decode_table_cfi_test
+                    PRIVATE util
+                )
+                target_compile_options(
+                    rocjitsu_decode_table_cfi_test
+                    PRIVATE ${_cfi_options}
+                )
+                target_link_options(
+                    rocjitsu_decode_table_cfi_test
+                    PRIVATE ${_cfi_options}
+                )
+                rj_configure_target(rocjitsu_decode_table_cfi_test PRIVATE_INCLUDES WARNINGS HIDDEN)
+                add_test(
+                    NAME DecodeTableTest.NoncanonicalCfi
+                    COMMAND rocjitsu_decode_table_cfi_test
+                )
+                set_tests_properties(
+                    DecodeTableTest.NoncanonicalCfi
+                    PROPERTIES SKIP_RETURN_CODE 77
+                )
+            endif()
+        endif()
+    endif()
     add_test(
         NAME ModelOnlyIsaTest.SymbolBoundary
         COMMAND
@@ -1417,6 +1587,13 @@ add_dependencies(
     rj_dbt_translate
     rj_decode_benchmark
 )
+if(TARGET rj_pretranslate)
+    add_dependencies(rj_dbt_translate_smoke_test rj_pretranslate)
+    set(RJ_DBT_SMOKE_PRETRANSLATE "$<TARGET_FILE:rj_pretranslate>")
+    set(RJ_DBT_SMOKE_INSTALLED_PRETRANSLATE
+        "\${RJ_INSTALLED_BINDIR}/rj_pretranslate"
+    )
+endif()
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(rj_dbt_translate_smoke_test)
     rj_install_test_target(rj_dbt_translate)
@@ -1428,11 +1605,12 @@ rj_add_test(
         rj_dbt_translate_smoke_test
         $<TARGET_FILE:rj_dbt_translate>
         $<TARGET_FILE:rj_decode_benchmark>
+        ${RJ_DBT_SMOKE_PRETRANSLATE}
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     INSTALL_COMMAND
         "bin/rj_dbt_translate_smoke_test"
         "bin/rj_dbt_translate"
-        "bin/rj_decode_benchmark"
+        "bin/rj_decode_benchmark" ${RJ_DBT_SMOKE_INSTALLED_PRETRANSLATE}
 )
 
 # --- Interposer tests run through the rocjitsu CLI launcher ---
@@ -1991,6 +2169,34 @@ rj_configure_target(util_force_scalar_probe TEST)
 add_dependencies(rocjitsu_tests util_force_scalar_probe)
 rj_add_test_path(rocjitsu_tests RJ_FORCE_SCALAR_PROBE_MODULE "$<TARGET_FILE:util_force_scalar_probe>")
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(operand_delegate_probe MODULE operand_delegate_probe.cpp)
+    target_link_libraries(operand_delegate_probe PRIVATE util simdojo_headers)
+    rj_configure_target(operand_delegate_probe LIB)
+    # The probe enters the executable's delegate scope without linking another
+    # simulator image. Keep the export limited to that shared state accessor.
+    target_link_options(
+        rocjitsu_tests
+        PRIVATE
+            "LINKER:--export-dynamic-symbol=_ZN8rocjitsu21ScopedOperandDelegate12active_countEv"
+    )
+    if(RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR)
+        # Header-only operand access must not reference the simulator's hidden RTTI.
+        target_compile_options(
+            operand_delegate_probe
+            PRIVATE -fno-sanitize=vptr
+        )
+    endif()
+    add_dependencies(rocjitsu_tests operand_delegate_probe)
+    rj_add_test_path(rocjitsu_tests RJ_OPERAND_DELEGATE_PROBE_MODULE "$<TARGET_FILE_NAME:operand_delegate_probe>")
+    if(RJ_INSTALL_TESTS)
+        install(
+            TARGETS operand_delegate_probe
+            LIBRARY DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
+        )
+    endif()
+endif()
+
 # --- Interposer loader initialization regression tests ---
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -2039,11 +2245,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
     )
     rj_configure_target(vm_shared_memory_api_test TEST)
-    target_compile_definitions(
+    rj_add_test_path(
         vm_shared_memory_api_test
-        PRIVATE
-            RJ_VM_API_LIBRARY="$<TARGET_FILE:rocjitsu_shared>"
-            RJ_VM_API_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/race-detector/race_test_config.json"
+        RJ_VM_API_LIBRARY
+        "$<TARGET_FILE:rocjitsu_shared>"
+    )
+    rj_add_test_path(
+        vm_shared_memory_api_test
+        RJ_VM_API_CONFIG
+        "${CMAKE_CURRENT_SOURCE_DIR}/race-detector/race_test_config.json"
     )
     add_dependencies(vm_shared_memory_api_test rocjitsu_shared rocjitsu_memory)
     foreach(_backing IN ITEMS native zero-hard-limit)
@@ -2206,6 +2416,7 @@ endfunction()
 
 set(_rj_interposer_dup_tests
     ConstructorPreservesDescriptorLimit
+    ConstructorPreparesTopologyBeforeFileLimitDrops
     DupKeepsKfdRoutingAfterPrimaryClose
     FcntlDupfdKeepsKfdRouting
     Dup2OverPrimaryInvalidatesKfdIdentity
@@ -2254,7 +2465,7 @@ set(_rj_interposer_drm_tests
     PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
-    TimestampUsesAdvertisedNanosecondClock
+    TimestampUsesAdvertisedDeviceClock
 )
 set(_rj_interposer_gem_tests
     LowAddressMappingHonorsMap32Bit
@@ -2336,6 +2547,7 @@ rj_add_interposer_test_suite(
 )
 
 set(_rj_interposer_pm4_tests
+    UnsupportedGdsResetLeavesQueueUsable
     SparseReplacementPreservesResidentTail
     SubmissionFenceQueryPollsAndWaitsForCompletion
     SubmissionFenceSequencesAreLocalToContextAndEngine
@@ -2377,6 +2589,7 @@ set(_rj_interposer_pm4_tests
     MergedSyncFilesRetainPendingFenceAcrossDupAndImport
     ThreadDimensionsMaskPartialGroupsForDirectAndIndirectDispatch
     GridProductOverflowFailsFence
+    IndirectBranchFetchesHighVaShader
     UnmappedShaderFailsFence
     OversizedLdsFailsFence
     FailedFenceIsStillAvailable
@@ -2430,6 +2643,17 @@ foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700)
         TokenLargeFenceOnlyBufferNeedsTemporaryAttachment
         CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
         SUFFIX ".fallback" PREFIX prlimit --fsize=4096:4096
+    )
+endforeach()
+
+foreach(
+    _config
+    IN
+    ITEMS gfx90a_mi210_kmd gfx942_cdna3_kmd gfx950_mi350x_kmd gfx1250_mi455x
+)
+    rj_add_interposer_test_suite(
+        InterposerPm4Test IndirectBranchFetchesHighVaShader
+        CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
     )
 endforeach()
 
@@ -4335,6 +4559,10 @@ if(RJ_ENABLE_HIP_TESTS)
     endif()
 
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        if(HSA_RUNTIME64)
+            rj_add_hip_test(hip_shader_rtc_test ARCH gfx950 EXTRA_LIBS ${HSA_RUNTIME64})
+            rj_add_hip_test_case(hip_shader_rtc_test "HipShaderRtcTest.AqlKernelReadsTheCalibratedGpuClock")
+        endif()
         rj_add_hip_test(hip_hw_id_test ARCH gfx950)
         rj_add_hip_test_case(
             hip_hw_id_test

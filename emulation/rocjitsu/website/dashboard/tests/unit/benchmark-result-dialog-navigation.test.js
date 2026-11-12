@@ -1,6 +1,7 @@
 import { Children, isValidElement } from 'react';
 import { expect, test, vi, beforeEach } from 'vitest';
-import { Dialog, DialogActions, Button } from '@mui/material';
+import { Dialog, DialogActions } from '@mui/material';
+import ActionButton from '../../src/components/shared/ActionButton.jsx';
 import BenchmarksView from '../../src/components/views/BenchmarksView.jsx';
 import ChartPointSelector from '../../src/components/benchmarks/ChartPointSelector.jsx';
 import BenchmarkResultDialog from '../../src/components/benchmarks/BenchmarkResultDialog.jsx';
@@ -36,13 +37,13 @@ beforeEach(() => { hooks.values = []; hooks.cursor = 0; });
 test('result action sits in inspector actions and details close preserves inspection and selected attempt', () => {
   let tree = openInspect();
   const actions = nodes(inspector(tree)).find((node) => node.type === DialogActions);
-  const action = nodes(actions).find((node) => node.type === Button && node.props.children === 'Open result details');
+  const action = nodes(actions).find((node) => node.type === ActionButton && node.props.children === 'Open result details');
   expect(action).toBeDefined();
 
   const choice = selector(tree).props.options[1];
   selector(tree).props.onSelectionChange(choice.id);
   tree = render();
-  nodes(inspector(tree)).find((node) => node.type === Button && node.props.children === 'Open result details').props.onClick();
+  nodes(inspector(tree)).find((node) => node.type === ActionButton && node.props.children === 'Open result details').props.onClick();
   tree = render();
   expect(details(tree).props.record).toEqual(choice.record);
   expect(inspector(tree).props.open).toBe(true);
@@ -58,7 +59,7 @@ test('result action sits in inspector actions and details close preserves inspec
   const another = selector(tree).props.options[0];
   selector(tree).props.onSelectionChange(another.id);
   tree = render();
-  nodes(inspector(tree)).find((node) => node.type === Button && node.props.children === 'Open result details').props.onClick();
+  nodes(inspector(tree)).find((node) => node.type === ActionButton && node.props.children === 'Open result details').props.onClick();
   expect(details(render()).props.record).toEqual(another.record);
   details(render()).props.onClose();
   inspector(render()).props.onClose({}, 'backdropClick');
@@ -69,7 +70,7 @@ test('result action sits in inspector actions and details close preserves inspec
 
 test('opening a record must not clear the inspector workload', () => {
   const tree = openInspect();
-  nodes(inspector(tree)).find((node) => node.type === Button && node.props.children === 'Open result details').props.onClick();
+  nodes(inspector(tree)).find((node) => node.type === ActionButton && node.props.children === 'Open result details').props.onClick();
   expect(inspector(render()).props.open).toBe(true);
 });
 
@@ -79,7 +80,7 @@ test('selector has bounded search and controlled selection without an inline act
   const onSelectionChange = vi.fn();
   const props = { label: 'Published attempt', options, selectedId: '', onSelectionChange };
   const tree = ChartPointSelector(props);
-  expect(nodes(tree).some((node) => node.type === Button)).toBe(false);
+  expect(nodes(tree).some((node) => node.type === ActionButton)).toBe(false);
   const autocomplete = nodes(tree).find((node) => node.props.options === options);
   expect(autocomplete.props.filterOptions(options, { inputValue: '', getOptionLabel: (option) => option.label })).toHaveLength(50);
   expect(autocomplete.props.value).toBe(options[0]);

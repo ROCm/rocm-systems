@@ -5,13 +5,13 @@
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "fp/x86_64/fma_exact_x86_64_v4.h"
-#include "common/internal.h"
 #include "common/simd.h"
+#include "common/validation.h"
 #include "common/x86_64/alu_x86_64_v4.h"
 #include "fp/binary.h"
 #include "fp/div_fmas.h"
 #include "fp/scalar_repair.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -38,8 +38,10 @@ __m256 narrow_product_f32(__m512d p, unsigned instruction_flags) {
 // Adapted from rj_arith-x86-lab wider512; matches the inherited rocjitsu MUL model.
 // Combines exact FP64 products with embedded narrowing. Within this normal
 // domain, the exact-product comparison also yields inherited MUL exceptions.
+// DX9 zero lanes are exact +0 in the inherited model, whatever the other source holds.
 bool mul_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-                         uint32_t *d, const uint32_t *a, const uint32_t *b, uint32_t *state) {
+                         uint32_t *d, const uint32_t *a, const uint32_t *b, uint32_t *state,
+                         bool dx9_zero) {
   if (instruction_flags & RJ_ARITH_ALU_OMOD_HALF) {
     return false;
   }
@@ -48,6 +50,9 @@ bool mul_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instructio
   if (report && rounding) {
     return false;
   }
+  // Guest input flushing makes denormal sources DX9 zeros.
+  const auto zero_limit =
+      _mm256_set1_epi32(flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS ? 0x00800000 : 1);
 
   // Zero and product exponents [-126, 126] cannot underflow or overflow.
   __m256i out[4];
@@ -57,12 +62,17 @@ bool mul_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instructio
          bb = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + i));
     auto ma = _mm256_and_si256(aa, _mm256_set1_epi32(0x7fffffff)),
          mb = _mm256_and_si256(bb, _mm256_set1_epi32(0x7fffffff));
-    if (_mm256_cmplt_epu32_mask(_mm256_sub_epi32(ma, _mm256_set1_epi32(1)),
-                                _mm256_set1_epi32(0x007fffff)) ||
-        _mm256_cmpge_epu32_mask(ma, _mm256_set1_epi32(0x7f800000)) ||
-        _mm256_cmplt_epu32_mask(_mm256_sub_epi32(mb, _mm256_set1_epi32(1)),
-                                _mm256_set1_epi32(0x007fffff)) ||
-        _mm256_cmpge_epu32_mask(mb, _mm256_set1_epi32(0x7f800000))) {
+    __mmask8 zero = 0;
+    if (dx9_zero) {
+      zero = _mm256_cmplt_epu32_mask(ma, zero_limit) | _mm256_cmplt_epu32_mask(mb, zero_limit);
+    }
+    if ((_mm256_cmplt_epu32_mask(_mm256_sub_epi32(ma, _mm256_set1_epi32(1)),
+                                 _mm256_set1_epi32(0x007fffff)) |
+         _mm256_cmpge_epu32_mask(ma, _mm256_set1_epi32(0x7f800000)) |
+         _mm256_cmplt_epu32_mask(_mm256_sub_epi32(mb, _mm256_set1_epi32(1)),
+                                 _mm256_set1_epi32(0x007fffff)) |
+         _mm256_cmpge_epu32_mask(mb, _mm256_set1_epi32(0x7f800000))) &
+        ~zero) {
       return false;
     }
     if (instruction_flags & RJ_ARITH_ALU_ABS_A) {
@@ -82,13 +92,14 @@ bool mul_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instructio
                                  _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
     auto e =
         _mm512_and_si512(_mm512_srli_epi64(_mm512_castpd_si512(p), 52), _mm512_set1_epi64(2047));
-    if ((_mm512_cmplt_epi64_mask(e, _mm512_set1_epi64(897)) &
-         _mm512_cmp_pd_mask(p, _mm512_setzero_pd(), _CMP_NEQ_OQ)) ||
-        _mm512_cmpgt_epi64_mask(e, _mm512_set1_epi64(1149))) {
+    if (((_mm512_cmplt_epi64_mask(e, _mm512_set1_epi64(897)) &
+          _mm512_cmp_pd_mask(p, _mm512_setzero_pd(), _CMP_NEQ_OQ)) |
+         _mm512_cmpgt_epi64_mask(e, _mm512_set1_epi64(1149))) &
+        ~zero) {
       return false;
     }
     auto rounded = narrow_product_f32(p, rounding);
-    auto u = _mm256_castps_si256(rounded);
+    auto u = _mm256_mask_mov_epi32(_mm256_castps_si256(rounded), zero, _mm256_setzero_si256());
     if (report &&
         (_mm512_cmp_pd_mask(p, _mm512_cvtps_pd(rounded), _CMP_NEQ_OQ) & ((exec_mask >> i) & 255))) {
       causes |= RJ_ARITH_EXCEPTION_INEXACT;

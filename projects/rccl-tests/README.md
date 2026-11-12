@@ -125,6 +125,20 @@ For MPI (using MPICH), you need to use a command similar to the following:
 mpirun.mpich -np 8 -env NCCL_DEBUG=VERSION -env HSA_NO_SCRATCH_RECLAIM=1 ./build/all_reduce_perf -b 8M -e 128M -i 8388608 -g 1 -d bfloat16
 ```
 
+#### Socket encryption (TLS)
+
+`NCCL_TESTS_TLS_PSK=<key>` makes every process call `ncclSetEncryption()` with this pre-shared key
+before the communicator is created, so RCCL's bootstrap, proxy and socket-transport TCP traffic is
+TLS-encrypted. The key must be at least 32 bytes and identical on all ranks, and RCCL must be
+built with `-DTLS_BACKEND=OPENSSL3` (otherwise communicator creation fails instead of falling back
+to plaintext). Requires RCCL 2.32 or newer, both at build time and at run time; with older
+headers or an older library the test exits with an error. The variable must reach every rank:
+if only some ranks have the key, bootstrap hangs instead of failing.
+
+```shell
+NCCL_TESTS_TLS_PSK=<key> mpirun -np 8 -x NCCL_TESTS_TLS_PSK ./build/all_reduce_perf -b 8 -e 128M -f 2
+```
+
 #### Grouped-broadcast (AllGatherV) mode
 
 `RCCL_TESTS_ALLGATHERV_ENABLE=1` makes `broadcast_perf` issue `nranks` broadcasts with distinct
@@ -202,7 +216,7 @@ All tests support the same set of arguments :
 
 ### Running multiple operations in parallel
 
-RCCL Tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel. 
+RCCL Tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel.
 To split the GPUs, RCCL will compute a "color" for each rank, based on the `NCCL_TESTS_SPLIT` environment variable, then all ranks
 with the same color will end up in the same group. The resulting group is printed next to each GPU at the beginning of the test.
 
@@ -219,6 +233,17 @@ Here are a few examples:
 - `NCCL_TESTS_SPLIT="AND 0x1"` or `NCCL_TESTS_SPLIT="MOD 2"`: Run two operations, each operation using every other rank.
 
 Note that the reported bandwidth is per group, hence to get the total bandwidth used by all groups, one must multiply by the number of groups.
+
+### Hierarchical alltoall over two GIN backends
+
+`alltoall_perf -R 2 -D 5` creates two DevComms on the same communicator: one on the Anvil SDMA GIN backend for intra-node (LSA) peers, and one on a network GIN backend for all other peers. CTA 0 drives the network DevComm and the remaining `-V` − 1 CTAs drive Anvil SDMA, so `-V` must be at least 2. `--gin_resource_sharing` applies to the network DevComm only; the SDMA DevComm stays GPU-locked, because every SDMA CTA flushes every peer. It needs a CMake build with `-DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON`, and both backends active on the communicator: leave `NCCL_GIN_TYPE` unset. When either backend is not active on the communicator, the test prints `# SKIP` and exits successfully.
+
+- `RCCL_TESTS_A2A_HIER_NET_GIN_TYPE=<type>` selects the network backend (default: `2`, PROXY).
+- `RCCL_TESTS_A2A_HIER_GROUP_SIZE=<n>` splits each node's ranks into groups of `n` consecutive local ranks and sends to local peers in other groups over the network backend, so a single node moves data on both backends. Default: `0` (all local peers use Anvil SDMA).
+
+```shell
+mpirun -np 8 -x RCCL_TESTS_A2A_HIER_GROUP_SIZE=4 ./build/alltoall_perf -b 1M -e 1G -f 2 -g 1 -R 2 -D 5 -V 16 -c 1
+```
 
 ## Unit tests
 

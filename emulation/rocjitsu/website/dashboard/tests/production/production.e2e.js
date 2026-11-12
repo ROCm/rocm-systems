@@ -1,6 +1,7 @@
 import { fixtureRunPath } from '../fixtures/runPath.js';
 import { readdir, readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
+import { expectRunPicker } from '../e2e/helpers/runPicker.js';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
 import { downloadSource, installPublication, openDashboard, RAW_DATA_PREFIX, ready } from '../e2e/helpers/dashboard.js';
@@ -39,8 +40,8 @@ test('production consumer reads deterministic intercepted maintained schema 1 at
   const { publication, requests } = await installPublication(page, { prefix: RAW_DATA_PREFIX });
   await openDashboard(page, '/?view=compare&compareCandidate=fictional-branch-01&compareBaseline=fictional-develop-20&targets=gfx950&modes=default');
   await expect(page.getByTestId('fixture-data-warning')).toHaveCount(0);
-  await expect(page.getByTestId('candidate-run-selected-identity')).toContainText('fictional-branch-01');
-  await expect(page.getByTestId('baseline-run-selected-identity')).toContainText('fictional-develop-20');
+  await expectRunPicker(page, 'candidate-run', 'fictional-branch-01');
+  await expectRunPicker(page, 'baseline-run', 'fictional-develop-20');
   await expect(page.getByRole('img', { name: 'Performance change by benchmark comparison chart' })).toBeVisible();
   expect(await downloadSource(page)).toEqual(publication);
   expect(requests.some((url) => new URL(url).pathname.endsWith('/metadata.json'))).toBe(false);
@@ -77,7 +78,7 @@ test('production rejects unsupported run version 99 with generic no-data UI and 
   expect(requests).toContain(`${RAW_DATA_PREFIX}index.json`);
   expect([...new Set(requests.filter((url) => url.startsWith(`${RAW_DATA_PREFIX}runs/`)))].sort())
     .toEqual(publication.index.runFiles.map((file) => `${RAW_DATA_PREFIX}${file}`).sort());
-  await page.getByRole('tab', { name: 'Branch Runs', exact: true }).click();
+  await page.getByRole('tab', { name: 'Branch runs', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'No published branch runs' })).toBeVisible();
   await expect(page.getByTestId('dashboard-data-error')).toBeVisible();
   await expect(page.getByTestId('branch-config-gfx1250-single')).toHaveCount(0);

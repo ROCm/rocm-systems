@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
+#include "rocjitsu/vm/amdgpu/lds_allocation.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
@@ -75,14 +76,11 @@ constexpr const char *decoded_memory_space_name(DecodedMemorySpace space) {
   return "unknown";
 }
 
-/// @brief Bytes retained below an exclusive bound, rounded to complete elements.
-constexpr uint64_t whole_element_bytes_in_range(uint64_t address, uint64_t bytes,
-                                                uint64_t element_bytes, uint64_t end) {
-  if (element_bytes == 0)
-    return 0;
-  const uint64_t available = address < end ? end - address : 0;
-  return std::min(bytes, available / element_bytes * element_bytes);
-}
+/// @brief One texel address set in a filtered-image footprint.
+struct ImageSampleFootprint {
+  std::span<const uint64_t> addresses;
+  uint64_t lane_mask = 0;
+};
 
 /// @brief One memory instruction as the memory system will see it.
 ///
@@ -284,10 +282,21 @@ struct MemoryAccessObservation {
   /// lanes as the first, so an instruction with a non-empty set here moves
   /// twice @ref bytes_per_lane().
   std::span<const uint64_t> secondary_addresses;
+  /// @brief Per-texel footprints of sampler instructions, regardless of filter mode.
+  /// @details IMAGE_SAMPLE*/IMAGE_GATHER4* replace addresses with these footprints,
+  /// including point samples. Each has wavefront_size addresses and a lane mask
+  /// contained in request_lane_mask. Border/zero-weight taps have cleared masks.
+  /// bytes_per_lane() is bytes per texel; all footprints share one instruction
+  /// issue and one completion-counter event. A null resource or unbacked sampler
+  /// uses the ordinary per-lane addresses span, empty footprints, and a zero
+  /// request_lane_mask while retaining the instruction's completion counter.
+  std::span<const ImageSampleFootprint> image_sample_footprints;
 
   /// @brief Nominal bytes each participating lane requests through one address
   ///        set, before backing rejection. Double it when @ref
   ///        secondary_addresses is non-empty.
+  /// @details For image sampling this is bytes per texel footprint, not the
+  /// instruction total. Count each image_sample_footprints lane mask separately.
   uint64_t bytes_per_lane() const {
     return static_cast<uint64_t>(element_size_bytes) * elements_per_lane;
   }

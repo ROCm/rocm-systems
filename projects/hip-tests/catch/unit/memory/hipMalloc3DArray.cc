@@ -179,6 +179,24 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_MaxTexture, int, uint4, short, usho
     const auto extent =
         GENERATE_COPY(from_range(std::begin(extentsToTest), std::end(extentsToTest)));
     CAPTURE(extent.width, extent.height, extent.depth);
+
+    {
+      // Tiled image layouts can be up to twice the linear size.
+      // Arrays that don't fit in VRAM fall back to host memory on AMD.
+      // Such large allocations on host can be very slow. Hence skip them.
+      size_t w = extent.width ? extent.width : 1;
+      size_t h = extent.height ? extent.height : 1;
+      size_t d = extent.depth ? extent.depth : 1;
+      size_t estimatedBytes = w * h * d * sizeof(TestType);
+      size_t freeMem = 0, totalMem = 0;
+      HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
+      if (estimatedBytes > freeMem / 2) {
+        WARN("Skipping allocation of " << (estimatedBytes >> 20)
+             << " MB (free: " << (freeMem >> 20) << " MB)");
+        return;
+      }
+    }
+
     auto maxArrayCreateError = hipMalloc3DArray(&array, &desc, extent, flag);
     // this can try to alloc many GB of memory, so out of memory is acceptable
     if (maxArrayCreateError == hipErrorOutOfMemory) return;
