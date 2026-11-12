@@ -10,6 +10,7 @@
 
 pub(crate) mod file;
 pub(crate) mod memory;
+pub(crate) mod module;
 pub(crate) mod process_identity;
 
 pub(crate) use clock::host_clock;
