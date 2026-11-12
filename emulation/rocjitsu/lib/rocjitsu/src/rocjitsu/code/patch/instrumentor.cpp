@@ -1191,7 +1191,9 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
                           .c_str());
     return std::nullopt;
   }
-  if (!kernel_sgpr_count) {
+  const std::optional<uint32_t> original_sgpr_count =
+      AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels);
+  if (!kernel_sgpr_count || !original_sgpr_count) {
     report(error_out, "a probe reads the framework's entry storage, but no kernel SGPR "
                       "allocation was discovered to reserve it from");
     return std::nullopt;
@@ -1217,11 +1219,14 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   // Reserve scalar sources before the wrapper prologue chooses its scratch:
   // a requested entry input can otherwise be dead to the original guest CFG.
   // CP inputs remain valid even when metadata counts only used registers.
+  // The planning allocation may already be enlarged, but entry sources must
+  // remain within the original descriptor's ordinary register ranges.
+  const uint32_t original_scalar_bound = ordinary_sgpr_bound(arch_, *original_sgpr_count);
   const uint32_t scalar_bound =
       options_.register_growth
-          ? std::max(options_.register_growth->sgprs,
+          ? std::max(std::min(options_.register_growth->sgprs, original_scalar_bound),
                      kernel_descriptor_initial_sgpr_count(arch_, kernel.descriptor))
-          : ordinary_sgpr_bound(arch_, *kernel_sgpr_count);
+          : original_scalar_bound;
   for (const InstrumentationPoint &point : points_)
     for (const ProbeArgValue &arg : point.probe_args)
       if (arg.source == ProbeArgSource::EntrySgpr) {
@@ -1261,9 +1266,11 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
     // The prologue has restored the guest kernarg pointer. Capture EntrySgpr
     // sources afterward so a kernarg-pointer word cannot expose the wrapper.
     // The prologue's temporary pair is now available for persistent snapshots.
-    const uint32_t vector_bound = options_.register_growth
-                                      ? options_.register_growth->vgprs
-                                      : kernel_vgpr_bounds(arch_, kernel.descriptor).ordinary_bound;
+    const uint32_t original_vector_bound =
+        kernel_vgpr_bounds(arch_, kernel.descriptor).ordinary_bound;
+    const uint32_t vector_bound =
+        options_.register_growth ? std::min(options_.register_growth->vgprs, original_vector_bound)
+                                 : original_vector_bound;
     std::vector<std::pair<RegClass, uint16_t>> sources;
     for (const InstrumentationPoint &point : points_)
       for (const ProbeArgValue &arg : point.probe_args) {

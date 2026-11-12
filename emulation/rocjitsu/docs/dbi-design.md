@@ -674,6 +674,10 @@ from every call envelope, just like the pointer. The source must fit the origina
 guest allocation or the descriptor's enabled scalar entry-input range, even when
 instrumentation grows the register file. This includes hardware input padding
 that the metadata's used-register count need not cover.
+With register growth, metadata counts are capped at the original descriptor's
+ordinary bounds before admitting snapshot sources: the SGPR total can include
+the special-register tail, and the VGPR total can include an accumulator window.
+Enabled scalar hardware inputs remain admissible beyond the metadata count.
 
 `AnchorVgpr` sources are parallel copies made before constants or scalar-sourced
 argument writes. The builder orders overlapping copies and breaks cycles with a

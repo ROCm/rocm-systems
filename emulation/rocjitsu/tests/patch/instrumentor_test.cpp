@@ -6236,6 +6236,57 @@ TEST(Instrumentor, RegisterGrowthStillRejectsRelativeSgprAccess) {
       << result.errors.front();
 }
 
+TEST(InstrumentorResources, EntrySnapshotsWithGrowthRespectOriginalOrdinaryRegisterBounds) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  ASSERT_TRUE(nop.succeeded() && end.succeeded());
+  // The metadata includes the six special SGPR slots and the accumulator
+  // window. Neither supplies ordinary entry values, even when DBI grows the
+  // allocation: s33/v3 are the last ordinary sources, while s34/v4 are not.
+  const std::vector<uint8_t> image = test::with_resource_metadata(
+      make_kernarg_kernel_elf({nop.value(), end.value()}, 0, EF_AMDGPU_MACH_AMDGCN_GFX950,
+                              kTestKernargSize, false, /*granulated_sgpr_count=*/4),
+      {{"test_kernel", kTestKernargSize, 40, 8, 0}});
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("snapshots", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const bool grow : {false, true}) {
+    SCOPED_TRACE(grow);
+    for (const ProbeArgValue source :
+         {ProbeArgValue{.source = ProbeArgSource::EntrySgpr, .register_index = 33},
+          ProbeArgValue{.source = ProbeArgSource::EntrySgpr, .register_index = 34},
+          ProbeArgValue{.source = ProbeArgSource::EntryVgprLane0, .register_index = 3},
+          ProbeArgValue{.source = ProbeArgSource::EntryVgprLane0, .register_index = 4}}) {
+      SCOPED_TRACE(static_cast<int>(source.source));
+      SCOPED_TRACE(source.register_index);
+      InstrumentationOptions options;
+      options.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper;
+      if (grow)
+        options.register_growth = OriginalRegisterCounts{.sgprs = 40, .vgprs = 8};
+      Instrumentor instrumentor(object, kArch, options);
+      InstrumentationPoint point;
+      point.probe_obj = &probe;
+      point.probe_symbol = "snapshots";
+      point.probe_args = {source};
+      instrumentor.add_point(point);
+      const InstrumentedCodeObject result = instrumentor.patch();
+      if (source.register_index == 33 || source.register_index == 3) {
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        EXPECT_FALSE(result.elf_bytes.empty());
+      } else {
+        EXPECT_FALSE(result.errors.empty());
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+        if (!result.errors.empty()) {
+          EXPECT_NE(result.errors.front().find("entry"), std::string::npos)
+              << result.errors.front();
+        }
+      }
+    }
+  }
+}
+
 TEST(InstrumentorResources, EntrySgprSnapshotIncludesEnabledInputsBeyondUsedRegisters) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
