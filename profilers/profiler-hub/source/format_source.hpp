@@ -84,9 +84,9 @@ public:
      *         memory can free the rows here. */
     virtual void finish_load() {}
 
-    /** @brief Called once, right after the track reader for this source is built. A
-     *         format that frees its rows in finish_load can keep the pointer: the
-     *         reader outlives every call made to the source. */
+    /** @brief Called once, right after the track reader for this source is built. The
+     *         reader outlives every call made to the source, so it can keep the pointer.
+     */
     virtual void attach_reader(cached_track_reader& /*reader*/) {}
 
     /** @brief Whole-track reads, through the interface the track cache already takes. */

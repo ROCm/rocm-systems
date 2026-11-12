@@ -19,8 +19,6 @@ namespace profiler_hub::pytorch
 namespace
 {
 
-constexpr const char* k_released = "pytorch: rows were released after loading";
-
 // cached_track_reader only asks for whole tracks. A filter this reader would ignore is
 // refused, so a later caller cannot get unfiltered rows without knowing it.
 void
@@ -80,7 +78,6 @@ public:
     std::optional<std::pair<size_t, size_t>> event_id_span(
         reader_types::event_type_t type) override
     {
-        m_source.require_rows();
         const auto slot = static_cast<std::size_t>(type);
         if(slot >= pytorch_source::k_type_slots) return std::nullopt;
         std::optional<size_t> first;
@@ -127,7 +124,6 @@ private:
 std::unique_ptr<track_row_reader>
 pytorch_source::row_seam::acquire()
 {
-    m_owner.require_rows();
     return std::make_unique<pytorch_row_reader>(m_owner);
 }
 
@@ -199,6 +195,8 @@ pytorch_source::load_catalog(common::thread_pool& /*workers*/,
         }
         m_tracks.push_back(std::move(held));
     }
+    m_events = std::move(store.events);
+    m_args   = std::move(store.args);
 
     for(std::size_t track = 0; track < m_tracks.size(); ++track)
     {
@@ -216,14 +214,6 @@ pytorch_source::load_catalog(common::thread_pool& /*workers*/,
         if(a.type != b.type) return a.type < b.type;
         return a.first_id < b.first_id;
     });
-}
-
-void
-pytorch_source::finish_load()
-{
-    if(m_released.exchange(true)) return;
-    std::vector<track_rows_t>{}.swap(m_tracks);
-    std::vector<const char*>{}.swap(m_names);
 }
 
 void
@@ -284,16 +274,9 @@ pytorch_source::histogram(const histogram_grid_t& grid)
         });
 }
 
-void
-pytorch_source::require_rows() const
-{
-    if(m_released) throw std::logic_error{ k_released };
-}
-
 const pytorch_source::track_rows_t&
 pytorch_source::track_rows(const reader_types::track_info_t& track) const
 {
-    require_rows();
     return m_tracks.at(track.id);
 }
 

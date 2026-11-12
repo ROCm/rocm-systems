@@ -22,6 +22,7 @@ struct store_row_t
     std::uint64_t              end{};
     std::uint32_t              name_id{};
     reader_types::event_type_t type{};
+    std::uint32_t              event{};  // index into pytorch_store_t::events
 };
 
 struct store_track_t
@@ -38,11 +39,13 @@ struct store_track_t
     std::vector<store_row_t>   rows;  // start ascending, then end descending
 };
 
-// A parsed Kineto trace as per-track rows. The rows are only held until profiler-hub's
-// reader has cached every track.
+// A parsed Kineto trace as per-track rows, and the events and args text the rows point
+// at.
 struct pytorch_store_t
 {
     std::vector<store_track_t>                                   tracks;
+    std::vector<event_t>                                         events;  // file order
+    std::string                                                  args;
     std::vector<std::string>                                     names;
     std::vector<std::string>                                     cats;
     std::map<std::pair<std::int64_t, std::int64_t>, std::string> thread_names;

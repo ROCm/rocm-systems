@@ -36,6 +36,12 @@ to_ns(std::uint64_t base_ns, std::int64_t ts_ns, bool& clamped)
     return clamped ? 0 : static_cast<std::uint64_t>(v);
 }
 
+std::int64_t
+link_of(const loaded_trace_t& t, const event_t& e)
+{
+    return t.link_by_correlation ? e.corr : e.ext;
+}
+
 bool
 event_order(const store_row_t& a, const store_row_t& b)
 {
@@ -61,7 +67,8 @@ sorted_rows(loaded_trace_t& t, const std::vector<std::uint32_t>& idxs)
                          start + static_cast<std::uint64_t>(dur),
                          e.name_id,
                          t.cat_classes[e.cat_id].event_type.value_or(
-                             reader_types::event_type_t::region) });
+                             reader_types::event_type_t::region),
+                         i });
     }
     std::stable_sort(rows.begin(), rows.end(), event_order);
     return rows;
@@ -101,9 +108,9 @@ load_store(const std::string& path, std::function<bool()> cancelled)
         {
             host_groups[{ e.pid, e.tid }].push_back(idx);
             ++host_events_by_pid[e.pid];
-            if(cls.launch_site && e.correlation >= 0)
+            if(cls.launch_site && link_of(trace, e) >= 0)
             {
-                launcher_pid_by_link.emplace(e.correlation, e.pid);
+                launcher_pid_by_link.emplace(link_of(trace, e), e.pid);
             }
         }
     }
@@ -141,8 +148,9 @@ load_store(const std::string& path, std::function<bool()> cancelled)
         std::int64_t launcher_pid = -1;
         for(const auto i : idxs)
         {
-            const auto it = launcher_pid_by_link.find(trace.events[i].correlation);
-            if(trace.events[i].correlation >= 0 && it != launcher_pid_by_link.end())
+            const auto link = link_of(trace, trace.events[i]);
+            const auto it   = launcher_pid_by_link.find(link);
+            if(link >= 0 && it != launcher_pid_by_link.end())
             {
                 launcher_pid = it->second;
                 break;
@@ -159,7 +167,6 @@ load_store(const std::string& path, std::function<bool()> cancelled)
         std::vector<std::uint32_t>{}.swap(idxs);
         store.tracks.push_back(std::move(track));
     }
-    std::vector<event_t>{}.swap(trace.events);
 
     for(auto& track : store.tracks)
     {
@@ -170,6 +177,8 @@ load_store(const std::string& path, std::function<bool()> cancelled)
         }
     }
 
+    store.events        = std::move(trace.events);
+    store.args          = std::move(trace.args);
     store.names         = std::move(trace.names);
     store.cats          = std::move(trace.cats);
     store.thread_names  = std::move(trace.thread_names);

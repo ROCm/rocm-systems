@@ -24,9 +24,12 @@ struct event_t
     std::int64_t  device{};
     std::int64_t  ts_ns{};
     std::int64_t  dur_ns{};
-    std::int64_t  correlation{};
+    std::int64_t  corr{ -1 };  // args "correlation"
+    std::int64_t  ext{ -1 };   // args "External id"
+    std::uint64_t args_off{};  // the args object's text in loaded_trace_t::args
+    std::uint32_t args_len{};  // 0 when the event has no args or an empty object
 };
-static_assert(sizeof(event_t) == 64, "event_t is the 64-byte layout");
+static_assert(sizeof(event_t) == 88, "event_t is the 88-byte layout");
 
 struct load_diag_t
 {
@@ -44,12 +47,14 @@ struct load_diag_t
 
 struct loaded_trace_t
 {
-    std::uint64_t                                                base_time_ns{};
-    std::int32_t                                                 schema_version{};
-    std::vector<std::string>                                     names;
-    std::vector<std::string>                                     cats;
-    std::vector<category_class_t>                                cat_classes;
-    std::vector<event_t>                                         events;
+    std::uint64_t                 base_time_ns{};
+    std::int32_t                  schema_version{};
+    std::vector<std::string>      names;
+    std::vector<std::string>      cats;
+    std::vector<category_class_t> cat_classes;
+    std::vector<event_t>          events;
+    std::string                   args;
+    bool                          link_by_correlation{ true };
     std::map<std::pair<std::int64_t, std::int64_t>, std::string> thread_names;
     std::map<std::int64_t, std::string>                          process_names;
     std::map<std::int64_t, std::string>                          device_names;
