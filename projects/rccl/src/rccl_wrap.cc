@@ -402,8 +402,8 @@ static bool rcclRemoteFlushTuneNodes(struct ncclComm* comm) {
 
 // gfx1250 LL128 slices are 32 words per thread (NCCL_LL128_SHMEM_ELEMS_PER_THREAD), 4x gfx9's, but the default
 // buffer still holds 120 words per thread per step, so a warp gets 3.75 slices per step where upstream NCCL's
-// layout (120 words per thread over 8-word slices) gives 15. x4 restores 15. Single node, 4 GPUs, Ring/LL128 at
-// 1 GB: +18-23% bus bandwidth on 32 channels, +1-2% on the default ~190; 512 MB: +2-4% on ~190.
+// layout (120 words per thread over 8-word slices) gives 15. x4 restores 15. Single node, 4 GPUs, Ring/LL128:
+// +17-22% bus bandwidth from 64 MB on 32 channels (-2-3% at 8-16 MB), up to +4% at 512 MB-1 GB on 192.
 static constexpr int kGfx1250CollLl128BuffScale = 4;
 
 // Ring all_reduce moves one LL128 chunk per channel per rank per loop, so data past chunk * nChannels * nRanks
