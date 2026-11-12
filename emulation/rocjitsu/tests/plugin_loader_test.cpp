@@ -106,6 +106,29 @@ TEST_F(PluginLoaderTest, RequiredPluginLoads) {
   EXPECT_NE(trace().find("good:create\n"), std::string::npos);
 }
 
+TEST_F(PluginLoaderTest, RequiredNamedPluginIgnoresUnrelatedBestEffortFailure) {
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group(
+          R"({"require_all_plugins":false,"required_plugins":["good"],)"
+          R"("plugins":{"missing":{},"good":{}}})",
+          PLUGIN_LOADER_FIXTURE_DIR);
+
+  ASSERT_TRUE(group.succeeded());
+  EXPECT_EQ(group.value()->num_plugins(), 1u);
+  EXPECT_NE(trace().find("good:create\n"), std::string::npos);
+}
+
+TEST_F(PluginLoaderTest, RequiredNamedPluginReportsFailedName) {
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group(
+          R"({"required_plugins":["missing"],"plugins":{"good":{},"missing":{}}})",
+          PLUGIN_LOADER_FIXTURE_DIR, diagnostic.emitter());
+
+  EXPECT_TRUE(group.failed());
+  EXPECT_EQ(diagnostic.message(), "required plugin 'missing' failed to load");
+}
+
 TEST_F(PluginLoaderTest, RequiringAllPluginsAllowsNoPlugins) {
   util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
       rocjitsu::PluginLoader::configure_plugin_group(R"({"require_all_plugins":true})",
