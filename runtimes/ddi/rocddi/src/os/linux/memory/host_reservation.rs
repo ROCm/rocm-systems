@@ -16,19 +16,33 @@ use std::os::fd::AsRawFd;
 
 pub(crate) struct HostReservation {
     range: Reservation,
+    unit: usize,
 }
 
 impl HostReservation {
-    pub(crate) fn create(size: usize, alignment: usize, process: u32) -> io::Result<Self> {
+    pub(crate) fn create(
+        size: usize,
+        alignment: usize,
+        unit: usize,
+        process: u32,
+    ) -> io::Result<Self> {
         if process != std::process::id() {
             return Err(io::Error::from(io::ErrorKind::Unsupported));
         }
         let page = page_size()?;
-        if !super::valid_host_layout(size, alignment, page) {
+        let unit = if unit == 0 { page } else { unit };
+        if !unit.is_power_of_two()
+            || unit < page
+            || !super::valid_host_layout(size, alignment, page)
+        {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         let range = Reservation::new(size, alignment, (page as u64, usize::MAX as u64), false)?;
-        Ok(Self { range })
+        Ok(Self { range, unit })
+    }
+
+    pub(crate) fn mapping_granularity(&self) -> usize {
+        self.unit
     }
 
     pub(crate) fn extent(&self) -> (usize, usize) {
@@ -42,7 +56,16 @@ impl HostReservation {
         }
         let page = page_size()? as u64;
         let size = self.range.usable_size() as u64;
-        if CheckedRange::new(size, offset, length, page, RangeTail::WholeUnits).is_none() {
+        if CheckedRange::new(
+            size,
+            offset,
+            length,
+            self.unit as u64,
+            RangeTail::EndOfReservation,
+        )
+        .is_none()
+            || length % page != 0
+        {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         let offset =
@@ -65,6 +88,7 @@ impl HostReservation {
         let (source_address, source_length) = source.extent();
         let page = page_size()? as u64;
         if source_address == 0
+            || source_offset % self.unit as u64 != 0
             || CheckedRange::new(
                 source_length,
                 source_offset,
@@ -132,7 +156,7 @@ mod tests {
         if child == 0 {
             // SAFETY: Bound a regression if inherited state is entered.
             unsafe { libc::alarm(3) };
-            let rejected = HostReservation::create(page, page, std::process::id())
+            let rejected = HostReservation::create(page, page, 0, std::process::id())
                 .ok()
                 .and_then(|mut target| target.replace(0, page as u64, &source, 0, true).err())
                 .is_some_and(|source| source.kind() == io::ErrorKind::Unsupported);
@@ -149,7 +173,7 @@ mod tests {
     #[test]
     fn released_reservation_cannot_replace_a_new_mapping() {
         let page = page_size().unwrap();
-        let mut reservation = HostReservation::create(page, page, std::process::id()).unwrap();
+        let mut reservation = HostReservation::create(page, page, 0, std::process::id()).unwrap();
         let source =
             HostAllocation::create_remappable(page as u64, page as u64, std::process::id())
                 .unwrap();
@@ -203,7 +227,7 @@ mod tests {
     #[test]
     fn failed_release_keeps_the_range_eligible_for_retry_and_clear() {
         let page = page_size().unwrap();
-        let mut reservation = HostReservation::create(page, page, std::process::id()).unwrap();
+        let mut reservation = HostReservation::create(page, page, 0, std::process::id()).unwrap();
         reservation.range.fail_release_once(libc::EIO);
         assert!(reservation.free().is_err());
         reservation.clear(0, page as u64).unwrap();

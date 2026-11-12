@@ -130,18 +130,14 @@ pub(crate) unsafe extern "C" fn create(
         {
             return Err(INVALID);
         }
-        let granularity = if access.mapping_granularity == 0 {
-            page
-        } else {
-            access.mapping_granularity
-        };
-        if !granularity.is_power_of_two() || granularity < page {
-            return Err(INVALID);
-        }
         let slot = instance.owner_slot::<Reservation>()?;
-        let native_owner =
-            host::HostReservation::reserve(info.byte_length, info.minimum_alignment.max(page))
-                .map_err(|error| native(&error))?;
+        let native_owner = host::HostReservation::reserve(
+            info.byte_length,
+            info.minimum_alignment.max(page),
+            access.mapping_granularity,
+        )
+        .map_err(|error| native(&error))?;
+        let granularity = native_owner.info().mapping_granularity;
         let address = u64::try_from(native_owner.info().address).map_err(|_| RANGE)?;
         register(&instance.children)?;
         let owner = slot.write(Reservation {
@@ -323,13 +319,6 @@ pub(crate) unsafe extern "C" fn detach(
     })
 }
 
-#[cfg_attr(
-    windows,
-    allow(
-        clippy::forget_non_drop,
-        reason = "Windows reservations are unavailable until their native owner is implemented"
-    )
-)]
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_memory_reservation_t) -> u64 {
     boundary(|| unsafe {
         let reservation = object(pointer.cast::<Reservation>())?;
