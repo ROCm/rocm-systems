@@ -257,7 +257,7 @@ __device__ void IPCContext::alltoallmem_wg_linear(rocshmem_team_t team, void *ds
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   // Have each PE put their designated data to the other PEs
@@ -538,7 +538,7 @@ __device__ void IPCContext::alltoallmem_linear_wave(rocshmem_team_t team, void *
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   // Have each PE put their designated data to the other PEs
@@ -672,7 +672,7 @@ __device__ void IPCContext::fcollectmem_linear_wave(rocshmem_team_t team, void *
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   // Have each PE put their designated data to the other PEs
@@ -758,7 +758,7 @@ __device__ void IPCContext::fcollectmem_wg_linear(rocshmem_team_t team, void *ds
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   // Have each PE put their designated data to the other PEs

@@ -475,7 +475,7 @@ __device__ void GDAContext::alltoallmem_linear_wave(rocshmem_team_t team, void *
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   int wf_id = get_flat_block_id() / WF_SIZE;
@@ -556,7 +556,7 @@ __device__ void GDAContext::fcollectmem_linear_wg(rocshmem_team_t team, void *ds
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
@@ -600,7 +600,7 @@ __device__ void GDAContext::fcollectmem_linear_wave(rocshmem_team_t team, void *
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
   int stride = team_obj->tinfo_wrt_world->stride;
-  long *pSync = team_obj->alltoall_pSync;
+  long *pSync = team_obj->barrier_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
