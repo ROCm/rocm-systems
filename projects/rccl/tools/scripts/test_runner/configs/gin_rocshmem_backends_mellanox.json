@@ -307,7 +307,7 @@
     },
     "gin_devmpi_mixed_2node": {
       "extends": "default",
-      "description": "AICOMRCCL-3450: 2 hosts, NCCL_GIN_TYPE unset (not empty). Runs two cases; the rest of GinMPIDeviceTests skips when the type is unset.",
+      "description": "AICOMRCCL-3450/3501: 2 hosts, NCCL_GIN_TYPE unset (not empty). MixedBackends_TwoNodeUnsetType runs a comm spanning both hosts (scale-up and scale-out), which drops Anvil SDMA for the proxy. MixedBackends_TwoNodePerHostSplitKeepsAnvil splits that comm per host into scale-up-only comms, which keep Anvil SDMA. The rest of GinMPIDeviceTests skips when the type is unset.",
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
       "num_ranks": 2,
