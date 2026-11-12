@@ -7799,18 +7799,23 @@ TEST(CommandProcessorGwsPlacementTest, UnsatisfiedGwsGridFailsWithoutCompletion)
 // A VMID 0 dispatch that uses private memory without a scratch allocation
 // fails on an address no VM fault reporter covers. Cancelling the dispatch
 // alone left its completion waiter with nothing to act on, so the queue now
-// receives a wave abort, and no memory changes.
+// receives a wave abort, and no memory changes. A queue without an exception
+// status address cannot be told, so the engine exits with an error instead of
+// leaving the completion signal pending.
 TEST(CommandProcessorAqlTest, PhysicalScratchWithoutBackingAbortsTheQueue) {
-  for (const bool load : {false, true}) {
-    SCOPED_TRACE(testing::Message() << "load=" << load);
+  for (const auto &[owner, load] : {std::pair{true, false}, std::pair{true, true},
+                                    std::pair{false, false}, std::pair{false, true}}) {
+    SCOPED_TRACE(testing::Message() << "owner=" << owner << " load=" << load);
     VmFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 4));
     std::vector<uint64_t> exceptions;
-    f.cu()->set_queue_exception_handler(
-        [&](uint32_t, uint32_t, uint64_t status, bool, amdgpu::QueueExceptionDeliveryPolicy) {
-          exceptions.push_back(status);
-          return true;
-        });
+    if (owner) {
+      f.cu()->set_queue_exception_handler(
+          [&](uint32_t, uint32_t, uint64_t status, bool, amdgpu::QueueExceptionDeliveryPolicy) {
+            exceptions.push_back(status);
+            return true;
+          });
+    }
     const auto scratch = cdna5::build_vscratch(load ? cdna5::kScratchLoadB32Vscratch
                                                     : cdna5::kScratchStoreB32Vscratch,
                                                {.saddr = 124, .vdst = 4, .vsrc = 8});
@@ -7832,8 +7837,14 @@ TEST(CommandProcessorAqlTest, PhysicalScratchWithoutBackingAbortsTheQueue) {
     const std::string warnings = testing::internal::GetCapturedStderr();
     EXPECT_FALSE(f.cu()->has_active_wfs());
     EXPECT_EQ(completion_signal_value(f.mem(), kSignal), 1);
-    EXPECT_EQ(exceptions, std::vector<uint64_t>{amdgpu::kAqlQueueWaveAbort});
-    EXPECT_EQ(f.engine->last_exit().code, 0);
+    if (owner) {
+      EXPECT_EQ(exceptions, std::vector<uint64_t>{amdgpu::kAqlQueueWaveAbort});
+      EXPECT_EQ(f.engine->last_exit().code, 0);
+    } else {
+      EXPECT_NE(f.engine->last_exit().code, 0);
+      EXPECT_EQ(f.engine->last_exit().message.find("Failed to deliver queue exception"), 0u)
+          << f.engine->last_exit().message;
+    }
     EXPECT_NE(warnings.find("private access without scratch backing"), std::string::npos)
         << warnings;
     // Code follows the 64-byte kernel descriptor.

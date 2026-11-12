@@ -853,9 +853,12 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
     util::Logger::warn("memory access failed: ", unreported, ": process=", wf.process_id(),
                        " queue=", wf.queue_id(), " dispatch=", wf.dispatch_id(), " cu=", name(),
                        " wave=", wf.wf_id(), " pc=", std::format("{:#x}", issue_pc));
+    // A queue that cannot be notified fails the engine rather than leaving
+    // the cancelled dispatch's completion signal pending.
     defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueWaveAbort,
                           /*clear_debug_stop_on_success=*/false,
-                          /*retain_failure_for_debugger=*/false);
+                          /*retain_failure_for_debugger=*/false,
+                          QueueExceptionDeliveryPolicy::PublishOrFail);
   }
   abort_dispatch(wf.dispatch_id());
 }
