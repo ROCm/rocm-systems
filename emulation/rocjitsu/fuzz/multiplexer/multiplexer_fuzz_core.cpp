@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/decoder.h"
 
 #include <array>
+#include <cassert>
 #include <cstdlib>
 #include <memory>
 #include <optional>
@@ -51,7 +52,10 @@ uint64_t run_execution(std::span<const uint8_t> payload) {
 }
 
 uint64_t run_code_object(std::span<const uint8_t> payload) {
-  const code_object_fuzz::RunStats stats = code_object_fuzz::run_input(payload);
+  static_assert(kMaxInputSize - 1 <= code_object_fuzz::kMaxInputSize);
+  const util::FailureOr<code_object_fuzz::RunStats> result = code_object_fuzz::run_input(payload);
+  assert(result.succeeded());
+  const code_object_fuzz::RunStats &stats = result.value();
   return stats.code_objects_valid + stats.executables_valid;
 }
 
