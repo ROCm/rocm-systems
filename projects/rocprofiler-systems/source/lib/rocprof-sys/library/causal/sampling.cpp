@@ -31,6 +31,7 @@
 #include "logger/debug.hpp"
 
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <memory>
@@ -38,6 +39,7 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <unistd.h>
 
 namespace rocprofsys::causal::sampling
 {
@@ -198,6 +200,24 @@ causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
     }
 }
 
+// rocprofiler_configure calls this from std::call_once while HIP is still
+// registering its fat binary, and the process-sampler thread may already be
+// running. std::exit destroys those maps and that thread; the result is a
+// NULL deref or std::terminate. _exit skips C++ teardown.
+[[noreturn]] void
+exit_failed_backend()
+{
+    logger_t::instance().flush();
+    if(state::process::get() == state::process::Active)
+    {
+        // Registration is done, so C++ teardown and atexit finalizers are safe.
+        std::exit(EXIT_FAILURE);
+    }
+    // Still inside rocprofiler_configure: skip static teardown, which would
+    // race with HIP's fat-binary registration.
+    ::_exit(EXIT_FAILURE);
+}
+
 std::set<int>
 configure(bool _setup, std::int64_t _tid)
 {
@@ -330,7 +350,7 @@ configure(bool _setup, std::int64_t _tid)
             {
                 LOG_ERROR("Perf backend for causal profiling failed to activate: {}",
                           *_perf_error);
-                std::exit(1);
+                exit_failed_backend();
             }
         }
         else if(get_causal_backend() == state::process::CausalBackend::timer)
@@ -338,7 +358,7 @@ configure(bool _setup, std::int64_t _tid)
             if(!_activate_timer_backend())
             {
                 LOG_ERROR("Timer backend for causal profiling failed to activate");
-                std::exit(1);
+                exit_failed_backend();
             }
         }
         else if(get_causal_backend() == state::process::CausalBackend::automatic)
@@ -357,7 +377,7 @@ configure(bool _setup, std::int64_t _tid)
                 if(!_activate_timer_backend())
                 {
                     LOG_ERROR("Timer backend for causal profiling failed to activate");
-                    std::exit(1);
+                    exit_failed_backend();
                 }
 
                 config::set_setting_value(std::string{ env_vars::CAUSAL_BACKEND },
