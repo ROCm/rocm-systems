@@ -18,6 +18,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -54,7 +55,7 @@ struct hip_fields_t
     std::optional<std::uint64_t> stream;
 };
 
-enum class arg_scope_t
+enum class arg_scope_t : std::uint8_t
 {
     host_span,      // operator inputs, Module Hierarchy, Python ids
     runtime_call,   // also the call's dst, src, bytes, kind, ptr and size
@@ -84,24 +85,24 @@ as_unsigned(const json_t& value)
     }
     if(value.is_number_float())
     {
-        const auto v = value.get<double>();
-        return v < 0 || !std::isfinite(v)
-                   ? std::nullopt
-                   : std::optional<std::uint64_t>{ static_cast<std::uint64_t>(v) };
+        const auto       v           = value.get<double>();
+        constexpr double k_two_to_64 = 18446744073709551616.0;
+        if(v < 0 || v >= k_two_to_64) return std::nullopt;
+        return static_cast<std::uint64_t>(v);
     }
     if(!value.is_string()) return std::nullopt;
 
     const auto& text = value.get_ref<const std::string&>();
     int         base = 10;
-    auto        from = text.data();
+    const auto* from = text.data();
     if(text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
     {
         base = 16;
         from += 2;
     }
-    std::uint64_t number = 0;
-    const auto    to     = text.data() + text.size();
-    const auto    result = std::from_chars(from, to, number, base);
+    std::uint64_t     number = 0;
+    const auto* const to     = text.data() + text.size();
+    const auto        result = std::from_chars(from, to, number, base);
     if(result.ec != std::errc{} || result.ptr != to) return std::nullopt;
     return number;
 }
@@ -115,7 +116,7 @@ as_triple(const json_t& value)
     {
         const auto number = as_unsigned(value[i]);
         if(!number) return std::nullopt;
-        out[i] = *number;
+        out.at(i) = *number;
     }
     return out;
 }
@@ -162,7 +163,9 @@ copy_fields_of(std::string_view args_json)
     if(!out.bytes)
     {
         if(const auto it = args.find("size"); it != args.end())
+        {
             out.bytes = as_unsigned(*it);
+        }
     }
     if(const auto it = args.find("src"); it != args.end()) out.src = as_unsigned(*it);
     if(const auto it = args.find("dst"); it != args.end()) out.dst = as_unsigned(*it);
@@ -240,6 +243,28 @@ extdata_with_flows(std::string_view              args_json,
     text.pop_back();  // the closing brace
     if(text.size() > 1) text.push_back(',');
     return text + list + "}";
+}
+
+// An allocation event allocates when its Bytes are positive and frees when they are
+// negative.
+std::string_view
+alloc_type_of(std::int64_t bytes)
+{
+    if(bytes > 0) return "ALLOC";
+    if(bytes < 0) return "FREE";
+    return {};
+}
+
+std::uint64_t
+alloc_size_of(std::int64_t bytes)
+{
+    return static_cast<std::uint64_t>(bytes < 0 ? -bytes : bytes);
+}
+
+bool
+overlaps(const time_window& window, std::uint64_t start, std::uint64_t end)
+{
+    return start <= window.end && end >= window.start;
 }
 
 // cached_track_reader only asks for whole tracks. A filter this reader would ignore is
@@ -467,9 +492,8 @@ pytorch_source::load_catalog(common::thread_pool& /*workers*/,
         }
     }
 
-    for(std::size_t track = 0; track < m_tracks.size(); ++track)
+    for(const auto& held : m_tracks)
     {
-        const auto& held = m_tracks[track];
         for(std::size_t slot = 0; slot < k_type_slots; ++slot)
         {
             const auto& run = held.by_type.at(slot);
@@ -624,7 +648,7 @@ pytorch_source::locate(const reader_types::unique_timeline_event_id_t& id) const
     const run_t& run = *std::prev(after);
     if(run.type != id.type || id.id >= run.first_id + run.count) return std::nullopt;
     const auto& held = m_tracks[run.track];
-    const auto  row  = held.by_type[slot].rows[id.id - run.first_id];
+    const auto  row  = held.by_type.at(slot).rows[id.id - run.first_id];
     return located_t{ run.track, &held.rows[row], id.id };
 }
 
@@ -847,10 +871,10 @@ pytorch_source::call_stack(const reader_types::timeline_event_t& event)
                 stack.push_back(std::move(frame));
             };
             add_frame(region, id);
-            for(auto ancestor = active.rbegin(); ancestor != active.rend(); ++ancestor)
+            for(const auto& ancestor : active | std::views::reverse)
             {
-                if(ancestor->level >= level) continue;
-                add_frame(*ancestor->row, ancestor->id);
+                if(ancestor.level >= level) continue;
+                add_frame(*ancestor.row, ancestor.id);
             }
             return stack;
         }
@@ -878,10 +902,15 @@ pytorch_source::region_details(const reader_types::timeline_event_t& event)
     data.end_timestamp   = row.end;
     data.name            = std::string{ m_names[row.name_id] };
     data.extdata         = extdata_of(row);
-    const auto scope =
-        m_cats[stored.cat_id] == "cuda_profiler_range" ? arg_scope_t::profiler_range
-        : m_cat_classes[stored.cat_id].launch_site     ? arg_scope_t::runtime_call
-                                                       : arg_scope_t::host_span;
+    auto scope           = arg_scope_t::host_span;
+    if(m_cats[stored.cat_id] == "cuda_profiler_range")
+    {
+        scope = arg_scope_t::profiler_range;
+    }
+    else if(m_cat_classes[stored.cat_id].launch_site)
+    {
+        scope = arg_scope_t::runtime_call;
+    }
     data.args = named_args_of(args_of(stored), scope);
     return data;
 }
@@ -934,7 +963,7 @@ pytorch_source::kernel_shape_of(const event_t& stored) const
         const bool multiply = geometry.block.has_value() && !totals;
         for(std::size_t axis = 0; axis < 3; ++axis)
         {
-            shape.grid[axis] =
+            shape.grid.at(axis) =
                 geometry.grid->at(axis) * (multiply ? geometry.block->at(axis) : 1);
         }
     }
@@ -1028,10 +1057,9 @@ pytorch_source::memory_alloc_details(const reader_types::timeline_event_t& event
     data.thread_info     = track.thread_info;
     if(sample != nullptr)
     {
-        data.type    = sample->bytes > 0 ? "ALLOC" : sample->bytes < 0 ? "FREE" : "";
-        data.address = static_cast<std::size_t>(sample->address);
-        data.size =
-            static_cast<std::size_t>(sample->bytes < 0 ? -sample->bytes : sample->bytes);
+        data.type       = std::string{ alloc_type_of(sample->bytes) };
+        data.address    = static_cast<std::size_t>(sample->address);
+        data.size       = static_cast<std::size_t>(alloc_size_of(sample->bytes));
         data.agent_info = agent_info(agent_of(*sample));
     }
     return data;
@@ -1065,6 +1093,78 @@ asks_for(const resolved_event_query& query, uint32_t event_type)
                query.event_types.end();
 }
 
+// The memory tracks' points, in id order across the tracks the query names.
+uint32_t
+read_memory_points(const reader_catalog_t&     catalog,
+                   const resolved_event_query& query,
+                   uint64_t                    after_id,
+                   uint64_t                    last_id,
+                   ph_table_event*             rows,
+                   uint32_t                    capacity)
+{
+    struct cursor_t
+    {
+        const std::vector<memory_activity_point_t>* points;
+        std::size_t                                 index;
+    };
+    std::vector<cursor_t> cursors;
+    for(const auto track_id : query.tracks)
+    {
+        const auto* const points = catalog.memory_activity_points(track_id);
+        if(points == nullptr) continue;
+        if(query.agent_id && catalog.tracks[track_id]->agent_id != *query.agent_id)
+        {
+            continue;
+        }
+        const auto begin =
+            std::lower_bound(points->begin(),
+                             points->end(),
+                             after_id,
+                             [](const memory_activity_point_t& point, std::uint64_t id) {
+                                 return point.id <= id;
+                             });
+        cursors.push_back({ points, static_cast<std::size_t>(begin - points->begin()) });
+    }
+    uint32_t filled = 0;
+    while(filled < capacity)
+    {
+        const memory_activity_point_t* best        = nullptr;
+        cursor_t*                      best_cursor = nullptr;
+        for(auto& cursor : cursors)
+        {
+            while(cursor.index < cursor.points->size())
+            {
+                const auto& point = (*cursor.points)[cursor.index];
+                if(point.id > last_id)
+                {
+                    cursor.index = cursor.points->size();
+                    break;
+                }
+                if(query.time && !overlaps(*query.time, point.start, point.end))
+                {
+                    ++cursor.index;
+                    continue;
+                }
+                if(best == nullptr || point.id < best->id)
+                {
+                    best        = &point;
+                    best_cursor = &cursor;
+                }
+                break;
+            }
+        }
+        if(best == nullptr) break;
+        rows[filled]       = ph_table_event{};
+        rows[filled].id    = best->id;
+        rows[filled].start = best->start;
+        rows[filled].end   = best->end;
+        rows[filled].value = best->value;
+        ++filled;
+        ++best_cursor->index;
+    }
+    return filled;
+}
+
 }  // namespace
 
 std::uint64_t
@@ -1084,7 +1184,7 @@ pytorch_source::table_match(const resolved_event_query& query,
 {
     const auto& row   = *at.row;
     const auto& track = *m_catalog->tracks[at.track];
-    if(query.time && !(row.start <= query.time->end && row.end >= query.time->start))
+    if(query.time && !overlaps(*query.time, row.start, row.end))
     {
         return false;
     }
@@ -1165,7 +1265,9 @@ pytorch_source::publish_row(event_type_t     type,
         out.tid       = track.thread_info->thread_id;
     }
     if(track.category == reader_types::track_kind_t::stream)
+    {
         out.stream_id = track.stream_id;
+    }
 
     switch(type)
     {
@@ -1195,14 +1297,11 @@ pytorch_source::publish_row(event_type_t     type,
         case event_type_t::memory_allocate:
             if(const auto* sample = sample_of(row.event))
             {
-                const std::string_view kind = sample->bytes > 0   ? "ALLOC"
-                                              : sample->bytes < 0 ? "FREE"
-                                                                  : "";
+                const std::string_view kind = alloc_type_of(sample->bytes);
                 std::copy(kind.begin(), kind.end(), out.mem_type);
                 out.agent_id = agent_of(*sample);
-                out.size = static_cast<std::uint64_t>(sample->bytes < 0 ? -sample->bytes
-                                                                        : sample->bytes);
-                out.address = sample->address;
+                out.size     = alloc_size_of(sample->bytes);
+                out.address  = sample->address;
             }
             break;
         case event_type_t::hip_event:
@@ -1228,69 +1327,7 @@ pytorch_source::read_table_events(const resolved_event_query& query,
     if(rows == nullptr || capacity == 0) return 0;
     if(event_type == PH_EVENT_TYPE_MEMORY_ACTIVITY)
     {
-        // The memory tracks' points, in id order across the tracks the query names.
-        struct cursor_t
-        {
-            const std::vector<memory_activity_point_t>* points;
-            std::size_t                                 index;
-        };
-        std::vector<cursor_t> cursors;
-        for(const auto track_id : query.tracks)
-        {
-            const auto points = m_catalog->memory_activity_points(track_id);
-            if(points == nullptr) continue;
-            if(query.agent_id && m_catalog->tracks[track_id]->agent_id != *query.agent_id)
-            {
-                continue;
-            }
-            const auto begin =
-                std::lower_bound(points->begin(),
-                                 points->end(),
-                                 after_id,
-                                 [](const memory_activity_point_t& point,
-                                    std::uint64_t id) { return point.id <= id; });
-            cursors.push_back(
-                { points, static_cast<std::size_t>(begin - points->begin()) });
-        }
-        uint32_t filled = 0;
-        while(filled < capacity)
-        {
-            const memory_activity_point_t* best        = nullptr;
-            cursor_t*                      best_cursor = nullptr;
-            for(auto& cursor : cursors)
-            {
-                while(cursor.index < cursor.points->size())
-                {
-                    const auto& point = (*cursor.points)[cursor.index];
-                    if(point.id > last_id)
-                    {
-                        cursor.index = cursor.points->size();
-                        break;
-                    }
-                    if(query.time && !(point.start <= query.time->end &&
-                                       point.end >= query.time->start))
-                    {
-                        ++cursor.index;
-                        continue;
-                    }
-                    if(best == nullptr || point.id < best->id)
-                    {
-                        best        = &point;
-                        best_cursor = &cursor;
-                    }
-                    break;
-                }
-            }
-            if(best == nullptr) break;
-            rows[filled]       = ph_table_event{};
-            rows[filled].id    = best->id;
-            rows[filled].start = best->start;
-            rows[filled].end   = best->end;
-            rows[filled].value = best->value;
-            ++filled;
-            ++best_cursor->index;
-        }
-        return filled;
+        return read_memory_points(*m_catalog, query, after_id, last_id, rows, capacity);
     }
 
     const auto type = table_type_of(event_type);
@@ -1378,9 +1415,8 @@ pytorch_source::summarize_name_durations(const resolved_event_query&           q
             if(*type == event_type_t::memory_allocate)
             {
                 const auto* sample = sample_of(at.row->event);
-                name               = sample != nullptr && sample->bytes > 0   ? "ALLOC"
-                                     : sample != nullptr && sample->bytes < 0 ? "FREE"
-                                                                              : "";
+                name = sample != nullptr ? std::string{ alloc_type_of(sample->bytes) }
+                                         : std::string{};
             }
             else
             {

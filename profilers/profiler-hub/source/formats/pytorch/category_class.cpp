@@ -11,11 +11,23 @@ namespace
 {
 using reader_types::event_type_t;
 
-constexpr category_class_t k_host{ false, false, event_type_t::region };
-constexpr category_class_t k_launch_site{ false, true, event_type_t::region };
-constexpr category_class_t k_kernel{ true, false, event_type_t::kernel_dispatch };
-constexpr category_class_t k_copy{ true, false, event_type_t::memory_copy };
-constexpr category_class_t k_device_other{ true, false, std::nullopt };
+constexpr category_class_t k_host{ false, false, event_type_t::region, {}, std::nullopt };
+constexpr category_class_t k_launch_site{ false,
+                                          true,
+                                          event_type_t::region,
+                                          {},
+                                          std::nullopt };
+constexpr category_class_t k_kernel{ true,
+                                     false,
+                                     event_type_t::kernel_dispatch,
+                                     {},
+                                     std::nullopt };
+constexpr category_class_t k_copy{ true,
+                                   false,
+                                   event_type_t::memory_copy,
+                                   {},
+                                   std::nullopt };
+constexpr category_class_t k_device_other{ true, false, std::nullopt, {}, std::nullopt };
 // MTIA device work: a DMA request moves data, every other name is taken as a kernel.
 constexpr category_class_t k_mtia_device{ true,
                                           false,

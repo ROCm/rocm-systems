@@ -100,9 +100,13 @@ probe_kineto(const std::string& path)
     {
         std::string text;
         if(read_prefix(path, text))
+        {
             result.schema_version.major = schema_version_in_prefix(text);
+        }
     } catch(...)
-    {}
+    {
+        result.schema_version.major = 0;
+    }
     return result;
 }
 }  // namespace profiler_hub::pytorch

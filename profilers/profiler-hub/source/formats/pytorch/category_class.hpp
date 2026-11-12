@@ -18,8 +18,8 @@ struct category_class_t
     std::optional<reader_types::event_type_t> event_type;
 
     // One event name in this category that has a type of its own.
-    std::string_view                          named_event{};
-    std::optional<reader_types::event_type_t> named_type{};
+    std::string_view                          named_event;
+    std::optional<reader_types::event_type_t> named_type;
 };
 
 // What a trace's category string means; unknown categories are plain host events.
