@@ -251,7 +251,7 @@ impl Session {
     /// Takes already constructed driver instances as one session registry.
     /// Every driver must have been configured with the same lifetime policy.
     #[cfg(test)]
-    fn from_drivers(
+    pub(crate) fn from_drivers(
         drivers: Vec<DriverInstance>,
         lifetime: DriverContextLifetime,
     ) -> Result<Self, Error> {
