@@ -67,9 +67,9 @@ void expectLdsPending(RaceTestBuilder &builder) {
 
 } // namespace
 
-// ---- All-ones no-wait operands ----
+// ---- Bounds above current occupancy ----
 
-TEST(RaceDetector, CounterCapacity_LgkmcntAllOnesWaitIsNoOpBelowCapacity) {
+TEST(RaceDetector, CounterCapacity_LgkmcntBoundAboveOccupancyLeavesEventsPending) {
   auto builder = makeCounterTest();
   issueOrderedLdsReads(builder, kClearlyBelowCapacity);
 
@@ -77,7 +77,7 @@ TEST(RaceDetector, CounterCapacity_LgkmcntAllOnesWaitIsNoOpBelowCapacity) {
   expectPending(builder, /*event=*/0);
 }
 
-TEST(RaceDetector, CounterCapacity_VmcntAllOnesWaitIsNoOpBelowCapacity) {
+TEST(RaceDetector, CounterCapacity_VmcntBoundAboveOccupancyLeavesEventsPending) {
   auto builder = makeCounterTest();
   issueOrderedVmemEvents(builder, kClearlyBelowCapacity);
 

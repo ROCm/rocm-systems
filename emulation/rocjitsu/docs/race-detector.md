@@ -379,8 +379,9 @@ storage are separate.
 
 The adapter and memory pipeline read the same `MemoryIssueInfo` selected by
 routing; the plugin does not infer FLAT's counter domains from addresses again.
-Explicit waits use `WaitCounterPolicy` decoding. A zero wait completes every event
-on its selected counter; an all-ones field means no wait. A nonzero wait retires
+`WaitCounterPolicy` decodes explicit waits and removes all-ones no-wait fields.
+The race core receives only the remaining numeric bounds, not ISA encodings.
+A zero wait completes every event on its selected counter. A nonzero wait retires
 only the provable prefix within each independently ordered completion class.
 Sharing a counter does not make scalar memory, GDS, and indexed LDS one FIFO.
 

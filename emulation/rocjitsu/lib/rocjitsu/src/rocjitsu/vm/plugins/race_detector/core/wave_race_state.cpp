@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
-#include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
@@ -229,45 +228,10 @@ void WaveRaceState::applyCounterConstraint(amdgpu::WaitCounterType type, int max
   }
 }
 
-int WaveRaceState::doNotWaitValue(amdgpu::WaitCounterType type) const {
-  switch (type) {
-  case amdgpu::WaitCounterType::VMCNT:
-    return counterCapacities.vmcnt;
-  case amdgpu::WaitCounterType::LGKMCNT:
-    return counterCapacities.lgkmcnt;
-  case amdgpu::WaitCounterType::EXPCNT:
-    return amdgpu::WaitCounters::EXPCNT_MAX;
-  case amdgpu::WaitCounterType::VSCNT:
-    return amdgpu::WaitCounters::VSCNT_MAX;
-  case amdgpu::WaitCounterType::LOADCNT:
-    return amdgpu::WaitCounters::VMCNT_MAX;
-  case amdgpu::WaitCounterType::STORECNT:
-    return amdgpu::WaitCounters::VSCNT_MAX;
-  case amdgpu::WaitCounterType::DSCNT:
-    return amdgpu::WaitCounters::DSCNT_MAX;
-  case amdgpu::WaitCounterType::KMCNT:
-    return amdgpu::WaitCounters::KMCNT_MAX;
-  case amdgpu::WaitCounterType::TENSORCNT:
-    return amdgpu::WaitCounters::TENSORCNT_MAX;
-  case amdgpu::WaitCounterType::ASYNCCNT:
-    return amdgpu::WaitCounters::ASYNCCNT_MAX;
-  case amdgpu::WaitCounterType::SAMPLECNT:
-    return amdgpu::WaitCounters::SAMPLECNT_MAX;
-  }
-  assert(false && "invalid wait counter type");
-  return -1;
-}
-
 void WaveRaceState::applyWaitCounter(amdgpu::WaitCounterType type, int threshold) {
-  if (threshold < 0 || threshold == doNotWaitValue(type))
+  if (threshold < 0)
     return;
-
-  if (threshold == 0) {
-    applyCounterConstraint(type, 0, /*includeUnordered=*/true);
-    return;
-  }
-
-  applyCounterConstraint(type, threshold, /*includeUnordered=*/false);
+  applyCounterConstraint(type, threshold, /*includeUnordered=*/threshold == 0);
 }
 
 void WaveRaceState::recordLdsOperandRead(InstructionSnapshot instruction, uint32_t address,

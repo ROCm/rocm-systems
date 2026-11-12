@@ -139,7 +139,7 @@ public:
 
   // -- Sync --
 
-  /// Dispatch s_waitcnt. -1 means "don't change this counter".
+  /// Apply decoded VMCNT/LGKMCNT bounds. -1 leaves a counter unchanged.
   void waitcnt(int wave, int vmcnt = -1, int lgkmcnt = -1) {
     waves_[wave]->applyWaitCounter(amdgpu::WaitCounterType::VMCNT, vmcnt);
     waves_[wave]->applyWaitCounter(amdgpu::WaitCounterType::LGKMCNT, lgkmcnt);

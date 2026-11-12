@@ -403,6 +403,10 @@ TYPED_TEST(WaitHazardTest, UpperImmediateBitsAreIgnoredBeforeCheckingTheSentinel
         TypeParam backend(c.arch);
         ASSERT_TRUE(backend.ready());
         backend.load(c.counter, 5);
+        // More candidates than the field's maximum distinguish no wait from
+        // accidentally applying the sentinel as a numeric counter bound.
+        for (uint32_t i = 1; i < c.mask; ++i)
+          backend.counter_only(c.counter);
         backend.load(c.counter, 6);
         backend.wait(c.opcode | upper | count);
         EXPECT_EQ(backend.pending(5), count == c.mask);
@@ -443,8 +447,12 @@ TYPED_TEST(WaitHazardTest, CombinedWaitKeepsCounterThresholdsIndependent) {
           TypeParam backend(arch);
           ASSERT_TRUE(backend.ready());
           backend.load(c.load_or_store, 5);
+          for (unsigned i = 1; i < 63; ++i)
+            backend.counter_only(c.load_or_store);
           backend.load(c.load_or_store, 6);
           backend.load(kDs, 7);
+          for (unsigned i = 1; i < 63; ++i)
+            backend.counter_only(kDs);
           backend.load(kDs, 8);
           backend.wait(word);
           EXPECT_EQ(backend.pending(5), load_or_store_count == 63);

@@ -108,8 +108,8 @@ public:
                                   std::span<const amdgpu::MemoryCounterObligation>,
                                   MemoryOrderClass memoryOrder, uint8_t alignedAtomicBytes = 0);
 
-  /// Apply one architectural wait threshold. Negative values and the counter's
-  /// all-ones encoding leave its progress unchanged.
+  /// Apply a decoded counter bound; negative values leave progress unchanged.
+  /// ISA no-wait sentinels must be filtered by the decoder, not passed as bounds.
   void applyWaitCounter(amdgpu::WaitCounterType type, int threshold);
 
   /// Check a synchronous VALU source against older writers and remember the
@@ -134,7 +134,6 @@ private:
   void satisfyOldestCounterObligations(int count, amdgpu::WaitCounterType, Pred matches);
   void applyCounterConstraint(amdgpu::WaitCounterType type, int maximumRemaining,
                               bool includeUnordered);
-  int doNotWaitValue(amdgpu::WaitCounterType type) const;
 
   std::vector<EventId> waveMemoryEvents;
   std::unordered_map<uint32_t, uint8_t> directLdsReadWidths;
