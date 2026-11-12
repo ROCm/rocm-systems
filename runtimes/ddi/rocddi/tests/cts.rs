@@ -216,7 +216,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     gpu.preload_linear_copy().map_err(|failure| failure.error)?;
     gpu.preload_linear_copy().map_err(|failure| failure.error)?;
     let counters = gpu.clock_counters()?;
-    assert!(counters.gpu_frequency > 0);
+    assert!(counters.gpu_info.frequency_hz > 0);
 
     let access = DeviceAccess::READ | DeviceAccess::WRITE;
     let mut source = device.allocate(MemoryKind::System, 4096, 4096, access)?;

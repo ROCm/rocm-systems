@@ -560,21 +560,39 @@ fn hardware_exception_events_match_the_amd_extension_layout() {
 }
 
 #[test]
-/// Verifies that GPU ticks translate around the correlated system sample.
-fn gpu_ticks_translate_around_the_correlated_system_sample() {
+/// Verifies that GPU ticks translate around the correlated host sample.
+fn gpu_ticks_translate_around_the_correlated_host_sample() {
     let counters = ClockCounters {
         gpu: 100,
-        host: 0,
-        system: 1_000,
-        system_frequency: 1_000_000_000,
-        gpu_frequency: 100_000_000,
+        host: 1_000,
+        system: None,
+        gpu_info: rocddi::host::clock::ClockInfo {
+            frequency_hz: 100_000_000,
+            counter_bit_count: 0,
+        },
     };
+    assert_eq!(
+        translate_gpu_tick(
+            ClockCounters {
+                gpu_info: rocddi::host::clock::ClockInfo {
+                    counter_bit_count: 32,
+                    ..counters.gpu_info
+                },
+                ..counters
+            },
+            110
+        ),
+        Err(NOT_SUPPORTED)
+    );
     assert_eq!(translate_gpu_tick(counters, 110), Ok(1_100));
     assert_eq!(translate_gpu_tick(counters, 90), Ok(900));
     assert_eq!(
         translate_gpu_tick(
             ClockCounters {
-                gpu_frequency: 200_000_000,
+                gpu_info: rocddi::host::clock::ClockInfo {
+                    frequency_hz: 200_000_000,
+                    ..counters.gpu_info
+                },
                 ..counters
             },
             110,
@@ -584,7 +602,10 @@ fn gpu_ticks_translate_around_the_correlated_system_sample() {
     assert_eq!(
         translate_gpu_tick(
             ClockCounters {
-                system_frequency: 0,
+                gpu_info: rocddi::host::clock::ClockInfo {
+                    frequency_hz: 0,
+                    ..counters.gpu_info
+                },
                 ..counters
             },
             100,

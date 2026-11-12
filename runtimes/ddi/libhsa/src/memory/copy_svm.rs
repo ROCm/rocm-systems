@@ -1237,15 +1237,9 @@ fn execute_gpu_entries(
     }
 }
 
-/// Reads a system clock tick from the native device or host.
-fn system_copy_tick(device: Option<&Device>) -> Result<u64, CopyRouteFailure> {
-    let device = device.ok_or_else(|| CopyRouteFailure::retired(ERROR))?;
-    let counters = crate::runtime::clock_counters(device)
-        .map_err(|error| CopyRouteFailure::retired(map_error(error)))?;
-    if counters.system == 0 {
-        return Err(CopyRouteFailure::retired(ERROR));
-    }
-    Ok(counters.system)
+/// Reads the host profiling clock without requiring a GPU or native correlation.
+fn system_copy_tick() -> Result<u64, CopyRouteFailure> {
+    rocddi::host::clock::read().map_err(|error| CopyRouteFailure::retired(map_error(error)))
 }
 
 /// Builds an asynchronous copy profile from GPU copy timestamps.
@@ -1262,7 +1256,6 @@ fn execute_copy_route(
     route: AsyncCopyRoute,
     sdma_engine: Option<u32>,
     profile_enabled: bool,
-    host_clock: Option<&Device>,
     stop: &AtomicBool,
 ) -> Result<Option<AsyncCopyProfile>, CopyRouteFailure> {
     match route {
@@ -1275,9 +1268,7 @@ fn execute_copy_route(
             if stop.load(Ordering::Acquire) {
                 return Err(CopyRouteFailure::retired(ERROR));
             }
-            let start = profile_enabled
-                .then(|| system_copy_tick(host_clock))
-                .transpose()?;
+            let start = profile_enabled.then(system_copy_tick).transpose()?;
             let needs_loaded_mapping = matches!(&source, HostCopySource::LoadedAddress(..))
                 || matches!(&destination, HostCopyDestination::LoadedAddress(..));
             let guard = if needs_loaded_mapping {
@@ -1322,9 +1313,7 @@ fn execute_copy_route(
             unsafe { std::ptr::copy(source_host as *const u8, destination_host as *mut u8, size) };
             fence(Ordering::SeqCst);
             drop(guard);
-            let end = profile_enabled
-                .then(|| system_copy_tick(host_clock))
-                .transpose()?;
+            let end = profile_enabled.then(system_copy_tick).transpose()?;
             let profile = start.zip(end).map(|(start, end)| AsyncCopyProfile {
                 clock: AsyncCopyClock::System,
                 start,
