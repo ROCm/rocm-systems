@@ -46,7 +46,7 @@ New-Item -ItemType Directory -Force "$env:APPDATA\hrr" | Out-Null; Set-Content "
 
 A process that initialises HIP with capture on says so once on stderr, whatever `AMD_LOG_LEVEL` is set to: the line begins with `[HRR capture] Recording` and names the process's own directory in the archive, such as `./my_capture.hrr/pid-4242`. Child processes record to their own `pid-*` directories in the same archive. A child started with `exec` prints a line of its own; a child created with `fork()` after HIP has started does not.
 
-The archive holds the process's code, models and data. Capture writes `NOTICE.txt` at its root, and the start line and `hrr-playback` point to it: read [Sharing an archive](PRIVACY.md#sharing-an-archive) before sharing one.
+The archive holds the process's code, models and data. Capture writes `NOTICE.txt` at its root, and the start line and `hrr-playback` point to it: read [Sharing an archive](PRIVACY.md#sharing-an-archive) before sharing one. What HRR takes care of, and what it leaves to the user, is under [Scope](PRIVACY.md#scope).
 
 Use the in-tree `libamdhip64` from the **same source commit** when testing capture changes:
 

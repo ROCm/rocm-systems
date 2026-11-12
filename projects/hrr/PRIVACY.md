@@ -10,6 +10,30 @@ Every task under AIRUNTIME-2733 that changes what an archive holds updates this 
 same change. `tools/tests/test_privacy_doc.py`, run by the ctest `hrr-generator-rules`,
 fails when the manifest fields written by capture and the table below disagree.
 
+## Scope
+
+HRR is responsible for:
+
+- recording nothing without the user's [consent](#consent), and writing an archive only to
+  the directory named by `HIP_HRR_CAPTURE_OUTPUT`. Apart from the archive, capture writes
+  only to stderr and the HIP log, and opens no network connection;
+- saying what an archive holds, on this page and in the notice described under
+  [Sharing an archive](#sharing-an-archive);
+- on Linux, protecting the archive on the machine that wrote it, as described under
+  [How the archive is protected on disk](#how-the-archive-is-protected-on-disk);
+- treating an archive as untrusted input at replay, within the limits described under
+  [Replay runs GPU code taken from the archive](#replay-runs-gpu-code-taken-from-the-archive).
+
+Out of scope, and left to the user:
+
+- protecting, storing, sharing and deleting an archive once capture has written it;
+- encrypting it. HRR encrypts nothing, so encrypt an archive before it leaves the machine;
+- data-protection, export and sanctions rules, and the licences of third-party code and
+  model weights, when an archive is shared or crosses borders;
+- sending an archive to AMD. HRR provides no channel for that;
+- an application, or an application owner, that is itself malicious. A process can change
+  what it records, and HRR does not detect that.
+
 ## Replay runs GPU code taken from the archive
 
 An archive is untrusted executable input for the tool that replays it. `hrr-playback` loads
@@ -134,7 +158,8 @@ serving stack can still hold its clients' prompts, as listed above.
 ## How the archive is protected on disk
 
 On Linux the archive is readable only by the user who captured it (directories 0700, files
-0600). [AIRUNTIME-2847](https://amd-hub.atlassian.net/browse/AIRUNTIME-2847) makes every
+0600). On Windows capture sets no access rights of its own: the archive takes those of the
+output directory. [AIRUNTIME-2847](https://amd-hub.atlassian.net/browse/AIRUNTIME-2847) makes every
 write go through the directory descriptors capture checked.
 [AIRUNTIME-2878](https://amd-hub.atlassian.net/browse/AIRUNTIME-2878) keeps the crash-time
 flush without displacing the application's own crash handler. None of these changes what an
