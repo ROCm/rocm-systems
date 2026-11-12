@@ -32,7 +32,7 @@ file(READ "${TEST_CONFIG_SOURCE}" _profile_json)
 string(
     REPLACE
     "{\"num_threads\": 8, \"cpu_dispatch_threads\": 17, \"async_helper_threads\": 8}"
-    "{\"num_threads\": 7, \"cpu_dispatch_threads\": 19, \"async_helper_threads\": 6}"
+    "{\"num_threads\": 7, \"cpu_dispatch_threads\": 19, \"async_helper_threads\": 0}"
     _profile_json
     "${_profile_json}"
 )
@@ -54,7 +54,7 @@ if(NOT _result EQUAL 0)
     )
 endif()
 
-if(NOT _output MATCHES "Configured \\| 7 \\| 19 \\| 6 \\| 31")
+if(NOT _output MATCHES "Configured \\| 7 \\| 19 \\| 0 \\| 25")
     message(
         FATAL_ERROR
         "build-tree profile lookup used the wrong config:\n${_output}"
