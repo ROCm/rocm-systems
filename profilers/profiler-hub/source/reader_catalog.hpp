@@ -175,6 +175,11 @@ struct reader_catalog_t
         size_t track_id) const;
     bool memory_activity_id_span(uint64_t& first_id, uint64_t& last_id) const;
 
+    // Adds a memory-activity track whose points a format supplies itself, in
+    // ascending id order, for a format with no rocpd_memory_allocate table.
+    void add_memory_activity_track(reader_types::track_info_ptr_t       track,
+                                   std::vector<memory_activity_point_t> points);
+
     // Memory-activity tracks are derived in memory and have no rocpd_info_pmc
     // row. Add a catalog entry for each one after pmc_infos has been loaded.
     void publish_memory_activity_pmc_infos();

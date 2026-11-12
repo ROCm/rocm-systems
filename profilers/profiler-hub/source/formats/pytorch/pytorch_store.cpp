@@ -66,7 +66,9 @@ sorted_rows(loaded_trace_t& t, const std::vector<std::uint32_t>& idxs)
         rows.push_back({ start,
                          start + static_cast<std::uint64_t>(dur),
                          e.name_id,
-                         event_type_of(t.cat_classes[e.cat_id], t.names[e.name_id]),
+                         e.phase == phase_t::memory
+                             ? reader_types::event_type_t::memory_allocate
+                             : event_type_of(t.cat_classes[e.cat_id], t.names[e.name_id]),
                          i });
     }
     std::stable_sort(rows.begin(), rows.end(), event_order);
@@ -184,6 +186,7 @@ load_store(const std::string& path, std::function<bool()> cancelled)
     }
 
     store.events        = std::move(trace.events);
+    store.memory        = std::move(trace.memory);
     store.args          = std::move(trace.args);
     store.names         = std::move(trace.names);
     store.cats          = std::move(trace.cats);

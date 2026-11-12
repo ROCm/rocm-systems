@@ -14,6 +14,12 @@
 
 namespace profiler_hub::pytorch
 {
+enum class phase_t : std::uint8_t
+{
+    complete,  // a "ph":"X" event
+    memory,    // a "[memory]" instant
+};
+
 struct event_t
 {
     std::uint32_t name_id{};
@@ -28,6 +34,7 @@ struct event_t
     std::int64_t  ext{ -1 };   // args "External id"
     std::uint64_t args_off{};  // the args object's text in loaded_trace_t::args
     std::uint32_t args_len{};  // 0 when the event has no args or an empty object
+    phase_t       phase{};
 };
 static_assert(sizeof(event_t) == 88, "event_t is the 88-byte layout");
 
@@ -38,11 +45,24 @@ struct load_diag_t
     std::uint64_t flow_s{};
     std::uint64_t flow_f{};
     std::uint64_t meta_events{};
+    std::uint64_t memory_events{};
     std::uint64_t other_events{};
     std::uint64_t bad_events{};
     std::uint64_t clamped_events{};
     std::uint64_t gunzip_ms{};
     std::uint64_t parse_ms{};
+};
+
+// What a "[memory]" instant carries in its args. A total the event lacks is -1.
+struct memory_sample_t
+{
+    std::uint32_t event{};  // index into loaded_trace_t::events
+    std::int64_t  device_type{ -1 };
+    std::int64_t  device_id{ -1 };
+    std::int64_t  bytes{};  // positive allocates, negative frees
+    std::uint64_t address{};
+    std::int64_t  allocated{ -1 };
+    std::int64_t  reserved{ -1 };
 };
 
 struct loaded_trace_t
@@ -53,6 +73,7 @@ struct loaded_trace_t
     std::vector<std::string>      cats;
     std::vector<category_class_t> cat_classes;
     std::vector<event_t>          events;
+    std::vector<memory_sample_t>  memory;  // by event index
     std::string                   args;
     bool                          link_by_correlation{ true };
     std::map<std::pair<std::int64_t, std::int64_t>, std::string> thread_names;
