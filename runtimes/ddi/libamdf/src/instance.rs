@@ -15,7 +15,7 @@ use rocddi::device::event::{
     DeviceEvent, DeviceEventOriginId, DeviceEventSourceId, DeviceEventSubscription,
     GpuHardwareException, subscribe,
 };
-use rocddi::device::gpu::event::linux::{SignalEventService, process_signal_event_available};
+use rocddi::device::gpu::event::{SignalEventService, signal_event_available};
 use rocddi::host::cache::{CacheMaintenance, CachePolicy};
 use rocddi::memory::storage::TryPush;
 use rocddi::memory::storage::{Allocator, Owned, OwnerVec, Shared, UninitOwned};
@@ -883,7 +883,8 @@ pub(crate) unsafe extern "C" fn create(
             session::DriverContextLifetime::Session
         };
         let native = session::Session::new(lifetime).map_err(|e| crate::support::native(&e))?;
-        let event_service = SignalEventService::new(&native);
+        let event_service =
+            SignalEventService::new(&native).map_err(|error| crate::support::native(&error))?;
         let host_page_size =
             native_memory::host::host_page_size().map_err(|e| crate::support::native(&e))?;
         let host_write_back_cache = CacheMaintenance::qualify(CachePolicy::WriteBack).ok();
@@ -1179,7 +1180,7 @@ pub(crate) unsafe extern "C" fn device_create(
         // Feature queries are metadata-only. Sample the process signal-page
         // state here so they never contend on its native-resource mutex.
         let native_events_available = if instance.process_lifetime() {
-            process_signal_event_available(&native).map_err(|error| {
+            signal_event_available(&native).map_err(|error| {
                 unregister(&endpoint.children);
                 crate::support::native(&error)
             })?
