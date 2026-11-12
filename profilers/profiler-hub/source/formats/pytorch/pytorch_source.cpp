@@ -61,7 +61,7 @@ public:
                 .start_timestamp   = row.start,
                 .end_timestamp     = row.end,
                 .display_name      = m_source.m_names[row.name_id],
-                .category          = {},
+                .category          = m_source.m_cats[m_source.m_events[row.event].cat_id],
                 .track             = track });
         }
         return events;
@@ -171,10 +171,10 @@ pytorch_source::load_catalog(common::thread_pool& /*workers*/,
 
     for(const auto& [id, text] : m_catalog->strings_by_id)
     {
-        if(id < first_name_id) continue;
-        const size_t name_id = id - first_name_id;
-        if(name_id >= m_names.size()) m_names.resize(name_id + 1);
-        m_names[name_id] = text.c_str();
+        auto&        table = id < first_name_id ? m_cats : m_names;
+        const size_t index = id < first_name_id ? id - 1 : id - first_name_id;
+        if(index >= table.size()) table.resize(index + 1);
+        table[index] = text;
     }
 
     // Ids start at 1, as rocpd row ids do.

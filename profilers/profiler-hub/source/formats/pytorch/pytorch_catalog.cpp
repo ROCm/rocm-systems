@@ -15,11 +15,11 @@ namespace profiler_hub::pytorch
 std::size_t
 fill_catalog(reader_catalog_t& catalog, pytorch_store_t& store)
 {
-    const std::size_t first_name_id = store.cats.size();
+    const std::size_t first_name_id = store.cats.size() + 1;
     catalog.strings_by_id.reserve(store.cats.size() + store.names.size());
     for(std::size_t i = 0; i < store.cats.size(); ++i)
     {
-        catalog.strings_by_id.emplace(i, std::move(store.cats[i]));
+        catalog.strings_by_id.emplace(i + 1, std::move(store.cats[i]));
     }
     for(std::size_t i = 0; i < store.names.size(); ++i)
     {

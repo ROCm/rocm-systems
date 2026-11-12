@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace profiler_hub::pytorch
@@ -86,11 +87,12 @@ private:
     std::shared_ptr<reader_catalog_t> m_catalog;
     row_seam                          m_seam;
     std::vector<track_rows_t>         m_tracks;  // by track id
-    std::vector<event_t>     m_events;  // file order; store_row_t::event indexes it
-    std::string              m_args;    // the args text of m_events
-    std::vector<const char*> m_names;   // by name id
-    std::vector<run_t>       m_runs;    // by type, then first id
-    cached_track_reader*     m_reader{};
+    std::vector<event_t>          m_events;  // file order; store_row_t::event indexes it
+    std::string                   m_args;    // the args text of m_events
+    std::vector<std::string_view> m_names;   // by name id
+    std::vector<std::string_view> m_cats;    // by category index
+    std::vector<run_t>            m_runs;    // by type, then first id
+    cached_track_reader*          m_reader{};
 };
 
 }  // namespace profiler_hub::pytorch
