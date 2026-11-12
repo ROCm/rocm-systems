@@ -1062,6 +1062,17 @@ TEST_F(TensorDmaRaceTest, RetainedFootprintDoesNotBorrowTheIssueRanges) {
   EXPECT_TRUE(ds_read(1, 64));
 }
 
+TEST_F(TensorDmaRaceTest, RetainedCallbackDoesNotBorrowTheDispatchWaveList) {
+  for (auto *wave : waves)
+    fixture.plugin_group_->onAmdgpuWavefrontCancelled(*wave);
+  auto dispatched_waves = waves;
+  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, dispatched_waves);
+  dispatched_waves.fill(nullptr);
+
+  EXPECT_FALSE(ds_write(0, 64));
+  EXPECT_TRUE(ds_read(1, 64));
+}
+
 TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesLeavesTheLoadPendingUntilTheWaitCoversIt) {
   tensor_load(0, {{.address = 0, .bytes = 16}});
   tensor_store(0, {});

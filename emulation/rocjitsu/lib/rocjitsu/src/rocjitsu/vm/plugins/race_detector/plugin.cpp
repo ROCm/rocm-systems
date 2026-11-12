@@ -375,8 +375,9 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
                                                      uint32_t /*physical_sgpr_count*/,
                                                      std::span<amdgpu::Wavefront *> wavefronts) {
   uint32_t num_waves = static_cast<uint32_t>(wavefronts.size());
-  std::vector<amdgpu::Wavefront *> wf_ptrs(wavefronts.begin(), wavefronts.end());
-  auto handler = [this, wf_ptrs, dispatch_id](RaceViolation v) {
+  auto handler = [this,
+                  wf_ptrs = std::vector<amdgpu::Wavefront *>(wavefronts.begin(), wavefronts.end()),
+                  dispatch_id](RaceViolation v) {
     assert(v.wave >= 0 && static_cast<size_t>(v.wave) < wf_ptrs.size() &&
            "wave index out of range");
     amdgpu::Wavefront *wf = wf_ptrs[v.wave];
