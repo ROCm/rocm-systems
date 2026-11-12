@@ -78,7 +78,6 @@ def run_pre_processing(tmp_path, selected_blocks, no_roof=False, trace_ml_api=No
     """
     profiling_args = argparse.Namespace(
         attach_pid=None,
-        config_dir=tmp_path / "analysis_configs",
         filter_blocks=[],
         no_roof=no_roof,
         output_directory=str(tmp_path),
@@ -800,7 +799,6 @@ def test_pre_processing_persists_membw_analysis_config(
     effective_filter_blocks = ["30.13"]
     profiling_args = argparse.Namespace(
         attach_pid=None,
-        config_dir=tmp_path / "analysis_configs",
         experimental=True,
         filter_blocks=[],
         membw_analysis=True,
@@ -873,7 +871,6 @@ def test_pre_processing_pmc_power_gating_warning(
     """Warn about perfmon gating only when the GPU profiled at AUTO."""
     profiling_args = argparse.Namespace(
         attach_pid=None,
-        config_dir=tmp_path / "analysis_configs",
         experimental=True,
         filter_blocks=[],
         membw_analysis=False,

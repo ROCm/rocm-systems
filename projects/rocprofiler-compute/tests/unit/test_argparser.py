@@ -145,22 +145,6 @@ def test_quiet_rejects_explicit_value(flag, capsys):
 
 
 # =============================================================================
-# --config-dir
-# =============================================================================
-
-
-def test_config_dir_success_stores_value():
-    assert build_args(["--config-dir", "/tmp/cfg"]).config_dir == "/tmp/cfg"
-
-
-def test_config_dir_requires_value(capsys):
-    with pytest.raises(SystemExit) as exc:
-        build_args(["--config-dir"])
-    assert exc.value.code == 2
-    assert "--config-dir" in capsys.readouterr().err
-
-
-# =============================================================================
 # profile -d / --output-directory
 # =============================================================================
 

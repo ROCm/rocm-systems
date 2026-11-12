@@ -382,7 +382,7 @@ class RocProfCompute:
         sys_info: Optional[Dict[str, Any]],
     ) -> Dict[str, Tuple[str, str, str]]:
         """Map the ids of arch's panel configs to (name, unit, description)."""
-        config_root = Path(self.__args.config_dir) / (
+        config_root = config.analysis_configs_dir / (
             canonical_config_arch(arch) or arch
         )
         if arch not in self.__supported_archs and not config_root.is_dir():
