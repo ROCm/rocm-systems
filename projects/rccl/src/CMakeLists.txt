@@ -1699,6 +1699,22 @@ if(ENABLE_DEVICE_LINKER)
   target_link_libraries(rccl PRIVATE ${DEVICE_LINKER_OBJECTS})
 endif()
 
+# ENABLE_RCCL_EP_IN_LIBRCCL is implemented by the device linker, and the rccl_ep tests compile the C
+# ABI into their own binary, so a build where the option does nothing passes its tests: fail instead.
+if(ENABLE_RCCL_EP_IN_LIBRCCL)
+  if(NOT ENABLE_DEVICE_LINKER)
+    message(FATAL_ERROR "ENABLE_RCCL_EP_IN_LIBRCCL needs ENABLE_DEVICE_LINKER=ON: the device linker "
+                        "is what compiles rccl_ep into librccl.so")
+  endif()
+  if(BUILD_SHARED_LIBS)
+    add_custom_command(TARGET rccl POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -DLIB=$<TARGET_FILE:rccl> -DNM=${CMAKE_NM}
+              -P ${PROJECT_SOURCE_DIR}/cmake/scripts/check_rccl_ep_exports.cmake
+      COMMENT "Verifying librccl.so exports the rccl_ep C ABI (ENABLE_RCCL_EP_IN_LIBRCCL)"
+      VERBATIM)
+  endif()
+endif()
+
 ## Set RCCL linked libraries
 if (HAVE_BFD)
   target_link_libraries(rccl PRIVATE bfd)
