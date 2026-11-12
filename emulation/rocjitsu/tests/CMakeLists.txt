@@ -2375,6 +2375,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Compile as C and link only the shared library's public ABI.
     add_executable(vm_config_c_api_test vm_config_c_api_test.c)
     target_link_libraries(vm_config_c_api_test PRIVATE rocjitsu_shared)
+    if(RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR)
+        # Compile the consumer as C, but link the C++ runtime needed by the
+        # instrumented library's vptr checks.
+        set_target_properties(
+            vm_config_c_api_test
+            PROPERTIES LINKER_LANGUAGE CXX
+        )
+    endif()
     target_include_directories(
         vm_config_c_api_test
         PRIVATE ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
