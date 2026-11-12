@@ -94,9 +94,12 @@ division_scale(typename IeeeFormat<Width>::Bits a, typename IeeeFormat<Width>::B
       if (exponent < (Width == 32 ? 0 : -11)) {
         value = (a & F::sign) | division_overflow<Width>((a & F::sign) != 0, rounding);
       } else if (exponent <= 0) {
+        // OMOD turns a denormal into +0, so a rounding carry to the smallest normal must not
+        // escape it: with OMOD, FP64 truncates like FP32.
+        const bool truncate = Width == 32 || (mode & RJ_ARITH_ALU_OMOD_MASK);
         value = (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) ? a & F::sign
-                : Width == 32 ? division_scale_bits<Width>(a, adjustment, 3)
-                              : value;
+                : truncate ? division_scale_bits<Width>(a, adjustment, 3)
+                           : value;
       }
     }
   }
