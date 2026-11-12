@@ -6,6 +6,7 @@
 
 #include "hip_comgr_helper.hpp"
 #include <atomic>
+#include <iterator>
 #if defined(_WIN32)
 #include <process.h>
 #else

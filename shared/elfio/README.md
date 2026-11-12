@@ -39,6 +39,7 @@ A sparse checkout of a consuming project must include `shared/elfio`.
 
 Consumers:
 
+- `projects/clr` (ROCclr's `amd::Elf`, used by the HIP and OpenCL runtimes)
 - `projects/rocprofiler-sdk` (unless `ROCPROFILER_BUILD_ELFIO=OFF`)
 
 ## Updating

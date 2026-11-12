@@ -9,6 +9,7 @@
 "project: clr":
 - changed-files:
   - any-glob-to-any-file: 'projects/clr/**/*'
+  - any-glob-to-any-file: 'shared/elfio/**/*'
 
 "project: cuid":
 - changed-files:

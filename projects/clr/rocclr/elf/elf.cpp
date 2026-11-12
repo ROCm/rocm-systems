@@ -67,7 +67,7 @@
           std::this_thread::get_id(), this, __func__, __VA_ARGS__)
 
 namespace amd {
-using namespace amd::ELFIO;
+using namespace ELFIO;
 
 #if !defined(ELFMAG)
 #define ELFMAG "\177ELF"
@@ -93,7 +93,7 @@ constexpr ElfSectionsDesc ElfSecDesc[] = {
     {Elf::CAL, ".text", 1, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, "AMD CalImage"},
     {Elf::DLL, ".text", 1, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, "x86 dll"},
     {Elf::STRTAB, ".strtab", 1, SHT_STRTAB, SHF_STRINGS, "String table"},
-    {Elf::SYMTAB, ".symtab", sizeof(Elf64_Xword), SHT_SYMTAB, 0, "Symbol table"},
+    {Elf::SYMTAB, ".symtab", sizeof(Elf_Xword), SHT_SYMTAB, 0, "Symbol table"},
     {Elf::RODATA, ".rodata", 1, SHT_PROGBITS, SHF_ALLOC, "Read-only data"},
     {Elf::SHSTRTAB, ".shstrtab", 1, SHT_STRTAB, SHF_STRINGS, "Section names"},
     {Elf::NOTES, ".note", 1, SHT_NOTE, 0, "used by loader for notes"},
@@ -161,7 +161,7 @@ Elf::~Elf() {
 bool Elf::Clear() {
   ElfTrace(amd::LOG_INFO);
 
-  _elfio.clean();
+  _elfio = elfio{};
   elfMemoryRelease();
 
   // Re-initialize the object
@@ -191,6 +191,16 @@ bool Elf::Init() {
         if (!_elfio.load(is)) {
           LogElfError("failed in _elfio.load(%p, %lu)", _rawElfBytes, _rawElfSize);
           return false;
+        }
+        // ELFIO keeps a section whose data could not be read (offset or size outside the
+        // image) with no data but its header size. Reject the image instead, so callers
+        // never see such a section.
+        for (const auto& sec : _elfio.sections) {
+          if (sec->get_type() != SHT_NULL && sec->get_type() != SHT_NOBITS &&
+              sec->get_size() != 0 && sec->get_data() == nullptr) {
+            LogElfError("failed: section %u has no readable data", sec->get_index());
+            return false;
+          }
         }
       }
       break;
@@ -399,17 +409,6 @@ bool Elf::getSection(Elf::ElfSections id, char** dst, size_t* sz) const {
   return true;
 }
 
-unsigned int Elf::getSymbolNum() const {
-  if (_symtab_ndx == SHN_UNDEF) {
-    logElfError(" failed: _symtab_ndx = SHN_UNDEF");
-    return 0;  // No SYMTAB
-  }
-  symbol_section_accessor symbol_reader(_elfio, _elfio.sections[_symtab_ndx]);
-  auto num = symbol_reader.get_symbols_num() - 1;  // Exclude the first dummy symbol
-  LogElfInfo(": num=%lu", num);
-  return num;
-}
-
 unsigned int Elf::getSegmentNum() const { return _elfio.segments.size(); }
 
 bool Elf::getSegment(const unsigned int index, segment*& seg) const {
@@ -419,57 +418,6 @@ bool Elf::getSegment(const unsigned int index, segment*& seg) const {
     ret = true;
   }
   return ret;
-}
-
-bool Elf::getSymbolInfo(unsigned int index, SymbolInfo* symInfo) const {
-  if (_symtab_ndx == SHN_UNDEF) {
-    logElfError(" failed: _symtab_ndx = SHN_UNDEF");
-    return false;  // No SYMTAB
-  }
-  symbol_section_accessor symbol_reader(_elfio, _elfio.sections[_symtab_ndx]);
-
-  auto num = getSymbolNum();
-
-  if (index >= num) {
-    LogElfError(" failed: wrong index %u >= symbols num %lu", index, num);
-    return false;
-  }
-
-  std::string sym_name;
-  Elf64_Addr value = 0;
-  Elf_Xword size = 0;
-  unsigned char bind = 0;
-  unsigned char type = 0;
-  Elf_Half sec_index = 0;
-  unsigned char other = 0;
-
-  // index++ for real index on top of the first dummy symbol
-  bool ret = symbol_reader.get_symbol(++index, sym_name, value, size, bind, type, sec_index, other);
-  if (!ret) {
-    LogElfError("failed to get_symbol(%u)", index);
-    return false;
-  }
-  section* sec = _elfio.sections[sec_index];
-  if (sec == nullptr) {
-    LogElfError("failed: null section at %u", sec_index);
-    return false;
-  }
-
-  symInfo->sec_addr = sec->get_data();
-  symInfo->sec_size = sec->get_size();
-  symInfo->address = symInfo->sec_addr + (size_t)value;
-  symInfo->size = (uint64_t)size;
-
-  symInfo->sec_name = sec->get_name();
-  symInfo->sym_name = sym_name;
-#if 0
-  // For debug purpose
-  LogElfDebug("succeeded at index=%u: sec_addr=%p, sec_size=%lu, address=%p,"
-              " size=%lu, sec_name=%s, sym_name=%s",
-              index, symInfo->sec_addr, symInfo->sec_size, symInfo->address, symInfo->size,
-              symInfo->sec_name.c_str(), symInfo->sym_name.c_str());
-#endif
-  return true;
 }
 
 bool Elf::addSectionData(Elf_Xword& outOffset, ElfSections id, const void* buffer, size_t size) {
@@ -560,169 +508,6 @@ bool Elf::addSection(ElfSections id, const void* d_buf, size_t d_size) {
 
   LogElfDebug("succeeded: name=%s, d_buf=%p, d_size=%zu", ElfSecDesc[id].name, d_buf, d_size);
   return true;
-}
-
-bool Elf::addSymbol(ElfSections id, const char* symbolName, const void* buffer, size_t size) {
-  assert(ElfSecDesc[id].id == id && "The order of ElfSecDesc[] and Elf::ElfSections mismatches.");
-
-  if (_symtab_ndx == SHN_UNDEF) {
-    logElfError("failed: _symtab_ndx = SHN_UNDEF");
-    return false;  // No SYMTAB
-  }
-
-  const char* sectionName = ElfSecDesc[id].name;
-
-  bool isFunction = ((id == Elf::CAL) || (id == Elf::DLL) || (id == Elf::JITBINARY)) ? true : false;
-
-  // Get section index
-  section* sec = _elfio.sections[sectionName];
-  if (sec == nullptr) {
-    // Create a new section.
-    if ((sec = newSection(id, nullptr, 0)) == NULL) {
-      LogElfError("failed in newSection(name=%s)", sectionName);
-      return false;
-    }
-  }
-  size_t sec_ndx = sec->get_index();
-  if (sec_ndx == SHN_UNDEF) {
-    logElfError("failed: sec->get_index() = SHN_UNDEF");
-    return false;
-  }
-
-  // Put symbolName into .strtab section
-  Elf_Xword strtab_offset = 0;
-  if (!addSectionData(strtab_offset, STRTAB, symbolName, strlen(symbolName) + 1)) {
-    LogElfError("failed in addSectionData(name=%s, symbolName=%s, length=%zu)",
-                ElfSecDesc[STRTAB].name, symbolName, strlen(symbolName) + 1);
-    return false;
-  }
-
-  // Put buffer into section
-  Elf_Xword sec_offset = 0;
-  if ((buffer != nullptr) && (size != 0)) {
-    if (!addSectionData(sec_offset, id, buffer, size)) {
-      LogElfError("failed in addSectionData(name=%s, buffer=%p, size=%zu)", sectionName, buffer,
-                  size);
-      return false;
-    }
-  }
-
-  symbol_section_accessor symbol_writter(_elfio, _elfio.sections[_symtab_ndx]);
-
-  auto ret = symbol_writter.add_symbol(strtab_offset, sec_offset, size, 0,
-                                       (isFunction) ? STT_FUNC : STT_OBJECT, 0, sec_ndx);
-
-  LogElfDebug(
-      "%s: sectionName=%s symbolName=%s strtab_offset=%lu, sec_offset=%lu, "
-      "size=%zu, sec_ndx=%zu, ret=%d",
-      ret >= 1 ? "succeeded" : "failed", sectionName, symbolName, strtab_offset, sec_offset, size,
-      sec_ndx, ret);
-  return ret >= 1;
-}
-
-bool Elf::getSymbol(ElfSections id, const char* symbolName, char** buffer, size_t* size) const {
-  assert(ElfSecDesc[id].id == id && "The order of ElfSecDesc[] and Elf::ElfSections mismatches.");
-
-  if (!size || !buffer || !symbolName) {
-    logElfError("failed: invalid parameters");
-    return false;
-  }
-  if (_symtab_ndx == SHN_UNDEF) {
-    logElfError("failed: _symtab_ndx = SHN_UNDEF");
-    return false;  // No SYMTAB
-  }
-
-  *size = 0;
-  *buffer = nullptr;
-  symbol_section_accessor symbol_reader(_elfio, _elfio.sections[_symtab_ndx]);
-
-  Elf64_Addr value = 0;
-  Elf_Xword size0 = 0;
-  unsigned char bind = 0;
-  unsigned char type = 0;
-  unsigned char other = 0;
-  Elf_Half sec_ndx = SHN_UNDEF;
-
-  // Search by symbolName, sectionName
-  bool ret = symbol_reader.get_symbol(symbolName, ElfSecDesc[id].name, value, size0, bind, type,
-                                      sec_ndx, other);
-
-  if (ret) {
-    *buffer = const_cast<char*>(_elfio.sections[sec_ndx]->get_data() + value);
-    *size = static_cast<size_t>(size0);
-  }
-#if 0
-  // For debug purpose
-  LogElfDebug("%s: sectionName=%s symbolName=%s value=%lu, buffer=%p, size=%zu, sec_ndx=%u",
-              ret ? "succeeded" : "failed",
-              ElfSecDesc[id].name, symbolName, value, *buffer, *size, sec_ndx);
-#endif
-  return ret;
-}
-
-bool Elf::addNote(const char* noteName, const char* noteDesc, size_t descSize) {
-  if (descSize == 0 || noteName == nullptr || (descSize != 0 && noteDesc == nullptr)) {
-    logElfError("failed: empty note");
-    return false;
-  }
-
-  // Get section
-  section* sec = _elfio.sections[ElfSecDesc[NOTES].name];
-  if (sec == nullptr) {
-    // Create a new section.
-    if ((sec = newSection(NOTES, nullptr, 0)) == nullptr) {
-      logElfError("failed in newSection(NOTES)");
-      return false;
-    }
-  }
-
-  note_section_accessor note_writer(_elfio, sec);
-  // noteName is null terminated
-  note_writer.add_note(0, noteName, noteDesc, descSize);
-
-  LogElfDebug("Succeed: add_note(%s, %s)", noteName, std::string(noteDesc, descSize).c_str());
-
-  return true;
-}
-
-bool Elf::getNote(const char* noteName, char** noteDesc, size_t* descSize) {
-  if (!descSize || !noteDesc || !noteName) {
-    logElfError("failed: empty note");
-    return false;
-  }
-
-  // Get section
-  section* sec = _elfio.sections[ElfSecDesc[NOTES].name];
-  if (sec == nullptr) {
-    logElfError("failed: null sections(NOTES)");
-    return false;
-  }
-
-  // Initialize the size and buffer to invalid data points.
-  *descSize = 0;
-  *noteDesc = nullptr;
-
-  note_section_accessor note_reader(_elfio, sec);
-
-  auto num = note_reader.get_notes_num();
-  Elf_Word type = 0;
-  void* desc = nullptr;
-  Elf_Word descSize1 = 0;
-
-  for (unsigned int i = 0; i < num; i++) {
-    std::string name;
-    if (note_reader.get_note(i, type, name, desc, descSize1)) {
-      if (name == noteName) {
-        *noteDesc = static_cast<char*>(desc);
-        *descSize = descSize1;
-        LogElfDebug("Succeed: get_note(%s, %s)", name.c_str(),
-                    std::string(*noteDesc, *descSize).c_str());
-        return true;
-      }
-    }
-  }
-
-  return false;
 }
 
 std::string Elf::generateUUIDV4() {
