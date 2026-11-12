@@ -251,6 +251,7 @@ jobs:
             -B build \
             -- \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
             -DROCPROFSYS_BUILD_DYNINST=ON \

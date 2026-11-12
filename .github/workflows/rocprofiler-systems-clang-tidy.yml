@@ -59,7 +59,7 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global --add safe.directory "$PWD"
-          cmake --preset debug-mpi-amdclang
+          cmake --preset debug-mpi-amdclang -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
 
       - name: Run clang-tidy-check
         working-directory: projects/rocprofiler-systems

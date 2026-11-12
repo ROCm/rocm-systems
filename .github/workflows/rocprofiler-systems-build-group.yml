@@ -70,6 +70,7 @@ jobs:
       # remainder lives in matrix.cmake_flags.
       CMAKE_COMMON_FLAGS: >-
         -DCMAKE_BUILD_TYPE=Release
+        -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
         -DROCPROFSYS_BUILD_TESTING=ON
         -DROCPROFSYS_BUILD_EXAMPLES=ON
         -DROCPROFSYS_USE_PYTHON=ON
@@ -402,6 +403,7 @@ jobs:
       # g++ and amdclang++ entries share the same cmake_flags anchor.
       CMAKE_COMMON_FLAGS: >-
         -DCMAKE_BUILD_TYPE=Release
+        -DPROFILER_HUB_FETCH_DEPENDENCIES=ON
         -DROCPROFSYS_BUILD_TESTING=ON
         -DROCPROFSYS_BUILD_EXAMPLES=ON
         -DROCPROFSYS_USE_PYTHON=ON
