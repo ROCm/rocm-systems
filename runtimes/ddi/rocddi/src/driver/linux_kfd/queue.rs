@@ -1829,7 +1829,7 @@ impl KfdQueue {
             return Err(if queue.uncertain {
                 Error::QueueBackingMayBeLive {
                     operation: "AMDKFD_IOC_CREATE_QUEUE outcome is uncertain",
-                    source: Some(source),
+                    source: crate::NativeStatus::from_io(&source),
                 }
             } else {
                 native_error("AMDKFD_IOC_CREATE_QUEUE", source)

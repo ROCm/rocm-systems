@@ -46,7 +46,7 @@ impl NativeStatus {
             .flatten()
     }
 
-    fn from_io(source: &io::Error) -> Option<Self> {
+    pub(crate) fn from_io(source: &io::Error) -> Option<Self> {
         if let Some(nested) = source
             .get_ref()
             .and_then(|source| source.downcast_ref::<Error>())
@@ -64,6 +64,8 @@ impl NativeStatus {
         })
     }
 }
+
+impl StdError for NativeStatus {}
 
 impl fmt::Display for NativeStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -151,7 +153,7 @@ pub enum Error {
         /// Queue acquisition or rollback step that left ownership uncertain.
         operation: &'static str,
         /// Original native failure, when one is available.
-        source: Option<io::Error>,
+        source: Option<NativeStatus>,
     },
 }
 
@@ -163,9 +165,7 @@ impl Error {
         match self {
             Self::NativeOperation { source, .. } => NativeStatus::from_io(source),
             Self::DriverOperation { status, .. } => Some(*status),
-            Self::QueueBackingMayBeLive { source, .. } => {
-                source.as_ref().and_then(NativeStatus::from_io)
-            }
+            Self::QueueBackingMayBeLive { source, .. } => *source,
             _ => None,
         }
     }
@@ -308,5 +308,19 @@ mod tests {
             NativeStatus::from_io(&io::Error::from(io::ErrorKind::Other)),
             None
         );
+    }
+    #[test]
+    fn uncertain_queue_backing_retains_arbitrary_native_domains() {
+        let status = NativeStatus {
+            domain: NativeStatusDomain::Hresult,
+            code: 0x887a_0005,
+        };
+        let error = Error::QueueBackingMayBeLive {
+            operation: "provider queue",
+            source: Some(status),
+        };
+        assert_eq!(error.kind(), ErrorKind::DriverContract);
+        assert_eq!(error.native_status(), Some(status));
+        assert!(error.source().is_some());
     }
 }
