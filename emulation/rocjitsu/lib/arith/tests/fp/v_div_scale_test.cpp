@@ -166,6 +166,38 @@ const DivScaleCapture scale_down_f64[] = {
     {0x80, 0x10000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x7ff0000000000000, 0},
     {0xc0, 0x1, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x7ff0000000000000, 0},
     {0xc0, 0x10000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x7ff0000000000000, 0},
+    // Boundary of the retained window: adjusted exponent -12 overflows, -11 and -1 keep a
+    // guest-rounded denormal, in all four rounding modes and with outputs flushed.
+    {0xf0, 0x740000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x7ff0000000000000, 0},
+    {0xf5, 0x740000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x7ff0000000000000, 0},
+    {0xfa, 0x740000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x7fefffffffffffff, 0},
+    {0xff, 0x740000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x7fefffffffffffff, 0},
+    {0x00, 0x740000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x7ff0000000000000, 0},
+    {0xf0, 0x8740000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0xfff0000000000000, 0},
+    {0xf5, 0x8740000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0xffefffffffffffff, 0},
+    {0xfa, 0x8740000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0xfff0000000000000, 0},
+    {0xff, 0x8740000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0xffefffffffffffff, 0},
+    {0x00, 0x8740000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0xfff0000000000000, 0},
+    {0xf0, 0x750000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x10000000000, 0},
+    {0xf5, 0x750000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x10000000001, 0},
+    {0xfa, 0x750000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x10000000000, 0},
+    {0xff, 0x750000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x10000000000, 0},
+    {0x00, 0x750000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x0, 0},
+    {0xf0, 0x8750000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x8000010000000000, 0},
+    {0xf5, 0x8750000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x8000010000000000, 0},
+    {0xfa, 0x8750000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x8000010000000001, 0},
+    {0xff, 0x8750000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x8000010000000000, 0},
+    {0x00, 0x8750000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x8000000000000000, 0},
+    {0xf0, 0x7f0000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x4000000000000, 0},
+    {0xf5, 0x7f0000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x4000000000001, 0},
+    {0xfa, 0x7f0000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x4000000000000, 0},
+    {0xff, 0x7f0000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x4000000000000, 0},
+    {0x00, 0x7f0000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x0, 0},
+    {0xf0, 0x87f0000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x8004000000000000, 0},
+    {0xf5, 0x87f0000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x8004000000000000, 0},
+    {0xfa, 0x87f0000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x8004000000000001, 0},
+    {0xff, 0x87f0000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x8004000000000000, 0},
+    {0x00, 0x87f0000000000001, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x8000000000000000, 0},
 };
 
 // Run every lane with the same capture, so SIMD lanes repair together.
@@ -208,7 +240,9 @@ TEST(FpDivScale, ScaleDownLeavesNormalRange) {
   check_scale_down<32, 32>(rj_arith_v_div_scale_f32_w32_gfx12, scale_down_f32);
   check_scale_down<32, 64>(rj_arith_v_div_scale_f32_w64_gfx12, scale_down_f32);
   check_scale_down<32, 32>(rj_arith_v_div_scale_f32_w32, scale_down_f32);
+  check_scale_down<32, 64>(rj_arith_v_div_scale_f32_w64, scale_down_f32);
   check_scale_down<64, 32>(rj_arith_v_div_scale_f64_w32_gfx12, scale_down_f64);
   check_scale_down<64, 64>(rj_arith_v_div_scale_f64_w64_gfx12, scale_down_f64);
   check_scale_down<64, 32>(rj_arith_v_div_scale_f64_w32, scale_down_f64);
+  check_scale_down<64, 64>(rj_arith_v_div_scale_f64_w64, scale_down_f64);
 }
