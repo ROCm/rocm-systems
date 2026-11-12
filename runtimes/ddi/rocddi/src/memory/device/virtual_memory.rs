@@ -9,6 +9,7 @@ use super::{
 };
 use crate::device::Device;
 use crate::driver::{self, AddressSpaceInfo, CachedInfo, VirtualMemoryOperations};
+use crate::memory::constraints::{CheckedRange, RangeTail};
 use crate::memory::storage::TryPush;
 use crate::memory::storage::{Owned, Shared};
 use crate::os::ProcessIdentity;
@@ -793,17 +794,17 @@ pub(crate) fn validate_virtual_mapping(
                 kind: ErrorKind::DriverContract,
                 detail: "virtual-address reservation extent overflows",
             })?;
-    let backing_end = offset.checked_add(size).ok_or(Error::Operation {
-        kind: ErrorKind::InvalidArgument,
-        detail: "virtual-memory backing offset overflows",
-    })?;
-    if size == 0
-        || address % granularity != 0
-        || offset % granularity != 0
-        || size % granularity != 0
+    if address % granularity != 0
         || address < reservation.address
         || mapping_end > reservation_end
-        || backing_end > memory.size
+        || CheckedRange::new(
+            memory.size,
+            offset,
+            size,
+            granularity,
+            RangeTail::WholeUnits,
+        )
+        .is_none()
     {
         return Err(Error::Operation {
             kind: ErrorKind::InvalidArgument,
