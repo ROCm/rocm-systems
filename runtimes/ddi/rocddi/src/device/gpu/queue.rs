@@ -35,11 +35,12 @@ use crate::{Error, ErrorKind};
 /// consistent fence and require native queue-publication qualification.
 ///
 /// # Safety
-/// `address` must be a live, aligned, writable 64-bit queue doorbell mapping.
+/// `address` must be a live, aligned, writable 64-bit MMIO doorbell mapping
+/// qualified as `HostQueuePublication::Ordered64BitMmio`.
 /// The caller must own the queue's packet-publication protocol and keep its
 /// ring, index storage, and doorbell mapping live through this call.
 #[allow(unsafe_code)]
-pub unsafe fn ring_doorbell(address: usize, value: u64) {
+pub unsafe fn store_ordered_mmio64(address: usize, value: u64) {
     #[cfg(target_arch = "x86_64")]
     // SAFETY: x86-64 has SSE2, and SFENCE drains earlier write-combined stores.
     unsafe {
@@ -691,6 +692,7 @@ mod queue_resource_tests {
             doorbell_host_address: 0x7000,
             doorbell_device_address: None,
             doorbell_width: QueueAccessWidth::Bits64,
+            host_publication: crate::device::gpu::queue::HostQueuePublication::Ordered64BitMmio,
         }
     }
 
@@ -896,7 +898,9 @@ mod queue_resource_tests {
 
     #[test]
     fn invalid_transport_is_retired_before_publication_or_retains_its_owner() -> Result<(), Error> {
-        for fail_destroy in [false, true] {
+        for (fail_destroy, provider_notification) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
             let driver_dropped = Arc::new(AtomicBool::new(false));
             let queue_drops = Arc::new(AtomicUsize::new(0));
             let driver = Shared::new(FakeDriver {
@@ -905,7 +909,12 @@ mod queue_resource_tests {
             })?;
             let inner = Owned::new(FakeQueue {
                 info: QueueTransport {
-                    index_unit_bytes: 4,
+                    index_unit_bytes: if provider_notification { 1 } else { 4 },
+                    host_publication: if provider_notification {
+                        HostQueuePublication::ProviderNotification
+                    } else {
+                        HostQueuePublication::Ordered64BitMmio
+                    },
                     ..transport()
                 },
                 driver_dropped: driver_dropped.clone(),

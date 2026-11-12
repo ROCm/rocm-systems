@@ -23,7 +23,7 @@ use crate::device::gpu::kernel_queue::{
 };
 use crate::device::gpu::queue::{
     Queue, QueueParameters, QueuePriority, QueueRequest, QueueRingMemory, SdmaEngineSelection,
-    ring_doorbell,
+    store_ordered_mmio64,
 };
 use crate::memory::{Allocation, DeviceAccess, MemoryKind};
 use crate::topology::{GpuSdmaDialect, GpuTargetProfile};
@@ -545,7 +545,7 @@ impl CopyResources {
             }
             fence(Ordering::Release);
             (&*(info.write_index_host_address as *const AtomicU64)).store(next, Ordering::Release);
-            ring_doorbell(info.doorbell_host_address, next);
+            store_ordered_mmio64(info.doorbell_host_address, next);
         }
         self.pending = Some(next);
         self.submitting = false;
