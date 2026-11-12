@@ -56,3 +56,15 @@ impl ForkWitness {
 pub fn duplicate_file(descriptor: i32) -> std::io::Result<std::fs::File> {
     crate::os::linux::file::duplicate_file(descriptor)
 }
+
+/// Reports Linux secure execution and changed user/group credentials.
+/// Frontends use this fact to apply their own environment-variable policy.
+#[must_use]
+pub fn secure_execution() -> bool {
+    // SAFETY: These process queries borrow no pointers or caller storage.
+    unsafe {
+        libc::geteuid() != libc::getuid()
+            || libc::getegid() != libc::getgid()
+            || libc::getauxval(libc::AT_SECURE) != 0
+    }
+}
