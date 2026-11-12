@@ -10637,7 +10637,9 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder) 
   });
 }
 
-// A global DDA threshold alone must not turn Broadcast on: the gfx1250 table has no Broadcast tier.
+// A global DDA threshold alone must not turn Broadcast on when the table has no Broadcast tier.
+// The real gfx1250 table now has Broadcast thresholds, so we copy it and zero the Broadcast slots
+// to construct the "no table tier" scenario explicitly.
 TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPlaceholder) {
   RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPlaceholder", []() {
     g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/1, /*ddaBc=*/-1);
@@ -10645,11 +10647,14 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPla
     ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
     ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
                      [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    const rcclArchThresholds* real =
+      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, real);
+    rcclArchThresholds table = *real;
+    table.ddaLLMax[ncclFuncBroadcast] = 0;
+    table.ddaLL128Max[ncclFuncBroadcast] = 0;
     ncclComm* comm = MakeBroadcastComm();
-    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
-    ASSERT_NE(nullptr, comm->archThresholds);
-    ASSERT_EQ(0u, comm->archThresholds->ddaLLMax[ncclFuncBroadcast]);
-    ASSERT_EQ(0u, comm->archThresholds->ddaLL128Max[ncclFuncBroadcast]);
+    comm->archThresholds = &table;
     rcclCollDecision d = PoisonedDecision();
     EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
     EXPECT_EQ(NCCL_ALGO_RING, d.algo);
@@ -10658,7 +10663,7 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPla
   });
 }
 
-// RCCL_DDA_BC=1 without tier thresholds: the table's Broadcast caps are 0, so the entry gate rejects.
+// RCCL_DDA_BC=1 without tier thresholds: zeroed Broadcast caps in the table gate the entry.
 TEST(WrapMicrotestIsolated, SelectBroadcast_BcOnAndNoTableTier_ReturnsRingPlaceholder) {
   RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcOnAndNoTableTier_ReturnsRingPlaceholder", []() {
     g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/1);
@@ -10666,9 +10671,14 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcOnAndNoTableTier_ReturnsRingPlaceh
     ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
     ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
                      [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    const rcclArchThresholds* real =
+      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, real);
+    rcclArchThresholds table = *real;
+    table.ddaLLMax[ncclFuncBroadcast] = 0;
+    table.ddaLL128Max[ncclFuncBroadcast] = 0;
     ncclComm* comm = MakeBroadcastComm();
-    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
-    ASSERT_NE(nullptr, comm->archThresholds);
+    comm->archThresholds = &table;
     rcclCollDecision d = PoisonedDecision();
     EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
     EXPECT_EQ(NCCL_ALGO_RING, d.algo);
