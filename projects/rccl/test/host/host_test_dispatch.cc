@@ -43,6 +43,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -98,10 +99,19 @@ constexpr std::string_view kChildTimeoutEnv = "RCCL_HOST_DISPATCH_CHILD_TIMEOUT"
 // enough that a child ignoring the signal does not extend the run by much.
 constexpr std::chrono::seconds kTerminateGrace{5};
 
-// How often a timed reap looks for a finished child. Only a run with a child timeout polls at
-// all -- without one the reap blocks as it always has -- and the interval only bounds how late
-// a deadline is noticed, which against a timeout measured in seconds need not be tight.
+// How long a wait sleeps before looking again when it has no wake pipe to be woken through.
+// Only a run whose pipe could not be created polls at all; the interval bounds how late a
+// deadline or a stop is noticed, which against a timeout measured in seconds need not be tight.
 constexpr std::chrono::milliseconds kReapPollInterval{5};
+
+// The longest a wait will sleep without looking again, even when it does have a pipe.
+//
+// Nothing is supposed to depend on this: every event a wait must not sleep through writes to
+// the pipe. It is here because the cost of being wrong about that is unbounded -- a wake that
+// is never written leaves an unbounded wait asleep for the whole run -- and the cost of
+// insuring against it is one syscall a second. It also bounds the damage when a wait is
+// entered with the handlers not installed, which the pipe cannot distinguish from a quiet run.
+constexpr std::chrono::milliseconds kWakeRecheckInterval{1000};
 
 // Source files kept out of the exported coverage. The tests' own code is not the thing under
 // test, and nvtx is vendored. Overridable for a consumer that wants a different view.
@@ -1269,31 +1279,102 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
     return pid;
 }
 
-// Send *signal* to everything *pid* has spawned, and to *pid* itself.
+// The one thing in this process a wait can be woken by, other than the thing it is waiting for.
 //
-// Falls back to the single pid when there is no such group, which is what a child that died
-// between the fork and its setpgid() leaves behind.
+// Every event the scheduler must not sleep through -- a child exiting, a stop being asked for --
+// arrives as a signal, and a signal cannot be waited for alongside a deadline. A byte down a
+// pipe can be: the handlers write one, and the wait is a poll() on the read end. That removes
+// both of the ways a stop used to be missed. There is no window between testing a flag and
+// blocking, because a signal landing in that window leaves the byte behind and poll() returns
+// at once; and there is no sleep-poll, because the wait is woken rather than retried.
+//
+// Writes are non-blocking and their result ignored: a full pipe already carries the only
+// information a reader takes from it, which is that something happened.
+class WakePipe {
+public:
+    // Idempotent, and safe to leave unopened: a wait with no pipe falls back to a short sleep,
+    // which is correct, merely less prompt. Nothing here is worth failing a test run over.
+    void open()
+    {
+        if (fds_[0] >= 0) {
+            return;
+        }
+        if (pipe2(fds_, O_CLOEXEC | O_NONBLOCK) != 0) {
+            fds_[0] = fds_[1] = -1;
+        }
+    }
+
+    int readFd() const { return fds_[0]; }
+
+    // Async-signal-safe: one write(2) on an already-open descriptor, and nothing else.
+    void wake() const
+    {
+        if (fds_[1] < 0) {
+            return;
+        }
+        const char byte = 1;
+        const ssize_t written = ::write(fds_[1], &byte, 1);
+        (void)written;
+    }
+
+    // Take back whatever the handlers left, so one wake does not satisfy every later wait.
+    void drain() const
+    {
+        if (fds_[0] < 0) {
+            return;
+        }
+        char buffer[64];
+        while (::read(fds_[0], buffer, sizeof(buffer)) > 0) {
+        }
+    }
+
+private:
+    int fds_[2] = {-1, -1};
+};
+
+WakePipe g_wake;
+
 // Set from the SIGTERM/SIGINT handler; read by the scheduler between reaps.
 volatile std::sig_atomic_t g_stopRequested = 0;
 
 extern "C" void requestStop(int)
 {
     g_stopRequested = 1;
+    g_wake.wake();
+}
+
+// SIGCHLD exists only to wake the wait. The child is reaped by the scheduler, in its own time,
+// where the exit status has somewhere to go.
+extern "C" void noteChildExit(int)
+{
+    g_wake.wake();
 }
 
 // Ask for SIGTERM and SIGINT to stop the run rather than end it outright, so the children are
-// killed with it and a report of what did finish is still written.
+// killed with it and a report of what did finish is still written, and ask for SIGCHLD so a
+// bounded wait learns of a child that finished early rather than sitting out the whole bound.
 //
-// Deliberately without SA_RESTART: the scheduler spends an untimed run blocked in waitpid(), and
-// the EINTR is what gets it back to the flag this sets.
+// With SA_RESTART, unlike the first version of this: the pipe is what wakes the wait now, so no
+// EINTR is load-bearing anywhere, and the syscalls this process makes around the scheduler --
+// not least the listing's popen/pclose -- are no longer exposed to spurious interruption.
 void installStopHandler()
 {
+    g_wake.open();
+
     struct sigaction action {};
     action.sa_handler = requestStop;
     sigemptyset(&action.sa_mask);
-    action.sa_flags = 0;
+    action.sa_flags = SA_RESTART;
     sigaction(SIGTERM, &action, nullptr);
     sigaction(SIGINT, &action, nullptr);
+
+    struct sigaction child {};
+    child.sa_handler = noteChildExit;
+    sigemptyset(&child.sa_mask);
+    // SA_NOCLDSTOP: a child merely stopped is not news, and this process would otherwise be
+    // woken by every SIGSTOP a test binary's own machinery uses.
+    child.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+    sigaction(SIGCHLD, &child, nullptr);
 }
 
 void signalChildGroup(pid_t pid, int signal)
@@ -1304,41 +1385,80 @@ void signalChildGroup(pid_t pid, int signal)
     ::kill(pid, signal);
 }
 
+// Sleep until something happens or *until* passes, whichever is first. "Something" is whatever
+// a handler wrote to the wake pipe: a child exited, or the run was asked to stop.
+void waitForWake(std::optional<std::chrono::steady_clock::time_point> until)
+{
+    const auto remaining = [&until]() -> int {
+        if (!until) {
+            return static_cast<int>(kWakeRecheckInterval.count());
+        }
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            *until - std::chrono::steady_clock::now());
+        return static_cast<int>(
+            std::min(kWakeRecheckInterval.count(),
+                     std::max<std::chrono::milliseconds::rep>(0, left.count())));
+    };
+
+    if (g_wake.readFd() < 0) {
+        // No pipe to be woken through, so look again shortly. Correct, just less prompt.
+        std::this_thread::sleep_for(
+            std::min<std::chrono::milliseconds>(kReapPollInterval,
+                                                std::chrono::milliseconds{remaining()}));
+        return;
+    }
+
+    struct pollfd woken {};
+    woken.fd = g_wake.readFd();
+    woken.events = POLLIN;
+    if (::poll(&woken, 1, remaining()) > 0) {
+        g_wake.drain();
+    }
+}
+
 // Wait for whichever spawned child finishes first, setting *exitStatus* to its status (128+signal
 // if killed) and returning its pid; -1 when there is nothing left to wait for.
 //
-// *within*, when set, bounds the wait: 0 comes back if it elapses with no child finished, and the
-// caller is then the one to decide what that means. Only a bounded wait polls; an unbounded one
-// blocks in waitpid() and costs nothing, which is what a run with no child timeout does.
+// 0 comes back for the two reasons a wait ends without a child: *within* elapsed, or the run was
+// asked to stop. Both are the caller's to interpret, and it can tell them apart by asking for
+// the stop itself -- the scheduler reads terminated() at the top of its loop either way.
+//
+// *within*, when set, bounds the wait; unset means wait until something happens. Neither case
+// blocks in waitpid(): the wait is a poll() on the wake pipe, so a child exiting, a stop, and
+// the deadline all end it, and the check-then-block race that a bare waitpid() has is gone --
+// a signal arriving after the status check leaves a byte in the pipe and the poll returns at
+// once.
 pid_t reapAnyChild(int &exitStatus, std::optional<std::chrono::milliseconds> within)
 {
-    const std::chrono::steady_clock::time_point deadline =
-        std::chrono::steady_clock::now() + within.value_or(std::chrono::milliseconds{0});
+    const std::optional<std::chrono::steady_clock::time_point> deadline =
+        within ? std::optional<std::chrono::steady_clock::time_point>(
+                     std::chrono::steady_clock::now() + *within)
+               : std::nullopt;
     for (;;) {
         int status = 0;
-        const pid_t pid = waitpid(-1, &status, within ? WNOHANG : 0);
-        if (pid < 0 && errno == EINTR) {
-            // A signal arrived. The caller is the one that knows whether it means the run is
-            // being stopped, so hand control back rather than re-entering the wait.
-            exitStatus = 0;
-            return 0;
-        }
-        if (pid < 0) {
-            exitStatus = 1;
-            return -1;
-        }
+        const pid_t pid = waitpid(-1, &status, WNOHANG);
         if (pid > 0) {
             exitStatus = WIFEXITED(status) ? WEXITSTATUS(status)
                                            : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1);
             return pid;
         }
-        const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-        if (now >= deadline) {
+        if (pid < 0 && errno != EINTR) {
+            // ECHILD: nothing left to wait for.
+            exitStatus = 1;
+            return -1;
+        }
+        // Tested after the reap, not before it: a child that exited is reported as having
+        // exited even on the pass that notices the stop, so its result is never thrown away
+        // for the sake of the news that the run is ending.
+        if (g_stopRequested != 0) {
             exitStatus = 0;
             return 0;
         }
-        std::this_thread::sleep_for(std::min<std::chrono::nanoseconds>(kReapPollInterval,
-                                                                      deadline - now));
+        if (deadline && std::chrono::steady_clock::now() >= *deadline) {
+            exitStatus = 0;
+            return 0;
+        }
+        waitForWake(deadline);
     }
 }
 

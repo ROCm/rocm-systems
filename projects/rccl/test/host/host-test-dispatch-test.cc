@@ -2446,8 +2446,57 @@ TEST(HostDispatchSignalMicrotest, AChildWithNoGroupOfItsOwnIsStillSignalled)
 // for this everywhere else, so dropping the WNOHANG would otherwise cost nothing here and a
 // timed run would wait for the hung binary it exists to time out.
 
+namespace {
+
+// The dispatcher's real signal handling, for the duration of one test, with the previous
+// dispositions put back afterwards. Installed rather than faked because what is under test here
+// is the handling itself: that a signal reaches a wait, which no stand-in can demonstrate.
+class ScopedStopHandling {
+public:
+    ScopedStopHandling()
+    {
+        sigaction(SIGTERM, nullptr, &term_);
+        sigaction(SIGINT, nullptr, &int_);
+        sigaction(SIGCHLD, nullptr, &child_);
+        installStopHandler();
+        g_stopRequested = 0;
+    }
+
+    ~ScopedStopHandling()
+    {
+        sigaction(SIGTERM, &term_, nullptr);
+        sigaction(SIGINT, &int_, nullptr);
+        sigaction(SIGCHLD, &child_, nullptr);
+        g_stopRequested = 0;
+        g_wake.drain();
+    }
+
+private:
+    struct sigaction term_ {};
+    struct sigaction int_ {};
+    struct sigaction child_ {};
+};
+
+// Kill *pid* and collect it, so a test that ends early leaves nothing behind.
+void discardChild(pid_t pid)
+{
+    signalChildGroup(pid, SIGKILL);
+    int discarded = 0;
+    waitpid(pid, &discarded, 0);
+}
+
+std::chrono::milliseconds since(std::chrono::steady_clock::time_point start)
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start);
+}
+
+}  // namespace
+
 TEST(HostDispatchReapMicrotest, ABoundedWaitComesBackWhileTheChildIsStillRunning)
 {
+    // With the handlers installed, as every run that reaches the scheduler has them.
+    const ScopedStopHandling handling;
     const pid_t pid = spawnChild("/bin/sh", {"-c", "sleep 5"});
     ASSERT_GT(pid, 0);
 
@@ -2470,8 +2519,90 @@ TEST(HostDispatchReapMicrotest, ABoundedWaitComesBackWhileTheChildIsStillRunning
                                                 << elapsed.count() << " ms";
 }
 
+
+TEST(HostDispatchReapMicrotest, AStopEndsATimedWaitLongBeforeItsDeadline)
+{
+    // The failure this exists for, reported twice: with a child timeout set, the wait used to
+    // sleep to the nearest deadline without ever reading the stop flag, so a SIGTERM was not
+    // acted on until a child exited or its timeout expired. The runner gives the dispatcher 10
+    // seconds after its SIGTERM before SIGKILL, so a child timeout longer than that meant the
+    // merged report was never written and the children were orphaned.
+    const ScopedStopHandling handling;
+    const pid_t pid = spawnChild("/bin/sh", {"-c", "sleep 30"});
+    ASSERT_GT(pid, 0);
+
+    std::thread stopper([] {
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        ::kill(::getpid(), SIGTERM);
+    });
+
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    int status = -1;
+    const pid_t reaped = reapAnyChild(status, std::chrono::seconds{20});
+    const std::chrono::milliseconds elapsed = since(start);
+
+    stopper.join();
+    discardChild(pid);
+
+    EXPECT_EQ(reaped, 0);
+    // Generous enough for a loaded machine, and far below the 20 s deadline: anything near that
+    // means the stop was not noticed until the wait ran out.
+    EXPECT_LT(elapsed, std::chrono::seconds{2})
+        << "the stop took " << elapsed.count() << " ms to reach a timed wait";
+}
+
+TEST(HostDispatchReapMicrotest, AStopThatArrivesBeforeTheWaitBeginsIsNotLost)
+{
+    // The second way a stop used to be missed, and the one with no window to reproduce: an
+    // unbounded wait blocked in waitpid(), and a signal arriving after the flag was last read
+    // but before the wait began could not interrupt a wait that had not started. The byte the
+    // handler leaves in the pipe is what closes it -- there is nothing to interrupt, because
+    // the wake is already waiting to be collected.
+    const ScopedStopHandling handling;
+    const pid_t pid = spawnChild("/bin/sh", {"-c", "sleep 10"});
+    ASSERT_GT(pid, 0);
+
+    ::kill(::getpid(), SIGTERM);   // lands before the wait below begins
+
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    int status = -1;
+    const pid_t reaped = reapAnyChild(status, std::nullopt);
+    const std::chrono::milliseconds elapsed = since(start);
+
+    discardChild(pid);
+
+    EXPECT_EQ(reaped, 0);
+    EXPECT_LT(elapsed, std::chrono::seconds{2})
+        << "an unbounded wait sat through a stop for " << elapsed.count() << " ms";
+}
+
+TEST(HostDispatchReapMicrotest, AnUnboundedWaitIsWokenByTheChildItIsWaitingFor)
+{
+    // The other thing the wake pipe has to carry. The wait no longer blocks in waitpid(), so
+    // without SIGCHLD reaching it an unbounded wait would sleep through the exit it exists to
+    // collect -- the whole run, for the ordinary case of a binary simply finishing.
+    const ScopedStopHandling handling;
+    const pid_t pid = spawnChild("/bin/sh", {"-c", "sleep 0.1; exit 3"});
+    ASSERT_GT(pid, 0);
+
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    int status = -1;
+    const pid_t reaped = reapAnyChild(status, std::nullopt);
+    const std::chrono::milliseconds elapsed = since(start);
+
+    EXPECT_EQ(reaped, pid);
+    EXPECT_EQ(status, 3);
+    // Below kWakeRecheckInterval deliberately. That safety net would otherwise collect the
+    // child a second late and this would pass with nothing waking the wait at all, which is
+    // the arrangement the test exists to rule out.
+    EXPECT_LT(elapsed, std::chrono::milliseconds{500})
+        << "the exit took " << elapsed.count() << " ms to wake an unbounded wait";
+}
+
 TEST(HostDispatchReapMicrotest, ABoundedWaitStillReapsAChildThatFinishesWithinIt)
 {
+    // With the handlers installed, as every run that reaches the scheduler has them.
+    const ScopedStopHandling handling;
     // The other half of the same path: the bound is a ceiling on the wait, not a replacement
     // for it, so a child that exits inside the window is still reaped and still carries its
     // exit status back.
