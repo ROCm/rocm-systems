@@ -16987,6 +16987,7 @@ class CodeGenerator:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))
                 if any(
                     'amdgpu::arith::exec_dense_fp_matrix<' in str(impl)
+                    or 'amdgpu::arith::exec_sparse_matrix<' in str(impl)
                     for impl in class_func_impls.model + class_func_impls.execution
                 ):
                     cpp_includes.append(
