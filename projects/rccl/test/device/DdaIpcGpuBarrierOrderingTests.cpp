@@ -50,7 +50,6 @@ struct BarrierImage {
   int selfRank;
   std::array<DeviceMailbox, kRanks> mailboxes;
   DdaKernelParams params;
-  bool aborted;
 };
 static_assert(sizeof(MailboxImage) == sizeof(DeviceMailbox), "DeviceMailbox layout changed");
 static_assert(sizeof(BarrierImage) == sizeof(IpcGpuBarrier), "IpcGpuBarrier layout changed");
@@ -65,7 +64,7 @@ DeviceMailbox makeMailbox(uint32_t* flags) {
 }
 
 IpcGpuBarrier makeBarrier(int selfRank, const std::vector<DeviceMailbox>& mailboxes, DdaKernelParams params = {}) {
-  BarrierImage img{kBlocks, selfRank, {}, params, false};
+  BarrierImage img{kBlocks, selfRank, {}, params};
   for (int r = 0; r < kRanks; ++r) {
     img.mailboxes[r] = mailboxes[r];
   }
@@ -121,6 +120,7 @@ template <bool kAcquireOnly>
 __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int iters, int slice,
                          unsigned long long* bad) {
   const int b = blockIdx.x;
+  bool aborted = false;
   unsigned long long mismatches = 0;
   for (int it = 0; it < iters; ++it) {
     uint32_t* mine = bufs[self] + static_cast<size_t>(b) * slice;
@@ -137,9 +137,9 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
       // Release-only stand-in for the prior kernel end; with no acquire here, only the barrier orders the reads.
       __syncthreads();
       __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");
-      bar.syncOnSameBlockIdx<false, true>();
+      bar.syncOnSameBlockIdx<false, true>(aborted);
     } else {
-      bar.syncOnSameBlockIdx<true, true>();
+      bar.syncOnSameBlockIdx<true, true>(aborted);
     }
     for (int p = 0; p < kRanks; ++p) {
       if (p == self) {
@@ -152,7 +152,7 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
         }
       }
     }
-    bar.syncOnSameBlockIdx<true, false>();
+    bar.syncOnSameBlockIdx<true, false>(aborted);
     // Stands in for the kernel end that follows <true, false> in production.
     __syncthreads();
   }
@@ -164,12 +164,13 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
 // One rank with its abort flag raised and no live peers: barrier 1 gives up, then late peers drain its flags.
 // Barrier 2 must signal nothing, or a late peer would pair with it and read a shard this rank never produced.
 __global__ void abortedBarrierStaysSilent(IpcGpuBarrier bar, uint32_t* const* flags, int self) {
-  bar.syncOnSameBlockIdx<true, true>();
+  bool aborted = false;
+  bar.syncOnSameBlockIdx<true, true>(aborted);
   if (threadIdx.x < kRanks) {
     __atomic_store_n(flags[threadIdx.x] + blockIdx.x * kRanks + self, 0u, __ATOMIC_RELAXED);
   }
   __syncthreads();
-  bar.syncOnSameBlockIdx<true, false>();
+  bar.syncOnSameBlockIdx<true, false>(aborted);
 }
 
 // Uncached is the production scratch; Coarse (cached) is the only allocation where a relaxed release is observable.
