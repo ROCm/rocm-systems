@@ -31,13 +31,11 @@ RJ_DIAGNOSTIC_POP
 #include <condition_variable>
 #include <cstring>
 #include <elf.h>
-#include <exception>
 #include <format>
 #include <limits>
 #include <optional>
 #include <string>
 #include <sys/mman.h>
-#include <system_error>
 #include <thread>
 
 namespace rocjitsu {
@@ -1356,23 +1354,14 @@ uint64_t CommandProcessor::register_queue(ComputeQueueConfig config, bool fanout
   }();
   if (registration_id == 0)
     return 0;
-  try {
-    // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
-    // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
-    // own doorbell_thread_mutex_. Keeping that lock order consistent with the stop
-    // path avoids joining a monitor while holding the queue mutex it needs to finish
-    // a scan. Internal test queues inject doorbell events directly via
-    // schedule_event_now() and need no monitor.
-    if (start_poll)
-      ensure_doorbell_monitor();
-  } catch (const std::system_error &) {
-    // The owner cascades teardown to its replicas before releasing its VM lease.
-    (void)unregister_queue_registration(registration_id);
-    throw;
-  } catch (...) {
-    // Allocation failures remain fatal even though thread-creation errors recover.
-    std::terminate();
-  }
+  // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
+  // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
+  // own doorbell_thread_mutex_. Keeping that lock order consistent with the stop
+  // path avoids joining a monitor while holding the queue mutex it needs to finish
+  // a scan. Internal test queues inject doorbell events directly via
+  // schedule_event_now() and need no monitor.
+  if (start_poll)
+    ensure_doorbell_monitor();
   return registration_id;
 }
 
@@ -1779,7 +1768,7 @@ void CommandProcessor::set_doorbell_base(uint32_t process_id, void *base) {
   }
 }
 
-void CommandProcessor::ensure_doorbell_monitor() {
+void CommandProcessor::ensure_doorbell_monitor() noexcept {
   std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
   // A monitor is already servicing this CP's queues — nothing to do. (The
   // register→ring window is fine: the live monitor scans every registered queue
@@ -1787,14 +1776,7 @@ void CommandProcessor::ensure_doorbell_monitor() {
   if (doorbell_running_)
     return;
   util::Logger::cp([&](auto &os) { os << std::format("{}: STARTING doorbell thread", name()); });
-  // Construct the thread BEFORE setting doorbell_running_: if the jthread
-  // constructor throws (std::system_error on thread-creation failure) the flag
-  // must stay false so a later ensure_doorbell_monitor() retries instead of
-  // no-oping forever. We still hold doorbell_thread_mutex_, so teardown cannot
-  // observe the new handle until both it and the running flag are published.
   assert(!doorbell_thread_.joinable());
-  if (std::exchange(fail_next_doorbell_monitor_start_for_testing_, false))
-    throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
   doorbell_thread_ = std::jthread([this](std::stop_token stop) { doorbell_poll_loop(stop); });
   doorbell_running_ = true;
 }
@@ -3194,18 +3176,12 @@ void CommandProcessor::service_command_streams(simdojo::Tick now) {
       if (busy)
         continue;
     }
-    try {
-      const auto result = dispatch_workgroups(entry);
-      if (result.outcome != VmAccessOutcome::Complete) {
-        entry.pm4_failure->fail();
-        fail_pm4_queue(queue, state);
-      } else if (entry.fully_completed() && engine()) {
-        engine()->schedule_event_now(doorbell_event());
-      }
-    } catch (const std::exception &error) {
-      util::Logger::warn("PM4 launch failed: ", error.what());
+    const auto result = dispatch_workgroups(entry);
+    if (result.outcome != VmAccessOutcome::Complete) {
       entry.pm4_failure->fail();
       fail_pm4_queue(queue, state);
+    } else if (entry.fully_completed() && engine()) {
+      engine()->schedule_event_now(doorbell_event());
     }
   }
 }

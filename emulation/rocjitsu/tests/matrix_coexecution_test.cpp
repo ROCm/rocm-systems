@@ -34,7 +34,6 @@
 #include <memory>
 #include <semaphore>
 #include <set>
-#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -485,26 +484,6 @@ TEST(MatrixCoexecutionTest, SharedPoolDoesNotWaitForBusyHelpersAndReusesThemAcro
   EXPECT_EQ(context.finished.load(), 6u);
 }
 
-TEST(MatrixCoexecutionTest, SharedPoolReleasesClaimsAfterHelperAndInlineFailures) {
-  mc::SharedPool pool(1);
-  Instruction failure("failure", [](Instruction &, void *) {
-    throw std::runtime_error("injected shared helper failure");
-  });
-  Instruction increment("increment", [](Instruction &, void *opaque) {
-    ++*static_cast<std::atomic<unsigned> *>(opaque);
-  });
-  std::atomic<unsigned> finished{0};
-  std::array<Instruction *, 2> instructions{&failure, &increment};
-  EXPECT_THROW(mma_test::execute_independent(pool, instructions, &finished), std::runtime_error);
-  EXPECT_EQ(finished.load(), 1u);
-  std::swap(instructions[0], instructions[1]);
-  EXPECT_THROW(mma_test::execute_independent(pool, instructions, &finished), std::runtime_error);
-  EXPECT_EQ(finished.load(), 2u);
-  instructions.fill(&increment);
-  EXPECT_EQ(mma_test::execute_independent(pool, instructions, &finished), 1u);
-  EXPECT_EQ(finished.load(), 4u);
-}
-
 TEST(MatrixCoexecutionTest, SharedPoolHandlesConcurrentIssuersAndZeroCapacity) {
   for (unsigned capacity : {0u, 1u, 4u}) {
     mc::SharedPool pool(capacity);
@@ -592,7 +571,7 @@ TEST(MatrixCoexecutionTest, SharedPoolIssuersReusePreferredHelpers) {
       }
       for (unsigned i = 0; i != width; ++i)
         if (tickets[i]) {
-          EXPECT_FALSE(pool.finish(tickets[i]));
+          EXPECT_TRUE(pool.finish(tickets[i]).succeeded());
           used.insert(ids[i]);
         }
     }
@@ -625,12 +604,12 @@ TEST(MatrixCoexecutionTest, SharedPoolClaimsAndReclaimsCapacityAcrossBitmapWords
       const auto extra = pool.submit(record, &extra_id);
       EXPECT_FALSE(extra);
       if (extra) {
-        EXPECT_FALSE(pool.finish(extra));
+        EXPECT_TRUE(pool.finish(extra).succeeded());
       }
       std::set<std::thread::id> used;
       for (unsigned i = 0; i != capacity; ++i)
         if (tickets[i]) {
-          EXPECT_FALSE(pool.finish(tickets[i]));
+          EXPECT_TRUE(pool.finish(tickets[i]).succeeded());
           used.insert(ids[i]);
         }
       EXPECT_EQ(used.size(), capacity);
@@ -665,7 +644,7 @@ TEST(MatrixCoexecutionTest, SharedPoolMakesProgressUnderConcurrentHandoffs) {
         // finish: a locked instruction could mask the publication race.
         const mc::SharedPool::Ticket ticket = pool.submit(increment, &value);
         if (ticket) {
-          if (pool.finish(ticket))
+          if (pool.finish(ticket).failed())
             progress[i].matched = false;
           ++progress[i].offloads;
         } else {

@@ -188,9 +188,7 @@ public:
   virtual ~QueueBindingFactory() = default;
 
   /// @brief Create a fully attached binding or reject without leaving processor state.
-  /// @details A factory that propagates an exception must undo its own attachment:
-  /// the registry cannot destroy a binding it has not received. SDMA worker startup
-  /// failures before publication can propagate to the frontend boundary.
+  /// @details Factories must not throw and must undo partial attachment on rejection.
   [[nodiscard]] virtual QueueBindingCreateResult
   create_binding(const QueueRegistrationRequest &request) = 0;
 };

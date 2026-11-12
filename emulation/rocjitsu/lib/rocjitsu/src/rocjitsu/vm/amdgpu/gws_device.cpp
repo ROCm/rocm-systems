@@ -36,6 +36,7 @@ void GwsDevice::release_sema_waiter(Resource &res, uint64_t seq) {
 
 void GwsDevice::park_wave(Wavefront &wf, uint32_t rid, bool is_barrier, uint64_t generation) {
   wf.gws_wait_rid_ = rid;
+  wf.gws_wait_pc_ = wf.pc;
   wf.gws_wait_is_barrier_ = is_barrier;
   wf.gws_wait_generation_ = generation;
   wf.set_state(WfState::GWS_WAIT);

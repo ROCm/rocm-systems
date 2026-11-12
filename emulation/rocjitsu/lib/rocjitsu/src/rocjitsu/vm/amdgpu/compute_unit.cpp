@@ -48,7 +48,6 @@
 #include <limits>
 #include <memory>
 #include <span>
-#include <stdexcept>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -176,6 +175,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "illegal instruction";
   case InstructionExecutionError::PluginFailure:
     return "plugin failure";
+  case InstructionExecutionError::GwsFailure:
+    return "GWS failure";
   }
   return "unknown instruction execution error";
 }
@@ -725,10 +726,11 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
   abort_dispatch(wf.dispatch_id());
 }
 
-void ComputeUnitCore::fail_gws_wait(Wavefront &wf, std::string_view reason) {
+void ComputeUnitCore::fail_gws_wait(Wavefront &wf, const char *reason) {
+  const uint64_t failure_pc = wf.state() == WfState::GWS_WAIT ? wf.gws_wait_pc_ : wf.pc;
   util::Logger::warn(reason, ": process=", wf.process_id(), " queue=", wf.queue_id(),
                      " dispatch=", wf.dispatch_id(), " cu=", name(), " wave=", wf.wf_id(),
-                     " resource=", wf.gws_wait_rid_, " pc=", std::format("{:#x}", wf.pc),
+                     " resource=", wf.gws_wait_rid_, " pc=", std::format("{:#x}", failure_pc),
                      " gws_wait_limit=", config_.gws_wait_limit);
   const uint32_t dispatch_id = wf.dispatch_id();
   const bool pm4_failed = wf.fail_pm4_submission();
@@ -740,13 +742,18 @@ void ComputeUnitCore::fail_gws_wait(Wavefront &wf, std::string_view reason) {
   }
   if (cp_ && engine())
     pending_execution_failures_.push_back({wf.queue_id(), wf.process_id(), std::string(reason)});
+  const InstructionExecutionError prior_error = wf.instruction_execution_error();
+  const char *prior_detail = wf.instruction_execution_error_detail();
   abort_dispatch(dispatch_id);
-  if (!cp_ || !engine()) {
-    if (engine())
-      engine()->request_exit(std::string(reason), 1);
-    else if (!pm4_failed)
-      throw std::runtime_error(std::string(reason));
-  }
+  // Cancellation resets the slot. Retain the failure on the original wave so
+  // standalone callers can inspect it until the slot is dispatched again.
+  wf.pc = failure_pc;
+  wf.report_instruction_execution_error(
+      prior_error == InstructionExecutionError::None ? InstructionExecutionError::GwsFailure
+                                                     : prior_error,
+      prior_error == InstructionExecutionError::None ? reason : prior_detail);
+  if (!cp_ && engine())
+    engine()->request_exit(std::string(reason), 1);
 }
 
 void ComputeUnitCore::maybe_reset_lds_alloc() {
@@ -2157,6 +2164,21 @@ void AsyncInstructionWindow::materialize() {
   materialized_ = true;
 }
 
+void AsyncInstructionWindow::check_errors() {
+  const std::optional<AsyncInstructionQueue::Failure> failure =
+      arithmetic_ ? arithmetic_->take_error() : std::nullopt;
+  if (!failure)
+    return;
+  stopped_ = true;
+  // Finish every accepted job before reporting the first failed ticket and
+  // releasing wave storage. Further failures must not replace its guest PC.
+  arithmetic_->drain();
+  (void)arithmetic_->take_error();
+  cu_.fail_wave_instruction(wf_, std::format("asynchronous {}", failure->mnemonic), failure->pc,
+                            InstructionExecutionError::MissingExecutionBackend,
+                            "MMA helper unavailable after fork");
+}
+
 void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
                                               uint32_t wave_size, bool has_accvgprs) {
   // CDNA4 MFMA and the default gfx1250 allowlist have cheap encoding filters.
@@ -2191,42 +2213,18 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
   AsyncInstructionWindowStorage storage;
   storage.admission = admission;
   storage.has_accvgprs = has_accvgprs;
-  try {
-    unsigned issued = 0;
-    do {
-      issue_instruction_impl<true>(active, storage.window ? &*storage.window : nullptr, &storage);
-      if (!storage.window) {
-        if (active->is_halted())
-          async_execution::stats.flush();
-        return;
-      }
-      storage.window->poll();
-    } while (++issued < async_execution::issue_limit() && storage.window->pending() &&
-             !storage.window->stopped() && active->state() == WfState::RUNNING);
-    storage.window->drain();
-  } catch (const util::UnimplementedInst &error) {
-    // Helper threads execute the same guest callbacks as the inline path. Join
-    // the remaining jobs before translating an unsupported guest combination
-    // into the wave-owned execution failure used by synchronous execution.
-    if (storage.window)
-      storage.window->abandon();
-    active->report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
-    const std::string instruction =
-        storage.window && !storage.window->failed_mnemonic().empty()
-            ? std::format("asynchronous {}", storage.window->failed_mnemonic())
-            : std::string("asynchronous instruction");
-    const uint64_t failure_pc = storage.window && !storage.window->failed_mnemonic().empty()
-                                    ? storage.window->failed_pc()
-                                    : active->pc;
-    fail_wave_instruction(*active, instruction, failure_pc, active->instruction_execution_error(),
-                          error.what());
-    async_execution::stats.flush();
-    return;
-  } catch (...) {
-    if (storage.window)
-      storage.window->abandon();
-    throw;
-  }
+  unsigned issued = 0;
+  do {
+    issue_instruction_impl<true>(active, storage.window ? &*storage.window : nullptr, &storage);
+    if (!storage.window) {
+      if (active->is_halted())
+        async_execution::stats.flush();
+      return;
+    }
+    storage.window->poll();
+  } while (++issued < async_execution::issue_limit() && storage.window->pending() &&
+           !storage.window->stopped() && active->state() == WfState::RUNNING);
+  storage.window->drain();
   if (active->is_halted())
     async_execution::stats.flush();
 }
@@ -2474,6 +2472,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       window = &storage->window.emplace(*this, *active, storage->has_accvgprs);
     if (window) {
       window->before(*inst);
+      if (active->is_halted())
+        return IssueOutcome::NotIssued;
       if (wait_state && !wait_for_buffer_lanes) {
         wait_state->check_instruction(*inst, *active);
         wait_checked = true;
@@ -2606,7 +2606,12 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   }
 
   if (execution_result.failed()) [[unlikely]] {
-    fail_current_instruction();
+    // GWS rejection already cancels the dispatch and publishes its failure.
+    // Its retained error belongs to the halted slot, whose identity was reset.
+    if (active->is_halted())
+      return_decoded.discard();
+    else
+      fail_current_instruction();
     return IssueOutcome::Issued;
   }
 

@@ -912,8 +912,7 @@ TEST(DecodedInstructionCacheTest, FailedExecutionAndExceptionsDoNotRetainInstruc
   EXPECT_EQ(decoder.calls, 3u);
 }
 
-// Fails every execution: first through the legacy exception path, whose message
-// becomes the failure detail, then with an encoding error that carries none.
+// Fails every execution: first with a detail, then with an encoding error that carries none.
 class FailingDecoder final : public rocjitsu::Decoder {
 public:
   class Failing final : public rocjitsu::Instruction {
@@ -922,9 +921,13 @@ public:
   };
 
   static void execute_failing(rocjitsu::Instruction &, void *wave) {
-    if (std::exchange(with_detail, false))
-      throw util::UnimplementedInst("first-failure-detail");
-    static_cast<amdgpu::Wavefront *>(wave)->report_instruction_execution_error(
+    auto &wf = *static_cast<amdgpu::Wavefront *>(wave);
+    if (std::exchange(with_detail, false)) {
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::UnsupportedOperandValue, "first-failure-detail");
+      return;
+    }
+    wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
   }
 
@@ -937,22 +940,19 @@ public:
   static inline bool with_detail = true;
 };
 
-TEST(DecodedInstructionCacheCuTest, FailureDetailDoesNotOutliveAThrowingFailureHandler) {
+TEST(DecodedInstructionCacheCuTest, FailureDetailDoesNotOutlivePreviousFailure) {
   CuFixture fixture("failure_detail");
   fixture.cu()->replace_decoder_for_test(std::make_unique<FailingDecoder>());
   FailingDecoder::with_detail = true;
-  bool throw_next = true;
-  fixture.cu()->set_execution_failure_handler([&](amdgpu::Wavefront &) -> bool {
-    if (std::exchange(throw_next, false))
-      throw std::runtime_error("failure handler failed");
-    return false;
-  });
   fixture.write_program(std::array<uint32_t, 1>{kSNop});
   ASSERT_NE(fixture.launch(1, 0), nullptr);
 
-  // The handler throws while the first failure, which has a detail, is reported.
-  EXPECT_THROW(fixture.cu()->step(), std::runtime_error);
+  testing::internal::CaptureStderr();
+  fixture.cu()->step();
+  const std::string first_warning = testing::internal::GetCapturedStderr();
+  EXPECT_NE(first_warning.find("first-failure-detail"), std::string::npos) << first_warning;
   // The next failure has no detail of its own and must not report the first one's.
+  ASSERT_NE(fixture.launch(1, 0), nullptr);
   testing::internal::CaptureStderr();
   fixture.cu()->step();
   const std::string warning = testing::internal::GetCapturedStderr();

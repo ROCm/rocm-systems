@@ -82,6 +82,7 @@ struct SdmaPacketRegisterReadResult {
 };
 
 /// @brief Narrow environment hooks for operations outside the GPU virtual address space.
+/// @details Callbacks must not throw; report expected failures through their returned outcomes.
 class SdmaPacketCallbacks {
 public:
   /// Non-Complete must mean that no externally visible callback effect occurred.

@@ -23,7 +23,6 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
-#include "util/except.h"
 
 #include <gtest/gtest.h>
 
@@ -268,60 +267,6 @@ TEST(AsyncMmaPolicyTest, ScaledWmmaOffloadsVectorAndInlineScalesButKeepsScalarSc
     EXPECT_FALSE(window.submit_mma(inst));
     EXPECT_NE(inst, nullptr);
   }
-}
-
-TEST(AsyncMmaPolicyTest, UnsupportedAsyncWmmaHaltsWithoutHostException) {
-  if (!policy::candidate("v_wmma_f32_32x16x128_f4"))
-    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
-  constexpr uint64_t kPc = 0x200000;
-  amdgpu::GpuMemory memory("unsupported_async_wmma_memory");
-  amdgpu::L2Cache l2("unsupported_async_wmma_l2");
-  amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
-  config.num_wf_slots = 1;
-  config.sgprs_per_wf = 106;
-  config.vgprs_per_wf = 256;
-  config.async_resources = std::make_shared<mc::ExecutionResources>(1);
-  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
-  ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(cu, "unsupported_async_wmma_cu",
-                                                                  config, &memory, &l2));
-  const auto &production_backend = cdna5::execution_backend();
-  std::vector<Instruction::ExecuteFn> callbacks(production_backend.instruction_callbacks,
-                                                production_backend.instruction_callbacks +
-                                                    production_backend.instruction_callback_count);
-  callbacks[static_cast<size_t>(cdna5::InstructionExecutionId::VWmmaF3232x16x128F4Vop3p)] =
-      [](Instruction &, void *) { throw util::UnimplementedInst("test async execution failure"); };
-  const IsaExecutionBackend throwing_backend{
-      .instruction_callbacks = callbacks.data(),
-      .instruction_callback_count = callbacks.size(),
-      .operand_backend = production_backend.operand_backend,
-  };
-  cu->replace_decoder_for_test(make_isa_decoder<cdna5::Isa>(&throwing_backend));
-  auto *wave = cu->dispatch_wf(0, kPc, 106, 256);
-  ASSERT_NE(wave, nullptr);
-  wave->set_exec(0xffffffff);
-
-  const auto first =
-      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
-                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
-  const auto second =
-      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
-                         {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
-  for (size_t index = 0; index != first.size(); ++index) {
-    memory.write32(kPc + index * sizeof(uint32_t), first[index]);
-    memory.write32(kPc + (index + first.size()) * sizeof(uint32_t), second[index]);
-  }
-  memory.write32(kPc + (first.size() + second.size()) * sizeof(uint32_t),
-                 cdna5::build_sopp(cdna5::kSEndpgmSopp)[0]);
-
-  testing::internal::CaptureStderr();
-  EXPECT_NO_THROW(cu->step());
-  const std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_TRUE(wave->is_halted());
-  EXPECT_NE(output.find("asynchronous v_wmma"), std::string::npos) << output;
-  EXPECT_NE(output.find("pc=0x200000"), std::string::npos) << output;
-  EXPECT_NE(output.find("unimplemented instruction"), std::string::npos) << output;
-  EXPECT_NE(output.find("test async execution failure"), std::string::npos) << output;
 }
 
 struct FaultDrainState {

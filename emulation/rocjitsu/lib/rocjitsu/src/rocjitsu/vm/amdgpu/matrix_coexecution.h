@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/instruction.h"
 #include "util/host_target.h"
+#include "util/result.h"
 
 #include <algorithm>
 #include <array>
@@ -17,11 +18,9 @@
 #include <cfenv>
 #include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -65,6 +64,7 @@ inline void register_helper_fork_guard() {
 }
 
 // Persistent helpers belong to a VM-owned pool, constructed lazily.
+// Callbacks must return normally; admitted guest errors are rejected before publication.
 // Instructions remain allocated and destroyed by the original decoder thread.
 // The caller validates disjoint register accesses and materializes destinations
 // before publication. All jobs complete before the CU can be rescheduled.
@@ -80,15 +80,13 @@ public:
   void submit(Instruction &instruction, void *wave) {
     instruction_ = &instruction;
     wave_ = wave;
-    error_ = nullptr;
     std::fegetenv(&environment_);
     publish(1);
   }
 
-  std::exception_ptr wait() {
+  void wait() {
     while (state_.load(std::memory_order_acquire) != 0)
       wait_while(1);
-    return error_;
   }
 
   bool ready() const { return state_.load(std::memory_order_acquire) == 0; }
@@ -129,11 +127,7 @@ private:
         continue;
       }
       std::fesetenv(&environment_);
-      try {
-        instruction_->execute(*instruction_, wave_);
-      } catch (...) {
-        error_ = std::current_exception();
-      }
+      instruction_->execute(*instruction_, wave_);
       publish(0);
     }
   }
@@ -142,7 +136,6 @@ private:
   alignas(64) Instruction *instruction_ = nullptr;
   void *wave_ = nullptr;
   std::fenv_t environment_{};
-  std::exception_ptr error_;
   std::thread thread_;
 };
 
@@ -177,12 +170,13 @@ public:
   /// A true result permits finish() without waiting for the helper.
   static bool ready(Ticket ticket) { return !helpers_enabled() || ticket.slot->helper.ready(); }
   /// Join a claimed job and release its slot; consume each ticket exactly once.
-  std::exception_ptr finish(Ticket ticket) {
+  /// Returns failure in a fork child where the inherited helper no longer exists.
+  util::Result finish(Ticket ticket) {
     if (!helpers_enabled())
-      return std::make_exception_ptr(std::runtime_error("MMA helper unavailable after fork"));
-    auto error = ticket.slot->helper.wait();
+      return util::Result::failure();
+    ticket.slot->helper.wait();
     release(ticket.slot);
-    return error;
+    return util::Result::success();
   }
 
   explicit SharedPool(unsigned count) {

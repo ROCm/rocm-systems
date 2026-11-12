@@ -7,7 +7,6 @@
 #include "halt_snapshot_plugin.h"
 #include "instruction_failure_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
-#include "throwing_instruction_test_util.h"
 
 #include "gws_test_encoding.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -7441,11 +7440,18 @@ TEST(CommandProcessorGwsPlacementTest, UnsatisfiedGwsGridFailsWithoutCompletion)
                      /*max_ticks=*/2'000'000));
     f.cu()->set_gws_wait_limit(32);
     std::atomic<uint64_t> exception_status = 0;
-    f.cu()->set_queue_exception_handler(
-        [&](uint32_t, uint32_t, uint64_t status, bool, amdgpu::QueueExceptionDeliveryPolicy) {
-          exception_status.store(status);
-          return true;
-        });
+    std::atomic<uint64_t> failure_pc = 0;
+    f.cu()->set_queue_exception_handler([&](uint32_t, uint32_t, uint64_t status, bool,
+                                            amdgpu::QueueExceptionDeliveryPolicy) {
+      exception_status.store(status);
+      for (uint32_t slot = 0; slot != 2; ++slot) {
+        const amdgpu::Wavefront *wave = f.cu()->wf(slot);
+        if (wave &&
+            wave->instruction_execution_error() == amdgpu::InstructionExecutionError::GwsFailure)
+          failure_pc.store(wave->pc);
+      }
+      return true;
+    });
     if (dispatch_threads > 1)
       f.cp()->set_dispatch_threads(dispatch_threads);
 
@@ -7466,6 +7472,7 @@ TEST(CommandProcessorGwsPlacementTest, UnsatisfiedGwsGridFailsWithoutCompletion)
 
     ASSERT_NO_THROW(f.engine->run());
     EXPECT_FALSE(f.cu()->has_active_wfs());
+    EXPECT_EQ(failure_pc.load(), 0x1040u);
     EXPECT_EQ(completion_signal_value(f.mem(), kSignal), 1);
     EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
     EXPECT_NE(f.engine->last_exit().code, 0);
@@ -10411,23 +10418,6 @@ amdgpu::ComputeQueueConfig make_inert_aql_queue(uint32_t queue_id, uint64_t ring
   return queue;
 }
 
-TEST(AqlDispatchTest, WorkerExceptionPropagatesThroughEngineStep) {
-  constexpr uint32_t kSMovB32 = 0xBE800000u; // s_mov_b32 s0, s0
-  VmFixture f;
-  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/2));
-  f.cp()->set_dispatch_threads(2);
-  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  ASSERT_TRUE(group->add(std::make_unique<test::ThrowingInstructionPlugin>()));
-  f.soc_ptr->set_plugin_group(group);
-
-  uint64_t kernel = f.write_kernel(0x1000, &kSMovB32, sizeof(kSMovB32));
-  test::AqlQueue queue(f.mem(), f.cp());
-  queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
-
-  ASSERT_TRUE(f.engine->step()); // Doorbell dispatches work for tick 1.
-  EXPECT_THROW((void)f.engine->step(), std::exception);
-}
-
 TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/2));
@@ -10962,68 +10952,6 @@ INSTANTIATE_TEST_SUITE_P(FailureKinds, AqlQueueFailureConcurrencyTest, testing::
                          [](const testing::TestParamInfo<bool> &info) {
                            return info.param ? "VmFault" : "InstructionFailure";
                          });
-
-TEST(AqlDispatchTest, WorkerExceptionLeavesQueueFailureForTeardown) {
-  for (bool close_queue : {false, true}) {
-    SCOPED_TRACE(close_queue ? "close" : "shutdown");
-    VmFixture fixture;
-    ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", 2));
-    fixture.cp()->set_dispatch_threads(2);
-    for (uint32_t index = 0; index < 2; ++index)
-      fixture.cu(index)->set_functional_quantum(1);
-    auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
-    auto *observed = lifecycle.get();
-    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-    ASSERT_TRUE(group->add(std::move(lifecycle)));
-    ASSERT_TRUE(group->add(std::make_unique<test::ThrowingInstructionPlugin>()));
-    fixture.soc_ptr->set_plugin_group(group);
-
-    const uint32_t failing_code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
-    constexpr uint32_t kSMovB32 = 0xBE800000u;
-    const uint32_t throwing_code[] = {kSMovB32, SOPP_S_ENDPGM};
-    const uint64_t failing_kernel =
-        fixture.write_kernel(0x1000, failing_code, sizeof(failing_code));
-    const uint64_t throwing_kernel =
-        fixture.write_kernel(0x2000, throwing_code, sizeof(throwing_code));
-    constexpr uint64_t kFailureSignal = 0x3000;
-    init_completion_signal(fixture.mem(), kFailureSignal);
-    test::AqlQueue failing_queue(fixture.mem(), fixture.cp());
-    test::AqlQueue throwing_queue(fixture.mem(), fixture.cp(), 0xf1000000, 4096, 0xf1010000,
-                                  0xf1010008, 0xf1010010, false, 2);
-    fixture.cp()->set_queue_cu_selection(1, 0, std::vector{fixture.cu(0)});
-    fixture.cp()->set_queue_cu_selection(2, 0, std::vector{fixture.cu(1)});
-    failing_queue.submit(make_dispatch_packet(failing_kernel, kFailureSignal, 32, 32));
-    throwing_queue.dispatch(throwing_kernel, 32, 32);
-    ASSERT_TRUE(fixture.engine->step());
-    ASSERT_EQ(observed->launches, 2u);
-    const uint32_t failed_dispatch = fixture.cu(0)->wf(0)->dispatch_id();
-    const uint64_t cache_epoch = fixture.cu(0)->instruction_cache().epoch();
-    fixture.cu(0)->set_notification_flush_hook_for_testing([&] {
-      fixture.cp()->notify_dispatch_vm_fault(1, 0, failed_dispatch,
-                                             amdgpu::VmAccessOutcome::Faulted);
-    });
-
-    // Both CUs finish their batch before the pool rethrows the independent
-    // queue's host exception. The normal post-batch failure drain is skipped.
-    EXPECT_THROW((void)fixture.engine->step(), std::runtime_error);
-    ASSERT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
-    EXPECT_EQ(observed->cancellations, 1u);
-    EXPECT_EQ(observed->halts, 0u);
-    EXPECT_EQ(observed->completed_dispatches, 0u);
-    EXPECT_EQ(fixture.cu(0)->instruction_cache().epoch(), cache_epoch);
-    EXPECT_EQ(completion_signal_value(fixture.mem(), kFailureSignal), 1);
-    if (close_queue)
-      fixture.cp()->unregister_queue(1, 0);
-    else
-      fixture.cp()->shutdown();
-    const uint64_t flushed_epoch = fixture.cu(0)->instruction_cache().epoch();
-    EXPECT_GT(flushed_epoch, cache_epoch);
-    fixture.cp()->shutdown();
-    EXPECT_EQ(fixture.cu(0)->instruction_cache().epoch(), flushed_epoch);
-    EXPECT_EQ(observed->cancellations, 1u);
-    EXPECT_EQ(completion_signal_value(fixture.mem(), kFailureSignal), 1);
-  }
-}
 
 class ThrowingIssuePlugin final : public ExecutionPlugin {
 public:

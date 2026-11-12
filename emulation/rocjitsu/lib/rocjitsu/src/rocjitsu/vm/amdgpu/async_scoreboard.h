@@ -58,14 +58,17 @@ public:
   using Access = async_execution::Access;
   using Pool = matrix_coexecution::SharedPool;
   explicit AsyncInstructionQueue(Pool &pool) : pool_(pool) {}
-  ~AsyncInstructionQueue() { assert(empty()); }
+  ~AsyncInstructionQueue() {
+    // Issuer unwinding can bypass the normal drain. Join accepted jobs before
+    // destroying their instructions, without reporting errors during teardown.
+    for (size_t index = 0; index != count_; ++index)
+      (void)pool_.finish(entries_[index].ticket);
+  }
   bool empty() const { return count_ == 0; }
   size_t size() const { return count_; }
   /// @brief The first helper failure and its originating guest instruction.
-  /// @details The issuer uses the PC and mnemonic to report the helper-thread
-  /// exception through the wave-owned instruction failure path.
+  /// @details The issuer reports unavailable inherited helpers after fork.
   struct Failure {
-    std::exception_ptr error;
     uint64_t pc = 0;
     std::string mnemonic;
   };
@@ -105,7 +108,7 @@ public:
     while (!empty())
       retire(0);
   }
-  std::optional<Failure> take_error() { return std::exchange(error_, {}); }
+  std::optional<Failure> take_error() { return std::exchange(error_, std::nullopt); }
 
 private:
   struct Entry {
@@ -116,9 +119,9 @@ private:
   };
   void retire(size_t index) {
     auto &entry = entries_[index];
-    auto error = pool_.finish(entry.ticket);
-    if (error && !error_)
-      error_ = Failure{error, entry.pc, std::string(entry.inst->mnemonic())};
+    const util::Result result = pool_.finish(entry.ticket);
+    if (result.failed() && !error_)
+      error_ = Failure{entry.pc, std::string(entry.inst->mnemonic())};
     entry.inst.reset();
     ++async_execution::stats.retired_mma;
     for (size_t i = index + 1; i != count_; ++i)
@@ -141,8 +144,6 @@ public:
   AsyncInstructionWindow(ComputeUnitCore &cu, Wavefront &wf, bool has_accvgprs = false);
   bool pending() const { return arithmetic_ && !arithmetic_->empty(); }
   bool stopped() const { return stopped_; }
-  uint64_t failed_pc() const { return failed_pc_; }
-  std::string_view failed_mnemonic() const { return failed_mnemonic_; }
   void reserve_issuer(uint64_t pc) { issuer_pc_ = std::min(issuer_pc_, pc); }
   bool take_issuer(uint64_t pc) {
     if (issuer_pc_ != pc)
@@ -173,8 +174,8 @@ public:
 
   // Admission requires production decoding to have rejected every operand or
   // format that can reach report_instruction_execution_error() in a candidate.
-  // Helpers transport exceptions only: reading or reporting through the shared
-  // Wavefront error field races the issuer clearing it for later instructions.
+  // Helpers must not report through the shared Wavefront error field: that
+  // would race the issuer clearing it for subsequent instructions.
   // Keep new candidates synchronous unless their decode checks establish this
   // invariant (including any execution-state checks), and cover those checks.
   // Test/custom callbacks submitted here must obey the same restriction.
@@ -223,12 +224,6 @@ public:
       arithmetic_->drain();
     check_errors();
   }
-  void abandon() noexcept {
-    try {
-      drain();
-    } catch (...) {
-    }
-  }
 
 private:
   void started() {
@@ -238,18 +233,7 @@ private:
     }
   }
   void materialize();
-  void check_errors() {
-    auto failure = arithmetic_ ? arithmetic_->take_error() : std::nullopt;
-    if (failure) {
-      if (failed_mnemonic_.empty()) {
-        failed_pc_ = failure->pc;
-        failed_mnemonic_ = std::move(failure->mnemonic);
-      }
-      const std::exception_ptr error = failure->error;
-      abandon();
-      std::rethrow_exception(error);
-    }
-  }
+  void check_errors();
   ComputeUnitCore &cu_;
   Wavefront &wf_;
   matrix_coexecution::SharedPool &pool_;
@@ -257,8 +241,6 @@ private:
   bool has_accvgprs_;
   bool stopped_ = false, started_ = false, materialized_ = false;
   uint64_t issuer_pc_ = ~uint64_t{0};
-  uint64_t failed_pc_ = 0;
-  std::string failed_mnemonic_;
 };
 
 // An issuer with no eligible instruction initializes only the optional's tag.

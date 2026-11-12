@@ -146,12 +146,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         name,
     )
 
+    unimplemented = (
+        '  wf.report_instruction_execution_error(\n'
+        '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+        '  return;'
+    )
     if not m:
-        return (
-            f'  // MFMA stub: {name}\n'
-            f'  (void)wf;\n'
-            f'  throw util::UnimplementedInst(mnemonic());'
-        )
+        return unimplemented
 
     result_type = m.group(1)  # F32, I32, F64, BF16F32
     M, N, K = int(m.group(2)), int(m.group(3)), int(m.group(4))
@@ -343,8 +344,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     )
     if uses_runtime_wave_swmmac_layout and not uses_rdna_swmmac_arithmetic:
         # Reject unsupported sparse shapes before resolving operands or index keys.
-        L = ['  throw util::UnimplementedInst(mnemonic());']
-        return '\n'.join(L)
+        return unimplemented
     # Fixed-wave OPSEL bits are matrix-reuse hints, not sparse index selectors.
     swmmac_index_key_expr = (
         '0u' if uses_fixed_wave_swmmac_layout else 'inst_.opsel & 0x3u'
@@ -804,7 +804,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             )
         elif uses_gfx11_wmma_layout or uses_gfx12_wmma_layout:
             # Do not apply an existing accumulation policy to an unsupported shape.
-            L.append('  throw util::UnimplementedInst(mnemonic());')
+            return unimplemented
         else:
             has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
             if not has_blgp:
@@ -1026,7 +1026,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             )
         elif uses_gfx12_wmma_layout and input_type in _F8_FIXED:
             # No native eight-product executor is defined for other shapes.
-            L.append('  throw util::UnimplementedInst(mnemonic());')
+            return unimplemented
         elif uses_gfx12_wmma_layout and input_type not in ('F8_F6_F4', 'F8F6F4'):
             if result_type == 'F16':
                 L.append(
