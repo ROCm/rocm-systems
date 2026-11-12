@@ -113,7 +113,7 @@ public:
       startup_.arrive_and_wait();
   }
 
-  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id, uint32_t, uint32_t,
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                    std::span<amdgpu::Wavefront *>) override {
     record(HookEvent::WORKGROUP_DISPATCHED, dispatch_id, wg_id);
   }
@@ -2218,8 +2218,6 @@ TEST(ExecutionPluginTest, MultiXcdBeginClaimCannotOutrunPublication) {
       run_staged_callbacks(claim_probe, std::chrono::milliseconds(20), publish_begin, [&]() {
         publish_begin();
         group.onAmdgpuWorkgroupDispatched(kDispatchId, /*wg_id=*/1,
-                                          /*physical_vgpr_count=*/0,
-                                          /*physical_sgpr_count=*/0,
                                           std::span<amdgpu::Wavefront *>{});
       });
 
@@ -2674,7 +2672,7 @@ TEST(HookOrderingTest, BarrierTwoWaves) {
   ASSERT_EQ(p->events.back().kind, HookEvent::SHUTDOWN);
 }
 
-TEST(HookOrderingTest, WorkgroupDispatchedReportsPhysicalRegisterBlockSizes) {
+TEST(HookOrderingTest, WorkgroupDispatchedExposesPhysicalRegisterBlockSizes) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize());
   auto *p = f.attach_ordering_plugin();

@@ -241,7 +241,7 @@ public:
       callback();
   }
 
-  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t, uint32_t, uint32_t,
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t,
                                    std::span<amdgpu::Wavefront *>) override {
     if (first_dispatched_.find(dispatch_id) == first_dispatched_.end())
       first_dispatched_[dispatch_id] = step_;
@@ -345,7 +345,7 @@ public:
   explicit AddressSpaceIdentityPlugin(amdgpu::AddressSpaceHandle expected)
       : ExecutionPlugin("xcd-address-space-identity"), expected_(expected) {}
 
-  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t,
                                    std::span<amdgpu::Wavefront *> waves) override {
     std::lock_guard<std::mutex> lock(mutex_);
     ++workgroups_;
@@ -375,7 +375,7 @@ class ScratchAddressPlugin : public ExecutionPlugin {
 public:
   ScratchAddressPlugin() : ExecutionPlugin("xcd-scratch-address") {}
 
-  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t wg_id, uint32_t, uint32_t,
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t wg_id,
                                    std::span<amdgpu::Wavefront *> waves) override {
     ASSERT_EQ(waves.size(), 1u);
     if (!waves.empty())
@@ -394,7 +394,7 @@ public:
   explicit ScratchAbiPlugin(bool check_descriptor = false)
       : ExecutionPlugin("xcd-scratch-abi"), check_descriptor_(check_descriptor) {}
 
-  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t wg_id, uint32_t, uint32_t,
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t wg_id,
                                    std::span<amdgpu::Wavefront *> waves) override {
     ASSERT_EQ(waves.size(), 2u);
     for (uint32_t wave_index = 0; wave_index < waves.size(); ++wave_index) {
@@ -565,7 +565,7 @@ public:
   explicit WorkgroupInfoPlugin(bool ttmp_ids = false, uint32_t info_slot = 2)
       : ExecutionPlugin("xcd-workgroup-info"), ttmp_ids_(ttmp_ids), info_slot_(info_slot) {}
 
-  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t,
                                    std::span<amdgpu::Wavefront *> waves) override {
     ASSERT_EQ(waves.size(), 2u);
     for (uint32_t wave_index = 0; wave_index < waves.size(); ++wave_index) {
@@ -734,7 +734,7 @@ public:
 
   WaveSlotPlugin() : ExecutionPlugin("xcd-wave-slot") {}
 
-  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t, uint32_t, uint32_t,
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t,
                                    std::span<amdgpu::Wavefront *> waves) override {
     ASSERT_EQ(waves.size(), 1u);
     if (waves.empty())

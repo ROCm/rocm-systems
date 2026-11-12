@@ -1156,7 +1156,7 @@ TEST(RoutedMemoryObservationTest, FlatLdsBoundsRetainNominalRequestsAndValidPref
   wave->set_lds_base(own_base);
   wave->set_lds_size(allocation_size);
   std::array<Wavefront *, 1> waves{wave};
-  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, waves);
+  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, waves);
   for (uint32_t address = 0; address < end + 256; address += 4)
     wave->lds().write32(address, address >= own_base && address < end ? 0x11223344u : 0x55aa33ccu);
   const std::array<uint32_t, 2> global{0x87654321u, 0xabcdef01u};
@@ -1875,7 +1875,7 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
           wf->set_dispatch_id(1);
           wf->set_exec(exec);
           std::array<Wavefront *, 1> waves{wf};
-          f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, wf->sgpr_alloc().count, waves);
+          f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, waves);
           f.plugin_group_->onAmdgpuWavefrontDispatched(*wf);
           wf->set_scratch_base(scratch);
           wf->set_scratch_lane_size(256);

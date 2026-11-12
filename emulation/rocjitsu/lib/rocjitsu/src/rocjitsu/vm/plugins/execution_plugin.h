@@ -300,13 +300,12 @@ public:
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuDispatchExecutionEnd(uint32_t /*dispatch_id*/) {}
 
-  /// Called after a workgroup's wavefronts have been dispatched to a CU.
-  /// @param physical_vgpr_count Physical VGPR allocation block size per wavefront.
-  /// @param physical_sgpr_count Physical SGPR allocation block size per wavefront.
+  /// Called after all of a workgroup's waves are initialized on a CU, before
+  /// onAmdgpuWavefrontDispatched() runs for any of them. The span is valid only
+  /// during this callback. Register allocation metadata is available through
+  /// each wave and its CU.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWorkgroupDispatched(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/,
-                                           uint32_t /*physical_vgpr_count*/,
-                                           uint32_t /*physical_sgpr_count*/,
                                            std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
   /// Called when the last wavefront of a workgroup has completed normally.

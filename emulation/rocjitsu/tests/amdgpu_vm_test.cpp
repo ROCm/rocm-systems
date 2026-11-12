@@ -524,7 +524,7 @@ TEST(CommandProcessorTest, LargeInternalWorkgroupsKeepCallbackOrderAndReclaimFai
     std::vector<amdgpu::Wavefront *> wave_callbacks;
     uint32_t workgroups = 0;
 
-    void onAmdgpuWorkgroupDispatched(uint32_t dispatch, uint32_t group, uint32_t, uint32_t,
+    void onAmdgpuWorkgroupDispatched(uint32_t dispatch, uint32_t group,
                                      std::span<amdgpu::Wavefront *> waves) override {
       ++workgroups;
       group_waves.assign(waves.begin(), waves.end());

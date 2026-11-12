@@ -453,7 +453,7 @@ public:
     dispatch_ids_[observed_packets_++] = info.dispatch_id;
   }
 
-  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t, uint32_t, uint32_t,
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t,
                                    std::span<amdgpu::Wavefront *>) override {
     if (!barrier_)
       return;

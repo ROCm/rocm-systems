@@ -379,6 +379,13 @@ The `ExecutionPlugin` interface (`execution_plugin.h`) defines hooks
 that the compute unit and command processor call during execution.
 Multiple plugins can be active simultaneously via `ExecutionPluginGroup`.
 
+### Workgroup initialization
+
+The workgroup-dispatched hook supplies dispatch and workgroup identities and
+the initialized waves. A wave's allocation counts and its CU's physical
+register block sizes are distinct quantities; consumers query the wave or CU
+for the metadata they need.
+
 ### VGPR observation precision
 
 `onAmdgpuWriteVgprLanes` observes instruction-level VGPR destinations rather

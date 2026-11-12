@@ -371,8 +371,6 @@ void RaceDetectorPlugin::onAmdgpuRegisterHazard(const amdgpu::RegisterHazardObse
 }
 
 void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
-                                                     uint32_t /*physical_vgpr_count*/,
-                                                     uint32_t /*physical_sgpr_count*/,
                                                      std::span<amdgpu::Wavefront *> wavefronts) {
   uint32_t num_waves = static_cast<uint32_t>(wavefronts.size());
   auto handler = [this,

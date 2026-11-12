@@ -463,13 +463,15 @@ public:
   }
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
-                                   uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
-                                   std::span<amdgpu::Wavefront *>) override {
+                                   std::span<amdgpu::Wavefront *> wavefronts) override {
     HookEvent e{HookEvent::WORKGROUP_DISPATCHED};
     e.dispatch_id = dispatch_id;
     e.wg_id = wg_id;
-    e.physical_vgpr_count = physical_vgpr_count;
-    e.physical_sgpr_count = physical_sgpr_count;
+    if (!wavefronts.empty()) {
+      const auto &cu = wavefronts.front()->cu();
+      e.physical_vgpr_count = cu.vgpr_allocation_block_size();
+      e.physical_sgpr_count = cu.sgprs_per_wf();
+    }
     events.push_back(e);
   }
 

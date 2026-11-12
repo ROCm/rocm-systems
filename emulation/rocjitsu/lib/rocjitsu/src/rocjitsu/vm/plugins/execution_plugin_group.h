@@ -435,12 +435,10 @@ public:
   }
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
-                                   uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) {
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count,
-                                                  physical_sgpr_count, wavefronts);
+        entry.plugin->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, wavefronts);
     });
   }
 
