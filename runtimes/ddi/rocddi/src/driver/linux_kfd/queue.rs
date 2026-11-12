@@ -1775,6 +1775,7 @@ impl KfdQueue {
             doorbell_host_address: 0,
             doorbell_device_address: None,
             doorbell_width: QueueAccessWidth::Bits64,
+            host_publication: crate::device::gpu::queue::HostQueuePublication::Ordered64BitMmio,
         };
         let mut args = uapi::CreateQueue {
             ring_address: ring_device_address,
