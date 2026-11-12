@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #pragma once
 
+#include <sstream>
 #include "roc_video_dec.h"
 #include "md5.h"
 
@@ -74,13 +75,17 @@ int ReconfigureFlushCallback(void *p_viddec_obj, uint32_t flush_mode, void *p_us
     return n_frames_flushed;
 }
 
+// Adds the number of non-empty comma-separated entries in environment variable `name` to dev_count. Splits a copy
+// so the environment is left unchanged: std::strtok on the std::getenv() buffer would truncate the variable.
 int GetEnvVar(const char *name, int &dev_count) {
-    char *v = std::getenv(name);
+    const char *v = std::getenv(name);
     if (v) {
-        char* p_tkn = std::strtok(v, ",");
-        while (p_tkn != nullptr) {
-            dev_count++;
-            p_tkn = strtok(nullptr, ",");
+        std::istringstream csv{std::string(v)};
+        std::string token;
+        while (std::getline(csv, token, ',')) {
+            if (!token.empty()) {
+                dev_count++;
+            }
         }
     }
     return dev_count;
