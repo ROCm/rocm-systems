@@ -179,6 +179,20 @@ struct LaunchFlags {
   std::shared_ptr<rjtools::OptionalUInt32Flag> gpus_per_node =
       std::make_shared<rjtools::OptionalUInt32Flag>(
           ucli::FlagInfo{"--gpus-per-node", {}, "Override the emulated GPU count for this launch"});
+  std::shared_ptr<rjtools::OptionalUInt32Flag> num_nodes =
+      std::make_shared<rjtools::OptionalUInt32Flag>(
+          ucli::FlagInfo{"--num-nodes",
+                         {},
+                         "Number of nodes to launch in a local process grid",
+                         ucli::ValueMode::Required,
+                         "N"});
+  std::shared_ptr<rjtools::OptionalUInt32Flag> nproc_per_node =
+      std::make_shared<rjtools::OptionalUInt32Flag>(
+          ucli::FlagInfo{"--nproc-per-node",
+                         {"--nproc_per_node"},
+                         "Number of local ranks to launch per process-grid node",
+                         ucli::ValueMode::Required,
+                         "N"});
   std::shared_ptr<rjtools::StringListFlag> option = std::make_shared<rjtools::StringListFlag>(
       ucli::FlagInfo{"--option",
                      {"-o"},
@@ -263,8 +277,8 @@ struct LaunchFlags {
             .failed() ||
         command
             .add_flags("Launch modes",
-                       {daemon, attach, fabric_effect_trace, env, clear_env_vars, workdir, gdb,
-                        gdb_ex, vfio_socket, vfio_ready_fd},
+                       {daemon, attach, fabric_effect_trace, num_nodes, nproc_per_node, env,
+                        clear_env_vars, workdir, gdb, gdb_ex, vfio_socket, vfio_ready_fd},
                        diagnostic)
             .failed())
       return util::Result::failure();
