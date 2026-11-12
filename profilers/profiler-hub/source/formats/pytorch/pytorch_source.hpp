@@ -53,6 +53,21 @@ public:
     [[nodiscard]] std::optional<reader_types::memory_alloc_data_t> memory_alloc_details(
         const reader_types::timeline_event_t& event) override;
 
+    [[nodiscard]] bool summarize_name_durations(
+        const resolved_event_query&           query,
+        uint32_t                              event_type,
+        std::vector<name_duration_summary_t>& rows) override;
+    [[nodiscard]] bool     supports_table_events() const override { return true; }
+    [[nodiscard]] uint32_t read_table_events(const resolved_event_query& query,
+                                             uint32_t                    event_type,
+                                             uint64_t                    after_id,
+                                             uint64_t                    last_id,
+                                             ph_table_event*             rows,
+                                             uint32_t capacity) override;
+    [[nodiscard]] bool     table_event_id_span(uint32_t  event_type,
+                                               uint64_t& first_id,
+                                               uint64_t& last_id) override;
+
 private:
     friend class pytorch_row_reader;
 
@@ -113,6 +128,15 @@ private:
         std::uint8_t type{};
     };
 
+    // A kernel's launch geometry as rocpd keeps it: both sizes in work-items.
+    struct kernel_shape_t
+    {
+        std::array<std::uint64_t, 3> workgroup{};
+        std::array<std::uint64_t, 3> grid{};
+        std::optional<std::uint64_t> group_segment;
+    };
+
+    [[nodiscard]] kernel_shape_t           kernel_shape_of(const event_t& stored) const;
     [[nodiscard]] std::optional<located_t> locate(
         const reader_types::unique_timeline_event_id_t& id) const;
     [[nodiscard]] std::string_view               args_of(const event_t& event) const;
@@ -123,6 +147,15 @@ private:
         const located_t&           at,
         reader_types::event_type_t type) const;
     [[nodiscard]] reader_types::agent_info_ptr_t agent_info(std::uint64_t agent) const;
+
+    // The destination agent of a copy is its device, except for a copy back to the host.
+    [[nodiscard]] std::uint64_t copy_agent_of(const located_t& at) const;
+    [[nodiscard]] bool          table_match(const resolved_event_query& query,
+                                            reader_types::event_type_t  type,
+                                            const located_t&            at) const;
+    void                        publish_row(reader_types::event_type_t type,
+                                            const located_t&           at,
+                                            ph_table_event&            out) const;
 
     // The agent a memory event is on: the CPU agent, a GPU's, or 0 when its device is
     // unknown.
@@ -143,9 +176,10 @@ private:
     std::vector<reader_types::stream_info_ptr_t>
                                   m_streams;  // by track id; null off stream tracks
     std::uint64_t                 m_cpu_agent_id{};
-    std::vector<std::string_view> m_names;  // by name id
-    std::vector<std::string_view> m_cats;   // by category index
-    std::vector<run_t>            m_runs;   // by type, then first id
+    std::size_t                   m_first_name_id{};  // the string id of name id 0
+    std::vector<std::string_view> m_names;            // by name id
+    std::vector<std::string_view> m_cats;             // by category index
+    std::vector<run_t>            m_runs;             // by type, then first id
     cached_track_reader*          m_reader{};
 };
 
