@@ -99,6 +99,8 @@ class GinHostFinalizeTest : public ::testing::Test {
     // Both are already value-initialized (make_unique, and `ncclComm comm_{}`);
     // do not memset either. ginState embeds std::thread / mutex / atomic, and
     // ncclComm embeds ncclRmaState, which holds a thread, mutex and condvar.
+    sharedRes_->owner = &comm_;
+    sharedRes_->tpNRanks = 1;
     comm_.sharedRes = sharedRes_.get();
     comm_.rank = 0;
     comm_.nRanks = 1;
@@ -297,6 +299,64 @@ TEST_F(GinHostFinalizeTest, DeregisterSkipsWindowStampedByAnotherGeneration) {
 
   EXPECT_EQ(ncclGinDeregister(&comm_, hostWins_, winGens_), ncclSuccess);
   EXPECT_EQ(fake_.deregMrSymCalls, 0);
+}
+
+// A splitShare child reuses the owner's connected ginComms[]. It may only do so
+// when it spans the owner's ranks in the owner's order: plugins such as Anvil
+// SDMA run bootstrap collectives on the owner during register, so a subset
+// child would wait alone, and a reordered one would address the wrong peers.
+class GinHostSplitShareTest : public GinHostFinalizeTest {
+ protected:
+  std::unique_ptr<ncclComm> child_ = std::make_unique<ncclComm>();
+  std::vector<int> childTopParentRanks_;
+
+  void makeChild(int ownerNRanks, std::vector<int> topParentRanks) {
+    sharedRes_->tpNRanks = ownerNRanks;
+    childTopParentRanks_ = std::move(topParentRanks);
+    child_->sharedRes = sharedRes_.get();
+    child_->rank = 0;
+    child_->nRanks = static_cast<int>(childTopParentRanks_.size());
+    child_->topParentRanks = childTopParentRanks_.data();
+    child_->contiguousRanksPerHost = 1;
+    child_->symmetricSupport = true;
+    child_->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  }
+};
+
+TEST_F(GinHostSplitShareTest, SubsetChildIsRejectedWithoutTouchingConnections) {
+  makeChild(/*ownerNRanks=*/2, {1});
+
+  EXPECT_EQ(ncclGinConnectOnce(child_.get()), ncclInvalidUsage);
+  EXPECT_EQ(fake_.listenCalls, 0);
+  EXPECT_TRUE(ginState()->connected);
+  EXPECT_EQ(backend()->ginComms[0], ginComm0_);
+  EXPECT_EQ(backend()->ginComms[1], ginComm1_);
+}
+
+TEST_F(GinHostSplitShareTest, SubsetChildIsRejectedBeforeFirstConnect) {
+  ginState()->connected = false;
+  backend()->ginComms[0] = nullptr;
+  backend()->ginComms[1] = nullptr;
+  makeChild(/*ownerNRanks=*/2, {0});
+
+  EXPECT_EQ(ncclGinConnectOnce(child_.get()), ncclInvalidUsage);
+  EXPECT_EQ(fake_.listenCalls, 0);
+  EXPECT_FALSE(ginState()->connected);
+}
+
+TEST_F(GinHostSplitShareTest, ReorderedChildIsRejected) {
+  makeChild(/*ownerNRanks=*/2, {1, 0});
+
+  EXPECT_EQ(ncclGinConnectOnce(child_.get()), ncclInvalidUsage);
+  EXPECT_EQ(fake_.listenCalls, 0);
+}
+
+TEST_F(GinHostSplitShareTest, FullRankSetChildReusesConnections) {
+  makeChild(/*ownerNRanks=*/2, {0, 1});
+
+  EXPECT_EQ(ncclGinConnectOnce(child_.get()), ncclSuccess);
+  EXPECT_EQ(fake_.listenCalls, 0);
+  EXPECT_TRUE(ginState()->connected);
 }
 
 TEST_F(GinHostFinalizeTest, AlreadyDisconnectedIsNoOp) {

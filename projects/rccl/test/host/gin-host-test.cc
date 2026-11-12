@@ -495,6 +495,7 @@ class GinHostFixture : public ::testing::Test {
 
     comm_ = std::make_unique<ncclComm>();
     sr_ = std::make_unique<ncclSharedResources>();
+    sr_->owner = comm_.get();
     comm_->sharedRes = sr_.get();
     comm_->nRanks = 1;
     comm_->rank = 0;

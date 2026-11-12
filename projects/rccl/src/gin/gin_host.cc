@@ -121,9 +121,30 @@ static ncclResult_t ginBackendCloseConnections(struct ncclGinBackendState* backe
   return ret;
 }
 
+// ginInstance[] was initialized on the sharedRes owner, and the plugins keep its
+// bootstrap and rank numbering. A splitShare child is only safe on them when it
+// spans the owner's ranks in the owner's order; any other child would address
+// the wrong peers and wait alone in plugin bootstrap collectives.
+static bool ginCommMatchesOwnerRanks(const struct ncclComm* comm) {
+  const struct ncclSharedResources* sharedRes = comm->sharedRes;
+  if (sharedRes->owner == comm) return true;
+  if (comm->nRanks != sharedRes->tpNRanks) return false;
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (comm->topParentRanks[r] != r) return false;
+  }
+  return true;
+}
+
 ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
   ncclTeam_t ginTeam;
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
+
+  if (!ginCommMatchesOwnerRanks(comm)) {
+    WARN("GIN on a communicator that shares resources requires the parent's full rank set in the parent's order "
+         "(nRanks %d, parent nRanks %d). Split with splitShare=0 to use GIN on this communicator.",
+         comm->nRanks, comm->sharedRes->tpNRanks);
+    return ncclInvalidUsage;
+  }
 
   if (ginState->connected) return ncclSuccess;
 
