@@ -336,6 +336,9 @@ fn transport(
     format_features: amdf_queue_format_features_t,
     device: bool,
 ) -> Result<amdf_user_queue_mapping_info_t, u64> {
+    if info.host_publication != queue::HostQueuePublication::Ordered64BitMmio {
+        return Err(UNSUPPORTED);
+    }
     match command_type {
         AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
         | AMDF_QUEUE_COMMAND_TYPE_GPU_AQL

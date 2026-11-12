@@ -690,6 +690,13 @@ impl GpuDriverRef<'_> {
 }
 
 /// Driver-selected owner of a user-mode GPU queue.
+#[cfg_attr(
+    all(test, windows),
+    allow(
+        clippy::large_enum_variant,
+        reason = "the test provider is the only inhabited queue variant on Windows"
+    )
+)]
 pub(crate) enum QueueState {
     #[cfg(not(target_os = "linux"))]
     Unavailable(std::convert::Infallible),
