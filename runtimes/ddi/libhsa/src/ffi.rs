@@ -632,8 +632,12 @@ pub(crate) const ACCESS_PERMISSION_RW: u32 = 3;
 /// Virtual memory access permission for ex.
 pub(crate) const ACCESS_PERMISSION_EX: u32 = 4;
 
-/// C ABI integer handle type used by legacy finalizer calls.
-pub(crate) type HsaHandle = i32;
+/// Native graphics interop handle, matching `hsa_handle_t` in `hsa.h`.
+#[cfg(unix)]
+pub(crate) type HsaHandle = std::ffi::c_int;
+/// Native graphics interop handle, matching `hsa_handle_t` in `hsa.h`.
+#[cfg(windows)]
+pub(crate) type HsaHandle = *mut c_void;
 
 /// Symbol information selector for type.
 pub(crate) const SYMBOL_INFO_TYPE: u32 = 0;

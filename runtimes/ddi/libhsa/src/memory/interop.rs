@@ -230,7 +230,7 @@ pub(crate) unsafe fn interop_map_buffer(
 ) -> Status {
     if num_agents == 0
         || agents.is_null()
-        || interop_handle < 0
+        || !native_memory::valid_graphics_handle(interop_handle)
         || flags != 0
         || size.is_null()
         || pointer.is_null()
@@ -259,7 +259,7 @@ pub(crate) unsafe fn interop_map_buffer(
         devices.push(&runtime.gpus[index].device);
         accessible.push(*agent);
     }
-    let descriptor = match native_memory::duplicate_descriptor(interop_handle) {
+    let descriptor = match native_memory::duplicate_graphics_handle(interop_handle) {
         Ok(descriptor) => descriptor,
         Err(error) => return map_error(error),
     };
