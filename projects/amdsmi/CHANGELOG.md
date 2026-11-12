@@ -148,6 +148,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed wrong values from PM metrics and register table queries in the Python library**.  
+  - The record names were correct, but every value was wrong.
+
 - **Fixed GPU BDFs and sysfs-based queries when `libdrm_amdgpu` cannot be loaded**.  
   - Without `libdrm_amdgpu`, as in the manylinux wheel on a system without the distro libdrm, `amdsmi_get_gpu_device_bdf()` returned leftover memory as the BDF with `AMDSMI_STATUS_SUCCESS`, `amdsmi_get_processor_handle_from_bdf()` could not find the GPU, and PCIe, clock, power-management and ECC-block information was unavailable.
   - The BDF and render node now come from sysfs regardless of libdrm. ASIC, VBIOS, driver, VRAM-usage and virtualization-mode queries still need libdrm and keep returning `AMDSMI_STATUS_NOT_SUPPORTED` without it.
