@@ -89,7 +89,7 @@ logging.trace = lambda *args, **kwargs: None
 
 
 def make_container_target(tmp_path, monkeypatch):
-    """Fake /proc/42 for a target in a container; return the target's root."""
+    """Create a fake /proc/42 for a target in a container. Return the target root."""
     procfs_root = tmp_path / "proc"
     target_root = procfs_root / "42" / "root"
     (target_root / "tmp").mkdir(parents=True)
@@ -98,7 +98,7 @@ def make_container_target(tmp_path, monkeypatch):
 
 
 def make_shared_root_target(tmp_path, monkeypatch):
-    """Fake /proc/42 for a target that shares our root directory."""
+    """Create a fake /proc/42 for a target with the same root directory as ours."""
     procfs_root = tmp_path / "proc"
     (procfs_root / "42").mkdir(parents=True)
     (procfs_root / "42" / "root").symlink_to("/")
@@ -112,10 +112,10 @@ def write_target_maps(lines):
 
 
 def make_fake_attach_library(target_root, attach_status=0, on_detach=None):
-    """Stand in for librocprofiler-sdk-rocattach.so.
+    """Return a fake librocprofiler-sdk-rocattach.so.
 
-    Detach writes results.db to ROCPROF_OUTPUT_PATH as the target sees it, then
-    calls on_detach with that local folder.
+    On detach, it writes results.db to ROCPROF_OUTPUT_PATH. Then it calls
+    on_detach with the local path of that folder.
     """
     seen = {}
 
@@ -1098,7 +1098,7 @@ def test_attach_target_root_errors_when_process_is_unreadable(tmp_path, monkeypa
 
 
 def test_find_attach_tool_library_uses_target_rocm(tmp_path, monkeypatch):
-    """The tool library comes from the ROCm whose attach library the target maps."""
+    """Use the tool library from the ROCm installation of the mapped attach library."""
     target_root = make_container_target(tmp_path, monkeypatch)
     write_target_maps([
         "7f00-7f10 r-xp 00000000 08:01 1 /opt/old/lib/librocprofiler-sdk-attach.so.1"
@@ -1139,7 +1139,7 @@ def test_find_attach_tool_library_none_when_target_rocm_lacks_tool(
 
 
 def test_temporary_rocprofiler_metrics_path_in_container_target(tmp_path, monkeypatch):
-    """Counter definitions go to the target's /tmp and are removed afterwards."""
+    """Write counter definitions to the /tmp of the target, and delete them after."""
     target_root = make_container_target(tmp_path, monkeypatch)
 
     with utils_common.temporary_rocprofiler_metrics_path(
@@ -1163,7 +1163,7 @@ def test_temporary_rocprofiler_metrics_path_removed_when_profiling_fails():
 
 
 def test_perform_attach_detach_copies_output_from_container(tmp_path, monkeypatch):
-    """A target in a container writes to its /tmp; the output is copied back."""
+    """Copy the output of a target in a container back from its /tmp."""
     target_root = make_container_target(tmp_path, monkeypatch)
     output_dir = tmp_path / "workload"
     output_dir.mkdir()

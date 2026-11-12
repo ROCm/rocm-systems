@@ -9,7 +9,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added a *Limited by* mode to the *AI axis* selector in the standalone roofline HTML. It shows each kernel at its limiting memory-level point, falling back to the leftmost point for compute-bound or unknown kernels.
 
-* Added support for live attach (`--attach-pid`) to a process in a container when ROCm Compute Profiler runs on the host.
+* Added live attach (`--attach-pid`) from the host to a process in a container.
 
 * Added Data Fabric to MALL bandwidth arrows to the CDNA (gfx9) Memory Chart. On gfx940–gfx942 these report estimated HBM bandwidth, derived from a 64B-per-request approximation, through the new `Estimated HBM Read BW` and `Estimated HBM Write and Atomic BW` metrics. On gfx950 they use the existing `HBM Read BW` and the new `HBM Write and Atomic BW` metric.
 

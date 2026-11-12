@@ -400,7 +400,7 @@ def test_attach_library_resolution_with_fallback():
 
 
 def test_attach_tool_library_comes_from_target_rocm(tmp_path, monkeypatch):
-    """Attach passes the SDK tool library of the ROCm that the target runs."""
+    """Use the SDK tool library from the ROCm installation of the target."""
     target_tool = "/opt/rocm-9.9.9/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
     attach_library = tmp_path / "librocprofiler-sdk-rocattach.so"
     attach_library.touch()
@@ -430,7 +430,7 @@ def test_attach_tool_library_comes_from_target_rocm(tmp_path, monkeypatch):
 
 
 def test_attach_errors_when_target_rocm_has_no_tool_library(tmp_path, monkeypatch):
-    """Attach stops before attaching when the target's ROCm has no tool library."""
+    """Stop before attaching when the ROCm of the target has no tool library."""
     args = _make_sanitize_args(
         ["/bin/true"],
         rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",

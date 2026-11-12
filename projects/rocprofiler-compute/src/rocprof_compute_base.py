@@ -61,7 +61,7 @@ from utils.utils_profile import get_submodules
 
 
 def _exit_on_sigterm(signum: int, _frame: Optional[FrameType]) -> None:
-    """Exit on SIGTERM like on any other error, so cleanup in finally blocks runs."""
+    """Exit on SIGTERM, so that finally blocks still clean up."""
     sys.exit(128 + signum)
 
 

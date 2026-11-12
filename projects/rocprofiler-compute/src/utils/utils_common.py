@@ -228,7 +228,10 @@ def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
 
 
 def attach_target_root(attach_pid: Optional[str]) -> Path:
-    """Return the root directory of the attach target, or / if it shares ours."""
+    """Return the root directory of the attach target.
+
+    Return / if the target uses the same root directory as this process.
+    """
     if attach_pid is None:
         return ROOT_DIR
     target_root = PROCFS_ROOT / attach_pid / "root"
@@ -243,19 +246,19 @@ def attach_target_root(attach_pid: Optional[str]) -> Path:
 
 
 def to_local_path(target_path: str, target_root: Path) -> Path:
-    """Return where a path that the target process sees is on this machine."""
+    """Convert a path in the view of the target to a path on this machine."""
     return target_root / Path(target_path).relative_to(ROOT_DIR)
 
 
 def to_target_path(local_path: Path, target_root: Path) -> str:
-    """Return how the target process sees a path under its root directory."""
+    """Convert a path under the target root to a path in the view of the target."""
     return str(ROOT_DIR / local_path.relative_to(target_root))
 
 
 def find_attach_tool_library(attach_pid: str) -> Optional[str]:
-    """Return the SDK tool library of the ROCm that the attach target runs.
+    """Return the SDK tool library from the ROCm installation of the attach target.
 
-    The path is the one the target sees, so it also works for a target in a
+    The path is in the view of the target, so it also works for a target in a
     container.
     """
     attach_library_dir = _find_mapped_library_directory(
@@ -1144,10 +1147,11 @@ def print_status(msg: str) -> None:
 def temporary_rocprofiler_metrics_path(
     sdk_config: Dict[str, Any], attach_pid: Optional[str] = None
 ) -> Generator[str, None, None]:
-    """Yield a counter definitions directory that the profiled process can read.
+    """Yield a directory with counter definitions for the profiled process.
 
-    With attach_pid, the directory is in the target's /tmp and owned by the
-    target's user. It is deleted on exit, also when profiling fails.
+    With attach_pid, the directory is in the /tmp of the target, and the user
+    of the target owns it. The directory is deleted on exit, also when
+    profiling fails.
     """
     target_root = attach_target_root(attach_pid)
     metrics_path = create_temp_rocprofiler_metrics_path(sdk_config, target_root)
@@ -1176,7 +1180,7 @@ def create_temp_rocprofiler_metrics_path(
 
     Returns:
         Path to the temporary directory (for ROCPROFILER_METRICS_PATH env var),
-        as the profiled process sees it.
+        in the view of the profiled process.
     """
     tmpfile_parent = Path(
         tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir=target_root / "tmp")
@@ -1500,7 +1504,7 @@ def _read_process_maps(pid: str) -> List[str]:
 def _find_mapped_library_directory(
     maps_lines: List[str], library_name: str
 ) -> Optional[str]:
-    """Return the directory of the first mapped file named library_name*."""
+    """Return the directory of the first mapped file that starts with library_name."""
     for line in maps_lines:
         path_start = line.find("/")
         if path_start < 0 or line.endswith(" (deleted)"):
@@ -1512,7 +1516,7 @@ def _find_mapped_library_directory(
 
 
 def _chown_to_process_owner(directory: Path, pid: str) -> None:
-    """Give a directory and its files to the user that runs process pid."""
+    """Change the owner of a directory and its files to the owner of process pid."""
     process_owner = (PROCFS_ROOT / pid).stat()
     for owned_path in [directory, *directory.iterdir()]:
         os.chown(owned_path, process_owner.st_uid, process_owner.st_gid)
@@ -1522,11 +1526,11 @@ def _chown_to_process_owner(directory: Path, pid: str) -> None:
 def _attach_output_in_target(
     new_env: Dict[str, str], attach_pid: Optional[str]
 ) -> Generator[Dict[str, str], None, None]:
-    """Yield the attach environment, with the output in the target's /tmp if needed.
+    """Yield the environment for the attach.
 
-    A target in a container cannot write to our output directory. Its output
-    goes to a folder in its own /tmp, which is copied back after detach and
-    always deleted.
+    A target in a container cannot write to our output directory. For such a
+    target, the output goes to a folder in its own /tmp. After detach, the
+    folder is copied to our output directory. The folder is always deleted.
     """
     target_root = attach_target_root(attach_pid)
     if target_root == ROOT_DIR:
@@ -1552,10 +1556,8 @@ def _attach_output_in_target(
 
 
 def _copy_attach_output(staging_path: Path, output_path: Path, pid: str) -> None:
-    """Copy the attach target's output from its /tmp into our output directory."""
+    """Copy the output of the attach target from its /tmp to our output directory."""
     if not staging_path.is_dir():
-        console_error(
-            f"Process {pid} exited before its profiling output could be copied."
-        )
+        console_error(f"Cannot copy the profiling output: process {pid} has exited.")
         return
     shutil.copytree(staging_path, output_path, dirs_exist_ok=True)

@@ -98,8 +98,8 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
 def test_run_prof_live_attach_gives_counter_definitions_to_target(
     tmp_path, monkeypatch
 ):
-    """run_prof writes counter definitions for the attach target and passes their
-    path, as the target sees it, to the attach."""
+    """run_prof writes counter definitions for the attach target. It passes their
+    path in the view of the target to the attach."""
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")

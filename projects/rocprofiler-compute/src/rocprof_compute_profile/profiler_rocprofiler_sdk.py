@@ -94,8 +94,8 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             sdk_attach_tool = find_attach_tool_library(args.attach_pid)
             if sdk_attach_tool is None:
                 console_error(
-                    "Could not find librocprofiler-sdk-tool.so in the ROCm "
-                    f"installation that process {args.attach_pid} uses."
+                    "Cannot find librocprofiler-sdk-tool.so in the ROCm "
+                    f"installation of process {args.attach_pid}."
                 )
             attach_tools = [sdk_attach_tool]
             if native_tool_path:

@@ -56,11 +56,11 @@ def positive_pid(value: str) -> str:
         parsed = int(value)
     except ValueError:
         raise argparse.ArgumentTypeError(
-            f"expected a positive process id, got {value!r}"
+            f"process ID must be a positive integer, got {value!r}"
         )
     if parsed <= 0:
         raise argparse.ArgumentTypeError(
-            f"process id must be a positive integer, got {parsed}"
+            f"process ID must be a positive integer, got {value!r}"
         )
     return str(parsed)
 

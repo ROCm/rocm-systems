@@ -75,7 +75,7 @@ def is_live_attach(
 
 
 def live_attach_pid(profiler_options: ProfilerOptions) -> Optional[str]:
-    """Return the rocprofiler-sdk attach target's process ID, if any."""
+    """Return the process ID of the rocprofiler-sdk attach target, or None."""
     if not isinstance(profiler_options, dict):
         return None
     return profiler_options.get("ROCPROF_ATTACH_PID")
