@@ -11,6 +11,7 @@
 #include "graph.h"
 #include "transport.h"
 #include "register_inline.h"
+#include "gin/gin_anvil_reach.h"
 #include "gin/gin_host.h"
 #include "gin/gin_host_proxy.h"
 #include "compiler.h"
@@ -122,9 +123,7 @@ static ncclResult_t ginBackendCloseConnections(struct ncclGinBackendState* backe
 }
 
 // ginInstance[] was initialized on the sharedRes owner, and the plugins keep its
-// bootstrap and rank numbering. A splitShare child is only safe on them when it
-// spans the owner's ranks in the owner's order; any other child would address
-// the wrong peers and wait alone in plugin bootstrap collectives.
+// bootstrap and rank numbering.
 static bool ginCommMatchesOwnerRanks(const struct ncclComm* comm) {
   const struct ncclSharedResources* sharedRes = comm->sharedRes;
   if (sharedRes->owner == comm) return true;
@@ -135,13 +134,27 @@ static bool ginCommMatchesOwnerRanks(const struct ncclComm* comm) {
   return true;
 }
 
+// Anvil SDMA fabric registration allgathers on the owner's bootstrap, so a
+// splitShare child that does not span the owner's ranks in order would wait
+// alone in regMrSym. Depends on topology only, so every rank of comm agrees.
+static bool ginSplitShareChildBlocked(struct ncclComm* comm) {
+  if (ginCommMatchesOwnerRanks(comm)) return false;
+  if (!ginAnvilFabricMemCapable(comm)) return false;
+  struct ncclGinState* ginState = &comm->sharedRes->ginState;
+  for (int i = 0; i < ginState->numActiveBackends; i++) {
+    if (ginState->backends[i].ginType == NCCL_GIN_TYPE_ANVIL_SDMA) return true;
+  }
+  return false;
+}
+
 ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
   ncclTeam_t ginTeam;
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
 
-  if (!ginCommMatchesOwnerRanks(comm)) {
-    WARN("GIN on a communicator that shares resources requires the parent's full rank set in the parent's order "
-         "(nRanks %d, parent nRanks %d). Split with splitShare=0 to use GIN on this communicator.",
+  if (ginSplitShareChildBlocked(comm)) {
+    WARN("GIN Anvil SDMA with fabric memory on a communicator that shares resources requires the parent's full "
+         "rank set in the parent's order (nRanks %d, parent nRanks %d). Split with splitShare=0 to use GIN on this "
+         "communicator.",
          comm->nRanks, comm->sharedRes->tpNRanks);
     return ncclInvalidUsage;
   }
