@@ -497,7 +497,10 @@ fn read_all(
     for _ in 0..3 {
         let before = match scalar(format_args!("{root}/generation_id")) {
             Ok(value) => value,
-            Err(e) if e.native_error_code() == Some(errno::ENOENT) => {
+            Err(e)
+                if e.native_status().and_then(crate::NativeStatus::errno_code)
+                    == Some(errno::ENOENT) =>
+            {
                 return Ok(DiscoveredTopology {
                     generation: None,
                     nodes: Vec::new(),
@@ -700,7 +703,14 @@ pub(super) fn probe_endpoint(
     })?);
     let before = match scalar(format_args!("{root}/generation_id")) {
         Ok(generation) => generation,
-        Err(error) if error.native_error_code() == Some(errno::ENOENT) => return Ok(None),
+        Err(error)
+            if error
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code)
+                == Some(errno::ENOENT) =>
+        {
+            return Ok(None);
+        }
         Err(error) => return Err(error),
     };
     let path = StackPath::new(format_args!("{root}/nodes/{node}"))?;
@@ -1584,7 +1594,8 @@ mod tests {
         assert_eq!(
             probe_endpoint(&root, &drm, ID)
                 .unwrap_err()
-                .native_error_code(),
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code),
             Some(errno::ENOENT)
         );
     }

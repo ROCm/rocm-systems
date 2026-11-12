@@ -140,7 +140,8 @@ pub(crate) unsafe fn ais_file_io(
                 // The ioctl input overlaps its output. On error KFD's copied
                 // count cannot be trusted, so leave size_copied untouched.
                 let errno = error
-                    .native_error_code()
+                    .native_status()
+                    .and_then(rocddi::NativeStatus::errno_code)
                     .filter(|errno| *errno > 0)
                     .unwrap_or(EIO);
                 if !operation_status.is_null() {

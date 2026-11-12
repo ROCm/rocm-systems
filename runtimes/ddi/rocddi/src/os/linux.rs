@@ -58,6 +58,11 @@ mod error_tests {
     fn vanished_native_object_has_a_portable_not_found_kind() {
         let error = native_error("open endpoint", io::Error::from_raw_os_error(errno::ENOENT));
         assert_eq!(error.kind(), ErrorKind::NotFound);
-        assert_eq!(error.native_error_code(), Some(errno::ENOENT));
+        assert_eq!(
+            error
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code),
+            Some(errno::ENOENT)
+        );
     }
 }
