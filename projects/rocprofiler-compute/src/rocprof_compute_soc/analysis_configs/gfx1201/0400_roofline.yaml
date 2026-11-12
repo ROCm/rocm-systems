@@ -32,10 +32,10 @@ Panel Config:
           value: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: $LDSBw_empirical_peak * 1e9
-        GDDR6 BW:
+        VRAM BW:
           value: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-          peak: $GDDR6Bw_empirical_peak * 1e9
+          peak: $VRAMBw_empirical_peak * 1e9
         DRAM-Destined BW (Infinity Cache Peak):
           value: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
@@ -56,7 +56,7 @@ Panel Config:
         AI LDS:
           value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu)
           unit: FLOPs/Byte
-        AI GDDR6:
+        AI VRAM:
           value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum))
           unit: FLOPs/Byte
         Performance (GFLOPs):
@@ -83,22 +83,22 @@ Panel Config:
       TCP_SECTORS counter is defined.
     LDS BW: >-
       Achieved bandwidth for Local Data Share memory operations.
-    GDDR6 BW: >-
+    VRAM BW: >-
       Bandwidth of GL2C/EA read and write requests destined for DRAM, compared
-      with the measured GDDR6 bandwidth (GDDR6Bw column of roofline.csv). Counts
+      with the measured VRAM bandwidth (VRAMBw column of roofline.csv). Counts
       32-byte granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and
       GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and
       EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte through 128-byte
       requests, so a fixed 256 bytes per request would overstate them. Navi 48
-      has a 256-bit GDDR6 interface at 20 Gbps. These requests are also served
+      has a 256-bit VRAM interface at 20 Gbps. These requests are also served
       by the Infinity Cache, so a working set that fits in it can exceed this
       peak.
     DRAM-Destined BW (Infinity Cache Peak): >-
       Bandwidth of GL2C/EA read and write requests destined for DRAM, compared
       with the measured Infinity Cache bandwidth (MALL column of roofline.csv).
-      Uses the same 32-byte request counters as GDDR6 BW. On Navi 48 (64 CUs),
+      Uses the same 32-byte request counters as VRAM BW. On Navi 48 (64 CUs),
       requests pass through GL0 (TCP), GL1, the 8 MB GL2, and the 64 MB
-      Infinity Cache before GDDR6. No counter separates Infinity Cache hits
+      Infinity Cache before VRAM. No counter separates Infinity Cache hits
       from DRAM traffic.
     AI L0: >-
       Arithmetic intensity relative to GL0 (TCP) requests, at 128 bytes per
@@ -109,9 +109,9 @@ Panel Config:
       Arithmetic intensity relative to Local Data Share traffic. The FLOP
       numerator is the VALU FLOPs excluding the WMMA instructions already
       counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
-    AI GDDR6: >-
+    AI VRAM: >-
       Arithmetic intensity relative to GL2C/EA requests destined for DRAM. The
-      plot marks the point at the GDDR6 level. Compare it with both the GDDR6 roof
+      plot marks the point at the VRAM level. Compare it with both the VRAM roof
       and the Infinity Cache (MALL) roof, since those requests can hit in the
       Infinity Cache. The FLOP numerator is the VALU FLOPs excluding the WMMA
       instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192

@@ -21,7 +21,7 @@ from utils.utils_common import _workload_base_dir
 XMIN = 0.01
 XMAX_DEFAULT = 1000.0
 
-CACHE_LEVELS = ["ai_l0", "ai_l1", "ai_l2", "ai_hbm", "ai_gddr6", "ai_lds"]
+CACHE_LEVELS = ["ai_l0", "ai_l1", "ai_l2", "ai_hbm", "ai_vram", "ai_lds"]
 
 
 # Enum class representing support of VALU and Matrix Operations
@@ -47,7 +47,7 @@ _METRIC_TO_AI_FIELD = {
     "AI L1": "ai_l1",
     "AI L2": "ai_l2",
     "AI HBM": "ai_hbm",
-    "AI GDDR6": "ai_gddr6",
+    "AI VRAM": "ai_vram",
     "AI LDS": "ai_lds",
 }
 
@@ -68,7 +68,7 @@ class PlotPoints:
     ai_l1: list[list[float]]
     ai_l2: list[list[float]]
     ai_hbm: list[list[float]]
-    ai_gddr6: list[list[float]]
+    ai_vram: list[list[float]]
     ai_lds: list[list[float]]
     kernelNames: list[str]
     counts: list[Optional[float]]
@@ -86,7 +86,7 @@ class PlotPoints:
             ai_l1=[[], []],
             ai_l2=[[], []],
             ai_hbm=[[], []],
-            ai_gddr6=[[], []],
+            ai_vram=[[], []],
             ai_lds=[[], []],
             kernelNames=[],
             counts=[],
@@ -103,7 +103,7 @@ class GraphPoints:
     """Data structure for storing roofline graph ceiling points."""
 
     hbm: list[Union[list[float], float, None]]
-    gddr6: list[Union[list[float], float, None]]
+    vram: list[Union[list[float], float, None]]
     mall: list[Union[list[float], float, None]]
     l2: list[Union[list[float], float, None]]
     l1: list[Union[list[float], float, None]]
@@ -117,7 +117,7 @@ class GraphPoints:
         """Create empty graph points structure."""
         return cls(
             hbm=[None, None, None],
-            gddr6=[None, None, None],
+            vram=[None, None, None],
             mall=[None, None, None],
             l2=[None, None, None],
             l1=[None, None, None],
@@ -181,7 +181,7 @@ def calc_ceilings(
 
     graph_points: dict[str, list[Union[list[float], float, None]]] = {
         "hbm": [],
-        "gddr6": [],
+        "vram": [],
         "mall": [],
         "l2": [],
         "l1": [],

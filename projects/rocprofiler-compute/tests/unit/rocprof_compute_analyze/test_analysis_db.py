@@ -3703,13 +3703,13 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "device_memory_metric", ["AI HBM", "AI GDDR6"], ids=["hbm", "gddr6"]
+    "device_memory_metric", ["AI HBM", "AI VRAM"], ids=["hbm", "vram"]
 )
 def test_calc_roofline_data_stores_the_device_memory_point_in_hbm_cache_data(
     monkeypatch, device_memory_metric
 ):
     """The column keeps its hbm_cache_data name. MI architectures fill it from
-    AI HBM, and gfx1201, which has no HBM, fills it from AI GDDR6."""
+    AI HBM, and gfx1201, which has no HBM, fills it from AI VRAM."""
     pmc_df = pd.DataFrame({
         "Kernel_Name": ["kernel"],
         "Start_Timestamp": [0],

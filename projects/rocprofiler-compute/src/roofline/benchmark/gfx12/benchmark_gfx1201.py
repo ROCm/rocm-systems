@@ -7,7 +7,7 @@
 # Benchmarking class for gfx1201 products: Navi 48 RDNA4 dGPUs such as the
 # AMD Radeon RX 9070 XT and Radeon AI PRO R9700.
 #
-# Navi 48: 64 CUs, 8 MB L2, 64 MB Infinity Cache, DRAM (GDDR6, 640 GB/s).
+# Navi 48: 64 CUs, 8 MB L2, 64 MB Infinity Cache, 640 GB/s of VRAM.
 #
 # The gfx12 base class targets gfx1250, whose WMMA builtins (16x16x32,
 # 16x16x64, 16x16x128) do not exist on RDNA4. This class therefore replaces the
@@ -87,7 +87,7 @@ L1_ROOF = ResidentReadRoof(
 )
 L2_ROOF = L1_ROOF._replace(working_set_bytes=L2_WORKING_SET_BYTES)
 
-# Navi 48 device memory: 256-bit GDDR6 at 20 Gbps per pin (AMD RX 9070 XT
+# Navi 48 device memory: 256-bit VRAM interface at 20 Gbps per pin (AMD RX 9070 XT
 # spec). A read-only stream cannot exceed the pin rate.
 DRAM_BUS_BITS = 256
 DRAM_GBPS_PER_PIN = 20
@@ -100,22 +100,22 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
     def __init__(self, device_id: int, cache_sizes: dict, gpu_arch: str) -> None:
         super().__init__(device_id, cache_sizes)
 
-        # GDDR6 is the device-memory roofline test (CSV column GDDR6Bw). It runs
+        # VRAM is the device-memory roofline test (CSV column VRAMBw). It runs
         # the DRAM_bw kernel and prints the share of the pin rate it reached.
         # Infinity Cache uses the MALL column. mi_gpu_spec.yaml lists no
         # F4/F6/F32/F64/I8 matrix path, so those tests are marked unsupported
-        # by apply_roofline_spec. GDDR6 keeps HBM's place in the CSV column order.
+        # by apply_roofline_spec. VRAM keeps HBM's place in the CSV column order.
         dram_bw_benchmark = partial(
             self.dram_pin_rated_bw_benchmark,
             kernel_name="DRAM_bw",
-            label="GDDR6",
+            label="VRAM",
             bus_bits=DRAM_BUS_BITS,
             gbps_per_pin=DRAM_GBPS_PER_PIN,
         )
         ordered_tests = {}
         for name, func in self.tests.items():
             if name == "HBM":
-                ordered_tests["GDDR6"] = dram_bw_benchmark
+                ordered_tests["VRAM"] = dram_bw_benchmark
             else:
                 ordered_tests[name] = func
         self.tests = ordered_tests
@@ -243,7 +243,7 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         # DRAM bandwidth. Same streaming body as the gfx12 base (a dataset far
         # larger than the 64 MB Infinity Cache), with the entry point renamed.
         # The source stays on hbm_bw_src because hbm_bw_benchmark compiles that
-        # attribute. The roofline test key is GDDR6 (CSV column GDDR6Bw). Keep
+        # attribute. The roofline test key is VRAM (CSV column VRAMBw). Keep
         # this kernel extern "C": the launcher looks the entry point up by the
         # unmangled name "DRAM_bw".
         self.hbm_bw_src = """
