@@ -10,8 +10,7 @@
 
 use crate::generated::amdf::*;
 use crate::instance::{Device, Endpoint, Instance, endpoint_id, supported_endpoint};
-use crate::platform::IntoRawFd;
-use crate::platform::memory as linux_interop;
+use crate::platform::external_memory as external_transport;
 use crate::reservation::Reservation;
 use crate::support::*;
 use rocddi::host::cache::CacheMaintenance;
@@ -117,6 +116,13 @@ unsafe fn publish_release(out: *mut amdf_memory_release_info_t, value: amdf_memo
     }
 }
 
+#[cfg_attr(
+    windows,
+    allow(
+        clippy::forget_non_drop,
+        reason = "no Windows provider instantiates the native cleanup owner yet"
+    )
+)]
 fn release_gpu(
     mut allocation: memory::device::Allocation,
     device: *mut Device,
@@ -509,22 +515,6 @@ fn supports_dma_buf_export(local: bool, registered: bool, has_endpoint: bool) ->
     !local && !registered && has_endpoint
 }
 
-unsafe extern "C" fn close_dma_buf(
-    _user_data: *mut c_void,
-    external_type: u32,
-    payload: amdf_external_memory_payload_t,
-) {
-    if external_type != AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD {
-        return;
-    }
-    let descriptor = unsafe { payload.file_descriptor };
-    if let Ok(descriptor) = i32::try_from(descriptor) {
-        // SAFETY: AMDF export transferred ownership of this descriptor to the
-        // external-memory value, whose release callback runs at most once.
-        let _ = unsafe { linux_interop::close_owned_descriptor(descriptor) };
-    }
-}
-
 #[allow(
     clippy::too_many_lines,
     reason = "placement and access facts must describe the same complete construction combination"
@@ -719,7 +709,11 @@ unsafe fn profile(
             },
             ..Default::default()
         };
-        if supports_dma_buf_export(local, registered, true) {
+        if supports_dma_buf_export(
+            local,
+            registered,
+            external_transport::supports_device_export(&endpoint.native),
+        ) {
             p.roles |= AMDF_MEMORY_PROFILE_ROLE_EXPORT;
             if import_supported {
                 p.roles |= AMDF_MEMORY_PROFILE_ROLE_IMPORT;
@@ -728,21 +722,8 @@ unsafe fn profile(
             p.guaranteed_flags |= AMDF_MEMORY_FLAG_SHAREABLE;
             p.supported_flags |= AMDF_MEMORY_FLAG_SHAREABLE;
             p.external_memory_support_count = 1;
-            p.external_memory_support[0] = amdf_external_memory_support_t {
-                r#type: AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD,
-                flags: AMDF_EXTERNAL_MEMORY_SUPPORT_FLAG_EXPORT
-                    | if import_supported {
-                        AMDF_EXTERNAL_MEMORY_SUPPORT_FLAG_IMPORT
-                    } else {
-                        0
-                    }
-                    | AMDF_EXTERNAL_MEMORY_SUPPORT_FLAG_SOURCE_OFFSET
-                    | AMDF_EXTERNAL_MEMORY_SUPPORT_FLAG_CROSS_PROCESS,
-                source_offset_alignment: page,
-                byte_length_alignment: 1,
-                maximum_byte_length: maximum,
-                ..Default::default()
-            };
+            p.external_memory_support[0] =
+                external_transport::support(page, maximum, import_supported);
         }
     }
     Ok((p, capabilities))
@@ -1054,7 +1035,7 @@ pub(crate) unsafe extern "C" fn device_profile(
                     endpoint: &*device.endpoint,
                     request: access.requirements,
                     address_range: device.native.address_range(),
-                    import_supported: linux_interop::supports_system_dma_buf_import(&device.native),
+                    import_supported: external_transport::supports_system_import(&device.native),
                 })
                 .map_err(|_| EXHAUSTED)?;
         }
@@ -1139,7 +1120,7 @@ pub(crate) unsafe extern "C" fn create(
                     endpoint,
                     request: access.requirements,
                     address_range: device.native.address_range(),
-                    import_supported: linux_interop::supports_system_dma_buf_import(&device.native),
+                    import_supported: external_transport::supports_system_import(&device.native),
                 })
                 .map_err(|_| EXHAUSTED)?;
         }
@@ -1395,7 +1376,7 @@ pub(crate) unsafe extern "C" fn create(
                 physical_backing_id.words = addresses.physical_backing_id;
             }
             if profile.guaranteed_flags & AMDF_MEMORY_FLAG_SHAREABLE != 0 {
-                let dma_buf = linux_interop::export_dma_buf(native_allocation.allocation()?)
+                let dma_buf = external_transport::export(native_allocation.allocation()?)
                     .map_err(|error| device.native_error_status(&error))?;
                 physical_backing_id.words = dma_buf.info().physical_backing_id;
             }
@@ -2022,7 +2003,7 @@ pub(crate) unsafe extern "C" fn import(
                     endpoint: &*device.endpoint,
                     request: access.requirements,
                     address_range: device.native.address_range(),
-                    import_supported: linux_interop::supports_system_dma_buf_import(&device.native),
+                    import_supported: external_transport::supports_system_import(&device.native),
                 })
                 .map_err(|_| EXHAUSTED)?;
             devices.try_push(&device.native).map_err(|_| EXHAUSTED)?;
@@ -2050,7 +2031,6 @@ pub(crate) unsafe extern "C" fn import(
         if external.provenance.words != support.provenance.words {
             return Err(UNSUPPORTED);
         }
-        let descriptor = i32::try_from(external.payload.file_descriptor).map_err(|_| INVALID)?;
         let slot = instance.owner_slot::<Memory>()?;
         let mut access_records =
             OwnerVec::try_with_allocator(instance.host_allocator, accesses.len())
@@ -2058,12 +2038,10 @@ pub(crate) unsafe extern "C" fn import(
         let permissions = memory::device::DeviceAccess::from_bits(accesses[0].requirements.access)
             .ok_or(UNSUPPORTED)?;
         let (native_allocation, rollback) = memory::device::with_rollback_report(false, || {
-            linux_interop::import_system_dma_buf(
+            external_transport::import_system(
                 &instance.native,
                 devices.as_slice(),
-                descriptor,
-                external.source_byte_offset,
-                external.byte_length,
+                &external,
                 alignment,
                 permissions,
             )
@@ -2213,7 +2191,7 @@ pub(crate) unsafe extern "C" fn export(
             memory.info.memory_profile_ordinal,
             Some(&*device.endpoint),
             request,
-            linux_interop::supports_system_dma_buf_import(&device.native),
+            external_transport::supports_system_import(&device.native),
         )?;
         if profile.roles & AMDF_MEMORY_PROFILE_ROLE_EXPORT == 0 {
             return Err(UNSUPPORTED);
@@ -2233,7 +2211,7 @@ pub(crate) unsafe extern "C" fn export(
         let Backing::Gpu(allocation) = &memory.backing else {
             return Err(UNSUPPORTED);
         };
-        let dma_buf = linux_interop::export_dma_buf(allocation)
+        let dma_buf = external_transport::export(allocation)
             .map_err(|error| device.native_error_status(&error))?;
         let dma_buf_info = dma_buf.info();
         if dma_buf_info.byte_length != memory.info.native_allocation_byte_length
@@ -2243,15 +2221,11 @@ pub(crate) unsafe extern "C" fn export(
         }
         out.write(amdf_external_memory_t {
             r#type: export.external_memory_type,
-            payload: amdf_external_memory_payload_t {
-                file_descriptor: i64::from(dma_buf.into_fd().into_raw_fd()),
-            },
             provenance: support.provenance,
             source_byte_offset: source_offset,
             byte_length: export.byte_length,
             physical_backing_id: memory.info.physical_backing_id,
-            release: Some(close_dma_buf),
-            ..Default::default()
+            ..dma_buf.into_abi()
         });
         Ok(())
     })
