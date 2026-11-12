@@ -14,8 +14,10 @@ Run `rocprof-compute analyze --help` before choosing flags.
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b memchart
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> --memory-chart
 ```
+
+On ROCm 10.2 and earlier, use `-b memchart` instead of `--memory-chart`.
 
 The Memory Chart shows the whole hierarchy at once: requests issued, what each
 cache level served, and what reached HBM. Read it before opening any single
@@ -26,7 +28,7 @@ Always analyze one kernel at a time with `-k`.
 If there is no workload yet, collect only the memory blocks:
 
 ```bash
-rocprof-compute profile --name <workload_name> -b memchart vl1d l2 lds -- <application> <args>
+rocprof-compute profile --name <workload_name> --memory-chart -b vl1d l2 lds -- <application> <args>
 ```
 
 The cache aliases differ by architecture; for example, some GPUs name their
@@ -118,7 +120,7 @@ It is experimental and currently shipped for gfx950 only; see
 only the memory chart (block 3) and block 30, so profile only those two blocks:
 
 ```bash
-rocprof-compute profile --experimental --membw-analysis -b 3 30 \
+rocprof-compute profile --experimental --membw-analysis --memory-chart -b 30 \
     --name <name> -- <application>
 
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id>
