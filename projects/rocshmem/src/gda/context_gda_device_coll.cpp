@@ -472,6 +472,16 @@ __device__ void GDAContext::broadcastmem_linear_thread_puts_wg(rocshmem_team_t t
       qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
       qps[dest_pe].atomic_add_single(&pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1], 1);
     }
+    // Unlike the wave variant (covered by sync_wave's completion fence),
+    // this function returns as soon as thread zero observes its own
+    // signal, which can land before the root's sends to slower peers
+    // finish. Above the provider's inline threshold, put_nbi_single's
+    // WQE reads src asynchronously, so without this the caller could
+    // overwrite src before those sends are done, racing the NIC read.
+    for (int j = tid; j < pe_size; j += step_size) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      qps[dest_pe].quiet_single();
+    }
   }
 
   __syncthreads();
