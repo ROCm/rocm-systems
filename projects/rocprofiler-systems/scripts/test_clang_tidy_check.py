@@ -35,7 +35,7 @@ def _args(**overrides) -> argparse.Namespace:
         "build_path": "/build",
         "jobs": 4,
         "timeout": None,
-        "base": None,
+        "base": "HEAD",
         "verbose": False,
     }
     defaults.update(overrides)
@@ -269,9 +269,9 @@ def test_git_failure_surfaces_stderr(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# get_default_base
+# get_fork_point / resolve_base
 # --------------------------------------------------------------------------- #
-def test_get_default_base_returns_merge_base_sha(monkeypatch):
+def test_get_fork_point_returns_merge_base_sha(monkeypatch):
     calls = []
 
     def fake_git(git_args, **_kwargs):
@@ -279,34 +279,46 @@ def test_get_default_base_returns_merge_base_sha(monkeypatch):
         return "abc123\n"
 
     monkeypatch.setattr(ctc, "_git", fake_git)
-    assert ctc.get_default_base() == "abc123"
-    assert calls == [["merge-base", "HEAD", ctc.DEFAULT_BASE]]
+    assert ctc.get_fork_point() == "abc123"
+    assert calls == [["merge-base", "HEAD", ctc.FORK_REF]]
 
 
-def test_get_default_base_falls_back_to_head_with_warning(monkeypatch, capsys):
+def test_get_fork_point_failure_exits_instead_of_falling_back(monkeypatch):
+    # An explicit `--base fork` must not silently degrade to HEAD.
     def boom(_git_args, **_kwargs):
         sys.exit("error: unknown revision")
 
     monkeypatch.setattr(ctc, "_git", boom)
-    assert ctc.get_default_base() == "HEAD"
-    assert "could not find merge-base" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        ctc.get_fork_point()
+
+
+def test_resolve_base_fork_selector_resolves_to_fork_point(monkeypatch):
+    monkeypatch.setattr(ctc, "get_fork_point", lambda: "abc123")
+    assert ctc.resolve_base("fork") == "abc123"
+
+
+@pytest.mark.parametrize("base", ["HEAD", "origin/release", "deadbeef"])
+def test_resolve_base_other_values_pass_through(monkeypatch, base):
+    def fail():
+        raise AssertionError("git must not be called")
+
+    monkeypatch.setattr(ctc, "get_fork_point", fail)
+    assert ctc.resolve_base(base) == base
 
 
 # --------------------------------------------------------------------------- #
 # parse_args  (--base)
 # --------------------------------------------------------------------------- #
-def test_parse_args_base_defaults_to_merge_base(monkeypatch):
-    monkeypatch.setattr(ctc, "get_default_base", lambda: "default123")
+def test_parse_args_base_defaults_to_head(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--build-path", "/build"])
-    assert ctc.parse_args().base == "default123"
+    assert ctc.parse_args().base == "HEAD"
 
 
-def test_parse_args_explicit_base_overrides_default(monkeypatch):
-    monkeypatch.setattr(ctc, "get_default_base", lambda: "default123")
-    monkeypatch.setattr(
-        sys, "argv", ["prog", "--build-path", "/build", "--base", "origin/release"]
-    )
-    assert ctc.parse_args().base == "origin/release"
+@pytest.mark.parametrize("base", ["fork", "origin/release", "deadbeef"])
+def test_parse_args_explicit_base_is_kept_verbatim(monkeypatch, base):
+    monkeypatch.setattr(sys, "argv", ["prog", "--build-path", "/build", "--base", base])
+    assert ctc.parse_args().base == base
 
 
 # --------------------------------------------------------------------------- #
@@ -466,6 +478,22 @@ def test_main_prints_base(monkeypatch, capsys):
     monkeypatch.setattr(ctc, "parse_args", lambda: _args(base="abc123"))
     assert ctc.main() == 0
     assert "Checking changes since base commit: abc123" in capsys.readouterr().out
+
+
+def test_main_fork_selector_passes_resolved_sha(monkeypatch, capsys):
+    changed_file = ctc.ChangedFile("src/foo.cpp", [(10, 20)])
+    seen = []
+    monkeypatch.setattr(ctc, "get_repo_root", lambda: "/repo")
+    monkeypatch.setattr(ctc, "get_fork_point", lambda: "fork123")
+    monkeypatch.setattr(
+        ctc, "get_changed_files", lambda repo, base: seen.append(base) or [changed_file]
+    )
+    monkeypatch.setattr(ctc, "has_enabled_checks", lambda args: True)
+    monkeypatch.setattr(ctc, "run_clang_tidy", lambda a, f, t: ("", True))
+    monkeypatch.setattr(ctc, "parse_args", lambda: _args(base="fork"))
+    assert ctc.main() == 0
+    assert seen == ["fork123"]
+    assert "base commit: fork123" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("verbose", [False, True])

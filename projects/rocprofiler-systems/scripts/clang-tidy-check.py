@@ -5,11 +5,10 @@
 
 """Run clang-tidy on changed lines and summarize the results.
 
-Covers committed changes since --base (default: where the branch diverged
-from origin/develop), staged/unstaged changes on top, and new untracked
-files. Runs clang-tidy scoped to only the changed lines of each affected
-file, then prints which files/lines were checked and which clang-tidy checks
-fired (with locations and messages).
+Covers committed changes since --base (default: HEAD), staged/unstaged
+changes on top, and new untracked files. Runs clang-tidy scoped to only the
+changed lines of each affected file, then prints which files/lines were
+checked and which clang-tidy checks fired (with locations and messages).
 """
 
 from __future__ import annotations
@@ -29,7 +28,9 @@ DIFF_FILE_RE = re.compile(r'^\+\+\+\ "?b/([^ \t\n"]*)')
 DIFF_HUNK_RE = re.compile(r"^@@.*\+(\d+)(,(\d+))?")
 DIAGNOSTIC_RE = re.compile(r"^(.*):(\d+):(\d+): (warning|error): (.*) \[([\w,.\-]+)\]$")
 
-DEFAULT_BASE = "origin/develop"
+# `--base fork` selects the point where the current branch diverged from this ref.
+FORK_SELECTOR = "fork"
+FORK_REF = "origin/develop"
 
 _ANSI = {
     "reset": "\033[0m",
@@ -131,23 +132,14 @@ def get_repo_root() -> str:
     return _git(["rev-parse", "--show-toplevel"]).strip()
 
 
-def get_default_base() -> str:
-    """Return the SHA where the current branch diverged from DEFAULT_BASE.
+def get_fork_point() -> str:
+    """Return the SHA where the current branch diverged from FORK_REF."""
+    return _git(["merge-base", "HEAD", FORK_REF]).strip()
 
-    Falls back to HEAD (with a warning) when the merge-base cannot be found,
-    e.g. DEFAULT_BASE does not exist locally or the cwd is not a git repo.
-    """
-    try:
-        return _git(["merge-base", "HEAD", DEFAULT_BASE]).strip()
-    except SystemExit:
-        print(
-            _color(
-                f"warning: could not find merge-base with {DEFAULT_BASE}; using HEAD",
-                "yellow",
-            ),
-            file=sys.stderr,
-        )
-        return "HEAD"
+
+def resolve_base(base: str) -> str:
+    """Resolve the `fork` selector to a SHA; any other value is used as-is."""
+    return get_fork_point() if base == FORK_SELECTOR else base
 
 
 def get_diff_changed_files(repo_root: str, base: str | None) -> dict[str, ChangedFile]:
@@ -385,10 +377,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--base",
-        default=get_default_base(),
+        default="HEAD",
         help=(
-            "Diff against this ref (default: %(default)s, where this branch "
-            f"diverged from {DEFAULT_BASE}). "
+            "Diff against this ref (default: %(default)s) "
+            f"Use '{FORK_SELECTOR}' for the point where this "
+            f"branch diverged from {FORK_REF}, or pass any ref/SHA."
             "Covers committed changes since the ref plus any "
             "staged/unstaged changes on top."
         ),
@@ -405,9 +398,10 @@ def main() -> int:
     """Run clang-tidy over changed files and print the results; return an exit code."""
     args = parse_args()
     repo_root = get_repo_root()
-    print(f"Checking changes since base commit: {args.base}")
+    base = resolve_base(args.base)
+    print(f"Checking changes since base commit: {base}")
 
-    changed_files = get_changed_files(repo_root, args.base)
+    changed_files = get_changed_files(repo_root, base)
     if not changed_files:
         print("No relevant changes found.")
         return 0
