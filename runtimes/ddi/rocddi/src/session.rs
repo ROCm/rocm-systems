@@ -42,7 +42,7 @@ pub enum DriverContextLifetime {
 
 /// Caller-owned scope for discovery, activation, and driver shutdown.
 ///
-/// Each session has a requested [`DriverContextLifetime`] and one or more
+/// Each session has a requested [`DriverContextLifetime`] and zero or more
 /// independently identified drivers. Clones share the same driver set;
 /// separate constructors create independent driver instances. Creating a
 /// session does not activate an endpoint. An activated device retains exactly
@@ -265,12 +265,6 @@ impl Session {
         lifetime: DriverContextLifetime,
         process: ProcessIdentity,
     ) -> Result<Self, Error> {
-        if drivers.is_empty() {
-            return Err(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "session requires at least one driver",
-            });
-        }
         for (index, driver) in drivers.iter().enumerate() {
             if driver.context_lifetime() != lifetime {
                 return Err(Error::Operation {
@@ -972,119 +966,6 @@ mod tests {
     }
 
     #[test]
-    fn copy_transport_is_selected_by_the_provider_for_the_same_gpu_target() {
-        use crate::topology::{GpuCopyTransport, GpuQueueCapabilities, GpuTargetProfile};
-        for (profile, transport, direct, kernel, supported) in [
-            (
-                GpuTargetProfile::Gfx9,
-                Some(GpuCopyTransport::User),
-                true,
-                false,
-                cfg!(target_arch = "x86_64"),
-            ),
-            (
-                GpuTargetProfile::Gfx9,
-                Some(GpuCopyTransport::Kernel),
-                false,
-                true,
-                true,
-            ),
-            (GpuTargetProfile::Gfx9, None, true, true, false),
-            (
-                GpuTargetProfile::Gfx9,
-                Some(GpuCopyTransport::Kernel),
-                true,
-                false,
-                false,
-            ),
-            (
-                GpuTargetProfile::Gfx1201,
-                Some(GpuCopyTransport::User),
-                true,
-                true,
-                false,
-            ),
-            (
-                GpuTargetProfile::Other,
-                Some(GpuCopyTransport::Kernel),
-                false,
-                true,
-                false,
-            ),
-        ] {
-            let id = [0x36; 16];
-            let driver = TestDriver::new(
-                id,
-                EndpointKind::Gpu {
-                    info: GpuInfo {
-                        target_profile: profile,
-                        queues: GpuQueueCapabilities {
-                            copy: transport,
-                            sdma: direct,
-                            kernel_sdma: kernel,
-                            ..GpuQueueCapabilities::default()
-                        },
-                        ..GpuInfo::default()
-                    },
-                },
-                DriverContextLifetime::Session,
-            );
-            let mut session = Session::from_drivers(
-                vec![DriverInstance::Test(Shared::new(driver).unwrap())],
-                DriverContextLifetime::Session,
-            )
-            .unwrap();
-            let device = session
-                .activate(&session.open_endpoint(id).unwrap())
-                .unwrap();
-            assert_eq!(device.gpu().unwrap().supports_linear_copy(), supported);
-            drop(device);
-            session.destroy().unwrap();
-        }
-    }
-
-    #[test]
-    fn clock_only_provider_routes_without_other_instrumentation_facets() {
-        let id = [0x35; 16];
-        let driver = TestDriver::new(
-            id,
-            EndpointKind::Gpu {
-                info: GpuInfo::default(),
-            },
-            DriverContextLifetime::Session,
-        );
-        let mut session = Session::from_drivers(
-            vec![DriverInstance::Test(Shared::new(driver).unwrap())],
-            DriverContextLifetime::Session,
-        )
-        .unwrap();
-        let endpoint = session.open_endpoint(id).unwrap();
-        let device = session.activate(&endpoint).unwrap();
-        let gpu = device.gpu().unwrap();
-        let clocks = gpu.clock_counters().unwrap();
-        assert_eq!(clocks.gpu, 17);
-        assert_eq!(clocks.system_frequency, 1_000_000);
-        assert_eq!(
-            gpu.pc_sampling_configurations(
-                crate::device::gpu::profiling::PcSamplingConfigurationSet::Supported
-            )
-            .unwrap_err()
-            .kind(),
-            ErrorKind::Unsupported
-        );
-        assert_eq!(
-            gpu.spm_acquire().unwrap_err().kind(),
-            ErrorKind::Unsupported
-        );
-        assert_eq!(
-            gpu.available_memory().unwrap_err().kind(),
-            ErrorKind::Unsupported
-        );
-        drop(device);
-        session.destroy().unwrap();
-    }
-
-    #[test]
     fn populated_gpu_endpoint_keeps_discovery_identity_for_activation() {
         let id = [0x34; 16];
         let driver = TestDriver::new(
@@ -1531,5 +1412,148 @@ mod tests {
             session.open_endpoint(id).unwrap_err().kind(),
             ErrorKind::InvalidData
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod portable_tests {
+    use super::*;
+    use crate::driver::test_driver::TestDriver;
+    use crate::topology::{EndpointKind, GpuInfo};
+    #[test]
+    fn copy_transport_is_selected_by_the_provider_for_the_same_gpu_target() {
+        use crate::topology::{GpuCopyTransport, GpuQueueCapabilities, GpuTargetProfile};
+        for (profile, transport, direct, kernel, supported) in [
+            (
+                GpuTargetProfile::Gfx9,
+                Some(GpuCopyTransport::User),
+                true,
+                false,
+                cfg!(target_arch = "x86_64"),
+            ),
+            (
+                GpuTargetProfile::Gfx9,
+                Some(GpuCopyTransport::Kernel),
+                false,
+                true,
+                true,
+            ),
+            (GpuTargetProfile::Gfx9, None, true, true, false),
+            (
+                GpuTargetProfile::Gfx9,
+                Some(GpuCopyTransport::Kernel),
+                true,
+                false,
+                false,
+            ),
+            (
+                GpuTargetProfile::Gfx1201,
+                Some(GpuCopyTransport::User),
+                true,
+                true,
+                false,
+            ),
+            (
+                GpuTargetProfile::Other,
+                Some(GpuCopyTransport::Kernel),
+                false,
+                true,
+                false,
+            ),
+        ] {
+            let id = [0x36; 16];
+            let driver = TestDriver::new(
+                id,
+                EndpointKind::Gpu {
+                    info: GpuInfo {
+                        target_profile: profile,
+                        queues: GpuQueueCapabilities {
+                            copy: transport,
+                            sdma: direct,
+                            kernel_sdma: kernel,
+                            ..GpuQueueCapabilities::default()
+                        },
+                        ..GpuInfo::default()
+                    },
+                },
+                DriverContextLifetime::Session,
+            );
+            let mut session = Session::from_drivers(
+                vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+                DriverContextLifetime::Session,
+            )
+            .unwrap();
+            let device = session
+                .activate(&session.open_endpoint(id).unwrap())
+                .unwrap();
+            assert_eq!(device.gpu().unwrap().supports_linear_copy(), supported);
+            drop(device);
+            session.destroy().unwrap();
+        }
+    }
+
+    #[test]
+    fn clock_only_provider_routes_without_other_instrumentation_facets() {
+        let id = [0x35; 16];
+        let driver = TestDriver::new(
+            id,
+            EndpointKind::Gpu {
+                info: GpuInfo::default(),
+            },
+            DriverContextLifetime::Session,
+        );
+        let mut session = Session::from_drivers(
+            vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+            DriverContextLifetime::Session,
+        )
+        .unwrap();
+        let endpoint = session.open_endpoint(id).unwrap();
+        let device = session.activate(&endpoint).unwrap();
+        let gpu = device.gpu().unwrap();
+        let clocks = gpu.clock_counters().unwrap();
+        assert_eq!(clocks.gpu, 17);
+        assert_eq!(clocks.system_frequency, 1_000_000);
+        assert_eq!(
+            gpu.pc_sampling_configurations(
+                crate::device::gpu::profiling::PcSamplingConfigurationSet::Supported
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::Unsupported
+        );
+        assert_eq!(
+            gpu.spm_acquire().unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+        assert_eq!(
+            gpu.available_memory().unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+        drop(device);
+        session.destroy().unwrap();
+    }
+
+    #[test]
+    fn session_without_device_providers_keeps_host_services_available() {
+        let mut session =
+            Session::from_drivers(Vec::new(), DriverContextLifetime::Session).unwrap();
+        let mut count = 0;
+        session
+            .enumerate(&mut |_| {
+                count += 1;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+        let caps = crate::memory::host::capabilities().unwrap();
+        let mut allocation = crate::memory::host::HostAllocation::allocate(
+            caps.allocation.granularity,
+            caps.allocation.alignment,
+        )
+        .unwrap();
+        assert_ne!(allocation.info().host_address, 0);
+        allocation.free().unwrap();
+        session.destroy().unwrap();
     }
 }

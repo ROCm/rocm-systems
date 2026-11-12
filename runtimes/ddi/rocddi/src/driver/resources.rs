@@ -1,6 +1,18 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#![cfg_attr(
+    windows,
+    allow(
+        unused_imports,
+        unused_variables,
+        clippy::trivially_copy_pass_by_ref,
+        clippy::needless_pass_by_value,
+        clippy::unnecessary_wraps,
+        reason = "native provider routes are absent on this host target"
+    )
+)]
+
 //! Concrete resource routing for drivers installed in a session.
 //!
 //! The public owners and their validation rules live in the memory and queue
@@ -12,9 +24,10 @@
 use super::test_driver::{TestAllocation, TestDriver, TestQueue};
 use super::{
     AllocationOperations, DeviceDriverState, GpuDriverRef, GpuKernelQueueOperations,
-    GpuPcSamplingOperations, GpuUserQueueOperations, KfdAllocation, KfdDriver, KfdKernelQueue,
-    KfdPcSampling, KfdQueue, VirtualMemoryOperations,
+    GpuPcSamplingOperations, GpuUserQueueOperations, VirtualMemoryOperations,
 };
+#[cfg(target_os = "linux")]
+use super::{KfdAllocation, KfdDriver, KfdKernelQueue, KfdPcSampling, KfdQueue};
 use crate::Error;
 #[cfg(test)]
 use crate::ErrorKind;
@@ -44,31 +57,45 @@ fn unsupported_memory<T>() -> Result<T, Error> {
 
 /// Driver-selected owner of a virtual-address reservation.
 pub(crate) enum VirtualAddressState {
+    #[cfg(not(target_os = "linux"))]
+    Unavailable(std::convert::Infallible),
     /// Reservation owned by the Linux KFD backend.
+    #[cfg(target_os = "linux")]
     LinuxKfd(DriverVirtualAddress<KfdDriver>),
 }
 
 impl VirtualAddressState {
     #[cfg(test)]
+    #[cfg(target_os = "linux")]
     pub(crate) fn from_linux_kfd(address: DriverVirtualAddress<KfdDriver>) -> Self {
         Self::LinuxKfd(address)
     }
 
     #[cfg(test)]
+    #[cfg(target_os = "linux")]
     pub(crate) fn linux_kfd(&self) -> &DriverVirtualAddress<KfdDriver> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(address) => address,
         }
     }
 
     pub(crate) fn info(&self) -> VirtualAddressInfo {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(address) => address.info(),
         }
     }
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(address) => address.free(),
         }
     }
@@ -83,6 +110,9 @@ impl DeviceDriverState {
         address: u64,
     ) -> Result<VirtualAddressState, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, .. } => Ok(VirtualAddressState::LinuxKfd(
                 DriverVirtualAddress::reserve(driver, bounds, size, alignment, address)?,
             )),
@@ -97,23 +127,34 @@ impl DeviceDriverState {
 
 /// Driver-selected owner of detached physical backing.
 pub(crate) enum VirtualMemoryState {
+    #[cfg(not(target_os = "linux"))]
+    Unavailable(std::convert::Infallible),
     /// Physical backing owned by the Linux KFD backend.
+    #[cfg(target_os = "linux")]
     LinuxKfd(DriverVirtualMemory<KfdDriver>),
 }
 
 impl VirtualMemoryState {
+    #[cfg(target_os = "linux")]
     pub(crate) fn from_linux_kfd(memory: DriverVirtualMemory<KfdDriver>) -> Self {
         Self::LinuxKfd(memory)
     }
 
+    #[cfg(target_os = "linux")]
     pub(crate) fn linux_kfd(&self) -> &DriverVirtualMemory<KfdDriver> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(memory) => memory,
         }
     }
 
     pub(crate) fn info(&self) -> VirtualMemoryInfo {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(memory) => memory.info(),
         }
     }
@@ -127,6 +168,9 @@ impl VirtualMemoryState {
         permissions: DeviceAccess,
     ) -> Result<VirtualHostMappingState, Error> {
         match (self, reservation) {
+            #[cfg(not(target_os = "linux"))]
+            (Self::Unavailable(never, ..), ..) => match *never {},
+            #[cfg(target_os = "linux")]
             (Self::LinuxKfd(memory), VirtualAddressState::LinuxKfd(reservation)) => {
                 Ok(VirtualHostMappingState::LinuxKfd(memory.map_host(
                     reservation,
@@ -141,6 +185,9 @@ impl VirtualMemoryState {
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(memory) => memory.free(),
         }
     }
@@ -148,13 +195,19 @@ impl VirtualMemoryState {
 
 /// Driver-selected owner of one device virtual-memory mapping.
 pub(crate) enum VirtualDeviceMappingState {
+    #[cfg(not(target_os = "linux"))]
+    Unavailable(std::convert::Infallible),
     /// Device mapping owned by the Linux KFD backend.
+    #[cfg(target_os = "linux")]
     LinuxKfd(DriverVirtualDeviceMapping<KfdDriver>),
 }
 
 impl VirtualDeviceMappingState {
     pub(crate) fn free(&mut self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(mapping) => mapping.free(),
         }
     }
@@ -162,19 +215,28 @@ impl VirtualDeviceMappingState {
 
 /// Driver-selected owner of one host virtual-memory mapping.
 pub(crate) enum VirtualHostMappingState {
+    #[cfg(not(target_os = "linux"))]
+    Unavailable(std::convert::Infallible),
     /// Host mapping owned by the Linux KFD backend.
+    #[cfg(target_os = "linux")]
     LinuxKfd(DriverVirtualHostMapping<KfdDriver>),
 }
 
 impl VirtualHostMappingState {
     pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(mapping) => mapping.set_permissions(permissions),
         }
     }
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(mapping) => mapping.free(),
         }
     }
@@ -182,7 +244,10 @@ impl VirtualHostMappingState {
 
 /// Driver-selected owner of device-accessible backing.
 pub(crate) enum AllocationState {
+    #[cfg(not(target_os = "linux"))]
+    Unavailable(std::convert::Infallible),
     /// Allocation owned by the Linux KFD backend.
+    #[cfg(target_os = "linux")]
     LinuxKfd(DriverAllocation<KfdDriver>),
     /// Allocation owned by a unit-test backend.
     #[cfg(test)]
@@ -190,6 +255,7 @@ pub(crate) enum AllocationState {
 }
 
 impl AllocationState {
+    #[cfg(target_os = "linux")]
     pub(crate) fn from_linux_kfd(driver: &Shared<KfdDriver>, inner: Owned<KfdAllocation>) -> Self {
         Self::LinuxKfd(DriverAllocation::new(driver.clone(), inner))
     }
@@ -203,8 +269,12 @@ impl AllocationState {
         clippy::unnecessary_wraps,
         reason = "other allocation drivers require an error"
     )]
+    #[cfg(target_os = "linux")]
     pub(crate) fn linux_kfd(&self) -> Result<&DriverAllocation<KfdDriver>, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(allocation) => Ok(allocation),
             #[cfg(test)]
             Self::Test(_) => Err(Error::Operation {
@@ -218,8 +288,12 @@ impl AllocationState {
         clippy::unnecessary_wraps,
         reason = "other allocation drivers require an error"
     )]
+    #[cfg(target_os = "linux")]
     pub(crate) fn linux_kfd_mut(&mut self) -> Result<&mut DriverAllocation<KfdDriver>, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(allocation) => Ok(allocation),
             #[cfg(test)]
             Self::Test(_) => Err(Error::Operation {
@@ -231,6 +305,9 @@ impl AllocationState {
 
     pub(crate) fn info(&self) -> AllocationInfo {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(allocation) => allocation.info(),
             #[cfg(test)]
             Self::Test(allocation) => allocation.info(),
@@ -239,6 +316,9 @@ impl AllocationState {
 
     pub(crate) fn host_alias_source_offset(&self) -> Option<u64> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(allocation) => allocation.driver_state().host_alias_source_offset(),
             #[cfg(test)]
             Self::Test(_) => None,
@@ -247,6 +327,9 @@ impl AllocationState {
 
     pub(crate) fn set_host_alias_identity(&self, identity: [u64; 2]) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(allocation) => {
                 allocation.driver_state().set_host_alias_identity(identity)
             }
@@ -257,6 +340,9 @@ impl AllocationState {
 
     pub(crate) fn remaining_backing_byte_length(&self) -> u64 {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(allocation) => allocation.driver_state().remaining_backing_byte_length(),
             #[cfg(test)]
             Self::Test(_) => 0,
@@ -265,6 +351,9 @@ impl AllocationState {
 
     pub(crate) fn check(&self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(allocation) => allocation.check(),
             #[cfg(test)]
             Self::Test(allocation) => allocation.check(),
@@ -273,6 +362,9 @@ impl AllocationState {
 
     pub(crate) fn device_address(&self, device: &DeviceDriverState) -> Result<u64, Error> {
         match (self, device) {
+            #[cfg(not(target_os = "linux"))]
+            (Self::Unavailable(never, ..), ..) => match *never {},
+            #[cfg(target_os = "linux")]
             (Self::LinuxKfd(allocation), DeviceDriverState::LinuxKfd { state, .. }) => {
                 allocation.device_address(state)
             }
@@ -290,6 +382,9 @@ impl AllocationState {
 
     pub(crate) fn shares_driver_instance(&self, device: &DeviceDriverState) -> bool {
         match (self, device) {
+            #[cfg(not(target_os = "linux"))]
+            (Self::Unavailable(never, ..), ..) => match *never {},
+            #[cfg(target_os = "linux")]
             (Self::LinuxKfd(allocation), DeviceDriverState::LinuxKfd { driver, .. }) => {
                 allocation.shares_driver_instance(driver)
             }
@@ -308,6 +403,9 @@ impl AllocationState {
         devices: &[&Device],
     ) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(allocation) => {
                 set_device_access_for::<KfdDriver, _>(allocation, origin, devices, |device| {
                     device.driver_state.linux_kfd().ok()
@@ -320,6 +418,9 @@ impl AllocationState {
 
     pub(crate) fn originates_from(&self, device: &DeviceDriverState) -> bool {
         match (self, device) {
+            #[cfg(not(target_os = "linux"))]
+            (Self::Unavailable(never, ..), ..) => match *never {},
+            #[cfg(target_os = "linux")]
             (Self::LinuxKfd(allocation), DeviceDriverState::LinuxKfd { state, .. }) => {
                 allocation.originates_from(state)
             }
@@ -334,6 +435,9 @@ impl AllocationState {
 
     pub(crate) fn metadata(&self) -> &[u8] {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(allocation) => allocation.driver_state().metadata(),
             #[cfg(test)]
             Self::Test(_) => &[],
@@ -342,6 +446,9 @@ impl AllocationState {
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(allocation) => allocation.free(),
             #[cfg(test)]
             Self::Test(allocation) => allocation.free(),
@@ -358,6 +465,9 @@ impl DeviceDriverState {
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => {
                 Ok(Allocation::new(AllocationState::from_linux_kfd(
                     driver,
@@ -377,6 +487,9 @@ impl DeviceDriverState {
         request: HostRegistration,
     ) -> Result<Allocation, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => {
                 // SAFETY: The caller preserves the page cover across native use.
                 let inner = unsafe { driver.register_host(state, &[], request)? };
@@ -400,6 +513,9 @@ impl DeviceDriverState {
         options: VirtualMemoryOptions,
     ) -> Result<VirtualMemory, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => {
                 let process = crate::os::ProcessIdentity::capture().map_err(|source| {
                     crate::os::native_error("virtual memory process identity", source)
@@ -422,6 +538,9 @@ impl DeviceDriverState {
         request: VirtualMapRequest,
     ) -> Result<VirtualDeviceMappingState, Error> {
         match (self, memory, reservation) {
+            #[cfg(not(target_os = "linux"))]
+            (Self::Unavailable(never, ..), ..) => match *never {},
+            #[cfg(target_os = "linux")]
             (
                 Self::LinuxKfd { driver, state },
                 VirtualMemoryState::LinuxKfd(memory),
@@ -450,6 +569,9 @@ impl DeviceDriverState {
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => {
                 let states = origin.peer_states_for(
                     peers,
@@ -485,6 +607,9 @@ impl DeviceDriverState {
         request: HostRegistration,
     ) -> Result<Allocation, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => {
                 let states = origin.peer_states_for(peers, false, driver, state, |peer| {
                     peer.driver_state.linux_kfd().ok()
@@ -511,6 +636,9 @@ impl DeviceDriverState {
 impl GpuDriverRef<'_> {
     pub(crate) fn allocate_queue_scratch(&self, size: u64) -> Result<Allocation, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => {
                 Ok(Allocation::new(AllocationState::from_linux_kfd(
                     driver,
@@ -524,6 +652,9 @@ impl GpuDriverRef<'_> {
 
     pub(crate) fn map_mmio_remap(&self) -> Result<Allocation, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => Ok(Allocation::new(
                 AllocationState::from_linux_kfd(driver, driver.map_mmio_remap(state)?),
             )),
@@ -535,7 +666,10 @@ impl GpuDriverRef<'_> {
 
 /// Driver-selected owner of a user-mode GPU queue.
 pub(crate) enum QueueState {
+    #[cfg(not(target_os = "linux"))]
+    Unavailable(std::convert::Infallible),
     /// Direct queue owned by the Linux KFD backend.
+    #[cfg(target_os = "linux")]
     LinuxKfd(DriverQueue<KfdDriver, KfdQueue>),
     /// Numeric-only transport owned by the test GPU backend.
     #[cfg(test)]
@@ -545,6 +679,9 @@ pub(crate) enum QueueState {
 impl QueueState {
     pub(crate) fn info(&self) -> QueueTransport {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => queue.info(),
             #[cfg(test)]
             Self::Test(queue) => queue.info(),
@@ -553,6 +690,9 @@ impl QueueState {
 
     pub(crate) fn map_device(&self, device: &Device) -> Result<QueueTransport, Error> {
         match (self, &device.driver_state) {
+            #[cfg(not(target_os = "linux"))]
+            (Self::Unavailable(never, ..), ..) => match *never {},
+            #[cfg(target_os = "linux")]
             (Self::LinuxKfd(queue), DeviceDriverState::LinuxKfd { driver, state }) => {
                 queue.map_device(driver, state)
             }
@@ -570,6 +710,9 @@ impl QueueState {
 
     pub(crate) fn progress(&self) -> Result<(u64, u64), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => queue.progress(),
             #[cfg(test)]
             Self::Test(queue) => queue.progress(),
@@ -578,6 +721,9 @@ impl QueueState {
 
     pub(crate) fn inactivate(&mut self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => queue.inactivate(),
             #[cfg(test)]
             Self::Test(queue) => queue.inactivate(),
@@ -586,6 +732,9 @@ impl QueueState {
 
     pub(crate) fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => queue.set_priority(priority),
             #[cfg(test)]
             Self::Test(queue) => queue.set_priority(priority),
@@ -594,6 +743,9 @@ impl QueueState {
 
     pub(crate) fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => queue.set_cu_mask(mask),
             #[cfg(test)]
             Self::Test(queue) => queue.set_cu_mask(mask),
@@ -605,7 +757,10 @@ impl QueueState {
     #[allow(unsafe_code)]
     pub(crate) unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
             // SAFETY: The caller preserves the stopped queue and backing.
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => unsafe { queue.set_scratch(scratch) },
             #[cfg(test)]
             // SAFETY: The caller preserves the stopped queue and backing.
@@ -615,6 +770,9 @@ impl QueueState {
 
     pub(crate) fn check(&self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => queue.check(),
             #[cfg(test)]
             Self::Test(queue) => queue.check(),
@@ -626,7 +784,10 @@ impl QueueState {
     #[allow(unsafe_code)]
     pub(crate) unsafe fn destroy(&mut self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
             // SAFETY: The caller has retired all queue reachability.
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => unsafe { queue.destroy() },
             #[cfg(test)]
             // SAFETY: The caller has retired all queue reachability.
@@ -643,7 +804,10 @@ impl QueueState {
         callback: &mut dyn FnMut(),
     ) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
             // SAFETY: The caller preserves both retirement obligations.
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => unsafe { queue.destroy_with_retained_transport(callback) },
             #[cfg(test)]
             // SAFETY: The caller preserves both retirement obligations.
@@ -654,37 +818,55 @@ impl QueueState {
 
 /// Driver-selected owner of a kernel-mediated GPU queue.
 pub(crate) enum KernelQueueState {
+    #[cfg(not(target_os = "linux"))]
+    Unavailable(std::convert::Infallible),
     /// Driver-mediated queue owned by the Linux KFD backend.
+    #[cfg(target_os = "linux")]
     LinuxKfd(DriverKernelQueue<KfdDriver, KfdKernelQueue>),
 }
 
 /// Driver-selected owner of one native PC sampling registration.
 pub(crate) enum PcSamplingState {
+    #[cfg(not(target_os = "linux"))]
+    Unavailable(std::convert::Infallible),
     /// Registration owned by the Linux KFD backend.
+    #[cfg(target_os = "linux")]
     LinuxKfd(DriverPcSampling<KfdDriver, KfdPcSampling>),
 }
 
 impl PcSamplingState {
     pub(crate) fn start(&mut self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(session) => session.start(),
         }
     }
 
     pub(crate) fn stop(&mut self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(session) => session.stop(),
         }
     }
 
     pub(crate) fn destroy(&mut self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(session) => session.destroy(),
         }
     }
 
     pub(crate) fn relinquish_adopted(&mut self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(session) => session.relinquish_adopted(),
         }
     }
@@ -696,19 +878,28 @@ impl KernelQueueState {
     #[allow(unsafe_code)]
     pub(crate) unsafe fn submit(&self, command: KernelCommand) -> Result<u64, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
             // SAFETY: The caller preserves the command backing.
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => unsafe { queue.submit(command) },
         }
     }
 
     pub(crate) fn status(&self) -> KernelQueueStatus {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => queue.status(),
         }
     }
 
     pub(crate) fn refresh_status(&self) -> Result<KernelQueueStatus, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => queue.refresh_status(),
         }
     }
@@ -720,6 +911,9 @@ impl KernelQueueState {
         poll_duration_nanoseconds: u64,
     ) -> Result<KernelQueueWait, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => {
                 queue.wait(submission, timeout_nanoseconds, poll_duration_nanoseconds)
             }
@@ -728,6 +922,9 @@ impl KernelQueueState {
 
     pub(crate) fn destroy(&mut self) -> Result<(), Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd(queue) => queue.destroy(),
         }
     }
@@ -739,6 +936,9 @@ impl GpuDriverRef<'_> {
     #[allow(unsafe_code)]
     pub(crate) unsafe fn create_queue(&self, desc: QueueRequest) -> Result<QueueState, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => {
                 // SAFETY: The caller preserves every request address.
                 let inner = unsafe { driver.create_user_queue(state, desc) }?;
@@ -765,6 +965,9 @@ impl GpuDriverRef<'_> {
         format: KernelQueueFormat,
     ) -> Result<KernelQueueState, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => {
                 let inner = driver.create_kernel_queue(state, format)?;
                 Ok(KernelQueueState::LinuxKfd(DriverKernelQueue::new(
@@ -783,6 +986,9 @@ impl GpuDriverRef<'_> {
         existing_trace_id: Option<std::num::NonZeroU32>,
     ) -> Result<PcSamplingState, Error> {
         match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => {
                 let inner = driver.create_pc_sampling(state, request, existing_trace_id)?;
                 Ok(PcSamplingState::LinuxKfd(DriverPcSampling::new(

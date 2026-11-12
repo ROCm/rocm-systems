@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! Native rocddi contract checks for the first GPU target.
+#![cfg(target_os = "linux")]
 #![allow(unsafe_code)]
 #![allow(
     clippy::cast_possible_truncation,
