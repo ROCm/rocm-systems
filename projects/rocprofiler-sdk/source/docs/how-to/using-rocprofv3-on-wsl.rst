@@ -121,24 +121,15 @@ All counter values are zero
    :ref:`wsl-environment-variables`.
 
 ``rocprofv3`` finds fewer GPUs than HIP does
-   ROCprofiler-SDK skips a GPU when it can't read that GPU's topology, and logs
-   the reason. Profiling still works on the other GPUs. The usual cause is a
-   ``librocdxg`` that doesn't match ROCprofiler-SDK; install matching packages.
-   ROCprofiler-SDK also skips a GPU whose topology is incomplete, and skips two
-   identical GPUs that it can't tell apart.
+   ROCprofiler-SDK skips a GPU when it can't read that GPU's topology.
+   Profiling still works on the other GPUs. To see why a GPU was skipped, run
+   with ``ROCPROFILER_LOG_LEVEL=info``. The usual cause is a ``librocdxg`` that
+   doesn't match ROCprofiler-SDK; install matching packages.
 
-The memory copy CSV has no byte count
-   This is the same on all platforms. To get byte counts, use the rocpd output
-   format and read ``rocpd_memory_copy.size``:
-
-   .. code-block:: bash
-
-      rocprofv3 --memory-copy-trace --output-format rocpd -d ./out -o results -- ./my_application
-
-Device-to-device copies are missing from the memory copy trace
-   This is the same on all platforms. HIP performs copies within one device
-   with a kernel, so they appear in the kernel trace as
-   ``__amd_rocclr_copyBuffer``.
+The application crashes during profiling
+   Check that ``librocdxg`` and the HSA runtime come from the same ROCm release.
+   A mismatched pair can corrupt memory, and the crash can appear later in
+   unrelated code.
 
 .. _wsl-environment-variables:
 
