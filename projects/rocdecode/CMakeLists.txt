@@ -43,7 +43,7 @@ if(NOT WIN32)
 endif()
 
 # rocdecode Version
-set(VERSION "1.12.1")
+set(VERSION "1.13.0")
 
 # Set Project Version and Language
 project(rocdecode VERSION ${VERSION} LANGUAGES CXX)
