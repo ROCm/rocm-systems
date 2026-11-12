@@ -35,7 +35,7 @@ rocjitsu --config <config.json> [--node <id>] --vfio-socket <path> [--vfio-socke
 ### Local mode
 
 ``` bash
-rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./app
+rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./app
 ```
 
 The simulator runs in-process. `rocjitsu` sets `LD_PRELOAD` and calls `execve` on the target application. The interposer routes `/dev/kfd` operations to a `SimulatedDriver` within the same process, and a background thread runs the simulation engine.
@@ -46,10 +46,10 @@ This mode corresponds to `RJ_VM_MODE_LOCAL` in the C API.
 
 ``` bash
 # Fork daemon + launch application
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./app args...
+rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- ./app args...
 
 # Daemon-only (no application launched)
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json
+rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json
 ```
 
 A child daemon process is forked to host the simulation engine and `SimulatedDriver`. The parent then `execve`'s the target application with `LD_PRELOAD` set. Client processes communicate with the daemon over a Unix domain socket using the RPC protocol described below.
@@ -58,10 +58,14 @@ GPU memory allocations use backing descriptors shared between the daemon and cli
 
 This mode corresponds to `RJ_VM_MODE_DAEMON` in the C API. It supports multi-process workloads such as PyTorch, `torchrun`, `torch.distributed`, and RCCL.
 
+The daemon hosts one shared simulation engine. A fatal instruction decode or execution failure stops that engine and disconnects every client, including clients whose GPU work is valid. The affected queue cancels its outstanding dispatches without publishing successful kernel or barrier completion. Runtime acceptance of a queue-error notification does not recover the engine; a debugger-owned illegal-instruction stop can still be repaired and resumed.
+
+After a successful KFD open, any daemon disconnect terminates the attached native process via `_Exit(EXIT_FAILURE)`. This includes an orderly daemon stop or restart while clients are idle or doing only host work, even after their GPU work has finished. `_Exit` skips `atexit` handlers and stdio flushing. Disconnect monitoring also interrupts clients waiting on shared-memory completion signals, so those waits cannot remain blocked after engine shutdown. The faulting client's HIP queue-error callback may abort it before the interposer handles the disconnect.
+
 ### Attach mode
 
 ``` bash
-rocjitsu --attach --config configs/gfx950_mi355x_kmd.json -- ./app
+rocjitsu --attach --config configs/gfx950_mi350x_kmd.json -- ./app
 ```
 
 Connects to an already-running daemon. The socket path is resolved using the environment variables described in [Environment variables and socket path resolution](#socket-path-resolution).
@@ -150,9 +154,13 @@ Backing descriptors (memfds or fallback socket tokens) are passed via `sendmsg()
 
 ### Shutdown
 
+During normal client shutdown:
+
 1.  The HSA runtime calls `SET_EVENT` on wake signals during its async control shutdown.
 2.  All client-side pollers observe the event (auto-reset is skipped on `timeout=0` polls).
 3.  The runtime's async threads exit, and thread joins succeed.
 4.  The runtime calls `DESTROY_QUEUE`, `DESTROY_EVENT`, and `close(kfd_fd)`.
 5.  The client's `RemoteDriver` sends `RPC_CLOSE` to the daemon.
 6.  The daemon closes the client connection and, when all clients have disconnected, shuts down the simulation engine.
+
+Stopping the daemon while clients remain connected closes every client socket. After a successful KFD open, those clients immediately terminate via `_Exit(EXIT_FAILURE)`, including idle clients; their `atexit` handlers and stdio flushing are skipped. A fatal instruction failure also stops the shared engine and disconnects every client, as described in [Daemon mode](#daemon-mode).

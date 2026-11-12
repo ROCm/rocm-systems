@@ -33,10 +33,10 @@ tests/python/
 ├── cli_unit_test.py        # runner: discovers cli/         (drives amd-smi CLI)
 ├── common/                 # shared runner + helpers (common.py, runcmd.py)
 ├── unit/                   # pure-logic tests
-│   ├── system/             #   test_bdf.py, test_check_res.py
+│   ├── system/             #   test_bdf.py, test_check_res.py, NIC tests (test_*nic*.py)
 │   └── gpu/                #   apu_metrics, ...
 ├── functional/             # hardware tests (require a live device + root)
-│   ├── gpu/  cpu/  nic/  ifoe/  system/
+│   ├── gpu/  cpu/  ifoe/  system/
 └── cli/                    # exercise the installed `amd-smi` binary
 ```
 

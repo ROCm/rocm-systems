@@ -234,6 +234,54 @@ union shader_data_short_type
     const char* typestr() const { return "SHADER_DATA_SHORT"; };
 };
 
+union execpopcnt1_type
+{
+    struct
+    {
+        uint64_t header : 10;
+        uint64_t wid    : 5;
+        uint64_t cnt    : 7;
+        uint64_t va     : 1;
+        uint64_t unused : 1;
+    };
+    uint64_t raw;
+
+    std::stringstream print() const
+    {
+        std::stringstream ss;
+        ss << "wid:" << wid << " cnt:" << cnt << " va:" << va;
+        return ss;
+    }
+    const char* typestr() const { return "EXEC_POPCNT1"; };
+};
+
+union execpopcnt3_type
+{
+    struct
+    {
+        uint64_t header : 9;
+        uint64_t wid1   : 5;
+        uint64_t cnt1   : 7;
+        uint64_t va1    : 1;
+        uint64_t wid2   : 5;
+        uint64_t cnt2   : 7;
+        uint64_t va2    : 1;
+        uint64_t wid3   : 5;
+        uint64_t cnt3   : 7;
+        uint64_t va3    : 1;
+    };
+    uint64_t raw;
+
+    std::stringstream print() const
+    {
+        std::stringstream ss;
+        ss << "wid1:" << wid1 << " cnt1:" << cnt1 << " va1:" << va1 << " wid2:" << wid2 << " cnt2:" << cnt2
+           << " va2:" << va2 << " wid3:" << wid3 << " cnt3:" << cnt3 << " va3:" << va3;
+        return ss;
+    }
+    const char* typestr() const { return "EXEC_POPCNT3"; };
+};
+
 class Token : public gfx11::Token
 {
 public:

@@ -17,8 +17,10 @@
 
 // Pre-compute GPU->NIC, GPU->GPU and NIC->GPU paths
 
+// RCCL: a BFS level can hold nodes of every type, e.g. all DEVs behind the shared UALoE fabric NVS
+// plus the base GPU's CPU and NIC. Entries are unique and each type has at most NCCL_TOPO_MAX_NODES.
 struct ncclTopoNodeList {
-  struct ncclTopoNode* list[NCCL_TOPO_MAX_NODES];
+  struct ncclTopoNode* list[NCCL_TOPO_MAX_NODES * NCCL_TOPO_NODE_TYPES];
   int count;
 };
 
@@ -420,8 +422,9 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   // explicit disable sentinel, not an allowed inter-rank path. This distinction
   // matters for ranks that share a DEV node (e.g. MLOPart partitions with
   // NCCL_TOPO_SPLIT_MLOPART=0) and therefore have a PATH_LOC path between them.
-  // For MNNVL clique peers (IFoE cross-node), no topology edge exists between the merged GPUs,
-  // so path->type is PATH_DIS. Treat them as PATH_NVL — fabric memory handles provide direct access.
+  // RCCL: MNNVL clique peers on another host always use P2P, as fabric memory handles give direct
+  // access. In a scale-out comm, peers on UALoE fabric hosts are PATH_NVL through the shared NVS
+  // anyway; other cross-host clique peers are PATH_DIS and need this bypass.
   if (mnnvl || ((g1 == g2 || p2pLevel != PATH_LOC) && path->type <= p2pLevel)) *p2p = 1;
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -612,9 +615,7 @@ ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t n
   NCCLCHECK(ncclGetLevel(&ncclTopoUserGdrLevel, NULL, "NCCL_NET_GDR_LEVEL"));
   if (ncclTopoUserGdrLevel != -2) netGdrLevel = ncclTopoUserGdrLevel;
   else {
-    int arch, vendor, model;
-    NCCLCHECK(ncclTopoCpuType(system, &arch, &vendor, &model));
-    if (arch == NCCL_TOPO_CPU_ARCH_X86 && vendor == NCCL_TOPO_CPU_VENDOR_AMD && model == NCCL_TOPO_CPU_MODEL_AMD_ROME) {
+    if (rcclTopoCpuIsRome(system)) {
       int i, d1 = -1, d2 = -1;
       for (i = 0; i < system->nodes[CPU].count; i++)
         if (system->nodes[GPU].nodes[g].paths[CPU][i].count == 2) break;
@@ -1110,9 +1111,9 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
   NCCLCHECK(ncclCalloc(&domains, system->nodes[GPU].count));
   NCCLCHECKGOTO(ncclCalloc(&ids, system->nodes[GPU].count), ret, fail);
 
-  // TODO: Remove sameCliqueP2p once cross-node MNNVL pairs get PATH_NVL via the topology fix
-  // (ncclTopoAddMNNVLXmlLinks). At that point paths[GPU][p].type < PATH_NET is naturally true
-  // for clique peers and this block becomes redundant.
+  // RCCL: in a scale-out comm, clique peers on hosts with UALoE fabric entries (fabric_supported=1)
+  // are PATH_NVL through the shared NVS (ncclTopoAddXGMI), so paths[GPU][p].type < PATH_NET already
+  // holds for them. sameCliqueP2p covers the other cross-host clique peers, which have no topology path.
   {
     if (comm->MNNVL && comm->peerInfo != NULL) {
       INFO(NCCL_GRAPH, "ncclTopoTrimSystem: MNNVL enabled, checking clique membership for %d ranks (cliqueSize %d)",
@@ -1125,7 +1126,7 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
       ids[g] = gpu->id;
       for (int p = 0; p < g; p++) {
         bool sameCliqueP2p = false;
-        // MNNVL clique peers have no topology path (PATH_DIS) but are reachable via IFoE fabric.
+        // Cross-host clique peers off the shared NVS have no topology path (PATH_DIS) but are reachable via IFoE fabric.
         // Treat them as same domain so they are not trimmed from the topology.
         if (comm->MNNVL && comm->peerInfo != NULL) {
           struct ncclTopoNode* peerGpu = system->nodes[GPU].nodes + p;

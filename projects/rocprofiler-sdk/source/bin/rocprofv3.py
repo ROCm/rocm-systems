@@ -190,6 +190,29 @@ def perfetto_buffer_size_kb(val):
     return value
 
 
+def get_mpi_env_int(var_name, label, minimum):
+    """Read an integer MPI environment variable, rejecting values that cannot be used.
+
+    Returns None when the variable is not set, which callers treat as "undetected".
+    """
+    if var_name not in os.environ:
+        return None
+
+    value = os.environ[var_name]
+    try:
+        result = int(value)
+    except ValueError:
+        fatal_error(f"MPI {label} variable {var_name}='{value}' is not an integer")
+
+    if result < minimum:
+        fatal_error(
+            f"MPI {label} variable {var_name}={result} is out of range "
+            f"(expected {minimum} or greater)"
+        )
+
+    return result
+
+
 def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
     """Detect MPI rank and size from the same MPI implementation's environment variables.
 
@@ -207,8 +230,13 @@ def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
     """
     # If custom environment variables are specified, use them exclusively
     if custom_rank_env is not None and custom_size_env is not None:
-        rank = int(os.environ[custom_rank_env]) if custom_rank_env in os.environ else None
-        size = int(os.environ[custom_size_env]) if custom_size_env in os.environ else None
+        rank = get_mpi_env_int(custom_rank_env, "rank", 0)
+        size = get_mpi_env_int(custom_size_env, "world size", 1)
+        if rank is not None and size is not None and rank >= size:
+            fatal_error(
+                f"MPI rank variable {custom_rank_env}={rank} is out of range for world "
+                f"size variable {custom_size_env}={size} (expected 0-{size - 1})"
+            )
         return (rank, size, custom_rank_env, custom_size_env)
 
     for rank_var, size_var in [
@@ -545,7 +573,7 @@ For attachment profiling of running processes:
         "-o",
         "--output-file",
         help="For the output file name. If nothing specified default path is `%%hostname%%/%%pid%%`",
-        default=os.environ.get("ROCPROF_OUTPUT_FILE_NAME", None),
+        default=None,
         type=str,
         required=False,
     )
@@ -553,7 +581,7 @@ For attachment profiling of running processes:
         "-d",
         "--output-directory",
         help="For adding output path where the output files will be saved. If nothing specified default path is `%%hostname%%/%%pid%%`",
-        default=os.environ.get("ROCPROF_OUTPUT_PATH", None),
+        default=None,
         type=str,
         required=False,
     )
@@ -1805,9 +1833,18 @@ def run(app_args, args, **kwargs):
         append=True,
     )
 
-    _output_file = args.output_file
+    # -o/-d stay None so a typed option stays distinguishable from an inherited
+    # ROCPROF_OUTPUT_*, which the listing subprocess always inherits from below;
+    # this restores the effective values the argparse defaults used to supply
+    _output_file = (
+        args.output_file
+        if args.output_file is not None
+        else os.environ.get("ROCPROF_OUTPUT_FILE_NAME")
+    )
     _output_path = (
-        args.output_directory if args.output_directory is not None else os.getcwd()
+        args.output_directory
+        if args.output_directory is not None
+        else os.environ.get("ROCPROF_OUTPUT_PATH", os.getcwd())
     )
 
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
@@ -1818,11 +1855,6 @@ def run(app_args, args, **kwargs):
         app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
         )
-
-    if args.list_avail and (
-        args.output_file is not None or args.output_directory is not None
-    ):
-        update_env("ROCPROF_OUTPUT_LIST_AVAIL_FILE", True)
 
     if not args.output_format:
         args.output_format = ["rocpd"]
@@ -2158,38 +2190,42 @@ def run(app_args, args, **kwargs):
     if args.list_avail:
         update_env("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", "on")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3-avail")
+
+        # rocprofv3-avail owns the library and the output file; pass it options
+        # and let it decide, so a direct invocation behaves the same way. Only a
+        # requested output location, -o/-d or an input file, diverts the listing
+        # from stdout. A placeholder in the name is expanded by rocprofv3-avail,
+        # so the listing shares the run's stem only when the name has none
+        avail_command = [sys.executable, path]
+        if args.output_file is not None or args.output_directory is not None:
+            avail_command += ["--output-directory", _output_path]
+            if _output_file is not None:
+                avail_command += ["--output-file", _output_file]
+        avail_command += ["info", "--pmc", "--pc-sampling", "--spm-config"]
+
         if app_args:
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--pmc"],
-                env=app_env,
-            )
-            if exit_code != 0:
-                fatal_error("rocprofv3-avail exit with error")
-
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--pc-sampling"],
-                env=app_env,
-            )
-
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--spm-config"],
-                env=app_env,
-            )
+            if args.echo:
+                # the listing runs as its own process, so report it alongside the
+                # application command echoed at the end of this function
+                sys.stderr.flush()
+                print(f"command: {avail_command}")
+                sys.stdout.flush()
+            else:
+                try:
+                    subprocess.check_call(avail_command, env=app_env)
+                except subprocess.CalledProcessError as error:
+                    fatal_error(
+                        "rocprofv3-avail exit with error", exit_code=error.returncode
+                    )
         else:
-            app_args = [sys.executable, path, "info", "--pmc"]
+            # with no application to profile the listing is what rocprofv3 runs,
+            # so --echo and the exit code flow through the common path below
+            app_args = avail_command
             for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):
                 update_env(
                     f"{itr}_LOG_LEVEL",
                     "error",
                 )
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--pc-sampling"],
-                env=app_env,
-            )
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--spm-config"],
-                env=app_env,
-            )
 
     elif args.pid:
         update_env("ROCPROF_ATTACH_PID", args.pid)

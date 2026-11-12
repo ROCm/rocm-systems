@@ -241,7 +241,9 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
         "amdgcn-amd-amdhsa--" + isa->GetProcessorName() + "-strict";
     const core::Isa* strict_isa = core::IsaRegistry::GetIsa(strict_name);
     // gfx1250 (12.5.0) A0 must have a registered strict variant.
-    if (isa->GetMajorVersion() == 12 && isa->GetMinorVersion() == 5)
+    // Later 12.5 steppings (e.g. gfx1251) have no -strict target.
+    if (isa->GetMajorVersion() == 12 && isa->GetMinorVersion() == 5 &&
+        isa->GetStepping() == 0)
       assert(strict_isa != nullptr && "A0 strict ISA variant is not registered.");
     if (strict_isa != nullptr) isa = strict_isa;
   }
@@ -349,6 +351,13 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     ASICShader compute_11;
     ASICShader compute_12;
     ASICShader compute_1250;
+    // Only populated where a gfx1250 revision 0 part needs a different blob.
+    // Left zeroed elsewhere, in which case compute_1250 is used for every
+    // revision.  Note that compute_1250 is the blob WITHOUT the revision 0
+    // instruction fixup, so any entry that supplies a gfx1250 trap handler
+    // must fill this slot as well; leaving it zeroed hands a revision 0 part
+    // a handler that is missing the fixup it requires.
+    ASICShader compute_1250_rev0;
   };
 
   std::map<std::string, CompiledShader> compiled_shaders = {
@@ -377,7 +386,8 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeTrapHandlerV2_10, sizeof(kCodeTrapHandlerV2_10), 2, 4},    // gfx10
            {kCodeTrapHandlerV2_11, sizeof(kCodeTrapHandlerV2_11), 2, 4},    // gfx11
            {kCodeTrapHandlerV2_12, sizeof(kCodeTrapHandlerV2_12), 2, 4},    // gfx12
-           {kCodeTrapHandlerV2_1250, sizeof(kCodeTrapHandlerV2_1250), 2, 4},  // gfx1250
+           {kCodeTrapHandlerV2_1250, sizeof(kCodeTrapHandlerV2_1250), 2, 4},  // gfx1250 rev 1+
+           {kCodeTrapHandlerV2_1250_rev0, sizeof(kCodeTrapHandlerV2_1250_rev0), 2, 4},  // gfx1250 rev 0
        }},
       {"CopyAligned",
        {
@@ -451,10 +461,30 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
         asic_shader = &compiled_shader_it->second.compute_11;
       break;
     case 12:
-        if(supported_isas()[0]->GetMinorVersion() >= 5)
+        if (supported_isas()[0]->GetMinorVersion() == 5 &&
+            supported_isas()[0]->GetStepping() == 0 &&
+            properties_.Capability.ui32.ASICRevision == 0) {
+          // The trap-during-VOP3PX PC fixup in the second-level trap handler
+          // applies to gfx1250 (12.5.0) revision 0 only.  Later 12.5 steppings
+          // such as gfx1251 always use compute_1250, even when KFD reports
+          // ASICRevision 0.  Every later gfx1250 revision uses the blob
+          // assembled without the fixup.  Shaders that do not vary by
+          // revision leave this slot zeroed.
+          ASICShader& rev0 = compiled_shader_it->second.compute_1250_rev0;
+          // An entry that supplies the later-revision blob must supply the
+          // revision 0 blob too.  Falling back would hand a revision 0 part
+          // the blob assembled without the fixup, and the check below cannot
+          // catch it because the fallback pointer is valid.
+          assert((rev0.code != NULL ||
+                  compiled_shader_it->second.compute_1250.code == NULL) &&
+                 "Incomplete shader table entry for this revision");
+          asic_shader =
+              (rev0.code != NULL) ? &rev0 : &compiled_shader_it->second.compute_1250;
+        } else if (supported_isas()[0]->GetMinorVersion() >= 5) {
           asic_shader = &compiled_shader_it->second.compute_1250;
-        else
+        } else {
           asic_shader = &compiled_shader_it->second.compute_12;
+        }
       break;
     default:
       assert(false && "Precompiled shader unavailable for target");
@@ -665,16 +695,29 @@ void GpuAgent::ReserveScratch()
   assert(mem_err == HSA_STATUS_SUCCESS && "AvailableMemory failed");
   std::lock_guard<std::mutex> lock(scratch_lock_);
   if (!scratch_cache_.reserved_bytes() && reserved_sz && available > 8 * reserved_sz) {
+    // The reservation is an optimization: it pre-binds a block that
+    // AcquireQueueMainScratch can fall back on as one of its retry tiers. Queue
+    // creation does not depend on it, so a failure here continues without one.
     HSAuint64 alt_va;
     void* reserved_base = scratch_pool_.alloc(reserved_sz);
-    if (reserved_base == nullptr)
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
+    if (reserved_base == nullptr) {
+      if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
+        fprintf(stderr,
+                "Scratch reserve of %zu bytes failed, continuing without a reserved block.\n",
+                reserved_sz);
+      return;
+    }
 
     if (driver().MakeMemoryResident(reserved_base, reserved_sz, &alt_va) == HSA_STATUS_SUCCESS)
       scratch_cache_.reserve(reserved_sz, reserved_base);
     else {
       scratch_pool_.free(reserved_base);
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
+      if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
+        fprintf(stderr,
+                "Scratch reserve of %zu bytes could not be mapped, continuing without a "
+                "reserved block.\n",
+                reserved_sz);
+      return;
     }
   }
 }
@@ -2336,7 +2379,7 @@ void GpuAgent::GetAqlInfoProperties(uint8_t value[8]) const {
   };
 
   // Fill the HSA_AMD_AQL_PROPERTY_EXT_DISPATCH
-  if (extended_aql_dispatch_supported_)
+  if (ExtendedAqlDispatchSupported())
       setFlag(HSA_AMD_AQL_PROPERTY_EXT_DISPATCH);
 }
 
@@ -2786,9 +2829,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 }
 
 // CP FW writes amd_queue_t::caps only once it has processed a packet on the queue, so the first
-// query runs an empty barrier-AND on the utility queue and reads the bit there.
-bool GpuAgent::SignalHintsSupported() const {
-  std::call_once(signal_hints_once_, [this]() {
+// query runs an empty barrier-AND on the utility queue and reads the bits there.
+uint32_t GpuAgent::CpFirmwareCaps() const {
+  std::call_once(cp_caps_once_, [this]() {
     core::unique_signal_ptr completion(new core::DefaultSignal(1));
     if (!completion->IsValid()) return;
     core::Queue* queue = (*queues_[QueueUtility]).get();
@@ -2807,9 +2850,20 @@ bool GpuAgent::SignalHintsSupported() const {
                   std::memory_order_release);
     core::Signal::Convert(hsa_queue.doorbell_signal)->StoreRelease(index);
     completion->WaitAcquire(HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
-    signal_hints_supported_ = (queue->amd_queue_.caps & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
+    cp_caps_ = queue->amd_queue_.caps;
   });
-  return signal_hints_supported_;
+  return cp_caps_;
+}
+
+bool GpuAgent::SignalHintsSupported() const {
+  return (CpFirmwareCaps() & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
+}
+
+// gfx12.5 supports the packet natively, without asking the firmware. The firmware's packet has
+// clusters of 1: cluster_max_dim_ stays {1, 1, 1}.
+bool GpuAgent::ExtendedAqlDispatchSupported() const {
+  return extended_aql_dispatch_supported_ ||
+         ((CpFirmwareCaps() & AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH) != 0);
 }
 
 hsa_status_t GpuAgent::SetAgentAttribute(hsa_agent_info_t attribute, void* value) {
@@ -3067,7 +3121,9 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
       else
         scratch.main_queue_base = scratch_pool_.alloc(scratch.main_size);
 
-      scratch.large = large | (scratch.main_queue_base > scratch_pool_.high_split());
+      scratch.large = large |
+          (scratch.main_queue_base != nullptr &&
+           (scratch.main_queue_base > scratch_pool_.high_split()));
       assert(((!scratch.large) | use_reclaim) && "Large scratch used with reclaim disabled.");
 
       if (scratch.main_queue_base != nullptr) {
@@ -3568,9 +3624,26 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
           PM4_ACQUIRE_MEM_COHER_CNTL_TC_WB_ACTION_ENA);
 
       cache_inv_size_dw = 7;
+  } else if (supported_isas()[0]->GetMajorVersion() == 12 &&
+             supported_isas()[0]->GetMinorVersion() == 5) {
+      // K$/V$ are maintained by dispatch; GCR_CNTL[9] is reserved.
+      // Select only I$/GL2 maintenance, using the common base/size encoding.
+      cache_inv[7] = PM4_ACQUIRE_MEM_DW7_GCR_CNTL(
+          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(
+              ptr ? PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV_RANGE
+                  : PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV_ALL) |
+          PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE(
+              ptr ? PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE_RANGE
+                  : PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE_ALL) |
+          PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV |
+          PM4_ACQUIRE_MEM_GCR_CNTL_SEQ(
+              PM4_ACQUIRE_MEM_GCR_CNTL_SEQ_REVERSE));
+
+      cache_inv_size_dw = 8;
   } else {
       cache_inv[7] = PM4_ACQUIRE_MEM_DW7_GCR_CNTL(
-          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(1) |
+          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(
+              PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV_ALL) |
           PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV |
           PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV |
           PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV |

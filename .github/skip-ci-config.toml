@@ -86,6 +86,10 @@ common = [
     # Test drivers invoked only by those therock-rccl-* workflows; nothing in
     # the build consumes them.
     "projects/rccl/ci/scripts/*",
+    # amdsmi's ABI checks: Python scripts and their data, run only by the
+    # abi-compliance-check and amdsmi-abi-gate workflows; CMake never reads them.
+    "projects/amdsmi/abi/*",
+    "projects/amdsmi/tests/abi_check/*",
 
     "*/.markdownlint-ci2.yaml",
     "tools/systems_pr_bot/*",

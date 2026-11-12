@@ -49,6 +49,9 @@ extern std::function<ncclResult_t(struct ibv_qp* /*qp*/)> g_ibvDestroyQp;
 extern std::function<ncclResult_t(struct ibv_context* /*context*/, uint8_t /*port_num*/, int /*index*/,
                                   union ibv_gid* /*gid*/)>
     g_ibvQueryGid;
+extern std::function<ncclResult_t(struct ibv_context* /*context*/, uint8_t /*port_num*/, int /*index*/,
+                                  uint16_t* /*pkey*/)>
+    g_ibvQueryPkey;
 extern std::function<ncclResult_t(struct ibv_qp* /*qp*/, struct ibv_ece* /*ece*/, int* /*supported*/)> g_ibvQueryEce;
 extern std::function<ncclResult_t(struct ibv_qp* /*qp*/, struct ibv_ece* /*ece*/, int* /*supported*/)> g_ibvSetEce;
 extern std::function<const char*(struct ibv_device* /*device*/)> g_ibvGetDeviceName;

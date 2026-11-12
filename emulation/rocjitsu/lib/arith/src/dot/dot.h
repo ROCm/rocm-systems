@@ -157,7 +157,7 @@ inline uint32_t dot_bits(const Raw (&a)[N], const Raw (&b)[N], uint32_t acc,
   constexpr bool is_bf16 = LeftFormat == InputFormat::Bf16;
   static_assert(std::is_same_v<Raw, std::conditional_t<is_f8, uint8_t, uint16_t>>);
   static_assert(is_f8 == Factor<RightFormat>::is_f8);
-  static_assert(is_f8 ? (N == 8 && !Packed) : (N == 2 || N == 4));
+  static_assert(is_f8 ? ((N == 4 || N == 8) && !Packed) : (N == 2 || N == 4));
   static_assert(is_f8 || LeftFormat == RightFormat);
   const auto special = [](uint32_t bits) -> uint32_t {
     if constexpr (Packed) {

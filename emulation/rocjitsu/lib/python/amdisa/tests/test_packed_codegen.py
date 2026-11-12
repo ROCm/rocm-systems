@@ -417,6 +417,20 @@ def test_rdna4_fp8_dot4_uses_the_gfx12_dot_model():
         assert 'fp8_e4m3_to_f32' not in cpp
 
 
+def test_fp8_dot4_rejects_missing_or_invalid_formats():
+    import pytest
+
+    for operation in (None, '', 'fp8', 'fp8_fp8_fp8', 'f16_fp8', 'fp8_unknown'):
+        with pytest.raises(ValueError, match='unhandled FP8 dot4 operation'):
+            gen_dot4(
+                ['vdst'],
+                ['src0', 'src1', 'src2'],
+                'dot4_f32_fp8',
+                operation=operation,
+                dot_accumulation=FloatDotAccumulation.GFX12,
+            )
+
+
 def test_fp8_dot4_rejects_other_accumulation_models():
     import pytest
 
@@ -802,7 +816,7 @@ def test_dot_dispatch_covers_every_semantic_class():
     """The DOT semantic classes and their DISPATCH handlers must agree exactly.
 
     The generator keeps no dot2_/dot4_/dot8_ prefix fallback, so a class with
-    no entry would generate a body that throws ``UnimplementedInst``. Checking
+    no entry would generate an unimplemented-instruction reporting stub. Checking
     the other direction too rejects handlers for classes no ISA defines,
     including bare ``dot2``/``dot4``/``dot8`` routes.
     """

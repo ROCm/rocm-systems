@@ -1,12 +1,14 @@
-import { Box, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material';
+import { tableStyles, changedRowSx } from '../../theme/tableStyles';
+import { fontWeights, sansFont } from '../../theme/typography';
+import { Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
 import { Fragment } from 'react';
 import { runEnvironmentDetails } from '../../data/provenance';
 import { groupMetadataFacts, metadataLabel } from '../shared/metadataPresentation';
-import { safeExternalUrl } from './branchPresentation';
-import { monoFont } from '../../theme/tokens';
-import { formatMetadataValue } from '../../utils/formatters';
+import { formatFullDate, formatMetadataValue } from '../../utils/formatters';
+import Disclosure from '../shared/Disclosure';
+import ScrollTableContainer from '../shared/ScrollTableContainer';
 
-export default function BranchEnvironment({ candidate, reference, selection, repository }) {
+export default function BranchEnvironment({ candidate, reference, selection }) {
   const baselineFacts = runEnvironmentDetails(reference);
   const candidateFacts = runEnvironmentDetails(candidate);
   const environment = [...new Set([...baselineFacts.keys(), ...candidateFacts.keys()])].sort().map((key) => ({
@@ -26,41 +28,37 @@ export default function BranchEnvironment({ candidate, reference, selection, rep
       ['baseBranch', 'Recorded base branch', (run) => run?.sourceBase?.branch], ['baseCommit', 'Recorded base SHA', (run) => run?.sourceBase?.commit],
     ]],
     ['Execution', [
-      ['committedAt', 'Commit time (UTC)', (run) => run?.commitTimestamp], ['completedAt', 'Execution completed (UTC)', (run) => run?.timestamp],
+      ['committedAt', 'Commit time', (run) => run?.commitTimestamp, formatFullDate], ['completedAt', 'Execution completed', (run) => run?.timestamp, formatFullDate],
       ['machine', 'Machine', (run) => run?.machineId], ['trigger', 'Trigger', (run) => run?.trigger],
     ]],
-  ].map(([label, fields]) => ({ label, facts: fields.map(([key, label, value]) => ({ key, label, baseline: value(reference), candidate: value(candidate) })) }));
+  ].map(([label, fields]) => ({ label, facts: fields.map(([key, label, value, format]) => ({ key, label, format, baseline: value(reference), candidate: value(candidate) })) }));
   const rows = (items, prefix) => items.map((fact) => {
     const changed = Boolean(reference && candidate) && JSON.stringify(fact.baseline ?? null) !== JSON.stringify(fact.candidate ?? null);
-    return <TableRow key={fact.key} data-testid={`branch-${prefix}-${fact.key}`} data-different={changed} sx={changed ? { '& > .MuiTableCell-root': { bgcolor: 'action.selected', color: 'text.primary' } } : undefined}>
-      <TableCell component="th" scope="row" sx={{ width: '30%' }}>
+    return <TableRow key={fact.key} data-testid={`branch-${prefix}-${fact.key}`} data-different={changed} sx={changed ? changedRowSx : undefined}>
+      <TableCell component="th" scope="row" sx={{ width: '30%', fontWeight: fontWeights.medium }}>
         {metadataLabel(fact.label, fact.key)}
         {fact.baselineLabel && fact.candidateLabel && fact.baselineLabel !== fact.candidateLabel && <Typography variant="caption">Reference label: {fact.baselineLabel}</Typography>}
       </TableCell>
-      <TableCell sx={{ fontFamily: monoFont }}>{formatMetadataValue(fact.baseline)}</TableCell>
-      <TableCell sx={{ fontFamily: monoFont }}>{formatMetadataValue(fact.candidate)}</TableCell>
+      <TableCell title={fact.format ? fact.baseline : undefined} sx={{ fontFamily: sansFont }}>{(fact.format ?? formatMetadataValue)(fact.baseline)}</TableCell>
+      <TableCell title={fact.format ? fact.candidate : undefined} sx={{ fontFamily: sansFont }}>{(fact.format ?? formatMetadataValue)(fact.candidate)}</TableCell>
     </TableRow>;
   });
-  return <Box component="details" data-testid="branch-environment" sx={{ borderTop: 1, borderColor: 'divider', mt: 1 }}>
-    <Box component="summary" sx={{ cursor: 'pointer', minHeight: 44, display: 'list-item', py: 1.5, ml: 2 }}>Environment &amp; measurement details</Box>
-    <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>These are independent published attempts. Matching workloads does not imply equivalent environments or machines. Highlighted rows indicate metadata differences, not performance.</Typography>
-    <TableContainer role="region" tabIndex={0} aria-label="Branch source and environment facts, scrollable" sx={{ maxHeight: 366, scrollbarGutter: 'stable', overscrollBehavior: 'contain', border: 1, borderColor: 'divider' }}>
-      <Table size="small" stickyHeader aria-label="Branch source and environment facts" sx={{ tableLayout: 'fixed', minWidth: 540, '& td, & th': { p: 1.25, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap', verticalAlign: 'top' } }}>
+  return <Disclosure data-testid="branch-environment" title="Environment & measurement details">
+    <Typography variant="body2" color="text.secondary" sx={{ mb: '12px' }}>These are independent published attempts. Matching workloads does not imply equivalent environments or machines. Highlighted rows indicate metadata differences, not performance.</Typography>
+    <ScrollTableContainer role="region" tabIndex={0} aria-label="Branch source and environment facts, scrollable" sx={{ maxHeight: 366, scrollbarGutter: 'stable', overscrollBehavior: 'contain' }}>
+      <Table size="small" stickyHeader aria-label="Branch source and environment facts" sx={{ ...tableStyles.normal, tableLayout: 'fixed', minWidth: 540, '& td, & th': { ...tableStyles.normal['& td, & th'], overflowWrap: 'anywhere', whiteSpace: 'pre-wrap', verticalAlign: 'top' } }}>
         <TableHead><TableRow><TableCell sx={{ width: '30%' }}>Field</TableCell><TableCell sx={{ width: '35%' }}>Reference · {reference?.runId ?? 'Unavailable'}</TableCell><TableCell sx={{ width: '35%' }}>Candidate · {candidate?.runId ?? 'Unavailable'}</TableCell></TableRow></TableHead>
         <TableBody>
           {sourceGroups.map(({ label, facts }) => <Fragment key={label}>
-            <TableRow><TableCell component="th" scope="rowgroup" colSpan={3} sx={{ bgcolor: 'action.hover', fontWeight: 600 }}>{label}</TableCell></TableRow>
+            <TableRow><TableCell component="th" scope="rowgroup" colSpan={3} sx={{ bgcolor: 'dashboard.tableGroup', color: 'text.secondary', fontWeight: fontWeights.medium }}>{label}</TableCell></TableRow>
             {rows(facts, 'source')}
           </Fragment>)}
           {environment.length ? groupMetadataFacts(environment).map((group) => <Fragment key={group.label}>
-            <TableRow><TableCell component="th" scope="rowgroup" colSpan={3} sx={{ bgcolor: 'action.hover', fontWeight: 600 }}>{group.label}</TableCell></TableRow>
+            <TableRow><TableCell component="th" scope="rowgroup" colSpan={3} sx={{ bgcolor: 'dashboard.tableGroup', color: 'text.secondary', fontWeight: fontWeights.medium }}>{group.label}</TableCell></TableRow>
             {rows(group.rows, 'environment')}
           </Fragment>) : <TableRow><TableCell colSpan={3}>No environment facts provided.</TableCell></TableRow>}
         </TableBody>
       </Table>
-    </TableContainer>
-    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
-      {safeExternalUrl(repository) && <Button component="a" href={repository} target="_blank" rel="noopener noreferrer" sx={{ minHeight: 44 }}>Source repository ↗</Button>}
-    </Box>
-  </Box>;
+    </ScrollTableContainer>
+  </Disclosure>;
 }

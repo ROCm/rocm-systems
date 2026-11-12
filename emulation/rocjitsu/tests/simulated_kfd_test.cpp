@@ -52,7 +52,7 @@ RJ_DIAGNOSTIC_POP
 
 namespace {
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi350x.json";
 
 struct TestVM {
   rocjitsu::config::LoadedConfig loaded;
@@ -107,9 +107,11 @@ util::FailureOr<TestVM> create_test_vm(util::DiagnosticEmitter emit_error,
   vm->driver()->setup_topology(t.loaded.device, soc->num_xcds());
 
   t.engine->topology().set_root(std::move(vm));
-  t.loaded.wire_links(t.engine->topology());
+  if (t.loaded.wire_links(t.engine->topology(), emit_error).failed())
+    return util::Result::failure();
   soc->wire_backing(t.engine->topology());
-  t.engine->create();
+  if (t.engine->create(emit_error).failed())
+    return util::Result::failure();
   t.engine->register_as_primary();
 
   return t;
@@ -121,7 +123,8 @@ protected:
 };
 
 TEST_F(SimulatedKfdTest, MissingConfigReturnsFailureWithoutThrowing) {
-  const rocjitsu::test::ScopedTempDirectory directory("rocjitsu-test-vm-missing-config-");
+  rocjitsu::test::ScopedTempDirectory directory;
+  ASSERT_TRUE(directory.initialize("rocjitsu-test-vm-missing-config-"));
   const std::string path = directory.path() + "/missing.json";
   util::StringDiagnostic diagnostic;
   auto result = create_test_vm(diagnostic.emitter(), path);
@@ -149,6 +152,58 @@ TEST_F(SimulatedKfdTest, OpenAndClose) {
 
   int ret = t.driver()->close();
   EXPECT_EQ(ret, 0);
+}
+
+TEST_F(SimulatedKfdTest, Gfx11BufferTfeObservesPublishedSparsePageAndResidentReplacement) {
+  util::StringDiagnostic diagnostic;
+  auto result =
+      create_test_vm(diagnostic.emitter(), std::string(CONFIG_DIR) + "/gfx1100_w7900.json");
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  auto vm = std::move(result).value();
+  auto *driver = vm.driver();
+  ASSERT_GE(driver->open(), 0);
+  constexpr size_t page = rocjitsu::KfdProcess::kPageSize;
+  constexpr uint64_t base = 0x65000000;
+  constexpr uint32_t flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  alignas(page) std::array<uint32_t, 2 * page / sizeof(uint32_t)> backing{};
+  backing[0] = 0xe0540000; // buffer_load_b64 v[0:2],v4,s[0:3],0 offen tfe
+  backing[1] = 0x80600004;
+  backing[page / sizeof(uint32_t) - 1] = 13;
+  backing[page / sizeof(uint32_t)] = 17;
+  ASSERT_TRUE(driver->gem_va_map(base, backing.data(), page, flags, false));
+  driver->publish_prt_ranges({{base + page, base + 2 * page}});
+
+  const auto handle = vm.soc()->gpu_vm().find_vmid(driver->local_process_id());
+  ASSERT_TRUE(handle);
+  auto *cu = vm.soc()->xcd(0)->command_processor()->compute_units().front();
+  auto *wf = cu->dispatch_wf(0, base, 32, 32, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(driver->local_process_id());
+  wf->set_address_space(*handle);
+  wf->set_exec(1);
+  const auto sgpr_base = wf->sgpr_alloc().base;
+  const auto vgpr_base = wf->vgpr_alloc().base;
+  cu->write_sgpr(sgpr_base, base + page - sizeof(uint32_t));
+  cu->write_sgpr(sgpr_base + 1, 0);
+  cu->write_sgpr(sgpr_base + 2, 8);
+  cu->write_sgpr(sgpr_base + 3, (2u << 28) | (20u << 12));
+  cu->write_vgpr(vgpr_base + 4, 0, 0);
+  for (bool sparse : {true, false}) {
+    if (!sparse) {
+      driver->publish_prt_ranges({});
+      ASSERT_TRUE(
+          driver->gem_va_map(base + page, &backing[page / sizeof(uint32_t)], page, flags, false));
+    }
+    wf->pc = base;
+    cu->write_vgpr(vgpr_base + 2, 0, 0xdeadbeef);
+    ASSERT_TRUE(cu->step());
+    EXPECT_EQ(cu->read_vgpr(vgpr_base, 0), 13u);
+    EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, 0), sparse ? 0u : 17u);
+    EXPECT_EQ(cu->read_vgpr(vgpr_base + 2, 0), sparse ? 1u : 0xdeadbeefu);
+  }
+  wf->halt();
+  EXPECT_TRUE(driver->gem_va_unmap(base, 2 * page));
+  EXPECT_EQ(driver->close(), 0);
 }
 
 TEST_F(SimulatedKfdTest, PrivateVramKeepsFullGpuBackingAcrossProtectedPartialView) {
@@ -2588,7 +2643,7 @@ TEST_F(SimulatedKfdTest, UnresolvedGpuAddressRaisesMemoryExceptionEvent) {
 // violation as the first one is misattribution the caller can see, not just
 // untidy metadata.
 TEST_F(SimulatedKfdTest, MemoryExceptionNamesTheFaultingGpu) {
-  const std::string config = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd_2gpu.json";
+  const std::string config = std::string(CONFIG_DIR) + "/gfx950_mi350x_kmd_2gpu.json";
   rj_vm_t *vm = nullptr;
   ASSERT_EQ(rj_vm_create(config.c_str(), RJ_VM_MODE_LOCAL, &vm), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(vm, nullptr);
