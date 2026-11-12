@@ -25,7 +25,7 @@ use windows as platform;
 
 pub(crate) use platform::{
     HostAllocation, HostReservation, file, host_clock, host_memory_capabilities, host_page_size,
-    native_error,
+    module, native_error,
 };
 
 pub(crate) use platform::process_identity::{ProcessIdentity, note_runtime_image};

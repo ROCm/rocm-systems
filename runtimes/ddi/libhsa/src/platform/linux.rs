@@ -4,6 +4,8 @@
 //! Linux KFD and descriptor translation for the HSA frontend.
 
 mod fork;
+#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+pub(crate) mod tooling;
 pub(crate) use fork::{bind_process, process_is_current};
 
 pub(crate) use rocddi::device::gpu::event::linux as event;

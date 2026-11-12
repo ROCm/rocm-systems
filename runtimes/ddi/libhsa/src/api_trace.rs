@@ -8,6 +8,8 @@
 //! late attachment remains visible. Legacy `OnLoad` edits are snapshotted
 //! after its callback returns, and its staging tables remain pinned.
 
+use crate::platform::tooling;
+use rocddi::host::module::ResidentModule;
 use std::collections::HashSet;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::mem::size_of;
@@ -174,50 +176,30 @@ struct ProfilerTable(NonNull<ApiTables>);
 // the existing HSA tool ABI. Moving the pointer does not touch those fields.
 unsafe impl Send for ProfilerTable {}
 
-/// Owned `dlopen` reference whose code stays mapped through process exit.
-struct ToolLibrary(usize);
+/// Tool module whose exported code remains resident through process exit.
+struct ToolLibrary(ResidentModule);
 
 impl ToolLibrary {
-    /// Opens a named tool library and takes ownership of its handle.
+    /// Acquires a named tool using the qualified frontend naming convention.
     fn open(name: &CStr) -> Option<Self> {
-        // RTLD_NODELETE retains code until process exit: a shutdown wrapper
-        // may still be returning through this library after OnUnload.
-        // SAFETY: name is NUL terminated and dlopen owns its returned handle.
-        let handle = unsafe {
-            libc::dlopen(
-                name.as_ptr(),
-                libc::RTLD_NOW | libc::RTLD_LOCAL | libc::RTLD_NODELETE,
-            )
-        };
-        (!handle.is_null()).then_some(Self(handle as usize))
+        // SAFETY: HSA tool configuration opts into the named foreign tool ABI.
+        unsafe { tooling::acquire(name, false) }.map(Self)
     }
 
-    /// Finds an already-loaded tool library without loading it again.
+    /// Retains a candidate from an already-loaded image snapshot.
     fn open_loaded(name: &CStr) -> Option<Self> {
-        // SAFETY: RTLD_NOLOAD resolves only an existing process mapping and
-        // takes one reference when it succeeds.
-        let handle = unsafe {
-            libc::dlopen(
-                name.as_ptr(),
-                libc::RTLD_NOLOAD | libc::RTLD_NOW | libc::RTLD_LOCAL | libc::RTLD_NODELETE,
-            )
-        };
-        (!handle.is_null()).then_some(Self(handle as usize))
+        // SAFETY: The existing HSA tool ABI permits already-loaded candidates.
+        unsafe { tooling::acquire(name, true) }.map(Self)
     }
 
-    /// Looks up a symbol in an opened tool library.
+    /// Looks up an untyped tool symbol; each caller checks its exact C ABI.
     fn symbol(&self, name: &CStr) -> *mut c_void {
-        // SAFETY: The handle remains owned by this ToolLibrary.
-        unsafe { libc::dlsym(self.0 as *mut c_void, name.as_ptr()) }
-    }
-}
-
-impl Drop for ToolLibrary {
-    /// Releases the library reference while `RTLD_NODELETE` keeps code mapped.
-    fn drop(&mut self) {
-        // SAFETY: This closes one owned dlopen reference. RTLD_NODELETE keeps
-        // code mapped while a tool wrapper can still be on the call stack.
-        unsafe { libc::dlclose(self.0 as *mut c_void) };
+        // SAFETY: Tool acquisition accepts foreign resolver execution. The
+        // native owner pins code before any table can retain the address.
+        unsafe { self.0.symbol(name) }
+            .ok()
+            .flatten()
+            .map_or(std::ptr::null_mut(), NonNull::as_ptr)
     }
 }
 
@@ -317,16 +299,6 @@ pub extern "C" fn rocprofiler_register_import_hsa() -> u32 {
     HSA_REGISTER_VERSION
 }
 
-/// Checks whether the process is running in a secure execution mode.
-fn secure_execution() -> bool {
-    // SAFETY: These libc queries have no pointer arguments or retained state.
-    unsafe {
-        libc::geteuid() != libc::getuid()
-            || libc::getegid() != libc::getgid()
-            || libc::getauxval(libc::AT_SECURE) != 0
-    }
-}
-
 /// Splits and validates the configured list of tool library names.
 fn parse_tool_names(names: &str) -> Vec<String> {
     let mut parsed = Vec::new();
@@ -364,7 +336,7 @@ fn parse_tool_names(names: &str) -> Vec<String> {
 /// those fields to preserve late attachment; the C ABI provides no update
 /// callback or synchronization with those reads.
 fn register_profiler(state: &mut ToolState) -> bool {
-    let Some(library) = ToolLibrary::open(c"librocprofiler-register.so.0") else {
+    let Some(library) = ToolLibrary::open(tooling::REGISTRAR) else {
         return false;
     };
     let symbol = library.symbol(c"rocprofiler_register_library_api_table");
@@ -408,35 +380,9 @@ fn register_profiler(state: &mut ToolState) -> bool {
     status == 0
 }
 
-/// Collects the name of a loaded library during linker iteration.
-unsafe extern "C" fn collect_loaded_library(
-    info: *mut libc::dl_phdr_info,
-    _size: usize,
-    data: *mut c_void,
-) -> libc::c_int {
-    if info.is_null() || data.is_null() {
-        return 0;
-    }
-    // SAFETY: dl_iterate_phdr passes a live info record and our Vec pointer
-    // synchronously. Copy each name before the callback returns.
-    let name = unsafe { (*info).dlpi_name };
-    if !name.is_null() {
-        let name = unsafe { CStr::from_ptr(name) };
-        if !name.is_empty() {
-            let names = unsafe { &mut *data.cast::<Vec<CString>>() };
-            names.push(name.to_owned());
-        }
-    }
-    0
-}
-
 /// Combines environment and already-loaded libraries into tool candidates.
 fn loaded_tool_candidates(env_count: usize) -> Vec<ToolCandidate> {
-    let mut loaded = Vec::<CString>::new();
-    // SAFETY: The callback borrows loaded only during this synchronous call.
-    unsafe {
-        libc::dl_iterate_phdr(Some(collect_loaded_library), (&raw mut loaded).cast());
-    }
+    let loaded = tooling::loaded_names();
     let mut candidates = Vec::new();
     for name in loaded {
         let Some(library) = ToolLibrary::open_loaded(&name) else {
@@ -460,7 +406,7 @@ fn loaded_tool_candidates(env_count: usize) -> Vec<ToolCandidate> {
 
 /// Attaches configured legacy tools and lets each modify the API tables.
 fn load_legacy_tools(state: &mut ToolState) {
-    let names = if secure_execution() {
+    let names = if tooling::secure_execution() {
         Vec::new()
     } else {
         std::env::var_os("HSA_TOOLS_LIB")
@@ -487,7 +433,7 @@ fn load_legacy_tools(state: &mut ToolState) {
     let mut seen = HashSet::new();
     for candidate in candidates {
         let ToolCandidate { library, name, .. } = candidate;
-        if !seen.insert(library.0) {
+        if !seen.insert(library.0.id()) {
             continue;
         }
         let symbol = library.symbol(c"OnLoad");
