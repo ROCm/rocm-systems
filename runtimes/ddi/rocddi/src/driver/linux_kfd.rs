@@ -3,11 +3,12 @@
 
 //! Linux KFD and DRM driver. Construction is inert; activation opens KFD and
 //! retains each exact VM binding for recreation within its lifetime policy.
+mod advice;
 mod allocation;
 mod drm;
 mod event;
 mod imported_system;
-pub(crate) mod interop;
+mod interop;
 mod kernel_queue;
 pub(super) mod memory;
 mod operations;
@@ -18,7 +19,6 @@ pub(super) mod sys;
 mod sysfs;
 mod target;
 mod uapi;
-use crate::memory::storage::TryPush;
 use crate::os::linux::{errno, file as os_file, memory as os_memory};
 use target::KfdTargetProfile;
 mod vmem;
@@ -39,10 +39,7 @@ use crate::driver::{
     UserQueueResource, VirtualMemoryOperations,
 };
 use crate::error::error;
-use crate::memory::interop::linux::{
-    AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle, KfdSvmAccess, KfdSvmAttribute,
-    KfdSvmLocation,
-};
+use crate::memory::interop::linux::{AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle};
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationDesc, AllocationLimits, DeviceAccess, HostMappingPolicy, HostRegistration,
@@ -491,160 +488,6 @@ impl LinuxKfdDriver {
 
     fn kfd(&self) -> Result<Shared<sys::Kfd>, Error> {
         self.with_context_resources(KfdContextResources::kfd)
-    }
-
-    fn svm_location_to_native(&self, location: KfdSvmLocation) -> Result<u32, Error> {
-        match location {
-            KfdSvmLocation::System => Ok(uapi::SVM_LOCATION_SYSTEM),
-            KfdSvmLocation::Undefined => Ok(uapi::SVM_LOCATION_UNDEFINED),
-            KfdSvmLocation::Device(identity) => {
-                self.with_context_resources(|resources| resources.bindings.svm_gpu_id(identity))
-            }
-        }
-    }
-
-    fn svm_location_from_native(&self, location: u32) -> Result<KfdSvmLocation, Error> {
-        match location {
-            uapi::SVM_LOCATION_SYSTEM => Ok(KfdSvmLocation::System),
-            uapi::SVM_LOCATION_UNDEFINED => Ok(KfdSvmLocation::Undefined),
-            gpu_id => self
-                .with_context_resources(|resources| resources.bindings.svm_identity(gpu_id))
-                .map(KfdSvmLocation::Device),
-        }
-    }
-
-    fn encode_svm_attributes(
-        &self,
-        attributes: &[KfdSvmAttribute],
-    ) -> Result<Vec<uapi::SvmAttribute>, Error> {
-        let mut native = crate::memory::storage::try_vec_with_capacity(attributes.len())?;
-        for attribute in attributes {
-            let encoded = match *attribute {
-                KfdSvmAttribute::PreferredLocation(location) => uapi::SvmAttribute {
-                    attribute_type: uapi::SVM_ATTR_PREFERRED_LOCATION,
-                    value: self.svm_location_to_native(location)?,
-                },
-                KfdSvmAttribute::PrefetchLocation(location) => uapi::SvmAttribute {
-                    attribute_type: uapi::SVM_ATTR_PREFETCH_LOCATION,
-                    value: self.svm_location_to_native(location)?,
-                },
-                KfdSvmAttribute::Access { device, access } => uapi::SvmAttribute {
-                    attribute_type: match access {
-                        KfdSvmAccess::Accessible => uapi::SVM_ATTR_ACCESS,
-                        KfdSvmAccess::AccessibleInPlace => uapi::SVM_ATTR_ACCESS_IN_PLACE,
-                        KfdSvmAccess::NoAccess => uapi::SVM_ATTR_NO_ACCESS,
-                    },
-                    value: self.with_context_resources(|resources| {
-                        resources.bindings.svm_gpu_id(device)
-                    })?,
-                },
-                KfdSvmAttribute::SetFlags(value) => {
-                    if value & !uapi::SVM_FLAGS != 0 {
-                        return Err(error(
-                            ErrorKind::InvalidArgument,
-                            "SVM set-flags attribute contains unknown bits",
-                        ));
-                    }
-                    uapi::SvmAttribute {
-                        attribute_type: uapi::SVM_ATTR_SET_FLAGS,
-                        value,
-                    }
-                }
-                KfdSvmAttribute::ClearFlags(value) => {
-                    if value & !uapi::SVM_FLAGS != 0 {
-                        return Err(error(
-                            ErrorKind::InvalidArgument,
-                            "SVM clear-flags attribute contains unknown bits",
-                        ));
-                    }
-                    uapi::SvmAttribute {
-                        attribute_type: uapi::SVM_ATTR_CLEAR_FLAGS,
-                        value,
-                    }
-                }
-                KfdSvmAttribute::MigrationGranularity(value) => uapi::SvmAttribute {
-                    attribute_type: uapi::SVM_ATTR_GRANULARITY,
-                    value,
-                },
-            };
-            native.try_push(encoded)?;
-        }
-        Ok(native)
-    }
-
-    fn decode_svm_attributes(
-        &self,
-        attributes: &mut [KfdSvmAttribute],
-        native: &[uapi::SvmAttribute],
-    ) -> Result<(), Error> {
-        for (attribute, returned) in attributes.iter_mut().zip(native) {
-            *attribute = match *attribute {
-                KfdSvmAttribute::PreferredLocation(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_PREFERRED_LOCATION {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM preferred-location query type",
-                        ));
-                    }
-                    KfdSvmAttribute::PreferredLocation(
-                        self.svm_location_from_native(returned.value)?,
-                    )
-                }
-                KfdSvmAttribute::PrefetchLocation(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_PREFETCH_LOCATION {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM prefetch-location query type",
-                        ));
-                    }
-                    KfdSvmAttribute::PrefetchLocation(
-                        self.svm_location_from_native(returned.value)?,
-                    )
-                }
-                KfdSvmAttribute::Access { device, .. } => {
-                    let access = match returned.attribute_type {
-                        uapi::SVM_ATTR_ACCESS => KfdSvmAccess::Accessible,
-                        uapi::SVM_ATTR_ACCESS_IN_PLACE => KfdSvmAccess::AccessibleInPlace,
-                        uapi::SVM_ATTR_NO_ACCESS => KfdSvmAccess::NoAccess,
-                        _ => {
-                            return Err(error(
-                                ErrorKind::DriverContract,
-                                "KFD returned an invalid SVM access mode",
-                            ));
-                        }
-                    };
-                    KfdSvmAttribute::Access { device, access }
-                }
-                KfdSvmAttribute::SetFlags(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_SET_FLAGS {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM set-flags query type",
-                        ));
-                    }
-                    KfdSvmAttribute::SetFlags(returned.value)
-                }
-                KfdSvmAttribute::ClearFlags(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_CLEAR_FLAGS {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM clear-flags query type",
-                        ));
-                    }
-                    KfdSvmAttribute::ClearFlags(returned.value)
-                }
-                KfdSvmAttribute::MigrationGranularity(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_GRANULARITY {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM granularity query type",
-                        ));
-                    }
-                    KfdSvmAttribute::MigrationGranularity(returned.value)
-                }
-            };
-        }
-        Ok(())
     }
 }
 
