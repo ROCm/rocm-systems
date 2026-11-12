@@ -52,6 +52,10 @@ event_type_index(ph_event_type_t type)
         case PH_EVENT_TYPE_MEMORY_COPY: return 2;
         case PH_EVENT_TYPE_MEMORY_ALLOCATE: return 3;
         case PH_EVENT_TYPE_HIP_EVENT: return 4;
+        case PH_EVENT_TYPE_REGION_SAMPLE:
+        case PH_EVENT_TYPE_PMC_COUNTER:
+        case PH_EVENT_TYPE_PMC_SAMPLE:
+        case PH_EVENT_TYPE_MEMORY_ACTIVITY: break;
     }
     return std::nullopt;
 }

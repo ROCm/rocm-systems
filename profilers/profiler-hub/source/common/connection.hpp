@@ -10,7 +10,7 @@
 
 namespace profiler_hub
 {
-class reader_catalog_t;
+struct reader_catalog_t;
 }  // namespace profiler_hub
 
 namespace profiler_hub::common

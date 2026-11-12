@@ -66,7 +66,13 @@ TEST_F(populate_reader_catalog_test, fills_the_shared_catalog_like_a_standalone_
 
     auto                    catalog = std::make_shared<reader_catalog_t>();
     common::thread_pool     workers{ 4 };
-    common::connection_pool connections{ m_db_path, 4, catalog };
+    common::connection_pool connections{ m_db_path,
+                                         4,
+                                         catalog,
+                                         "",
+                                         reader_types::trace_format_t{
+                                             reader_types::trace_schema_t::rocpd,
+                                             version_t{ 3, 0, 0 } } };
     populate_reader_catalog(workers, connections, *catalog);
 
     std::vector<std::string> populated;
@@ -86,7 +92,13 @@ TEST_F(populate_reader_catalog_test, works_with_a_single_worker_and_a_single_con
 {
     auto                    catalog = std::make_shared<reader_catalog_t>();
     common::thread_pool     workers{ 1 };
-    common::connection_pool connections{ m_db_path, 1, catalog };
+    common::connection_pool connections{ m_db_path,
+                                         1,
+                                         catalog,
+                                         "",
+                                         reader_types::trace_format_t{
+                                             reader_types::trace_schema_t::rocpd,
+                                             version_t{ 3, 0, 0 } } };
 
     populate_reader_catalog(workers, connections, *catalog);
 
@@ -97,7 +109,13 @@ TEST_F(populate_reader_catalog_test, can_run_inside_the_only_worker_of_its_own_p
 {
     auto                    catalog = std::make_shared<reader_catalog_t>();
     common::thread_pool     workers{ 1 };
-    common::connection_pool connections{ m_db_path, 4, catalog };
+    common::connection_pool connections{ m_db_path,
+                                         4,
+                                         catalog,
+                                         "",
+                                         reader_types::trace_format_t{
+                                             reader_types::trace_schema_t::rocpd,
+                                             version_t{ 3, 0, 0 } } };
 
     const auto task = workers.submit([&](const std::stop_token&) {
         populate_reader_catalog(workers, connections, *catalog);
@@ -112,7 +130,13 @@ TEST_F(populate_reader_catalog_test,
 {
     auto                    catalog = std::make_shared<reader_catalog_t>();
     common::thread_pool     workers{ 4 };
-    common::connection_pool connections{ m_db_path, 4, catalog };
+    common::connection_pool connections{ m_db_path,
+                                         4,
+                                         catalog,
+                                         "",
+                                         reader_types::trace_format_t{
+                                             reader_types::trace_schema_t::rocpd,
+                                             version_t{ 3, 0, 0 } } };
     drop_table(std::string{ "rocpd_info_node_" } + std::string{ test::trace_uuid });
 
     EXPECT_ANY_THROW(populate_reader_catalog(workers, connections, *catalog));

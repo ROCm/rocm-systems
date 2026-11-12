@@ -69,6 +69,10 @@ to_reader_event_type(ph_event_type_t type)
         case PH_EVENT_TYPE_MEMORY_COPY: return event_type_t::memory_copy;
         case PH_EVENT_TYPE_MEMORY_ALLOCATE: return event_type_t::memory_allocate;
         case PH_EVENT_TYPE_HIP_EVENT: return event_type_t::hip_event;
+        case PH_EVENT_TYPE_REGION_SAMPLE:
+        case PH_EVENT_TYPE_PMC_COUNTER:
+        case PH_EVENT_TYPE_PMC_SAMPLE:
+        case PH_EVENT_TYPE_MEMORY_ACTIVITY: break;
     }
     return std::nullopt;
 }
@@ -784,7 +788,7 @@ ph_ctx::trim_trace(uint64_t    start_ts,
     // SaveTrimmedData adds source 0's origin when that origin is greater than
     // zero. Subtract it back, then put the same displayed range on each source.
     constexpr uint64_t k_unset = std::numeric_limits<uint64_t>::max();
-    const auto         origin_of = [this, k_unset](uint32_t source_index) {
+    const auto         origin_of = [this](uint32_t source_index) {
         uint64_t origin = k_unset;
         for(const ph_track_t& track : m_c_tracks)
         {
@@ -800,7 +804,7 @@ ph_ctx::trim_trace(uint64_t    start_ts,
         rel_start = start_ts > base ? start_ts - base : 0;
         rel_end   = end_ts > base ? end_ts - base : 0;
     }
-    const auto place = [k_unset](uint64_t origin, uint64_t relative) {
+    const auto place = [](uint64_t origin, uint64_t relative) {
         return origin > k_unset - relative ? k_unset : origin + relative;
     };
 

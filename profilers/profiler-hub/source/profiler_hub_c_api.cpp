@@ -83,6 +83,10 @@ is_duration_event_type(ph_event_type_t type)
         case PH_EVENT_TYPE_MEMORY_COPY:
         case PH_EVENT_TYPE_MEMORY_ALLOCATE:
         case PH_EVENT_TYPE_HIP_EVENT: return true;
+        case PH_EVENT_TYPE_REGION_SAMPLE:
+        case PH_EVENT_TYPE_PMC_COUNTER:
+        case PH_EVENT_TYPE_PMC_SAMPLE:
+        case PH_EVENT_TYPE_MEMORY_ACTIVITY: break;
     }
     return false;
 }

@@ -334,7 +334,7 @@ trim_trace_files(const std::vector<trim_source_t>& inputs,
         // Later phases read rows an earlier phase wrote, including rows from
         // another file that landed in the same table. Finish one phase for
         // every file before starting the next.
-        constexpr int phase_count = static_cast<int>(row_kind_t::event_child) + 1;
+        constexpr size_t phase_count = static_cast<size_t>(row_kind_t::event_child) + 1;
         std::vector<std::array<std::vector<planned_copy_t>, phase_count>> plans(groups.size());
         size_t total = 0;
         for(size_t index = 0; index < groups.size(); ++index)
@@ -344,7 +344,7 @@ trim_trace_files(const std::vector<trim_source_t>& inputs,
                 const auto [start_ts, end_ts] = window_for(groups[index], table.name);
                 trim_statement_t statement    = trim_schema->statement_for(
                     table.name, groups[index].kept_tables, start_ts, end_ts);
-                const int phase = static_cast<int>(statement.kind);
+                const size_t phase = static_cast<size_t>(statement.kind);
                 plans[index][phase].push_back(
                     planned_copy_t{ table.name, std::move(statement.sql) });
                 ++total;
@@ -386,7 +386,7 @@ trim_trace_files(const std::vector<trim_source_t>& inputs,
 
         size_t       done = 0;
         const double span = total == 0 ? 0.0 : 0.9 / static_cast<double>(total);
-        for(int phase = 0; phase < phase_count; ++phase)
+        for(size_t phase = 0; phase < phase_count; ++phase)
         {
             for(size_t index = 0; index < groups.size(); ++index)
             {

@@ -191,7 +191,13 @@ protected:
 TEST_F(pooled_connection_source_test,
        try_acquire_returns_nullptr_when_the_pool_is_exhausted)
 {
-    common::connection_pool  pool{ m_db_path, 1, std::make_shared<reader_catalog_t>() };
+    common::connection_pool  pool{ m_db_path,
+                                   1,
+                                   std::make_shared<reader_catalog_t>(),
+                                   "",
+                                   reader_types::trace_format_t{
+                                       reader_types::trace_schema_t::rocpd,
+                                       version_t{ 3, 0, 0 } } };
     pooled_connection_source source{ pool };
 
     const auto held      = source.acquire();
@@ -204,7 +210,13 @@ TEST_F(pooled_connection_source_test,
 TEST_F(pooled_connection_source_test,
        destroying_a_reader_returns_the_connection_to_the_pool)
 {
-    common::connection_pool  pool{ m_db_path, 1, std::make_shared<reader_catalog_t>() };
+    common::connection_pool  pool{ m_db_path,
+                                   1,
+                                   std::make_shared<reader_catalog_t>(),
+                                   "",
+                                   reader_types::trace_format_t{
+                                       reader_types::trace_schema_t::rocpd,
+                                       version_t{ 3, 0, 0 } } };
     pooled_connection_source source{ pool };
 
     auto held = source.acquire();
@@ -216,7 +228,13 @@ TEST_F(pooled_connection_source_test,
 TEST_F(pooled_connection_source_test,
        reads_the_event_id_span_through_the_leased_connection)
 {
-    common::connection_pool  pool{ m_db_path, 1, std::make_shared<reader_catalog_t>() };
+    common::connection_pool  pool{ m_db_path,
+                                   1,
+                                   std::make_shared<reader_catalog_t>(),
+                                   "",
+                                   reader_types::trace_format_t{
+                                       reader_types::trace_schema_t::rocpd,
+                                       version_t{ 3, 0, 0 } } };
     pooled_connection_source source{ pool };
 
     const auto reader = source.acquire();
