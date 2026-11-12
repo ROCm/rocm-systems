@@ -12,7 +12,7 @@ Graphics Register Bus Manager (GRBM)
 The Graphics Register Bus Manager (GRBM) exposes coarse-grained utilization for the whole GPU and for individual Shader engines (SEs).
 These counters summarize how busy the graphics/compute complex is; pair them with Workgroup Manager (SPI), Workgroup processor (WGP), and cache chapters when you need root-cause detail.
 
-The sections below list GRBM utilization tables. Select the RDNA3.5 or RDNA4 tab on each table. On gfx1201, GRBM Metrics reports GPU Busy, CP Busy, GL2C Busy, and TA Busy.
+The sections below list GRBM utilization tables. Select the RDNA3.5 or RDNA4 tab on each table. On gfx1201, GRBM Metrics reports GPU Busy.
 
 .. Note::
    For AMD Instinct-centric Shader engine metrics, see :doc:`../cdna/shader-engine`.
@@ -30,7 +30,7 @@ GPU utilization
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 GRBM panel has one table, GRBM Metrics. It reports GPU Busy, CP Busy, GL2C Busy, and TA Busy. Those metrics have descriptions in the analysis report. This page does not publish a separate gfx1201 table.
+      The gfx1201 GRBM panel has one table, GRBM Metrics. It reports GPU Busy. Those metrics have descriptions in the analysis report. This page does not publish a separate gfx1201 table.
 
 Shader engine utilization
 ---------------------------
@@ -45,4 +45,4 @@ Shader engine utilization
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 GRBM panel has one table, GRBM Metrics. It reports GPU Busy, CP Busy, GL2C Busy, and TA Busy. Those metrics have descriptions in the analysis report. This page does not publish a separate gfx1201 table.
+      The gfx1201 GRBM panel has one table, GRBM Metrics. It reports GPU Busy. Those metrics have descriptions in the analysis report. This page does not publish a separate gfx1201 table.

@@ -43,7 +43,8 @@ the same 16x16x16 shape as FP8, so it counts 8192 FLOPs per instruction.
   that misses in the 8 MB L2 and fits in the Infinity Cache.
 * ``L2``, ``L1``, and ``L0`` are measured with working sets that stay resident
   in GL2 and GL0. GL1 has no tags, so the ``L1`` roof is the GL2-hit return
-  path for a set that misses GL0.
+  path for a set that misses GL0. gfx1201 has no ``AI L1`` or ``AI L2`` point,
+  so the ``L1`` and ``L2`` roofs have no kernel point.
 
 The ``AI GDDR6`` point counts 32-byte GL2C/EA requests destined for memory.
 Infinity Cache can serve those requests, and no counter separates its hits from

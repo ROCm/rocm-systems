@@ -36,7 +36,7 @@ GL0 utilization
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 GL0 panel describes utilization, requests, cache performance, the GL0-GL1 interface, and stalls in the analysis report. This page publishes the Memory Chart tables for gfx1201.
+      The gfx1201 GL0 panel describes requests, cache performance, and stalls in the analysis report. This page publishes the Memory Chart tables for gfx1201.
 
 GL0 request statistics
 ----------------------
@@ -51,7 +51,7 @@ GL0 request statistics
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 GL0 panel describes utilization, requests, cache performance, the GL0-GL1 interface, and stalls in the analysis report. This page publishes the Memory Chart tables for gfx1201.
+      The gfx1201 GL0 panel describes requests, cache performance, and stalls in the analysis report. This page publishes the Memory Chart tables for gfx1201.
 
 GL0 cache performance
 ---------------------
@@ -66,7 +66,7 @@ GL0 cache performance
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 GL0 panel describes utilization, requests, cache performance, the GL0-GL1 interface, and stalls in the analysis report. This page publishes the Memory Chart tables for gfx1201.
+      The gfx1201 GL0 panel describes requests, cache performance, and stalls in the analysis report. This page publishes the Memory Chart tables for gfx1201.
 
 GL0-GL1 interface
 -----------------
@@ -81,7 +81,7 @@ GL0-GL1 interface
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 GL0 panel describes utilization, requests, cache performance, the GL0-GL1 interface, and stalls in the analysis report. This page publishes the Memory Chart tables for gfx1201.
+      The gfx1201 GL0 panel describes requests, cache performance, and stalls in the analysis report. This page publishes the Memory Chart tables for gfx1201.
 
 GL0 stalls
 ----------
@@ -96,7 +96,7 @@ GL0 stalls
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 GL0 panel describes utilization, requests, cache performance, the GL0-GL1 interface, and stalls in the analysis report. This page publishes the Memory Chart tables for gfx1201.
+      The gfx1201 GL0 panel describes requests, cache performance, and stalls in the analysis report. This page publishes the Memory Chart tables for gfx1201.
 
 Memory chart: path up to GL1
 ============================
@@ -181,5 +181,4 @@ Memory chart - TCP-GL1 interface
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      .. jinja:: rdna4-memory-chart-gl0-gl1-interface-gfx1201
-         :file: _templates/metrics_table.j2
+      gfx1201 has no GL0-GL1 interface Memory Chart table.

@@ -30,7 +30,7 @@ SPI utilization
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      SPI Utilization and Wave Dispatch Statistics have metric descriptions on gfx1201. Resource Allocation and CPC-SPI Interface have no metrics. This page does not publish a separate gfx1201 table.
+      Wave Dispatch Statistics has metric descriptions on gfx1201. SPI Utilization, Resource Allocation, and CPC-SPI Interface have no metrics. This page does not publish a separate gfx1201 table.
 
 Wave dispatch statistics
 ------------------------
@@ -45,4 +45,4 @@ Wave dispatch statistics
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      SPI Utilization and Wave Dispatch Statistics have metric descriptions on gfx1201. Resource Allocation and CPC-SPI Interface have no metrics. This page does not publish a separate gfx1201 table.
+      Wave Dispatch Statistics has metric descriptions on gfx1201. SPI Utilization, Resource Allocation, and CPC-SPI Interface have no metrics. This page does not publish a separate gfx1201 table.

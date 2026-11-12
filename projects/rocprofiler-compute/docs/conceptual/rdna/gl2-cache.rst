@@ -69,14 +69,7 @@ GL2 cache bandwidth
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      ``GL2 Cache Read BW`` and ``GL2 Cache Write BW`` report size-weighted requests
-      at the GL2 output FIFOs. Reads cover uncompressed request categories. Writes
-      include recompressed requests. These rates measure a different boundary from
-      the GL2/EA interface and do not represent all L2 traffic or physical GDDR6
-      transfers.
-
-      .. jinja:: navi48-gl2-bandwidth-gfx1201
-         :file: _templates/metrics_table.j2
+      gfx1201 has no GL2 cache bandwidth table.
 
 Memory chart: GL2 cache
 =======================

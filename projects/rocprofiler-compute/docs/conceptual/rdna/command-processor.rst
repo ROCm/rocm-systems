@@ -16,7 +16,7 @@ On Instinct GPUs, the profiler often separates the metrics into Command Processo
 Fetcher (CPF) and Command Processor Compute (CPC). The gfx115x analysis panels
 emphasize CPC and ME (Micro Engine) activity, including utilization,
 interface utilization, stall cycles, memory requests, and instruction cache.
-The gfx1201 CPC panel has one table, CPC Utilizations, with metric descriptions in the analysis report. Select the architecture tab on each table.
+gfx1201 has no CPC panel. Select the architecture tab on each table.
 
 For the complete CDNA architecture overview and the CPF and CPC metric tabs across AMD Instinct MI-Series GPUs, see
 :doc:`../cdna/command-processor` under CDNA-CDNA4.
@@ -37,7 +37,7 @@ CPC utilization
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 CPC panel has one table, CPC Utilizations, with metric descriptions in the analysis report. This page does not publish a separate gfx1201 table.
+      gfx1201 has no CPC panel.
 
 CPC interface utilization
 -------------------------
@@ -52,7 +52,7 @@ CPC interface utilization
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 CPC panel has one table, CPC Utilizations, with metric descriptions in the analysis report. This page does not publish a separate gfx1201 table.
+      gfx1201 has no CPC panel.
 
 Micro Engine (ME) stall cycles
 -------------------------------
@@ -67,7 +67,7 @@ Micro Engine (ME) stall cycles
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 CPC panel has one table, CPC Utilizations, with metric descriptions in the analysis report. This page does not publish a separate gfx1201 table.
+      gfx1201 has no CPC panel.
 
 CPC memory requests
 -------------------
@@ -82,7 +82,7 @@ CPC memory requests
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 CPC panel has one table, CPC Utilizations, with metric descriptions in the analysis report. This page does not publish a separate gfx1201 table.
+      gfx1201 has no CPC panel.
 
 Micro Engine (ME) instruction cache
 ------------------------------------
@@ -97,4 +97,4 @@ Micro Engine (ME) instruction cache
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 CPC panel has one table, CPC Utilizations, with metric descriptions in the analysis report. This page does not publish a separate gfx1201 table.
+      gfx1201 has no CPC panel.

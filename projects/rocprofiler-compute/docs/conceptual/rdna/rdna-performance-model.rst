@@ -109,6 +109,6 @@ Each metric table has a tab for each generation.
 .. note::
 
    The System Speed-of-Light, Roofline, Memory Chart, and Efficiency Arbiter
-   chapters include metric tables for gfx1201. SPI, WGP, GL0, GL2, CPC, and GRBM
+   chapters include metric tables for gfx1201. SPI, WGP, GL0, GL2, and GRBM
    also have metric descriptions in the analysis report.
    ROCm Compute Profiler currently has limited support for WMMA on gfx115x.

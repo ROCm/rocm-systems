@@ -35,7 +35,7 @@ GL1 Cache utilization
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 GL1 Cache panel has tables for utilization, request statistics, request bandwidth, and the GL1-GL2 interface. None of those panel metrics have descriptions yet, so this page does not publish a metric table for them.
+      The gfx1201 GL1 Cache panel reports ``Total Requests`` in GL1 Cache Request Statistics. It has no utilization, request bandwidth, or GL1-GL2 interface table. This page does not publish a separate gfx1201 table.
 
 GL1 Cache request statistics
 ----------------------------
@@ -50,7 +50,7 @@ GL1 Cache request statistics
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 GL1 Cache panel has tables for utilization, request statistics, request bandwidth, and the GL1-GL2 interface. None of those panel metrics have descriptions yet, so this page does not publish a metric table for them.
+      The gfx1201 GL1 Cache panel reports ``Total Requests`` in GL1 Cache Request Statistics. It has no utilization, request bandwidth, or GL1-GL2 interface table. This page does not publish a separate gfx1201 table.
 
 GL1 Cache performance
 ---------------------
@@ -65,7 +65,7 @@ GL1 Cache performance
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 GL1 Cache panel has tables for utilization, request statistics, request bandwidth, and the GL1-GL2 interface. None of those panel metrics have descriptions yet, so this page does not publish a metric table for them.
+      The gfx1201 GL1 Cache panel reports ``Total Requests`` in GL1 Cache Request Statistics. It has no utilization, request bandwidth, or GL1-GL2 interface table. This page does not publish a separate gfx1201 table.
 
 GL1-GL2 interface
 -----------------
@@ -80,7 +80,7 @@ GL1-GL2 interface
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 GL1 Cache panel has tables for utilization, request statistics, request bandwidth, and the GL1-GL2 interface. None of those panel metrics have descriptions yet, so this page does not publish a metric table for them.
+      The gfx1201 GL1 Cache panel reports ``Total Requests`` in GL1 Cache Request Statistics. It has no utilization, request bandwidth, or GL1-GL2 interface table. This page does not publish a separate gfx1201 table.
 
 GL1 Cache stalls
 ----------------
@@ -95,7 +95,7 @@ GL1 Cache stalls
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      The gfx1201 GL1 Cache panel has tables for utilization, request statistics, request bandwidth, and the GL1-GL2 interface. None of those panel metrics have descriptions yet, so this page does not publish a metric table for them.
+      The gfx1201 GL1 Cache panel reports ``Total Requests`` in GL1 Cache Request Statistics. It has no utilization, request bandwidth, or GL1-GL2 interface table. This page does not publish a separate gfx1201 table.
 
 Memory chart: GL1 cache and GL1-GL2 interface
 =============================================
@@ -116,8 +116,7 @@ Memory chart - GL1 cache
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      .. jinja:: rdna4-memory-chart-gl1-cache-gfx1201
-         :file: _templates/metrics_table.j2
+      gfx1201 has no GL1 cache Memory Chart table.
 
 Memory chart - GL1-GL2 interface
 --------------------------------
@@ -132,5 +131,4 @@ Memory chart - GL1-GL2 interface
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      .. jinja:: rdna4-memory-chart-gl1-gl2-interface-gfx1201
-         :file: _templates/metrics_table.j2
+      gfx1201 has no GL1-GL2 interface Memory Chart table.

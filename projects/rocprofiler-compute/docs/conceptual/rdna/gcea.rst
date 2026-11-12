@@ -35,7 +35,7 @@ DRAM read interface
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      gfx1201 reports EA traffic in the utilization, bandwidth, and EA-SDP tables below. The DRAM read, DRAM write, SARB, and return-interface tables are the gfx115x tables.
+      gfx1201 has no Efficiency Arbiter panel. Its EA-to-DRAM traffic is in the Memory Chart table below.
 
 DRAM write interface
 --------------------
@@ -50,7 +50,7 @@ DRAM write interface
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      gfx1201 reports EA traffic in the utilization, bandwidth, and EA-SDP tables below. The DRAM read, DRAM write, SARB, and return-interface tables are the gfx115x tables.
+      gfx1201 has no Efficiency Arbiter panel. Its EA-to-DRAM traffic is in the Memory Chart table below.
 
 System arbiter (SARB)
 ---------------------
@@ -65,7 +65,7 @@ System arbiter (SARB)
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      gfx1201 reports EA traffic in the utilization, bandwidth, and EA-SDP tables below. The DRAM read, DRAM write, SARB, and return-interface tables are the gfx115x tables.
+      gfx1201 has no Efficiency Arbiter panel. Its EA-to-DRAM traffic is in the Memory Chart table below.
 
 Return interface
 ----------------
@@ -80,7 +80,7 @@ Return interface
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      gfx1201 reports EA traffic in the utilization, bandwidth, and EA-SDP tables below. The DRAM read, DRAM write, SARB, and return-interface tables are the gfx115x tables.
+      gfx1201 has no Efficiency Arbiter panel. Its EA-to-DRAM traffic is in the Memory Chart table below.
 
 Memory chart: GCEA to system memory
 ===================================
@@ -127,76 +127,4 @@ measure them. Do not infer those values from memory-destined traffic.
       :selected:
 
       .. jinja:: navi48-memory-chart-infinity-cache-gfx1201
-         :file: _templates/metrics_table.j2
-
-Efficiency Arbiter panel
-========================
-
-On gfx1201, EA sends requests toward MALL and DRAM after GL2. A counter whose
-name mentions DRAM still describes this interface. It does not establish the
-number of transfers that reach physical GDDR6. No counter separates MALL hits
-from DRAM traffic, so DRAM bandwidth in these tables can exceed the 640 GB/s
-DRAM peak. These rates use the configured 32, 64, 128, and 256-byte request
-categories. Separate compressed request and data counters are not included.
-The measured MALL bandwidth is the roofline MALL roof; see :ref:`rdna4-roofline`.
-
-
-EA utilization
---------------
-
-.. tab-set::
-
-   .. tab-item:: RDNA3.5 (gfx115x)
-
-      gfx115x reports this stage in the DRAM, SARB, and return-interface tables above.
-
-   .. tab-item:: RDNA4 (gfx1201)
-      :selected:
-
-      .. jinja:: rdna4-ea-utilization-gfx1201
-         :file: _templates/metrics_table.j2
-
-EA traffic bandwidth
---------------------
-
-.. tab-set::
-
-   .. tab-item:: RDNA3.5 (gfx115x)
-
-      gfx115x reports this stage in the DRAM, SARB, and return-interface tables above.
-
-   .. tab-item:: RDNA4 (gfx1201)
-      :selected:
-
-      .. jinja:: rdna4-ea-traffic-bandwidth-gfx1201
-         :file: _templates/metrics_table.j2
-
-EA-SDP interface - outstanding requests
----------------------------------------
-
-.. tab-set::
-
-   .. tab-item:: RDNA3.5 (gfx115x)
-
-      gfx115x does not publish this EA-SDP table.
-
-   .. tab-item:: RDNA4 (gfx1201)
-      :selected:
-
-      .. jinja:: rdna4-ea-sdp-outstanding-requests-gfx1201
-         :file: _templates/metrics_table.j2
-
-EA-SDP interface - stalls
--------------------------
-
-.. tab-set::
-
-   .. tab-item:: RDNA3.5 (gfx115x)
-
-      gfx115x does not publish this EA-SDP table.
-
-   .. tab-item:: RDNA4 (gfx1201)
-      :selected:
-
-      .. jinja:: rdna4-ea-sdp-stalls-gfx1201
          :file: _templates/metrics_table.j2

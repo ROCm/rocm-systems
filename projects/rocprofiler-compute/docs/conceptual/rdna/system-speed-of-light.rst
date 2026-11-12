@@ -137,11 +137,6 @@ The wavefront size is fixed per kernel at compile time. The profiler reads
 ``$wave_size`` from the hardware specs reported by ``rocminfo``, but a given
 kernel can be compiled for the other size.
 
-``Wave Dependency Wait`` is the percentage of wave cycles spent waiting for
-anything (``SQ_WAIT_ANY / SQG_WAVE_CYCLES``). ``Wave Issue Wait`` is the
-percentage spent waiting for any instruction to issue
-(``SQ_WAIT_INST_ANY / SQG_WAVE_CYCLES``).
-
 The ``WMMA FLOPs`` row counts 8192 FLOPs per WMMA instruction, the work of one
 16x16x16 multiply-accumulate. The counter increments once per vec32, so a wave64
 WMMA counts twice. The counter does not separate FP16, BF16, FP8, and BF8 WMMA.
@@ -177,12 +172,6 @@ The memory hierarchy runs GL0 (TCP) -> GL1 write-combining cache -> GL2 -> MALL 
 Rows that have a peak use one transfer per cycle per instance, scaled by instance
 count and ``$max_sclk``.
 
-* GL1 read: One 128-byte return per cycle per GL1 instance --
-  ``$num_gl1c * 128 B/cycle * $max_sclk``. ``$num_gl1c`` is the shader engine count
-  times the shader arrays per engine.
-* GL2 Cache BW: One 128-byte request per cycle per GL2 channel --
-  ``$total_l2_chan * 128 B/cycle * $max_sclk``. The percentage of peak uses this
-  L2 interface width.
 * Scalar data cache: One 64-byte request per cycle per SQC instance --
   ``$sqc_per_gpu * 64 B/cycle * $max_sclk``.
 
@@ -190,16 +179,6 @@ Some rows are not available on gfx1201 and show N/A:
 
 * ``GL0 Cache BW (TCP Cache)`` and ``Instruction Cache BW``: the counters give no access size.
 * ``GL1 Cache Hit Rate``: the GL1 write-combining cache has no hit or miss counter.
-
-The ``GL2-Fabric Read BW`` and ``GL2-Fabric Write BW`` rows have no peak. The 64 MB
-MALL (Infinity Cache) serves part of the traffic that GL2 sends to the fabric, so the
-rows are not compared with the 640 GB/s DRAM peak. These EA rates use the configured
-32, 64, 128, and 256-byte request categories. Separate compressed request and data
-counters are not included. For the measured GDDR6 and MALL roofs, see :ref:`rdna4-roofline`.
-
-``GL2 Cache BW`` measures uncompressed read requests at the GL2 output FIFOs. It does
-not measure all L2 traffic. The percentage of peak uses the L2 interface width, not
-the GDDR6 peak. See :doc:`gl2-cache`.
 
 An ``N/A`` value means the metric is unavailable, not zero. GL1 is a write-combining
 stage on gfx1201 and has no hit-rate metric. Some bandwidth rows also lack counters
