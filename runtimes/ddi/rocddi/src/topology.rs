@@ -25,7 +25,7 @@ pub mod host;
 pub mod platform;
 pub use gpu::{
     GpuCopyTransport, GpuInfo, GpuQueueCapabilities, GpuScratchEncoding, GpuSdmaDialect,
-    GpuTargetProfile,
+    GpuTargetProfile, GpuUserQueueCapabilities,
 };
 pub use graph::{
     AttachmentKind, CpuNodeInfo, EndpointAttachment, MemoryBank, MemoryBankKind, MemoryLocation,
@@ -196,6 +196,10 @@ impl MemoryLinkInfo {
 /// a CPU, NPU, or another kind of accelerator.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "passive endpoint facts remain copyable without separate allocation"
+)]
 pub enum EndpointKind {
     /// A host processor endpoint.
     Cpu,

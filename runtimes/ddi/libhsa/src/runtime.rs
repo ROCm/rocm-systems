@@ -464,7 +464,7 @@ impl HsaState {
         let endpoints = topology
             .endpoints
             .iter()
-            .filter(|endpoint| endpoint.gpu().is_some_and(|gpu| gpu.queues.aql))
+            .filter(|endpoint| endpoint.gpu().is_some_and(|gpu| gpu.queues.aql.is_some()))
             .cloned()
             .collect::<Vec<_>>();
         if endpoints.is_empty() {
