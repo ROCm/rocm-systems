@@ -8,10 +8,13 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import importlib.util
 import io
 import json
 import os
+import platform
+import selectors
 from pathlib import Path
 import signal
 import socket
@@ -20,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -152,6 +156,47 @@ def fake_server(path: Path, behavior: str, supports_vfio: bool = True) -> None:
         ).encode(),
         0o755,
     )
+
+
+requires_pidfd_syscall = unittest.skipUnless(
+    sys.platform.startswith("linux")
+    and platform.machine() in RUNNER.PIDFD_SYSCALL_ARCHES,
+    "the launcher needs a known pidfd_open syscall number",
+)
+
+
+def without_python_pidfd_open() -> contextlib.AbstractContextManager:
+    old_os = types.SimpleNamespace(**vars(os))
+    vars(old_os).pop("pidfd_open", None)
+    return mock.patch.object(RUNNER, "os", old_os)
+
+
+@requires_pidfd_syscall
+class PidfdTest(unittest.TestCase):
+    def test_missing_python_wrapper_still_observes_child_exit(self) -> None:
+        # Force the manylinux Python path but use a real kernel process handle.
+        with without_python_pidfd_open():
+            child = subprocess.Popen([sys.executable, "-c", "pass"])
+            try:
+                fd = RUNNER.open_pidfd(child.pid)
+                try:
+                    self.assertFalse(os.get_inheritable(fd))
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(fd, selectors.EVENT_READ)
+                        self.assertTrue(selector.select(timeout=5))
+                    self.assertEqual(child.wait(timeout=5), 0)
+                finally:
+                    os.close(fd)
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                child.wait()
+
+    def test_missing_python_wrapper_preserves_kernel_errors(self) -> None:
+        with without_python_pidfd_open():
+            with self.assertRaises(OSError) as caught:
+                RUNNER.open_pidfd(-1)
+            self.assertEqual(caught.exception.errno, errno.EINVAL)
 
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "VFIO launcher is Linux-only")
@@ -1158,6 +1203,14 @@ class RunVfioGuestTest(unittest.TestCase):
 
         self.assertEqual(status, 1)
         self.assertIn("rocjitsu exited with status 23", diagnostics)
+
+    @requires_pidfd_syscall
+    def test_guest_and_server_cleanup_without_python_pidfd_open(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, without_python_pidfd_open():
+            root = Path(temporary)
+            status, diagnostics = self.run_fake_guest(root, "clean")
+            self.assertEqual(status, 0, diagnostics)
+            self.assert_fake_processes_reaped(root)
 
     def test_clean_server_shutdown_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

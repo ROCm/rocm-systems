@@ -57,6 +57,42 @@ void LibcPassthrough::resolve() {
   xstat64_fn = util::lookup_symbol<decltype(xstat64_fn)>(handle, "__xstat64");
   lxstat_fn = util::lookup_symbol<decltype(lxstat_fn)>(handle, "__lxstat");
   lxstat64_fn = util::lookup_symbol<decltype(lxstat64_fn)>(handle, "__lxstat64");
+  // Before glibc 2.33, the public stat functions were header wrappers around
+  // these versioned entry points, not exported symbols. Use the libc ABI (not
+  // the kernel stat layout), and keep calling RTLD_NEXT to avoid our interposer.
+#if defined(_STAT_VER)
+  constexpr int stat_version = _STAT_VER;
+#elif defined(__x86_64__)
+  constexpr int stat_version = 1;
+#elif defined(__aarch64__)
+  constexpr int stat_version = 0;
+#endif
+#if defined(_STAT_VER) || defined(__x86_64__) || defined(__aarch64__)
+  if (!stat && xstat_fn)
+    stat = [](const char *path, struct stat *buf) {
+      return libc_passthrough().xstat_fn(stat_version, path, buf);
+    };
+  if (!lstat && lxstat_fn)
+    lstat = [](const char *path, struct stat *buf) {
+      return libc_passthrough().lxstat_fn(stat_version, path, buf);
+    };
+  if (!fstat_fn && fxstat_fn)
+    fstat_fn = [](int fd, struct stat *buf) {
+      return libc_passthrough().fxstat_fn(stat_version, fd, buf);
+    };
+  if (!stat64_fn && xstat64_fn)
+    stat64_fn = [](const char *path, struct stat64 *buf) {
+      return libc_passthrough().xstat64_fn(stat_version, path, buf);
+    };
+  if (!lstat64_fn && lxstat64_fn)
+    lstat64_fn = [](const char *path, struct stat64 *buf) {
+      return libc_passthrough().lxstat64_fn(stat_version, path, buf);
+    };
+  if (!fstat64_fn && fxstat64_fn)
+    fstat64_fn = [](int fd, struct stat64 *buf) {
+      return libc_passthrough().fxstat64_fn(stat_version, fd, buf);
+    };
+#endif
   readlink_fn = util::lookup_symbol<decltype(readlink_fn)>(handle, "readlink");
   realpath_fn = util::lookup_symbol<decltype(realpath_fn)>(handle, "realpath");
   realpath_chk_fn = util::lookup_symbol<decltype(realpath_chk_fn)>(handle, "__realpath_chk");
