@@ -169,7 +169,7 @@ impl GpuTargetProfile {
 /// GPU target and enabled compute geometry captured without activation.
 /// Required geometry fields must be complete and consistent before this record
 /// is published; opening an endpoint never substitutes guessed dimensions.
-/// Optional DRM facts may be populated later.
+/// Optional provider facts may be populated later.
 #[allow(
     clippy::struct_excessive_bools,
     reason = "GPU topology reports independent native capabilities as flags"
@@ -188,11 +188,10 @@ pub struct GpuInfo {
     pub unique_id: Option<u64>,
     /// AMD GPU hive identifier, or zero when the endpoint has no hive.
     pub hive_id: u64,
-    /// ASIC family identifier reported by KFD topology.
+    /// ASIC family identifier reported at discovery. The activated GPU view
+    /// exposes the family resolved by its provider for runtime use.
     pub asic_family_id: u32,
-    /// ASIC family reported by the matching DRM device, when available.
-    pub drm_asic_family_id: Option<u32>,
-    /// GPU timestamp frequency in hertz reported by DRM, when available.
+    /// GPU timestamp frequency in hertz reported by the provider, when available.
     pub counter_frequency_hz: Option<u64>,
     /// Target ASIC revision, not PCI configuration revision.
     pub asic_revision: u32,

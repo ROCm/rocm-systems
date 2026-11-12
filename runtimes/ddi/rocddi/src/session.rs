@@ -988,11 +988,9 @@ mod tests {
         .unwrap();
         let mut endpoint = session.open_endpoint(id).unwrap();
         assert_eq!(endpoint.product_name, None);
-        assert_eq!(endpoint.gpu().unwrap().drm_asic_family_id, None);
         session.populate_endpoint(&mut endpoint).unwrap();
         assert_eq!(endpoint.product_name.as_deref(), Some("Test endpoint"));
         assert_eq!(endpoint.gpu().unwrap().asic_family_id, 11);
-        assert_eq!(endpoint.gpu().unwrap().drm_asic_family_id, Some(42));
         assert_eq!(
             endpoint.gpu().unwrap().counter_frequency_hz,
             Some(1_000_000)
@@ -1000,6 +998,10 @@ mod tests {
         session.populate_endpoint(&mut endpoint).unwrap();
         let device = session.activate(&endpoint).unwrap();
         assert_eq!(device.endpoint(), &endpoint);
+        let gpu = device.gpu().unwrap();
+        assert_eq!(gpu.asic_family_id(), 42);
+        assert_eq!(gpu.surface_config().unwrap().asic_family_id, 42);
+        assert_eq!(device.endpoint().gpu().unwrap().asic_family_id, 11);
 
         let mut stale = endpoint.clone();
         if let EndpointKind::Gpu { info } = &mut stale.kind {

@@ -336,6 +336,8 @@ pub(crate) struct DeviceState {
     vm: Shared<memory::DeviceVm>,
     /// KFD topology identity revalidated during activation.
     native: sysfs::KfdNode,
+    /// ASIC family resolved against the activated native device.
+    pub(crate) asic_family_id: u32,
     /// GPU clock frequency queried from the activated native device.
     gpu_counter_frequency_hz: u64,
 }
@@ -612,15 +614,21 @@ impl Driver for LinuxKfdDriver {
             let resources = primary_slot()?.join(&self.joined_primary, &self.process)?;
             resources.activate_device(self.lifetime, &native)?
         };
-        let gpu_counter_frequency_hz = vm
+        let device_info = vm
             .render()
             .ok()
-            .and_then(|render| operations::matching_device_info(endpoint, render))
+            .and_then(|render| operations::matching_device_info(endpoint, render));
+        let gpu_counter_frequency_hz = device_info
             .and_then(operations::device_counter_frequency_hz)
             .unwrap_or(0);
+        let asic_family_id = operations::resolved_family_id(
+            endpoint.gpu().map_or(0, |info| info.asic_family_id),
+            device_info,
+        );
         Ok(DeviceState {
             vm,
             native,
+            asic_family_id,
             gpu_counter_frequency_hz,
         })
     }
@@ -633,6 +641,18 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Weak};
+
+    #[test]
+    fn activated_family_uses_matching_native_information_without_losing_fallback() {
+        assert_eq!(operations::resolved_family_id(11, None), 11);
+        assert_eq!(
+            operations::resolved_family_id(11, Some(drm::DeviceInfoPrefix::default())),
+            11
+        );
+        let mut native = drm::DeviceInfoPrefix::default();
+        native.family_id = 42;
+        assert_eq!(operations::resolved_family_id(11, Some(native)), 42);
+    }
 
     #[test]
     fn marketing_name_matches_device_and_revision() {
