@@ -411,7 +411,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 AMD_AGENT_INFO_DOMAIN => write_value(value, pci.map_or(0, |info| info.domain)),
                 AMD_AGENT_INFO_COOPERATIVE_QUEUES => write_value(
                     value,
-                    gpu.is_some_and(|info| info.queues.aql.is_some_and(|queue| queue.cooperative)),
+                    gpu.and_then(crate::queue::cooperative_queue_size).is_some(),
                 ),
                 AMD_AGENT_INFO_UUID => {
                     let uuid = agent_uuid(gpu);
