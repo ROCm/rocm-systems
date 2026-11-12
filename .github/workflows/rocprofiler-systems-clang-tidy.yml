@@ -36,6 +36,7 @@ jobs:
           filter: blob:none
           sparse-checkout: |
             projects/rocprofiler-systems
+            profilers/profiler-hub/
             .gitmodules
 
       - name: Init rocprofiler-systems submodules

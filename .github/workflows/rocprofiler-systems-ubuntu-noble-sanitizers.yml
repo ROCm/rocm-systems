@@ -43,6 +43,7 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
+            profilers/profiler-hub/
             .gitmodules
           set-safe-directory: true
           submodules: true
