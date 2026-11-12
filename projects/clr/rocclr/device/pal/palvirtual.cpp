@@ -3378,12 +3378,9 @@ void VirtualGPU::flush(amd::Command* list, bool wait) {
     //! @todo: Check if really need a lock
     std::scoped_lock lock(execution());
     for (uint i = 0; i < AllEngines; ++i) {
+      // Drops the engine's last event if it already completed. A pending one stays: HIP
+      // orders SDMA and compute through it (WaitForIdleCompute/WaitForIdleSdma).
       flushDMA(i);
-      // Reset event so we won't try to wait again,
-      // if runtime didn't submit any commands
-      //! @note: it's safe to invalidate events, since
-      //! we already saved them with the batch creation step above
-      events_[i].invalidate();
     }
   }
 
@@ -3421,15 +3418,6 @@ void VirtualGPU::enableSyncedBlit() const { return blitMgr_->enableSynchronizati
 
 void VirtualGPU::setGpuEvent(GpuEvent gpuEvent, bool flush) {
   events_[engineID_] = gpuEvent;
-
-  // Preserve the last compute-engine submission durably. flush() clears
-  // events_[MainEngine] (e.g. when a hipEventRecord marker is submitted between
-  // a kernel and a copy), which would otherwise leave the following SDMA copy
-  // with no wait on the compute work. WaitForIdleCompute() falls back to this
-  // when events_[MainEngine] is no longer valid (rocm-systems #12571).
-  if (gpuEvent.engineId_ == MainEngine) {
-    lastComputeEvent_ = gpuEvent;
-  }
 
   // Flush current DMA buffer if requested
   if (flush) {
