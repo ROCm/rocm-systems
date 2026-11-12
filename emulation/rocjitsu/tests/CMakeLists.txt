@@ -236,8 +236,8 @@ add_test(
     NAME RocjitsuProfileRejectsMissingValue
     COMMAND
         ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
-        "-DTEST_ARGS=--profile;--thread-budget-table"
-        "-DTEST_REGEX=--profile:? requires a value" -P ${_rj_cli_failure_script}
+        "-DTEST_ARGS=--profile" "-DTEST_REGEX=--profile:? requires a value" -P
+        ${_rj_cli_failure_script}
 )
 
 add_test(
@@ -252,8 +252,8 @@ add_test(
     NAME RocjitsuConfigRejectsMissingValue
     COMMAND
         ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
-        "-DTEST_ARGS=--config;--thread-budget-table"
-        "-DTEST_REGEX=--config:? requires a value" -P ${_rj_cli_failure_script}
+        "-DTEST_ARGS=--config" "-DTEST_REGEX=--config:? requires a value" -P
+        ${_rj_cli_failure_script}
 )
 
 add_test(
