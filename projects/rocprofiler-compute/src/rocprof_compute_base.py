@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
 
 import config
-from argparser import omniarg_parser, warn_deprecated_options
+from argparser import build_parser
 from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
@@ -257,49 +257,16 @@ class RocProfCompute:
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
 
     def parse_args(self) -> None:
-        # Detect if --experimental flag is present (for help text control)
-        prelim_parser = argparse.ArgumentParser(add_help=False)
-        prelim_parser.add_argument("--experimental", action="store_true", default=False)
-
-        # Parse only known args (respects -- separator)
-        prelim_args, _ = prelim_parser.parse_known_args()
-        experimental_requested: bool = prelim_args.experimental
-
-        # Build full parser with experimental knowledge
-        self.__parser = argparse.ArgumentParser(
-            description=(
-                "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
-            ),
-            prog="tool",
-            formatter_class=lambda prog: argparse.RawTextHelpFormatter(
-                prog, max_help_position=30
-            ),
-            usage="rocprof-compute [mode] [options]",
-        )
-        omniarg_parser(
-            self.__parser,
+        self.__parser = build_parser(
             config.rocprof_compute_home,
             self.__supported_archs,
             self.__version,
-            experimental_requested,
+            sys.argv[1:],
         )
         self.__args = self.__parser.parse_args()
-        warn_deprecated_options(self.__args)
-        # --list-metrics-gfx-id <arch> on its own lists the blocks of <arch>
-        if self.__args.list_metrics_gfx_id and self.__args.list_metrics is None:
-            self.__args.list_metrics = []
 
-        if self.__args.mode == "profile":
-            self.handle_profile_args()
-        elif self.__args.mode == "analyze":
+        if self.__args.mode == "analyze":
             self.handle_analyze_args()
-
-    def handle_profile_args(self) -> None:
-        # Handle list operations first - these are independent and exit immediately
-        if getattr(self.__args, "list_sets", False):
-            return
-        if getattr(self.__args, "list_available_metrics", False):
-            return
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
@@ -335,7 +302,7 @@ class RocProfCompute:
             print(generate_machine_specs(self.__args))
             sys.exit(0)
         elif self.__args.list_metrics is not None and self.__mode != "analyze":
-            arch = self.__args.list_metrics_gfx_id
+            arch = self.__args.debug_list_metrics_gfx_id
             if arch is None:
                 self.generate_machine_specs()
                 arch = self.__mspec.gpu_arch
@@ -415,7 +382,7 @@ class RocProfCompute:
         sys_info: Optional[Dict[str, Any]],
     ) -> Dict[str, Tuple[str, str, str]]:
         """Map the ids of arch's panel configs to (name, unit, description)."""
-        config_root = Path(self.__args.config_dir) / (
+        config_root = config.analysis_configs_dir / (
             canonical_config_arch(arch) or arch
         )
         if arch not in self.__supported_archs and not config_root.is_dir():
@@ -572,28 +539,25 @@ class RocProfCompute:
     def _validate_profile_mode_arguments(self) -> None:
         """Validate that the profile-mode invocation is internally consistent.
 
-        Covers the mutual exclusion among action-selection flags
-        (--block, --set, --roof-only, --bench-only) and the
-        --bench-only / --no-roof conflict.
+        Block selection, --set and --roofline-bench-only exclude each other, and
+        --roofline-bench-only cannot be combined with --no-roof.
         """
         args = self.__args
         if (
             sum((
                 bool(getattr(args, "filter_blocks", None)),
                 bool(getattr(args, "set_selected", None)),
-                bool(getattr(args, "roof_only", False)),
                 bool(getattr(args, "bench_only", False)),
             ))
             > 1
         ):
             console_error(
-                "--block, --set, --roof-only, and --bench-only"
-                " are mutually exclusive options."
-                " Please use only one of them."
+                "Use only one of: blocks (-b, --speed-of-light, --memory-chart, "
+                "--roofline), --set, or --roofline-bench-only."
             )
 
         if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
-            console_error("--bench-only cannot be used with --no-roof.")
+            console_error("--roofline-bench-only cannot be used with --no-roof.")
 
     def _resolve_pc_sampling_interval(self) -> None:
         """Apply the method-aware default for --pc-sampling-interval and
@@ -638,10 +602,10 @@ class RocProfCompute:
     def _validate_list_option_exclusions(self) -> None:
         """Check which options the list options can be combined with."""
         args = self.__args
-        if args.list_metrics_gfx_id is not None and self.__mode == "analyze":
+        if args.debug_list_metrics_gfx_id is not None and args.list_metrics is None:
             console_error(
-                "--list-metrics-gfx-id can't be used in analyze mode, which "
-                "lists the metrics of the -p workload's GPU."
+                "Use --debug-list-metrics-gfx-id with --list-metrics, for example "
+                "--list-metrics sol --debug-list-metrics-gfx-id gfx90a."
             )
 
         block_active = bool(
@@ -651,15 +615,16 @@ class RocProfCompute:
         if not block_active:
             return
 
+        block_options = "-b/--block, --speed-of-light, --memory-chart or --roofline"
         if args.list_metrics is not None:
             console_error(
-                "Pass block ids or aliases to --list-metrics instead of --block, "
-                "for example --list-metrics sol."
+                "Pass block ids or aliases to --list-metrics instead of "
+                f"{block_options}, for example --list-metrics sol."
             )
         if args.list_blocks is not None:
-            console_error("Cannot use --list-blocks with --blocks")
+            console_error(f"Cannot use --list-blocks with {block_options}.")
         if getattr(args, "list_available_metrics", False):
-            console_error("Cannot use --list-available-metrics with --blocks")
+            console_error(f"Cannot use --list-available-metrics with {block_options}.")
 
     @demarcate
     def _run_bench_only(self) -> None:
@@ -669,12 +634,9 @@ class RocProfCompute:
         promoted to the workload directory after passing validation.
         """
         if self.__mspec.gpu_arch not in BENCHMARKING_SUPPORTED:
-            console_log(
-                "roofline",
-                f"Skipping benchmark: roofline benchmarking not supported on "
-                f"{self.__mspec.gpu_arch}",
+            console_error(
+                f"{self.__mspec.gpu_arch} does not support the roofline benchmark."
             )
-            return
 
         output_dir = Path(self.__args.output_directory)
         if not output_dir.exists():

@@ -39,6 +39,7 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 # Import from existing modules to maintain single source of truth
+import config  # noqa: E402
 from rocprof_compute_soc.soc_base import (  # noqa: E402
     CounterFile,
     OmniSoC_Base,
@@ -88,7 +89,6 @@ def _rocprof_supported_superset(counters: set[str]) -> set[str]:
 
 def run_soc_detect_and_coalesce(
     arch: str,
-    config_dir: Path,
     filter_blocks: Optional[list[str]],
     perfmon_config: dict[str, int],
     workload_root: Path,
@@ -108,13 +108,9 @@ def run_soc_detect_and_coalesce(
     filter_block_list = list(filter_blocks) if filter_blocks else []
     cli_args = argparse.Namespace(
         output_directory=str(workload_root.resolve()),
-        config_dir=str(config_dir.resolve()),
         filter_blocks=filter_block_list,
         membw_analysis=False,
         set_selected=None,
-        roof_only=False,
-        no_roof=True,
-        device=0,
     )
 
     soc = OmniSoC_Base(cli_args, machine_spec)
@@ -443,11 +439,6 @@ def render_perfmon_plan_svg(
     return console.export_svg(title=title)
 
 
-def get_default_config_dir() -> Path:
-    """Get the default analysis configs directory."""
-    return _SRC_DIR / "rocprof_compute_soc" / "analysis_configs"
-
-
 def get_supported_archs() -> list[str]:
     """Get list of supported architectures from mi_gpu_specs."""
     return list(mi_gpu_specs.get_gpu_series_dict().keys())
@@ -485,12 +476,6 @@ Examples:
         help="GPU architecture (e.g., gfx942, gfx950)",
     )
     parser.add_argument(
-        "--config-dir",
-        type=Path,
-        default=None,
-        help="Path to analysis_configs directory (default: auto-detect)",
-    )
-    parser.add_argument(
         "--block",
         "-b",
         nargs="+",
@@ -522,9 +507,7 @@ Examples:
 
     args = parser.parse_args()
 
-    config_dir = args.config_dir or get_default_config_dir()
-    if not config_dir.is_dir():
-        console_error(f"Error: Config directory not found: {config_dir}")
+    config_dir = config.analysis_configs_dir
 
     arch = args.arch
 
@@ -543,7 +526,7 @@ Examples:
     with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
         workload_root = Path(tmpdir)
         counters, output_files = run_soc_detect_and_coalesce(
-            arch, config_dir, args.block, perfmon_config, workload_root
+            arch, args.block, perfmon_config, workload_root
         )
 
         if not counters:

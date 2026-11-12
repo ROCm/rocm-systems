@@ -1309,3 +1309,31 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
     assert not utils_common.is_gfx1250("gfx12500")
     assert not utils_common.is_gfx1250("gfx1251")
     assert not utils_common.is_gfx1250(None)
+
+
+@pytest.mark.parametrize(
+    ("filter_blocks", "selects"),
+    [
+        (None, True),
+        ([], True),
+        (["4"], True),
+        (["roof"], True),
+        (["4.1.1"], True),
+        (["2", "4"], True),
+        (["2", "sol"], False),
+        (["40"], False),
+    ],
+    ids=[
+        "none",
+        "empty",
+        "block_4",
+        "alias",
+        "roofline_metric",
+        "with_other_block",
+        "no_roofline",
+        "block_40",
+    ],
+)
+def test_roofline_selection(filter_blocks, selects):
+    """4, 4.x and the roof alias all count as roofline."""
+    assert utils_common.selects_roofline(filter_blocks) is selects

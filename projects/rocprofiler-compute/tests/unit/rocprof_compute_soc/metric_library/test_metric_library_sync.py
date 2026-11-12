@@ -285,10 +285,8 @@ def row_metric_id(row: Row, library: loader.MetricLibrary, arch: str) -> Optiona
 def make_soc(arch: str, membw_analysis: bool, filter_blocks: List[str]) -> OmniSoC_Base:
     """Return an OmniSoC_Base for arch, with no GPU needed."""
     args = SimpleNamespace(
-        config_dir=config.analysis_configs_dir,
         filter_blocks=filter_blocks,
         membw_analysis=membw_analysis,
-        roof_only=False,
         set_selected=None,
     )
     machine_specs = SimpleNamespace(

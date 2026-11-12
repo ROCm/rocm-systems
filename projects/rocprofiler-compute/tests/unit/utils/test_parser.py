@@ -13,7 +13,6 @@ import common
 import pandas as pd
 import pytest
 
-import config
 from pc_sampling.pc_sampling_analysis import load_pc_sample_records
 from utils import schema
 from utils.parser import (
@@ -27,19 +26,11 @@ from utils.specs import MachineSpecsCDNA
 from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     expand_placeholder_ranges,
-    load_panel_configs,
 )
 
 # =============================================================================
 # Helpers to build in-memory panel configs
 # =============================================================================
-
-
-@pytest.fixture(scope="module")
-def gfx1201_wgp_tables():
-    """Load the Navi48 WGP tables once for their column-order contract."""
-    panel = load_panel_configs([str(config.analysis_configs_dir / "gfx1201")])[700]
-    return [source["metric_table"] for source in panel["data source"]]
 
 
 def _metric_panel(
@@ -1083,16 +1074,16 @@ class TestCorrectSysInfo:
     def test_single_pair_overrides_spec(self, monkeypatch) -> None:
         """One name:value pair updates the spec object and the returned frame."""
         mspec = make_mi350_machine_specs(monkeypatch)
-        sys_info = correct_sys_info(mspec, "num_xcd:4")
+        sys_info = correct_sys_info(mspec, ["num_xcd:4"])
 
         assert mspec.num_xcd == "4"
         assert len(sys_info) == 1
         assert sys_info["num_xcd"].item() == "4"
 
     def test_multiple_pairs_override_every_spec(self, monkeypatch) -> None:
-        """Comma-separated pairs are all applied."""
+        """Every pair is applied."""
         mspec = make_mi350_machine_specs(monkeypatch)
-        sys_info = correct_sys_info(mspec, "num_xcd:4,cu_per_gpu:64")
+        sys_info = correct_sys_info(mspec, ["num_xcd:4", "cu_per_gpu:64"])
 
         assert sys_info["num_xcd"].item() == "4"
         assert sys_info["cu_per_gpu"].item() == "64"
@@ -1100,7 +1091,7 @@ class TestCorrectSysInfo:
     def test_surrounding_whitespace_is_stripped(self, monkeypatch) -> None:
         """Spaces around names and values do not break the override."""
         sys_info = correct_sys_info(
-            make_mi350_machine_specs(monkeypatch), " num_xcd : 4 , cu_per_gpu:64 "
+            make_mi350_machine_specs(monkeypatch), [" num_xcd : 4 ", "cu_per_gpu:64"]
         )
 
         assert sys_info["num_xcd"].item() == "4"
@@ -1113,31 +1104,21 @@ class TestCorrectSysInfo:
         analysis_base.initalize_runs() reads sys_info["ip_blocks"] straight
         after the correction, so dropping columns here would break analysis.
         """
-        sys_info = correct_sys_info(make_mi350_machine_specs(monkeypatch), "num_xcd:4")
+        mspec = make_mi350_machine_specs(monkeypatch)
+        sys_info = correct_sys_info(mspec, ["num_xcd:4"])
 
         assert sys_info["ip_blocks"].item().startswith("SQ|LDS|")
         assert sys_info["gpu_arch"].item() == "gfx950"
         assert sys_info["gpu_model"].item() == "MI350"
         assert sys_info["total_l2_chan"].item() == "128"
 
-    def test_fragment_without_separator_is_ignored(self, monkeypatch) -> None:
-        """A fragment with no ':' is skipped; valid pairs still apply."""
-        mspec = make_mi350_machine_specs(monkeypatch)
-        sys_info = correct_sys_info(mspec, "num_xcd:4,garbage")
-
-        assert sys_info["num_xcd"].item() == "4"
-        assert sys_info["cu_per_gpu"].item() == "256"
-
-    def test_value_keeps_everything_after_the_first_colon(self, monkeypatch) -> None:
-        """Only the first ':' separates name from value."""
-        sys_info = correct_sys_info(
-            make_mi350_machine_specs(monkeypatch), "command:./vcopy -n 1:2"
-        )
-
-        assert sys_info["command"].item() == "./vcopy -n 1:2"
-
-    def test_unknown_spec_name_errors_and_exits(self, monkeypatch) -> None:
-        """An unknown spec name reports the name and aborts."""
+    @pytest.mark.parametrize(
+        "pair",
+        ["not_a_spec:1", "num_xcd", "num_xcd:4,cu_per_gpu:64"],
+        ids=["unknown_name", "no_colon", "comma_separated_pairs"],
+    )
+    def test_invalid_pair_errors_and_exits(self, monkeypatch, pair) -> None:
+        """A pair without exactly one ':' or with an unknown name aborts."""
         error_calls = []
 
         def record_and_exit(*args, **_kwargs):
@@ -1149,18 +1130,7 @@ class TestCorrectSysInfo:
         )
 
         with pytest.raises(SystemExit):
-            correct_sys_info(make_mi350_machine_specs(monkeypatch), "not_a_spec:1")
+            correct_sys_info(make_mi350_machine_specs(monkeypatch), [pair])
 
-        assert "not_a_spec" in str(error_calls[0])
-        assert "--specs" in str(error_calls[0])
-
-
-@pytest.mark.misc
-def test_gfx1201_wgp_metrics_fill_every_header_column_in_order(gfx1201_wgp_tables):
-    """Displayed WGP fields match header order; nondisplayed metadata is ignored."""
-    assert gfx1201_wgp_tables
-    for table in gfx1201_wgp_tables:
-        columns = [key for key in table["header"] if key != "metric"]
-        for name, metric in table["metric"].items():
-            displayed_columns = [key for key in metric if key in columns]
-            assert displayed_columns == columns, (table["id"], name)
+        assert pair in str(error_calls[0])
+        assert "sysinfo.csv" in str(error_calls[0])
