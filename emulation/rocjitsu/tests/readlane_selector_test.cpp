@@ -82,6 +82,28 @@ TEST_P(ReadlaneSelectorTest, ReadlaneMasksInline64AndLiteralIndices) {
     EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4),
               0xa5000000u + ((selector == 255 ? 95u : 64u) & (wf->wf_size() - 1)));
   }
+  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA2) {
+    // An ordinary source VGPR beyond the 16-register allocation reads v0.
+    // v_readlane_b32 s4,v40,5
+    constexpr std::array<uint32_t, 2> words{0xd7600004, 0x02010b28};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), 0xa5000005u);
+  }
+}
+
+class Mi200ReadlaneTest : public ReadlaneSelectorTest {};
+INSTANTIATE_TEST_SUITE_P(Gfx90a, Mi200ReadlaneTest, ::testing::Values(ROCJITSU_CODE_ARCH_CDNA2));
+
+TEST_P(Mi200ReadlaneTest, OutOfRangeSourceUsesV0) {
+  wf->set_exec(0);
+  // v_readlane_b32 s4,v40,5. The wave has 16 architectural VGPRs.
+  std::array<uint32_t, 2> words{0xd2890004u, (256u + 40) | (133u << 9)};
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_TRUE(inst);
+  ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+  EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4), 0xa5000005u);
 }
 
 TEST_P(ReadlaneSelectorTest, ReadlaneWritesBothVccWordsWithEmptyExec) {

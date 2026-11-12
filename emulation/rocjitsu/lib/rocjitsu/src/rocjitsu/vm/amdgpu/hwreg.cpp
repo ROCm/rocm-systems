@@ -20,6 +20,8 @@ namespace {
 
 enum class HwregState : uint8_t {
   Unsupported,
+  LdsAllocGfx10,
+  ShMemBasesGfx10,
   Mode,
   Status,
   StatePrivGfx12,
@@ -236,7 +238,7 @@ constexpr HwregDescriptor RDNA1_HWREGS[] = {
     {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
     {4, "HW_ID_LEGACY", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
-    {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {6, "LDS_ALLOC", HwregState::LdsAllocGfx10, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {8, "PC_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {9, "PC_HI", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -245,7 +247,7 @@ constexpr HwregDescriptor RDNA1_HWREGS[] = {
     {12, "IB_DBG0", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {13, "IB_DBG1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {14, "FLUSH_IB", HwregState::Unsupported, HwregWritePolicy::UserWritable},
-    {15, "SH_MEM_BASES", HwregState::Unsupported, HwregWritePolicy::UserWritable},
+    {15, "SH_MEM_BASES", HwregState::ShMemBasesGfx10, HwregWritePolicy::UserWritable},
     {16, "SHADER_TBA_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {17, "SHADER_TBA_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {18, "SHADER_TMA_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
@@ -268,14 +270,14 @@ constexpr HwregDescriptor RDNA2_HWREGS[] = {
     {2, "STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
     {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
-    {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {6, "LDS_ALLOC", HwregState::LdsAllocGfx10, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {8, "PC_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {9, "PC_HI", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {10, "INST_DW0", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {13, "IB_DBG1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {14, "FLUSH_IB", HwregState::Unsupported, HwregWritePolicy::UserWritable},
-    {15, "SH_MEM_BASES", HwregState::Unsupported, HwregWritePolicy::UserWritable},
+    {15, "SH_MEM_BASES", HwregState::ShMemBasesGfx10, HwregWritePolicy::UserWritable},
     {16, "SHADER_TBA_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {17, "SHADER_TBA_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {18, "SHADER_TMA_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
@@ -446,6 +448,15 @@ bool field_aliases_scc(const Wavefront &wf, HwregState state, const DecodedHwreg
 
 HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_value) {
   switch (state) {
+  case HwregState::LdsAllocGfx10:
+    raw_value = field_value(wf.lds_base() / 256u, 0, 9) | field_value(wf.lds_size() / 256u, 12, 9);
+    return HwregAccessResult::Success;
+  case HwregState::ShMemBasesGfx10: {
+    const unsigned shift = wf.flat_pointer32() ? 16 : 48;
+    raw_value = field_value(wf.private_aperture_base() >> shift, 0, 16) |
+                field_value(wf.shared_aperture_base() >> shift, 16, 16);
+    return HwregAccessResult::Success;
+  }
   case HwregState::Mode:
     raw_value = wf.mode_raw();
     return HwregAccessResult::Success;
@@ -523,6 +534,17 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
 
 HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_value) {
   switch (state) {
+  case HwregState::ShMemBasesGfx10: {
+    const unsigned shift = wf.flat_pointer32() ? 16 : 48;
+    const uint64_t low_mask = (uint64_t{1} << shift) - 1;
+    const uint64_t shared = uint64_t{raw_value >> 16} << shift;
+    const uint64_t priv = uint64_t{raw_value & 0xffffu} << shift;
+    wf.set_apertures(shared | (wf.shared_aperture_base() & low_mask),
+                     shared | (wf.shared_aperture_limit() & low_mask),
+                     priv | (wf.private_aperture_base() & low_mask),
+                     priv | (wf.private_aperture_limit() & low_mask), /*override_launch=*/true);
+    return HwregAccessResult::Success;
+  }
   case HwregState::Mode:
     wf.set_mode_raw(raw_value);
     return HwregAccessResult::Success;
@@ -568,6 +590,7 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::XnackMaskGfx1250:
     wf.set_gfx1250_xnack_mask_raw(raw_value);
     return HwregAccessResult::Success;
+  case HwregState::LdsAllocGfx10:
   case HwregState::SimdIdCdna2:
   case HwregState::LocationCdna3_4:
   case HwregState::XccIdCdna3_4:
