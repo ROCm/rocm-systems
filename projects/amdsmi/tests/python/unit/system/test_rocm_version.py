@@ -40,7 +40,9 @@ class TestAmdSmiGetRocmVersion(unittest.TestCase):
             version_ptr._obj.release = 0
             return amdsmi.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS
 
-        with mock.patch.object(amdsmi.amdsmi_wrapper, "amdsmi_get_rocm_version", _stub):
+        with mock.patch.object(
+            amdsmi.amdsmi_wrapper, "amdsmi_get_rocm_version", _stub, create=True
+        ):
             result = amdsmi.amdsmi_interface.amdsmi_get_rocm_version()
 
         self.assertEqual(result, (True, "7.0.0"))
@@ -49,7 +51,9 @@ class TestAmdSmiGetRocmVersion(unittest.TestCase):
         def _stub(_version_ptr):
             return amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
 
-        with mock.patch.object(amdsmi.amdsmi_wrapper, "amdsmi_get_rocm_version", _stub):
+        with mock.patch.object(
+            amdsmi.amdsmi_wrapper, "amdsmi_get_rocm_version", _stub, create=True
+        ):
             result = amdsmi.amdsmi_interface.amdsmi_get_rocm_version()
 
         self.assertEqual(result, (False, "Could not find librocm-core.so"))
@@ -58,7 +62,9 @@ class TestAmdSmiGetRocmVersion(unittest.TestCase):
         def _stub(_version_ptr):
             return amdsmi.amdsmi_wrapper.AMDSMI_STATUS_API_FAILED
 
-        with mock.patch.object(amdsmi.amdsmi_wrapper, "amdsmi_get_rocm_version", _stub):
+        with mock.patch.object(
+            amdsmi.amdsmi_wrapper, "amdsmi_get_rocm_version", _stub, create=True
+        ):
             result = amdsmi.amdsmi_interface.amdsmi_get_rocm_version()
 
         self.assertEqual(result, (False, "Failed to unpack ROCm version"))
@@ -70,6 +76,7 @@ class TestAmdSmiGetRocmVersion(unittest.TestCase):
             amdsmi.amdsmi_wrapper,
             "amdsmi_get_rocm_version",
             side_effect=OSError("AMD SMI shared library could not be loaded."),
+            create=True,
         ):
             result = amdsmi.amdsmi_interface.amdsmi_get_rocm_version()
 
@@ -91,6 +98,7 @@ class TestAmdSmiGetRocmVersion(unittest.TestCase):
             amdsmi.amdsmi_wrapper,
             "amdsmi_get_rocm_version",
             side_effect=AttributeError("amdsmi_get_rocm_version"),
+            create=True,
         ), mock.patch.object(
             amdsmi.amdsmi_interface.ctypes, "CDLL", return_value=fake_librocm_core
         ):
@@ -106,6 +114,7 @@ class TestAmdSmiGetRocmVersion(unittest.TestCase):
             amdsmi.amdsmi_wrapper,
             "amdsmi_get_rocm_version",
             side_effect=AttributeError("amdsmi_get_rocm_version"),
+            create=True,
         ), mock.patch.object(
             amdsmi.amdsmi_interface.ctypes, "CDLL", side_effect=OSError("not found")
         ):
