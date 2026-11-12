@@ -8961,7 +8961,7 @@ def test_ds_mode_rejection_precedes_execution(
     body = codegen._gen_execute_body(inst, sem, enc_name)
 
     assert 'throw ' not in body
-    assert 'std::make_unique<amdgpu::VectorMemState>' in body
+    assert 'acquire_data<amdgpu::VectorMemState>' in body
     if not has_gds:
         assert 'inst_.gds' not in body
         assert 'report_instruction_execution_error' not in body
@@ -8970,7 +8970,7 @@ def test_ds_mode_rejection_precedes_execution(
     requires_gds = semantic_class == 'ds_gws'
     condition = '!inst_.gds' if requires_gds else 'inst_.gds'
     error = 'InvalidInstructionEncoding' if requires_gds else 'UnimplementedInstruction'
-    # A complete guard at the start ensures no allocation, register read, stack
+    # A complete guard at the start ensures no state acquisition, register read, stack
     # preparation or GWS state change can happen before rejection returns.
     guard = (
         f'  if ({condition}) {{\n'
@@ -9308,13 +9308,68 @@ def test_generated_vflat_metadata_has_two_counter_obligations(
         assert 'amdgpu::WaitCounterType::DSCNT' not in source
 
 
+@pytest.mark.parametrize(
+    ('arch', 'name', 'paths'),
+    [
+        ('rdna3', 'IMAGE_SAMPLE', 2),
+        ('rdna3_5', 'IMAGE_SAMPLE', 2),
+        ('rdna4', 'IMAGE_SAMPLE', 2),
+        ('rdna3', 'IMAGE_ATOMIC_ADD', 1),
+        ('rdna4', 'IMAGE_ATOMIC_ADD_UINT', 1),
+        ('rdna3', 'IMAGE_BVH_INTERSECT_RAY', 1),
+        ('rdna2', 'S_ATC_PROBE', 1),
+        ('rdna2', 'DS_ORDERED_COUNT', 1),
+        ('rdna3_5', 'DS_ORDERED_COUNT', 1),
+        ('rdna3_5', 'DS_ADD_GS_REG_RTN', 1),
+        ('cdna1', 'DS_ADD_SRC2_U32', 1),
+        ('cdna2', 'BUFFER_STORE_LDS_DWORD', 1),
+    ],
+)
+def test_memory_preparation_reuses_dynamic_state(tmp_path, arch, name, paths):
+    addition = {'S_ATC_PROBE': 'atc_probe', 'DS_ADD_SRC2_U32': 'ds_src2'}.get(name)
+    additions = (
+        [str(_mrisa_dir() / f'amdgpu_isa_{arch}_{addition}.xml')] if addition else []
+    )
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'),
+        _profile_for_arch(arch),
+        additions,
+    ).parse()
+    generator = CodeGenerator(spec, str(tmp_path))
+    encoding, inst = next(
+        (encoding, inst)
+        for encoding in spec.inst_encodings
+        for inst in encoding.insts
+        if inst.name == name
+    )
+    generator._current_enc = encoding
+    generator._current_inst_fields = {
+        field.name for field in spec.encoding_map[inst.enc_name].ucode_fields
+    }
+    body = generator._gen_execute_body(
+        inst, derive_all_semantics(spec)[name], encoding.enc_name
+    )
+    if paths == 2:
+        assert 'prepare_image_transfer' in body
+        assert 'use_linear_image_path' in body
+    assert (
+        len(re.findall(r'acquire_data<amdgpu::(?:Scalar|Vector)MemState>', body))
+        == paths
+    )
+    assert body.count('d->wait_counter_type =') == paths
+    assert not re.search(r'make_unique<amdgpu::(?:Scalar|Vector)MemState>', body)
+
+
 def test_generated_memory_paths_use_decoded_issue_metadata(
     amdgpu_generated_root: Path,
 ):
     total_states = 0
     for path in amdgpu_generated_root.rglob('*_exec*.cpp'):
         source = path.read_text()
-        state_pattern = r'std::make_unique<amdgpu::(?:Scalar|Vector)MemState>'
+        state_pattern = r'acquire_data<amdgpu::(?:Scalar|Vector)MemState>'
+        assert not re.search(
+            r'std::make_unique<amdgpu::(?:Scalar|Vector)MemState>', source
+        ), path
         states = len(re.findall(state_pattern, source))
         counter_initializers = source.count('d->wait_counter_type =')
         assert 'before_memory_instruction' not in source, path

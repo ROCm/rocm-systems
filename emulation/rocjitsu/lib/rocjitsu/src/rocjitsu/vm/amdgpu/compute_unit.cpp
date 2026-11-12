@@ -1636,7 +1636,7 @@ void ComputeUnitCore::qualify_cdna4_memory_destination(Instruction &inst, const 
   }
 }
 
-VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> &&inst,
+VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> &inst,
                                                    Wavefront &wf, uint64_t deferred_gds_sources) {
   if (arch() == ROCJITSU_CODE_ARCH_CDNA4)
     qualify_cdna4_memory_destination(*inst, wf);
@@ -1644,7 +1644,7 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> 
     qualify_gfx11_memory(*inst, wf);
   if (arch() == ROCJITSU_CODE_ARCH_RDNA4)
     nullify_unallocated_memory_result(*inst, wf);
-  return route_prepared_memory_inst(std::move(inst), wf, deferred_gds_sources);
+  return route_prepared_memory_inst(inst, wf, deferred_gds_sources);
 }
 
 // Only gfx1250 partitions the shared aperture into local and distributed LDS.
@@ -1664,7 +1664,7 @@ static bool flat_shared_atomic_misaligned(rj_code_arch_t arch, const VectorMemSt
          shared_offset % state.elem_size != 0;
 }
 
-VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst,
+VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Instruction> &inst,
                                                             Wavefront &wf,
                                                             uint64_t deferred_gds_sources) {
   if (observes_memory_instruction_routing_)
@@ -1826,12 +1826,13 @@ VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Inst
 
   switch (route_tag) {
   case SCALAR_MEM:
-    return scalar_mem_pipeline_.issue_deferred(inst.release(), wf, observe_routed_access);
+    return scalar_mem_pipeline_.issue_deferred(inst, wf, observe_routed_access);
   case LOCAL_MEM:
-    return local_mem_pipeline_.issue_deferred(inst.release(), wf, observe_routed_access);
+    return local_mem_pipeline_.issue_deferred(inst, wf, observe_routed_access);
   case GLOBAL_MEM:
-    return global_mem_pipeline_.issue_deferred(inst.release(), wf, observe_routed_access);
+    return global_mem_pipeline_.issue_deferred(inst, wf, observe_routed_access);
   default:
+    inst.reset();
     return VmAccessOutcome::Malformed;
   }
 }
@@ -3615,10 +3616,11 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       // A memory execute path can intentionally reject an invalid complete
       // register operand before constructing pipeline state. Treat that as a
       // fully suppressed instruction: no route callback, wait-counter update,
-      // or memory transaction is permitted.
+      // or memory transaction is permitted. Retain the decode for ScopedReturn,
+      // including warm LDS-direct entries whose EXEC mask is zero and whose
+      // prior dynamic state is retired.
       if (deferred_gds_sources)
         lock_gds_sources(*inst, *active, deferred_gds_sources);
-      decoded.value().reset();
     } else {
       if (inst->data()->tag() == GLOBAL_MEM) {
         auto *d = inst->data_as<VectorMemState>();
@@ -3628,7 +3630,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         d->issue_pc = active->pc;
       }
       const VmAccessOutcome memory_outcome =
-          route_prepared_memory_inst(std::move(decoded.value()), *active, deferred_gds_sources);
+          route_prepared_memory_inst(decoded.value(), *active, deferred_gds_sources);
       if (active->instruction_execution_failed()) [[unlikely]] {
         fail_current_instruction();
         return IssueOutcome::Issued;
@@ -3648,6 +3650,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         handle_memory_access_failure(*active, memory_outcome, issue_pc);
         return IssueOutcome::Issued;
       }
+      if (decoded.succeeded())
+        decoded.value()->retire_data();
       if (active->state() == WfState::MEMORY_TRAP) {
         active->pc += inst_size;
         deliver_memory_trap(*active);
