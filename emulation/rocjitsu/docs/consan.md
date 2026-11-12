@@ -206,12 +206,11 @@ same four-address-group quota, loss rules, exact collision masks, and qualified
 barrier certificates. The compatibility token/options reject older b32-only
 producer interpretations and target-specific width restrictions.
 
-gfx1250 wave32 accepts one through sixteen complete 1D workgroups; other
-target/wave profiles remain limited to one. Grid/workgroup Y and Z must equal
-one, and grid X must be nonzero and divisible by workgroup X. Each group retains
-all of its waves, including a partial final wave. Multi-group launches require
-the original descriptor's workgroup-X input; kernels without it remain
-supported for one group.
+All supported target/wave profiles accept one through sixteen complete 1D
+workgroups. Grid/workgroup Y and Z must equal one, and grid X must be nonzero
+and divisible by workgroup X. Each group retains all of its waves, including
+a partial final wave. Multi-group launches require the original descriptor's
+workgroup-X input; kernels without it remain supported for one group.
 
 Each workgroup has independent LDS and barrier participants. Equal numeric
 LDS addresses in different workgroups cannot form conflict candidates, and

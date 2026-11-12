@@ -260,53 +260,61 @@ foreach(
             )
             list(APPEND _target_fixtures ${_image})
         endforeach()
+        set(_group_cases 1 3 4 6)
+        if(_gpu STREQUAL "gfx1250")
+            list(APPEND _group_cases 2 5)
+        endif()
+        foreach(_case IN LISTS _group_cases)
+            set(_object ${_directory}/group-${_case}.o)
+            set(_image ${_directory}/group-${_case}.hsaco)
+            add_custom_command(
+                OUTPUT ${_object}
+                COMMAND
+                    ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x
+                    assembler-with-cpp -P -target amdgcn-amd-amdhsa
+                    -mcpu=${_gpu} -mcode-object-version=5 ${_wave_size_options}
+                    -DCONSAN_TARGET="amdgcn-amd-amdhsa--${_gpu}"
+                    -DCONSAN_WAVE_SIZE=${_wave_size} -DCONSAN_LEGACY=${_legacy}
+                    -DCONSAN_GFX12=${_gfx12} -DCONSAN_GROUP_CASE=${_case} -c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/workgroup_lds.s -o
+                    ${_object}
+                DEPENDS fixtures/workgroup_lds.s ${AMDCXX}
+                VERBATIM
+            )
+            add_custom_command(
+                OUTPUT ${_image}
+                COMMAND
+                    ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared ${_object} -o
+                    ${_image}
+                DEPENDS ${_object}
+                VERBATIM
+            )
+            list(APPEND _target_fixtures ${_image})
+        endforeach()
+        set(_object ${_directory}/native-no-workgroup-id.o)
+        set(_image ${_directory}/native-no-workgroup-id.hsaco)
+        add_custom_command(
+            OUTPUT ${_object}
+            COMMAND
+                ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x assembler-with-cpp
+                -P -target amdgcn-amd-amdhsa -mcpu=${_gpu}
+                -mcode-object-version=5 ${_wave_size_options}
+                -DCONSAN_GROUP_BYTES=128 -DCONSAN_NO_WORKGROUP_ID=1
+                -DCONSAN_CASE=2 -DCONSAN_LEGACY=${_legacy}
+                -DCONSAN_GFX12=${_gfx12} -DCONSAN_WAVE_SIZE=${_wave_size}
+                -DCONSAN_TARGET="amdgcn-amd-amdhsa--${_gpu}" -c
+                ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_lds.s -o ${_object}
+            DEPENDS fixtures/native_lds.s ${AMDCXX}
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${_image}
+            COMMAND
+                ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared ${_object} -o ${_image}
+            DEPENDS ${_object}
+            VERBATIM
+        )
+        list(APPEND _target_fixtures ${_image})
     endforeach()
 endforeach()
-set(_directory ${_fixture_dir}/targets/gfx1250/wave32)
-foreach(
-    _case
-    IN
-    ITEMS 1 2 3 4 5 6
-)
-    set(_object ${_directory}/group-${_case}.o)
-    set(_image ${_directory}/group-${_case}.hsaco)
-    add_custom_command(
-        OUTPUT ${_object}
-        COMMAND
-            ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x assembler-with-cpp -P
-            -target amdgcn-amd-amdhsa -mcpu=gfx1250 -mcode-object-version=5
-            -mno-wavefrontsize64 -DCONSAN_GROUP_CASE=${_case} -c
-            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/workgroup_lds.s -o ${_object}
-        DEPENDS fixtures/workgroup_lds.s ${AMDCXX}
-        VERBATIM
-    )
-    add_custom_command(
-        OUTPUT ${_image}
-        COMMAND ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared ${_object} -o ${_image}
-        DEPENDS ${_object}
-        VERBATIM
-    )
-    list(APPEND _target_fixtures ${_image})
-endforeach()
-set(_object ${_directory}/native-no-workgroup-id.o)
-set(_image ${_directory}/native-no-workgroup-id.hsaco)
-add_custom_command(
-    OUTPUT ${_object}
-    COMMAND
-        ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x assembler-with-cpp -P
-        -target amdgcn-amd-amdhsa -mcpu=gfx1250 -mcode-object-version=5
-        -mno-wavefrontsize64 -DCONSAN_GROUP_BYTES=128 -DCONSAN_NO_WORKGROUP_ID=1
-        -DCONSAN_CASE=2 -DCONSAN_GFX12=1
-        -DCONSAN_TARGET="amdgcn-amd-amdhsa--gfx1250" -c
-        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_lds.s -o ${_object}
-    DEPENDS fixtures/native_lds.s ${AMDCXX}
-    VERBATIM
-)
-add_custom_command(
-    OUTPUT ${_image}
-    COMMAND ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared ${_object} -o ${_image}
-    DEPENDS ${_object}
-    VERBATIM
-)
-list(APPEND _target_fixtures ${_image})
 add_custom_target(consan_target_fixtures DEPENDS ${_target_fixtures})

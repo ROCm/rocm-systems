@@ -105,28 +105,39 @@ def required_names():
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.late-barrier-or',
         'ConSanHsaPlugin.RejectedNonDispatchPacketDoesNotModifyATrackedSignal',
         'ConSanHsaPlugin.IndividualBarriersStillPassThroughWithoutDispatchAdmission',
+        'ConSanHsaPlugin.CompleteWorkgroupsPublishAllRowsAndCaptureTheirFullExtent',
+        'ConSanBoundedLaunch.AllNativeTargetsKeepBoundedWorkgroupRowsAndAdmission',
+        'ConSanAnalysis.EveryTargetKeepsNoSyncConflictsAndReadReadExclusionLocalToWorkgroups',
+        'ConSanAnalysis.EveryTargetNeverJoinsIdenticalLdsOffsetsAcrossWorkgroups',
+        'ConSanAnalysis.Wave64WorkgroupsKeepHighLanesAndRejectOnlyInvalidPartialWaveMasks',
     }
     for groups in (1, 4, 16):
-        for case in ('grouped_disjoint', 'grouped_barrier', 'grouped_empty'):
+        for case in ('grouped_barrier', 'grouped_empty'):
             names.add(
                 f'ConSanSimProductionE2E.gfx1250.wave32.assembly.{case}.groups{groups}'
             )
-    for groups in (4, 16):
-        for case in ('grouped_race', 'grouped_read_read', 'grouped_isolation'):
-            names.add(
-                f'ConSanSimProductionE2E.gfx1250.wave32.assembly.{case}.groups{groups}'
-            )
-    for case, groups in (
-        ('grouped_repeat', 4),
-        ('grouped_oversized', 17),
-        ('grouped_edge', 4),
-        ('grouped_missing_id', 4),
-    ):
-        names.add(f'ConSanSimE2E.gfx1250.wave32.assembly.{case}.groups{groups}')
-    names.add(
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.single_missing_id.groups1'
-    )
     for gpu, wave_size in MODES:
+        for groups in (1, 4, 16):
+            names.add(
+                f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.grouped_disjoint.groups{groups}'
+            )
+        for groups in (4, 16):
+            for case in ('grouped_race', 'grouped_read_read', 'grouped_isolation'):
+                names.add(
+                    f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}.groups{groups}'
+                )
+        for case, groups in (
+            ('grouped_repeat', 4),
+            ('grouped_oversized', 17),
+            ('grouped_edge', 4),
+            ('grouped_missing_id', 4),
+        ):
+            names.add(
+                f'ConSanSimE2E.{gpu}.wave{wave_size}.assembly.{case}.groups{groups}'
+            )
+        names.add(
+            f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.single_missing_id.groups1'
+        )
         suffix = f'{gpu}Wave{wave_size}'
         width_cases = GFX1250_WIDTH_CASES if gpu == 'gfx1250' else CORE_WIDTH_CASES
         for case in width_cases:
@@ -158,6 +169,7 @@ def required_names():
             'HipWorkloadsMustContainQualifiedNativeLdsSites',
             'GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoundaries',
             'QualifyOnlyWholeRegisterSingleRangeForms',
+            'BoundedWorkgroupFixturesRetainQualifiedLdsSites',
         ):
             names.add(f'ConSanTargets/ConSanTargetStatic.{case}/{suffix}')
         for case in (

@@ -32,7 +32,7 @@ TEST(ConSanDigest, OptionsIdentityNamesTheSoftwareAddressGroupReservation) {
       "address-groups-per-site=" + std::to_string(kAddressGroupsPerSite) + ";";
   EXPECT_NE(kMvpOptions.find(reservation), std::string_view::npos);
   EXPECT_EQ(hex(mvp_options_digest()),
-            "3b89788d9a54447ae7302129551f566042d5dda1dfee68cb3fb9d2089846d320");
+            "5b9bfee7f3ffd5348342fc932f2a7f251256b20ac1894aaadb50ada03da5b1b8");
 }
 
 TEST(ConSanDigest, KnownAnswersIncludePaddingAndMultipleBlocks) {
@@ -126,6 +126,53 @@ TEST(ConSanBoundedLaunch, FourCompleteGroupsKeepAllPartialWaves) {
   EXPECT_EQ(layout.value().report_bytes, 64u + 12u * 576u);
 }
 
+TEST(ConSanBoundedLaunch, AllNativeTargetsKeepBoundedWorkgroupRowsAndAdmission) {
+  for (const TargetProfile &target : kNativeLdsTargets)
+    for (const uint32_t wave_size : {32u, 64u}) {
+      if (!supports_wave(target, wave_size))
+        continue;
+      SCOPED_TRACE(target.name);
+      SCOPED_TRACE(wave_size);
+      Manifest manifest = example();
+      manifest.target = target.id;
+      manifest.wave_size = wave_size;
+      manifest.entry.workgroup_id_scalar = target.id == 1201 || target.id == 1250 ? 117 : 15;
+      for (const uint32_t groups : {1u, 4u, 16u})
+        for (const uint32_t threads : {2 * wave_size, 2 * wave_size + 1}) {
+          SCOPED_TRACE(groups);
+          SCOPED_TRACE(threads);
+          const uint32_t waves = (threads + wave_size - 1) / wave_size;
+          const LaunchDimensions dimensions = {{groups * threads, 1, 1}, {threads, 1, 1}};
+          ContractError error;
+          const FailureOr<LaunchLayout> layout = plan_launch(manifest, dimensions, 8, 0, &error);
+          ASSERT_TRUE(layout.succeeded()) << error.message;
+          EXPECT_EQ(layout.value().workgroup_count, groups);
+          EXPECT_EQ(layout.value().waves_per_workgroup, waves);
+          EXPECT_EQ(layout.value().wave_count, groups * waves);
+          EXPECT_EQ(layout.value().report_bytes, 64u + groups * waves * 576u);
+          const FailureOr<TransportImage> transport =
+              initialize_transport(manifest, dimensions, 8, 0, 1, 0x10000, &error);
+          ASSERT_TRUE(transport.succeeded()) << error.message;
+          for (uint32_t row = 0; row < groups * waves; ++row) {
+            const size_t offset = kReportHeaderBytes + row * layout.value().row_stride;
+            EXPECT_EQ(wire::read_u32(transport.value().report, offset + wire::kRowWorkgroupX),
+                      row / waves);
+            EXPECT_EQ(wire::read_u32(transport.value().report, offset + wire::kRowWave),
+                      row % waves);
+          }
+        }
+      ContractError error;
+      EXPECT_TRUE(plan_launch(manifest, {{17 * wave_size, 1, 1}, {wave_size, 1, 1}}, 8, 0, &error)
+                      .failed());
+      EXPECT_EQ(error.code, ContractErrorCode::UnsupportedLaunch);
+      manifest.entry.workgroup_id_scalar = UINT32_MAX;
+      EXPECT_TRUE(plan_launch(manifest, {{wave_size, 1, 1}, {wave_size, 1, 1}}, 8, 0).succeeded());
+      EXPECT_TRUE(
+          plan_launch(manifest, {{4 * wave_size, 1, 1}, {wave_size, 1, 1}}, 8, 0, &error).failed());
+      EXPECT_EQ(error.code, ContractErrorCode::UnsupportedLaunch);
+    }
+}
+
 TEST(ConSanBoundedLaunch, ValidateAllRowsDimensionsIdentityAndBudgetsBeforeAllocation) {
   Manifest manifest = example();
   manifest.target = 1250;
@@ -174,8 +221,7 @@ TEST(ConSanBoundedLaunch, ValidateAllRowsDimensionsIdentityAndBudgetsBeforeAlloc
   EXPECT_EQ(error.code, ContractErrorCode::UnsupportedLaunch);
   manifest.entry.workgroup_id_scalar = 117;
   manifest.target = 1201;
-  EXPECT_TRUE(plan_launch(manifest, {{260, 1, 1}, {65, 1, 1}}, 8, 0, &error).failed());
-  EXPECT_EQ(error.code, ContractErrorCode::UnsupportedLaunch);
+  EXPECT_TRUE(plan_launch(manifest, {{260, 1, 1}, {65, 1, 1}}, 8, 0, &error).succeeded());
 }
 
 TEST(ConSanBoundedLaunch, DefaultReportCapNeverReducesQuotasOrSamplesWorkgroups) {

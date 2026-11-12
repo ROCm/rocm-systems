@@ -273,8 +273,8 @@ protected:
     result.waves = snapshots->snapshots();
     if (workgroups > 1)
       std::ranges::sort(result.waves, [](const auto &first, const auto &second) {
-        return std::tuple{first.sgpr(15), first.vgpr(0, 0)} <
-               std::tuple{second.sgpr(15), second.vgpr(0, 0)};
+        return std::tuple{first.sgpr(14), first.vgpr(0, 0)} <
+               std::tuple{second.sgpr(14), second.vgpr(0, 0)};
       });
     else
       std::ranges::sort(result.waves, {}, &::rocjitsu::test::WavefrontSnapshot::wf_id);
@@ -805,63 +805,78 @@ TEST_F(ConSanBootstrapSim, MixedWidthBarrierPreservesTheIndependentCrossWaveValu
 }
 
 TEST_F(ConSanBootstrapSim, BoundedWorkgroupsPreserveEveryOutputRegisterAndLaunchIdentity) {
-  for (const char *fixture : {"group-1", "group-2", "group-5"})
-    for (const uint32_t groups : {1u, 4u, 16u})
-      for (const uint32_t threads : {64u, 65u}) {
-        SCOPED_TRACE(fixture);
-        SCOPED_TRACE(groups);
-        SCOPED_TRACE(threads);
-        RunResult before, after;
-        run(fixture, Bootstrap::None, before, {"gfx1250", 32}, threads, true, 1, groups);
-        ASSERT_FALSE(HasFatalFailure());
-        run(fixture, Bootstrap::Instrumented, after, {"gfx1250", 32}, threads, true, 1, groups);
-        ASSERT_FALSE(HasFatalFailure());
-        expect_guest_state(before, after);
-        const uint32_t waves = (threads + 31) / 32;
-        std::vector<uint32_t> expected;
-        for (uint32_t group = 0; group < groups; ++group)
-          for (uint32_t wave = 0; wave < waves; ++wave) {
-            expected.push_back(7 + 16 * group +
-                               (std::string_view(fixture) == "group-1" ? wave : 0));
-            EXPECT_EQ(before.waves[group * waves + wave].ttmp(9), group);
-            EXPECT_EQ(after.waves[group * waves + wave].ttmp(9), group);
-            EXPECT_EQ(after.waves[group * waves + wave].sgpr(15), group);
-            EXPECT_EQ(after.waves[group * waves + wave].vgpr(0, 0), wave * 32);
+  for (const test::TargetMode target : test::kTargetModes)
+    for (const char *fixture : {"group-1", "group-2", "group-5"}) {
+      const bool barrier = std::string_view(fixture) != "group-1";
+      if (barrier && std::string_view(target.target) != "gfx1250")
+        continue;
+      for (const uint32_t groups : {1u, 4u, 16u})
+        for (const uint32_t threads : {2 * target.wave_size, 2 * target.wave_size + 1}) {
+          SCOPED_TRACE(target.target);
+          SCOPED_TRACE(target.wave_size);
+          SCOPED_TRACE(fixture);
+          SCOPED_TRACE(groups);
+          SCOPED_TRACE(threads);
+          RunResult before, after;
+          run(fixture, Bootstrap::None, before, target, threads, true, 1, groups);
+          ASSERT_FALSE(HasFatalFailure());
+          run(fixture, Bootstrap::Instrumented, after, target, threads, true, 1, groups);
+          ASSERT_FALSE(HasFatalFailure());
+          expect_guest_state(before, after);
+          const uint32_t waves = (threads + target.wave_size - 1) / target.wave_size;
+          const bool ttmp = std::string_view(target.target) == "gfx1201" ||
+                            std::string_view(target.target) == "gfx1250";
+          EXPECT_EQ(after.manifest.entry.workgroup_id_scalar, ttmp ? 117u : 15u);
+          std::vector<uint32_t> expected;
+          for (uint32_t group = 0; group < groups; ++group)
+            for (uint32_t wave = 0; wave < waves; ++wave) {
+              expected.push_back(7 + 16 * group + (barrier ? 0 : wave));
+              if (ttmp) {
+                EXPECT_EQ(before.waves[group * waves + wave].ttmp(9), group);
+                EXPECT_EQ(after.waves[group * waves + wave].ttmp(9), group);
+              }
+              EXPECT_EQ(after.waves[group * waves + wave].sgpr(14), group);
+              EXPECT_EQ(after.waves[group * waves + wave].sgpr(15), 99u);
+              EXPECT_EQ(after.waves[group * waves + wave].vgpr(0, 0), wave * target.wave_size);
+            }
+          EXPECT_EQ(before.full_output, expected);
+          EXPECT_EQ(after.full_output, expected);
+          const std::vector<ObservedAccess> records = published_accesses(after);
+          ASSERT_EQ(records.size(), 2u * groups * waves);
+          for (const ObservedAccess &record : records) {
+            EXPECT_LT(record.workgroup, groups);
+            EXPECT_LT(record.wave, waves);
+            EXPECT_EQ(record.mask, 1u);
+            EXPECT_EQ(record.offset, record.site == 0 || !barrier ? record.wave * 4 : 0);
           }
-        EXPECT_EQ(before.full_output, expected);
-        EXPECT_EQ(after.full_output, expected);
-        const std::vector<ObservedAccess> records = published_accesses(after);
-        ASSERT_EQ(records.size(), 2u * groups * waves);
-        for (const ObservedAccess &record : records) {
-          EXPECT_LT(record.workgroup, groups);
-          EXPECT_LT(record.wave, waves);
-          EXPECT_EQ(record.mask, 1u);
-          EXPECT_EQ(record.offset, record.site == 0 || std::string_view(fixture) == "group-1"
-                                       ? record.wave * 4
-                                       : 0);
+          if (barrier)
+            for (uint32_t row = 0; row < groups * waves; ++row) {
+              const size_t offset = kReportHeaderBytes +
+                                    row * report_row_bytes(after.manifest.sites.size(), true) +
+                                    sync_offset(after.manifest.sites.size());
+              EXPECT_EQ(wire::read_u32(after.report, offset + wire::kSyncParticipants), waves);
+              EXPECT_EQ(wire::read_u32(after.report, offset + wire::kSyncCommit),
+                        wire::kBarrierCompleted);
+            }
         }
-        if (std::string_view(fixture) != "group-1")
-          for (uint32_t row = 0; row < groups * waves; ++row) {
-            const size_t offset = kReportHeaderBytes +
-                                  row * report_row_bytes(after.manifest.sites.size(), true) +
-                                  sync_offset(after.manifest.sites.size());
-            EXPECT_EQ(wire::read_u32(after.report, offset + wire::kSyncParticipants), waves);
-            EXPECT_EQ(wire::read_u32(after.report, offset + wire::kSyncCommit),
-                      wire::kBarrierCompleted);
-          }
-      }
+    }
 }
 
 TEST_F(ConSanBootstrapSim, MissingOriginalWorkgroupIdKeepsSingleGroupFunctional) {
-  RunResult before, after;
-  run("native-no-workgroup-id", Bootstrap::None, before, {"gfx1250", 32}, 65, true);
-  ASSERT_FALSE(HasFatalFailure());
-  run("native-no-workgroup-id", Bootstrap::Instrumented, after, {"gfx1250", 32}, 65, true);
-  ASSERT_FALSE(HasFatalFailure());
-  expect_guest_state(before, after);
-  EXPECT_EQ(after.full_output, (std::vector<uint32_t>{7, 8, 9}));
-  EXPECT_EQ(after.manifest.entry.workgroup_id_scalar, UINT32_MAX);
-  EXPECT_EQ(published_accesses(after).size(), 6u);
+  for (const test::TargetMode target : test::kTargetModes) {
+    SCOPED_TRACE(target.target);
+    SCOPED_TRACE(target.wave_size);
+    RunResult before, after;
+    const uint32_t threads = 2 * target.wave_size + 1;
+    run("native-no-workgroup-id", Bootstrap::None, before, target, threads, true);
+    ASSERT_FALSE(HasFatalFailure());
+    run("native-no-workgroup-id", Bootstrap::Instrumented, after, target, threads, true);
+    ASSERT_FALSE(HasFatalFailure());
+    expect_guest_state(before, after);
+    EXPECT_EQ(after.full_output, (std::vector<uint32_t>{7, 8, 9}));
+    EXPECT_EQ(after.manifest.entry.workgroup_id_scalar, UINT32_MAX);
+    EXPECT_EQ(published_accesses(after).size(), 6u);
+  }
 }
 
 const auto target_name = [](const auto &info) {
