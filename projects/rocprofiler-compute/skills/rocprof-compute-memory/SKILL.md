@@ -40,7 +40,7 @@ caches `gl0` and `gl2`.
 Before reading a Navi48 Memory Chart, read the
 [Navi48 (gfx1201)](../rocprof-compute-speed-of-light/SKILL.md#navi48-gfx1201)
 section of the `rocprof-compute-speed-of-light` skill. It covers the GL1, GL2,
-DRAM, and Infinity Cache rows that do not measure what their CDNA counterparts
+VRAM, and Infinity Cache rows that do not measure what their CDNA counterparts
 do.
 
 ### Collect only what the question needs

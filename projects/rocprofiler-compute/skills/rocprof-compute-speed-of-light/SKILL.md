@@ -54,8 +54,8 @@ Present that comparison as approximate. Do not subtract WMMA issues to infer
 FP32 FLOPs from these rows or combine WMMA and VALU into an independent total.
 A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports WMMA inclusion in
 VALU for that instruction; counted population and other variants remain
-unqualified. WGP `SQ_INST_CYCLES_VALU` is a raw SIMD execution-cycle count with
-no peak; it is not elapsed time, FLOPs, or utilization.
+unqualified. WGP `SQ_INST_CYCLES_VALU` counts the cycles needed to execute VALU
+operations. It has no peak and is not elapsed time, FLOPs, or utilization.
 
 The WGP Instruction Issue Stalls table, including `Wait for Any`, is
 unavailable, and Speed-of-Light has no wave-wait rows. `Wavefront Occupancy` and
@@ -75,7 +75,7 @@ and have no VRAM peak. `Infinity Cache Hit Rate` and VRAM bandwidth are
 is provisional.
 
 On the roofline, the device-memory roof is `VRAM` and the `MALL` roof is the
-64 MB Infinity Cache. The `AI VRAM` point counts GL2C requests destined for
+Infinity Cache. The `AI VRAM` point counts GL2C requests destined for
 memory, which the Infinity Cache can also serve, so the plot marks it once, at
 `VRAM`. Compare it with both roofs yourself, because "Limited by" and the hover
 text never name `MALL`. A point above `VRAM` and below `MALL` means the
