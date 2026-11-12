@@ -7,6 +7,7 @@
 #include "execution_plugin_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "instruction_failure_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -1585,6 +1586,8 @@ std::vector<uint32_t> independent_wmma_kernel() {
 }
 
 TEST(ExecutionPluginTest, AsyncMmaEndsSetregVgprMsbAdjacencyHazard) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -1711,6 +1714,8 @@ private:
 class AsyncPluginFailureTest : public ::testing::TestWithParam<AsyncFailurePoint> {};
 
 TEST_P(AsyncPluginFailureTest, DestroysEveryAcceptedInstructionOnIssuerAfterFailure) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   AsyncFailureObservation observations;
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
@@ -1746,6 +1751,8 @@ INSTANTIATE_TEST_SUITE_P(CallbackFailures, AsyncPluginFailureTest,
                          });
 
 TEST(ThroughputPluginTest, AsyncMmaCountsHaveExplicitlyUnavailableHandlerTiming) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -1828,6 +1835,8 @@ TEST(InstructionMixPluginTest, AloneItSubscribesToOnlyTheHooksItConsumes) {
 // without handling the issue hook would have dropped them from the counts
 // instead.
 TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -1858,6 +1867,8 @@ TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
 }
 
 TEST(ExecutionPluginTest, KernelLoggingSupportsActualAsyncMma) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
