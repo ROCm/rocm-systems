@@ -209,6 +209,21 @@ TEST(WaitcheckStream, UnknownAndUnsupportedConcreteTargetsFail) {
   EXPECT_FALSE(error.message().empty());
 }
 
+TEST(WaitcheckStream, GlobalTransposeUsesTheWaveSizedReturnRegisters) {
+  for (unsigned wave_size : {32u, 64u}) {
+    for (unsigned width : {2u, 4u}) {
+      const uint32_t op = width == 2 ? 0xee16007cu : 0xee15c07cu;
+      for (unsigned reg : {28u, 29u, 30u}) {
+        const auto report =
+            analyze({op, 27u, 2u, v_mov(0, reg)}, ROCJITSU_CODE_ARCH_RDNA4, false, wave_size);
+        ASSERT_FALSE(report.incomplete);
+        const unsigned result_words = wave_size == 64 ? width / 2 : width;
+        EXPECT_EQ(report.diagnostics.size(), unsigned(reg < 27 + result_words));
+      }
+    }
+  }
+}
+
 TEST(WaitcheckStream, LoadWaitAndSentinelHaveDifferentEffects) {
   for (uint32_t count : {0u, 1u, 63u}) {
     Program program;

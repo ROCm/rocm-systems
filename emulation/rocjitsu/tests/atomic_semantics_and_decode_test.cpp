@@ -76,6 +76,7 @@ public:
       return;
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256);
+    wave->set_lds_size(1024);
     wave->set_exec(1);
     base = wave->vgpr_alloc().base;
   }
@@ -183,6 +184,14 @@ TEST(AtomicSemanticsAndDecode, IntegerEvaluatorRejectsUnsupportedOperations) {
   }
 }
 
+TEST(AtomicSemanticsAndDecode, OrderedAddRequiresThePackedIdAndValue) {
+  constexpr auto op = amdgpu::AtomicOp::ORDERED_ADD;
+  EXPECT_TRUE(amdgpu::apply_int_atomic<uint32_t>(op, 1, 1, 0).failed());
+  const auto result = amdgpu::apply_int_atomic<uint64_t>(op, 0x200000001ull, 0x300000001ull, 0);
+  ASSERT_TRUE(result.succeeded());
+  EXPECT_EQ(result.value(), 0x500000002ull);
+}
+
 TEST(AtomicSemanticsAndDecode, ConditionalAndClampedMemorySubtract) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
@@ -270,8 +279,9 @@ TEST(AtomicSemanticsAndDecode, RdnaInvalidFormatBufferAccessesTouchNoMemory) {
       for (uint32_t add_tid : {0u, 1u << 23})
         for (uint32_t format : {0u, kRdnaFormat32})
           word3s.push_back((oob << 28) | add_tid | format);
-    // Bit 18 is STRIDE_SCALE on RDNA4, not FORMAT.
-    if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    // Word3 bit 18 is outside GFX11 and RDNA4 FORMAT (it selects STRIDE_SCALE on RDNA4).
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+        arch == ROCJITSU_CODE_ARCH_RDNA4)
       word3s.push_back(0x30040000u);
     for (uint32_t word3 : word3s) {
       SCOPED_TRACE(word3);
@@ -644,7 +654,11 @@ protected:
                                                                     config, &memory_, &cache_));
     decoder_ = Decoder::create(arch);
     wave_ = compute_unit_->dispatch_wf(0, 0, 106, 256);
+    ASSERT_NE(wave_, nullptr);
+    wave_->set_lds_base(compute_unit_->allocate_lds(512));
+    wave_->set_lds_size(512);
     wave_->set_exec(1);
+    wave_->set_lds_size(config.lds_size_kb * 1024);
     base_ = wave_->vgpr_alloc().base;
   }
 
@@ -1144,6 +1158,37 @@ TEST_P(AtomicPolicyExecutionTest, DsWrapSerializesSharedAddressesAndPreservesIna
   EXPECT_EQ(compute_unit_->read_vgpr(base_ + 6, 1), 0xdeadbeef);
 }
 
+TEST_P(AtomicPolicyExecutionTest, TwoAddressDsWrapsEachOffsetBeforeRelocation) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
+      GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP() << "GFX11/GFX12 DS encodings";
+  wave_->set_lds_base(512);
+  wave_->set_lds_size(512);
+  wave_->lds().write32(wave_->lds_base(), 0xabcddcba);
+  wave_->lds().write32(wave_->lds_base() + 4, 0x31323334u);
+  compute_unit_->write_vgpr(base_ + 2, 0, 0xfffffffcu);
+  compute_unit_->write_vgpr(base_ + 3, 0, 31);
+  compute_unit_->write_vgpr(base_ + 4, 0, 32);
+  for (bool store : {false, true}) {
+    // ds_load_2addr_b32 or ds_store_2addr_b32, at DWORD offsets one and two.
+    const std::array words =
+        store ? std::array{0xd8380201u, 0x00040302u} : std::array{0xd8dc0201u, 0x14000002u};
+    auto inst = decoder_->decode_window(words);
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(compute_unit_->execute_instruction(inst.value().get(), *wave_).succeeded());
+    ASSERT_NE(inst.value()->data(), nullptr);
+    const auto *payload = inst.value()->data_as<amdgpu::VectorMemState>();
+    EXPECT_EQ(payload->per_lane_addr[0], wave_->lds_base());
+    EXPECT_EQ(payload->ds2_per_lane_addr[0], wave_->lds_base() + 4);
+    amdgpu::LocalMemPipeline pipeline;
+    pipeline.issue(std::move(inst).value().release(), *wave_);
+    EXPECT_EQ(wave_->lds().read32(wave_->lds_base()), store ? 31u : 0xabcddcbau);
+    EXPECT_EQ(wave_->lds().read32(wave_->lds_base() + 4), store ? 32u : 0x31323334u);
+    EXPECT_EQ(compute_unit_->read_vgpr(base_ + 20, 0), 0xabcddcbau);
+    EXPECT_EQ(compute_unit_->read_vgpr(base_ + 21, 0), 0x31323334u);
+  }
+}
+
 TEST_P(AtomicPolicyExecutionTest, LdsStackUpdatesPointerAndResultWithoutAnIntersectionEngine) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   if (!gfx12 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5)
@@ -1197,6 +1242,27 @@ TEST_P(AtomicPolicyExecutionTest, LdsStackUpdatesPointerAndResultWithoutAnInters
     }
     EXPECT_EQ(compute_unit_->read_vgpr(base_ + 12, 1), 0xdeadbeef);
     EXPECT_EQ(compute_unit_->read_vgpr(base_ + 16, 1), 1u << (gfx12 ? 15 : 18));
+  }
+  // The stack base lies in another workgroup's allocation. The first GFX11 child
+  // returns directly. Pop operations that require an out-of-window LDS word read zero.
+  wave_->set_lds_size(512);
+  wave_->set_exec(1);
+  constexpr uint32_t neighbor = 1024;
+  compute_unit_->write_vgpr(base_ + 16, 0, (neighbor / 4) << (gfx12 ? 15 : 18));
+  compute_unit_->write_vgpr(base_, 0, 0xffffffff);
+  for (unsigned slot = 0; slot < 4; ++slot)
+    wave_->lds().write32(wave_->lds_base() + neighbor + slot * 128, 0xdeadbeef);
+  for (bool push : {true, false}) {
+    for (unsigned slot = 0; slot < 4; ++slot)
+      compute_unit_->write_vgpr(base_ + 4 + slot, 0, push ? 0x104 + slot * 0x100 : 0xffffffff);
+    auto inst = decoder_->decode_window(words);
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(compute_unit_->execute_instruction(inst.value().get(), *wave_).succeeded());
+    amdgpu::LocalMemPipeline pipeline;
+    pipeline.issue(std::move(inst).value().release(), *wave_);
+    EXPECT_EQ(compute_unit_->read_vgpr(base_ + 12, 0), push && !gfx12 ? 0x104u : 0u);
+    for (unsigned slot = 0; slot < 4; ++slot)
+      EXPECT_EQ(wave_->lds().read32(wave_->lds_base() + neighbor + slot * 128), 0xdeadbeefu);
   }
 }
 
