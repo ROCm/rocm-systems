@@ -114,8 +114,8 @@ it.
 GRBM counters can read zero at the start of a session
 -----------------------------------------------------
 
-All ``GRBM_*`` counters can read zero for the first few hundred milliseconds of
-a profiling session, even though the dispatches ran. Treat these zeros as
+All ``GRBM_*`` counters can read zero on the first dispatches of a profiling
+session, for up to about 300 ms, even though the dispatches ran. Treat these zeros as
 missing data. Metrics derived from these counters are also wrong for those
 dispatches, including ``GPU_UTIL``, ``CU_UTILIZATION``, ``VALUBusy``,
 ``SALUBusy``, ``MemUnitStalled``, ``LDSBankConflict``, and
@@ -147,9 +147,11 @@ All counter values are zero
    :ref:`wsl-environment-variables`.
 
 ``rocprofv3`` finds fewer GPUs than HIP does
-   ``librocdxg`` and ROCprofiler-SDK don't come from the same ROCm release.
    ROCprofiler-SDK skips a GPU when it can't read that GPU's topology, and logs
-   the reason. Install matching packages. Other GPUs remain profilable.
+   the reason. Profiling still works on the other GPUs. The usual cause is a
+   ``librocdxg`` that doesn't match ROCprofiler-SDK; install matching packages.
+   ROCprofiler-SDK also skips a GPU whose topology is incomplete, and skips two
+   identical GPUs that it can't tell apart.
 
 The memory copy CSV has no byte count
    This is the same on all platforms. To get byte counts, use the rocpd output
