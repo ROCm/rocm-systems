@@ -30,7 +30,7 @@ def test_benchmark_pr_trigger_extends_develop_push_paths():
         '.github/workflows/rocjitsu-benchmarks.yml',
     ]
     trigger = workflow[True]['pull_request']
-    assert trigger['branches'] == ['develop']
+    assert 'branches' not in trigger and 'branches-ignore' not in trigger
     assert trigger['types'] == ['labeled', 'synchronize']
     assert trigger['paths'] == push['paths'] + [
         '.github/scripts/rocjitsu_benchmark_report.js',
@@ -207,7 +207,7 @@ def test_dispatch_form_explains_source_and_pr_constraints():
     assert 'side-branch SHA' in source and 'develop' in source
     pr = inputs['pull_request_number']['description']
     assert 'open' in pr and 'same-repository' in pr
-    assert 'selected side branch' in pr and 'develop' in pr
+    assert 'selected side branch' in pr and 'stacked' in pr
 
 
 def test_python_ci_names_its_current_workflow_responsibilities():

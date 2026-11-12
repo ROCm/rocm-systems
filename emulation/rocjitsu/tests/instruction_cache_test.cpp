@@ -8,6 +8,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
@@ -18,7 +20,11 @@
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
+#include "rocjitsu/vm/plugins/instruction_family.h"
+#include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/except.h"
 
 #include <gtest/gtest.h>
@@ -723,6 +729,231 @@ TEST(DecodedInstructionCacheCuTest, LoopDecodesOnceAndReadsCurrentRegisters) {
   EXPECT_EQ(counter->calls, 2u);
 }
 
+// Observers see the current issue only. In particular, a cached FLAT operation
+// that previously routed to LDS must not report that old route before execution.
+class MemoryReuseObserver final : public rocjitsu::ExecutionPlugin {
+public:
+  explicit MemoryReuseObserver(
+      rocjitsu::plugins::InstructionFamily family = rocjitsu::plugins::InstructionFamily::Global)
+      : ExecutionPlugin("memory_reuse"), family_(family) {}
+
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const rocjitsu::Instruction &inst,
+                                        amdgpu::Wavefront &) override {
+    if (!inst.is_memory_op())
+      return;
+    ++before_count;
+    EXPECT_EQ(inst.data(), nullptr);
+    EXPECT_EQ(rocjitsu::plugins::classify_instruction(inst), family_);
+  }
+
+  void onAmdgpuAfterExecuteInstruction(uint64_t, const rocjitsu::Instruction &inst,
+                                       amdgpu::Wavefront &) override {
+    if (inst.is_memory_op()) {
+      instructions.push_back(&inst);
+      prepared_states.push_back(inst.data());
+    }
+  }
+
+  bool observes_memory_routing() const override { return true; }
+
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) override {
+    routes.push_back(access.route);
+  }
+
+  unsigned before_count = 0;
+  std::vector<const rocjitsu::Instruction *> instructions;
+  std::vector<const rocjitsu::DynamicInstState *> prepared_states;
+  std::vector<amdgpu::MemoryRoute> routes;
+
+private:
+  rocjitsu::plugins::InstructionFamily family_;
+};
+
+TEST(DecodedInstructionCacheCuTest, ScalarMemoryReusesDecodeAndStateWithCurrentAddress) {
+  CuFixture fixture("decoded_scalar_memory", 2);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  auto decoder = std::make_unique<CountingDecoder>();
+  CountingDecoder *counter = decoder.get();
+  fixture.cu()->replace_decoder_for_test(std::move(decoder));
+  auto plugins = std::make_shared<rocjitsu::ExecutionPluginGroup>(rocjitsu::PluginSinkConfig{});
+  auto observer = std::make_unique<MemoryReuseObserver>();
+  MemoryReuseObserver *observed = observer.get();
+  plugins->add(std::move(observer));
+  fixture.cu()->set_plugin_group(plugins);
+  const std::array<uint32_t, 2> load =
+      cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sbase = 0, .sdata = 4, .imm = 1});
+  fixture.write_program(load);
+  const std::array<amdgpu::Wavefront *, 2> waves{fixture.launch(1, 0), fixture.launch(1, 1)};
+  ASSERT_NE(waves[0], nullptr);
+  ASSERT_NE(waves[1], nullptr);
+  ASSERT_NE(waves[0]->sgpr_alloc().base, waves[1]->sgpr_alloc().base);
+
+  for (uint32_t pass = 0; pass < 6; ++pass) {
+    for (uint32_t index = 0; index < waves.size(); ++index) {
+      amdgpu::Wavefront &wave = *waves[index];
+      const uint64_t address = 0x400000 + pass * 256 + index * 64;
+      fixture.memory().write32(address, 0x12340000 + pass * 2 + index);
+      fixture.cu()->write_sgpr(wave.sgpr_alloc().base, static_cast<uint32_t>(address));
+      fixture.cu()->write_sgpr(wave.sgpr_alloc().base + 1, 0);
+      fixture.cu()->write_sgpr(wave.sgpr_alloc().base + 4, 0xdeadbeef);
+      wave.pc = kCodeBase;
+    }
+    fixture.cu()->step();
+    for (uint32_t index = 0; index < waves.size(); ++index) {
+      const amdgpu::Wavefront &wave = *waves[index];
+      ASSERT_EQ(wave.pc, kCodeBase + 8);
+      EXPECT_EQ(fixture.cu()->read_sgpr(wave.sgpr_alloc().base + 4), 0x12340000 + pass * 2 + index);
+      EXPECT_EQ(wave.wait_counters().lgkmcnt, 0u);
+    }
+  }
+  EXPECT_EQ(counter->calls, 1u);
+  EXPECT_EQ(observed->before_count, 12u);
+  ASSERT_EQ(observed->prepared_states.size(), 12u);
+  ASSERT_NE(observed->prepared_states.front(), nullptr);
+  for (size_t issue = 1; issue < observed->prepared_states.size(); ++issue) {
+    EXPECT_EQ(observed->instructions[issue], observed->instructions.front());
+    EXPECT_EQ(observed->prepared_states[issue], observed->prepared_states.front());
+  }
+}
+
+TEST(DecodedInstructionCacheCuTest, FlatMemoryReusesCurrentExecDataAndRoute) {
+  CuFixture fixture("decoded_flat_memory");
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  auto decoder = std::make_unique<CountingDecoder>();
+  CountingDecoder *counter = decoder.get();
+  fixture.cu()->replace_decoder_for_test(std::move(decoder));
+  auto plugins = std::make_shared<rocjitsu::ExecutionPluginGroup>(rocjitsu::PluginSinkConfig{});
+  auto observer = std::make_unique<MemoryReuseObserver>();
+  MemoryReuseObserver *observed = observer.get();
+  plugins->add(std::move(observer));
+  fixture.cu()->set_plugin_group(plugins);
+  constexpr uint64_t kSharedBase = 0x0001'0000'0000'0000ULL;
+  fixture.cu()->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  const std::array<uint32_t, 2> store = cdna4::build_flat(
+      cdna4::kFlatStoreDwordFlat, {.seg = 0, .addr = 0, .data = 2, .saddr = 0x7f});
+  const std::array<uint32_t, 2> load =
+      cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.seg = 0, .addr = 0, .saddr = 0x7f, .vdst = 4});
+  const uint32_t wait = cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0})[0];
+  fixture.write_program(std::array<uint32_t, 6>{store[0], store[1], wait, load[0], load[1], wait});
+  amdgpu::Wavefront *wave = fixture.launch(1, 0);
+  ASSERT_NE(wave, nullptr);
+  wave->set_lds_base(128);
+  wave->set_lds_size(4096);
+  constexpr std::array<uint64_t, 5> masks{0x5, 0x3, 0, 0xa, 1};
+  constexpr std::array<bool, 5> local{false, true, true, false, true};
+  for (uint32_t pass = 0; pass < masks.size(); ++pass) {
+    SCOPED_TRACE(pass);
+    wave->set_exec(masks[pass]);
+    for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+      const uint32_t offset = pass * 256 + lane * 4;
+      const uint64_t address = (local[pass] ? kSharedBase : 0x400000) + offset;
+      fixture.cu()->write_vgpr(wave->vgpr_alloc().base, lane, static_cast<uint32_t>(address));
+      fixture.cu()->write_vgpr(wave->vgpr_alloc().base + 1, lane,
+                               static_cast<uint32_t>(address >> 32));
+      fixture.cu()->write_vgpr(wave->vgpr_alloc().base + 2, lane, 1000 * pass + lane);
+      fixture.cu()->write_vgpr(wave->vgpr_alloc().base + 4, lane, 0xdeadbeef);
+      if (local[pass])
+        wave->lds().write32(wave->lds_base() + offset, 0xcccccccc);
+      else
+        fixture.memory().write32(address, 0xcccccccc);
+    }
+    // A replay of the preceding store during EXEC-zero would overwrite these
+    // sentinels, even though this issue's addresses have all changed.
+    if (masks[pass] == 0)
+      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+        wave->lds().write32(wave->lds_base() + (pass - 1) * 256 + lane * 4, 0xabababab);
+    wave->pc = kCodeBase;
+    fixture.cu()->step();
+    ASSERT_EQ(wave->pc, kCodeBase + 8);
+    fixture.cu()->step(); // Retire the store before issuing the dependent load.
+    ASSERT_EQ(wave->pc, kCodeBase + 12);
+    fixture.cu()->step();
+    ASSERT_EQ(wave->pc, kCodeBase + 20);
+    fixture.cu()->step(); // Clear the load's dependency before changing the next issue's inputs.
+    ASSERT_EQ(wave->pc, kCodeBase + 24);
+    for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+      const bool active = (masks[pass] & (uint64_t{1} << lane)) != 0;
+      EXPECT_EQ(fixture.cu()->read_vgpr(wave->vgpr_alloc().base + 4, lane),
+                active ? 1000 * pass + lane : 0xdeadbeef);
+      if (local[pass]) {
+        EXPECT_EQ(wave->lds().read32(wave->lds_base() + pass * 256 + lane * 4),
+                  active ? 1000 * pass + lane : 0xcccccccc);
+        if (masks[pass] == 0) {
+          EXPECT_EQ(wave->lds().read32(wave->lds_base() + (pass - 1) * 256 + lane * 4), 0xabababab);
+        }
+      }
+    }
+    EXPECT_EQ(wave->wait_counters().vmcnt, 0u);
+    EXPECT_EQ(wave->wait_counters().lgkmcnt, 0u);
+    ASSERT_EQ(observed->routes.size(), 2 * (pass + 1));
+    if (masks[pass]) {
+      const amdgpu::MemoryRoute expected =
+          local[pass] ? amdgpu::MemoryRoute::LOCAL : amdgpu::MemoryRoute::GLOBAL;
+      EXPECT_EQ(observed->routes[2 * pass], expected);
+      EXPECT_EQ(observed->routes[2 * pass + 1], expected);
+    }
+  }
+  EXPECT_EQ(counter->calls, 4u); // Store, load, and the two distinct fetched wait windows.
+  EXPECT_EQ(observed->before_count, 10u);
+  ASSERT_EQ(observed->prepared_states.size(), 10u);
+  for (size_t issue = 2; issue < observed->prepared_states.size(); ++issue) {
+    EXPECT_EQ(observed->instructions[issue], observed->instructions[issue % 2]);
+    EXPECT_EQ(observed->prepared_states[issue], observed->prepared_states[issue % 2]);
+  }
+}
+
+TEST(DecodedInstructionCacheCuTest, MaskedLdsDirectLoadPreservesWarmDecodeAndState) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  CuFixture fixture("decoded_lds_direct", 1, false, arch);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  auto decoder = std::make_unique<CountingDecoder>(arch);
+  CountingDecoder *counter = decoder.get();
+  fixture.cu()->replace_decoder_for_test(std::move(decoder));
+  auto plugins = std::make_shared<rocjitsu::ExecutionPluginGroup>(rocjitsu::PluginSinkConfig{});
+  auto observer = std::make_unique<MemoryReuseObserver>(rocjitsu::plugins::InstructionFamily::Lds);
+  MemoryReuseObserver *observed = observer.get();
+  plugins->add(std::move(observer));
+  fixture.cu()->set_plugin_group(plugins);
+  fixture.write_program(
+      rocjitsu::rdna3::build_ldsdir(rocjitsu::rdna3::kLdsDirectLoadLdsdir, {.vdst = 4}));
+  auto *wave = fixture.launch(1, 0);
+  ASSERT_NE(wave, nullptr);
+  wave->set_lds_base(128);
+  wave->set_lds_size(4096);
+  constexpr std::array<uint64_t, 4> masks{1, 1, 0, 1};
+  size_t expected_routes = 0;
+  for (uint32_t pass = 0; pass < masks.size(); ++pass) {
+    SCOPED_TRACE(pass);
+    const uint32_t offset = pass * 4;
+    const uint32_t value = 100 + pass;
+    wave->set_exec(masks[pass]);
+    wave->set_m0((2u << 16) | offset);
+    wave->lds().write32(wave->lds_base() + offset, value);
+    for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+      fixture.cu()->write_vgpr(wave->vgpr_alloc().base + 4, lane, 0xdeadbeef);
+    wave->pc = kCodeBase;
+    fixture.cu()->step();
+    EXPECT_EQ(wave->pc, kCodeBase + 4);
+    EXPECT_EQ(counter->calls, 1u);
+    for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+      EXPECT_EQ(fixture.cu()->read_vgpr(wave->vgpr_alloc().base + 4, lane),
+                masks[pass] && lane < 4 ? value : 0xdeadbeef);
+    EXPECT_EQ(wave->wait_counters().expcnt, 0u);
+    expected_routes += masks[pass] != 0;
+    EXPECT_EQ(observed->routes.size(), expected_routes);
+  }
+  EXPECT_EQ(observed->before_count, 4u);
+  ASSERT_EQ(observed->prepared_states.size(), 4u);
+  ASSERT_NE(observed->prepared_states[0], nullptr);
+  EXPECT_EQ(observed->prepared_states[1], observed->prepared_states[0]);
+  EXPECT_EQ(observed->prepared_states[2], nullptr);
+  EXPECT_EQ(observed->prepared_states[3], observed->prepared_states[0]);
+  for (const auto *instruction : observed->instructions)
+    EXPECT_EQ(instruction, observed->instructions[0]);
+  for (const auto route : observed->routes)
+    EXPECT_EQ(route, amdgpu::MemoryRoute::LOCAL);
+}
+
 TEST(DecodedInstructionCacheCuTest, IdenticalEncodingsAtDifferentPcsUseCurrentBranchPc) {
   CuFixture fixture("decoded_relocated_loop");
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -1177,7 +1408,7 @@ TEST(DecodedInstructionCacheTest, AddressSpacesAndClearCauseMisses) {
   EXPECT_EQ(decoder.calls, 4u);
 }
 
-TEST(DecodedInstructionCacheTest, DynamicStateIsNotReusedAndPoolLifetimeIsIndependent) {
+TEST(DecodedInstructionCacheTest, ActiveDynamicStateExcludesReuseAndPoolLifetimeIsIndependent) {
   amdgpu::DecodedInstructionCache cache;
   std::array<uint32_t, amdgpu::DecodedInstructionCache::kNumWords> words{kSNop};
   {
@@ -1200,6 +1431,249 @@ TEST(DecodedInstructionCacheTest, DynamicStateIsNotReusedAndPoolLifetimeIsIndepe
   // The decoder and its active allocator pool are gone before the cached
   // instruction is destroyed. Cache entries must have independent storage.
   cache.clear();
+}
+
+TEST(DecodedInstructionCacheTest, RetiredVectorStateResetsSemanticsAndReusesClearedBuffers) {
+  rocjitsu::Instruction instruction("state_probe", nullptr);
+  std::unique_ptr<amdgpu::VectorMemState> state =
+      instruction.acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  amdgpu::VectorMemState *identity = state.get();
+  state->is_load = false;
+  state->atomic_op = amdgpu::AtomicOp::ADD;
+  state->exec_mask = 7;
+  state->lane_mask = 3;
+  state->per_lane_addr.fill(0xabcdef);
+  state->flat_local_lane_mask = 1;
+  state->flat_local_allocation_end = 1024;
+  state->scratch_swizzle = true;
+  state->ds2_active = true;
+  state->response_data.assign(512, 0xaa);
+  state->store_data.assign(256, 0xbb);
+  state->ds2_response_data.assign(128, 0xcc);
+  state->ds2_store_data.assign(64, 0xdd);
+  state->translated.requests.push_back({.address = 0x1234, .data_offset = 16, .size = 4});
+  state->translated.reordered_data.assign(32, 0xee);
+  state->translated.request_index = 1;
+  state->translated.completed_bytes = 4;
+  state->translated.atomic_lane = 3;
+  state->translated.initialized = true;
+  state->translated.atomic_loaded = true;
+  state->element_lane_masks.assign(32, 3);
+  const std::array<const uint8_t *, 5> buffers{
+      state->response_data.data(), state->store_data.data(), state->ds2_response_data.data(),
+      state->ds2_store_data.data(), state->translated.reordered_data.data()};
+  const amdgpu::TranslatedMemoryRequest *requests = state->translated.requests.data();
+  instruction.set_data(std::move(state));
+  instruction.retire_data();
+  EXPECT_EQ(instruction.data(), nullptr);
+  EXPECT_EQ(std::as_const(instruction).data(), nullptr);
+
+  state = instruction.acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  ASSERT_EQ(state.get(), identity);
+  EXPECT_EQ(instruction.data(), nullptr) << "acquisition must not publish partly prepared state";
+  EXPECT_EQ(state->tag(), amdgpu::LOCAL_MEM);
+  EXPECT_EQ(state->wait_counter_type, amdgpu::WaitCounterType::LGKMCNT);
+  EXPECT_TRUE(state->is_load);
+  EXPECT_EQ(state->atomic_op, amdgpu::AtomicOp::NONE);
+  EXPECT_EQ(state->exec_mask, 0u);
+  EXPECT_EQ(state->lane_mask, 0u);
+  EXPECT_TRUE(
+      std::ranges::all_of(state->per_lane_addr, [](uint64_t address) { return address == 0; }));
+  EXPECT_EQ(state->flat_local_lane_mask, 0u);
+  EXPECT_FALSE(state->flat_local_allocation_end);
+  EXPECT_FALSE(state->scratch_swizzle);
+  EXPECT_FALSE(state->ds2_active);
+  EXPECT_TRUE(state->element_lane_masks.empty());
+  EXPECT_EQ(state->translated.request_index, 0u);
+  EXPECT_EQ(state->translated.completed_bytes, 0u);
+  EXPECT_EQ(state->translated.atomic_lane, 0u);
+  EXPECT_FALSE(state->translated.initialized);
+  EXPECT_FALSE(state->translated.atomic_loaded);
+  const std::array<std::vector<uint8_t> *, 5> reused{
+      &state->response_data, &state->store_data, &state->ds2_response_data, &state->ds2_store_data,
+      &state->translated.reordered_data};
+  for (size_t buffer = 0; buffer < reused.size(); ++buffer) {
+    EXPECT_TRUE(reused[buffer]->empty());
+    EXPECT_EQ(reused[buffer]->data(), buffers[buffer]);
+    reused[buffer]->resize(32);
+    EXPECT_TRUE(std::ranges::all_of(*reused[buffer], [](uint8_t byte) { return byte == 0; }))
+        << "resize must not expose payload bytes from the preceding issue";
+  }
+  EXPECT_TRUE(state->translated.requests.empty());
+  EXPECT_EQ(state->translated.requests.data(), requests);
+  instruction.set_data(std::move(state));
+  EXPECT_EQ(instruction.data(), identity);
+}
+
+TEST(DecodedInstructionCacheTest, RetiredScalarStateRestoresLoadAndTranslationDefaults) {
+  rocjitsu::Instruction instruction("state_probe", nullptr);
+  std::unique_ptr<amdgpu::ScalarMemState> state =
+      instruction.acquire_data<amdgpu::ScalarMemState>();
+  amdgpu::ScalarMemState *identity = state.get();
+  state->addr = 0x1234;
+  state->is_load = false;
+  state->elem_size = 8;
+  state->num_dwords = 2;
+  state->load_dword_mask = 1;
+  state->response_data[0] = 0x12345678;
+  state->store_data[15] = 0x87654321;
+  state->translated.requests.push_back({.address = 0x1234, .size = 8});
+  state->translated.completed_bytes = 4;
+  state->translated.initialized = true;
+  const amdgpu::TranslatedMemoryRequest *requests = state->translated.requests.data();
+  instruction.set_data(std::move(state));
+  instruction.retire_data();
+  state = instruction.acquire_data<amdgpu::ScalarMemState>();
+  ASSERT_EQ(state.get(), identity);
+  EXPECT_EQ(state->tag(), amdgpu::SCALAR_MEM);
+  EXPECT_EQ(state->addr, 0u);
+  EXPECT_TRUE(state->is_load);
+  EXPECT_EQ(state->elem_size, 4u);
+  EXPECT_EQ(state->num_dwords, 0u);
+  EXPECT_EQ(state->load_dword_mask, 0xffffu);
+  EXPECT_TRUE(std::ranges::all_of(state->response_data, [](uint32_t word) { return word == 0; }));
+  EXPECT_TRUE(std::ranges::all_of(state->store_data, [](uint32_t word) { return word == 0; }));
+  EXPECT_TRUE(state->translated.requests.empty());
+  EXPECT_EQ(state->translated.requests.data(), requests);
+  EXPECT_EQ(state->translated.completed_bytes, 0u);
+  EXPECT_FALSE(state->translated.initialized);
+}
+
+TEST(DecodedInstructionCacheTest, AbandonedMemoryPreparationDoesNotPublishOrRetainState) {
+  rocjitsu::Instruction instruction("state_probe", nullptr);
+  std::unique_ptr<amdgpu::ScalarMemState> completed =
+      instruction.acquire_data<amdgpu::ScalarMemState>();
+  amdgpu::ScalarMemState *identity = completed.get();
+  completed->addr = 0x1234;
+  completed->num_dwords = 1;
+  completed->response_data[0] = 0xdeadbeef;
+  instruction.set_data(std::move(completed));
+  instruction.retire_data();
+
+  GpuVm gpu_vm;
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  auto owner = std::make_shared<int>(1);
+  const std::weak_ptr<int> lifetime = owner;
+  const amdgpu::AddressSpaceHandle handle = gpu_vm.register_address_space(
+      7, backing, backing, [owner](uint64_t, amdgpu::VmAccessKind) { (void)owner; });
+  ASSERT_TRUE(handle);
+  {
+    std::unique_ptr<amdgpu::ScalarMemState> preparation =
+        instruction.acquire_data<amdgpu::ScalarMemState>();
+    ASSERT_EQ(preparation.get(), identity);
+    EXPECT_EQ(preparation->addr, 0u);
+    EXPECT_EQ(preparation->response_data[0], 0u);
+    preparation->translated.access = gpu_vm.snapshot_pinned(handle);
+    ASSERT_TRUE(preparation->translated.access);
+    preparation->addr = 0x5678;
+    owner.reset();
+    ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
+    ASSERT_FALSE(lifetime.expired());
+    EXPECT_EQ(instruction.data(), nullptr);
+    // Preparation can return before set_data(). The local unique owner must
+    // then release its resources without leaving an active or retained alias.
+  }
+  EXPECT_TRUE(lifetime.expired());
+  EXPECT_EQ(instruction.data(), nullptr);
+  instruction.retire_data();
+  std::unique_ptr<amdgpu::ScalarMemState> retry =
+      instruction.acquire_data<amdgpu::ScalarMemState>();
+  EXPECT_EQ(retry->addr, 0u);
+  EXPECT_EQ(retry->num_dwords, 0u);
+  EXPECT_EQ(retry->response_data[0], 0u);
+  EXPECT_FALSE(retry->translated.access);
+  instruction.set_data(std::move(retry));
+  EXPECT_NE(instruction.data(), nullptr);
+}
+
+TEST(DecodedInstructionCacheTest, RetirementReleasesVmAndImageOwnersBeforeAnotherIssue) {
+  GpuVm gpu_vm;
+  auto backing = std::make_shared<ExecutableAddressSpace>(0);
+  auto memory_owner = std::make_shared<int>(1);
+  auto image_owner = std::make_shared<int>(2);
+  const std::weak_ptr<int> memory_lifetime = memory_owner;
+  const std::weak_ptr<int> image_lifetime = image_owner;
+  const amdgpu::AddressSpaceHandle memory_handle = gpu_vm.register_address_space(
+      7, backing, backing, [memory_owner](uint64_t, amdgpu::VmAccessKind) { (void)memory_owner; });
+  const amdgpu::AddressSpaceHandle image_handle = gpu_vm.register_address_space(
+      8, backing, backing, [image_owner](uint64_t, amdgpu::VmAccessKind) { (void)image_owner; });
+  ASSERT_TRUE(memory_handle);
+  ASSERT_TRUE(image_handle);
+  rocjitsu::Instruction instruction("state_probe", nullptr);
+  std::unique_ptr<amdgpu::VectorMemState> state =
+      instruction.acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  state->translated.access = gpu_vm.snapshot_pinned(memory_handle);
+  ASSERT_TRUE(state->translated.access);
+  state->image_sample = std::make_unique<amdgpu::ImageSampleAccess>();
+  state->image_sample->taps.resize(1);
+  state->image_sample->taps[0].translated.access = gpu_vm.snapshot_pinned(image_handle);
+  ASSERT_TRUE(state->image_sample->taps[0].translated.access);
+  instruction.set_data(std::move(state));
+  memory_owner.reset();
+  image_owner.reset();
+  ASSERT_TRUE(gpu_vm.unregister_address_space(memory_handle));
+  ASSERT_TRUE(gpu_vm.unregister_address_space(image_handle));
+  ASSERT_FALSE(memory_lifetime.expired());
+  ASSERT_FALSE(image_lifetime.expired());
+
+  instruction.retire_data();
+  EXPECT_EQ(instruction.data(), nullptr);
+  EXPECT_TRUE(memory_lifetime.expired());
+  EXPECT_TRUE(image_lifetime.expired());
+}
+
+TEST(DecodedInstructionCacheTest, RetirementClearsCompletedTransferToken) {
+  rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<rocjitsu::test::AsyncVmMemory>(*sim.owner, 64, 0, 64);
+  memory->backing->read_freshness = std::make_shared<rocjitsu::CanonicalLineFreshness>();
+  memory->backing->read_backing_id = 17;
+  GpuVm vm;
+  const auto access = vm.snapshot(vm.register_translated(7, memory, memory));
+  ASSERT_TRUE(access);
+  rocjitsu::Instruction instruction("state_probe", nullptr);
+  auto state = instruction.acquire_data<amdgpu::ScalarMemState>();
+  auto *retained = state.get();
+  state->translated.access = access;
+  std::array<std::byte, 4> bytes{};
+  size_t completed = 0;
+  EXPECT_EQ(access->read(0, bytes, completed, state->translated.transfer_token),
+            amdgpu::VmAccessOutcome::Unavailable);
+  (void)sim.engine.step();
+  ASSERT_EQ(access->read(0, bytes, completed, state->translated.transfer_token),
+            amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(completed, bytes.size());
+  ASSERT_EQ(memory->backing->read_effects, 1u);
+  EXPECT_FALSE(state->translated.transfer_token.pending());
+  instruction.set_data(std::move(state));
+
+  instruction.retire_data();
+
+  EXPECT_EQ(instruction.data(), nullptr);
+  EXPECT_FALSE(retained->translated.transfer_token.take_completed_read());
+  EXPECT_FALSE(retained->translated.access);
+}
+
+TEST(DecodedInstructionCacheTest, RetirementDropsOversizedMemoryBuffers) {
+  rocjitsu::Instruction instruction("state_probe", nullptr);
+  std::unique_ptr<amdgpu::VectorMemState> state =
+      instruction.acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  constexpr size_t kOversizedBytes = amdgpu::kMaxRetainedMemoryBufferBytes + 1;
+  state->response_data.resize(kOversizedBytes);
+  state->store_data.resize(kOversizedBytes);
+  state->ds2_response_data.resize(kOversizedBytes);
+  state->ds2_store_data.resize(kOversizedBytes);
+  state->translated.reordered_data.resize(kOversizedBytes);
+  state->translated.requests.resize(
+      amdgpu::kMaxRetainedMemoryBufferBytes / sizeof(amdgpu::TranslatedMemoryRequest) + 1);
+  instruction.set_data(std::move(state));
+  instruction.retire_data();
+  state = instruction.acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  EXPECT_EQ(state->response_data.capacity(), 0u);
+  EXPECT_EQ(state->store_data.capacity(), 0u);
+  EXPECT_EQ(state->ds2_response_data.capacity(), 0u);
+  EXPECT_EQ(state->ds2_store_data.capacity(), 0u);
+  EXPECT_EQ(state->translated.reordered_data.capacity(), 0u);
+  EXPECT_EQ(state->translated.requests.capacity(), 0u);
 }
 
 TEST(DecodedInstructionCacheTest, UncachedInstructionsAreHeapBackedWithAnActivePool) {

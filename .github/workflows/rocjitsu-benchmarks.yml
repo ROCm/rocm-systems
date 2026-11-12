@@ -8,8 +8,6 @@ on:
       - "emulation/rocjitsu/**"
       - ".github/workflows/rocjitsu-benchmarks.yml"
   pull_request:
-    branches:
-      - "develop"
     types:
       - labeled
       - synchronize
@@ -28,7 +26,7 @@ on:
         required: false
         type: string
       pull_request_number:
-        description: "Optional open, same-repository PR from the selected side branch to develop"
+        description: "Optional open, same-repository PR from the selected side branch, including stacked PRs"
         required: false
         type: string
       publish_results:
@@ -192,18 +190,23 @@ jobs:
             PR_JSON="$(gh api \
               "repos/${GITHUB_REPOSITORY}/pulls/${REQUESTED_PULL_REQUEST}")"
             PR_STATE="$(jq -r '.state' <<< "${PR_JSON}")"
-            PR_BASE="$(jq -r '.base.ref' <<< "${PR_JSON}")"
+            PR_BASE="$(jq -r '.base.ref // ""' <<< "${PR_JSON}")"
+            PR_BASE_REPOSITORY="$(jq -r '.base.repo.full_name // ""' <<< "${PR_JSON}")"
             PR_HEAD_REPOSITORY="$(jq -r '.head.repo.full_name // ""' <<< "${PR_JSON}")"
             PR_HEAD_BRANCH="$(jq -r '.head.ref' <<< "${PR_JSON}")"
             PR_HEAD_SHA="$(jq -r '.head.sha' <<< "${PR_JSON}")"
             PR_URL="$(jq -r '.html_url' <<< "${PR_JSON}")"
             if [[ "${PR_STATE}" != open \
-                  || "${PR_BASE}" != "${BASE_BRANCH}" \
+                  || "${PR_BASE_REPOSITORY}" != "${GITHUB_REPOSITORY}" \
                   || "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" \
                   || "${PR_HEAD_BRANCH}" != "${BENCHMARK_BRANCH}" \
                   || ! "${PR_HEAD_SHA}" =~ ^[0-9a-f]{40}$ \
                   || "${PR_URL}" != "https://github.com/${GITHUB_REPOSITORY}/pull/${REQUESTED_PULL_REQUEST}" ]]; then
-              fail "PR #${REQUESTED_PULL_REQUEST} must be an open same-repository ${BENCHMARK_BRANCH} PR to develop."
+              fail "PR #${REQUESTED_PULL_REQUEST} must be an open same-repository ${BENCHMARK_BRANCH} PR."
+            fi
+            if [[ -z "${PR_BASE}" || "${PR_BASE}" == -* ]] \
+               || ! git check-ref-format "refs/heads/${PR_BASE}"; then
+              fail "The PR base must be a valid branch name."
             fi
             PR_MERGE_BASE="$(gh api \
               "repos/${GITHUB_REPOSITORY}/compare/${BENCHMARK_SHA}...${PR_HEAD_SHA}" \

@@ -327,6 +327,236 @@ public:
   }
 };
 
+class TrackedMemoryInstruction final : public Instruction {
+public:
+  explicit TrackedMemoryInstruction(uint32_t &destructions)
+      : Instruction("tracked_memory", nullptr), destructions_(destructions) {
+    flags_ |= MEMORY_OP;
+  }
+  ~TrackedMemoryInstruction() override { ++destructions_; }
+
+private:
+  uint32_t &destructions_;
+};
+
+class OwnershipTestPipeline final : public amdgpu::MemoryPipeline {
+public:
+  OwnershipTestPipeline() : MemoryPipeline(amdgpu::WaitCounterType::VMCNT) {}
+
+  amdgpu::VmAccessOutcome access = amdgpu::VmAccessOutcome::Complete;
+  amdgpu::MemoryAccessCompletion completion = amdgpu::MemoryAccessCompletion::Complete;
+  bool complete_inline = false;
+  uint32_t access_calls = 0;
+  uint32_t writeback_calls = 0;
+  uint8_t counters_at_writeback = 0;
+  std::function<void(amdgpu::Wavefront &)> before_completion;
+
+  void complete_pending() {
+    ASSERT_TRUE(pending_completion_);
+    amdgpu::MemoryAccessDeferredCompletion completion = std::move(pending_completion_);
+    completion();
+  }
+
+protected:
+  amdgpu::VmAccessOutcome initiate_access(Instruction &, amdgpu::Wavefront &) override {
+    ++access_calls;
+    return access;
+  }
+
+  amdgpu::MemoryAccessCompletion
+  complete_access(Instruction &, amdgpu::Wavefront &wave,
+                  amdgpu::MemoryAccessDeferredCompletion deferred_completion) override {
+    ++writeback_calls;
+    counters_at_writeback = wave.wait_counters().vmcnt;
+    if (before_completion)
+      before_completion(wave);
+    if (completion == amdgpu::MemoryAccessCompletion::Deferred) {
+      if (complete_inline)
+        deferred_completion();
+      else
+        pending_completion_ = std::move(deferred_completion);
+    }
+    return completion;
+  }
+
+private:
+  amdgpu::MemoryAccessDeferredCompletion pending_completion_;
+};
+
+TEST(GpuVmPipeline, SynchronousCompletionReturnsOwnerAfterWritebackAndCounterRelease) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  uint32_t destructions = 0;
+  std::unique_ptr<Instruction> instruction =
+      std::make_unique<TrackedMemoryInstruction>(destructions);
+  Instruction *original = instruction.get();
+  OwnershipTestPipeline pipeline;
+  constexpr uint32_t kDestination = 10;
+  const uint32_t destination = context.wf->sgpr_alloc().base + kDestination;
+  pipeline.before_completion = [&](amdgpu::Wavefront &wave) {
+    EXPECT_EQ(instruction, nullptr);
+    context.cu->write_sgpr(destination, pipeline.writeback_calls);
+    wave.set_state(amdgpu::WfState::VM_RETRY);
+  };
+
+  for (uint32_t issue = 1; issue <= 2; ++issue) {
+    ASSERT_EQ(pipeline.issue_deferred(instruction, *context.wf), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(instruction.get(), original);
+    EXPECT_EQ(context.cu->read_sgpr_storage(destination), issue);
+    EXPECT_EQ(pipeline.counters_at_writeback, 1u);
+    EXPECT_TRUE(context.wf->wait_counters().empty());
+    EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+    EXPECT_EQ(destructions, 0u);
+  }
+  instruction.reset();
+  EXPECT_EQ(destructions, 1u);
+}
+
+TEST(GpuVmPipeline, FailedIssueAndWritebackDestroyCallerOwner) {
+  for (amdgpu::VmAccessOutcome access :
+       {amdgpu::VmAccessOutcome::Faulted, amdgpu::VmAccessOutcome::Malformed,
+        amdgpu::VmAccessOutcome::Complete}) {
+    SCOPED_TRACE(static_cast<unsigned>(access));
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    uint32_t destructions = 0;
+    std::unique_ptr<Instruction> instruction =
+        std::make_unique<TrackedMemoryInstruction>(destructions);
+    OwnershipTestPipeline pipeline;
+    pipeline.access = access;
+    pipeline.completion = amdgpu::MemoryAccessCompletion::Failed;
+
+    const amdgpu::VmAccessOutcome expected =
+        access == amdgpu::VmAccessOutcome::Complete ? amdgpu::VmAccessOutcome::Malformed : access;
+    EXPECT_EQ(pipeline.issue_deferred(instruction, *context.wf), expected);
+    EXPECT_EQ(instruction, nullptr);
+    EXPECT_EQ(destructions, 1u);
+    EXPECT_EQ(pipeline.writeback_calls, access == amdgpu::VmAccessOutcome::Complete ? 1u : 0u);
+    EXPECT_TRUE(context.wf->wait_counters().empty());
+    EXPECT_TRUE(pipeline.empty());
+  }
+}
+
+TEST(GpuVmPipeline, DeferredCompletionConsumesOwnerIncludingInlineCallback) {
+  for (bool complete_inline : {false, true}) {
+    SCOPED_TRACE(complete_inline);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    uint32_t destructions = 0;
+    std::unique_ptr<Instruction> instruction =
+        std::make_unique<TrackedMemoryInstruction>(destructions);
+    OwnershipTestPipeline pipeline;
+    pipeline.completion = amdgpu::MemoryAccessCompletion::Deferred;
+    pipeline.complete_inline = complete_inline;
+
+    EXPECT_EQ(pipeline.issue_deferred(instruction, *context.wf), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(instruction, nullptr);
+    EXPECT_EQ(pipeline.counters_at_writeback, 1u);
+    if (!complete_inline) {
+      EXPECT_EQ(destructions, 0u);
+      EXPECT_EQ(context.wf->wait_counters().vmcnt, 1u);
+      pipeline.complete_pending();
+    }
+    EXPECT_EQ(destructions, 1u);
+    EXPECT_TRUE(context.wf->wait_counters().empty());
+    EXPECT_TRUE(pipeline.empty());
+  }
+}
+
+TEST(GpuVmPipeline, UnavailableIssueConsumesOwnerThroughRetryOrCancellation) {
+  for (bool cancel : {false, true}) {
+    SCOPED_TRACE(cancel);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    uint32_t destructions = 0;
+    std::unique_ptr<Instruction> instruction =
+        std::make_unique<TrackedMemoryInstruction>(destructions);
+    OwnershipTestPipeline pipeline;
+    pipeline.access = amdgpu::VmAccessOutcome::Unavailable;
+
+    EXPECT_EQ(pipeline.issue_deferred(instruction, *context.wf), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(instruction, nullptr);
+    EXPECT_EQ(destructions, 0u);
+    EXPECT_EQ(context.wf->wait_counters().vmcnt, 1u);
+    EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+    EXPECT_FALSE(pipeline.empty());
+    if (cancel) {
+      pipeline.cancel(*context.wf);
+      context.cu->free_wavefront_resources(*context.wf);
+    } else {
+      pipeline.access = amdgpu::VmAccessOutcome::Complete;
+      pipeline.tick();
+      EXPECT_EQ(pipeline.counters_at_writeback, 1u);
+      EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+    }
+    EXPECT_TRUE(pipeline.empty());
+    EXPECT_TRUE(context.wf->wait_counters().empty());
+    EXPECT_EQ(destructions, 1u);
+  }
+}
+
+TEST(GpuVmPipeline, StaleCompletionDestroysOwnerWithoutTouchingReplacementWave) {
+  for (bool deferred : {false, true}) {
+    SCOPED_TRACE(deferred);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    uint32_t destructions = 0;
+    std::unique_ptr<Instruction> instruction =
+        std::make_unique<TrackedMemoryInstruction>(destructions);
+    OwnershipTestPipeline pipeline;
+    pipeline.completion = deferred ? amdgpu::MemoryAccessCompletion::Deferred
+                                   : amdgpu::MemoryAccessCompletion::Complete;
+    const uint64_t old_generation = context.wf->dispatch_generation();
+    pipeline.before_completion = [&](amdgpu::Wavefront &wave) {
+      context.cu->free_wavefront_resources(wave);
+      amdgpu::Wavefront *replacement = context.cu->dispatch_wf(1, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_EQ(replacement, &wave);
+      ASSERT_NE(replacement->dispatch_generation(), old_generation);
+      replacement->wait_counters().vmcnt = 2;
+      replacement->set_state(amdgpu::WfState::VM_RETRY);
+    };
+
+    EXPECT_EQ(pipeline.issue_deferred(instruction, *context.wf), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(instruction, nullptr);
+    if (deferred)
+      pipeline.complete_pending();
+    EXPECT_EQ(destructions, 1u);
+    EXPECT_EQ(context.wf->wait_counters().vmcnt, 2u);
+    EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  }
+}
+
+TEST(GpuVmPipeline, FinalCounterRetirementReturnsCompletedOwnerAfterWaveReset) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  uint32_t destructions = 0;
+  std::unique_ptr<Instruction> instruction =
+      std::make_unique<TrackedMemoryInstruction>(destructions);
+  Instruction *original = instruction.get();
+  OwnershipTestPipeline pipeline;
+  pipeline.before_completion = [](amdgpu::Wavefront &wave) {
+    wave.set_state(amdgpu::WfState::ENDING);
+  };
+  const uint64_t old_generation = context.wf->dispatch_generation();
+
+  EXPECT_EQ(pipeline.issue_deferred(instruction, *context.wf), amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(instruction.get(), original);
+  EXPECT_EQ(destructions, 0u);
+  EXPECT_EQ(context.wf->dispatch_generation(), old_generation);
+  EXPECT_TRUE(context.wf->is_halted());
+  EXPECT_TRUE(context.wf->wait_counters().empty());
+  EXPECT_EQ(context.wf->sgpr_alloc().count, 0u);
+  EXPECT_EQ(context.wf->vgpr_alloc().count, 0u);
+  instruction.reset();
+  EXPECT_EQ(destructions, 1u);
+}
+
 class InstructionVmPlugin final : public ExecutionPlugin {
 public:
   InstructionVmPlugin() : ExecutionPlugin("instruction-vm") {}

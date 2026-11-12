@@ -139,7 +139,7 @@ def test_manual_source_below_compatibility_floor_rejects(tmp_path):
 def side_responses(**pr_changes):
     pr = {
         'state': 'open',
-        'base': {'ref': 'develop'},
+        'base': {'ref': 'develop', 'repo': {'full_name': REPO}},
         'head': {'repo': {'full_name': REPO}, 'ref': 'feature/source', 'sha': 'e' * 40},
         'html_url': f'https://github.com/{REPO}/pull/42',
         **pr_changes,
@@ -156,7 +156,10 @@ def side_responses(**pr_changes):
     }
 
 
-def test_pr_event_measures_frozen_head_not_synthetic_merge_or_later_tip(tmp_path):
+@pytest.mark.parametrize('base_branch', ['develop', 'feature/parent'])
+def test_pr_event_measures_frozen_head_not_synthetic_merge_or_later_tip(
+    tmp_path, base_branch
+):
     result, values, calls = resolve(
         tmp_path,
         event='pull_request',
@@ -166,7 +169,9 @@ def test_pr_event_measures_frozen_head_not_synthetic_merge_or_later_tip(tmp_path
             'number': 42,
             'pull_request': {'head': {'ref': 'feature/source', 'sha': SOURCE}},
         },
-        responses=side_responses(),
+        responses=side_responses(
+            base={'ref': base_branch, 'repo': {'full_name': REPO}}
+        ),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert values == {
@@ -180,9 +185,15 @@ def test_pr_event_measures_frozen_head_not_synthetic_merge_or_later_tip(tmp_path
     assert not any('/git/ref/heads/feature' in call for call in calls)
 
 
-def test_side_source_old_commit_is_valid_pr_metadata(tmp_path):
+@pytest.mark.parametrize('base_branch', ['develop', 'feature/parent'])
+def test_side_source_old_commit_is_valid_pr_metadata(tmp_path, base_branch):
     result, values, calls = resolve(
-        tmp_path, branch='feature/source', pr='42', responses=side_responses()
+        tmp_path,
+        branch='feature/source',
+        pr='42',
+        responses=side_responses(
+            base={'ref': base_branch, 'repo': {'full_name': REPO}}
+        ),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert values == {
@@ -194,13 +205,17 @@ def test_side_source_old_commit_is_valid_pr_metadata(tmp_path):
         'pull_request_url': f'https://github.com/{REPO}/pull/42',
     }
     assert f'repos/{REPO}/compare/{SOURCE}...{"e" * 40}' in calls
+    assert not any('feature%2Fparent' in call for call in calls)
 
 
 @pytest.mark.parametrize(
     'changes',
     [
         {'state': 'closed'},
-        {'base': {'ref': 'release'}},
+        {'base': {'ref': 'develop', 'repo': {'full_name': 'fork/repo'}}},
+        {'base': {'ref': 'develop'}},
+        {'base': {'ref': '', 'repo': {'full_name': REPO}}},
+        {'base': {'ref': 'bad..branch', 'repo': {'full_name': REPO}}},
         {
             'head': {
                 'repo': {'full_name': 'fork/repo'},

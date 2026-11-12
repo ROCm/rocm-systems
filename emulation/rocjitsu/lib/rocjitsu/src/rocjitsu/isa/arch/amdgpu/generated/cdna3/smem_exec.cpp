@@ -30,7 +30,7 @@ void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -49,7 +49,7 @@ void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 2;
   d->elem_size = 4;
@@ -68,7 +68,7 @@ void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 4;
   d->elem_size = 4;
@@ -87,7 +87,7 @@ void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 8u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 8;
   d->elem_size = 4;
@@ -106,7 +106,7 @@ void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 16u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 16;
   d->elem_size = 4;
@@ -125,7 +125,7 @@ void SScratchLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -144,7 +144,7 @@ void SScratchLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 2;
   d->elem_size = 4;
@@ -163,7 +163,7 @@ void SScratchLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 4;
   d->elem_size = 4;
@@ -182,7 +182,7 @@ void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -201,7 +201,7 @@ void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 2;
   d->elem_size = 4;
@@ -220,7 +220,7 @@ void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 4;
   d->elem_size = 4;
@@ -239,7 +239,7 @@ void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 8u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 8;
   d->elem_size = 4;
@@ -258,7 +258,7 @@ void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 16u);
   if (!dst_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = *dst_register;
   d->num_dwords = 16;
   d->elem_size = 4;
@@ -274,7 +274,7 @@ void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->num_dwords = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
@@ -293,7 +293,7 @@ void SStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->num_dwords = 2;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
@@ -312,7 +312,7 @@ void SStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->num_dwords = 4;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
@@ -331,7 +331,7 @@ void SStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SScratchStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->num_dwords = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
@@ -350,7 +350,7 @@ void SScratchStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SScratchStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->num_dwords = 2;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
@@ -369,7 +369,7 @@ void SScratchStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SScratchStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->num_dwords = 4;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
@@ -388,7 +388,7 @@ void SScratchStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->num_dwords = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
@@ -407,7 +407,7 @@ void SBufferStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->num_dwords = 2;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
@@ -426,7 +426,7 @@ void SBufferStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->num_dwords = 4;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
@@ -488,7 +488,7 @@ void SBufferAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -508,7 +508,7 @@ void SBufferAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->dst_register.width = 1;
   d->num_dwords = 1;
@@ -530,7 +530,7 @@ void SBufferAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -550,7 +550,7 @@ void SBufferAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -570,7 +570,7 @@ void SBufferAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -590,7 +590,7 @@ void SBufferAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -610,7 +610,7 @@ void SBufferAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -630,7 +630,7 @@ void SBufferAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -650,7 +650,7 @@ void SBufferAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -670,7 +670,7 @@ void SBufferAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -690,7 +690,7 @@ void SBufferAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -710,7 +710,7 @@ void SBufferAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -730,7 +730,7 @@ void SBufferAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -750,7 +750,7 @@ void SBufferAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -771,7 +771,7 @@ void SBufferAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->dst_register.width = 2;
   d->num_dwords = 2;
@@ -795,7 +795,7 @@ void SBufferAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -816,7 +816,7 @@ void SBufferAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -837,7 +837,7 @@ void SBufferAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -858,7 +858,7 @@ void SBufferAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -879,7 +879,7 @@ void SBufferAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -900,7 +900,7 @@ void SBufferAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -921,7 +921,7 @@ void SBufferAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -942,7 +942,7 @@ void SBufferAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -963,7 +963,7 @@ void SBufferAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -984,7 +984,7 @@ void SBufferAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1005,7 +1005,7 @@ void SBufferAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1026,7 +1026,7 @@ void SAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -1046,7 +1046,7 @@ void SAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->dst_register.width = 1;
   d->num_dwords = 1;
@@ -1068,7 +1068,7 @@ void SAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -1088,7 +1088,7 @@ void SAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -1108,7 +1108,7 @@ void SAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -1128,7 +1128,7 @@ void SAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -1148,7 +1148,7 @@ void SAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -1168,7 +1168,7 @@ void SAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -1188,7 +1188,7 @@ void SAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -1208,7 +1208,7 @@ void SAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -1228,7 +1228,7 @@ void SAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -1248,7 +1248,7 @@ void SAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -1268,7 +1268,7 @@ void SAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 1;
   d->elem_size = 4;
@@ -1288,7 +1288,7 @@ void SAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1309,7 +1309,7 @@ void SAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->dst_register.width = 2;
   d->num_dwords = 2;
@@ -1333,7 +1333,7 @@ void SAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1354,7 +1354,7 @@ void SAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1375,7 +1375,7 @@ void SAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1396,7 +1396,7 @@ void SAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1417,7 +1417,7 @@ void SAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1438,7 +1438,7 @@ void SAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1459,7 +1459,7 @@ void SAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1480,7 +1480,7 @@ void SAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1501,7 +1501,7 @@ void SAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1522,7 +1522,7 @@ void SAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
@@ -1543,7 +1543,7 @@ void SAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!data_register)
     return;
-  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
   d->dst_register = amdgpu::scalar_write_range(wf, *data_register);
   d->num_dwords = 2;
   d->elem_size = 8;
