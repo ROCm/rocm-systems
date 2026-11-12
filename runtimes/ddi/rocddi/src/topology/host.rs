@@ -5,7 +5,7 @@
 //!
 //! A host domain describes OS topology, not an activated device or a promise
 //! that the calling process may execute on its CPUs. Host observations come
-//! from independent OS files and are not one atomic hardware generation.
+//! from independent OS sources and are not one atomic hardware generation.
 //! The source-qualified topology graph projects these observations into host
 //! nodes and caches while retaining this richer CPU and cache-sharing view.
 
@@ -20,17 +20,41 @@ mod linux;
 /// CPU identity reported by the host OS.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CpuInfo {
-    /// First reported processor model name.
-    pub name: String,
+    /// First reported processor model name, when available.
+    pub name: Option<String>,
     /// Number of processor entries reported by the OS source.
     pub compute_units: u32,
 }
 
-/// One explicit association between Linux's logical CPU ID and its APIC ID.
+/// Source-qualified logical CPU identity. Linux uses its logical index;
+/// Windows uses a processor group and an index within that group. Neither is
+/// an APIC ID or a Windows CPU-set scheduling ID.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct CpuId(u64);
+
+impl CpuId {
+    /// Constructs a Linux logical CPU identity.
+    #[must_use]
+    pub const fn linux(index: u32) -> Self {
+        Self(index as u64)
+    }
+
+    /// Constructs a Windows group/index identity; a group has at most 64 CPUs.
+    #[must_use]
+    pub const fn windows(group: u16, index: u8) -> Option<Self> {
+        if index < 64 {
+            Some(Self((1_u64 << 63) | ((group as u64) << 6) | index as u64))
+        } else {
+            None
+        }
+    }
+}
+
+/// One explicit association between a logical CPU and its hardware APIC ID.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CpuApicId {
     /// Logical CPU ID used by sysfs CPU lists and cache directories.
-    pub logical_cpu: u32,
+    pub logical_cpu: CpuId,
     /// APIC ID used by KFD's `cpu_core_id_base` topology property.
     pub apic_id: u32,
 }
@@ -38,22 +62,22 @@ pub struct CpuApicId {
 /// Sorted, nonoverlapping CPU ID ranges without expanding large sysfs ranges.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CpuSet {
-    pub(crate) ranges: Vec<(u32, u32)>,
+    pub(crate) ranges: Vec<(u64, u64)>,
 }
 
 impl CpuSet {
     /// Returns the lowest CPU ID, if the set is nonempty.
     #[must_use]
-    pub fn first(&self) -> Option<u32> {
-        self.ranges.first().map(|(first, _)| *first)
+    pub fn first(&self) -> Option<CpuId> {
+        self.ranges.first().map(|(first, _)| CpuId(*first))
     }
 
     /// Returns whether this set contains the CPU ID.
     #[must_use]
-    pub fn contains(&self, cpu: u32) -> bool {
+    pub fn contains(&self, cpu: CpuId) -> bool {
         self.ranges
             .iter()
-            .any(|(first, last)| *first <= cpu && cpu <= *last)
+            .any(|(first, last)| *first <= cpu.0 && cpu.0 <= *last)
     }
 
     /// Returns whether two sets contain at least one common CPU ID.
@@ -79,8 +103,8 @@ impl CpuSet {
 /// One CPU cache record reported by the host OS.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CpuCache {
-    /// CPU directory that reported this cache.
-    pub cpu: u32,
+    /// Reporting CPU on Linux; lowest sharing CPU for Windows cache records.
+    pub cpu: CpuId,
     /// CPUs sharing this cache, when the OS supplied a valid list.
     pub shared_cpus: Option<CpuSet>,
     /// Passive cache facts. The line size does not qualify maintenance.
@@ -90,7 +114,7 @@ pub struct CpuCache {
 impl CpuCache {
     /// Returns the first CPU sharing this cache, when the list was valid.
     #[must_use]
-    pub fn first_shared_cpu(&self) -> Option<u32> {
+    pub fn first_shared_cpu(&self) -> Option<CpuId> {
         self.shared_cpus.as_ref().and_then(CpuSet::first)
     }
 }
@@ -100,7 +124,7 @@ impl CpuCache {
 pub struct HostCaches {
     /// Complete records in native CPU and index order.
     pub records: Vec<CpuCache>,
-    /// False when a directory or cache property could not be read or parsed.
+    /// False when a cache observation could not be read or parsed.
     pub complete: bool,
 }
 
@@ -121,24 +145,24 @@ pub struct HostDomain {
 pub struct HostTopologyGraphSnapshot {
     /// System memory capacity, if the OS reported a nonzero value.
     pub memory_bytes: Option<usize>,
-    /// CPU model and processor-entry count, if both were reported.
+    /// Processor count and optional model name, when the count is complete.
     pub cpu: Option<CpuInfo>,
-    /// Explicit `/proc/cpuinfo` associations for cross-source CPU matching.
+    /// Explicit APIC associations for cross-source matching, when available.
     pub cpu_apic_ids: Vec<CpuApicId>,
-    /// CPUs reported online when this file was read, if its list was valid.
+    /// CPUs reported online by a complete membership observation.
     pub online_cpus: Option<CpuSet>,
-    /// Cache records from the system CPU directory.
+    /// Cache records reported by the host OS.
     pub caches: HostCaches,
     /// OS NUMA domains discovered without assuming node zero exists.
     pub domains: Vec<HostDomain>,
-    /// False when the NUMA directory or a node entry could not be read.
+    /// False when the NUMA enumeration or a node entry was incomplete.
     pub domains_complete: bool,
 }
 
 impl HostTopologyGraphSnapshot {
     /// Resolves a KFD APIC ID only when it identifies exactly one logical CPU.
     #[must_use]
-    pub fn logical_cpu_for_apic_id(&self, apic_id: u32) -> Option<u32> {
+    pub fn logical_cpu_for_apic_id(&self, apic_id: u32) -> Option<CpuId> {
         let mut matches = self
             .cpu_apic_ids
             .iter()
@@ -182,21 +206,14 @@ pub fn graph_snapshot() -> HostTopologyGraphSnapshot {
 #[cfg(target_os = "linux")]
 pub(crate) use linux::attached_numa_node_for_render;
 
-/// Windows observations are explicitly incomplete until CPU/cache/NUMA
-/// discovery has a native implementation. Missing data is never fabricated.
+#[cfg(windows)]
+mod windows;
+#[cfg(any(windows, test))]
+mod windows_records;
+
+/// Captures independent best-effort Windows host observations without a GPU.
 #[cfg(windows)]
 #[must_use]
 pub fn graph_snapshot() -> HostTopologyGraphSnapshot {
-    HostTopologyGraphSnapshot {
-        memory_bytes: None,
-        cpu: None,
-        cpu_apic_ids: Vec::new(),
-        online_cpus: None,
-        caches: HostCaches {
-            records: Vec::new(),
-            complete: false,
-        },
-        domains: Vec::new(),
-        domains_complete: false,
-    }
+    windows::graph_snapshot()
 }
