@@ -47,3 +47,12 @@ impl ForkWitness {
         fork_witness_valid(Some(address))
     }
 }
+
+/// Acquires an owned reference to a borrowed C file descriptor without taking
+/// the caller's descriptor or changing its shared cursor.
+///
+/// # Errors
+/// Invalid descriptors and native resource exhaustion are reported by the OS.
+pub fn duplicate_file(descriptor: i32) -> std::io::Result<std::fs::File> {
+    crate::os::linux::file::duplicate_file(descriptor)
+}
