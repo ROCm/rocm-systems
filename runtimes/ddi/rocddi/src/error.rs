@@ -47,6 +47,12 @@ impl NativeStatus {
     }
 
     fn from_io(source: &io::Error) -> Option<Self> {
+        if let Some(nested) = source
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<Error>())
+        {
+            return nested.native_status();
+        }
         let code = source.raw_os_error()?;
         Some(Self {
             domain: if cfg!(windows) {
@@ -258,6 +264,25 @@ mod tests {
             .errno_code(),
             None
         );
+    }
+
+    #[test]
+    fn io_wrapping_preserves_a_provider_status_domain() {
+        let status = NativeStatus {
+            domain: NativeStatusDomain::NtStatus,
+            code: 0xc000_0022,
+        };
+        let source = io::Error::other(Error::DriverOperation {
+            kind: ErrorKind::PermissionDenied,
+            operation: "native query",
+            status,
+        });
+        let error = Error::NativeOperation {
+            kind: ErrorKind::Driver,
+            operation: "file operation",
+            source,
+        };
+        assert_eq!(error.native_status(), Some(status));
     }
 
     #[test]
