@@ -872,6 +872,48 @@ void expect_gfx1250_buffer_cmpswap_def_use(uint8_t return_control, uint8_t paylo
   }
 }
 
+TEST(LivenessAnalysis, Gfx12GlobalTransposeKillsOnlyTheWaveSizedResult) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  const RegisterRef v30{RegClass::VGPR, 30, 1};
+  for (uint8_t wave_size : {32u, 64u}) {
+    for (bool transpose : {false, true}) {
+      for (unsigned words : {2u, 4u}) {
+        SCOPED_TRACE(testing::Message() << "wave" << +wave_size << " transpose=" << transpose
+                                        << " registers=" << words);
+        const uint32_t op = words == 2 ? (transpose ? 0xee16007cu : 0xee05407cu)
+                                       : (transpose ? 0xee15c07cu : 0xee05c07cu);
+        const auto dest = static_cast<uint16_t>(31 - words);
+        TestCodeObject code({wave_size == 64 ? 0xbefe01c1u : 0xbefe00c1u, // mov EXEC, -1
+                             0x7e3c02aau,                                 // v_mov_b32 v30, 42
+                             op, dest, 2u,  // global load to a tuple ending at v30
+                             0x7e0a031eu,   // v_mov_b32 v5, v30
+                             0xbfb00000u}); // s_endpgm
+        auto blocks = build_valid_blocks(code, *decoder, ROCJITSU_CODE_ARCH_RDNA4);
+        ASSERT_EQ(blocks.size(), 1u);
+        const auto &load = *std::next(blocks.front()->instructions().begin(), 2);
+        const bool compact = transpose && wave_size == 64;
+        const auto written = static_cast<uint8_t>(compact ? words / 2 : words);
+        InstDefUse effect(load, wave_size);
+        EXPECT_TRUE(effect.defs.contains({RegClass::VGPR, dest, written}));
+        EXPECT_EQ(effect.defs.contains(v30), !compact);
+        EXPECT_TRUE(effect.uses.contains({RegClass::VGPR, 2, 2}));
+        std::array scope{blocks.front().get()};
+        auto exec = std::make_unique<ExecMaskAnalysis>(KernelBlockScope(scope), wave_size);
+        ASSERT_EQ(exec->before(load), ExecState::Full);
+        LivenessAnalysis liveness(KernelBlockScope(scope), wave_size, std::move(exec));
+        auto live = liveness.is_live_before(load, v30);
+        ASSERT_TRUE(live.succeeded());
+        EXPECT_EQ(live.value(), compact);
+        auto scratch = liveness.find_free_run(&load, 1, 30);
+        ASSERT_TRUE(scratch.succeeded());
+        ASSERT_TRUE(scratch.value().has_value());
+        EXPECT_EQ(*scratch.value(), compact ? 31u : 30u);
+      }
+    }
+  }
+}
+
 TEST(GeneratedInstDefUse, Gfx1250BufferCmpswapReturnUsesElementWidth) {
   constexpr uint8_t kAtomicNoReturn = 0;
   constexpr uint8_t kAtomicReturn = 1;
@@ -8765,6 +8807,65 @@ TEST(ExplicitOrdinarySgprBound, SeesAnSgprThatIsAlsoAnImplicitUse) {
   for (const auto &b : blocks)
     scope.push_back(b.get());
   EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), kScopeWaveSize), 12u);
+}
+
+TEST(GeneratedInstDefUse, Gfx1150BufferFeedbackKeepsIncomingStatusLiveAtFullExec) {
+  constexpr uint8_t data = 8;
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  auto decoder = Decoder::create(arch);
+  ASSERT_NE(decoder, nullptr);
+  const auto full = rdna3_5::build_sop1(rdna3_5::kSMovB64Sop1, {.ssrc0 = 193, .sdst = 126});
+  const auto wait = rdna3_5::build_sopp(rdna3_5::kSWaitcntSopp);
+  const auto end = rdna3_5::build_sopp(rdna3_5::kSEndpgmSopp);
+  struct Case {
+    std::array<uint32_t, 2> words;
+    uint16_t payload_words;
+    bool returns;
+    bool atomic;
+  };
+  for (bool tfe : {false, true}) {
+    const rdna3_5::MubufBuilderFields buffer{.vdata = data, .tfe = tfe, .soffset = 128};
+    const rdna3_5::MtbufBuilderFields typed{
+        .format = 20, .vdata = data, .tfe = tfe, .soffset = 128};
+    const Case cases[] = {
+        {rdna3_5::build_mubuf(rdna3_5::kBufferLoadB32Mubuf, buffer), 1, true, false},
+        {rdna3_5::build_mubuf(rdna3_5::kBufferLoadFormatXyMubuf, buffer), 2, true, false},
+        {rdna3_5::build_mtbuf(rdna3_5::kTbufferLoadD16FormatXyzMtbuf, typed), 2, true, false},
+        {rdna3_5::build_mubuf(rdna3_5::kBufferAtomicAddU32Mubuf, buffer), 1, false, true},
+        {rdna3_5::build_mubuf(rdna3_5::kBufferAtomicAddU32Mubuf,
+                              {.glc = 1, .vdata = data, .tfe = tfe, .soffset = 128}),
+         1, true, true}};
+    for (const auto &test : cases) {
+      const RegisterRef status{RegClass::VGPR, static_cast<uint16_t>(data + test.payload_words), 1};
+      for (bool consume_status : {false, true}) {
+        const auto consume = rdna3_5::build_vop1(
+            rdna3_5::kVMovB32Vop1,
+            {.src0 = static_cast<uint16_t>(256 + (consume_status ? status.index : data)),
+             .vdst = 24});
+        TestCodeObject co({full[0], test.words[0], test.words[1], wait[0], consume[0], end[0]});
+        auto blocks = build_valid_blocks(co, *decoder, arch);
+        ASSERT_EQ(blocks.size(), 1u);
+        auto insts = insts_of(*blocks.front());
+        ASSERT_EQ(insts.size(), 5u);
+        const auto &inst = *insts[1];
+        SCOPED_TRACE(testing::Message()
+                     << inst.mnemonic() << " tfe=" << tfe << " consumes status=" << consume_status);
+        const auto scope = block_scope(blocks);
+        ExecMaskAnalysis exec{KernelBlockScope(scope), 32};
+        ASSERT_EQ(exec.before(inst), ExecState::Full);
+        LivenessAnalysis liveness{KernelBlockScope(scope), 32,
+                                  std::make_unique<ExecMaskAnalysis>(exec)};
+        const InstDefUse du(inst, 32);
+        EXPECT_EQ(du.defs.contains(status), tfe && test.returns);
+        EXPECT_FALSE(du.uses.contains(status));
+        auto live = liveness.live_before(inst);
+        ASSERT_TRUE(live.succeeded());
+        ASSERT_NE(live.value(), nullptr);
+        EXPECT_EQ(live.value()->contains(status), consume_status);
+        EXPECT_EQ(live.value()->contains({RegClass::VGPR, data, 1}), test.atomic);
+      }
+    }
+  }
 }
 
 } // namespace

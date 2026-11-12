@@ -177,7 +177,14 @@ public:
   IssueSnapshot issue_snapshot() const { return issued_; }
   bool cancel_last_issue(uint64_t pc, const IssueSnapshot &before);
   void before(const Instruction &inst, rj_code_arch_t arch);
+  /// Return whether address preparation can change which lanes supply VDATA.
+  static bool needs_buffer_payload_lanes(const Instruction &inst, rj_code_arch_t arch);
   void check_instruction(const Instruction &inst, Wavefront &wf);
+  struct MemoryLanes {
+    uint64_t issue;
+    uint64_t result;
+  };
+  static MemoryLanes memory_lanes(const Instruction &inst, Wavefront &wf);
   static uint64_t result_lanes(const Instruction &inst, Wavefront &wf);
   static bool result_is_written(const Instruction &inst, Wavefront &wf);
   struct FlatLanes {

@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
@@ -67,9 +69,27 @@ public:
   }
 
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
-                     uint64_t private_limit) {
+                     uint64_t private_limit, bool ptr32 = false) {
     for (auto *cu : cus_)
-      cu->set_apertures(shared_base, shared_limit, private_base, private_limit);
+      cu->set_apertures(shared_base, shared_limit, private_base, private_limit, ptr32);
+  }
+
+  /// CS SGPR ABI: count [5:0], ordered append term [17:6], first wave [31].
+  static uint32_t workgroup_info(rj_code_arch_t arch, uint32_t wave_count, uint32_t wave,
+                                 uint32_t term) {
+    uint32_t info = wave_count;
+    if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+      info |= term << 6;
+    if (!isa_properties(arch).uses_ttmp_workgroup_ids) {
+      info |= wave == 0 ? 1u << 31 : 0;
+      // CDNA3/4 list a 34-bit concatenation. Their [24:20] position follows
+      // RDNA2/3's layout and has no gfx942/gfx950 hardware qualification.
+      if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+          arch == ROCJITSU_CODE_ARCH_RDNA2 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+          arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+        info |= wave << 20;
+    }
+    return info;
   }
 
   /// @brief Enqueue a workgroup from an ACE pipe.
@@ -118,9 +138,12 @@ public:
                             wg.entry->scratch_wave_limit_per_se);
         assert(wf && "dispatch_wf failed after select_cu returned a CU");
         wf->set_lds_base(lds_base);
-        wf->set_lds_size(util::align_up(wg.entry->group_segment_fixed_size, 256u));
+        wf->set_lds_size(
+            lds_workgroup_window_bytes(cu->arch(), wg.entry->group_segment_fixed_size));
+        wf->set_wave_in_group(w);
         wf->set_lds(placement->lds);
-        wf->set_dispatch_id(wg.entry->dispatch_id);
+        wf->set_workgroup_dispatch(wg.entry->dispatch_id, wg.entry->wfs_per_workgroup);
+        wf->set_accum_vgpr_base(wg.entry->accum_vgpr_base);
         wf->set_address_space(wg.entry->address_space);
         wf->set_process_id(wg.entry->process_id);
         wf->set_queue_id(wg.entry->queue_id);
@@ -221,7 +244,6 @@ public:
 
     if (wgps_.empty())
       return std::nullopt;
-    const uint32_t aligned = util::align_up(entry.group_segment_fixed_size, 256u);
     for (size_t attempt = 0; attempt < wgps_.size(); ++attempt) {
       size_t wgp_index = (next_wgp_ + attempt) % wgps_.size();
       auto &wgp = *wgps_[wgp_index];
@@ -235,7 +257,10 @@ public:
           (wgp.cu0->has_active_wfs() || wgp.cu1->has_active_wfs() ||
            wgp.cu0->lds_allocation_pinned() || wgp.cu1->lds_allocation_pinned()))
         continue;
-      if (static_cast<uint64_t>(wgp.next_lds_alloc) + aligned > wgp.lds.size_bytes())
+      const uint64_t aligned =
+          lds_allocation_bytes(wgp.cu0->arch(), entry.group_segment_fixed_size);
+      if ((arch_is_rdna(wgp.cu0->arch()) && aligned > arch_lds_bytes(wgp.cu0->arch())) ||
+          static_cast<uint64_t>(wgp.next_lds_alloc) + aligned > wgp.lds.size_bytes())
         continue;
 
       ComputeUnitCore *selected = nullptr;
@@ -253,8 +278,8 @@ public:
 
       const uint32_t lds_base = wgp.next_lds_alloc;
       // Like CU-local LDS, paired-WGP LDS retains its physical contents on reuse.
-      wgp.lds.materialize_range(lds_base, aligned);
-      wgp.next_lds_alloc += aligned;
+      wgp.lds.materialize_range(lds_base, static_cast<uint32_t>(aligned));
+      wgp.next_lds_alloc += static_cast<uint32_t>(aligned);
       ++wgp.active_workgroups;
       resident_wgp_workgroups_[wg_key(entry.dispatch_id, global_wg_id)] = WgpReservation{wgp_index};
       next_wgp_ = (wgp_index + 1) % wgps_.size();

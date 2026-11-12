@@ -905,6 +905,8 @@ public:
       out += " dlc";
     if (inst->slc)
       out += " slc";
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF))
+      out += " tfe";
   }
   using OpEncoding = MubufMachineInst;
   const OpEncoding inst_;
@@ -926,6 +928,8 @@ public:
       out += " dlc";
     if (inst->slc)
       out += " slc";
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF))
+      out += " tfe";
   }
   using OpEncoding = MtbufMachineInst;
   const OpEncoding inst_;

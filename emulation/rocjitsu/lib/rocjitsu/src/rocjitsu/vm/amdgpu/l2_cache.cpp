@@ -489,14 +489,19 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
       const VmAccessOutcome cache_outcome = cache_partial_bytes(ea, dst + copied, chunk, vmid);
       if (cache_outcome != VmAccessOutcome::Complete)
         return cache_outcome;
-      copied += chunk;
-      continue;
+    } else {
+      const VmAccessOutcome outcome = ensure_line(ea, vmid);
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+      cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
     }
-
-    const VmAccessOutcome outcome = ensure_line(ea, vmid);
-    if (outcome != VmAccessOutcome::Complete)
-      return outcome;
-    cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+    if (mtype == Mtype::CC) {
+      // A coherent read refilled from backing, leaving a clean coherent copy.
+      const bool resident_after_fill = cache_.lookup(ea, &resident, vmid);
+      assert(resident_after_fill && resident);
+      (void)resident_after_fill;
+      resident->coherence = simdojo::CoherenceState::SHARED;
+    }
     copied += chunk;
   }
   return VmAccessOutcome::Complete;
@@ -670,6 +675,24 @@ VmAccessOutcome L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
   auto maintenance_lock = acquire_cache_access();
   std::lock_guard set_lock(set_mutex(addr));
   return flush_line_locked(addr, vmid);
+}
+
+VmAccessOutcome L2Cache::invalidate_buffer_scope(bool system_scope) {
+  // Consult the device before taking an L2 lock, matching the lock order used
+  // by device-wide atomics. Only the issuing XCD's L2 performs the invalidation.
+  if (!system_scope && !coherence_->has_multiple_l2_caches())
+    return VmAccessOutcome::Complete;
+
+  auto maintenance_lock = acquire_cache_maintenance();
+  // Coherent accesses write through. Publish outstanding write-back bytes
+  // before evicting their noncoherent lines and retain dirty state on failure.
+  const auto outcome = flush_dirty_locked();
+  if (outcome != VmAccessOutcome::Complete)
+    return outcome;
+  cache_.invalidate_clean_if([](const simdojo::CacheTag &tag) {
+    return tag.coherence != simdojo::CoherenceState::SHARED;
+  });
+  return VmAccessOutcome::Complete;
 }
 
 VmAccessOutcome L2Cache::flush_all(uint32_t vmid) {

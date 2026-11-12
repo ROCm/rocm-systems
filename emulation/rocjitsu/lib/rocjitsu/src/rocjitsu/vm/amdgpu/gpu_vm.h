@@ -90,6 +90,12 @@ public:
 
   virtual ~AddressSpaceTranslator() = default;
 
+  /// Explicit sparse reservations eligible for TFE. Ordinary translation faults
+  /// and unavailable transports retain their normal fault and retry behavior.
+  [[nodiscard]] virtual std::shared_ptr<const PrtRanges> nonresident_prt_ranges() const {
+    return {};
+  }
+
   [[nodiscard]] virtual VmTranslationResult translate(uint64_t address, std::size_t size,
                                                       VmAccessKind access) const = 0;
 

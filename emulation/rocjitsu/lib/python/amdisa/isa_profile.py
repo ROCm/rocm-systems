@@ -19,6 +19,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
+from amdisa.semantics import TransposeKind
+
 # \NPI new ISA family: (1) sync shared/machine-readable-isa via download.py and \
 # add amdgpu_isa_<isa>.xml, (2) add its profile in this module, (3) regenerate \
 # per docs/codegen.md, (4) author the hand-written isa.h / insts.h / mma_exec.h \
@@ -456,6 +458,20 @@ class IsaProfile(ABC):
     # The VOP2 form of V_MUL_LO_U16 carries CLAMP in its SDWA extension.
     mul_lo_u16_clamp_encodings: frozenset[str] = frozenset()
     cndmask_b32_uses_f32_modifiers = False
+    # Buffer-to-LDS loads extend each value to a DWORD at M0 + offset.
+    buffer_lds_dword_extend = False
+    # The GFX10 and CDNA1–4 ISA manuals specify a single DATA0 access for
+    # double-address DS instructions when their two offsets are equal.
+    coincident_ds_ignores_data1 = False
+    # GFX11 GLC bypasses scalar/vector L1 for SMEM, buffer and FLAT/GLOBAL requests.
+    gfx11_memory_cache_policy = False
+    # Resident GFX10 buffer loads preserve the shader-initialized TFE status VGPR.
+    gfx10_buffer_tfe = False
+    # GFX11 can write individual data dwords and conditionally define its status VGPR.
+    gfx11_buffer_tfe = False
+    # Suppress lanes before fetch when the result exceeds the VGPR allocation.
+    # The issued buffer load keeps its wait-counter obligation.
+    check_buffer_load_result_bounds = False
 
     @property
     def uses_rj_arith_matrix(self) -> bool:
@@ -879,34 +895,34 @@ class IsaProfile(ABC):
         return False
 
     @property
-    def ds_b4_transpose_kind(self) -> int:
+    def ds_b4_transpose_kind(self) -> TransposeKind:
         """CDNA4 contiguous sixteen-lane B4 transpose layout."""
-        return 8
+        return TransposeKind.CDNA4_TR_B4
 
     @property
-    def ds_b6_transpose_kind(self) -> int:
+    def ds_b6_transpose_kind(self) -> TransposeKind:
         """CDNA4 contiguous sixteen-lane B6 transpose layout."""
-        return 9
+        return TransposeKind.CDNA4_TR_B6
 
     @property
-    def ds_b8_transpose_kind(self) -> int:
+    def ds_b8_transpose_kind(self) -> TransposeKind:
         """Cross-lane routing used by 8-bit B64 DS transpose loads.
 
         CDNA4 and older targets use the MFMA-oriented B64_TR_B8 routing.
         Architectures with target-specific DS B8 routing override this property
         so opcode aliases cannot acquire different behavior from their spelling.
         """
-        return 3
+        return TransposeKind.B64_TR_B8
 
     @property
-    def global_b8_transpose_kind(self) -> int:
+    def global_b8_transpose_kind(self) -> TransposeKind:
         """Cross-lane routing used by 8-bit B64 global transpose loads.
 
         Current targets use the 16x16 WMMA routing. Keep this selection in
         the ISA profile so a future architecture can change the global-load
         routing without making mnemonic aliases disagree.
         """
-        return 6
+        return TransposeKind.WMMA_TR_B8
 
     @property
     def cmpx_writes_vcc(self) -> bool:
@@ -1352,6 +1368,12 @@ _SMEM_MODIFIERS_GLC_DLC = [
     EncodingModifier('dlc'),
 ]
 
+# The trailing conditionally written VGPR distinguishes feedback-capable fetches
+# and returning atomics from stores and instructions that ignore the encoded bit.
+_BUFFER_FEEDBACK_MODIFIER = EncodingModifier(
+    'tfe', condition='inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF)'
+)
+
 _MUBUF_MODIFIERS_GLC_DLC = [
     EncodingModifier('offen'),
     EncodingModifier('idxen'),
@@ -1360,6 +1382,7 @@ _MUBUF_MODIFIERS_GLC_DLC = [
     EncodingModifier('dlc'),
     EncodingModifier('slc'),
     EncodingModifier('lds'),
+    _BUFFER_FEEDBACK_MODIFIER,
 ]
 
 _MTBUF_MODIFIERS_GLC_DLC = [
@@ -1368,6 +1391,7 @@ _MTBUF_MODIFIERS_GLC_DLC = [
     EncodingModifier('glc'),
     EncodingModifier('dlc'),
     EncodingModifier('slc'),
+    _BUFFER_FEEDBACK_MODIFIER,
 ]
 
 _FLAT_MODIFIERS_GLC_DLC = [
@@ -1930,6 +1954,8 @@ class CdnaProfile(_AmdgpuProfileBase):
 
     packed_mul_lo_u16_clamp = True
     mul_lo_u16_clamp_encodings = frozenset({'ENC_VOP3', 'ENC_VOP2'})
+    buffer_lds_dword_extend = True
+    coincident_ds_ignores_data1 = True
 
     flat_offset_bits = 13
     flat_lds_m0_mask = 0x3FFFC
@@ -2291,12 +2317,25 @@ class Cdna2Profile(CdnaProfile):
         upper = enc_name.upper()
         if upper == 'ENC_SMEM':
             return _SMEM_MODIFIERS  # soffset_en/imm/glc/nv present in CDNA2
-        if upper == 'ENC_MUBUF':
-            return _MUBUF_MODIFIERS_GLC
-        if upper == 'ENC_MTBUF':
-            return _MTBUF_MODIFIERS_GLC
+        if upper in ('ENC_MUBUF', 'ENC_MTBUF'):
+            # Assembly requires IDXEN before OFFEN when both address components are used.
+            modifiers = [
+                EncodingModifier('idxen'),
+                EncodingModifier('offen'),
+                EncodingModifier('offset', is_offset=True),
+                EncodingModifier('glc'),
+                EncodingModifier('slc'),
+                EncodingModifier('scc'),
+            ]
+            if upper == 'ENC_MUBUF':
+                modifiers.append(EncodingModifier('lds'))
+            return modifiers
         if upper == 'ENC_FLAT':
-            return _FLAT_MODIFIERS_GLC
+            return [
+                *_FLAT_MODIFIERS_GLC,
+                EncodingModifier('scc'),
+                EncodingModifier('lds'),
+            ]
         return []
 
     @property
@@ -2324,6 +2363,10 @@ class Rdna1Profile(_AmdgpuProfileBase):
     - Reserved field omissions (versions 1.0.0): the parser synthesizes
       padding fields for gaps in the MicrocodeFormat bitfield layout.
     """
+
+    gfx10_buffer_tfe = True
+    buffer_lds_dword_extend = True
+    coincident_ds_ignores_data1 = True
 
     @property
     def mimg_max_nsa_words(self) -> int:
@@ -2467,6 +2510,7 @@ class Rdna2Profile(Rdna1Profile):
     remain skipped (``_SKIP_DPP_SDWA = True``).
     """
 
+    check_buffer_load_result_bounds = True
     separately_rounded_mad_opcodes = frozenset()
     packed_mul_lo_u16_clamp = True
     mul_lo_u16_clamp_encodings = frozenset({'ENC_VOP3'})
@@ -2498,6 +2542,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
       ``gen_vopd`` after XML parsing skips normal instruction generation.
     - Reserved field omissions (version 1.0.0): synthesized by the parser.
     """
+
+    gfx11_memory_cache_policy = True
+    gfx11_buffer_tfe = True
+    check_buffer_load_result_bounds = True
 
     def saddr_null_selector_expr(self, enc_name: str) -> str | None:
         if enc_name.upper() == 'ENC_FLAT':
@@ -2974,8 +3022,8 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return has_modifier_encoding
 
     @property
-    def ds_b8_transpose_kind(self) -> int:
-        return 6
+    def ds_b8_transpose_kind(self) -> TransposeKind:
+        return TransposeKind.WMMA_TR_B8
 
     @property
     def waitcnt_lgkmcnt_mask(self) -> str:
@@ -3251,20 +3299,20 @@ class Cdna5Profile(Rdna4Profile):
         return 'cdna5'
 
     @property
-    def ds_b4_transpose_kind(self) -> int:
+    def ds_b4_transpose_kind(self) -> TransposeKind:
         """CDNA5 interleaved source-lane B4 layout."""
-        return 1
+        return TransposeKind.TR_B4
 
     @property
-    def ds_b6_transpose_kind(self) -> int:
+    def ds_b6_transpose_kind(self) -> TransposeKind:
         """CDNA5 interleaved source-lane B6 layout."""
-        return 2
+        return TransposeKind.TR_B6
 
     @property
-    def ds_b8_transpose_kind(self) -> int:
+    def ds_b8_transpose_kind(self) -> TransposeKind:
         # gfx1250 groups source lanes by four rows and two eight-column halves.
         # Keep every mnemonic alias on the corresponding CDNA5 DS routing.
-        return 7
+        return TransposeKind.CDNA5_DS_TR_B8
 
     @property
     def semantic_overrides(self) -> dict[str, tuple[str, ...]]:

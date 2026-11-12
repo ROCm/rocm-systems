@@ -116,6 +116,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     d.exec_mask = amdgpu::wave32_exec_all_if_nonzero(d.exec_mask);
     d.lane_mask = d.exec_mask;
   }
+  if (d.transpose && !d.exec_mask)
+    return;
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   bool saddr_present = has_saddr(inst.saddr);
@@ -432,7 +434,7 @@ void ds_calculate_addresses_masked(const VdsMachineInst &inst, amdgpu::Wavefront
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(lane_mask & (1ULL << lane)))
       continue;
-    d.per_lane_addr[lane] = addresses[lane] + offset + wf.lds_base();
+    d.per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), addresses[lane], offset);
   }
 }
 

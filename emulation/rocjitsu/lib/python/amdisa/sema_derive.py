@@ -2120,6 +2120,7 @@ class _DsAtomic(_ScalarDeriver):
         addr = _addr_call(
             'CalcDsAddr', _cast(_src(0), SemaType.U32), _id('OFFSET', SemaType.U32)
         )
+        operand = _cast(_src(1), elem_ty)
         stmts = [
             _assign(_id('addr', SemaType.U32), addr),
             SemaNode(
@@ -2129,7 +2130,7 @@ class _DsAtomic(_ScalarDeriver):
                 children=(
                     _id(f'atomic_{op}'),
                     _id('addr', SemaType.U32),
-                    _cast(_src(1), elem_ty),
+                    operand,
                 ),
             ),
         ]

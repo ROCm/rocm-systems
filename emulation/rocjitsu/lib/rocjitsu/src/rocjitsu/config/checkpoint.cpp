@@ -344,6 +344,8 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
                (w->memory_wait_scoreboard() && !w->memory_wait_scoreboard()->empty())))
             return emit_error.emit()
                    << "Cannot checkpoint pending AMDGPU memory or wait state on " << cu->name();
+          if (w->memory_trap_pending())
+            return emit_error.emit() << "Cannot checkpoint a wave awaiting a memory trap";
           if (w->in_trap_handler() || w->debug_stopped())
             return emit_error.emit()
                    << "Cannot checkpoint " << cu->name() << " wf" << w->wf_id()
@@ -462,14 +464,13 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
 
         flatbuffers::Offset<flatbuffers::Vector<uint8_t>> lds;
         if (cu_owned_lds && (!wf_offsets.empty() || lds_end)) {
-          const uint32_t granule = amdgpu::lds_allocation_granule(cu->arch());
-          const uint64_t reserved = (lds_end + granule - 1) / granule * granule;
-          if (reserved > cu->lds().size_bytes() || reserved > UINT32_MAX)
+          if (lds_end > cu->lds().size_bytes() || lds_end > UINT32_MAX)
             return emit_error.emit() << "Invalid checkpoint LDS reservation";
           uint8_t *bytes = nullptr;
-          lds = builder.CreateUninitializedVector<uint8_t>(reserved, &bytes);
+          const uint32_t payload_size = static_cast<uint32_t>(lds_end);
+          lds = builder.CreateUninitializedVector<uint8_t>(payload_size, &bytes);
           const amdgpu::Lds &backing = cu->lds();
-          backing.read(0u, bytes, static_cast<uint32_t>(reserved));
+          backing.read(0u, bytes, payload_size);
         }
         auto name = builder.CreateString(cu->name());
         auto wfs_vec = builder.CreateVector(wf_offsets);
@@ -704,18 +705,13 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
       const bool restore_lds = checkpoint_cu_owned_lds(cu->arch());
       const auto *lds = cu_state->lds();
       const auto cursor = cu_state->lds_cursor();
-      // Earlier writers placed every reservation at a 256-byte boundary. Keep those
-      // bytes and logical windows; allocate_lds rounds the next placement for this CU.
-      const auto serialized_alignment = cursor ? 256u : amdgpu::lds_allocation_granule(cu->arch());
-      if (cursor &&
-          (!restore_lds || *cursor > cu->lds().size_bytes() ||
-           *cursor % serialized_alignment != 0 || (*cursor && (!lds || *cursor > lds->size()))))
+      if (cursor && (!restore_lds || (*cursor && (!lds || *cursor > lds->size()))))
         return emit_error.emit() << "Invalid checkpoint LDS allocator cursor";
       if (lds) {
         if (!restore_lds || lds->size() > cu->lds().size_bytes() ||
-            lds->size() % serialized_alignment != 0)
+            (!cursor && lds->size() % amdgpu::lds_allocation_granule(cu->arch()) != 0) ||
+            !cu->restore_lds_cursor(cursor.value_or(lds->size())))
           return emit_error.emit() << "Invalid checkpoint LDS reservation";
-        cu->allocate_lds(cursor.value_or(lds->size()));
         cu->lds().write(0u, lds->data(), lds->size());
       }
       const bool rdna2 = cu->arch() == ROCJITSU_CODE_ARCH_RDNA2;
@@ -735,6 +731,9 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
           const uint32_t sgpr_capacity = cu->config().sgprs_per_wf;
           uint32_t num_sgprs = sgprs ? sgprs->size() : sgpr_capacity;
           uint32_t restore_sgpr_words = num_sgprs;
+          const auto *resources = wf_state->gfx10_resources();
+          if ((resources != nullptr) != (cu_resources != nullptr))
+            return emit_error.emit() << "Inconsistent GFX10 wave checkpoint records";
           const auto *window = wf_state->lds_window();
           if (restore_lds && !wf_state->halted() && (!window || !lds))
             return emit_error.emit() << "Cannot restore active wave without saved LDS state";
@@ -742,9 +741,6 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
               (!restore_lds || !lds || window->base() > cu->lds().size_bytes() ||
                (window->size() && uint64_t{window->base()} + window->size() > lds->size())))
             return emit_error.emit() << "Invalid checkpoint LDS window";
-          const auto *resources = wf_state->gfx10_resources();
-          if ((resources != nullptr) != (cu_resources != nullptr))
-            return emit_error.emit() << "Inconsistent GFX10 wave checkpoint records";
           if (cu->arch() == ROCJITSU_CODE_ARCH_RDNA1 && !resources) {
             if (wf_state->halted())
               continue;

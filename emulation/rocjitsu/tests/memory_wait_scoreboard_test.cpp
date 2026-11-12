@@ -837,6 +837,9 @@ TEST(MemoryWaitExecutionTest, ImageAndFormattedBufferOperandFootprints) {
     auto *wf = cu->dispatch_wf(0, 0x100, 128, 96);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(1);
+    // The GFX11 formatted stores use the buffer descriptor in s[32:35].
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+      cu->write_sgpr(wf->sgpr_alloc().base + 35, 0x20014000u);
     auto decoder = Decoder::create(arch);
     auto &state = wf->ensure_memory_wait_scoreboard();
     std::vector<MemoryWaitScoreboard::Hazard> hazards;
@@ -1747,7 +1750,7 @@ private:
 void set_test_flat_domains(ComputeUnitCore &cu, Wavefront &wf, uint64_t shared_lanes) {
   constexpr uint64_t shared = uint64_t{2} << 32;
   cu.set_apertures(shared, shared + UINT32_MAX, 0, 0);
-  wf.set_apertures(shared, shared + UINT32_MAX, 0, 0);
+  wf.set_apertures(shared, shared + UINT32_MAX, 0, 0, /*override_launch=*/true);
   for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
     cu.write_vgpr(wf.vgpr_alloc().base, lane, 0);
     cu.write_vgpr(wf.vgpr_alloc().base + 1, lane, shared_lanes & (uint64_t{1} << lane) ? 2 : 8);
@@ -1841,7 +1844,8 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
     auto *wf = cu->dispatch_wf(0, 0x100, 32, config.vgprs_per_wf, 32);
     ASSERT_NE(wf, nullptr);
     cu->set_apertures(shared, shared + UINT32_MAX, private_base, private_base + UINT32_MAX);
-    wf->set_apertures(shared, shared + UINT32_MAX, private_base, private_base + UINT32_MAX);
+    wf->set_apertures(shared, shared + UINT32_MAX, private_base, private_base + UINT32_MAX,
+                      /*override_launch=*/true);
     wf->set_scratch_base(0x400000);
     wf->set_scratch_lane_size(256);
     const bool cdna5 = arch == ROCJITSU_CODE_ARCH_CDNA5;
@@ -1873,7 +1877,7 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
           const uint64_t addresses[] = {
               shared + 0x100, shared + (uint64_t{1} << 31) + 0x100, uint64_t{8} << 32,
               cdna5 ? 0x400080 | (uint64_t{3} << 52) : private_base + 0x80};
-          for (unsigned lane = 0; lane < 4; ++lane) {
+          for (unsigned lane = 0; lane < std::size(addresses); ++lane) {
             const uint64_t value = addresses[lane] - (has_scalar && !legacy_cdna ? shared : 0);
             const unsigned base = wf->vgpr_alloc().base + (cdna5 ? 256 : 0);
             cu->write_vgpr(base, lane, static_cast<uint32_t>(value));
@@ -1939,13 +1943,21 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
           ASSERT_NE(inst.data(), nullptr);
           const auto &data = *inst.data_as<VectorMemState>();
           EXPECT_EQ(planned.requests, data.lane_mask);
+          ASSERT_EQ(data.lane_mask & ~exec, 0u);
           uint64_t shared_lanes = 0;
-          for (unsigned lane = 0; lane < wf->wf_size(); ++lane) {
+          for (unsigned lane = 0; lane < std::size(addresses); ++lane) {
             const uint64_t bit = uint64_t{1} << lane;
+            uint64_t aperture_pointer = data.per_lane_addr[lane];
+            if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                arch == ROCJITSU_CODE_ARCH_RDNA4) {
+              // These apertures test the input pointer. With SADDR, VADDR is a single DWORD.
+              aperture_pointer = has_scalar
+                                     ? shared + static_cast<uint32_t>(addresses[lane] - shared)
+                                     : addresses[lane];
+            }
             if ((data.lane_mask & bit) &&
                 !(data.scratch_swizzle && (data.scratch_lane_mask & bit)) &&
-                data.per_lane_addr[lane] >= shared &&
-                data.per_lane_addr[lane] <= shared + UINT32_MAX)
+                aperture_pointer >= shared && aperture_pointer <= shared + UINT32_MAX)
               shared_lanes |= bit;
           }
           EXPECT_EQ(planned.shared, shared_lanes);
@@ -3040,7 +3052,7 @@ TEST(MemoryWaitExecutionTest, ScratchAddressChecksDoNotObserveGlobalOrInactiveLa
         ASSERT_NE(wf, nullptr);
         wf->set_exec(active ? 1 : 0);
         wf->set_scratch_base(0x400000);
-        wf->set_apertures(0, 0, uint64_t{2} << 32, uint64_t{3} << 32);
+        wf->set_apertures(0, 0, uint64_t{2} << 32, uint64_t{3} << 32, /*override_launch=*/true);
         cu->write_vgpr(wf->vgpr_alloc().base, 0, 0);
         cu->write_vgpr(wf->vgpr_alloc().base + 1, 0, private_address ? 2 : 0);
         auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -4345,14 +4357,23 @@ TEST(MemoryWaitFootprintTest, NarrowDsAndBufferStoresCheckOnlyConsumedBytes) {
     const auto words = rdna3::build_ds(opcode, {.addr = 0, .data0 = 4});
     cases.emplace_back(words.begin(), words.end());
   }
+  check_vector_footprints(ROCJITSU_CODE_ARCH_RDNA3, 32, 16, cases);
+  cases.clear();
   for (auto opcode : {rdna3::kBufferStoreB8Mubuf, rdna3::kBufferStoreB16Mubuf,
                       rdna3::kBufferStoreD16HiB8Mubuf, rdna3::kBufferStoreD16HiB16Mubuf}) {
     const auto words = rdna3::build_mubuf(opcode, {.vaddr = 0, .vdata = 4, .srsrc = 0, .offen = 1});
     cases.emplace_back(words.begin(), words.end());
   }
-  // Bind s[0:3] with a valid format so the buffer stores read their data.
-  check_vector_footprints(ROCJITSU_CODE_ARCH_RDNA3, 32, 16, cases, 0, 0,
-                          [](Wavefront &wave) { wave.debug_write_sgpr(3, kRdnaFormat32); });
+  // An unbound MUBUF skips VADDR, while an ordinary store reads each
+  // addressed word. Both issue paths retain their VDATA byte footprints.
+  for (const uint32_t format : {kRdnaFormat32, 0u}) {
+    SCOPED_TRACE(format);
+    check_vector_footprints(ROCJITSU_CODE_ARCH_RDNA3, 32, 16, cases, 0, 0, [format](Wavefront &wf) {
+      ASSERT_TRUE(RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + 2, 64).succeeded());
+      ASSERT_TRUE(
+          RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + 3, (2u << 28) | format).succeeded());
+    });
+  }
 }
 
 TEST(MemoryWaitFootprintTest, WriteLaneChecksOnlyTheSelectedDestinationLane) {
@@ -5402,6 +5423,315 @@ TEST(MemoryWaitExecutionTest, TransposePrecheckUsesExpandedExecutionLanes) {
   }
 }
 
+TEST(MemoryWaitExecutionTest, ModernVectorBufferTypeSuppressesWritebackButStillIssues) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    GpuMemory memory("buffer_result_memory");
+    L2Cache l2("buffer_result_l2");
+    l2.set_backing_memory(&memory);
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.functional_quantum = 1;
+    config.sgprs_per_wf = 96;
+    config.vgprs_per_wf = 32;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "buffer_result_cu", config, &memory, &l2));
+    auto *wf = cu->dispatch_wf(0, 0x4000, 96, 32, 32);
+    ASSERT_NE(wf, nullptr);
+    auto decoder = Decoder::create(arch);
+    auto &scoreboard = wf->ensure_memory_wait_scoreboard();
+    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+    const auto sb = wf->sgpr_alloc().base, vb = wf->vgpr_alloc().base;
+    constexpr uint32_t address = 0x8000, initial = 0x55555555, value = 0x44444444;
+    cu->write_sgpr(sb, address);
+    cu->write_sgpr(sb + 1, 4u << 16);
+    cu->write_sgpr(sb + 2, 4);
+    wf->set_exec(1);
+    uint64_t pc = 0x10000;
+    for (unsigned form : {0u, 1u, 2u}) {
+      const bool typed = form == 1, atomic = form == 2;
+      std::vector<uint32_t> words;
+      const auto set_words = [&](const auto &encoded) {
+        words.assign(encoded.begin(), encoded.end());
+      };
+      if (gfx12) {
+        const uint16_t opcode = typed    ? rdna4::kTbufferLoadFormatXVbuffer
+                                : atomic ? rdna4::kBufferAtomicAddU32Vbuffer
+                                         : rdna4::kBufferLoadB32Vbuffer;
+        set_words(rdna4::build_vbuffer(opcode, {.soffset = 124,
+                                                .vdata = 0,
+                                                .rsrc = 0,
+                                                .th = uint8_t(atomic),
+                                                .format = uint8_t(typed ? 20 : 0)}));
+      } else if (typed) {
+        set_words(
+            rdna3::build_mtbuf(rdna3::kTbufferLoadFormatXMtbuf, {.format = 20, .soffset = 124}));
+      } else {
+        set_words(rdna3::build_mubuf(atomic ? rdna3::kBufferAtomicAddU32Mubuf
+                                            : rdna3::kBufferLoadB32Mubuf,
+                                     {.glc = uint8_t(atomic), .soffset = 124}));
+      }
+      const auto decoded = decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      SCOPED_TRACE(testing::Message() << arch << ' ' << decoded.value()->mnemonic());
+      for (const uint32_t control :
+           {0x20014000u, 0x20000000u, 0x40014000u, 0x80014000u, 0x80000000u, 0xc0014000u}) {
+        if (atomic && control == 0x20000000)
+          continue;
+        const bool writes = (control >> 30) == 0;
+        cu->write_sgpr(sb + 3, control);
+        // Pending descriptor reads survive a TYPE mismatch. A result-register
+        // conflict is checked only for operations that write it.
+        for (const auto &pending :
+             {RegisterRef{RegClass::SGPR, 3, 1}, RegisterRef{RegClass::VGPR, 0, 1}}) {
+          if (atomic && pending.cls == RegClass::VGPR)
+            continue; // Returning atomics use VDATA as a source as well.
+          scoreboard.clear();
+          unsigned warnings = 0;
+          const auto counter = WaitCounterKind::Ds;
+          scoreboard.add({scoreboard.issue(counter), pc - 4, 1, pending, counter, 0xf});
+          scoreboard.bind(pc, &warnings,
+                          [](void *ctx, const auto &) { ++*static_cast<unsigned *>(ctx); });
+          scoreboard.check_instruction(*decoded.value(), *wf);
+          EXPECT_EQ(warnings != 0, pending.cls == RegClass::SGPR || writes) << control;
+        }
+        for (bool wait : {false, true}) {
+          SCOPED_TRACE(testing::Message()
+                       << "control=" << std::hex << control << " waited=" << wait);
+          scoreboard.clear();
+          cu->write_vgpr(vb, 0, initial);
+          cu->write_vgpr(vb + 1, 0, 0);
+          memory.write32(address, value);
+          cu->l1_vector().invalidate_all();
+          l2.invalidate_all();
+          memory.load_image(reinterpret_cast<const uint8_t *>(words.data()), words.size() * 4, pc);
+          auto next = pc + words.size() * 4;
+          if (wait) {
+            const auto wait_word = gfx12
+                                       ? rdna4::build_sopp(rdna4::kSWaitLoadcntSopp)[0]
+                                       : rdna3::build_sopp(rdna3::kSWaitcntSopp, {.simm16 = 0})[0];
+            memory.write32(next, wait_word);
+            next += 4;
+          }
+          const auto consume =
+              gfx12 ? rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 256, .vdst = 1})
+                    : rdna3::build_vop1(rdna3::kVMovB32Vop1, {.src0 = 256, .vdst = 1});
+          memory.write32(next, consume[0]);
+          wf->pc = pc;
+          cu->run_issue_cycle(1);
+          ASSERT_EQ(wf->pc, pc + words.size() * 4) << unsigned(wf->instruction_execution_error());
+          EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::Load), 1u);
+          const auto before = cu->memory_wait_diagnostic_count();
+          for (unsigned tick = 0; wf->pc < next + 4 && tick < 32; ++tick)
+            cu->run_issue_cycle(1);
+          ASSERT_EQ(wf->pc, next + 4);
+          EXPECT_EQ(cu->memory_wait_diagnostic_count() - before, unsigned(writes && !wait));
+          const uint32_t result = !writes ? initial : control == 0x20000000 ? 0 : value;
+          EXPECT_EQ(cu->read_vgpr(vb, 0), result);
+          EXPECT_EQ(cu->read_vgpr(vb + 1, 0), result);
+          pc += 64;
+        }
+      }
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx11BufferAddressReadsRequireAnAvailableScalarOffset) {
+  GpuMemory memory("buffer_offsets");
+  L2Cache l2("buffer_offsets_l2");
+  ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3;
+  cfg.sgprs_per_wf = 16;
+  cfg.vgprs_per_wf = 16;
+  cfg.num_wf_slots = 1;
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "buffer_offsets", cfg, &memory, &l2));
+  auto *wf = cu->dispatch_wf(0, 0, 16, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  cu->write_sgpr(wf->sgpr_alloc().base + 3, 0x20014000);
+  auto decoder = Decoder::create(cfg.arch);
+  for (uint8_t offset : {8, 40, 124, 128}) {
+    const auto words =
+        rdna3::build_mubuf(rdna3::kBufferLoadB32Mubuf, {.vaddr = 4, .offen = 1, .soffset = offset});
+    auto inst = decoder->decode_window(words);
+    ASSERT_TRUE(inst.succeeded());
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    unsigned reports = 0;
+    state.clear();
+    state.bind(0x200, &reports, [](void *p, const MemoryWaitScoreboard::Hazard &) {
+      ++*static_cast<unsigned *>(p);
+    });
+    state.add({state.issue(WaitCounterKind::Load),
+               0x100,
+               1,
+               {RegClass::VGPR, 4, 1},
+               WaitCounterKind::Load,
+               0xf});
+    state.check_instruction(*inst.value(), *wf);
+    EXPECT_EQ(reports, offset == 40 ? 0u : 1u) << unsigned(offset);
+  }
+  wf->halt();
+}
+
+TEST(MemoryWaitExecutionTest, ModernRejectedBufferReadsOnlyItsRequiredDescriptorWords) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    GpuMemory memory("buffer_vaddr_memory");
+    L2Cache l2("buffer_vaddr_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 96;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "buffer_vaddr", config, &memory, &l2));
+    auto *wf = cu->dispatch_wf(0, 0x100, 96, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    if (!gfx12) {
+      cu->write_sgpr(wf->sgpr_alloc().base + 3, 0x20014000u);
+      for (bool typed : {false, true}) {
+        for (bool tfe : {false, true}) {
+          for (uint8_t vdata : {30, 31}) {
+            // Both forms write two VGPRs, either two data words or one data word plus TFE.
+            const auto words = typed ? rdna3::build_mtbuf(tfe ? rdna3::kTbufferLoadFormatXMtbuf
+                                                              : rdna3::kTbufferLoadFormatXyMtbuf,
+                                                          {.format = 20,
+                                                           .vaddr = 4,
+                                                           .vdata = vdata,
+                                                           .tfe = uint8_t(tfe),
+                                                           .offen = 1,
+                                                           .soffset = 12})
+                                     : rdna3::build_mubuf(tfe ? rdna3::kBufferLoadB32Mubuf
+                                                              : rdna3::kBufferLoadB64Mubuf,
+                                                          {.vaddr = 4,
+                                                           .vdata = vdata,
+                                                           .tfe = uint8_t(tfe),
+                                                           .offen = 1,
+                                                           .soffset = 12});
+            auto load = decoder->decode_window(words);
+            ASSERT_TRUE(load.succeeded());
+            for (RegisterRef source : {RegisterRef{RegClass::VGPR, 4, 1},
+                                       {RegClass::SGPR, 0, 1},
+                                       {RegClass::SGPR, 1, 1},
+                                       {RegClass::SGPR, 2, 1},
+                                       {RegClass::SGPR, 3, 1},
+                                       {RegClass::SGPR, 12, 1}}) {
+              SCOPED_TRACE(testing::Message()
+                           << arch << " typed=" << typed << " tfe=" << tfe
+                           << " vdata=" << unsigned(vdata) << " source=" << source.index);
+              unsigned reports = 0;
+              auto &state = wf->ensure_memory_wait_scoreboard();
+              state.clear();
+              state.bind(0x200, &reports,
+                         [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+              state.add({state.issue(WaitCounterKind::Load), 0x100, 1, source,
+                         WaitCounterKind::Load, 0xf});
+              state.check_instruction(*load.value(), *wf);
+              EXPECT_EQ(reports, unsigned(vdata == 30));
+              const auto lanes = MemoryWaitScoreboard::memory_lanes(*load.value(), *wf);
+              EXPECT_EQ(lanes.issue, 1u);
+              EXPECT_EQ(lanes.result, unsigned(vdata == 30));
+              state.access(source, 1, 0xf, false);
+              EXPECT_EQ(reports, 1u);
+            }
+          }
+        }
+      }
+    }
+    struct Form {
+      uint16_t gfx11_opcode, gfx12_opcode;
+      bool formatted;
+      bool typed = false;
+      uint8_t encoded_format = 0;
+    };
+    const Form forms[] = {
+        {rdna3::kBufferLoadB32Mubuf, rdna4::kBufferLoadB32Vbuffer, false},
+        {rdna3::kBufferLoadD16HiB16Mubuf, rdna4::kBufferLoadD16HiB16Vbuffer, false},
+        {rdna3::kBufferLoadD16FormatXMubuf, rdna4::kBufferLoadD16FormatXVbuffer, true},
+        {rdna3::kBufferStoreD16FormatXMubuf, rdna4::kBufferStoreD16FormatXVbuffer, true},
+        {rdna3::kTbufferLoadFormatXMtbuf, rdna4::kTbufferLoadFormatXVbuffer, true, true, 0},
+        {rdna3::kTbufferLoadFormatXMtbuf, rdna4::kTbufferLoadFormatXVbuffer, true, true, 20},
+        {rdna3::kTbufferStoreD16FormatXMtbuf, rdna4::kTbufferStoreD16FormatXVbuffer, true, true, 0},
+        {rdna3::kTbufferStoreD16FormatXMtbuf, rdna4::kTbufferStoreD16FormatXVbuffer, true, true,
+         20},
+    };
+    for (const auto form : forms) {
+      std::array<uint32_t, 3> words{};
+      if (gfx12) {
+        std::ranges::copy(
+            rdna4::build_vbuffer(
+                form.gfx12_opcode,
+                {.soffset = 12, .vdata = 8, .format = form.encoded_format, .offen = 1, .vaddr = 4}),
+            words.begin());
+      } else if (form.typed) {
+        std::ranges::copy(
+            rdna3::build_mtbuf(
+                form.gfx11_opcode,
+                {.format = form.encoded_format, .vaddr = 4, .vdata = 8, .offen = 1, .soffset = 12}),
+            words.begin());
+      } else {
+        std::ranges::copy(rdna3::build_mubuf(form.gfx11_opcode,
+                                             {.vaddr = 4, .vdata = 8, .offen = 1, .soffset = 12}),
+                          words.begin());
+      }
+      auto decoded = decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      for (uint32_t control : {0x20014000u, 0x20000000u, 0x80014000u}) {
+        cu->write_sgpr(wf->sgpr_alloc().base + 3, control);
+        for (RegisterRef pending : {RegisterRef{RegClass::VGPR, 4, 1},
+                                    {RegClass::VGPR, 8, 1},
+                                    {RegClass::SGPR, 0, 1},
+                                    {RegClass::SGPR, 1, 1},
+                                    {RegClass::SGPR, 2, 1},
+                                    {RegClass::SGPR, 3, 1},
+                                    {RegClass::SGPR, 12, 1}}) {
+          if (pending.cls == RegClass::VGPR && pending.index == 8 &&
+              !decoded.value()->mnemonic().starts_with("buffer_store_") &&
+              !decoded.value()->mnemonic().starts_with("tbuffer_store_"))
+            continue;
+          SCOPED_TRACE(testing::Message()
+                       << arch << " " << decoded.value()->mnemonic() << " descriptor=" << std::hex
+                       << control << " reg=" << pending.index);
+          unsigned reports = 0;
+          auto &state = wf->ensure_memory_wait_scoreboard();
+          state.clear();
+          state.bind(0x200, &reports, [](void *p, const MemoryWaitScoreboard::Hazard &) {
+            ++*static_cast<unsigned *>(p);
+          });
+          state.add(
+              {state.issue(WaitCounterKind::Load), 0x100, 1, pending, WaitCounterKind::Load, 0xf});
+          state.check_instruction(*decoded.value(), *wf);
+          bool reads = control == 0x20014000u && (!form.typed || form.encoded_format != 0);
+          if (pending.cls == RegClass::VGPR && pending.index == 8)
+            reads = reads && (decoded.value()->mnemonic().starts_with("buffer_store_") ||
+                              decoded.value()->mnemonic().starts_with("tbuffer_store_"));
+          if (!reads && pending.cls == RegClass::SGPR) {
+            if (form.formatted)
+              reads = pending.index == 3;
+            else if (gfx12)
+              reads = pending.index >= 1 && pending.index <= 3;
+            else
+              reads = pending.index <= 3 || (pending.index == 12 && control == 0x20000000u);
+          }
+          EXPECT_EQ(reports, unsigned(reads));
+        }
+      }
+    }
+  }
+}
+
 TEST(MemoryWaitExecutionTest, BufferTypeSuppressesResultsButKeepsEncodedSourceDependencies) {
   class Observer final : public ExecutionPlugin {
   public:
@@ -5461,9 +5791,7 @@ TEST(MemoryWaitExecutionTest, BufferTypeSuppressesResultsButKeepsEncodedSourceDe
               {state.issue(WaitCounterKind::Ds), 0x100, 1, pending, WaitCounterKind::Ds, 0xf});
           const auto reads_before = observed->reads;
           state.check_instruction(*decoded.value(), *wf);
-          EXPECT_EQ(reports,
-                    pending.cls != RegClass::VGPR || (exec && (pending.index == 0 || !type)) ? 1u
-                                                                                             : 0u);
+          EXPECT_EQ(reports, pending.cls != RegClass::VGPR || (exec && !type) ? 1u : 0u);
           EXPECT_EQ(observed->reads, reads_before);
         }
       }
@@ -6390,6 +6718,7 @@ TEST(MemoryWaitExecutionTest, DualDsExchangeExecutesBothDecodedResultsAcrossArch
     ASSERT_NE(wf, nullptr);
     wf->set_exec(1);
     wf->set_lds_base(cu->allocate_lds(4096));
+    wf->set_lds_size(4096);
     auto decoder = Decoder::create(arch);
     for (unsigned width : {1u, 2u})
       for (bool stride64 : {false, true}) {
@@ -6467,6 +6796,8 @@ TEST(MemoryWaitExecutionTest,
           rocjitsu::test::initialize_compute_unit(cu, "buffer_alias_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0x100, sgprs, 32);
       ASSERT_NE(wf, nullptr);
+      // s[104:107] uses VCC_LO for the byte count and VCC_HI for FORMAT.
+      wf->set_vcc_raw((uint64_t{20u << 12} << 32) | 64u);
       auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
       auto observer = std::make_unique<Observer>();
       auto *observed = observer.get();
@@ -6504,11 +6835,11 @@ TEST(MemoryWaitExecutionTest,
           state.add({state.issue(WaitCounterKind::Ds), 0x80, 1, pending, WaitCounterKind::Ds, 0xf});
           const auto reads_before = observed->reads;
           state.check_instruction(*decoded.value(), *wf);
-          // Invalid backing does not establish an ISA exemption from source
-          // waits. Address/offset operands keep their encoded dependencies.
-          const bool expected = pending.cls == RegClass::VGPR ? bool(exec)
-                                : pending.cls == RegClass::SGPR && pending.index == 4
-                                    ? true
+          // Neither the vector address nor the scalar offset is read without a backed descriptor.
+          // A load still writes its destination on the active lanes.
+          const bool reads_address = sgprs == 106;
+          const bool expected = pending.cls == RegClass::VGPR
+                                    ? exec && (pending.index == 8 || reads_address)
                                     : sgprs == 106;
           EXPECT_EQ(reports != 0, expected);
           EXPECT_EQ(observed->reads, reads_before);
@@ -6822,7 +7153,7 @@ TEST(MemoryWaitFootprintTest, PermutationControlsShareExecutionSelectorValues) {
   ASSERT_NE(wf, nullptr);
   wf->set_exec_raw(1ull << 32);
   wf->set_vcc_raw(1ull << 32);
-  wf->set_apertures(3ull << 32, 4ull << 32, 5ull << 32, 6ull << 32);
+  wf->set_apertures(3ull << 32, 4ull << 32, 5ull << 32, 6ull << 32, /*override_launch=*/true);
   wf->set_exec(1);
   for (unsigned lane = 0; lane < 32; ++lane)
     cu->write_vgpr(wf->vgpr_alloc().base + 8, lane, lane);

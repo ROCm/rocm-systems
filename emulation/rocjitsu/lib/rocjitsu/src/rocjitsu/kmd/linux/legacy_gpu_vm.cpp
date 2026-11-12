@@ -32,7 +32,7 @@ public:
           std::shared_ptr<void> frontend_lifetime)
       : memory_(std::move(memory)), address_space_(std::make_shared<LegacyAddressSpace>(*memory_)),
         vmid_(vmid), original_request_mutex_(registration.request_mutex),
-        mutation_epoch_(registration.mutation_epoch),
+        mutation_epoch_(registration.mutation_epoch), prt_residency_(registration.prt_residency),
         frontend_lifetime_(std::move(frontend_lifetime)) {}
 
   util::Result initialize(LegacyAddressSpaceRegistration registration,
@@ -64,6 +64,10 @@ public:
                                            std::span<std::byte> bytes) const override {
     return &physical == static_cast<const PhysicalMemoryAccess *>(this) &&
            address_space_->try_read_uncached_ram(address, bytes, vmid_, original_request_mutex_);
+  }
+
+  [[nodiscard]] std::shared_ptr<const PrtRanges> nonresident_prt_ranges() const override {
+    return prt_residency_ ? prt_residency_->nonresident.load() : nullptr;
   }
 
   [[nodiscard]] VmTranslationResult translate(uint64_t address, std::size_t size,
@@ -311,6 +315,7 @@ private:
   // under the caller's VM-state lock, even after raw registry replacement.
   const std::shared_ptr<util::DistributedSharedMutex> original_request_mutex_;
   util::IntrusiveSharedPtr<const amdgpu::VmMutationEpoch> mutation_epoch_;
+  std::shared_ptr<const PrtResidency> prt_residency_;
   std::shared_ptr<void> frontend_lifetime_;
 };
 

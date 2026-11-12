@@ -921,12 +921,12 @@ template <typename Isa> void check_high_shared_flat_addresses(rj_code_arch_t arc
     bool rdna4_only = false;
   };
   constexpr std::array kCases{
-      Case{0x40u, 0, true, 0x40u},       Case{0x20040u, 0, true, 0x40u},
-      Case{0x80000040u, 0, true, 0x40u}, Case{0x10000u, 0, false, 0},
-      Case{0xffffffc0u, 0, false, 0},    Case{0x1fffcu, 4, true, 0},
-      Case{0x20004u, -4, true, 0},       Case{0x20000u, 0x40, true, 0x40u},
-      Case{0xfcu, 0, true, 0xfcu, true}, Case{0x100u, 0, false, 0, true},
-      Case{0x200u, 0, false, 0, true},   Case{0x20200u, 0, false, 0, true},
+      Case{0x40u, 0, true, 0x40u},         Case{0x20040u, 0, true, 0x40u},
+      Case{0x80000040u, 0, true, 0x40u},   Case{0x10000u, 0, false, 0},
+      Case{0xffffffc0u, 0, false, 0},      Case{0x1fffcu, 4, true, 0},
+      Case{0x20004u, -4, true, 0},         Case{0x20000u, 0x40, true, 0x40u},
+      Case{0x3fcu, 0, true, 0x3fcu, true}, Case{0x400u, 0, false, 0, true},
+      Case{0x800u, 0, false, 0, true},     Case{0x20800u, 0, false, 0, true},
   };
   enum class Operation { Load, Store, Atomic };
   for (uint32_t shared_lane : {0u, 1u}) {
@@ -959,16 +959,18 @@ template <typename Isa> void check_high_shared_flat_addresses(rj_code_arch_t arc
           wf->set_exec(mixed ? 3 : uint64_t{1} << shared_lane);
           ASSERT_EQ(cu.allocate_lds(256), 0u);
           const uint32_t own_base = cu.allocate_lds(256);
-          ASSERT_EQ(own_base, 0x100u);
-          ASSERT_EQ(cu.allocate_lds(512), own_base + 256);
+          const uint32_t allocation = amdgpu::lds_allocation_granule(arch);
+          ASSERT_EQ(own_base, allocation);
+          ASSERT_EQ(cu.allocate_lds(512), own_base + allocation);
           wf->set_lds_base(own_base);
-          wf->set_lds_size(256);
+          wf->set_lds_size(allocation);
           constexpr uint32_t canary = 0xdeadbeef, value = 0x12345678;
           constexpr uint32_t foreign_canary = 0x55aa33cc, inactive_value = 0xabad1dea;
           constexpr uint32_t destination = 0xbaadf00d, global_value = 0x87654321;
-          for (uint32_t address = 0; address < 1024; address += 4)
-            wf->lds().write32(
-                address, address >= own_base && address < own_base + 256 ? canary : foreign_canary);
+          for (uint32_t address = 0; address < 4 * allocation; address += 4)
+            wf->lds().write32(address, address >= own_base && address < own_base + allocation
+                                           ? canary
+                                           : foreign_canary);
           memory.write32(0x2000, global_value);
           const uint32_t vb = wf->vgpr_alloc().base;
           for (uint32_t lane = 0; lane < 3; ++lane) {
@@ -1012,12 +1014,12 @@ template <typename Isa> void check_high_shared_flat_addresses(rj_code_arch_t arc
               arch == ROCJITSU_CODE_ARCH_RDNA4 ? test.rdna4_in_range : test.address_offset == 0x40u;
           const uint32_t shared_offset =
               arch == ROCJITSU_CODE_ARCH_RDNA4 ? test.rdna4_offset : 0x40u;
-          for (uint32_t address = 0; address < 1024; address += 4) {
+          for (uint32_t address = 0; address < 4 * allocation; address += 4) {
             const uint32_t expected =
                 !load && shared_in_range && address == own_base + shared_offset
                     ? atomic ? canary + value : value
-                : address >= own_base && address < own_base + 256 ? canary
-                                                                  : foreign_canary;
+                : address >= own_base && address < own_base + allocation ? canary
+                                                                         : foreign_canary;
             EXPECT_EQ(wf->lds().read32(address), expected);
           }
           EXPECT_EQ(memory.read32(0x2000),
@@ -1049,10 +1051,10 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAlloc
     uint32_t address_offset, logical_offset, valid_words;
   };
   // gfx1201 retains complete DWORDs, also when the first address is unaligned.
-  constexpr std::array cases{Case{240, 240, 4},    Case{241, 241, 3}, Case{244, 244, 3},
-                             Case{248, 248, 2},    Case{252, 252, 1}, Case{253, 253, 0},
-                             Case{254, 254, 0},    Case{255, 255, 0}, Case{256, 256, 0},
-                             Case{0x200fc, 252, 1}};
+  constexpr std::array cases{Case{1008, 1008, 4},   Case{1009, 1009, 3}, Case{1012, 1012, 3},
+                             Case{1016, 1016, 2},   Case{1020, 1020, 1}, Case{1021, 1021, 0},
+                             Case{1022, 1022, 0},   Case{1023, 1023, 0}, Case{1024, 1024, 0},
+                             Case{0x203fc, 1020, 1}};
   constexpr std::array<uint32_t, 4> payload{0x10203040, 0x50607080, 0x90a0b0c0, 0xd0e0f000};
   for (const Case &test : cases) {
     for (uint32_t width : {1u, 2u, 4u}) {
@@ -1075,13 +1077,13 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAlloc
           ASSERT_NE(wave, nullptr);
           wave->set_exec(mixed ? 3 : 1);
           ASSERT_EQ(cu.allocate_lds(256), 0u);
-          ASSERT_EQ(cu.allocate_lds(256), 256u);
-          ASSERT_EQ(cu.allocate_lds(512), 512u);
-          wave->set_lds_base(256);
-          wave->set_lds_size(256);
-          std::array<uint8_t, 1024> expected_memory{};
+          ASSERT_EQ(cu.allocate_lds(256), 1024u);
+          ASSERT_EQ(cu.allocate_lds(512), 2048u);
+          wave->set_lds_base(1024);
+          wave->set_lds_size(1024);
+          std::array<uint8_t, 3072> expected_memory{};
           for (uint32_t address = 0; address < expected_memory.size(); address += 4) {
-            const uint32_t value = address >= 256 && address < 512 ? 0x11223344u : 0x55aa33ccu;
+            const uint32_t value = address >= 1024 && address < 2048 ? 0x11223344u : 0x55aa33ccu;
             wave->lds().write32(address, value);
             std::memcpy(expected_memory.data() + address, &value, 4);
           }
@@ -1115,7 +1117,7 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAlloc
           const uint32_t valid_words = std::min(width, test.valid_words);
           if (!load)
             for (uint32_t word = 0; word < valid_words; ++word)
-              std::memcpy(expected_memory.data() + 256 + test.logical_offset + word * 4,
+              std::memcpy(expected_memory.data() + 1024 + test.logical_offset + word * 4,
                           &payload[word], 4);
           for (uint32_t address = 0; address < expected_memory.size(); address += 4) {
             uint32_t expected;
@@ -1134,7 +1136,7 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAlloc
                   expected = 0x88770000u + word;
                 else if (word < valid_words)
                   std::memcpy(&expected,
-                              expected_memory.data() + 256 + test.logical_offset + word * 4, 4);
+                              expected_memory.data() + 1024 + test.logical_offset + word * 4, 4);
               }
               EXPECT_EQ(cu.read_vgpr(vb + 16 + word, lane), expected);
             }
@@ -1148,9 +1150,9 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAlloc
 }
 
 TEST(Rdna4MemoryExecutionHarness, SharedFlatAtomic64RequiresACompleteAllocationElement) {
-  // A 252-byte logical bound is deliberately synthetic: real allocations are
+  // A 1020-byte logical bound is deliberately synthetic: real allocations are
   // granular, so an aligned atomic cannot partially cross their boundary.
-  for (uint32_t logical_size : {252u, 256u}) {
+  for (uint32_t logical_size : {1020u, 1024u}) {
     for (bool returns : {false, true}) {
       SCOPED_TRACE(testing::Message() << "logical_size=" << logical_size << " returns=" << returns);
       amdgpu::GpuMemory memory("flat_atomic_boundary_memory");
@@ -1168,17 +1170,17 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatAtomic64RequiresACompleteAllocationE
       ASSERT_NE(wave, nullptr);
       wave->set_exec(3);
       ASSERT_EQ(cu.allocate_lds(256), 0u);
-      ASSERT_EQ(cu.allocate_lds(256), 256u);
-      ASSERT_EQ(cu.allocate_lds(256), 512u);
-      wave->set_lds_base(256);
+      ASSERT_EQ(cu.allocate_lds(256), 1024u);
+      ASSERT_EQ(cu.allocate_lds(256), 2048u);
+      wave->set_lds_base(1024);
       wave->set_lds_size(logical_size);
       constexpr uint64_t initial = 0x5566778811223344ull;
-      wave->lds().write64(256 + 248, initial);
-      wave->lds().write64(512, 0x55aa33cc55aa33ccull);
+      wave->lds().write64(1024 + 1016, initial);
+      wave->lds().write64(2048, 0x55aa33cc55aa33ccull);
       memory.write64(0x4000, initial);
       const uint32_t vb = wave->vgpr_alloc().base;
       for (uint32_t lane = 0; lane < 2; ++lane) {
-        const uint64_t address = lane == 0 ? shared_base + 248 : 0x4000;
+        const uint64_t address = lane == 0 ? shared_base + 1016 : 0x4000;
         cu.write_vgpr(vb, lane, static_cast<uint32_t>(address));
         cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
         cu.write_vgpr(vb + 8, lane, 1);
@@ -1196,15 +1198,15 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatAtomic64RequiresACompleteAllocationE
       ASSERT_EQ(cu.route_memory_inst(instruction.release(), *wave),
                 amdgpu::VmAccessOutcome::Complete);
       cu.flush_all();
-      EXPECT_EQ(wave->lds().read64(256 + 248), logical_size == 256 ? initial + 1 : initial);
-      EXPECT_EQ(wave->lds().read64(512), 0x55aa33cc55aa33ccull);
+      EXPECT_EQ(wave->lds().read64(1024 + 1016), logical_size == 1024 ? initial + 1 : initial);
+      EXPECT_EQ(wave->lds().read64(2048), 0x55aa33cc55aa33ccull);
       EXPECT_EQ(memory.read64(0x4000), initial + 1);
       for (uint32_t lane = 0; lane < 2; ++lane) {
         const uint64_t actual =
             uint64_t{cu.read_vgpr(vb + 16, lane)} | (uint64_t{cu.read_vgpr(vb + 17, lane)} << 32);
-        EXPECT_EQ(actual, !returns                           ? 0xa5a5a5a5a5a5a5a5ull
-                          : lane == 0 && logical_size == 252 ? 0
-                                                             : initial);
+        EXPECT_EQ(actual, !returns                            ? 0xa5a5a5a5a5a5a5a5ull
+                          : lane == 0 && logical_size == 1020 ? 0
+                                                              : initial);
       }
       EXPECT_TRUE(wave->wait_counters().empty());
     }
@@ -1235,14 +1237,15 @@ TEST(Gfx1250MemoryExecutionHarness, DdsFaultsWithoutWrappingIntoAnotherLdsAlloca
           const uint64_t exec = mixed ? 3 : uint64_t{1} << dds_lane;
           wf->set_exec(exec);
           // The first allocation belongs to a different workgroup. The upper
-          // DDS offset used to wrap into its word at 0xc0 after adding 0x100.
+          // highest DDS offset can wrap into the previous physical allocation.
           const uint32_t other_base = cu.allocate_lds(256);
           ASSERT_EQ(other_base, 0u);
           const uint32_t own_base = cu.allocate_lds(256);
-          ASSERT_EQ(own_base, 0x100u);
+          ASSERT_EQ(own_base, 2048u);
           wf->set_lds_base(own_base);
+          wf->set_lds_size(2048);
           constexpr uint32_t canary = 0xdeadbeef;
-          for (uint32_t address = 0; address < 512; address += 4)
+          for (uint32_t address = 0; address < own_base + wf->lds_size(); address += 4)
             wf->lds().write32(address, canary);
           memory.write32(0x2000, canary);
           const uint32_t vb = wf->vgpr_alloc().base;
@@ -1263,13 +1266,66 @@ TEST(Gfx1250MemoryExecutionHarness, DdsFaultsWithoutWrappingIntoAnotherLdsAlloca
           EXPECT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Faulted);
           EXPECT_TRUE(wf->wait_counters().empty());
           EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
-          for (uint32_t address = 0; address < 512; address += 4)
+          for (uint32_t address = 0; address < own_base + wf->lds_size(); address += 4)
             EXPECT_EQ(wf->lds().read32(address), canary);
           EXPECT_EQ(memory.read32(0x2000), canary);
           for (uint32_t lane = 0; lane < 2; ++lane)
             EXPECT_EQ(cu.read_vgpr(vb + 16, lane), canary);
         }
       }
+    }
+  }
+}
+
+TEST(Gfx1250MemoryExecutionHarness, B64AtomicsPreflightEveryParticipatingLane) {
+  using namespace amdgpu;
+  for (bool local : {false, true}) {
+    for (bool valid : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "local=" << local << " valid=" << valid);
+      GpuMemory memory("atomic_memory");
+      L2Cache l2("atomic_l2");
+      ComputeUnitCore::Config cfg{};
+      cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+      cfg.num_wf_slots = 1;
+      cfg.sgprs_per_wf = 128;
+      cfg.vgprs_per_wf = 32;
+      cfg.lds_size_kb = 64;
+      Gfx1250MemoryTestCu cu("atomic", cfg, &memory, &l2);
+      auto *wf = cu.dispatch_wf(0, 0, 128, 32, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(3);
+      wf->set_scratch_base(0x10000);
+      wf->set_scratch_lane_size(64);
+      wf->set_lds_base(cu.allocate_lds(64));
+      wf->set_lds_size(64);
+      constexpr uint64_t global = 0x2000;
+      constexpr uint32_t lds_offset = 16;
+      const uint64_t base = local ? lds_offset : global;
+      const uint64_t second = valid ? base + 8 : local ? base + 4 : (uint64_t{1} << 52) | 0x10000;
+      const uint32_t vgpr = wf->vgpr_alloc().base;
+      for (unsigned lane = 0; lane < 2; ++lane) {
+        const uint64_t address = lane ? second : base;
+        cu.write_vgpr(vgpr, lane, static_cast<uint32_t>(address));
+        cu.write_vgpr(vgpr + 1, lane, address >> 32);
+        cu.write_vgpr(vgpr + 4, lane, 1);
+        cu.write_vgpr(vgpr + 5, lane, 0);
+      }
+      memory.write64(global, 41);
+      wf->lds().write64(wf->lds_base() + lds_offset, 41);
+      auto decoder = Decoder::create(cfg.arch);
+      const auto flat =
+          cdna5::build_vflat(cdna5::kFlatAtomicAddU64Vflat, {.saddr = 124, .vsrc = 4, .vaddr = 0});
+      const auto ds = cdna5::build_vds(cdna5::kDsAddU64Vds, {.addr = 0, .data0 = 4});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, local ? ds.data() : flat.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
+      EXPECT_EQ(cu.route_memory_inst(inst.release(), *wf),
+                local && !valid ? VmAccessOutcome::Faulted : VmAccessOutcome::Complete);
+      cu.flush_all();
+      EXPECT_EQ(bool(wf->trapsts() & (1u << 8)), !local && !valid);
+      EXPECT_EQ(wf->memory_trap_pending(), !local && !valid);
+      EXPECT_EQ(local ? wf->lds().read64(wf->lds_base() + lds_offset) : memory.read64(global),
+                valid ? 42u : 41u);
     }
   }
 }
@@ -1304,7 +1360,8 @@ TEST(Gfx1250MemoryExecutionHarness, MixedFlatLdsAndGlobalLanesPreserveEachResult
       auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
       ASSERT_NE(wf, nullptr);
       wf->set_exec(0x3);
-      wf->set_lds_base(0x200);
+      wf->set_lds_base(cu.allocate_lds(2048));
+      wf->set_lds_size(2048);
       const uint32_t local_lane = first_lane_is_lds ? 0 : 1;
       const uint32_t vb = wf->vgpr_alloc().base;
       auto initial = [](uint32_t lane, uint32_t word) { return 0x12000000u + lane * 16 + word; };
@@ -1379,7 +1436,8 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
       ASSERT_NE(wf, nullptr);
       ASSERT_EQ(wf->wf_size(), 32u);
       wf->set_exec(0x7);
-      wf->set_lds_base(0x200);
+      wf->set_lds_base(cu.allocate_lds(2048));
+      wf->set_lds_size(2048);
       wf->set_lds_size(512);
       wf->set_scratch_base(scratch_base);
       wf->set_scratch_lane_size(128);
@@ -1390,8 +1448,7 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
       const bool is_cdna5 = arch == ROCJITSU_CODE_ARCH_CDNA5;
       auto scratch_address = [&](uint32_t lane, uint32_t word) {
         // CDNA5 interleaves DWORDs across lanes; RDNA4 uses per-lane backing.
-        return scratch_base +
-               (is_cdna5 ? (word * wf->wf_size() + lane) * 4 : lane * 128 + word * 4);
+        return scratch_base + (word * wf->wf_size() + lane) * 4;
       };
       auto initial = [](uint32_t lane, uint32_t word) { return 0xabc00000u + lane * 16 + word; };
       auto source = [](uint32_t lane, uint32_t word) { return 0x12300000u + lane * 16 + word; };
@@ -1578,9 +1635,7 @@ void check_block_transfer_masks(rj_code_arch_t arch, bool general_completion = f
         }
         const uint32_t vb = wf->vgpr_alloc().base;
         auto address = [&](uint32_t lane, uint32_t word) {
-          return base + (scratch && arch == ROCJITSU_CODE_ARCH_CDNA5
-                             ? (word * wf->wf_size() + lane) * 4
-                             : lane * 128 + word * 4);
+          return base + (scratch ? (word * wf->wf_size() + lane) * 4 : lane * 128 + word * 4);
         };
         auto value = [](uint32_t lane, uint32_t word) { return 0xabc00000u + lane * 32 + word; };
         for (uint32_t lane = 0; lane < 3; ++lane) {
@@ -1691,9 +1746,7 @@ template <typename Isa> void check_block_transfer_ownership(rj_code_arch_t arch)
           wave->set_scratch_lane_size(128);
         }
         const auto address = [&](uint32_t lane, uint32_t word) {
-          return base + (scratch && arch == ROCJITSU_CODE_ARCH_CDNA5
-                             ? (word * wave->wf_size() + lane) * 4
-                             : lane * 128 + word * 4);
+          return base + (scratch ? (word * wave->wf_size() + lane) * 4 : lane * 128 + word * 4);
         };
         const auto value = [](uint32_t lane, uint32_t word) {
           return 0xabc00000u + lane * 32 + word;
@@ -9115,6 +9168,11 @@ TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms)
         const uint32_t vb = wf->vgpr_alloc().base;
         const uint32_t sb = wf->sgpr_alloc().base;
         constexpr uint64_t kAddr = 0x1000;
+        if (form == Form::Ds) {
+          constexpr uint32_t bytes = kAddr + sizeof(uint32_t);
+          wf->set_lds_base(cu.allocate_lds(bytes));
+          wf->set_lds_size(bytes);
+        }
         const uint8_t th = returns ? 1 : 0;
         const uint16_t atomic_op =
             bf16 ? cdna5::kGlobalAtomicPkAddBf16Vglobal : cdna5::kGlobalAtomicPkAddF16Vglobal;
@@ -9162,7 +9220,7 @@ TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms)
             wf->set_mode_raw(0xf | ((denorm ^ 3u) << 4) | (denorm << 6) |
                              amdgpu::Wavefront::FP16_OVFL_BIT);
             if (form == Form::Ds)
-              cu.lds().write32(kAddr, c.old_value);
+              cu.lds().write32(wf->lds_base() + kAddr, c.old_value);
             else
               memory.write32(kAddr, c.old_value);
             cu.write_vgpr(vb, 0, 0xdeadbeef);
@@ -9178,7 +9236,9 @@ TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms)
             if (form == Form::Ds &&
                 ((c.input_denorm && !(denorm & 1u)) || (c.output_denorm && !(denorm & 2u))))
               expected = c.flushed_value;
-            EXPECT_EQ(form == Form::Ds ? cu.lds().read32(kAddr) : memory.read32(kAddr), expected);
+            EXPECT_EQ(form == Form::Ds ? cu.lds().read32(wf->lds_base() + kAddr)
+                                       : memory.read32(kAddr),
+                      expected);
             EXPECT_EQ(cu.read_vgpr(vb + dst, 0),
                       returns ? c.old_value : (form == Form::Buffer ? c.source : 0xdeadbeef));
             EXPECT_EQ(cu.read_vgpr(vb + dst, 1), 0xdeadbeefu);
@@ -10824,7 +10884,7 @@ TEST(Cdna4FlatMixedApertureTest, ScratchSwizzleDoesNotStrideGlobalLanes) {
   constexpr uint32_t kGlobalWord0 = 0xBB0000B0u;
   constexpr uint32_t kGlobalWord1 = 0xBB0000B1u;
 
-  wf->set_apertures(0, 0, kPrivateBase, kPrivateBase + 0x10000);
+  wf->set_apertures(0, 0, kPrivateBase, kPrivateBase + 0x10000, /*override_launch=*/true);
   wf->set_scratch_base(kScratchBase);
   wf->set_exec(0x3u); // lane 0 -> private aperture, lane 1 -> global
 
@@ -11081,8 +11141,10 @@ template <typename ComputeUnit> void check_flat_atomic_lds_policy(rj_code_arch_t
   constexpr uint64_t kSharedBase = 0x100000000ULL;
   compute_unit.set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
   amdgpu::Wavefront *wave = compute_unit.dispatch_wf(0, 0, 106, 256);
+  wave->set_lds_base(compute_unit.allocate_lds(512));
+  wave->set_lds_size(512);
   wave->set_exec(1);
-  wave->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  wave->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0, /*override_launch=*/true);
   const uint32_t base = wave->vgpr_alloc().base;
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   const bool modern = arch == ROCJITSU_CODE_ARCH_CDNA5;
@@ -11465,8 +11527,9 @@ TEST(LegacyRdnaFlatTest, PrivateAndGlobalLanesKeepDistinctMultiwordLayouts) {
           constexpr uint64_t scratch_base = 0x8000;
           constexpr uint64_t global_address = 0x2000;
           constexpr uint32_t global_lane = 1;
-          wf->set_apertures(0, 0, private_base, private_base + 0x10000);
+          wf->set_apertures(0, 0, private_base, private_base + 0x10000, /*override_launch=*/true);
           wf->set_scratch_base(scratch_base);
+          wf->set_scratch_lane_size(64);
           wf->set_exec((uint64_t{1} << private_lane) | (uint64_t{1} << global_lane));
           const uint32_t vb = wf->vgpr_alloc().base;
           for (uint32_t lane : {private_lane, global_lane}) {
@@ -11542,8 +11605,14 @@ TEST(LegacyRdnaFlatTest, PrivateAndGlobalLanesKeepDistinctMultiwordLayouts) {
           ASSERT_NE(load, nullptr);
           ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
           EXPECT_EQ(pipeline.issue(load.release(), *wf), amdgpu::VmAccessOutcome::Complete);
-          EXPECT_EQ(cu->read_vgpr(vb + 2, private_lane), payload[0]);
-          EXPECT_EQ(cu->read_vgpr(vb + 3, private_lane), payload[1]);
+          // RDNA1 aligns the effective dword buffer address after swizzling.
+          const uint32_t start =
+              arch == ROCJITSU_CODE_ARCH_RDNA1 ? private_offset & ~3u : private_offset;
+          for (unsigned word = 0; word < 2; ++word) {
+            uint32_t expected = 0;
+            std::memcpy(&expected, expected_private.data() + start + word * 4, 4);
+            EXPECT_EQ(cu->read_vgpr(vb + 2 + word, private_lane), expected);
+          }
           wf->halt();
         }
       }
