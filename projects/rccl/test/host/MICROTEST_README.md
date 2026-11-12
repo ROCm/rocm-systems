@@ -51,8 +51,8 @@ A new binary is named in **one** place: `rccl_add_micro_binary()` (or
 `rccl_add_transport_micro_binary()`) in `test/host/CMakeLists.txt`. Everything
 that runs it finds it from the name alone — `run_host_tests.sh` goes through
 [`rccl-UnitTestsHostAll`](#rccl-unittestshostall--one-front-door-for-every-host-binary),
-which runs the binaries the build recorded beside it. (`lib/test_executor.py` discovers the
-same binaries by the `rccl-UnitTestsMicro*` naming convention for its `llvm-cov --object` set.)
+which runs the binaries the build recorded beside it. (`lib/test_executor.py` needs no list of
+them either: it attributes their coverage from `host-coverage.lcov`, not from objects of its own.)
 
 ## Units under test
 
@@ -1281,6 +1281,23 @@ The division of labour follows from the same constraint:
   both. Additive and best effort — no tracefile, no `lcov`, or a tracefile lcov
   rejects, and its own reports are produced exactly as before.
 
+  The boundary is visible in the profile layout, and the runner's `.profdata`
+  glob is deliberately **flat** because of it. The front door writes each
+  binary it forks into `<rawfiles>/<binary>/`, one directory down; everything
+  the runner launched itself — including the front door's own profile — is at
+  the top level. So the top level is exactly the set the runner may read
+  against its own objects, and the nested ones are the set it must take as
+  lcov instead. A suite that names a host binary *directly* rather than going
+  through the front door (`gin_micro_finalize` runs
+  `host/micro/rccl-UnitTestsMicro`) is therefore an ordinary test to the
+  runner: flat profile, and its binary passed as `--object` like any other.
+
+  Only binaries that actually ran are passed as objects. An `--object` with no
+  profile is not free — `llvm-cov` counts its mappings as uncovered — so
+  naming the whole host tree, as this did before the front door existed,
+  reports ~90 binaries' worth of unexecuted product-source mappings against
+  the library's own numbers.
+
 Note that `lcov` and `llvm-cov` count branches differently, so a per-binary
 `llvm-cov` branch total and the lcov union's will not agree; neither is wrong.
 
@@ -1572,6 +1589,13 @@ the tests' own code and vendored nvtx).
 It is also skippable. `RCCL_HOST_COVERAGE_EXPORT=0` leaves the children's
 profiles exactly where they fall and skips the export over them, for a consumer
 that reads the `.profraw` files itself and has no use for `host-coverage.lcov`.
+
+That consumer has to be one that can pair each profile with the binary that
+produced it, which is the whole difficulty — so `tools/scripts/test_runner`
+is **not** one, and drops the variable from the front door's environment when
+`--coverage-report` is on (saying so when it was set to `0`). The tracefile is
+that report's only route to the host tests' coverage, and honouring the opt-out
+there would quietly cost it every one of their lines.
 
 Adding a host test binary therefore needs no change outside this directory.
 

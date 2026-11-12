@@ -1164,6 +1164,11 @@ class TestExecutor:
         self.log_dir = os.path.join(self.workspace_dir, "logs")
         self.report_dir = os.path.join(self.workspace_dir, "report")
         self.rawfiles_dir = os.path.join(self.log_dir, "rawfiles")
+        # Binaries this runner launched itself, for llvm-cov's --object set. An
+        # object is only worth passing when a profile for it exists: one without
+        # contributes its mappings as UNCOVERED, so listing binaries that did not
+        # run depresses the reported coverage. See _host_coverage_objects().
+        self.executed_binaries = set()
 
         # Create directories (skip build_dir if using custom lib)
         if not self.using_custom_lib:
@@ -1212,6 +1217,33 @@ class TestExecutor:
         pattern = self._coverage_profile_pattern()
         env["LLVM_PROFILE_FILE"] = pattern
         return pattern
+
+    def _claim_host_coverage_export(self, env):
+        """Stop anything turning off the host tracefile this report depends on.
+
+        rccl-UnitTestsHostAll reads RCCL_HOST_COVERAGE_EXPORT and skips writing
+        host-coverage.lcov when it is "0". That opt-out exists for a caller that
+        collects the .profraw files itself -- but this runner cannot, since the
+        binaries the front door forks compile the same sources under different
+        #defines and their profiles can only be read against the binary that
+        produced them. The tracefile is therefore the ONLY route by which the
+        host tests' coverage reaches this report, and honouring the opt-out here
+        would silently drop every one of their lines from it.
+
+        Called after the config's own env_variables are applied, so it is the
+        last word on the subject.
+        """
+        if not self.args.coverage_report:
+            return
+        previous = env.pop("RCCL_HOST_COVERAGE_EXPORT", None)
+        if previous is not None and previous != "0":
+            # Only "0" is an opt-out to the front door; anything else was a no-op
+            # and is not worth a line of output.
+            return
+        if previous == "0":
+            print("NOTE: ignoring RCCL_HOST_COVERAGE_EXPORT=0 for this run -- "
+                  "--coverage-report needs the host tracefile the front door "
+                  "writes, and has no other way to read the host tests' profiles")
 
     def _cmake_cache_value(self, name):
         """Return the CMake cache VALUE for <name>, or None if absent."""
@@ -2059,6 +2091,10 @@ class TestExecutor:
                 "case_counts": _counts_from_details(missing_details),
             })
 
+        # Recorded after the existence checks above, so the set holds what was
+        # actually launched rather than what was asked for.
+        self.executed_binaries.add(os.path.abspath(test_binary_path))
+
         # For MPI tests, verify mpirun is available
         if num_ranks > 1:
             mpi_path = self.paths.get("mpi_path", "")
@@ -2163,6 +2199,7 @@ class TestExecutor:
         for key, value in merged_env.items():
             if key != 'LD_LIBRARY_PATH':
                 env[key] = str(value)
+        self._claim_host_coverage_export(env)
 
         # Executable to invoke. Use the fully-resolved absolute path (not
         # "./<binary>") so out-of-tree binaries work: gtest binaries live in
@@ -2650,6 +2687,7 @@ class TestExecutor:
         for key, value in merged_env.items():
             if key != "LD_LIBRARY_PATH":
                 env[key] = str(value)
+        self._claim_host_coverage_export(env)
 
         # Keep the JUnit report as an artifact under the runner's log dir (it is
         # the only structured record of the pytest run), one file per test.
@@ -3188,6 +3226,45 @@ class TestExecutor:
             f"Load a ROCm module or set rocm_path/--rocm_home."
         )
 
+    def _host_coverage_objects(self):
+        """Host-tree binaries to pass llvm-cov as --object, sorted.
+
+        The division of labour: this runner owns the binaries IT launched, and the
+        front door owns the ones it forks. A suite can name a host binary directly
+        (gin_micro_finalize runs host/micro/rccl-UnitTestsMicro), and that profile
+        lands flat in rawfiles_dir like any other test's, so it needs its object
+        here or its coverage cannot be attributed to anything. The binaries the
+        front door forks are not here: their profiles nest one directory down,
+        they are read against their own binary by the dispatcher, and they reach
+        this report as host-coverage.lcov.
+
+        Only binaries that ran are returned. An --object with no profile is not
+        free: llvm-cov counts its mappings as uncovered, so naming the whole host
+        tree -- as this did before the front door existed -- reports ~90 binaries'
+        worth of unexecuted product-source mappings against the library's numbers.
+        """
+        # Absolute on both sides: the launched paths are, and build_dir need not be.
+        host_dir = os.path.abspath(os.path.join(self.build_dir, "test", "host"))
+        launched = self.executed_binaries
+        if not launched:
+            # --coverage-report --skip-tests reports on an earlier run's
+            # workspace, so nothing was launched in this process. The configs name
+            # the same binaries that run would have used.
+            configs = self.config_processor.config.get("configs", {}) or {}
+            launched = set()
+            for config in configs.values():
+                binary = config.get("binary")
+                if binary:
+                    launched.add(os.path.abspath(
+                        self._resolve_binary_path(binary, config)))
+
+        objects = []
+        for path in sorted(launched):
+            if not path.startswith(host_dir + os.sep) or not os.path.isfile(path):
+                continue
+            objects.append(path)
+        return objects
+
     def _host_coverage_tracefile(self):
         """The host-only tests' lcov tracefile, or None.
 
@@ -3320,12 +3397,16 @@ class TestExecutor:
         print(f"{'='*80}")
 
         rccl_tests_build_dir = self._rccl_tests_build_dir()
-        # Recursive for the same reason the cleanup above is: the host-test
-        # front door profiles each binary it forks into its own subdirectory, so
-        # a flat glob would report no host-test coverage at all.
-        profraw_files = sorted(
-            glob.glob(os.path.join(self.rawfiles_dir, "**", "*.profraw"), recursive=True)
-        )
+        # Flat, unlike the cleanup above: one directory down is where the host
+        # front door puts the profiles of the binaries it forks, and those are
+        # not this report's to merge. They were produced by ~90 binaries that
+        # compile the same sources under different #defines, so they can only be
+        # read against the binary that produced them -- which the dispatcher does,
+        # unioning the result into host-coverage.lcov for this report to take at
+        # the lcov level (see _host_coverage_tracefile). Merging them into this
+        # .profdata instead would read them against objects they were not built
+        # from.
+        profraw_files = sorted(glob.glob(os.path.join(self.rawfiles_dir, "*.profraw")))
 
         if not profraw_files:
             print(f"ERROR: No .profraw files found in {self.rawfiles_dir}")
@@ -3415,6 +3496,14 @@ class TestExecutor:
                 object_files.extend(["--object", binary_path])
                 if self.args.verbose:
                     print(f"Found binary: {binary_path}")
+
+        # Host binaries this runner launched itself. Their profiles are flat in
+        # rawfiles_dir alongside every other test's, so without their objects the
+        # coverage of a suite that names a host binary directly is unattributable.
+        for host_binary in self._host_coverage_objects():
+            object_files.extend(["--object", host_binary])
+            if self.args.verbose:
+                print(f"Found host test binary: {host_binary}")
 
         # Add rccl-tests perf binaries so their host coverage mapping is attributed.
         if rccl_tests_build_dir and os.path.isdir(rccl_tests_build_dir):

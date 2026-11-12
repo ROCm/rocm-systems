@@ -213,6 +213,8 @@ class CoverageReportingTest(unittest.TestCase):
         executor.build_dir = str(build_dir)
         executor.paths = {"rocm_path": str(root / "rocm"), "workdir": str(root / "src")}
         executor.rccl_tests_build_config = {}
+        executor.executed_binaries = set()
+        executor.config_processor = SimpleNamespace(config={})
         return executor, build_dir
 
     def _run_report(self, executor, command_results):
@@ -237,12 +239,14 @@ class CoverageReportingTest(unittest.TestCase):
                     )
                     self.assertFalse(self._run_report(executor, results))
 
-    def test_profraw_from_the_host_test_front_door_is_found(self):
-        # rccl-UnitTestsHostAll gives each binary it forks a directory of its
-        # own under rawfiles/, so the host-only tests' profiles are never at the
-        # top level. A flat scan would find only the perf tests' profraw and
-        # report no host-test coverage at all, which reads as a source
-        # regression rather than as a harness that stopped looking.
+    def test_profiles_the_front_door_owns_are_left_to_it(self):
+        # rccl-UnitTestsHostAll gives each binary it forks a directory of its own
+        # under rawfiles/. Those profiles are not this report's to merge: they come
+        # from ~90 binaries compiling the same sources under different #defines, so
+        # they can only be read against the binary that produced them -- which the
+        # dispatcher does, handing this report the union as host-coverage.lcov.
+        # Pooling them here instead reads them against objects they were not built
+        # from, and costs the suite that owns them its attribution.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             executor, _ = self._coverage_executor(root)
@@ -253,7 +257,78 @@ class CoverageReportingTest(unittest.TestCase):
             self.assertTrue(self._run_report(executor, [mock.Mock(returncode=0)] * 4))
 
             merged = (root / "logs" / "rawprofiles.list").read_text().split()
-            self.assertIn(str(nested / "init.profraw"), merged)
+            self.assertNotIn(str(nested / "init.profraw"), merged)
+            # The run's own profiles are still merged, so this is about where the
+            # boundary is and not about having stopped looking.
+            self.assertIn(str(Path(executor.rawfiles_dir) / "profile.profraw"), merged)
+
+    def test_a_host_binary_this_runner_ran_is_attributed(self):
+        # A suite can name a host binary directly rather than going through the
+        # front door -- gin_micro_finalize runs host/micro/rccl-UnitTestsMicro --
+        # and then its profile lands flat in rawfiles/ like any other test's. With
+        # no object for it, llvm-cov has nothing to read that profile against and
+        # the suite's coverage silently leaves the report.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executor, build_dir = self._coverage_executor(root)
+            micro = build_dir / "test" / "host" / "micro"
+            micro.mkdir(parents=True)
+            binary = micro / "rccl-UnitTestsMicro"
+            binary.write_bytes(b"object")
+            executor.executed_binaries = {str(binary)}
+
+            recorded, runner = self._recording_runner()
+            self.assertTrue(self._run_report(executor, runner))
+
+            show_cmd = next(c for c in recorded if "show" in c)
+            self.assertIn(str(binary), show_cmd)
+            self.assertEqual(show_cmd[show_cmd.index(str(binary)) - 1], "--object")
+
+    def test_a_host_binary_that_did_not_run_is_not_attributed(self):
+        # An --object with no profile is not free: llvm-cov counts its mappings as
+        # uncovered. Naming the whole host tree -- as this did before the front
+        # door existed -- therefore reports ~90 binaries' worth of unexecuted
+        # product-source mappings against the library's own numbers.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executor, build_dir = self._coverage_executor(root)
+            micro = build_dir / "test" / "host" / "micro"
+            micro.mkdir(parents=True)
+            ran = micro / "rccl-UnitTestsMicro"
+            ran.write_bytes(b"object")
+            idle = micro / "rccl-UnitTestsMicroCrypt"
+            idle.write_bytes(b"object")
+            executor.executed_binaries = {str(ran)}
+
+            recorded, runner = self._recording_runner()
+            self.assertTrue(self._run_report(executor, runner))
+
+            show_cmd = next(c for c in recorded if "show" in c)
+            self.assertNotIn(str(idle), show_cmd)
+
+    def test_report_only_falls_back_to_the_binaries_the_configs_name(self):
+        # --coverage-report --skip-tests reports on an earlier run's workspace, so
+        # this process launched nothing. The configs name the same binaries that
+        # run would have used, which is the only record of them left.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executor, build_dir = self._coverage_executor(root)
+            micro = build_dir / "test" / "host" / "micro"
+            micro.mkdir(parents=True)
+            binary = micro / "rccl-UnitTestsMicro"
+            binary.write_bytes(b"object")
+            executor.executed_binaries = set()
+            executor.config_processor = SimpleNamespace(config={
+                "configs": {
+                    "gin_micro_finalize": {"binary": "host/micro/rccl-UnitTestsMicro"},
+                }
+            })
+
+            recorded, runner = self._recording_runner()
+            self.assertTrue(self._run_report(executor, runner))
+
+            show_cmd = next(c for c in recorded if "show" in c)
+            self.assertIn(str(binary), show_cmd)
 
     def test_no_object_files_fails_report_generation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -456,6 +531,7 @@ class CoverageReportingTest(unittest.TestCase):
             executor.log_dir = str(root / "logs")
             executor.global_env = {}
             executor.emit_enabled = False
+            executor.executed_binaries = set()
             executor._gpus_per_node = 8
             executor._gpus_per_node_detected = True
             executor._rocm_root_cache = str(root / "rocm")
@@ -488,6 +564,96 @@ class CoverageReportingTest(unittest.TestCase):
             self.assertEqual(result["result"], "PASSED")
             expected = str(rawfiles / "rccl_tests_%h_%p_%m.profraw")
             self.assertEqual(captured["env"]["LLVM_PROFILE_FILE"], expected)
+
+    def _run_one_test(self, root, env_variables=None, coverage_report=True):
+        """Run one non-gtest test through run_test and return the child's env."""
+        binary = root / "all_reduce_perf"
+        binary.write_text("#!/bin/sh\n")
+        binary.chmod(0o755)
+        rawfiles = root / "logs" / "rawfiles"
+        rawfiles.mkdir(parents=True, exist_ok=True)
+
+        executor = TestExecutor.__new__(TestExecutor)
+        executor.args = _args(coverage_report=coverage_report)
+        executor.paths = {
+            "workdir": str(root),
+            "rocm_path": str(root / "rocm"),
+            "mpi_path": "",
+        }
+        executor.build_dir = str(root)
+        executor.rawfiles_dir = str(rawfiles)
+        executor.log_dir = str(root / "logs")
+        executor.global_env = {}
+        executor.emit_enabled = False
+        executor.executed_binaries = set()
+        executor._gpus_per_node = 8
+        executor._gpus_per_node_detected = True
+        executor._rocm_root_cache = str(root / "rocm")
+
+        captured = {}
+
+        class FakeProc:
+            def wait(self, timeout=None):
+                return 0
+
+        def fake_popen(cmd, **kwargs):
+            captured["env"] = kwargs.get("env", {})
+            return FakeProc()
+
+        config = {
+            "name": "all_reduce",
+            "binary": str(binary),
+            "is_gtest": False,
+            "num_ranks": 1,
+            "num_nodes": 1,
+            "num_gpus": 1,
+            "timeout": 0,
+        }
+        if env_variables is not None:
+            config["env_variables"] = env_variables
+
+        with mock.patch("lib.test_executor.subprocess.Popen",
+                        side_effect=fake_popen):
+            result = executor.run_test(config, {})
+
+        self.assertEqual(result["result"], "PASSED")
+        return captured["env"]
+
+    def test_the_host_coverage_export_cannot_be_turned_off_under_coverage(self):
+        # The front door skips host-coverage.lcov when RCCL_HOST_COVERAGE_EXPORT
+        # is "0". That opt-out is for a caller that reads the .profraw files
+        # itself; this runner cannot, because the binaries the front door forks
+        # compile the same sources under different #defines and their profiles
+        # only mean anything against the binary that produced them. The tracefile
+        # is the only route the host tests' coverage has into this report, so
+        # honouring the opt-out here would drop all of it without a word.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with mock.patch.dict(os.environ,
+                                 {"RCCL_HOST_COVERAGE_EXPORT": "0"}):
+                env = self._run_one_test(Path(temp_dir))
+            self.assertNotIn("RCCL_HOST_COVERAGE_EXPORT", env)
+
+    def test_a_config_cannot_turn_the_host_coverage_export_off_either(self):
+        # env_variables from the test config are applied after the coverage
+        # environment is built, so the claim has to be staked after them or a
+        # config would quietly win.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self._run_one_test(
+                Path(temp_dir),
+                env_variables={"RCCL_HOST_COVERAGE_EXPORT": "0"},
+            )
+            self.assertNotIn("RCCL_HOST_COVERAGE_EXPORT", env)
+
+    def test_the_export_opt_out_is_left_alone_when_not_reporting_coverage(self):
+        # Without --coverage-report nothing here reads the tracefile, so the
+        # caller's choice is theirs to make and the variable is passed through.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = self._run_one_test(
+                Path(temp_dir),
+                env_variables={"RCCL_HOST_COVERAGE_EXPORT": "0"},
+                coverage_report=False,
+            )
+            self.assertEqual(env["RCCL_HOST_COVERAGE_EXPORT"], "0")
 
     def test_pytest_run_exports_absolute_llvm_profile_file(self):
         with tempfile.TemporaryDirectory() as temp_dir:
