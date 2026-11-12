@@ -8,6 +8,7 @@
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
@@ -131,6 +132,7 @@ struct FunctionalQuantumResult {
 // Observers compile inline register accessors against this polymorphic type.
 // Its RTTI must be visible to GCC UBSan's vptr checks in separately loaded DSOs.
 class RJ_API_TYPE_EXPORT ComputeUnitCore : public simdojo::CompositeComponent {
+  friend class ::rocjitsu::config::Gfx10CheckpointResources;
   friend class AsyncInstructionWindow;
 
 public:
@@ -247,6 +249,11 @@ public:
   /// allocation leaves the slot idle and available for later dispatches.
   Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
                             uint32_t num_vgprs, uint32_t wave_size = 0);
+
+  /// @brief Restore a wave into its recorded slot and optional physical SGPR/VGPR block.
+  Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
+                            uint32_t num_vgprs, uint32_t wave_size,
+                            std::optional<uint32_t> register_block);
 
   /// @brief Advance every RUNNING wavefront by one instruction, then report
   /// residency.
@@ -480,6 +487,12 @@ public:
     execution_failure_handler_ = std::move(cb);
   }
 
+  /// @brief Deliver a completed aperture violation when no trap shader is available.
+  using ApertureViolationHandler = std::function<bool(Wavefront &)>;
+  void set_aperture_violation_handler(ApertureViolationHandler callback) {
+    aperture_violation_handler_ = std::move(callback);
+  }
+
   /// @brief Offer an architectural memory fault to its runtime or debugger owner.
   /// @details Fetch and debugger probes supply the access address and direction.
   /// Deferred data and tensor-DMA faults supply zero/false when lane metadata is
@@ -588,6 +601,8 @@ public:
 
   /// @brief Return the device-global GWS store this CU participates in.
   GwsDevice &gws_device() { return *gws_device_; }
+
+  bool has_registered_workgroups() const { return !active_wgs_.empty(); }
 
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
@@ -796,7 +811,8 @@ public:
   /// @brief Allocate a per-WG LDS region and return its base offset.
   uint32_t allocate_lds(uint32_t size_bytes) {
     uint32_t base = next_lds_alloc_;
-    uint32_t aligned = util::align_up(size_bytes, 256u);
+    const uint64_t aligned = lds_allocation_bytes(arch(), size_bytes);
+    assert(base + aligned <= lds_.size_bytes());
     // Reusing a physical LDS region does not initialize its contents. Keep the
     // bytes written by prior workgroups until another instruction overwrites them.
     lds_.materialize_range(base, aligned);
@@ -806,6 +822,18 @@ public:
 
   /// @brief Reset LDS allocation when no resident waves or pinned clusters remain.
   void reset_lds_alloc() { next_lds_alloc_ = 0; }
+  uint32_t reserved_lds_bytes() const { return next_lds_alloc_; }
+
+  // Historical checkpoint reservations can use 256-byte placement on any CU. When the
+  // next native boundary exceeds capacity, the valid old windows exhaust the allocator.
+  bool restore_lds_cursor(uint32_t saved) {
+    const uint64_t capacity = lds_.size_bytes();
+    const uint64_t next = std::min(capacity, lds_allocation_bytes(arch(), saved));
+    if (saved > capacity || saved % 256 != 0 || next > UINT32_MAX)
+      return false;
+    next_lds_alloc_ = static_cast<uint32_t>(next);
+    return true;
+  }
 
   /// @brief Hold LDS allocation state while a workgroup cluster is resident.
   ///
@@ -894,11 +922,12 @@ public:
 
   /// @brief Set flat-address-space aperture boundaries (SPI programs these once per node).
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
-                     uint64_t private_limit) {
+                     uint64_t private_limit, bool ptr32 = false) {
     shared_aperture_base_ = shared_base;
     shared_aperture_limit_ = shared_limit;
     private_aperture_base_ = private_base;
     private_aperture_limit_ = private_limit;
+    flat_pointer32_ = arch() == ROCJITSU_CODE_ARCH_RDNA1 && ptr32;
   }
 
   /// @brief Query SRAM ECC mode. When true, D16 loads zero unused VGPR bits.
@@ -1012,7 +1041,30 @@ public:
                physical_base, physical_count);
   }
 
+  // GFX10 VALU operands are bounded by the dispatched wave's allocation,
+  // even when its reserved physical slot has room for additional registers.
+  [[nodiscard]] bool valid_operand_vgpr_range(const Wavefront &wf, uint32_t base,
+                                              uint32_t count) const {
+    if (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2)
+      return wf.vgpr_alloc().contains(base, count);
+    return owns_vgpr_range(wf, base, count);
+  }
+
+  /// RDNA 3.5 suppresses the complete vector-memory result outside the guest's
+  /// allocated VGPR tuple, even if that tuple fits in the simulator's register slot.
+  [[nodiscard]] bool owns_memory_result_range(const Wavefront &wf, uint32_t base,
+                                              uint32_t count) const {
+    if (arch() == ROCJITSU_CODE_ARCH_RDNA4 || arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
+        arch() == ROCJITSU_CODE_ARCH_RDNA3_5 || arch() == ROCJITSU_CODE_ARCH_RDNA1 ||
+        arch() == ROCJITSU_CODE_ARCH_RDNA2)
+      return &wf.raw_cu() == this && wf.vgpr_alloc().contains(base, count);
+    return owns_memory_result_vgprs(wf, base, count);
+  }
+
 private:
+  static bool nullify_unallocated_memory_result(Instruction &inst, const Wavefront &wf);
+  VmAccessOutcome route_prepared_memory_inst(std::unique_ptr<Instruction> inst, Wavefront &wf);
+
   // RegisterAccess is the instruction-facing register boundary. These
   // ownership and SGPR access helpers validate the complete operation, fire
   // callbacks, and only then expose or modify storage.
@@ -1365,14 +1417,30 @@ public:
   util::Result execute_instruction(Instruction *inst, Wavefront &wf,
                                    std::string *failure_detail = nullptr) {
     assert(inst->execute && "instruction execution backend is not linked");
-    wf.clear_instruction_execution_error();
+    wf.begin_instruction_execution();
     const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
     if (drop_set_vgpr_msb && std::string_view(inst->mnemonic()) == "s_set_vgpr_msb")
       return util::Result::success();
     check_static_isa_diagnostics(*inst, wf);
+    if (wf.discards_valu_result(*inst))
+      return util::Result::success();
+    // A SALU instruction with a protected TTMP destination also preserves SCC.
+    bool preserve_scc = false;
+    if (!wf.shader_can_write_ttmp() && (inst->flags() & SALU) && inst->num_dst_operands()) {
+      const Operand &dst = *inst->dst_operand(0);
+      if (dst.encoding_value() >= static_cast<int>(kTtmpSelectorFirst) &&
+          dst.encoding_value() <= static_cast<int>(kTtmpSelectorLast)) {
+        const auto reg = dst.to_register_ref();
+        preserve_scc = reg && reg->cls == RegClass::TTMP;
+      }
+    }
+    const bool saved_scc = preserve_scc && wf.read_scc();
     // The decoded instruction already selects its ISA execution callback.
     try {
       inst->execute(*inst, &wf);
+      if (inst->is_memory_op() && inst->data() &&
+          (config_.arch == ROCJITSU_CODE_ARCH_RDNA3 || config_.arch == ROCJITSU_CODE_ARCH_RDNA3_5))
+        qualify_gfx11_memory(*inst, wf);
     } catch (const util::UnimplementedInst &error) {
       // Some implemented instructions reject particular operand or mode
       // combinations through the legacy exception path. Treat those guest
@@ -1381,12 +1449,20 @@ public:
       if (failure_detail)
         *failure_detail = error.what();
     }
+    if (config_.arch == ROCJITSU_CODE_ARCH_RDNA4 && inst->data())
+      nullify_unallocated_memory_result(*inst, wf);
+    if (preserve_scc)
+      wf.write_scc(saved_scc);
+    if (inst->data() && config_.arch == ROCJITSU_CODE_ARCH_CDNA4)
+      qualify_cdna4_memory_destination(*inst, wf);
     if (failure_detail && wf.instruction_execution_error_detail())
       *failure_detail = wf.instruction_execution_error_detail();
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
   }
 
 protected:
+  void qualify_gfx11_memory(Instruction &inst, const Wavefront &wf);
+
   /// @brief Defer a runtime queue exception until the wave-state lock is released.
   /// @details Instruction callbacks run under @ref wave_state_mutex_. The command
   /// processor takes its queue lock before this lock, so reporting synchronously
@@ -1483,6 +1559,17 @@ protected:
   /// @param inst The memory instruction (ownership transferred).
   /// @param wf The issuing wavefront.
   VmAccessOutcome route_memory_inst(std::unique_ptr<Instruction> inst, Wavefront &wf);
+
+  [[nodiscard]] bool owns_memory_result_vgprs(const Wavefront &wf, uint32_t base,
+                                              uint32_t count) const {
+    if (!owns_vgpr_range(wf, base, count))
+      return false;
+    if (arch() != ROCJITSU_CODE_ARCH_CDNA4)
+      return true;
+
+    return wf.unified_vgpr_range_is_allocated(base - wf.vgpr_alloc().base, count);
+  }
+  void qualify_cdna4_memory_destination(Instruction &inst, const Wavefront &wf);
 
   /// @brief Tell the plugin group what the memory system is about to be asked
   ///        for, once routing has settled.
@@ -1603,6 +1690,8 @@ protected:
     QueueExceptionDeliveryPolicy delivery_policy;
   };
 
+  void enter_trap_handler(Wavefront &wave, const TrapHandlerConfig &config, uint32_t trap_id,
+                          uint64_t saved_pc);
   /// @brief Offer an architectural data fault to its owner, otherwise cancel it.
   /// @param issue_pc Original instruction PC, before advancing to the resume PC.
   void handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome, uint64_t issue_pc);
@@ -1685,6 +1774,7 @@ protected:
   IllegalInstHandler illegal_inst_handler_;
   ExecutionFailureHandler execution_failure_handler_;
   MemoryViolationHandler memory_violation_handler_;
+  ApertureViolationHandler aperture_violation_handler_;
   AluExceptionHandler alu_exception_handler_;
   WaveReservationHandler wave_reservation_handler_;
   std::atomic<bool> debug_active_{false};
@@ -1766,6 +1856,7 @@ protected:
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;
   uint64_t private_aperture_limit_ = 0;
+  bool flat_pointer32_ = false;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   bool observes_before_execute_instruction_ = false;
@@ -1814,6 +1905,9 @@ protected:
   /// @param base Allocation-block-aligned physical VGPR base.
   /// @param wf Owning wavefront, or nullptr when the block is freed.
   virtual void set_vgpr_block_owner(uint32_t base, Wavefront *wf) = 0;
+
+  /// @brief Reserve the specified VGPR block when restoring physical register placement.
+  virtual int32_t allocate_vgprs_at(uint32_t count, uint32_t block) = 0;
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
@@ -2205,6 +2299,10 @@ protected:
 
   /// @returns Base index of the allocated VGPR block, or -1 on failure.
   int32_t allocate_vgprs(uint32_t count) override { return vgpr_file_.allocate(count); }
+
+  int32_t allocate_vgprs_at(uint32_t count, uint32_t block) override {
+    return vgpr_file_.allocate(count, block);
+  }
 
   /// @brief Return allocated VGPRs to the free pool.
   void free_vgprs(uint32_t base) override {

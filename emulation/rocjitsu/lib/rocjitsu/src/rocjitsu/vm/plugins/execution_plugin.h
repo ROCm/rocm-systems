@@ -393,6 +393,10 @@ public:
   /// continue unless a plugin explicitly opts out.
   virtual bool observes_sgpr_reads() const { return true; }
 
+  /// Opt in to reads of the LDS-direct VALU source. Sampled when the plugin is registered.
+  virtual bool observes_lds_direct_reads() const { return false; }
+  virtual void onAmdgpuLdsDirectRead(const amdgpu::Wavefront &, uint32_t, uint32_t, uint32_t) {}
+
 private:
   friend class ExecutionPluginGroup;
   std::string name_;
