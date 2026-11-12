@@ -248,7 +248,8 @@ class SpawnProc {
     std::vector<char> envBlock;
     LPVOID lpEnvironment = NULL;
     if (!envVars_.empty() || !clearedEnv_.empty()) {
-      auto replacedOrCleared = [&](const std::string& key) {
+      // True if this key was given to setEnv or clearEnv.
+      auto overriddenEnvVar = [&](const std::string& key) {
         for (const auto& kv : envVars_) {
           if (envNamesEqual(kv.first, key)) return true;
         }
@@ -264,7 +265,9 @@ class SpawnProc {
           std::string entry(var);
           auto eq = entry.find('=', 1);
           std::string key = (eq != std::string::npos) ? entry.substr(0, eq) : entry;
-          if (!replacedOrCleared(key)) {
+          // Skip an inherited name this spawn overrides.
+          // setEnv replaces it below; clearEnv leaves it unset.
+          if (!overriddenEnvVar(key)) {
             envBlock.insert(envBlock.end(), entry.begin(), entry.end());
             envBlock.push_back('\0');
           }
