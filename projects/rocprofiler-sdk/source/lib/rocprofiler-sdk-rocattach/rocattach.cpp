@@ -189,11 +189,16 @@ build_environment_buffer()
             continue;
         }
         constexpr auto register_library_env = "ROCPROFILER_REGISTER_LIBRARY=";
-        if(std::string_view{var}.find(register_library_env) == 0)
+        constexpr auto register_library_no_force_env =
+            "ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD=";
+        auto var_view = std::string_view{var};
+        if(var_view.find(register_library_env) == 0 ||
+           var_view.find(register_library_no_force_env) == 0)
         {
-            // ROCPROFILER_REGISTER_LIBRARY is set by the attaching process's SDK and may
-            // contain a host-only, fully versioned path. Do not propagate it to the target;
-            // let rocprofiler-register resolve the SDK in the target environment.
+            // Both variables name the rocprofiler-sdk library rocprofiler-register should
+            // load, and either may hold a host-only, fully versioned path from the attaching
+            // process. Do not propagate them to the target; let rocprofiler-register resolve
+            // the SDK in the target environment.
             continue;
         }
 

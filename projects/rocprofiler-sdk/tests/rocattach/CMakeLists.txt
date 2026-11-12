@@ -183,7 +183,29 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION
         "Attachment test observed ROCPROFILER_TEST_FORWARDING=preserved"
-    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|inherited ROCPROFILER_REGISTER_LIBRARY=/tmp/rocattach-missing"
+    )
+
+# ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD names a library the same way, so a path which
+# resolves only in the attaching process must not be forwarded through it either. Were it
+# forwarded, rocprofiler-register in the target would load that single candidate instead
+# of searching, and fail to find any rocprofiler-sdk library at all.
+rocprofiler_add_integration_execute_test(
+    rocattach-stale-no-force-load-library-test-execute
+    COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
+            $<TARGET_FILE:rocprofiler-sdk-c-tool-configured> --stale-no-force-load-library
+    DEPENDS rocattach-parallel-attach-test
+    TIMEOUT 45
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION
+        "Attachment test observed ROCPROFILER_TEST_FORWARDING=preserved"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|inherited ROCPROFILER_REGISTER_LIBRARY_NO_FORCE_LOAD=/tmp/rocattach-missing"
+    )
 
 rocprofiler_add_integration_execute_test(
     rocattach-equivalent-register-library-test-execute
