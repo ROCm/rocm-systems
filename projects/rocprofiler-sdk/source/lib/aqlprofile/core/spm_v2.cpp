@@ -334,9 +334,11 @@ GetCounter(aql_profile::Pm4Factory* pm4_factory, const aqlprofile_pmc_event_t& e
     if(int(event.block_name) == AQLPROFILE_BLOCK_NAME_SP)
         WARN_LOGGING("SP block used in SPM path without explicit validation coverage yet");
 
-    const bool is_sq_accum_counter = event.flags.raw &&
-                                     event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ &&
-                                     event.flags.sq_flags.accum != 0;
+    const bool is_sq_accum_counter =
+        event.flags.raw && (block_info->attr & CounterBlockSqAttr) &&
+        event.block_name !=
+            static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SQG) &&
+        event.flags.sq_flags.accum != 0;
     const bool is_sqg_accum_counter =
         event.flags.raw &&
         event.block_name ==
