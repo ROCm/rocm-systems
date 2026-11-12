@@ -35,9 +35,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `analyze --debug-table-view`: print every block as plain tables.
   * `analyze --debug-verify-deps`: check that the Python dependencies of analyze mode are installed, then exit.
 
-* Added Linux GPU metrics and Memory Chart support for Navi48 (gfx1201), including Radeon RX 9070. Profiling requires the `STABLE_STD` performance level. Infinity Cache hit rate and physical VRAM bandwidth are unavailable.
-
-* Enablement in this change covers the Radeon RX 9070 and RX 9070 XT variants identified here, and only one physical device ID is provided, 30032 (0x7550). gfx1201 includes at least five other Navi48 variants that this change does not enable.
+* Added Linux GPU metrics and Memory Chart support for Navi48 (gfx1201) Radeon RX 9070 and RX 9070 XT. Profiling requires the `STABLE_STD` performance level. Infinity Cache hit rate and physical VRAM bandwidth are unavailable.
 
 ### Changed
 
