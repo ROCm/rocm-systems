@@ -212,6 +212,10 @@ public:
   void set_scratch_xcc_layout_for_test(uint32_t xcc_id, uint32_t xcc_count);
 
   /// @brief Register a queue and return its CP-local lifetime identity.
+  /// @details Invalid layout and VM capability publication failures return zero.
+  /// Exceptions from VM capability access propagate before queue publication.
+  /// Monitor thread-creation errors propagate after rolling back owner and peer
+  /// registrations. Replicas do not repeat capability publication.
   uint64_t register_queue(ComputeQueueConfig queue);
 
   /// @brief Remove only the queue incarnation identified by @p registration_id.
@@ -498,6 +502,11 @@ public:
   [[nodiscard]] bool doorbell_monitor_running_for_test() {
     std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
     return doorbell_running_;
+  }
+  /// @brief Fail the next monitor startup with a thread-creation error.
+  void fail_next_doorbell_monitor_start_for_testing() {
+    std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+    fail_next_doorbell_monitor_start_for_testing_ = true;
   }
   /// @brief Test-only check that teardown reaped the monitor's thread handle.
   [[nodiscard]] bool doorbell_monitor_joinable_for_test() {
@@ -1121,6 +1130,7 @@ private:
   std::mutex doorbell_thread_mutex_;
   // True while the lifecycle owns a running monitor.
   bool doorbell_running_ = false;
+  bool fail_next_doorbell_monitor_start_for_testing_ = false;
   std::jthread doorbell_thread_;
 };
 

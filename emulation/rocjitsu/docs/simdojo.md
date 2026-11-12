@@ -323,8 +323,11 @@ priority (highest priority first):
 
 1. `TIMER_CALLBACK` - scheduled timer/tick callback (used by `Clocked`)
 2. `MESSAGE_ARRIVAL` - a message arrived at a port
-3. `SIM_EXIT` - simulation exit sentinel (lowest priority, ensures all real
-   events at `max_ticks` fire before the exit)
+3. `SIM_EXIT` - lowest-priority exit sentinel scheduled at a positive
+   `max_ticks` by single-threaded `run()` or the first `step()`. Queued timers
+   and messages at that tick have priority over the exit. The
+   [partitioned engine](#multi-threaded-path) enforces the limit at its epoch
+   barrier, before processing the epoch at `max_ticks`.
 
 Events with the same timestamp are ordered by type priority, then by
 sequence number for deterministic tie-breaking.
@@ -418,8 +421,8 @@ scheduling events during `startup()`:
 - A `Clocked` component schedules clock-edge events (timing simulation).
 - A `Functional` component self-schedules a timer callback and re-enqueues
   after each `advance()` (untimed simulation within the event loop).
-- If no events are ever scheduled and no primaries are registered, the
-  simulation terminates via quiescence.
+- If no events are scheduled and no primaries are registered, the simulation
+  terminates via quiescence unless it is configured to await the first primary.
 
 ### Single-Threaded Path
 
@@ -432,10 +435,10 @@ structure. When the queue empties:
 3. Run service callbacks
 4. Drain async event buffers
 5. If new events appeared, continue processing
-6. Check termination (quiescence or all primaries done)
-7. If primaries are active, pause the pacing clock and block on `idle_cv_`
-   until an async event or shutdown arrives (with a timed wait when pacing
-   is enabled)
+6. Check the termination conditions in the [primary protocol](#primary-component-protocol)
+7. If the protocol calls for waiting, pause the pacing clock and use
+   `idle_wait_quiescent()` until an async event or shutdown arrives (with a timed
+   wait when pacing is enabled)
 8. After wake, resume the pacing clock and drain async events
 
 ### Multi-Threaded Path
@@ -454,15 +457,17 @@ Phase 4: Arrive at barrier (completion function computes new global_lbts)
 ```
 
 The **barrier completion function** runs exactly once after all threads
-arrive. It computes `global_lbts = min(local_next[i])` across all
-partitions, updates `current_time_`, runs service callbacks periodically,
-and checks termination conditions.
+arrive. It drains buffered async events before advancing simulation time.
+The new `global_lbts` is the minimum of the published partition bounds
+and the resulting event queue heads. The function then updates
+`current_time_` and checks termination conditions.
 
 The barrier provides a consistent global snapshot without per-channel null
 messages or vector clocks.
 
-**Quiescence detection** is trivial: if `global_lbts = TICK_MAX` after
-a barrier, all partitions are idle and the simulation terminates.
+**Quiescence detection**: if `global_lbts = TICK_MAX` after a barrier, all
+partitions are idle. The [primary protocol](#primary-component-protocol)
+determines whether the engine waits or stops.
 
 **Termination after primaries**: when all registered primaries have
 signaled `primary_release()`, the barrier completion function checks
@@ -470,8 +475,12 @@ signaled `primary_release()`, the barrier completion function checks
 drained) before terminating, ensuring in-flight cross-partition messages
 are fully delivered.
 
-**max_ticks**: in multi-threaded mode, checked by the barrier completion
-function when `global_lbts >= max_ticks`.
+In a finite run, once the next event reaches or exceeds `max_ticks`, the engine exits with
+`ExitCause::MAX_TICKS` at `max_ticks` without processing that epoch. If new
+async work arrived during the barrier's drain, it keeps the previous bound
+until the next epoch can account for that work. In the
+single-threaded loop, a callback at that tick can run before the limit sentinel.
+If the partitions become idle before the limit, the primary protocol applies.
 
 ### Wall-Clock Pacing
 
@@ -535,8 +544,9 @@ reporting.
 The simulation reports its termination reason through `ExitStatus`, a
 first-class value type.
 
-- `ExitReason::COMPLETED` - normal completion (all primaries done or
-  max_ticks reached)
+- `ExitReason::COMPLETED` - a successful engine stop; `ExitStatus::cause`
+  distinguishes all primaries done, ordinary quiescence, `max_ticks`, and a
+  finite-run active-primary stall
 - `ExitReason::EXIT_REQUEST` - a component called `request_exit()`
 - `ExitReason::INTERRUPTED` - external interrupt (ctrl-C, watchdog)
 
@@ -564,18 +574,27 @@ engine()->primary_release();
 engine()->primary_retain();
 ```
 
-The simulation ends gracefully when **all** registered primaries have
-called `primary_release()`. This is checked via a unified
-`check_termination()` helper alongside `max_ticks` and quiescence
-detection. The exit reason is `COMPLETED` with a descriptive message
-distinguishing the trigger.
+An unlimited simulation ends gracefully when **all** registered primaries
+have called `primary_release()`. This is checked via a unified
+`check_termination()` helper alongside `max_ticks` and quiescence detection.
+Successful exits use `ExitReason::COMPLETED`; `ExitStatus::cause` distinguishes
+primary completion, ordinary quiescence, tick exhaustion, and a finite-run
+active-primary stall without depending on the diagnostic message.
 
-Primaries also suppress quiescence termination: if any primary is registered
-but has not yet signaled OK, the engine will not exit when the event queue
-is empty. In single-threaded mode, the worker blocks on a condition variable
-until an async event or shutdown arrives. In multi-threaded mode, the
-barrier continues cycling and `check_termination()` defers exit until all
-primaries signal done AND the system is fully quiescent.
+When all partitions are idle, the engine handles primaries as follows:
+
+- With an active primary, an unlimited run waits for an async event or shutdown.
+  A finite run that becomes idle before `max_ticks` returns
+  `ExitCause::ACTIVE_PRIMARY_STALL` at the last processed tick.
+- With `await_primaries` set and no primary registered yet, both finite and
+  unlimited runs wait for an async event or shutdown. A finite run keeps its
+  tick budget while waiting.
+- With all registered primaries released, the engine returns
+  `ExitCause::ALL_PRIMARIES_COMPLETED` once pending work is drained. If no primary
+  ever registered and `await_primaries` is clear, it returns
+  `ExitCause::QUIESCENCE`.
+
+Reaching the tick limit returns `ExitCause::MAX_TICKS`.
 
 This complements `request_exit()`: primaries are the cooperative
 termination path (consensus); `request_exit()` is the unilateral force
@@ -589,11 +608,12 @@ partition's queue safely. Events are buffered in a per-partition
 event queue at the next safe point:
 
 - In `worker_loop` (single-threaded): after the queue empties
-- In `worker_loop` (multi-threaded): at Phase 1 of each barrier epoch
+- In `worker_loop` (multi-threaded): at Phase 1 of each epoch and in the barrier completion function
 - In `step()`: at the start of each call, before processing
 
-In multi-threaded mode, async event timestamps are floored at the global
-LBTS to ensure they are not placed before the already-committed safe time.
+In multi-threaded mode, async event timestamps are floored at the last
+committed simulation tick or the receiving partition's current tick,
+whichever is later. This floor still applies when all partitions are idle.
 
 `schedule_event_now()` is the preferred API for external stimulus. It
 translates the current wall time to a simulation tick (via
@@ -607,8 +627,10 @@ For GUI, debugger, or test harness use. Single-threaded only. On the first
 call, starts all components (initialization happens in `create()`). Each
 subsequent call drains async events and advances to the next event time,
 processing all events at that timestamp. Ticks without scheduled events
-are skipped. Returns true if the simulation can continue. If the queue is
-empty but primaries are registered, returns true so the caller can poll.
+are skipped. Returns true if the simulation can continue. When idle, `step()`
+uses the same primary protocol and returns true in the waiting cases so the
+caller can poll. It returns false when the engine stops. Inspect
+`last_exit().cause` to distinguish the outcomes.
 
 ---
 

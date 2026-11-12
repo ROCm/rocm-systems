@@ -14,6 +14,7 @@ use crate::driver::{self, DriverInstance};
 use crate::memory::Allocation;
 use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
+use crate::os::{ProcessIdentity, native_error};
 use crate::topology::{AttachmentKind, Endpoint, NativeNodeId, SourceId, TopologySnapshot};
 use crate::{Error, ErrorKind};
 
@@ -59,7 +60,7 @@ struct DriverRegistry {
     /// Policy validated against every installed driver at construction.
     lifetime: DriverContextLifetime,
     /// Process that constructed this registry; inherited sessions cannot run.
-    process_id: u32,
+    process: ProcessIdentity,
     /// Prevents new work once any driver shutdown has started.
     closing: bool,
 }
@@ -188,14 +189,21 @@ impl Session {
     /// Rejects a session inherited through fork before touching driver state
     /// in the child process.
     fn ensure_process(&self) -> Result<(), Error> {
-        if self.registry.process_id == std::process::id() {
-            Ok(())
-        } else {
-            Err(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "session belongs to another process",
-            })
-        }
+        self.registry.process.check().map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "session belongs to another process",
+        })
+    }
+
+    /// Whether this session belongs to the calling process.
+    /// Frontends may use this for host-only paths that do not enter a driver.
+    #[must_use]
+    pub fn is_current_process(&self) -> bool {
+        self.registry.process.check().is_ok()
+    }
+
+    pub(crate) fn process_identity(&self) -> ProcessIdentity {
+        self.registry.process.clone()
     }
 
     /// Borrows installed drivers for a platform-specific capability lookup.
@@ -211,6 +219,8 @@ impl Session {
     /// # Errors
     /// Fails with `ResourceExhausted` if driver registry metadata cannot be allocated.
     pub fn new(lifetime: DriverContextLifetime) -> Result<Self, Error> {
+        let process = ProcessIdentity::capture()
+            .map_err(|source| native_error("session process identity", source))?;
         let mut drivers = Vec::new();
         drivers
             .try_reserve_exact(driver::BUILTIN_DRIVER_FACTORIES.len())
@@ -218,16 +228,27 @@ impl Session {
                 resource: "session drivers",
             })?;
         for construct in driver::BUILTIN_DRIVER_FACTORIES {
-            drivers.push(construct(lifetime)?);
+            drivers.push(construct(lifetime, process.clone())?);
         }
-        Self::from_drivers(drivers, lifetime)
+        Self::from_drivers_with_process(drivers, lifetime, process)
     }
 
     /// Takes already constructed driver instances as one session registry.
     /// Every driver must have been configured with the same lifetime policy.
+    #[cfg(test)]
     fn from_drivers(
         drivers: Vec<DriverInstance>,
         lifetime: DriverContextLifetime,
+    ) -> Result<Self, Error> {
+        let process = ProcessIdentity::capture()
+            .map_err(|source| native_error("session process identity", source))?;
+        Self::from_drivers_with_process(drivers, lifetime, process)
+    }
+
+    fn from_drivers_with_process(
+        drivers: Vec<DriverInstance>,
+        lifetime: DriverContextLifetime,
+        process: ProcessIdentity,
     ) -> Result<Self, Error> {
         if drivers.is_empty() {
             return Err(Error::Operation {
@@ -256,7 +277,7 @@ impl Session {
             registry: Shared::new(DriverRegistry {
                 drivers,
                 lifetime,
-                process_id: std::process::id(),
+                process,
                 closing: false,
             })?,
         })
@@ -769,6 +790,7 @@ mod tests {
 
         let event = DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some(id),
+            origin_id: None,
             scope: GpuResetScope::WholeGpu,
             memory_lost: false,
             cause: GpuResetCause::Hang,
@@ -787,6 +809,7 @@ mod tests {
 
         let next = DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some(id),
+            origin_id: None,
             scope: GpuResetScope::WholeGpu,
             memory_lost: true,
             cause: GpuResetCause::Ecc,
@@ -808,6 +831,7 @@ mod tests {
         drop(second);
         let older = DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some(id),
+            origin_id: None,
             scope: GpuResetScope::WholeGpu,
             memory_lost: false,
             cause: GpuResetCause::Other,
@@ -949,10 +973,11 @@ mod tests {
         let (mut session, _) = test_session(&[id]);
         let endpoint = session.open_endpoint(id).unwrap();
         assert!(session.can_access_local_memory(&endpoint, &endpoint));
-        Shared::get_mut(&mut session.registry).unwrap().process_id =
-            std::process::id().wrapping_add(1);
+        Shared::get_mut(&mut session.registry).unwrap().process =
+            ProcessIdentity::with_pid_for_test(std::process::id().wrapping_add(1));
         assert!(!session.can_access_local_memory(&endpoint, &endpoint));
-        Shared::get_mut(&mut session.registry).unwrap().process_id = std::process::id();
+        Shared::get_mut(&mut session.registry).unwrap().process =
+            ProcessIdentity::capture().unwrap();
         session.destroy().unwrap();
     }
 

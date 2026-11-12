@@ -10,15 +10,10 @@ instructions.
 
 ## Target scope
 
-The race detector focuses on pre-GFX12 architectures. Its current end-to-end
-coverage exercises gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4), and gfx1151
-(GFX11.5/RDNA3.5). GFX12
-and later architectures are not supported. Some GFX12 split-counter behavior
-is already modeled and covered by plugin tests, including partial load waits
-and address-dependent FLAT counter participation. This partial
-coverage does not establish complete counter, scheduling, or writeback support;
-issue-time counter-capacity backpressure remains limited to CDNA1 through CDNA4
-and GFX11.
+The race detector supports gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4) and
+gfx1151 (GFX11.5/RDNA3.5), with end-to-end tests for each. Support for gfx1250
+(CDNA5) is limited and under active development; end-to-end tests currently
+cover its tensor DMA races (see Tensor DMA races below).
 
 ## Quick start
 
@@ -248,7 +243,14 @@ following lifecycle:
    perspective of other waves in the same workgroup.
 1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
    retired and, from the perspective of all threads in all wavefronts, the
-   operation is complete.
+   operation is complete. A workgroup with a single wave has no other wave to
+   race with, so its LDS events are retired as soon as they are wave-complete,
+   without a barrier. They then leave the LDS lists that race checks scan, so
+   those checks do not slow down as completed events add up in long
+   single-wave kernels. Retired events stay in the event registry until it
+   trims them, and it trims only from the oldest event: an older event that is
+   still pending, such as a global load waiting on `loadcnt`, keeps every
+   later retired event in the registry.
 
 Generic `FLAT_*` instructions select counter domains from their resolved memory
 requests. Global and scratch requests use the vector-memory counter; LDS
@@ -471,9 +473,10 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
 - `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
-  owns the gfx942, gfx950 and gfx1151 end-to-end HIP programs. The
-  `rocjitsu-test-corpus` workflow builds them with the corpus HIP toolchain
-  and runs each case under the emulator with the `race` plugin enabled.
+  owns the gfx942, gfx950, gfx1151 and gfx1250 end-to-end HIP programs; the
+  gfx1250 program covers tensor DMA. The `rocjitsu-test-corpus` workflow builds
+  them with the corpus HIP toolchain and runs each case under the emulator with
+  the `race` plugin enabled.
 
 ```bash
 # Core detection tests
@@ -484,8 +487,9 @@ To run the HIP cases locally, follow the corpus's
 [race-suite instructions](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
 and point the wrapper at the RocJITsu build being tested. Set
 `ROCJITSU_RACE_CONFIG` to `tests/race-detector/race_test_gfx942_config.json` for gfx942,
-`tests/race-detector/race_test_config.json` for gfx950 or `configs/gfx1151.json` for
-gfx1151, using absolute paths from this source tree. The original
+`tests/race-detector/race_test_config.json` for gfx950, `configs/gfx1151.json` for
+gfx1151 or `configs/gfx1250_mi455x.json` for gfx1250, using absolute paths from
+this source tree. The original
 `RaceTest.<target>_<name>` selectors remain available through the corpus's
 `--case` option. Shared atomic and FLAT-to-LDS cases use
 `RaceTest.vmem_<target>_<name>`, for example

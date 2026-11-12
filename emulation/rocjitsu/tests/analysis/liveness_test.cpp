@@ -7892,10 +7892,10 @@ TEST(GeneratedInstDefUse, Gfx1250Vop3CompareDefinesOneSgpr) {
   EXPECT_FALSE(idu.defs.contains({RegClass::SGPR, 54, 1}));
 }
 
-TEST(GeneratedInstDefUse, Gfx1250VopdCndmaskMaskIsOneSgprInWave32) {
+TEST(GeneratedInstDefUse, Gfx1250VopdCndmaskMaskIsOneSgpr) {
   // v_dual_cndmask_b32 in either VOPD3 slot, its mask in s8, paired with
-  // v_dual_fmac_f32. The VOPD3 decoder declares the mask as a 64-bit SGPR
-  // operand, and Wave32 narrows it to s8.
+  // v_dual_fmac_f32. gfx1250 is wave32-only, so the mask occupies s8 at either
+  // analysis wave size and must not keep the adjacent s9 live.
   for (const bool x_slot : {true, false}) {
     SCOPED_TRACE(x_slot ? "X slot" : "Y slot");
     const uint32_t opx = x_slot ? 9u : 0u;
@@ -7908,9 +7908,12 @@ TEST(GeneratedInstDefUse, Gfx1250VopdCndmaskMaskIsOneSgprInWave32) {
     ASSERT_NE(inst->mnemonic().find("v_dual_cndmask_b32"), std::string_view::npos)
         << inst->mnemonic();
 
-    const InstDefUse wave32(*inst, 32);
-    EXPECT_TRUE(wave32.uses.contains({RegClass::SGPR, 8, 1}));
-    EXPECT_FALSE(wave32.uses.contains({RegClass::SGPR, 9, 1}));
+    for (const unsigned wave_size : {32u, 64u}) {
+      SCOPED_TRACE(wave_size);
+      const InstDefUse idu(*inst, static_cast<uint8_t>(wave_size));
+      EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 8, 1}));
+      EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 9, 1}));
+    }
   }
 }
 
@@ -8592,7 +8595,7 @@ TEST(GeneratedInstDefUse, D16BufferLoadLdsBitSuppressesDestinationRead) {
       << "LDS set: data goes to LDS, so vdata is not a preserved read";
 }
 
-TEST(GeneratedInstDefUse, Vop3SdstEncDppInvalidSourceCanReadScalarResult) {
+TEST(GeneratedInstDefUse, Vop3SdstEncDppClearsSuppressedScalarResult) {
   constexpr uint32_t kVop3SdstWord0 = (53u << 26) | (288u << 16) | (8u << 8) | 6u;
   constexpr uint32_t kVop3SdstWord1 = (10u << 18) | (3u << 9) | 250u;
   auto inst = decode_rdna4({kVop3SdstWord0, kVop3SdstWord1, (0xFu << 28) | (0xFu << 24) | 2u});
@@ -8600,7 +8603,24 @@ TEST(GeneratedInstDefUse, Vop3SdstEncDppInvalidSourceCanReadScalarResult) {
 
   InstDefUse idu(*inst, 64);
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
-  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+}
+
+TEST(GeneratedInstDefUse, DppReverseSubtractIgnoresScalarMinuendOnGfx115AndGfx12) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    auto decoder = Decoder::create(arch);
+    auto reads_s5 = [&](std::initializer_list<uint32_t> words) {
+      auto inst = decoder->decode_window(std::span(words.begin(), words.size()));
+      EXPECT_TRUE(inst.succeeded());
+      return inst.succeeded() &&
+             InstDefUse(*inst.value(), 32).uses.contains({RegClass::SGPR, 5, 1});
+    };
+    EXPECT_TRUE(reads_s5({0xd7020c06, 0x02000b04}));              // plain SUBREV_CO reads s5
+    EXPECT_FALSE(reads_s5({0xd7020c06, 0x00000afa, 0xff090104})); // DPP16
+    EXPECT_FALSE(reads_s5({0xd5220c06, 0x01a80aea, 0x1f58d104})); // DPP8
+  }
 }
 
 // explicit_ordinary_sgpr_bound is the cheap whole-scope scan shared by DBT's

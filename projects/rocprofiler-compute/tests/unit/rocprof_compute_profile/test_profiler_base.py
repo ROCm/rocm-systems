@@ -578,6 +578,7 @@ def _make_rpc_args(
     pc_sampling_interval=None,
     membw_analysis=False,
     experimental=False,
+    set_selected=None,
     mode="profile",
     list_stats=False,
     output_format="stdout",
@@ -586,7 +587,7 @@ def _make_rpc_args(
     return argparse.Namespace(
         mode=mode,
         list_metrics=None,
-        list_metrics_gfx_id=None,
+        debug_list_metrics_gfx_id=None,
         list_blocks=None,
         list_available_metrics=False,
         list_sets=False,
@@ -598,7 +599,7 @@ def _make_rpc_args(
         pc_sampling_interval=pc_sampling_interval,
         membw_analysis=membw_analysis,
         experimental=experimental,
-        set_selected=None,
+        set_selected=set_selected,
         bench_only=False,
         no_roof=False,
         name="unit-test",
@@ -669,6 +670,17 @@ def _fake_pc_sampling_limits(method: str, _sdk_tool_path=None) -> PCSamplingLimi
             False,
             ["21"],
             id="pc_sampling_with_experimental_injects_21",
+        ),
+        pytest.param(
+            _make_rpc_args(
+                pc_sampling=True,
+                experimental=True,
+                filter_blocks=[],
+                set_selected="launch_stats",
+            ),
+            True,
+            None,
+            id="pc_sampling_with_set_errors",
         ),
         pytest.param(
             _make_rpc_args(filter_blocks=["21"], pc_sampling=True, experimental=True),
@@ -751,15 +763,6 @@ def test_sanitize_membw_analysis_injects_block_30(
     instance = _make_profiler_with_args(args)
     instance.sanitize()
     assert args.filter_blocks == expected_filter_blocks
-
-
-def test_sanitize_pc_sampling_rejects_set(caplog):
-    """--set would replace the PC sampling block, so the pair is rejected."""
-    args = _make_rpc_args(pc_sampling=True, experimental=True, filter_blocks=[])
-    args.set_selected = "launch_stats"
-    with pytest.raises(SystemExit):
-        _make_profiler_with_args(args).sanitize()
-    assert "--pc-sampling cannot be used with --set." in caplog.text
 
 
 # ---------------------------------------------------------------------------

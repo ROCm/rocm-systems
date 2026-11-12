@@ -28,9 +28,9 @@ for enforced rules including type annotations, f-strings, and `pathlib` usage.
 
 ## CLI Options
 
-Read **[`.ai/rules/cli-options.md`](.ai/rules/cli-options.md)** before working on
-any command-line option, whether adding one, changing one, reviewing one, or
-answering questions about one.
+Read **[Adding or Changing Command-Line Options](CONTRIBUTING.md#adding-or-changing-command-line-options)**
+in `CONTRIBUTING.md` before working on any command-line option, whether adding
+one, changing one, reviewing one, or answering questions about one.
 
 ## Tooling
 

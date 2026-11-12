@@ -28,7 +28,7 @@ pub(crate) unsafe extern "C" fn create(
         }
         let device = object(pointer.cast::<Device>())?;
         let instance = instance::device_instance(device);
-        if !instance.process_lifetime || instance.process_id != std::process::id() {
+        if !instance.process_lifetime() || !instance.native.is_current_process() {
             return Err(UNSUPPORTED);
         }
         let reset_epoch = device.current_reset_epoch();

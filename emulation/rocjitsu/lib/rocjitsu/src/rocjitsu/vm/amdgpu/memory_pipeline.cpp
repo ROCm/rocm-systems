@@ -471,6 +471,25 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       }
     }
   }
+  // A dense D16 load fills the same half of one VGPR across the wave.
+  // Resolve the register and its preservation policy once for all lanes.
+  if (!is_atomic && d.elem_size == sizeof(uint16_t) && d.num_elems == 1 && (d.d16_lo || d.d16_hi) &&
+      writes_dword(0) &&
+      ((d.wf_size == 32 && d.lane_mask == UINT32_MAX) ||
+       (d.wf_size == 64 && d.lane_mask == UINT64_MAX)) &&
+      d.wf_size <= cu.vgpr_storage_lane_count()) {
+    auto *dst = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.dst_reg_base));
+    const uint32_t shift = d.d16_hi ? 16 : 0;
+    const uint32_t preserve = cu.sram_ecc() ? 0u : ~(0xffffu << shift);
+    const uint32_t lanes = d.wf_size;
+    for (uint32_t lane = 0; lane < lanes; ++lane) {
+      uint16_t halfword;
+      std::memcpy(&halfword, d.response_data.data() + lane * sizeof(halfword), sizeof(halfword));
+      const uint32_t retained = preserve ? (dst[lane] & preserve) : 0;
+      dst[lane] = retained | (static_cast<uint32_t>(halfword) << shift);
+    }
+    return MemoryAccessCompletion::Complete;
+  }
   // Performance-only fast path for ordinary dword loads. The general completion
   // path below remains authoritative for atomics, conversions, and partial-register
   // writes. Ownership is validated above for ordinary loads and per DWORD for
@@ -1205,11 +1224,12 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
       uint64_t old_val = lds->read64(addr);
       uint64_t new_val;
       if (d.atomic_op == AtomicOp::BARRIER_ARRIVE) {
-        uint64_t decrement = 0;
-        const bool has_decrement = store_data.size() >= lane * src_stride + 8;
-        if (has_decrement)
-          std::memcpy(&decrement, &store_data[lane * src_stride], 8);
-        new_val = lds_barrier_cell_update_arrive(old_val, has_decrement ? decrement : 1);
+        // The returning DS instruction supplies UPDATE_VAL.b32 in the low DWORD
+        // of DATA0. An asynchronous arrival has a fixed update of one.
+        uint32_t update = 1;
+        if (store_data.size() >= lane * src_stride + sizeof(update))
+          std::memcpy(&update, &store_data[lane * src_stride], sizeof(update));
+        new_val = lds_barrier_cell_update_arrive(old_val, update);
       } else if (fp_operation) {
         uint64_t source_bits = 0, compare_bits = 0;
         std::memcpy(&source_bits, &store_data[lane * src_stride], 8);
@@ -1317,6 +1337,47 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
 
 VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wavefront &wf,
                                                           uint64_t request_lanes) {
+  if (!d.image_sample)
+    return initiate_texel_access(d, wf, request_lanes);
+  auto &sample = *d.image_sample;
+  if (request_lanes == 0) {
+    sample.next_tap = sample.taps.size();
+    return VmAccessOutcome::Complete;
+  }
+  if (wf.address_space() &&
+      (!d.translated.initialized ||
+       (sample.next_tap == 0 && d.translated.access && !d.translated.access->info().ready))) {
+    d.translated.access = wf.snapshot_vm_access();
+    if (!d.translated.access)
+      return VmAccessOutcome::Faulted;
+    d.translated.initialized = true;
+  }
+  if (d.translated.access && !d.translated.access->info().ready)
+    return VmAccessOutcome::Unavailable;
+  while (sample.next_tap < sample.taps.size()) {
+    auto &tap = sample.taps[sample.next_tap];
+    if (!tap.translated.initialized && d.translated.initialized) {
+      tap.translated.access = d.translated.access;
+      tap.translated.initialized = true;
+    }
+    // Each tap retains its own request cursor, while all share one VM snapshot.
+    // Restore the issue-time parent state before returning, including on retry.
+    std::swap(d.per_lane_addr, tap.addresses);
+    std::swap(d.response_data, tap.response);
+    std::swap(d.translated, tap.translated);
+    const auto outcome = initiate_texel_access(d, wf, tap.lane_mask & request_lanes);
+    std::swap(d.translated, tap.translated);
+    std::swap(d.response_data, tap.response);
+    std::swap(d.per_lane_addr, tap.addresses);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
+    ++sample.next_tap;
+  }
+  return VmAccessOutcome::Complete;
+}
+
+VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wavefront &wf,
+                                                         uint64_t request_lanes) {
   const uint64_t swizzled_lanes = d.scratch_swizzle ? d.scratch_lane_mask & request_lanes : 0;
   if (d.requires_scratch_backing && swizzled_lanes != 0 && wf.scratch_base() == 0)
     return VmAccessOutcome::Faulted;

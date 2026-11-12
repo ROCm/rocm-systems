@@ -35,7 +35,6 @@ PC_SAMPLING_SOURCE_WORKLOAD = (
 )
 SOURCE_WORKLOAD_NAME = "pc_sampling_source_workload"
 SOURCE_WORKLOAD_SUB_NAME = "run_001"
-SOL_MEMCHART_AND_BLOCK_5 = ["--speed-of-light", "--memory-chart", "-b", "5"]
 
 
 def setup_pc_sampling_source_workload(tmp_path):
@@ -71,27 +70,6 @@ def test_list_kernels(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
         common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.list_metrics
-def test_list_metrics_gfx_id_is_rejected(
-    binary_handler_analyze_rocprof_compute, capsys
-):
-    """analyze lists the -p workload's GPU, so it rejects --list-metrics-gfx-id."""
-    workload_dir = integration_common.setup_workload_dir(indirs[1])
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--list-metrics",
-        "--list-metrics-gfx-id",
-        "gfx908",
-    ])
-    assert code == 1
-    assert "--list-metrics-gfx-id can't be used in analyze mode" in (
-        capsys.readouterr().out
-    )
-    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
@@ -246,42 +224,6 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys):
         assert "Invalid --block value '100'" in error_output
 
         common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.filter_block
-@pytest.mark.parametrize(
-    ("workload", "shortcuts", "blocks"),
-    [
-        ("tests/workloads/vcopy/MI200", SOL_MEMCHART_AND_BLOCK_5, ["5", "2", "3"]),
-        ("tests/workloads/vcopy/MI350", SOL_MEMCHART_AND_BLOCK_5, ["5", "2", "3"]),
-        # vcopy has no roofline.csv, so compare roofline on a workload that does
-        ("tests/workloads/mem_levels_HBM/MI200", ["--roofline"], ["4"]),
-    ],
-    ids=["sol_memchart_MI200", "sol_memchart_MI350", "roofline_MI200"],
-)  # fmt: skip
-def test_filter_panel_shortcuts(
-    binary_handler_analyze_rocprof_compute, capsys, workload, shortcuts, blocks
-):
-    """--speed-of-light/--memory-chart/--roofline show the same panels as -b."""
-    workload_dir = integration_common.setup_workload_dir(
-        workload, param_id=Path(workload).parent.name + Path(workload).name
-    )
-    outputs = []
-    for options in (shortcuts, ["--block", *blocks]):
-        capsys.readouterr()
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            *options,
-        ])
-        assert code == 0
-        # Compare the report only; the log lines before it can differ
-        out = capsys.readouterr().out
-        outputs.append(out[out.index("0. Top Stats") :])
-    assert outputs[0] == outputs[1]
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
@@ -673,14 +615,14 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_g(binary_handler_analyze_rocprof_compute):
+def test_debug_metric_expression(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
             workload_dir,
-            "-g",
+            "--debug-metric-expression",
         ])
         assert code == 0
 

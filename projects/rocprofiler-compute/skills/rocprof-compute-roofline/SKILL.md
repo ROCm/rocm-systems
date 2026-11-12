@@ -18,8 +18,10 @@ carries the same numbers in readable form.
 Collect only the roofline block:
 
 ```bash
-rocprof-compute profile --name <workload_name> -b roofline -- <application> <args>
+rocprof-compute profile --name <workload_name> --roofline -- <application> <args>
 ```
+
+On ROCm 10.2 and earlier, use `-b roof` instead of `--roofline`.
 
 Collecting it runs microbenchmarks in addition to profiling the application,
 which takes extra time. They are skipped when `-b` or `--set` selects blocks
@@ -42,15 +44,19 @@ See [standalone roofline](../../docs/how-to/profile/mode.rst) for two more optio
 - `--roofline` selects the roofline block; used alone, it collects only roofline data.
 - `--roofline-bench-only` runs only the microbenchmarks, without an application.
 
+On ROCm 10.2 and earlier, these options are named `--device`, `--roof-only` and
+`--bench-only`.
+
 ### Collect only what the question needs
 
 Never run a full profile. It replays the application once per counter pass and
 also runs the roofline benchmarks.
 
-- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
-  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
-  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
-  Aliases differ by architecture.
+- List what this GPU can collect with `rocprof-compute --list-metrics`, and a
+  block's metrics with `rocprof-compute --list-metrics <alias>`. On ROCm 10.2
+  and earlier, use `--list-blocks <gfx_arch>` and `--list-metrics <gfx_arch>`.
+  Pass `-b` only the block aliases, block ids, or metric ids (for example
+  `2.1.0`) the question needs. Aliases differ by architecture.
 - `--set <set_name>` collects a predefined topic in one pass.
   `rocprof-compute profile --list-sets` lists the sets.
 - Add `-k <kernel_name>` when the user names the kernels that matter.
@@ -66,7 +72,7 @@ also runs the roofline benchmarks.
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roofline
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> --roofline
 ```
 
 Always pass one kernel id. The table gives the kernel's arithmetic intensity in
@@ -113,8 +119,7 @@ know the intent, the counters know what ran.
 HBM answers "am I limited by main memory", while L2 and vL1D show whether
 caches are absorbing the traffic.
 
-`--view table` prints one table for all kernels together instead of one per
-kernel. To compare many kernels, write the
+To compare many kernels, write the
 [analysis database](../../docs/how-to/analyze/cli.rst) with
 `--output-format db` and query it with SQL.
 

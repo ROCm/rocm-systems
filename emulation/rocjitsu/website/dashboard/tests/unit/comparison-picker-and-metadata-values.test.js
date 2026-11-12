@@ -6,6 +6,7 @@ import { ThemeProvider } from '@mui/material/styles';
 import { createDashboardTheme } from '../../src/theme/theme.js';
 import RunMetadataDiff from '../../src/components/compare/RunMetadataDiff.jsx';
 import BranchEnvironment from '../../src/components/branch/BranchEnvironment.jsx';
+import { formatFullDate } from '../../src/utils/formatters.js';
 import RunSelector from '../../src/components/compare/RunSelector.jsx';
 
 // Exercise the real MUI DOM/styles in Node, injecting the FormControl focus
@@ -156,4 +157,21 @@ test.each([RunMetadataDiff, BranchEnvironment].map((Component) => ({ name: Compo
   expect(html).not.toContain('data-different="true"');
   expect(html).toContain('>—</td>');
   expect(html).toContain('fictional-candidate');
+});
+
+test('branch timestamp tooltips preserve exact values when local labels match', () => {
+  const base = { ...baseline, commitTimestamp: '2026-10-05T09:00:00.123Z', timestamp: '2026-10-05T10:00:00Z' };
+  const next = { ...candidate, commitTimestamp: '2026-10-05T09:00:00.456Z', timestamp: '2026-10-05T10:00:30Z' };
+  const { html } = renderMetadata(BranchEnvironment, 'light', base, next);
+  for (const [key, field] of [['committedAt', 'commitTimestamp'], ['completedAt', 'timestamp']]) {
+    expect(formatFullDate(base[field])).toBe(formatFullDate(next[field]));
+    const row = metadataRow(html, `branch-source-${key}`);
+    expect(row).toContain('data-different="true"');
+    const cells = [...row.matchAll(/<td\b[^>]*>[\s\S]*?<\/td>/g)].map(match => match[0]);
+    expect(cells).toHaveLength(2);
+    for (const [index, run] of [base, next].entries()) {
+      expect(cells[index]).toContain(`title="${run[field]}"`);
+      expect(cells[index]).toContain(`>${formatFullDate(run[field])}</td>`);
+    }
+  }
 });
