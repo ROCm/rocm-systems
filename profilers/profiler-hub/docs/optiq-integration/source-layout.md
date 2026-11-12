@@ -204,7 +204,7 @@ Built only with `PROFILER_HUB_ENABLE_PYTORCH_KINETO`. The `pytorch` registry ent
 | `kineto_probe.hpp`, `kineto_probe.cpp` | Reader | The entry's recogniser (reads the first two bytes, inflates up to 64 KiB of a gzip file, applies the format check) and its probe, which reports success with version 0.0.0 and no GUIDs. |
 | `pytorch_store.hpp`, `pytorch_store.cpp` | Reader | Parses a file with the loader and groups the events into host-thread and GPU-stream tracks with their rows, sorted by start. Fails on a trace with no usable event. |
 | `pytorch_catalog.hpp`, `pytorch_catalog.cpp` | Reader | Moves the store's strings into the shared catalog and builds its node, process, thread, agent, stream and track entries. |
-| `pytorch_source.hpp`, `pytorch_source.cpp` | Reader | `pytorch_source`, the `format_source` for a Kineto file: parses in `load_catalog`, serves tracks from memory through the connection-source interface, frees the rows in `finish_load`, answers `track_of` from a table of id runs and the histogram from the track reader. Details, correlated events and call stacks answer with nothing; the summary and table queries are declined. |
+| `pytorch_source.hpp`, `pytorch_source.cpp` | Reader | `pytorch_source`, the `format_source` for a Kineto file: parses in `load_catalog`, serves tracks from memory through the connection-source interface, keeps the parsed events for the life of the context, answers `track_of` from a table of id runs and the histogram from the track reader. Details, correlated events and call stacks answer with nothing; the summary and table queries are declined. |
 
 ## source/queries
 

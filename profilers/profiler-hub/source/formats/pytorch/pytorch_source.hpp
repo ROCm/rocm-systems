@@ -7,7 +7,6 @@
 #include "pytorch_store.hpp"
 
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -18,11 +17,9 @@ namespace profiler_hub::pytorch
 {
 
 /**
- * A Kineto trace parsed into memory in load_catalog and served to cached_track_reader.
- * Event ids are dense per type and numbered in track order from 1, so each (track, type)
- * owns one contiguous id run. finish_load frees the rows; the run table, the catalog and
- * the reader pointer stay, which is all track_of and histogram need. A row read after
- * that throws std::logic_error.
+ * A Kineto trace parsed into memory in load_catalog and kept there. Event ids are dense
+ * per type and numbered in track order from 1, so each (track, type) owns one contiguous
+ * id run.
  */
 class pytorch_source final : public format_source
 {
@@ -32,7 +29,6 @@ public:
     [[nodiscard]] const std::shared_ptr<reader_catalog_t>& catalog() const override;
     void                             load_catalog(common::thread_pool&   workers,
                                                   const catalog_cache_t& cache) override;
-    void                             finish_load() override;
     void                             attach_reader(cached_track_reader& reader) override;
     [[nodiscard]] connection_source& track_reads() override;
 
@@ -85,16 +81,16 @@ private:
 
     [[nodiscard]] const track_rows_t& track_rows(
         const reader_types::track_info_t& track) const;
-    void require_rows() const;
 
     std::string                       m_path;
     std::shared_ptr<reader_catalog_t> m_catalog;
     row_seam                          m_seam;
     std::vector<track_rows_t>         m_tracks;  // by track id
-    std::vector<const char*>          m_names;   // by name id
-    std::vector<run_t>                m_runs;    // by type, then first id
-    cached_track_reader*              m_reader{};
-    std::atomic<bool>                 m_released{ false };
+    std::vector<event_t>     m_events;  // file order; store_row_t::event indexes it
+    std::string              m_args;    // the args text of m_events
+    std::vector<const char*> m_names;   // by name id
+    std::vector<run_t>       m_runs;    // by type, then first id
+    cached_track_reader*     m_reader{};
 };
 
 }  // namespace profiler_hub::pytorch

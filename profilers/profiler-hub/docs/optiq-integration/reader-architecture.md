@@ -253,10 +253,10 @@ second with a path list and no cache.
         written to `e<id>.bin` or `s<id>.bin`.
       - No cache folder: each track is read into the in-memory cache.
 
-      Then `finish_load` tells each source that every track is loaded. The
-      rocpd source does nothing. A Kineto source frees its rows and keeps a table
-      of which event ids belong to which track, so `track_of` and the histogram
-      still answer; a row read after that throws.
+      Then `finish_load` tells each source that every track is loaded. Neither
+      the rocpd source nor the Kineto source does anything there. The Kineto
+      source keeps its parsed events, and a table of which event ids belong to
+      which track, for the life of the context.
    7. `attach_track_store` connects the timeline cache to each source's
       `cached_track_reader`, and the node, agent, process, thread, stream,
       queue, and PMC lists are built for the C structs.

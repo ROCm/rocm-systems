@@ -249,6 +249,106 @@ text_us_to_ns(std::string_view s)
     return signed_ns(ns + (round_up ? 1 : 0), negative);
 }
 
+// Re-serialises the SAX events of one JSON value as compact text. Keys keep their order
+// and a number keeps the token the file wrote.
+class json_text_t
+{
+public:
+    void begin(std::string& out)
+    {
+        m_out  = &out;
+        m_done = false;
+        m_open.clear();
+        m_out->clear();
+    }
+    void end() { m_out = nullptr; }
+
+    [[nodiscard]] bool active() const { return m_out != nullptr; }
+    [[nodiscard]] bool complete() const { return m_done; }
+
+    void token(std::string_view text)
+    {
+        prefix();
+        m_out->append(text);
+        m_done = m_open.empty();
+    }
+    void string(std::string_view text)
+    {
+        prefix();
+        quote(text);
+        m_done = m_open.empty();
+    }
+    void key(std::string_view text)
+    {
+        auto& top = m_open.back();
+        if(!top.first) m_out->push_back(',');
+        top.first = false;
+        quote(text);
+        m_out->push_back(':');
+    }
+    void open(char bracket)
+    {
+        prefix();
+        m_out->push_back(bracket);
+        m_open.push_back({ bracket == '{', true });
+    }
+    void close()
+    {
+        m_out->push_back(m_open.back().object ? '}' : ']');
+        m_open.pop_back();
+        m_done = m_open.empty();
+    }
+
+private:
+    struct level_t
+    {
+        bool object;
+        bool first;
+    };
+
+    void prefix()
+    {
+        if(m_open.empty() || m_open.back().object) return;
+        if(!m_open.back().first) m_out->push_back(',');
+        m_open.back().first = false;
+    }
+
+    void quote(std::string_view text)
+    {
+        constexpr std::string_view hex = "0123456789abcdef";
+        m_out->push_back('"');
+        for(const char c : text)
+        {
+            switch(c)
+            {
+                case '"': m_out->append("\\\""); break;
+                case '\\': m_out->append("\\\\"); break;
+                case '\b': m_out->append("\\b"); break;
+                case '\f': m_out->append("\\f"); break;
+                case '\n': m_out->append("\\n"); break;
+                case '\r': m_out->append("\\r"); break;
+                case '\t': m_out->append("\\t"); break;
+                default:
+                    if(static_cast<unsigned char>(c) < 0x20)
+                    {
+                        m_out->append("\\u00");
+                        m_out->push_back(hex[static_cast<unsigned char>(c) >> 4]);
+                        m_out->push_back(hex[static_cast<unsigned char>(c) & 0xf]);
+                    }
+                    else
+                    {
+                        m_out->push_back(c);
+                    }
+            }
+        }
+        m_out->push_back('"');
+    }
+
+    std::string*         m_out  = nullptr;
+    bool                 m_done = false;
+    std::vector<level_t> m_open;
+};
+
 // Depth map: 1 root members, 2 traceEvents / deviceProperties array, 3 an event or device
 // object, 4 args members.
 class sax_handler
@@ -266,12 +366,21 @@ public:
 
     const std::string& parse_error_message() const { return m_parse_error; }
 
-    static bool null() { return true; }
-    static bool boolean(bool /*val*/) { return true; }
+    bool null()
+    {
+        if(m_text.active()) m_text.token("null");
+        return true;
+    }
+    bool boolean(bool val)
+    {
+        if(m_text.active()) m_text.token(val ? "true" : "false");
+        return true;
+    }
     static bool binary(binary_t& /*val*/) { return true; }
 
     bool number_integer(number_integer_t v)
     {
+        if(m_text.active()) m_text.token(std::to_string(v));
         if(at_time_key())
         {
             const auto magnitude = v < 0 ? ~static_cast<std::uint64_t>(v) + 1
@@ -284,6 +393,7 @@ public:
     }
     bool number_unsigned(number_unsigned_t v)
     {
+        if(m_text.active()) m_text.token(std::to_string(v));
         if(at_time_key())
         {
             set_time(integer_us_to_ns(v, false));
@@ -295,6 +405,7 @@ public:
     }
     bool number_float(number_float_t v, const string_t& text)
     {
+        if(m_text.active()) m_text.token(text);
         if(at_time_key())
         {
             set_time(text_us_to_ns(text));
@@ -306,6 +417,7 @@ public:
 
     bool string(string_t& s)
     {
+        if(m_text.active()) m_text.string(s);
         if(m_depth == 3 && m_in_event)
         {
             if(m_k3 == "name")
@@ -334,11 +446,18 @@ public:
 
     bool start_object(std::size_t /*elements*/)
     {
+        const bool nested = m_text.active();
+        if(nested) m_text.open('{');
         ++m_depth;
         if(m_depth == 3 && m_k1 == "traceEvents")
         {
             m_in_event = true;
             m_cur      = {};
+        }
+        else if(!nested && m_depth == 4 && m_in_event && m_k3 == "args")
+        {
+            m_text.begin(m_args_text);
+            m_text.open('{');
         }
         else if(m_depth == 3 && m_k1 == "deviceProperties")
         {
@@ -351,6 +470,7 @@ public:
 
     bool end_object()
     {
+        close_text();
         if(m_depth == 3 && m_in_event)
         {
             finish_event();
@@ -367,17 +487,20 @@ public:
 
     bool start_array(std::size_t /*elements*/)
     {
+        if(m_text.active()) m_text.open('[');
         ++m_depth;
         return true;
     }
     bool end_array()
     {
+        close_text();
         --m_depth;
         return true;
     }
 
     bool key(string_t& s)
     {
+        if(m_text.active()) m_text.key(s);
         if(m_depth == 1)
         {
             m_k1 = s;
@@ -411,12 +534,17 @@ private:
         std::int64_t ts_ns = 0, dur_ns = 0;
         std::int64_t pid = 0, tid = 0, stream = -1, device = -1;
         std::int64_t corr = -1, ext = -1;
+        bool         has_args = false;
     };
-    struct pending_t
+
+    void close_text()
     {
-        std::size_t  index;
-        std::int64_t ext;
-    };
+        if(!m_text.active()) return;
+        m_text.close();
+        if(!m_text.complete()) return;
+        m_text.end();
+        m_cur.has_args = true;
+    }
 
     bool at_time_key() const
     {
@@ -506,17 +634,8 @@ private:
         if(!class_of(m_cur.cat).launch_site) return;
         if(!icontains_launch(m_cur.name)) return;
 
-        m_key_decided = true;
-        m_use_corr    = m_cur.corr >= 0;
-        if(!m_use_corr)
-        {
-            for(const auto& p : m_pending)
-            {
-                m_t.events[p.index].correlation = p.ext;
-            }
-        }
-        m_pending.clear();
-        m_pending.shrink_to_fit();
+        m_key_decided           = true;
+        m_t.link_by_correlation = m_cur.corr >= 0;
     }
 
     void finish_event()
@@ -547,17 +666,13 @@ private:
                 e.device = m_cur.device;
                 e.ts_ns  = m_cur.ts_ns;
                 e.dur_ns = m_cur.dur_ns;
-                if(m_key_decided)
+                e.corr   = m_cur.corr;
+                e.ext    = m_cur.ext;
+                if(m_cur.has_args && m_args_text.size() > 2)
                 {
-                    e.correlation = m_use_corr ? m_cur.corr : m_cur.ext;
-                }
-                else
-                {
-                    e.correlation = m_cur.corr;
-                    if(m_cur.corr >= 0 || m_cur.ext >= 0)
-                    {
-                        m_pending.push_back({ m_t.events.size(), m_cur.ext });
-                    }
+                    e.args_off = m_t.args.size();
+                    e.args_len = static_cast<std::uint32_t>(m_args_text.size());
+                    m_t.args.append(m_args_text);
                 }
                 m_t.events.push_back(e);
                 break;
@@ -596,8 +711,8 @@ private:
 
     std::unordered_map<std::string, std::uint32_t> m_name_ids, m_cat_ids;
     bool                                           m_key_decided = false;
-    bool                                           m_use_corr    = true;
-    std::vector<pending_t>                         m_pending;
+    json_text_t                                    m_text;
+    std::string                                    m_args_text;
 };
 }  // namespace
 
