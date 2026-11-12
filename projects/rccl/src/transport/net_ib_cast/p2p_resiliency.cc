@@ -363,10 +363,11 @@ static ncclResult_t IbCastResiliencyHandleCompletionErrorSender(struct ncclIbRes
   struct ncclIbResiliencySend* sendResCtx = (struct ncclIbResiliencySend*)resCtx;
   res = IbCastResiliencySendRequestInit(sendResCtx, request, devIndex);
   if (res != ncclSuccess) {
-    WARN("NET/IB: %s: Failed to initialize a resiliency send request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=0x%lx, "
-         "wc.status=%s(%d), wc.opcode=%s(%d), slot=%ld).",
-         __func__, request, request->base, request->id, IbCastReqTypeStr[request->type], wc->wr_id,
-         ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, slot);
+    WARN(
+      "NET/IB: %s: Failed to initialize a resiliency send request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=0x%lx, "
+      "wc.status=%s(%d), wc.opcode=%s(%d), slot=%ld).",
+      __func__, request, request->base, request->id, IbCastReqTypeStr[request->type], wc->wr_id,
+      ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, slot);
     return res;
   }
 
@@ -600,12 +601,11 @@ static ncclResult_t IbCastResiliencyProbeProgress(struct ncclIbResiliencySend* s
 ncclResult_t IbCastResiliencyInit(struct ncclIbNetCommBase* baseComm, struct ncclIbResiliency** resCtx) {
   assert(baseComm != NULL);
   assert(resCtx != NULL);
-  if (IbCastByOrderRequested() ||  ncclParamIbCastResiliencyPortFailover() == 0 || IbCastQpSharingEnabled()) {
+  if (IbCastByOrderRequested() || ncclParamIbCastResiliencyPortFailover() == 0 || IbCastQpSharingEnabled()) {
     // Resiliency and QP sharing are kept orthogonal for now: disable resiliency
     // when QP sharing is enabled.
     INFO(NCCL_NET, "NET/IB: %s: Resiliency is disabled on the %s communicator (comm=%p)%s", __func__,
-         baseComm->isSend ? "send" : "recv", baseComm,
-         IbCastQpSharingEnabled() ? " (QP sharing enabled)" : "");
+         baseComm->isSend ? "send" : "recv", baseComm, IbCastQpSharingEnabled() ? " (QP sharing enabled)" : "");
     *resCtx = NULL;
     return ncclSuccess;
   }

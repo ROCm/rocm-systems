@@ -498,12 +498,16 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
   }
 #endif
   // Keyed by plugin too: Socket's "no GDR" must not answer for a later IB comm on this GPU (ROCM-27737).
-  enum class GdrVerdict { Unprobed = 0, No, Yes };
+  enum class GdrVerdict {
+    Unprobed = 0,
+    No,
+    Yes
+  };
   static GdrVerdict gdrSupportMatrix[NCCL_NET_MAX_PLUGINS][NCCL_MAX_LOCAL_RANKS] = {};
   GdrVerdict uncached = GdrVerdict::Unprobed;
-  GdrVerdict* cached = (comm->cudaDev >= 0 && comm->cudaDev < NCCL_MAX_LOCAL_RANKS)
-                           ? &gdrSupportMatrix[comm->netPluginIndex][comm->cudaDev]
-                           : &uncached;
+  GdrVerdict* cached = (comm->cudaDev >= 0 && comm->cudaDev < NCCL_MAX_LOCAL_RANKS) ?
+                         &gdrSupportMatrix[comm->netPluginIndex][comm->cudaDev] :
+                         &uncached;
   if (*cached == GdrVerdict::Unprobed) {
     int netDevs;
     GdrVerdict verdict = GdrVerdict::No;

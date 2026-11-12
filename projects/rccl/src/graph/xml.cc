@@ -1302,8 +1302,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t hipDev,
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
           int isGpu = ncclTopoPciClassIsGpu(deviceClass);
           if (!isGpu) {
-            INFO(NCCL_GRAPH,
-                 "XGMI target %s sysfs class %s is not a GPU (HIP logical BDF?); using accelerator tclass",
+            INFO(NCCL_GRAPH, "XGMI target %s sysfs class %s is not a GPU (HIP logical BDF?); using accelerator tclass",
                  busId, deviceClass);
             NCCLCHECK(xmlSetAttr(sub, "tclass", PCI_ACCELERATOR_CLASS));
           } else {
@@ -1350,8 +1349,7 @@ ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct nccl
     if (!ncclTopoPciClassIsGpu(deviceClass)) {
       NCCLCHECK(int64ToBusId(hipId & ~0xfLL, physBusId));
       pciBusId = physBusId;
-      INFO(NCCL_GRAPH,
-           "HIP logical GPU at %s is not a physical GPU PCI function (class %s); attaching under %s", busId,
+      INFO(NCCL_GRAPH, "HIP logical GPU at %s is not a physical GPU PCI function (class %s); attaching under %s", busId,
            deviceClass[0] ? deviceClass : "missing", pciBusId);
     }
   }

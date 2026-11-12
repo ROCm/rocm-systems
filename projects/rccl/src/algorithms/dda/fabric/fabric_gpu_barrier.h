@@ -158,13 +158,17 @@ public:
     }
     __syncthreads();
   }
-  __device__ __forceinline__ void waitPeer(int srcRank) { waitPeer(srcRank, static_cast<int>(blockIdx.x)); }
+  __device__ __forceinline__ void waitPeer(int srcRank) {
+    waitPeer(srcRank, static_cast<int>(blockIdx.x));
+  }
 
   // Epoch flags of the peer-major push alltoall (own region; the toggle flags are untouched): a post stores a growing
   // value and never waits, a wait polls for at least a value, so every wave can poll one slot. A block's launch uses
   // epoch .. epoch + pieces + 1 (entry posts epoch, piece p posts epoch + 2 + p); epoch is the block's cell, advanced by
   // epochEnd, so it survives CUDA graph replays. Scratch accesses are system-scope: no fence besides orderDestWrites().
-  __device__ __forceinline__ FlagType epochBegin() const { return epochCell()[blockIdx.x] + 1; }
+  __device__ __forceinline__ FlagType epochBegin() const {
+    return epochCell()[blockIdx.x] + 1;
+  }
 
   // Must be called by every thread of the block after its last use of the epoch flags. Every launch advances all the
   // cells (cell e is written by block e % gridDim.x), so the cells stay equal across block indices, which a drain block
@@ -235,8 +239,12 @@ public:
   //   CAS: one-token flags, a post waits until the previous token was consumed (signalWaitPeer / postPeer / waitPeer).
   // All ranks must use the same scheme. The kernels still bracket the launch with epochBegin / epochEnd; in the CAS
   // scheme those only touch the epoch cell and are harmless.
-  __host__ void setEpochFlags(bool on) { useEpoch_ = on; }
-  __host__ bool epochFlags() const { return useEpoch_; }
+  __host__ void setEpochFlags(bool on) {
+    useEpoch_ = on;
+  }
+  __host__ bool epochFlags() const {
+    return useEpoch_;
+  }
 
   // Entry handshake of block b: posts to rank `to` and waits for rank `from`.
   __device__ __forceinline__ void signalWait(int to, int from, FlagType epoch) {
@@ -266,6 +274,7 @@ public:
       waitPeer(from, fromBlock);
     }
   }
+
 private:
   int nBlocks_{-1};
   int selfRank_{-1};

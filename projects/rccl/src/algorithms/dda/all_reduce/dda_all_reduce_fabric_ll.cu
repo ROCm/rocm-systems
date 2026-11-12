@@ -170,8 +170,8 @@ static int ddaArLL128Wire(const ncclComm* comm, size_t bytes) {
     return dda::common::kDdaLL128WireCoop;
   }
   const size_t shard = bytes / (size_t)std::max(comm->nRanks, 1);
-  return ddaArLL128StagedWireOk(comm) && shard >= kDdaArLL128AsyncMinShardBytes ? dda::common::kDdaLL128WireAsync
-                                                                                  : dda::common::kDdaLL128WireCoop;
+  return ddaArLL128StagedWireOk(comm) && shard >= kDdaArLL128AsyncMinShardBytes ? dda::common::kDdaLL128WireAsync :
+                                                                                  dda::common::kDdaLL128WireCoop;
 }
 
 // Dynamic LDS of an LL128 launch: the staged writer's two windows per warp.
@@ -188,9 +188,9 @@ template <typename T>
 static DdaArLL128Kernel<T> ddaArLL128TwoShotKernel(int nRanks, int wire) {
   return ddaArPickRanksCt(nRanks, [wire](auto n) -> DdaArLL128Kernel<T> {
     constexpr int kN = decltype(n)::value;
-    return wire == dda::common::kDdaLL128WireAsync
-             ? &dda::common::ddaAllReduceTwoShotLL128<T, kN, dda::common::kDdaLL128WireAsync>
-             : &dda::common::ddaAllReduceTwoShotLL128<T, kN, dda::common::kDdaLL128WireCoop>;
+    return wire == dda::common::kDdaLL128WireAsync ?
+             &dda::common::ddaAllReduceTwoShotLL128<T, kN, dda::common::kDdaLL128WireAsync> :
+             &dda::common::ddaAllReduceTwoShotLL128<T, kN, dda::common::kDdaLL128WireCoop>;
   });
 }
 
@@ -295,7 +295,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
                                                          ncclComm* comm, cudaStream_t stream, rcclDdaLaunchCap cap) {
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
-  const size_t nPk = (bytes >> 3 ) / (size_t)nRanks; // 8 payload bytes per packet
+  const size_t nPk = (bytes >> 3) / (size_t)nRanks; // 8 payload bytes per packet
 
   const auto geom = ddaArLLTwoShotGeom(comm, bytes, cap);
   const dim3 grid = geom.first;
@@ -342,12 +342,12 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
 
 // Shape/resource eligibility for the one-shot variant, independent of whether
 // the tier is switched on for this size.
-bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                            ncclDataType_t datatype, ncclRedOp_t op) {
+bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                            ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
   if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLLOneShotThreshold()) {
-      return false;
+    return false;
   }
 
   if (comm == nullptr || comm->bootstrap == nullptr) {
@@ -386,12 +386,12 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
 }
 
 // Shape/resource eligibility for the two-shot variant.
-bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                            ncclDataType_t datatype, ncclRedOp_t op) {
+bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                            ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
   if (count * ncclTypeSize(datatype) > rcclDdaLLTwoShotThreshold(comm)) {
-      return false;
+    return false;
   }
 
   if (comm == nullptr || comm->bootstrap == nullptr) {
@@ -562,7 +562,8 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
   const size_t bytes = count * ncclTypeSize(datatype);
 
   if (ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-    INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL one-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+    INFO(NCCL_COLL,
+         "AllReduce: taking DDA fabric LL one-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, bytes);
     (void)op;
     switch (datatype) {
@@ -582,7 +583,8 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
   }
 
   if (ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-    INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL two-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+    INFO(NCCL_COLL,
+         "AllReduce: taking DDA fabric LL two-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, bytes);
     switch (datatype) {
     case ncclFloat32:
@@ -673,7 +675,6 @@ uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDat
                                            rcclDdaLaunchCap cap) {
   const size_t bytes = count * ncclTypeSize(datatype);
   const bool oneShot = ddaLL128ArOneShotEligible(comm, nullptr, nullptr, count, datatype, ncclSum);
-  const dim3 grid =
-      (oneShot ? ddaArLL128OneShotGeom(comm, bytes, cap) : ddaArLL128TwoShotGeom(comm, bytes, cap)).first;
+  const dim3 grid = (oneShot ? ddaArLL128OneShotGeom(comm, bytes, cap) : ddaArLL128TwoShotGeom(comm, bytes, cap)).first;
   return grid.x * grid.y;
 }

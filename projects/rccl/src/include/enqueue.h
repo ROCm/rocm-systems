@@ -56,7 +56,9 @@ static inline int rcclPlanThreadsPerBlock(const struct ncclComm* comm, int nWarp
 
 // Biased so the default stream (nullptr) tags as 1, leaving 0 free as the "no launch yet"
 // sentinel. See ncclComm::lastStreamTag.
-static inline uintptr_t ncclStreamTag(cudaStream_t s) { return (uintptr_t)s + 1; }
+static inline uintptr_t ncclStreamTag(cudaStream_t s) {
+  return (uintptr_t)s + 1;
+}
 
 // Addon backends launch onto the user's stream themselves instead of going through doLaunches, which is what
 // makes comm->cudaDev current and installs the cross-stream dependency. Bracket such a launch with these.
@@ -78,8 +80,8 @@ struct rcclAddonLaunchState {
 };
 
 ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, struct rcclAddonLaunchState* state);
-ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
-                                const struct rcclAddonLaunchState& state, ncclResult_t launchRes);
+ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream, const struct rcclAddonLaunchState& state,
+                                ncclResult_t launchRes);
 
 template <typename LaunchFn>
 inline ncclResult_t rcclAddonLaunch(struct ncclComm* comm, cudaStream_t stream, LaunchFn&& launch) {

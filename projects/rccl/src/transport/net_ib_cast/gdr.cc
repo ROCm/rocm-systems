@@ -34,7 +34,8 @@ static void ibGdrSupportInitOnce() {
     if (ncclIbScanDefaultPeerMemClients()) IbCastGdrModuleLoaded = 1;
 
     char strValue[MAX_STR_LEN];
-    ncclResult_t rc = ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue));
+    ncclResult_t rc =
+      ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue));
     if (rc == ncclSuccess && strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
       int roMode = ncclParamIbCastPciRelaxedOrdering();
       rc = ncclOsTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue, sizeof(strValue));

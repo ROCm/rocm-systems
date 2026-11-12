@@ -131,7 +131,7 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void*
 } // namespace
 
 bool ncclAllReduceDdaFabricLL128Eligible_old(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                         ncclDataType_t datatype, ncclRedOp_t op) {
+                                             ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
   if (comm == nullptr || comm->bootstrap == nullptr) {
@@ -180,8 +180,9 @@ uint32_t ncclAllReduceDdaFabricLL128Blocks_old(ncclComm* comm, size_t count, ncc
   return grid.x * grid.y;
 }
 
-ncclResult_t ncclAllReduceDdaFabricLL128_old(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
+ncclResult_t ncclAllReduceDdaFabricLL128_old(const void* sendbuff, void* recvbuff, size_t count,
+                                             ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
+                                             cudaStream_t stream) {
   (void)op;
   switch (datatype) {
   case ncclFloat32:

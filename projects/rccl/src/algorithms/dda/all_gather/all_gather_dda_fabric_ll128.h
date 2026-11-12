@@ -2,7 +2,7 @@
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
  * LL128-protocol all-gather device kernel for the DDA fabric path (gfx1250).
- * A warp owns one 2 KiB slice: eight uint64 registers per lane. 
+ * A warp owns one 2 KiB slice: eight uint64 registers per lane.
  * No GPU barrier; staging uses comm->ddaScratch reached via comm->ddaPeerPtrsDev.
  *
  * See LICENSE.txt for license information.
@@ -77,22 +77,20 @@ __launch_bounds__(1024)
   const size_t wstride = (size_t)gridDim.y * (size_t)nwarps;
 
   const int8_t* srcBytes = reinterpret_cast<const int8_t*>(sendbuff);
-  uint64_t* scatterSlot = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords +
-    (uint64_t)selfRank * (uint64_t)slotWords;
-  const uint64_t* gatherSlot = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords +
-    (uint64_t)peer * (uint64_t)slotWords;
+  uint64_t* scatterSlot =
+    reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords + (uint64_t)selfRank * (uint64_t)slotWords;
+  const uint64_t* gatherSlot =
+    reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords + (uint64_t)peer * (uint64_t)slotWords;
   int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff) + (size_t)peer * perRankBytes;
 
   // Phase 1: pack and push this column's slices to the one peer it owns.
   for (size_t s = gwarp; s < slicesTotal; s += wstride) {
     const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
     const size_t rem = perRankBytes - dataByte;
-    const int eltInSlice =
-      rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+    const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t regs[kDdaLL128WordsPerThread];
     ddaLL128LoadRegsBatched<int8_t>(regs, srcBytes + dataByte, eltInSlice, lane, flagLane);
-    ddaLL128StoreWire(
-      scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs, flag, flagLane);
+    ddaLL128StoreWire(scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs, flag, flagLane);
   }
 
   // Local copy sendbuff -> recvbuff[selfRank].
@@ -111,8 +109,7 @@ __launch_bounds__(1024)
   for (size_t s = gwarp; s < slicesTotal; s += wstride) {
     const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
     const size_t rem = perRankBytes - dataByte;
-    const int eltInSlice =
-      rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+    const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t vr[kDdaLL128WordsPerThread];
     if (!ddaLL128PollWireBatched(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
                                  params)) {

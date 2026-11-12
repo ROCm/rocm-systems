@@ -21,7 +21,6 @@ enum ionicdv_reg_udma_mask {
   IONIC_UDMA_MASK_HIGH = 2
 };
 
-
 struct ionic_dv_puec_route {
   union ibv_gid dgid;
   union ibv_gid sgid;

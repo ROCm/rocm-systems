@@ -37,7 +37,9 @@ ncclResult_t ncclGinA2AFinalize(ncclComm* comm);
 
 // gin_alltoall_sdma.cu is only compiled with the GIN backend, so teardown has
 // nothing to release here.
-inline ncclResult_t ncclGinA2AFinalize(ncclComm*) { return ncclSuccess; }
+inline ncclResult_t ncclGinA2AFinalize(ncclComm*) {
+  return ncclSuccess;
+}
 
 #endif
 

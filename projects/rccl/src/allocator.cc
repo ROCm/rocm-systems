@@ -96,7 +96,7 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
     }
     goto exit;
 
-vmm_fail:
+  vmm_fail:
     if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, handleSize);
     if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, handleSize);
     if (handleCreated) (void)cuMemRelease(handle);

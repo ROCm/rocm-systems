@@ -974,8 +974,7 @@ static ncclResult_t ncclTopoGetDevForPciBusId(struct ncclTopoSystem* system, int
   for (int d = 0; d < system->nodes[DEV].count; d++) {
     struct ncclTopoNode* candidate = system->nodes[DEV].nodes + d;
     int64_t local = NCCL_TOPO_ID_LOCAL_ID(candidate->id);
-    if (NCCL_TOPO_ID_SYSTEM_ID(candidate->id) == systemId &&
-        (local & ~(NCCL_TOPO_MLOPART_MASK | 0xfLL)) == phys &&
+    if (NCCL_TOPO_ID_SYSTEM_ID(candidate->id) == systemId && (local & ~(NCCL_TOPO_MLOPART_MASK | 0xfLL)) == phys &&
         (local & NCCL_TOPO_MLOPART_MASK) == NCCL_TOPO_MLOPART(fn)) {
       *devNode = candidate;
       break;
@@ -2417,8 +2416,7 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
     struct ncclXmlNode* topNode;
     NCCLCHECKGOTO(xmlFindTag(xml, "system", &topNode), ret, fail);
     if (topNode) {
-      NCCLCHECKGOTO(xmlSetAttrInt(topNode, "cross_clique", comm->MNNVL && comm->clique.size < comm->nRanks),
-                    ret, fail);
+      NCCLCHECKGOTO(xmlSetAttrInt(topNode, "cross_clique", comm->MNNVL && comm->clique.size < comm->nRanks), ret, fail);
     }
   }
 

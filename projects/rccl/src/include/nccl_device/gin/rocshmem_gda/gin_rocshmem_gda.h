@@ -11,7 +11,6 @@
 #include "gin_rocshmem_device_host_common_gda.h"
 #include "gda/queue_pair_provider.hpp"
 
-
 namespace nccl {
 namespace gin {
 namespace rocshmem_gda {

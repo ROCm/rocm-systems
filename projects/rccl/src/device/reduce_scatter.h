@@ -11,7 +11,8 @@
 
 namespace {
 template <typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && (!defined(__gfx1250__) && !defined(__gfx1250_strict__))
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && \
+  (!defined(__gfx1250__) && !defined(__gfx1250_strict__))
 __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #else
 __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
@@ -260,13 +261,14 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* poll = &ps->flags;
-          while (__scoped_atomic_load_n(poll, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) == 0) { // Wait for compute thread
+          while (__scoped_atomic_load_n(poll, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) ==
+                 0) { // Wait for compute thread
           }
           int last = ps->last;
           prims.patReduce(ps, shmem);
           if (tidInGroup == 0)
             __scoped_atomic_store_n(poll, 0, __ATOMIC_RELEASE,
-                               __MEMORY_SCOPE_WRKGRP); // Return element to compute thread
+                                    __MEMORY_SCOPE_WRKGRP); // Return element to compute thread
           if (last) break;
           step += nGroups;
         }
@@ -317,8 +319,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
           }
           int last = ps->last;
           prims.template patReduce<true>(ps, shmem);
-          if (tidInGroup == 0)
-            __scoped_atomic_store_n(schedulerStep, -1, __ATOMIC_RELEASE, __MEMORY_SCOPE_WRKGRP);
+          if (tidInGroup == 0) __scoped_atomic_store_n(schedulerStep, -1, __ATOMIC_RELEASE, __MEMORY_SCOPE_WRKGRP);
           if (last) break;
           step += nGroups;
         }

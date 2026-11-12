@@ -102,8 +102,7 @@ ncclResult_t ncclBroadcastDdaFabricLL(const void* sendbuff, void* recvbuff, size
   const unsigned threads = ddaLLBcThreads(comm);
   // Only this rank's own buffers; the wire format does not depend on it. The
   // aligned path moves user data in 4-byte words.
-  const uintptr_t addrs =
-    reinterpret_cast<uintptr_t>(recvbuff) | (isRoot ? reinterpret_cast<uintptr_t>(sendbuff) : 0);
+  const uintptr_t addrs = reinterpret_cast<uintptr_t>(recvbuff) | (isRoot ? reinterpret_cast<uintptr_t>(sendbuff) : 0);
   const bool aligned = addrs % sizeof(uint32_t) == 0;
 
   char* const* peers = reinterpret_cast<char* const*>(comm->ddaPeerPtrsDev);

@@ -207,9 +207,9 @@ extern bool IbCastUseInline;
  * commId is non-zero only when QP sharing is enabled; otherwise the
  * upper 16 bits are zero and the full 64-bit value is the original index.
  */
-#define WR_ID_RX_COMM_ID_BITS  16
+#define WR_ID_RX_COMM_ID_BITS 16
 #define WR_ID_RX_COMM_ID_BIT_POS 48
-#define WR_ID_RX_COMM_ID_MASK  ((uint64_t)((1u << WR_ID_RX_COMM_ID_BITS) - 1) << WR_ID_RX_COMM_ID_BIT_POS)
+#define WR_ID_RX_COMM_ID_MASK ((uint64_t)((1u << WR_ID_RX_COMM_ID_BITS) - 1) << WR_ID_RX_COMM_ID_BIT_POS)
 
 /*
  * imm_data layout — default (non-BY_ID) scheme (32-bit):
@@ -224,13 +224,13 @@ extern bool IbCastUseInline;
  *  SD     : split-data flag (set when data spans >1 QPs)
  *  The receiver takes a one-request size from the completion byte count.
  */
-#define WR_IMM_RX_REQ_IDX_BITS  8
+#define WR_IMM_RX_REQ_IDX_BITS 8
 #define WR_IMM_RX_REQ_IDX_BIT_POS 24
-#define WR_IMM_RX_REQ_IDX_MASK  (((1u << WR_IMM_RX_REQ_IDX_BITS) - 1) << WR_IMM_RX_REQ_IDX_BIT_POS)
-#define WR_IMM_SIZE_BITS        23
-#define WR_IMM_SIZE_BIT_POS       0
-#define WR_IMM_SIZE_MASK        (((1u << WR_IMM_SIZE_BITS) - 1) << WR_IMM_SIZE_BIT_POS)
-#define WR_IMM_SPLIT_DATA_FLAG  (1u << WR_IMM_SIZE_BITS)
+#define WR_IMM_RX_REQ_IDX_MASK (((1u << WR_IMM_RX_REQ_IDX_BITS) - 1) << WR_IMM_RX_REQ_IDX_BIT_POS)
+#define WR_IMM_SIZE_BITS 23
+#define WR_IMM_SIZE_BIT_POS 0
+#define WR_IMM_SIZE_MASK (((1u << WR_IMM_SIZE_BITS) - 1) << WR_IMM_SIZE_BIT_POS)
+#define WR_IMM_SPLIT_DATA_FLAG (1u << WR_IMM_SIZE_BITS)
 
 /*
  * imm_data layout — BY_ID scheme (32-bit, QP sharing enabled):
@@ -244,12 +244,12 @@ extern bool IbCastUseInline;
  *  reqId  : receiver-side request index (NET_IB_MAX_REQUESTS <= 256)
  *  commId : receiver commId for routing completions to the right comm
  */
-#define WR_IMM_BYID_REQ_ID_BITS   8
-#define WR_IMM_BYID_REQ_ID_BIT_POS  0
-#define WR_IMM_BYID_REQ_ID_MASK   (((1u << WR_IMM_BYID_REQ_ID_BITS) - 1) << WR_IMM_BYID_REQ_ID_BIT_POS)
-#define WR_IMM_BYID_COMM_ID_BITS  16
+#define WR_IMM_BYID_REQ_ID_BITS 8
+#define WR_IMM_BYID_REQ_ID_BIT_POS 0
+#define WR_IMM_BYID_REQ_ID_MASK (((1u << WR_IMM_BYID_REQ_ID_BITS) - 1) << WR_IMM_BYID_REQ_ID_BIT_POS)
+#define WR_IMM_BYID_COMM_ID_BITS 16
 #define WR_IMM_BYID_COMM_ID_BIT_POS WR_IMM_BYID_REQ_ID_BITS
-#define WR_IMM_BYID_COMM_ID_MASK  (((1u << WR_IMM_BYID_COMM_ID_BITS) - 1) << WR_IMM_BYID_COMM_ID_BIT_POS)
+#define WR_IMM_BYID_COMM_ID_MASK (((1u << WR_IMM_BYID_COMM_ID_BITS) - 1) << WR_IMM_BYID_COMM_ID_BIT_POS)
 extern int IbCastGdrFlushDisable;
 extern bool IbCastAinicRoce;
 extern bool IbCastMultiplaneEnable;
@@ -552,14 +552,12 @@ static_assert(NET_IB_MAX_REQUESTS <= 256,
 // post one maximum-sized request and its possible signal/completion tail as a
 // single chain.
 static inline uint32_t IbCastDataSendQueueDepth(uint32_t maxPostSendBytes, uint32_t depthMultiplier = 1) {
-  const uint32_t splitDataWrs =
-      1u + (static_cast<uint32_t>(MAX_NET_SIZE) - 1u) / maxPostSendBytes;
+  const uint32_t splitDataWrs = 1u + (static_cast<uint32_t>(MAX_NET_SIZE) - 1u) / maxPostSendBytes;
   const uint32_t splitWrs = splitDataWrs + 1u;
   // The Ionic QP creator applies depthMultiplier to this result for shared QPs.
   // Scale only the ordinary request slots; a shared physical QP still needs
   // room for one maximum-length split chain, not one chain per logical comm.
-  const uint32_t splitWrsPerUnit =
-      (splitWrs + depthMultiplier - 1) / depthMultiplier;
+  const uint32_t splitWrsPerUnit = (splitWrs + depthMultiplier - 1) / depthMultiplier;
   return 2u * (NET_IB_MAX_REQUESTS - 1) + splitWrsPerUnit;
 }
 
@@ -597,10 +595,10 @@ struct ncclIbResiliency;
 
 struct IbCastQpSharingInfo {
   uint16_t netIbCommId;
-  bool     isPrimary;
-  int      groupIdx;
-  int      remIbDevIdx;
-  int      groupNqps;
+  bool isPrimary;
+  int groupIdx;
+  int remIbDevIdx;
+  int groupNqps;
   uint64_t peerProcTag;       // remote process identity, 0 = unknown
 };
 

@@ -405,8 +405,8 @@ static ncclResult_t rasMsgCheckBodyLength(const struct rasMsg* msg, int recvLeng
   rasCollectiveType collType = RAS_MSG_NONE;
   if (msg->type == RAS_MSG_COLLREQ) {
     // The collective type determines the length, so it must itself be within what we received before we may read it.
-    if ((size_t)recvLength < offsetof(struct rasMsg, collReq) + offsetof(struct rasCollRequest, type) +
-                             sizeof(collType))
+    if ((size_t)recvLength <
+        offsetof(struct rasMsg, collReq) + offsetof(struct rasCollRequest, type) + sizeof(collType))
       return ncclRemoteError;
     collType = msg->collReq.type;
   }

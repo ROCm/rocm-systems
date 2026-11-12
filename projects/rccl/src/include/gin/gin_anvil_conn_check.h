@@ -29,10 +29,10 @@ static_assert(kMaxConnCheckHostRanks <= kMaxConnCheckKernelRanks,
 // [GIN-CONN-CHECK] Device launchers for the LSA signal connectivity self-test.
 // Implemented in gin_anvil_conn_check_device.cc (HIP). Host unit tests stub these
 // in gin_anvil_plugin_test_stubs.cc.
-extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
-                                 unsigned long long stamp, hipStream_t stream);
-extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long long stamp,
-                                 int* missingDev, hipStream_t stream);
+extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank, unsigned long long stamp,
+                                 hipStream_t stream);
+extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long long stamp, int* missingDev,
+                                 hipStream_t stream);
 
 #endif  // ENABLE_ROCSHMEM_GIN
 

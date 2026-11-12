@@ -62,7 +62,10 @@ struct ncclReg {
   struct ncclIpcRegInfo** ipcInfos;  // Dynamically allocated, sized to ipcInfosSize
   int ipcInfosSize;                  // Size of ipcInfos array (localRanks or nRanks for cross-clique)
   // RCCL: NET segment cache, written only by rcclNetRegSegmentCount / rcclNetRegCommit (rccl_wrap.cc).
-  struct { int nSegments; bool allPeers; } rcclNet;
+  struct {
+    int nSegments;
+    bool allPeers;
+  } rcclNet;
 };
 
 struct ncclRegCache {

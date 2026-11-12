@@ -188,8 +188,8 @@ __launch_bounds__(512)
         if (r < nRanks) {
           // peer is wave-uniform; readfirstlane makes that explicit so the scratch base is a scalar load.
           const int peer = __builtin_amdgcn_readfirstlane((selfRank + r) % nRanks);
-          uint64_t* scatterSlot = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords +
-            (uint64_t)selfRank * (uint64_t)slotWords;
+          uint64_t* scatterSlot =
+            reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords + (uint64_t)selfRank * (uint64_t)slotWords;
           ddaLL128StoreWire(scatterSlot + wireOff, regs[i], flag, flagLane);
         }
       }

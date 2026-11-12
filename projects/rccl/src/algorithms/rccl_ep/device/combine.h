@@ -34,12 +34,9 @@ namespace rccl_ep {
 // Vectorised at dwordx4: scalar 2-byte loads are an 8x loss of load width, and
 // the split changes only which lane owns which element, never the order of
 // additions applied to any single element.
-__device__ __forceinline__ void reduce_rows_bf16(bf16_t* dst,
-                                                 const bf16_t* __restrict__ src,
-                                                 const int32_t* rows, int nrow,
-                                                 const bf16_t* __restrict__ bias0,
-                                                 const bf16_t* __restrict__ bias1,
-                                                 int hidden, int lane) {
+__device__ __forceinline__ void reduce_rows_bf16(bf16_t* dst, const bf16_t* __restrict__ src, const int32_t* rows,
+                                                 int nrow, const bf16_t* __restrict__ bias0,
+                                                 const bf16_t* __restrict__ bias1, int hidden, int lane) {
   constexpr int kPerVec = 8; // 8 bf16 = 16 B
   const int nvec = hidden / kPerVec;
   for (int v = lane; v < nvec; v += kWarpSize) {
@@ -239,9 +236,8 @@ __global__ void combine_reduce_epilogue_impl(EpConfig cfg, WindowView self,
     }
 
     const size_t tbase = (size_t)t * cfg.hidden;
-    reduce_rows_bf16(out + tbase, self.y(), row, nrow,
-                     bias0 ? bias0 + tbase : nullptr,
-                     bias1 ? bias1 + tbase : nullptr, cfg.hidden, lane);
+    reduce_rows_bf16(out + tbase, self.y(), row, nrow, bias0 ? bias0 + tbase : nullptr, bias1 ? bias1 + tbase : nullptr,
+                     cfg.hidden, lane);
 
     if (out_w) {
       for (int k = lane; k < K; k += kWarpSize) {

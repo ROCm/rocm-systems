@@ -664,7 +664,8 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
       const amdsmi_status_t probeStatus =
         pfn_amdsmi_get_gpu_fabric_info(probeHandle, amdSmiFabricInfoBufferAsInfo(probeBuffer));
       const amdSmiFabricRuntimeLayout runtimeLayout = probeStatus == AMDSMI_STATUS_SUCCESS ?
-        amdSmiDetectFabricRuntimeLayout(probeBuffer) : amdSmiFabricRuntimeLayout::Unknown;
+                                                        amdSmiDetectFabricRuntimeLayout(probeBuffer) :
+                                                        amdSmiFabricRuntimeLayout::Unknown;
       const bool runtimeLayoutIs8Gpu = runtimeLayout == amdSmiFabricRuntimeLayout::EightGpu;
       const bool runtimeLayoutIs16Gpu = runtimeLayout == amdSmiFabricRuntimeLayout::SixteenGpu;
       const bool runtimeLayoutIsExtended = runtimeLayout == amdSmiFabricRuntimeLayout::ExtendedUnion;
@@ -910,7 +911,7 @@ struct FabricTelemetryDevice {
   int refCount; // communicators on this device; the last one out frees the telemetry
   amdsmi_processor_handle handle;
   amdsmi_fabric_telemetry_t* telemetry;
-  amdsmiFabricTelemetryBaseline baseline;        // previous tick, for the periodic report
+  amdsmiFabricTelemetryBaseline baseline; // previous tick, for the periodic report
   amdsmiFabricTelemetryBaseline sessionBaseline; // first sample, for the report at destroy
   bool warnedSampleFailure; // a device that starts failing fails every tick; warn once per run of them
 };
@@ -941,8 +942,7 @@ bool telemetryUnsupported = false;
 void fabricTelemetryReportLocked(FabricTelemetryDevice* dev, amdsmiFabricTelemetryBaseline* baseline,
                                  const char* scope) {
   amdsmiFabricTelemetryCategoryReport reports[AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX];
-  const int reportCount =
-    amdSmiFabricTelemetryDiff(dev->telemetry, baseline, amd_smi_fabricTelemIdToString, reports);
+  const int reportCount = amdSmiFabricTelemetryDiff(dev->telemetry, baseline, amd_smi_fabricTelemIdToString, reports);
 
   for (int r = 0; r < reportCount; r++) {
     const amdsmiFabricTelemetryCategoryReport* report = &reports[r];
@@ -1149,8 +1149,7 @@ bool fabricTelemetryProbeDeviceLocked(uint32_t index, uint64_t commHash, int ran
 // can start working later. Without this, every later communicator on an unusable GPU
 // pays for it again and repeats the explanation in the log.
 bool fabricTelemetryAddDeviceLocked(uint32_t index, uint64_t commHash, int rank) {
-  if (std::find(telemetryFailedDevices.begin(), telemetryFailedDevices.end(), index) !=
-      telemetryFailedDevices.end()) {
+  if (std::find(telemetryFailedDevices.begin(), telemetryFailedDevices.end(), index) != telemetryFailedDevices.end()) {
     return false;
   }
   if (!fabricTelemetryProbeDeviceLocked(index, commHash, rank)) {

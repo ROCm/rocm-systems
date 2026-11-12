@@ -21,8 +21,8 @@
 
 // Keep lane id, flag-lane test and peer 0's FIFO pointer and flag in registers instead of reloading them
 // from the Primitives object, which lives in scratch.
-#if defined(__gfx1250_strict__) || defined(__gfx1250__) || defined(__gfx950__) \
-    || defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx908__)
+#if defined(__gfx1250_strict__) || defined(__gfx1250__) || defined(__gfx950__) || defined(__gfx90a__) || \
+  defined(__gfx942__) || defined(__gfx908__)
 #define RCCL_LL128_HW_LANE_ENABLE 1
 #else
 #define RCCL_LL128_HW_LANE_ENABLE 0
@@ -104,7 +104,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   // Valid only if every LL128 group starts on a warp boundary (lane == tid % WARP_SIZE).
   // Use int(wid) where a plain int is needed (auto, varargs, templates).
   struct HwLane {
-    __device__ __forceinline__ operator int() const { return (int)__lane_id(); }
+    __device__ __forceinline__ operator int() const {
+      return (int)__lane_id();
+    }
   };
   struct HwFlagLane {
     __device__ __forceinline__ operator bool() const {
@@ -636,13 +638,11 @@ public:
       wid(tid % WARP_SIZE),
 #endif
       stepSize(stepSize_ > 0 ? stepSize_ : ncclShmem.comm.buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS / sizeof(uint64_t)),
-      warp(tid / WARP_SIZE),
-      warpInBlock(threadIdx.x / WARP_SIZE),
+      warp(tid / WARP_SIZE), warpInBlock(threadIdx.x / WARP_SIZE),
 #if !RCCL_LL128_HW_LANE_ENABLE
       flagThread((tid % (NCCL_LL128_LINEELEMS / 2)) == (NCCL_LL128_LINEELEMS / 2 - 1)),
 #endif
-      group(group),
-      threadsPerBlock(blockDim.x) {
+      group(group), threadsPerBlock(blockDim.x) {
 #if RCCL_LL128_HW_LANE_ENABLE
     // wid and flagThread must take no storage: the int after each must follow the int before it. Primitives is
     // complete here. The pragma covers instantiations whose RedOp or Fan is not standard-layout.

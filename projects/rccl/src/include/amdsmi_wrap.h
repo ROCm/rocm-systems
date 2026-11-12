@@ -524,9 +524,9 @@ constexpr bool amdSmiFabricV1WindowIsAt16GpuOffsets =
   offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState16GpuOffset - sizeof(uint32_t) &&
   offsetof(amdsmi_fabric_info_v1_t, accel_state) == kAmdSmiFabricState16GpuOffset;
 
-constexpr bool amdSmiFabricLayoutIs16Gpu =
-  amdSmiFabricV1WindowIsAt16GpuOffsets && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize &&
-  offsetof(amdsmi_fabric_info_t, reserved) == kAmdSmiFabricV1PayloadEnd;
+constexpr bool amdSmiFabricLayoutIs16Gpu = amdSmiFabricV1WindowIsAt16GpuOffsets &&
+                                           sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo16GpuSize &&
+                                           offsetof(amdsmi_fabric_info_t, reserved) == kAmdSmiFabricV1PayloadEnd;
 
 constexpr bool amdSmiFabricLayoutIsExtendedUnion =
   amdSmiFabricV1WindowIsAt16GpuOffsets && kAmdSmiFabricHeaderIsExtended &&
@@ -679,8 +679,7 @@ static_assert(kAmdSmiFabricV1PayloadBegin < kAmdSmiFabricV1PayloadEnd &&
 // Confirmation reads only the reserved windows, which every writer zero-fills. The v1 payload is
 // live data that can legitimately hold a 0xA5 byte, so it is only tested for having been touched.
 inline amdSmiFabricRuntimeLayout amdSmiDetectFabricRuntimeLayout(const amdSmiFabricInfoBuffer& buffer) {
-  const bool wroteV1 =
-    !amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricV1PayloadEnd);
+  const bool wroteV1 = !amdSmiFabricWindowAllCanary(buffer, kAmdSmiFabricV1PayloadBegin, kAmdSmiFabricV1PayloadEnd);
   const bool wrote8GpuTail =
     amdSmiFabricWindowNoCanary(buffer, kAmdSmiFabricV1PayloadEnd, kAmdSmiFabricReserved8GpuEnd);
   const bool wrote16GpuTail =
@@ -839,14 +838,22 @@ inline int64_t amdSmiFabricTelemetryResolveIntervalMs(int64_t requestedMs) {
 
 inline const char* amdSmiFabricTelemetryCategoryName(unsigned category) {
   switch (category) {
-  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE: return "UALOE";
-  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH: return "Switch";
-  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO: return "Crypto";
-  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC: return "PFC";
-  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT: return "NetPort";
-  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE: return "DerivedUALOE";
-  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT: return "DerivedNetPort";
-  default: return "Unknown";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE:
+    return "UALOE";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH:
+    return "Switch";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO:
+    return "Crypto";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC:
+    return "PFC";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT:
+    return "NetPort";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE:
+    return "DerivedUALOE";
+  case AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT:
+    return "DerivedNetPort";
+  default:
+    return "Unknown";
   }
 }
 
@@ -888,8 +895,7 @@ inline void amdSmiFabricTelemetryRecordMover(amdsmiFabricTelemetryMover* top, in
  * @param[in] instanceName Instance label, which need not be NUL terminated
  * @return Hash of the three, for use with amdSmiFabricTelemetryItemKey()
  */
-inline uint64_t amdSmiFabricTelemetryInstanceKey(unsigned category, unsigned logicalIdx,
-                                                 const char* instanceName) {
+inline uint64_t amdSmiFabricTelemetryInstanceKey(unsigned category, unsigned logicalIdx, const char* instanceName) {
   uint64_t hash = 14695981039346656037ull ^ category; // FNV-1a basis
   hash = (hash ^ logicalIdx) * 1099511628211ull;
   for (size_t i = 0; i < kAmdSmiFabricTelemetryLabelSize && instanceName[i] != '\0'; i++) {
@@ -957,8 +963,7 @@ using amdsmiFabricTelemetryNameFn = const char* (*)(uint64_t telemId);
  * @return Number of entries written to `reports`
  */
 inline int amdSmiFabricTelemetryDiff(const amdsmi_fabric_telemetry_t* telemetry,
-                                     amdsmiFabricTelemetryBaseline* baseline,
-                                     amdsmiFabricTelemetryNameFn nameFn,
+                                     amdsmiFabricTelemetryBaseline* baseline, amdsmiFabricTelemetryNameFn nameFn,
                                      amdsmiFabricTelemetryCategoryReport* reports) {
   const bool rebaseline = !baseline->established;
   const size_t previousCount = baseline->values.size();

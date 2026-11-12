@@ -209,7 +209,7 @@ static inline size_t rasMsgLength(rasMsgType type, rasCollectiveType collType = 
 // which costs sizeof(struct rasPeerInfo) (~48 bytes) per NCCL process, so this covers clusters far larger than
 // anything RAS is deployed on, while stopping a hostile or malfunctioning peer from making us allocate gigabytes
 // per socket.
-#define RAS_MSG_MAXLEN (256*1024*1024)
+#define RAS_MSG_MAXLEN (256 * 1024 * 1024)
 
 // How much to enlarge any RAS array by if we run out of space.
 #define RAS_INCREMENT 4

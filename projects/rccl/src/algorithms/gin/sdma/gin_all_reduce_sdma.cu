@@ -48,7 +48,7 @@ NCCL_PARAM(GinAllReduceGfx1250Enable, "GIN_ALLREDUCE_GFX1250_ENABLE", 0);
 NCCL_PARAM(GinAllReduceScratchBytes, "GIN_ALLREDUCE_SCRATCH_BYTES",
            static_cast<int64_t>(kGinAllReduceTwoShotScratchBytes));
 // LSA two-shot tuning. CTAs default to kGinAllReduceLsaTwoShotCtasPerPeer * nRanks; the DDA IPC
-// kernels top out at DDA_IPC_MAXBLOCKS (24), so this range is worth sweeping. 
+// kernels top out at DDA_IPC_MAXBLOCKS (24), so this range is worth sweeping.
 NCCL_PARAM(GinAllReduceLsaTwoShotCtas, "GIN_ALLREDUCE_LSA_TWOSHOT_CTAS", 0);
 
 namespace {
@@ -208,13 +208,12 @@ static ncclResult_t ncclAllReduceGinSdmaOneShotTyped(const void* sendbuff, void*
 
   const size_t sendOff =
     static_cast<size_t>(static_cast<const char*>(sendbuff) - static_cast<const char*>(sendWin->userPtr));
-  const size_t recvOff =
-    static_cast<size_t>(static_cast<char*>(recvbuff) - static_cast<const char*>(recvWin->userPtr));
+  const size_t recvOff = static_cast<size_t>(static_cast<char*>(recvbuff) - static_cast<const char*>(recvWin->userPtr));
 
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  hipExtLaunchKernelGGL((gin::sdma::allReduceLsaOneShotKernel<T>), kGinAllReduceLsaCtas,
-                        kGinAllReduceLsaThreadsPerCta, 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0,
-                        sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, count, comm->ginAllReduceState.devComm);
+  hipExtLaunchKernelGGL((gin::sdma::allReduceLsaOneShotKernel<T>), kGinAllReduceLsaCtas, kGinAllReduceLsaThreadsPerCta,
+                        0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, sendWin->vidmem, sendOff,
+                        recvWin->vidmem, recvOff, count, comm->ginAllReduceState.devComm);
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
 }
@@ -251,8 +250,7 @@ static ncclResult_t ncclAllReduceGinSdmaLsaTwoShotTyped(const void* sendbuff, vo
 
   const size_t sendOff =
     static_cast<size_t>(static_cast<const char*>(sendbuff) - static_cast<const char*>(sendWin->userPtr));
-  const size_t recvOff =
-    static_cast<size_t>(static_cast<char*>(recvbuff) - static_cast<const char*>(recvWin->userPtr));
+  const size_t recvOff = static_cast<size_t>(static_cast<char*>(recvbuff) - static_cast<const char*>(recvWin->userPtr));
   const size_t countPerRank = count / static_cast<size_t>(comm->nRanks);
   const int gridCtas = ginAllReduceLsaTwoShotCtas(comm->nRanks);
 
@@ -283,15 +281,14 @@ static ncclResult_t ncclAllReduceGinSdmaGinTwoShotTyped(const void* sendbuff, vo
 
   const size_t sendOff =
     static_cast<size_t>(static_cast<const char*>(sendbuff) - static_cast<const char*>(sendWin->userPtr));
-  const size_t recvOff =
-    static_cast<size_t>(static_cast<char*>(recvbuff) - static_cast<const char*>(recvWin->userPtr));
+  const size_t recvOff = static_cast<size_t>(static_cast<char*>(recvbuff) - static_cast<const char*>(recvWin->userPtr));
   const size_t countPerRank = count / static_cast<size_t>(comm->nRanks);
 
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  hipExtLaunchKernelGGL((gin::sdma::ginAllReduceTwoShotKernel<T>), kGinAllReduceLsaCtas,
-                        kGinAllReduceLsaThreadsPerCta, 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0,
-                        comm->ginAllReduceState.devComm, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff,
-                        countPerRank, comm->nRanks, comm->ginAllReduceState.intraGpuCtaBar);
+  hipExtLaunchKernelGGL((gin::sdma::ginAllReduceTwoShotKernel<T>), kGinAllReduceLsaCtas, kGinAllReduceLsaThreadsPerCta,
+                        0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, comm->ginAllReduceState.devComm,
+                        sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, countPerRank, comm->nRanks,
+                        comm->ginAllReduceState.intraGpuCtaBar);
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
 }
@@ -309,8 +306,7 @@ static ncclResult_t ncclAllReduceGinSdmaGinScatterTyped(const void* sendbuff, vo
 
   const size_t sendOff =
     static_cast<size_t>(static_cast<const char*>(sendbuff) - static_cast<const char*>(sendWin->userPtr));
-  const size_t recvOff =
-    static_cast<size_t>(static_cast<char*>(recvbuff) - static_cast<const char*>(recvWin->userPtr));
+  const size_t recvOff = static_cast<size_t>(static_cast<char*>(recvbuff) - static_cast<const char*>(recvWin->userPtr));
   const size_t countPerRank = count / static_cast<size_t>(comm->nRanks);
   const size_t chunkBytes = countPerRank * sizeof(T);
 
@@ -386,7 +382,6 @@ static bool ginAllReduceBaseEligible(ncclComm* comm, const void* sendbuff, void*
 }
 
 } // namespace
-
 
 bool ncclAllReduceGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                   ncclDataType_t datatype, ncclRedOp_t op) {

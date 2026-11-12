@@ -53,3 +53,6 @@ f4bf55d0033915b030380a8e1733b390235dbae6
 
 # [Manual] One time post formatting fix
 a3ce94021e982212cc9c5af7fe74979ac77eddf5
+
+# [Auto] Apply clang-format and the whitespace hooks
+b3aeb946b51dcf64c40ff8cc7ae1ec043646efb4

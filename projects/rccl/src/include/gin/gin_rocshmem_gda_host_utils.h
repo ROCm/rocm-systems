@@ -27,31 +27,35 @@ namespace rocshmem {
 #define UNLIKELY(X) __builtin_expect(X, 0)
 #endif
 
-#define CHECK_NNULL(value, fn_str) do {                                        \
-  if (UNLIKELY(nullptr == (value))) {                                          \
-    LOG_ERROR_ABORT("%s: %s (%d)", fn_str, strerror(errno), errno);            \
-  }                                                                            \
-} while(0)
+#define CHECK_NNULL(value, fn_str) \
+  do { \
+    if (UNLIKELY(nullptr == (value))) { \
+      LOG_ERROR_ABORT("%s: %s (%d)", fn_str, strerror(errno), errno); \
+    } \
+  } while (0)
 
-#define CHECK_ZERO(value, fn_str) do {                                         \
-  if (UNLIKELY(0 != (value))) {                                                \
-    LOG_ERROR_ABORT("%s: %s (%d)", fn_str, strerror(errno), errno);            \
-  }                                                                            \
-} while(0)
+#define CHECK_ZERO(value, fn_str) \
+  do { \
+    if (UNLIKELY(0 != (value))) { \
+      LOG_ERROR_ABORT("%s: %s (%d)", fn_str, strerror(errno), errno); \
+    } \
+  } while (0)
 
-#define CHECK_HIP(instr) do {                                                  \
-  hipError_t error = (instr);                                                  \
-  if (error != hipSuccess) {                                                   \
-    LOG_ERROR_ABORT(#instr ": %s (%d)", hipGetErrorString(error), error);      \
-  }                                                                            \
-} while(0)
+#define CHECK_HIP(instr) \
+  do { \
+    hipError_t error = (instr); \
+    if (error != hipSuccess) { \
+      LOG_ERROR_ABORT(#instr ": %s (%d)", hipGetErrorString(error), error); \
+    } \
+  } while (0)
 
-#define CHECK_HSA(cmd) do {                                                    \
-  hsa_status_t error = cmd;                                                     \
-  if (error != HSA_STATUS_SUCCESS) {                                           \
-    LOG_ERROR_EXIT(#cmd ": %d", error);                                        \
-  }                                                                            \
-} while (0)
+#define CHECK_HSA(cmd) \
+  do { \
+    hsa_status_t error = cmd; \
+    if (error != HSA_STATUS_SUCCESS) { \
+      LOG_ERROR_EXIT(#cmd ": %d", error); \
+    } \
+  } while (0)
 
 }  // namespace rocshmem
 

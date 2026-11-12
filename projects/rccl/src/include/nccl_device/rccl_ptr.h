@@ -52,8 +52,7 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 #ifdef __HIP_DEVICE_COMPILE__
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
   __has_builtin(__builtin_amdgcn_cooperative_atomic_load_8x16B) && \
-  __has_builtin(__builtin_amdgcn_cooperative_atomic_store_8x16B) && \
-  !defined(COOPERATIVE_ATOMIC_INTRINSICS_FORCE_OFF)
+  __has_builtin(__builtin_amdgcn_cooperative_atomic_store_8x16B) && !defined(COOPERATIVE_ATOMIC_INTRINSICS_FORCE_OFF)
 #define RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS 1
 // #pragma message "RCCL Cooperative Atomic Builtins Enabled on GFX1250"
 #else

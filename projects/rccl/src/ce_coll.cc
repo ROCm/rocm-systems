@@ -61,7 +61,7 @@ static int ncclCeBatchAsyncSupported() {
 // AlltoAllv still iterates world ranks (the size matrix is world-indexed);
 // nNodes==1 is not identity once NCCL_LSA_TEAM_SIZE < nRanks.
 static ncclResult_t ncclCePeerLsaPtr(struct ncclComm* comm, struct ncclDevrWindow* win, size_t offset, int worldRank,
-                                    void** outPtr) {
+                                     void** outPtr) {
   int lsaRank;
   NCCLCHECK(ncclDevrWorldToLsaRank(comm, worldRank, &lsaRank));
   return ncclDevrGetLsaRankPtr(comm, win, offset, lsaRank, outPtr);
@@ -194,7 +194,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
   static int64_t paramStaging = rcclParamCeArStagingBytes();
-  comm->ceColl.ceArMaxBytes     = rcclCeArNonRegCap(comm);
+  comm->ceColl.ceArMaxBytes = rcclCeArNonRegCap(comm);
   comm->ceColl.ceArStagingBytes = ncclCeArStagingBytes(paramStaging);
 
   int i = 0;
@@ -420,8 +420,8 @@ bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncc
 }
 
 bool ncclHierCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
-                                 struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
-                                 bool hasSysmemSegment, bool capturing) {
+                                 struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin, bool hasSysmemSegment,
+                                 bool capturing) {
   if (ncclGroupDepth != 0) return false;
   if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) return false;
   if (hasSysmemSegment || capturing) return false;
@@ -528,14 +528,14 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
   // Store the updated sequence number in the device buffer.
   if (!capturing) {
     CUCHECKGOTO(cuStreamWriteValue32(stream, (CUdeviceptr)comm->ceColl.ceSeqNumDev, currentSeq,
-                                    CU_STREAM_WRITE_VALUE_DEFAULT),
-              ret, fail);
+                                     CU_STREAM_WRITE_VALUE_DEFAULT),
+                ret, fail);
   }
 
   // Write our own ready/complete flag to the multi-cast address
   CUDACHECKGOTO(cudaMemcpyAsync(mcDstPtr, comm->ceColl.ceSeqNumDev + capturing, sizeof(uint32_t),
-                              cudaMemcpyDeviceToDevice, stream),
-              ret, fail);
+                                cudaMemcpyDeviceToDevice, stream),
+                ret, fail);
 
   // Add local wait operations for every other LSA rank.
   for (int r = 0; r < lsaSize; ++r) {
@@ -548,16 +548,16 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
     (*opIdx)++;
   }
 
-  exit:
+exit:
   return ret;
-  fail:
+fail:
   goto exit;
 }
 // Capture: issue peer writes as a separate stream batch so the captured graph
 // orders write → wait → reset (reset is a second batch in ncclMemOpSync). Fusing
 // write+wait+reset in one HIP batch can hang on replay.
 static ncclResult_t ncclPrepUCSyncCapture(struct ncclComm* comm, bool isComplete, uint32_t* readyPtrs,
-                                         uint32_t* completePtrs, uint32_t waitValue, cudaStream_t stream) {
+                                          uint32_t* completePtrs, uint32_t waitValue, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
   hipStreamBatchMemOpParams* writeParams = nullptr;
   size_t writeIdx = 0;
@@ -591,8 +591,8 @@ fail:
 
 // Non-capture: fuse peer writes into batchParams with waits (one submit, lower latency).
 static ncclResult_t ncclPrepUCSyncNonCapture(struct ncclComm* comm, bool isComplete, uint32_t* readyPtrs,
-                                            uint32_t* completePtrs, uint32_t waitValue,
-                                            hipStreamBatchMemOpParams* batchParams, size_t* opIdx) {
+                                             uint32_t* completePtrs, uint32_t waitValue,
+                                             hipStreamBatchMemOpParams* batchParams, size_t* opIdx) {
   ncclResult_t ret = ncclSuccess;
   void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
   size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
@@ -649,8 +649,7 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
     int r = lsaRankList[i];
     batchParams[*opIdx] = {};
     batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
-    batchParams[*opIdx].waitValue.address =
-      (CUdeviceptr)(isComplete ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
+    batchParams[*opIdx].waitValue.address = (CUdeviceptr)(isComplete ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
     batchParams[*opIdx].waitValue.value = waitValue;
     batchParams[*opIdx].waitValue.flags = CU_STREAM_WAIT_VALUE_EQ;
     (*opIdx)++;
@@ -920,7 +919,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
              ceChunkSize, params->numOps);
         NCCLCHECKGOTO(ncclCeLaunchChunkedMemcpyBatchAsync(params, ceChunkSize, stream), ret, fail);
       } else if (params->intraBatchSync) {
-      // Break into multiple batches with sync between them
+        // Break into multiple batches with sync between them
         int batchSize = comm->ceColl.intraBatchSyncFreq;
         for (int i = 0; i < params->numOps; i += batchSize) {
           int currentBatchSize = (i + batchSize <= params->numOps) ? batchSize : params->numOps - i;
@@ -936,13 +935,13 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
                           (void**)&params->dsts[i], (void**)&params->srcs[i], &params->sizes[i], currentBatchSize,
                           params->attrs, params->attrIdxs, params->numAttrs, nullptr, stream),
                         ret, fail);
-        // Sync after each batch
+          // Sync after each batch
           if (i + batchSize < params->numOps) {
             NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
           }
         }
       } else {
-      // Use single batch for all operations
+        // Use single batch for all operations
         INFO(NCCL_COLL, "CE: rank %d -> Batch path without intraBatchSync (hipMemcpyBatchAsync), numOps=%zu",
              comm->rank, params->numOps);
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -954,7 +953,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
                         params->attrIdxs, params->numAttrs, nullptr, stream),
                       ret, fail);
       }
-    } else  // CE batch async disabled — fall through to non-batch paths below
+    } else // CE batch async disabled — fall through to non-batch paths below
 #endif // CE_BATCH_ASYNC_SUPPORTED
       if (comm->ceColl.nCopyStreams > 0 && (int)params->numOps > 1 && !params->intraBatchSync) {
         int nStreams = comm->ceColl.nCopyStreams;
@@ -962,14 +961,14 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
         INFO(NCCL_COLL, "CE: rank %d -> No-Batch Multi-Stream path (%d streams), numOps=%zu", comm->rank, activeStreams,
              params->numOps);
 
-      // Make copy streams wait on the main stream
+        // Make copy streams wait on the main stream
         for (int s = 0; s < activeStreams; s++) {
           CUDACHECKGOTO(cudaEventRecord(comm->ceColl.copyEvents[s], stream), ret, fail);
           CUDACHECKGOTO(cudaStreamWaitEvent(comm->ceColl.copyStreams[s], comm->ceColl.copyEvents[s], 0), ret, fail);
           forkedStreams = s + 1;
         }
 
-      // Distribute copies round-robin across streams
+        // Distribute copies round-robin across streams
         for (int i = 0; i < (int)params->numOps; i++) {
           int s = i % activeStreams;
           CUDACHECKGOTO(cudaMemcpyAsync((void*)params->dsts[i], (void*)params->srcs[i], params->sizes[i],
@@ -977,13 +976,13 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
                         ret, fail);
         }
 
-      // Make main stream wait on all copy streams
+        // Make main stream wait on all copy streams
         for (int s = 0; s < activeStreams; s++) {
           CUDACHECKGOTO(cudaEventRecord(comm->ceColl.copyEvents[s], comm->ceColl.copyStreams[s]), ret, fail);
           CUDACHECKGOTO(cudaStreamWaitEvent(stream, comm->ceColl.copyEvents[s], 0), ret, fail);
         }
       } else {
-      // For older ROCm versions, fall back to individual transfers
+        // For older ROCm versions, fall back to individual transfers
         INFO(NCCL_COLL, "CE: rank %d -> No-Batch Single-Stream path (cudaMemcpyAsync), numOps=%zu", comm->rank,
              params->numOps);
         for (int i = 0; i < params->numOps; i++) {
@@ -1521,8 +1520,7 @@ static void ncclHierCollFreeChunkPlan(struct ncclHierChunkPlan* plan) {
 // ncclHierCollBuildChunk, so AlltoAll and AlltoAllv agree on signal counts.
 // bytes == 0 returns 0 chunks so AlltoAllv can skip the peer; BuildChunk returns
 // one zero-byte chunk because uniform AlltoAll always has a slot per peer.
-static void ncclHierCollPeerChunks(size_t bytes, size_t maxChunk, int* outNum, size_t* outUniform,
-                                   size_t* outLast) {
+static void ncclHierCollPeerChunks(size_t bytes, size_t maxChunk, int* outNum, size_t* outUniform, size_t* outLast) {
   const size_t align = HIER_COLL_CHUNK_ALIGN;
   if (bytes == 0 || maxChunk == 0 || bytes <= maxChunk) {
     *outNum = bytes ? 1 : 0;
@@ -2934,7 +2932,6 @@ fail:
   goto exit;
 }
 
-
 // Hierarchical AlltoAllv: variable-size alltoall over RMA (inter-node) + CE (intra-node).
 // Same phase DAG as ncclHierCeAlltoAll; offsets/sizes come from gathered args->sizes.
 // Inter-node puts are chunked like AlltoAll (max HIER_COLL_MAX_CHUNK_SIZE) so large
@@ -3062,11 +3059,9 @@ ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* p
         size_t peerBytes = sendSizes[peer];
         if (peerBytes == 0) continue;
 
-        size_t srcWinOffset =
-          ((const uint8_t*)sendbuff + sendDispls[peer]) - (const uint8_t*)sendWin->userPtr;
+        size_t srcWinOffset = ((const uint8_t*)sendbuff + sendDispls[peer]) - (const uint8_t*)sendWin->userPtr;
         size_t* peerRecvDispls = ncclAlltoAllvRecvDispls(args->sizes, peer, nRanks);
-        size_t peerWinOffset =
-          ((const uint8_t*)recvbuff + peerRecvDispls[myRank]) - (const uint8_t*)recvWin->userPtr;
+        size_t peerWinOffset = ((const uint8_t*)recvbuff + peerRecvDispls[myRank]) - (const uint8_t*)recvWin->userPtr;
 
         int nChunks;
         size_t uni, last;
@@ -3114,8 +3109,7 @@ ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* p
 
       void* src = (void*)((const uint8_t*)sendbuff + sendDispls[targetWorldRank]);
       size_t* targetRecvDispls = ncclAlltoAllvRecvDispls(args->sizes, targetWorldRank, nRanks);
-      size_t dstWinOff =
-        ((const uint8_t*)recvbuff + targetRecvDispls[myRank]) - (const uint8_t*)recvWin->userPtr;
+      size_t dstWinOff = ((const uint8_t*)recvbuff + targetRecvDispls[myRank]) - (const uint8_t*)recvWin->userPtr;
 
       if (targetLsa == myLsaRank) {
         void* dst = (void*)((uint8_t*)recvbuff + targetRecvDispls[myRank]);
@@ -3254,7 +3248,6 @@ fail:
   goto exit;
 }
 
-
 // Allocate CE AllReduce scatter staging on first AllReduce, not during generic
 // CE init. AlltoAll/AllGather should not reserve two staging slots of VMM.
 ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
@@ -3290,14 +3283,12 @@ int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void cons
   const uintptr_t winStart = (uintptr_t)win->userPtr;
   const uintptr_t recvStart = (uintptr_t)recvbuff;
   const size_t peerSafeSize = ncclDevrWindowPeerSafeSize(win);
-  return recvStart >= winStart && totalBytes <= peerSafeSize &&
-         recvStart - winStart <= peerSafeSize - totalBytes;
+  return recvStart >= winStart && totalBytes <= peerSafeSize && recvStart - winStart <= peerSafeSize - totalBytes;
 }
 
 size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes) {
   if (nRanks <= 0) return 0;
-  return alignUp((size_t)NCCL_CE_NUM_SLOTS * (size_t)nRanks *
-                   ncclCeAllReduceMaxChunkBytes(nRanks, stagingBytes),
+  return alignUp((size_t)NCCL_CE_NUM_SLOTS * (size_t)nRanks * ncclCeAllReduceMaxChunkBytes(nRanks, stagingBytes),
                  (size_t)16);
 }
 
@@ -3396,8 +3387,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   // The scheduler sets this bit during launch preparation. Do not perform
   // host-blocking bootstrap collectives from the per-comm launch: grouped
   // comms may be driven serially by one host thread.
-  fastPath = fastPath && recvWin != nullptr &&
-             (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+  fastPath = fastPath && recvWin != nullptr && (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
              ncclCeRecvRangeContainedInWindow(recvWin, recvbuff, totalBytes) != 0;
   collArgs.recvWin = recvWin;
 
@@ -3617,8 +3607,7 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
   // Match the window ncclCeEnsureAllReduceStaging sized from ceArStagingBytes.
   // ncclCeAllReduceMaxChunkBytes() is the compile-time default and overruns the
   // window when RCCL_CE_AR_STAGING_BYTES is smaller.
-  const size_t slotChunkBytes =
-      ncclCeAllReduceSlotChunkBytes(comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks);
+  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks);
   if (shardElems == 0 || slotChunkBytes < eltSize) {
     WARN("CE ReduceScatter: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
     return ncclInvalidArgument;
@@ -3852,7 +3841,7 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
       // (AG written directly into user recvbuff, no final D2D copy).
       NCCLCHECKGOTO(ncclCeAllReduce(comm, args->sendBuff, args->recvBuff, args->nElts, args->datatype, args->redOp,
                                     stream, args->recvWin, args),
-                  ret, fail);
+                    ret, fail);
       break;
     case ncclFuncReduceScatter:
       NCCLCHECKGOTO(ncclCeEnsureAllReduceStaging(comm), ret, fail);
@@ -3863,7 +3852,7 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
       }
       NCCLCHECKGOTO(ncclCeReduceScatter(comm, args->sendBuff, args->recvBuff, args->nElts, args->datatype, args->redOp,
                                         stream, args->recvWin, args),
-                      ret, fail);
+                    ret, fail);
       break;
     default:
       ret = ncclInvalidUsage;

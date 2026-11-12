@@ -212,8 +212,8 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
         // carries output with it, window bases are page-aligned) and every tile advances by a
         // multiple of 256, so the tiles are ncclSymkTileLine-aligned and the peel can go.
         bcastDeep<BytePerPack, UnrollPacks, UnrollPeers, EnableTma, /*TileAligned=*/true>(
-          handler, tn, t, waitNeeded, bar, (ncclSymPtr<char>)input + cursor,
-          (ncclSymPtr<char>)output + cursor, inPlace, chunks * ncclSymkMinWarpsPerBlock, team, slot0);
+          handler, tn, t, waitNeeded, bar, (ncclSymPtr<char>)input + cursor, (ncclSymPtr<char>)output + cursor, inPlace,
+          chunks * ncclSymkMinWarpsPerBlock, team, slot0);
         cursor = cursorAfter;
         waitNeeded = false;
       }

@@ -622,10 +622,8 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
 #endif
   static_assert(useAcc || ScalarUnroll == NativeScalarUnroll,
                 "ScalarUnroll must remain unchanged when the bias path is disabled.");
-  static_assert(useAcc || CopyUnroll == Unroll,
-                "CopyUnroll must remain unchanged when the bias path is disabled.");
-  static_assert(CopyUnroll * (16 / sizeof(T)) / 2 == ScalarUnroll,
-                "CopyUnroll must reproduce ScalarUnroll.");
+  static_assert(useAcc || CopyUnroll == Unroll, "CopyUnroll must remain unchanged when the bias path is disabled.");
+  static_assert(CopyUnroll * (16 / sizeof(T)) / 2 == ScalarUnroll, "CopyUnroll must reproduce ScalarUnroll.");
 
   if NCCL_IF_CONSTEXPR (BigPackSize > sizeof(T)) {
     // Check that all pointers are AlignedPathPackSize aligned.
@@ -674,9 +672,10 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
           /*&*/ nBytesAhead);
       else
         reduceCopyPacks<RedFn, T, CopyUnroll*((MinSrcs == 1 && MinDsts == 1) ? 2 : 1), BigPackSize, MultimemSrcs,
-                        MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(
-          nThreads, /*&*/ thread, redArg, postOp, nSrcs, srcPtrFn, nDsts, dstPtrFn, /*&*/ nBytesBehind,
-          /*&*/ nBytesAhead);
+                        MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(nThreads, /*&*/ thread, redArg,
+                                                                                     postOp, nSrcs, srcPtrFn, nDsts,
+                                                                                     dstPtrFn, /*&*/ nBytesBehind,
+                                                                                     /*&*/ nBytesAhead);
 #endif
       if (nBytesAhead == 0) return;
 
@@ -752,11 +751,10 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
   }
 #else
   if constexpr (useAcc)
-    reduceCopyPacksWithBias<RedFn, T, ScalarUnroll, /*BytePerPack=*/sizeof(T), MultimemSrcs, MinSrcs,
-                            MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(nThreads, /*&*/ thread, redArg, postOp,
-                                                                                nSrcs, srcPtrFn, nDsts, dstPtrFn,
-                                                                                /*&*/ nBytesBehind, /*&*/ nBytesAhead,
-                                                                                accPtrFn);
+    reduceCopyPacksWithBias<RedFn, T, ScalarUnroll, /*BytePerPack=*/sizeof(T), MultimemSrcs, MinSrcs, MaxSrcs,
+                            MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(nThreads, /*&*/ thread, redArg, postOp, nSrcs,
+                                                                       srcPtrFn, nDsts, dstPtrFn,
+                                                                       /*&*/ nBytesBehind, /*&*/ nBytesAhead, accPtrFn);
   else if constexpr (Pipeline)
     reduceCopyPacksPipelined<RedFn, T, ScalarUnroll, /*BytePerPack=*/sizeof(T), MultimemSrcs, MinSrcs, MaxSrcs,
                              MultimemDsts, MinDsts, MaxDsts, PreOpSrcs>(
@@ -764,7 +762,7 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
   else
     reduceCopyPacks<RedFn, T, ScalarUnroll, /*BytePerPack=*/sizeof(T), MultimemSrcs, MinSrcs, MaxSrcs, MultimemDsts,
                     MinDsts, MaxDsts, PreOpSrcs>(nThreads, /*&*/ thread, redArg, postOp, nSrcs, srcPtrFn, nDsts,
-                                                dstPtrFn, /*&*/ nBytesBehind, /*&*/ nBytesAhead);
+                                                 dstPtrFn, /*&*/ nBytesBehind, /*&*/ nBytesAhead);
 
 #endif
   if (nBytesAhead == 0) return;
@@ -788,8 +786,8 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
 // Does this slice qualify for the TDM mover? Pure gating, no side effects.
 template <int useAcc, typename RedFn, typename T, int MultimemSrcs, int MultimemDsts, int PreOpSrcs, int Pipeline,
           typename IntBytes>
-__device__ __forceinline__ bool canUseTdm(int thread, int nThreads, bool postOp, int nSrcs, void** srcPtrs,
-                                          int nDsts, void** dstPtrs, IntBytes nElts) {
+__device__ __forceinline__ bool canUseTdm(int thread, int nThreads, bool postOp, int nSrcs, void** srcPtrs, int nDsts,
+                                          void** dstPtrs, IntBytes nElts) {
   // No multimem, accumulation or pipelining, and PreOp only when it is the identity.
   if (MultimemSrcs || MultimemDsts || useAcc || Pipeline) return false;
   if (PreOpSrcs && !Apply_PreOp<RedFn, 1>::IsIdentity) return false;
@@ -812,11 +810,11 @@ __device__ __forceinline__ bool canUseTdm(int thread, int nThreads, bool postOp,
 
 template <int useAcc, typename RedFn, typename T, int MultimemSrcs, int MultimemDsts, int PreOpSrcs, int Pipeline,
           typename IntBytes>
-__device__ __forceinline__ bool tryTdmCopy(int thread, int nThreads, bool postOp, int nSrcs, void** srcPtrs,
-                                           int nDsts, void** dstPtrs, IntBytes nElts) {
+__device__ __forceinline__ bool tryTdmCopy(int thread, int nThreads, bool postOp, int nSrcs, void** srcPtrs, int nDsts,
+                                           void** dstPtrs, IntBytes nElts) {
 #if TDM_SUPPORTED && ENABLE_TDM_SIMPLE
-  if (!canUseTdm<useAcc, RedFn, T, MultimemSrcs, MultimemDsts, PreOpSrcs, Pipeline>(
-        thread, nThreads, postOp, nSrcs, srcPtrs, nDsts, dstPtrs, nElts))
+  if (!canUseTdm<useAcc, RedFn, T, MultimemSrcs, MultimemDsts, PreOpSrcs, Pipeline>(thread, nThreads, postOp, nSrcs,
+                                                                                    srcPtrs, nDsts, dstPtrs, nElts))
     return false;
 
   static_assert(RCCL_TDM_STAGE_BYTES_PER_WARP >= tdm::MIN_COPY_LDS_BYTES, "TDM staging below the copy's minimum");
@@ -839,8 +837,8 @@ template <int Unroll, int useAcc, typename RedFn, typename T, int MultimemSrcs, 
 __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t redArg, bool postOp, int nSrcs,
                                            void** srcPtrs, int nDsts, void** dstPtrs, IntBytes nElts,
                                            void* accPtr = nullptr) {
-  if (tryTdmCopy<useAcc, RedFn, T, MultimemSrcs, MultimemDsts, PreOpSrcs, Pipeline>(
-        thread, nThreads, postOp, nSrcs, srcPtrs, nDsts, dstPtrs, nElts))
+  if (tryTdmCopy<useAcc, RedFn, T, MultimemSrcs, MultimemDsts, PreOpSrcs, Pipeline>(thread, nThreads, postOp, nSrcs,
+                                                                                    srcPtrs, nDsts, dstPtrs, nElts))
     return;
   reduceCopy<Unroll, useAcc, RedFn, T, MultimemSrcs, MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs,
              IntBytes, Pipeline, EnableTdmReduce>(

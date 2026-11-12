@@ -50,7 +50,7 @@
 // 7.0.2.x backport: alias the real HostNuma (hipify does not map it); the CMake probe tells it from stock 7.0.2.
 // HIP_VERSION because rocmwrap.h is not included yet; unhipified host tests pin ROCM_VERSION < 7.12.
 #if defined(__HIP_PLATFORM_AMD__) && ((HIP_VERSION) < 71260540 || (defined(ROCM_VERSION) && ROCM_VERSION < 71200)) && \
-    !defined(CU_MEM_LOCATION_TYPE_HOST_NUMA)
+  !defined(CU_MEM_LOCATION_TYPE_HOST_NUMA)
 #if (HIP_VERSION) >= 70051831 && (HIP_VERSION) < 70060000 && defined(RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED)
 // TODO: drop this alias once the 7.0.2.2 hipify ships the LCOMPILER-2603 mapping.
 #define CU_MEM_LOCATION_TYPE_HOST_NUMA hipMemLocationTypeHostNuma
@@ -118,7 +118,8 @@
 #if defined(NCCL_HIP_PLATFORM)
   // AMD GPUs use 64-wide waves (or 32 in wave32 mode)
 #if defined(__GFX10__) || defined(__GFX11__) || defined(__gfx1100__) || defined(__gfx1101__) || \
-  defined(__gfx1102__) || defined(__gfx1200__) || defined(__gfx1201__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
+  defined(__gfx1102__) || defined(__gfx1200__) || defined(__gfx1201__) || \
+  (defined(__gfx1250__) || defined(__gfx1250_strict__))
 #define NCCL_WARP_SIZE 32
 #else
 #define NCCL_WARP_SIZE 64

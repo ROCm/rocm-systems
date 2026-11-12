@@ -76,8 +76,7 @@ inline void rcclRegisterShutdownHandler() {
 // AddressFrees this reservation with skip-free auto-on. NCCL_CUMEM_SKIP_FREE
 // =0/1 still overrides both helpers below.
 inline bool rcclSkipCuMemFreeFromArch(const hipDeviceProp_t& prop) {
-  return strstr(prop.gcnArchName, "gfx950") != nullptr ||
-         strstr(prop.gcnArchName, "gfx1250") != nullptr;
+  return strstr(prop.gcnArchName, "gfx950") != nullptr || strstr(prop.gcnArchName, "gfx1250") != nullptr;
 }
 
 inline bool rcclSkipLsaFlatAddressFreeFromArch(const hipDeviceProp_t& prop) {
@@ -597,7 +596,8 @@ static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* m
   // VA unmap here lets the run finish (OS reclaims at exit). Owner handle release
   // (ncclCuMemFree) and ordinary buffers are unaffected — see rcclSkipCuMemFree().
   if (rcclShutdownFlag().load(std::memory_order_acquire) || rcclSkipCuMemFree()) {
-    INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Skipping free (%s) pointer %p", rcclSkipCuMemFree() ? "NCCL_CUMEM_SKIP_FREE" : "process shutdown", ptr);
+    INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Skipping free (%s) pointer %p",
+         rcclSkipCuMemFree() ? "NCCL_CUMEM_SKIP_FREE" : "process shutdown", ptr);
     return ncclSuccess;
   }
 

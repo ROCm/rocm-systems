@@ -43,11 +43,11 @@ bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
 // The per-variant predicates the gate above is the disjunction of. Declared here
 // so unit tests can exercise one tier without the other masking it; hidden in
 // Release by -fvisibility=hidden, as the rest of the internal surface is.
-bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                            ncclDataType_t datatype, ncclRedOp_t op);
+bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                            ncclRedOp_t op);
 
-bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                            ncclDataType_t datatype, ncclRedOp_t op);
+bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                            ncclRedOp_t op);
 
 // The LL128 tiers hang off the same gate. Their slot geometry is derived from
 // the scratch bank rather than a fixed constant, so unlike the LL tiers their
@@ -60,8 +60,7 @@ bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
                                ncclDataType_t datatype, ncclRedOp_t op);
 
 ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                      ncclRedOp_t op, ncclComm* comm, cudaStream_t stream,
-                                      rcclDdaLaunchCap cap = {});
+                                      ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, rcclDdaLaunchCap cap = {});
 
 // LL128-protocol fabric path (mid-message fast lane, 128B lines, no barrier).
 bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,

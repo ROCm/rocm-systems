@@ -111,8 +111,8 @@
 
 using namespace rccl;
 
-const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
-                                                   "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda",
+const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce",        "AllGather",   "ReduceScatter",
+                                                   "AllReduce", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda",
                                                    "SendRecv"}; // Increased numFunc by 1 for AlltollvGda
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = {"Tree",     "Ring", "CollNetDirect", "CollNetChain", "NVLS",
                                                 "NVLSTree", "PAT"};
@@ -1347,8 +1347,8 @@ static rcclTuningPartition rcclTuningPartitionRequest(const char* computePartiti
       ATTN("Invalid value %s for RCCL_TUNING_PARTITION_MODE (expected auto, SPX or DPX), using auto", mode);
     });
   }
-  return computePartition != nullptr && strcasecmp(computePartition, "DPX") == 0 ? RCCL_TUNING_PARTITION_DPX
-                                                                                  : RCCL_TUNING_PARTITION_SPX;
+  return computePartition != nullptr && strcasecmp(computePartition, "DPX") == 0 ? RCCL_TUNING_PARTITION_DPX :
+                                                                                   RCCL_TUNING_PARTITION_SPX;
 }
 
 // Ranks pick algorithms on their own, so every rank of a comm must read the same table: DPX only
@@ -1784,7 +1784,7 @@ static ncclResult_t ncclP2pSchedule(struct ncclComm* comm) {
   int groupCount = 0;
   uint32_t groupRound = 0, groupDelta = 0;
   int round = 0;
-  NCCLCHECK(ncclCalloc(&groupToNode, nGroups));                     // node hosting the group
+  NCCLCHECK(ncclCalloc(&groupToNode, nGroups)); // node hosting the group
   NCCLCHECKGOTO(ncclCalloc(&groupToLocal, nGroups), ret, cleanup); // local offset of the group
   for (int n = 0; n < comm->nNodes; ++n) {
     if (0 != comm->nodeRanks[n].localRanks % groupSize) {
@@ -2172,10 +2172,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   {
     bool nonUniformRanks = !uniformRanksPerHost(comm, nranks);
-    bool isGfx1250 = comm->topo->nodes[GPU].count > 0 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+    bool isGfx1250 =
+      comm->topo->nodes[GPU].count > 0 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
     comm->topo->skipPresetTopoMatching = nonUniformRanks || isGfx1250;
     if (comm->topo->skipPresetTopoMatching) {
-      INFO(NCCL_INIT, "Rome model matching disabled %s", isGfx1250 ? "on gfx1250" : "due to non-uniform ranks per host");
+      INFO(NCCL_INIT, "Rome model matching disabled %s",
+           isGfx1250 ? "on gfx1250" : "due to non-uniform ranks per host");
     }
   }
 
@@ -2325,9 +2327,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // Initialize num P2P LL buffers for this communicator. gfx1250 internodal LL128 needs the
   // NET staging buffer even when NCCL_ALLOC_P2P_NET_LL_BUFFERS is unset: ENABLE=1 is the
   // opt-in (any nRanks). Default ENABLE=-1 does not use LL128, so it does not auto-allocate.
-  comm->allocP2pNetLLBuffers =
-    rcclAllocP2pNetLLBuffers(comm->cudaArch, nNodes, nranks, ncclParamP2pLL128Enable(),
-                             ncclParamAllocP2pNetLLBuffers());
+  comm->allocP2pNetLLBuffers = rcclAllocP2pNetLLBuffers(comm->cudaArch, nNodes, nranks, ncclParamP2pLL128Enable(),
+                                                        ncclParamAllocP2pNetLLBuffers());
 
   if (comm->rank == ncclParamGraphDumpFileRank()) {
     struct ncclTopoGraph* dumpGraphs[5] = {ringGraph, treeGraph, collNetDirectGraph, collNetChainGraph, nvlsGraph};
@@ -2391,8 +2392,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   if (comm->tdmSimpleReduceEnable) INFO(NCCL_INIT, "TDM SIMPLE reduce path enabled");
 #endif
 #if ENABLE_TDM_PRIM_LL128
-  comm->tdmLl128Enable =
-    rcclParamTdmLl128Enable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
+  comm->tdmLl128Enable = rcclParamTdmLl128Enable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
   if (comm->tdmLl128Enable) INFO(NCCL_INIT, "TDM LL128 path enabled");
 #endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
@@ -4220,11 +4220,11 @@ static ncclResult_t ncclCommInitRankDev(ncclComm_t* newcomm, int nranks, int nId
   }
   if (ncclParamEnqueueRearchEnable()) {
     res = ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, ncclCommInitRankFunc, childCommCleanupJob, comm);
-    job = NULL;  // enqueue owns and destroys the job on both success and failure
+    job = NULL; // enqueue owns and destroys the job on both success and failure
     NCCLCHECKGOTO(res, res, fail);
   } else {
     res = ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc, NULL, childCommCleanupJob, comm);
-    job = NULL;  // launch owns and destroys the job on both success and failure
+    job = NULL; // launch owns and destroys the job on both success and failure
     NCCLCHECKGOTO(res, res, fail);
   }
 
@@ -4686,8 +4686,7 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
           }
         } else if (curIntraComm->revokedFlag) {
           if ((ret = ncclCommOrphanPersistentPlans(curIntraComm)) != ncclSuccess) {
-            WARN("commReclaim: reclaiming graph plans failed comm %p (rank = %d) error %d", curIntraComm, curRank,
-                 ret);
+            WARN("commReclaim: reclaiming graph plans failed comm %p (rank = %d) error %d", curIntraComm, curRank, ret);
           }
           if ((ret = ncclCommPollCallbacks(curIntraComm, /*waitSome=*/false)) != ncclSuccess) {
             WARN("commReclaim: polling graph callbacks failed comm %p (rank = %d) error %d", curIntraComm, curRank,
@@ -5082,12 +5081,12 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
   snprintf(job->funcName, NCCL_COMMINIT_FUNCNAME_LEN, "%s", caller);
   if (ncclParamEnqueueRearchEnable()) {
     res = ncclMgmtTaskEnqueue((struct ncclAsyncJob*)job, ncclCommInitRankFunc, childCommCleanupJob, comm);
-    job = NULL;  // enqueue owns and destroys the job on both success and failure
+    job = NULL; // enqueue owns and destroys the job on both success and failure
     NCCLCHECKGOTO(res, res, fail);
   } else {
     res = ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc, /*undo=*/nullptr,
                           /*destructor=*/childCommCleanupJob, comm);
-    job = NULL;  // launch owns and destroys the job on both success and failure
+    job = NULL; // launch owns and destroys the job on both success and failure
     NCCLCHECKGOTO(res, res, fail);
   }
 

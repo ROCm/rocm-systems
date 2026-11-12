@@ -180,7 +180,7 @@ static ncclResult_t ncclProfiler_init(void** ctx, uint64_t commId, int* eActivat
   // (ncclProfileProxyDiag is an RCCL v6-only extension and is cleared here as well)
   if (eActivationMask) {
     *eActivationMask &=
-        ~(ncclProfileCeColl | ncclProfileCeSync | ncclProfileCeBatch | ncclProfileProxyDiag | ncclProfileKernelPhase);
+      ~(ncclProfileCeColl | ncclProfileCeSync | ncclProfileCeBatch | ncclProfileProxyDiag | ncclProfileKernelPhase);
   }
 
   ncclProfiler.startEvent = ncclProfiler_startEvent;

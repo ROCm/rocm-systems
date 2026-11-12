@@ -16,8 +16,7 @@
 namespace gin_anvil {
 namespace conn_check {
 
-__global__ void ginAnvilConnWriteKernel(uintptr_t* remoteAddrs, int nRanks, int selfRank,
-                                        unsigned long long stamp) {
+__global__ void ginAnvilConnWriteKernel(uintptr_t* remoteAddrs, int nRanks, int selfRank, unsigned long long stamp) {
   int p = threadIdx.x;
   if (p >= nRanks) return;
   uintptr_t base = remoteAddrs[p];
@@ -27,8 +26,8 @@ __global__ void ginAnvilConnWriteKernel(uintptr_t* remoteAddrs, int nRanks, int 
   __threadfence_system();
 }
 
-__global__ void ginAnvilConnCheckKernel(unsigned long long* localSignals, int nRanks,
-                                        unsigned long long stamp, int* missing) {
+__global__ void ginAnvilConnCheckKernel(unsigned long long* localSignals, int nRanks, unsigned long long stamp,
+                                        int* missing) {
   int x = threadIdx.x;
   if (x >= nRanks) return;
   __threadfence_system();
@@ -44,8 +43,8 @@ static int connCheckLaunchOk() {
 }  // namespace conn_check
 }  // namespace gin_anvil
 
-extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
-                                 unsigned long long stamp, hipStream_t stream) {
+extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank, unsigned long long stamp,
+                                 hipStream_t stream) {
   if (remoteAddrsDev == nullptr) return -1;
   if (nRanks <= 0 || nRanks > gin_anvil::conn_check::kMaxConnCheckKernelRanks) return -1;
   if (selfRank < 0 || selfRank >= nRanks) return -1;

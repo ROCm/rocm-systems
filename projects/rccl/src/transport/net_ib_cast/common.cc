@@ -27,7 +27,6 @@ NCCL_PARAM(IbCastAsyncEvents, "IB_RETURN_ASYNC_EVENTS", 1);
 RCCL_PARAM(IbCastOptionalRecvCompletion, "IB_OPTIONAL_RECV_COMPLETION", 0);
 extern int64_t ncclParamNetOptionalRecvCompletion();
 
-
 ncclResult_t IbCastStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
   if (ncclParamIbCastAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {
     ERROR("RCCL encountered a communication fatal error (detected in %s)\n", funcName);
@@ -84,8 +83,8 @@ void IbCastInitOptRecvCompletion(struct ncclIbNetCommBase* baseComm, bool useCts
   if (!netHint || blocked) optRecvCompletion = false;
   baseComm->optRecvCompletion = optRecvCompletion;
   INFO(NCCL_NET, "NET/IB: %s: optRecvCompletion=%d (useCtsOffload=%d blocked=%d control=%ld netHint=%d)", __func__,
-       (int)baseComm->optRecvCompletion, (int)useCtsOffload, (int)blocked,
-       rcclParamIbCastOptionalRecvCompletion(), (int)netHint);
+       (int)baseComm->optRecvCompletion, (int)useCtsOffload, (int)blocked, rcclParamIbCastOptionalRecvCompletion(),
+       (int)netHint);
 }
 
 ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {

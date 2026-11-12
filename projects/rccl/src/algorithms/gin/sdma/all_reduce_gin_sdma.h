@@ -42,8 +42,8 @@ template <typename T>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-  __global__ void allReduceLsaOneShotKernel(ncclWindow_t sendWin, size_t sendOff, ncclWindow_t recvWin,
-                                            size_t recvOff, size_t count, struct ncclDevComm devComm) {
+  __global__ void allReduceLsaOneShotKernel(ncclWindow_t sendWin, size_t sendOff, ncclWindow_t recvWin, size_t recvOff,
+                                            size_t count, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier,
                                          static_cast<uint32_t>(blockIdx.x)};
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
@@ -53,8 +53,7 @@ __launch_bounds__(512)
   const int globalTid = threadIdx.x + blockDim.x * (rank + blockIdx.x * nRanks);
   const int globalNthreads = blockDim.x * gridDim.x * nRanks;
 
-  for (size_t offset = static_cast<size_t>(globalTid); offset < count;
-       offset += static_cast<size_t>(globalNthreads)) {
+  for (size_t offset = static_cast<size_t>(globalTid); offset < count; offset += static_cast<size_t>(globalNthreads)) {
     T v = T{0};
     for (int peer = 0; peer < nRanks; peer++) {
       T* sendPtr = reinterpret_cast<T*>(ncclGetLsaPointer(sendWin, sendOff, peer));
@@ -145,9 +144,9 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-  __global__ void lsaAllReduceTwoShotKernel(struct ncclDevComm devComm, ncclWindow_t sendWin, size_t sendOff,
-                                            ncclWindow_t recvWin, size_t recvOff, size_t countPerRank,
-                                            int nRanksRuntime) {
+  __global__
+  void lsaAllReduceTwoShotKernel(struct ncclDevComm devComm, ncclWindow_t sendWin, size_t sendOff, ncclWindow_t recvWin,
+                                 size_t recvOff, size_t countPerRank, int nRanksRuntime) {
   ncclCoopCta cta;
   ncclLsaBarrierSession<ncclCoopCta> bar{cta, devComm, ncclTeamLsa(devComm), devComm.lsaBarrier,
                                          static_cast<uint32_t>(blockIdx.x)};
@@ -240,9 +239,9 @@ template <typename T>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-  __global__ void ginAllReduceTwoShotKernel(struct ncclDevComm devComm, ncclWindow_t sendWin, size_t sendOff,
-                                            ncclWindow_t recvWin, size_t recvOff, size_t countPerRank, int nRanks,
-                                            uint32_t* intraGpuCtaBar) {
+  __global__
+  void ginAllReduceTwoShotKernel(struct ncclDevComm devComm, ncclWindow_t sendWin, size_t sendOff, ncclWindow_t recvWin,
+                                 size_t recvOff, size_t countPerRank, int nRanks, uint32_t* intraGpuCtaBar) {
   constexpr int ginContext = 0;
 
   ncclGin gin{devComm, ginContext};
@@ -309,7 +308,6 @@ __launch_bounds__(512)
 
     ginBar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::None);
   }
-
 }
 
 // Anvil SDMA WeakSignalInc adds into one word per index. A shared index is not a
@@ -340,10 +338,10 @@ __device__ __forceinline__ void ginScatterPutRemoteChunk(ncclGin& gin, ncclTeam 
 }
 
 __device__ __forceinline__ void ginScatterIssuePut(ncclGin& gin, ncclTeam world, int rank, int nRanks,
-                                                  ncclWindow_t scratchWin, size_t scratchOff, ncclWindow_t sendWin,
-                                                  size_t sendOff, size_t perRankBytes, size_t slotBytes,
-                                                  size_t uniformBytes, size_t lastBytes, int nChunks, int nPhases,
-                                                  bool staged, int chunk) {
+                                                   ncclWindow_t scratchWin, size_t scratchOff, ncclWindow_t sendWin,
+                                                   size_t sendOff, size_t perRankBytes, size_t slotBytes,
+                                                   size_t uniformBytes, size_t lastBytes, int nChunks, int nPhases,
+                                                   bool staged, int chunk) {
   const size_t chunkOff = ginAllReduceGinScatterChunkOff(chunk, uniformBytes);
   const size_t chunkBytes = ginAllReduceGinScatterChunkSize(chunk, nChunks, uniformBytes, lastBytes);
   const int slot = staged ? ((nPhases <= 1) ? 0 : (chunk % nPhases)) : 0;

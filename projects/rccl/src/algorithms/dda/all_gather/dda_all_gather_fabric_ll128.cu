@@ -102,8 +102,7 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   INFO(NCCL_COLL,
        "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
        "(warp-per-slice, bpp=%u, slotWords=%zu)",
-       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer,
-       ddaLL128AgSlotWords(bankSize, nRanks));
+       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer, ddaLL128AgSlotWords(bankSize, nRanks));
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);

@@ -24,8 +24,7 @@
 #endif
 
 static inline bool ncclUseOneRpnNetRegChannelCap(ncclFunc_t func) {
-  return func == ncclFuncBroadcast ||
-         (func == ncclFuncAllGather && NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED);
+  return func == ncclFuncBroadcast || (func == ncclFuncAllGather && NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED);
 }
 
 // CHUNKSIZE must be a multiple of SLICESIZE

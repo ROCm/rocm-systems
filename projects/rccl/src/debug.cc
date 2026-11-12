@@ -281,9 +281,9 @@ static void ncclDebugInit() {
       } else if (strcasecmp(level, "TRACE") == 0) {
         tempNcclDebugLevelMask |= (1u << NCCL_LOG_TRACE);
       } else if (strcasecmp(level, "ALL") == 0) {
-        tempNcclDebugLevelMask |= (1u << NCCL_LOG_ERROR | 1u << NCCL_LOG_VERSION | 1u << NCCL_LOG_WARN |
-                                   1u << NCCL_LOG_ATTN | 1u << NCCL_LOG_INFO | 1u << NCCL_LOG_ABORT |
-                                   1u << NCCL_LOG_TRACE);
+        tempNcclDebugLevelMask |=
+          (1u << NCCL_LOG_ERROR | 1u << NCCL_LOG_VERSION | 1u << NCCL_LOG_WARN | 1u << NCCL_LOG_ATTN |
+           1u << NCCL_LOG_INFO | 1u << NCCL_LOG_ABORT | 1u << NCCL_LOG_TRACE);
       }
       level = strtok(NULL, ",");
     }

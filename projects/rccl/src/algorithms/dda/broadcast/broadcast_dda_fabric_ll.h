@@ -69,13 +69,12 @@ __device__ __forceinline__ void ddaBcChunkRange(size_t nPk, int chunk, int nChun
 // grid: chunks x 1. Each block owns one contiguous packet range.
 // kAligned: this rank's user buffers are 4B aligned (per rank, wire unaffected).
 template <bool kAligned>
-__launch_bounds__(512)
-  __global__ void ddaBroadcastFabricLL(char* const* __restrict__ peerScratch, // nRanks scratch bases
-                                       char* __restrict__ recvbuff, const char* __restrict__ sendbuff,
-                                       size_t bytes, // multiple of 16
-                                       int selfRank, int nRanks, int root,
-                                       uint32_t* __restrict__ epochDev, int epochLen, size_t bankSize,
-                                       DdaKernelParams params) {
+__launch_bounds__(512) __global__
+  void ddaBroadcastFabricLL(char* const* __restrict__ peerScratch, // nRanks scratch bases
+                            char* __restrict__ recvbuff, const char* __restrict__ sendbuff,
+                            size_t bytes, // multiple of 16
+                            int selfRank, int nRanks, int root, uint32_t* __restrict__ epochDev, int epochLen,
+                            size_t bankSize, DdaKernelParams params) {
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
   const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;

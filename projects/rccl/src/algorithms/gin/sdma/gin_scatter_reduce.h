@@ -44,8 +44,8 @@ __device__ __forceinline__ void lsaStoreVec(char* p, uint4 val) {
 // so rank == myRank loads from send instead of the incoming slot.
 template <typename T>
 __device__ __forceinline__ const char* ginScatterReduceSrc(int peer, int rank, const char* selfSend,
-                                                          const char* incomingBase, size_t incomingStride, size_t elem,
-                                                          size_t elemStart, bool staged) {
+                                                           const char* incomingBase, size_t incomingStride, size_t elem,
+                                                           size_t elemStart, bool staged) {
   if (peer == rank) {
     return selfSend + elem * sizeof(T);
   }
@@ -55,8 +55,8 @@ __device__ __forceinline__ const char* ginScatterReduceSrc(int peer, int rank, c
 
 template <typename T>
 __device__ __forceinline__ void ginScatterReduceChunk(const char* selfSend, const char* incomingBase, char* reducedOut,
-                                                     int rank, int nRanks, size_t incomingStride, size_t elemStart,
-                                                     size_t elemEnd, bool staged) {
+                                                      int rank, int nRanks, size_t incomingStride, size_t elemStart,
+                                                      size_t elemEnd, bool staged) {
   constexpr int W = static_cast<int>(sizeof(uint4) / sizeof(T));
   constexpr int U = 4;
   const size_t nVec = (elemEnd - elemStart) / static_cast<size_t>(W);
@@ -74,8 +74,8 @@ __device__ __forceinline__ void ginScatterReduceChunk(const char* selfSend, cons
 #pragma unroll
     for (int i = 0; i < U; ++i) {
       elem[i] = elemStart + (vi + static_cast<size_t>(i) * stride) * static_cast<size_t>(W);
-      acc[i] = lsaLoadVec(ginScatterReduceSrc<T>(0, rank, selfSend, incomingBase, incomingStride, elem[i], elemStart,
-                                                staged));
+      acc[i] =
+        lsaLoadVec(ginScatterReduceSrc<T>(0, rank, selfSend, incomingBase, incomingStride, elem[i], elemStart, staged));
     }
 #pragma clang loop unroll(disable) vectorize(disable)
     for (int r = 1; r < nRanks; ++r) {
@@ -83,7 +83,7 @@ __device__ __forceinline__ void ginScatterReduceChunk(const char* selfSend, cons
 #pragma unroll
       for (int i = 0; i < U; ++i) {
         tmp[i] = lsaLoadVec(ginScatterReduceSrc<T>(r, rank, selfSend, incomingBase, incomingStride, elem[i], elemStart,
-                                                  staged));
+                                                   staged));
       }
 #pragma unroll
       for (int i = 0; i < U; ++i) {

@@ -98,17 +98,14 @@ constexpr int kDdaLL128LineSkip = 2 * kDdaLL128Warp / kDdaLL128LineElems; // 4
 constexpr int kDdaLL128WireWordsPerSlice = kDdaLL128Warp * kDdaLL128WordsPerThread; // 256 u64
 constexpr int kDdaLL128WireBytesPerSlice = kDdaLL128WireWordsPerSlice * 8; // 2 KiB, 16 lines
 constexpr int kDdaLL128FlagWordsPerSlice = kDdaLL128WireWordsPerSlice / kDdaLL128LineElems; // 16, one per line
-constexpr int kDdaLL128DataBytesPerSlice =
-  (kDdaLL128WireWordsPerSlice - kDdaLL128FlagWordsPerSlice) * 8; // 1920
-static_assert(kDdaLL128WireBytesPerSlice % (int)kDdaLL128LineBytes == 0,
-              "a slice must be a whole number of lines");
+constexpr int kDdaLL128DataBytesPerSlice = (kDdaLL128WireWordsPerSlice - kDdaLL128FlagWordsPerSlice) * 8; // 1920
+static_assert(kDdaLL128WireBytesPerSlice % (int)kDdaLL128LineBytes == 0, "a slice must be a whole number of lines");
 
 // Per-rank slot in 8B wire words. nStagingAreas is 1 for one-shot publish/reduce
 // and 2 for two-shot (publish plus write-back). Shared by all-reduce, all-gather
 // and reduce-scatter so the four tiers carve the bank the same way.
 constexpr size_t ddaLL128SlotWords(size_t bankSize, int nRanks, int nStagingAreas) {
-  return ddaLLSlotPkts(bankSize,
-                       sizeof(uint64_t) * (size_t)nRanks * (size_t)nStagingAreas,
+  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks * (size_t)nStagingAreas,
                        (size_t)kDdaLL128WireWordsPerSlice);
 }
 
@@ -122,8 +119,7 @@ __device__ __forceinline__ bool ddaLL128IsFlagLane(int wid) {
 // `ix` formula). Compensates for the flag holes so the packed payload in the
 // user buffer stays gap-free and coalesced.
 __device__ __forceinline__ int ddaLL128ChunkIx(int g, int wid) {
-  return g * kDdaLL128Warp - kDdaLL128LineSkip * (g / 2) + wid -
-    (g % 2) * (wid / (kDdaLL128LineElems / 2));
+  return g * kDdaLL128Warp - kDdaLL128LineSkip * (g / 2) + wid - (g % 2) * (wid / (kDdaLL128LineElems / 2));
 }
 
 // Plain 16B access, used for the user buffers and as the non-cooperative wire
@@ -166,8 +162,7 @@ __device__ __forceinline__ void ddaLL128StoreAtomic16B(uint64_t* dst, uint64_t l
   } u;
   u.w[0] = lo;
   u.w[1] = hi;
-  __builtin_amdgcn_cooperative_atomic_store_8x16B(
-    (v4i_gptr)dst, u.v, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
+  __builtin_amdgcn_cooperative_atomic_store_8x16B((v4i_gptr)dst, u.v, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
 #else
   ddaLL128Store16B(dst, lo, hi);
 #endif
@@ -179,8 +174,7 @@ __device__ __forceinline__ void ddaLL128LoadAtomic16B(const uint64_t* src, uint6
     v4i v;
     uint64_t w[2];
   } u;
-  u.v = __builtin_amdgcn_cooperative_atomic_load_8x16B(
-    (v4i_gptr)src, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
+  u.v = __builtin_amdgcn_cooperative_atomic_load_8x16B((v4i_gptr)src, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
   lo = u.w[0];
   hi = u.w[1];
 #else
@@ -193,16 +187,15 @@ __device__ __forceinline__ void ddaLL128LoadAtomic16B(const uint64_t* src, uint6
 
 // load of slice's payload from `src` into registers
 template <typename T>
-__device__ __forceinline__ void ddaLL128LoadRegs(
-    uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
+__device__ __forceinline__ void ddaLL128LoadRegs(uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN,
+                                                 int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
 #pragma unroll
   for (int g = 0; g < kDdaLL128Pairs; g++) {
     if (!flag || g % 2 == 0) {
       int ix = ddaLL128ChunkIx(g, wid);
       if (ix * EltPer16B < eltN)
-        ddaLL128Load16B(reinterpret_cast<const uint64_t*>(src + ix * EltPer16B),
-                        regs[2 * g], regs[2 * g + 1]);
+        ddaLL128Load16B(reinterpret_cast<const uint64_t*>(src + ix * EltPer16B), regs[2 * g], regs[2 * g + 1]);
     }
   }
 #pragma unroll
@@ -212,8 +205,8 @@ __device__ __forceinline__ void ddaLL128LoadRegs(
 
 // ddaLL128LoadRegs without per-lane branches. Loads a lane does not need are in bounds and discarded.
 template <typename T>
-__device__ __forceinline__ void ddaLL128LoadRegsBatched(
-    uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
+__device__ __forceinline__ void ddaLL128LoadRegsBatched(uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src,
+                                                        int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
 #pragma unroll
   for (int g = 0; g < kDdaLL128Pairs; g++) {
@@ -242,16 +235,18 @@ __device__ __forceinline__ void ddaLL128ForEachWirePair(const uint64_t (&regs)[k
 }
 
 // Store one slice to the wire with the flag word embedded on the flag lane
-__device__ __forceinline__ void ddaLL128StoreWire(
-  uint64_t* wire, const uint64_t (&regs)[kDdaLL128WordsPerThread], uint64_t flag, bool flagLane) {
-  ddaLL128ForEachWirePair(regs, flag, flagLane, [wire](int word, uint64_t lo, uint64_t hi) {
-    ddaLL128StoreAtomic16B(wire + word, lo, hi);
-  });
+__device__ __forceinline__ void ddaLL128StoreWire(uint64_t* wire, const uint64_t (&regs)[kDdaLL128WordsPerThread],
+                                                  uint64_t flag, bool flagLane) {
+  ddaLL128ForEachWirePair(regs, flag, flagLane,
+                          [wire](int word, uint64_t lo, uint64_t hi) { ddaLL128StoreAtomic16B(wire + word, lo, hi); });
 }
 
 // ---- LDS-staged wire writer ----
 // Async: the wire image goes to an LDS window once, then async stores per peer; without ASYNC_COPY_SUPPORTED, Coop.
-enum DdaLL128Wire : int { kDdaLL128WireCoop = 0, kDdaLL128WireAsync = 1 };
+enum DdaLL128Wire : int {
+  kDdaLL128WireCoop = 0,
+  kDdaLL128WireAsync = 1
+};
 
 // Two 2 KiB windows per warp; a window is refilled once the stores of the fill before last are done.
 constexpr int kDdaLL128StageWindows = 2;
@@ -286,9 +281,9 @@ __device__ __forceinline__ void ddaLL128StageWaitAtMost(int keep) {
 
 // Per-warp staging state: the warp's two windows, the one the last fill wrote, and the stores issued from it since.
 struct DdaLL128Stage {
-  uint8_t* lds;  // this warp's windows
-  int win;       // window the last fill wrote
-  int lastOps;   // async stores issued since the last fill
+  uint8_t* lds; // this warp's windows
+  int win; // window the last fill wrote
+  int lastOps; // async stores issued since the last fill
 };
 
 __device__ __forceinline__ DdaLL128Stage ddaLL128StageInit(uint8_t* ldsBase, int warp) {
@@ -327,9 +322,9 @@ __device__ __forceinline__ void ddaLL128StagePush(DdaLL128Stage& st, uint64_t* w
     return;
   }
 #if ASYNC_COPY_SUPPORTED
-  asyncStoreFromLDS<SyncPolicy::Async, kDdaLL128StagePolicy, true>(
-    st.lds + (size_t)st.win * kDdaLL128WireBytesPerSlice, reinterpret_cast<uint8_t*>(wireSlice),
-    kDdaLL128WireBytesPerSlice);
+  asyncStoreFromLDS<SyncPolicy::Async, kDdaLL128StagePolicy, true>(st.lds + (size_t)st.win * kDdaLL128WireBytesPerSlice,
+                                                                   reinterpret_cast<uint8_t*>(wireSlice),
+                                                                   kDdaLL128WireBytesPerSlice);
   st.lastOps += kDdaLL128StagePushOps;
 #endif
 }
@@ -384,27 +379,25 @@ __device__ __forceinline__ bool ddaLL128PollWireBatched(const uint64_t* wire, ui
     for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
       ddaLL128LoadAtomic16B(wire + u * kDdaLL128Warp, vr[u], vr[u + 1]);
 #pragma unroll
-    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
-      needReload |= flagLane && (vr[u + 1] != flag);
+    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) needReload |= flagLane && (vr[u + 1] != flag);
   } while (__any(needReload));
   return true;
 }
 
 // Flag-lane un-shuffle then store of registers into `dst`
 template <typename T>
-__device__ __forceinline__ void ddaLL128StoreRegs(
-    T* dst, uint64_t (&regs)[kDdaLL128WordsPerThread], int eltN, int wid, bool flag) {
+__device__ __forceinline__ void ddaLL128StoreRegs(T* dst, uint64_t (&regs)[kDdaLL128WordsPerThread], int eltN, int wid,
+                                                  bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
 #pragma unroll
-  for (int g = 1; g < kDdaLL128Pairs; g += 2)  // reverse the load shuffle
+  for (int g = 1; g < kDdaLL128Pairs; g += 2) // reverse the load shuffle
     if (flag) regs[2 * g - 1] = regs[2 * g];
 #pragma unroll
   for (int g = 0; g < kDdaLL128Pairs; g++) {
     if (!flag || g % 2 == 0) {
       int ix = ddaLL128ChunkIx(g, wid);
       if (ix * EltPer16B < eltN)
-        ddaLL128Store16B(reinterpret_cast<uint64_t*>(dst + ix * EltPer16B),
-                         regs[2 * g], regs[2 * g + 1]);
+        ddaLL128Store16B(reinterpret_cast<uint64_t*>(dst + ix * EltPer16B), regs[2 * g], regs[2 * g + 1]);
     }
   }
 }

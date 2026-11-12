@@ -1191,7 +1191,8 @@ inline void ncclPersistentPlanRefDrop(struct ncclPersistentPlanRef* ref) {
 }
 
 inline void ncclPersistentPlanRefsLock(struct ncclComm* comm) {
-  while (COMPILER_ATOMIC_EXCHANGE(&comm->persistentPlanRefsLock, 1, std::memory_order_acquire) != 0) {}
+  while (COMPILER_ATOMIC_EXCHANGE(&comm->persistentPlanRefsLock, 1, std::memory_order_acquire) != 0) {
+  }
 }
 
 inline void ncclPersistentPlanRefsUnlock(struct ncclComm* comm) {

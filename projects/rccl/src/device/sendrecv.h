@@ -63,7 +63,8 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     } while (cursor < bytes);
   }
 
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && (!defined(__gfx1250__) && !defined(__gfx1250_strict__))
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && \
+  (!defined(__gfx1250__) && !defined(__gfx1250_strict__))
   __device__ void run(){
 #else
   __device__ __attribute__((noinline)) void run() {

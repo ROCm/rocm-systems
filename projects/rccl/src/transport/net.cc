@@ -604,11 +604,11 @@ static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
       ncclGdcPinFlag(req.needFlush) == GDR_PIN_FLAG_FORCE_PCIE) {
     logFlush = ncclTopoFlushNone;
   }
-  INFO(NCCL_INIT | NCCL_NET,
-       "Channel %02d/%d : %d[%d] -> %d[%d] [receive] via NET/%s/%d%s%s%s%s%s comm %p nRanks %02d", channelId, connIndex,
-       peerInfo->rank, peerInfo->nvmlDev, myInfo->rank, myInfo->nvmlDev, comm->ncclNet->name, req.netDev,
-       req.useGdr ? "/GDRDMA" : "", req.useGdr == ncclTopoGdrModePci ? "(PCI)" : "", req.shared ? "/Shared" : "",
-       req.useGdr ? "/flush=" : "", req.useGdr ? ncclTopoFlushTypeStr(logFlush) : "", comm, comm->nRanks);
+  INFO(NCCL_INIT | NCCL_NET, "Channel %02d/%d : %d[%d] -> %d[%d] [receive] via NET/%s/%d%s%s%s%s%s comm %p nRanks %02d",
+       channelId, connIndex, peerInfo->rank, peerInfo->nvmlDev, myInfo->rank, myInfo->nvmlDev, comm->ncclNet->name,
+       req.netDev, req.useGdr ? "/GDRDMA" : "", req.useGdr == ncclTopoGdrModePci ? "(PCI)" : "",
+       req.shared ? "/Shared" : "", req.useGdr ? "/flush=" : "", req.useGdr ? ncclTopoFlushTypeStr(logFlush) : "", comm,
+       comm->nRanks);
   return ncclSuccess;
 }
 
@@ -914,8 +914,7 @@ static size_t rcclAnonHugeKb(const void* addr) {
 static bool sharedHostBuffAllocHuge(struct ncclProxySharedP2p* state) {
   if (!rcclParamNetSharedHostHugePages() || (size_t)state->size < rcclHugePageSize) return false;
   size_t mapSize = ROUNDUP((size_t)state->size, rcclHugePageSize);
-  char* raw =
-    (char*)mmap(NULL, mapSize + rcclHugePageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  char* raw = (char*)mmap(NULL, mapSize + rcclHugePageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (raw == MAP_FAILED) {
     ATTN("NET/Shared host pool: mmap of %zu bytes failed (%s), using hipHostMalloc", mapSize, strerror(errno));
     return false;
@@ -936,8 +935,8 @@ static bool sharedHostBuffAllocHuge(struct ncclProxySharedP2p* state) {
   cudaError_t err = cudaThreadExchangeStreamCaptureMode(&mode);
   if (err == cudaSuccess) {
 #if defined(HIP_HOST_UNCACHED_MEMORY)
-    err = cudaHostRegister(ptr, mapSize,
-                           cudaHostRegisterPortable | cudaHostRegisterMapped | hipExtHostRegisterUncached);
+    err =
+      cudaHostRegister(ptr, mapSize, cudaHostRegisterPortable | cudaHostRegisterMapped | hipExtHostRegisterUncached);
 #else
     err = cudaHostRegister(ptr, mapSize, cudaHostRegisterPortable | cudaHostRegisterMapped);
 #endif
@@ -975,8 +974,12 @@ static ncclResult_t sharedHostBuffFreeHuge(struct ncclProxySharedP2p* state) {
 }
 #else
 // Huge-page backing is Linux only; other platforms use hipHostMalloc.
-static bool sharedHostBuffAllocHuge(struct ncclProxySharedP2p*) { return false; }
-static ncclResult_t sharedHostBuffFreeHuge(struct ncclProxySharedP2p*) { return ncclSuccess; }
+static bool sharedHostBuffAllocHuge(struct ncclProxySharedP2p*) {
+  return false;
+}
+static ncclResult_t sharedHostBuffFreeHuge(struct ncclProxySharedP2p*) {
+  return ncclSuccess;
+}
 #endif  // NCCL_OS_LINUX
 
 static ncclResult_t sharedHostBuffAlloc(struct ncclProxySharedP2p* state) {
@@ -1376,8 +1379,8 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       // SendRecv uses LL128 (in place of LL) for latency-bound sizes; allocate its staging buffer too.
       // LL128 (unlike LL) lives in device memory when GDR is enabled, matching the collective net path
       // and the proxy's LL128 fast-path (ready = useGdr).
-      NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0 /*devMem when GDR*/,
-                               proxyState->p2pLl128BuffSize, buffs[NCCL_PROTO_LL128]);
+      NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0 /*devMem when GDR*/, proxyState->p2pLl128BuffSize,
+                               buffs[NCCL_PROTO_LL128]);
       resources->buffSizes[NCCL_PROTO_LL128] = proxyState->p2pLl128BuffSize;
     }
 
@@ -1647,8 +1650,8 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
     // SendRecv uses LL128 (in place of LL) for latency-bound sizes; allocate its staging buffer too.
     // LL128 (unlike LL) lives in device memory when GDR is enabled, matching the collective net path
     // and the proxy's LL128 fast-path (ready = useGdr).
-    NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0 /*devMem when GDR*/,
-                             proxyState->p2pLl128BuffSize, buffs[NCCL_PROTO_LL128]);
+    NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0 /*devMem when GDR*/, proxyState->p2pLl128BuffSize,
+                             buffs[NCCL_PROTO_LL128]);
     resources->buffSizes[NCCL_PROTO_LL128] = proxyState->p2pLl128BuffSize;
   }
 

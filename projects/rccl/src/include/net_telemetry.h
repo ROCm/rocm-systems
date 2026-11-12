@@ -38,16 +38,16 @@ extern "C" {
  * the slot index. Kept equal to the transports' own MAX_IB_DEVS: a device that
  * does not fit here cannot be registered, and all of its traffic silently
  * lands in num_qp_untracked. The transports static_assert against this. */
-#define RCCL_TELEMETRY_MAX_DEVS       32
+#define RCCL_TELEMETRY_MAX_DEVS 32
 /* Sanity bound, not a reservation: channel storage is allocated on demand, and
  * this only rejects indices too absurd to be a real channel. Matches the
  * largest MAXCHANNELS RCCL is built with (src/include/device.h). */
-#define RCCL_TELEMETRY_MAX_CHANNELS   512
+#define RCCL_TELEMETRY_MAX_CHANNELS 512
 #define RCCL_TELEMETRY_HISTOGRAM_SIZE 16
 
 /* PFC is defined over eight traffic classes, so every per-priority counter
  * array is this wide and every loop over priorities runs this far. */
-#define RCCL_TELEMETRY_NUM_PFC_PRIO   8
+#define RCCL_TELEMETRY_NUM_PFC_PRIO 8
 
 /* Every filesystem path telemetry builds (sysfs, debugfs, procfs, the output
  * file) uses one buffer size, so no call site has to reason about which limit
@@ -73,9 +73,9 @@ extern "C" {
 /* Device names as sysfs exposes them: IBV_SYSFS_NAME_MAX is 64 for the RoCE
  * device, and IFNAMSIZ (16) bounds the netdev name, so one buffer covers both
  * without pulling verbs headers into this file. */
-#define RCCL_TELEMETRY_DEV_NAME_MAX   64
+#define RCCL_TELEMETRY_DEV_NAME_MAX 64
 /* Transport label, e.g. "IB-CAST" or "IB". */
-#define RCCL_TELEMETRY_TRANSPORT_MAX  32
+#define RCCL_TELEMETRY_TRANSPORT_MAX 32
 
 /* Power-of-two buckets for the WQE payload-size distribution: bucket b holds
  * WQEs of [2^(b-1), 2^b - 1] bytes, bucket 0 holds zero-length WQEs. */
@@ -95,11 +95,11 @@ extern "C" {
  * against this bound in one step, so a table cannot outgrow this array
  * without failing the build.
  */
-#define RCCL_TELEMETRY_MAX_HWC        80
+#define RCCL_TELEMETRY_MAX_HWC 80
 
 /* Bound on the longest json_name in any counter table, used to size the config
  * filter list below so that naming every counter still fits. */
-#define RCCL_TELEMETRY_HWC_NAME_MAX   32
+#define RCCL_TELEMETRY_HWC_NAME_MAX 32
 
 /* Compile-time assert usable from both the C++ implementation and any C
  * consumer of this header. */
@@ -158,7 +158,7 @@ int rcclTelemetryFlush(void);
  * collective-stop, then subtracts to get per-collective deltas.
  */
 typedef struct {
-  int      device_id;
+  int device_id;
   uint64_t tx_bytes;
   uint64_t rx_bytes;
   uint64_t num_cq_errors;
@@ -170,8 +170,8 @@ typedef struct {
                          * equals wqe_completed unless 1-in-N latency
                          * sampling is on, and always equals the sum of
                          * wqe_completion_histogram below */
-  int64_t  wqe_completion_ns_min;   /* min across QPs (0 = none seen) */
-  int64_t  wqe_completion_ns_max;   /* max across QPs */
+  int64_t wqe_completion_ns_min;   /* min across QPs (0 = none seen) */
+  int64_t wqe_completion_ns_max;   /* max across QPs */
   uint64_t wqe_completion_histogram[RCCL_TELEMETRY_HISTOGRAM_SIZE]; /* summed across channels/QPs */
 } RcclTelemetrySwSnapshot;
 
@@ -180,8 +180,7 @@ typedef struct {
  * Returns the number of devices written (0 if telemetry disabled).
  * Does NOT reset the underlying counters (whole-run flush stays intact).
  */
-__attribute__((visibility("default")))
-int rcclTelemetrySwCapture(RcclTelemetrySwSnapshot* out, int maxDevs);
+__attribute__((visibility("default"))) int rcclTelemetrySwCapture(RcclTelemetrySwSnapshot* out, int maxDevs);
 
 /*
  * Configuration structure - populated from environment variables
@@ -191,8 +190,8 @@ typedef struct {
   /* Directory the JSON is written to, default "/tmp". PATH_MAX bounds the
    * finished path, so the directory gets PATH_MAX minus the file name that is
    * appended to it, and the join can never truncate. */
-  char    output_dir[RCCL_TEL_PATH_MAX - RCCL_TEL_FILENAME_MAX];
-  int     histogram_max_buckets;        /* default: 5 */
+  char output_dir[RCCL_TEL_PATH_MAX - RCCL_TEL_FILENAME_MAX];
+  int histogram_max_buckets;        /* default: 5 */
   int64_t histogram_bucket_interval_ns; /* default: 30000 */
 
   /* Derived from histogram_bucket_interval_ns, never set directly: call
@@ -209,7 +208,7 @@ typedef struct {
 
   /* Comma-separated json_names to collect; "" means collect all. Sized so that
    * naming every counter of the widest table still fits without truncation. */
-  char    hw_counter_list[RCCL_TELEMETRY_MAX_HWC * (RCCL_TELEMETRY_HWC_NAME_MAX + 1)];
+  char hw_counter_list[RCCL_TELEMETRY_MAX_HWC * (RCCL_TELEMETRY_HWC_NAME_MAX + 1)];
 } RcclTelemetryConfig;
 
 extern RcclTelemetryConfig rcclTelemetryCfg;
@@ -296,8 +295,8 @@ static inline void rcclTelemetryConfigDeriveHistogram(void) {
  * blocks holding these slots are allocated with the same alignment.
  */
 typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
-  int      id;
-  int      is_data_qp;            /* 1 for data QPs, 0 for CTS QPs */
+  int id;
+  int is_data_qp;            /* 1 for data QPs, 0 for CTS QPs */
   uint64_t num_wqe_sent;
   uint64_t num_recv_wqe;
   uint64_t num_wqe_rcvd;
@@ -312,8 +311,8 @@ typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
   uint64_t num_cts_sent_unsignalled;
   uint64_t num_write_wqe;         /* RDMA_WRITE postings */
   uint64_t num_write_imm_wqe;     /* RDMA_WRITE_WITH_IMM postings */
-  int64_t  wqe_completion_ns_min;
-  int64_t  wqe_completion_ns_max;
+  int64_t wqe_completion_ns_min;
+  int64_t wqe_completion_ns_max;
   uint64_t wqe_completion_histogram[RCCL_TELEMETRY_HISTOGRAM_SIZE];
 } RcclQpStats;
 
@@ -373,18 +372,18 @@ typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
 typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
   /* --- Read-mostly / cold metadata. Written only at registration, first use or
    * flush, never by a per-WQE or per-request hook, so it may share a line. --- */
-  int    device_id;
-  char   roce_device[RCCL_TELEMETRY_DEV_NAME_MAX];
-  char   eth_device[RCCL_TELEMETRY_DEV_NAME_MAX];
-  char   transport[RCCL_TELEMETRY_TRANSPORT_MAX]; /* e.g., "IB-CAST", "IB" */
+  int device_id;
+  char roce_device[RCCL_TELEMETRY_DEV_NAME_MAX];
+  char eth_device[RCCL_TELEMETRY_DEV_NAME_MAX];
+  char transport[RCCL_TELEMETRY_TRANSPORT_MAX]; /* e.g., "IB-CAST", "IB" */
 
   const void* hw_config;      /* opaque: points to active per-HW RcclHwConfig */
 
-  int      num_channels;
+  int num_channels;
   /* Set when the transport has no real NCCL channel id (non-AINIC): every QP
    * then lands in one device-wide bucket, so num_channels is reported unknown
    * rather than a misleading 1. */
-  int      channels_unknown;
+  int channels_unknown;
   /* Per-channel shortfalls plus channels that could not be tracked. */
   int num_qp_untracked;
   /* Blocks of RcclChannelStats; stored before channel_capacity is raised. */
@@ -398,8 +397,7 @@ typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
 
   /* --- Hot: bumped on every posted WQE. Own line(s) so it never shares with
    * the byte counters below or the metadata above. --- */
-  uint64_t wqe_size_histogram[RCCL_TELEMETRY_WQE_SIZE_BUCKETS]
-      __attribute__((aligned(RCCL_TELEMETRY_CACHELINE)));
+  uint64_t wqe_size_histogram[RCCL_TELEMETRY_WQE_SIZE_BUCKETS] __attribute__((aligned(RCCL_TELEMETRY_CACHELINE)));
 
   /* --- Hot: per-request byte counters. tx and rx take separate lines so a rank
    * driving both directions on one device does not ping-pong a shared line. --- */
@@ -451,14 +449,13 @@ typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
  * counters across lines to avoid false sharing. Pin the size so any field change
  * that alters the layout is a deliberate, reviewed edit, and keep it a whole
  * number of cache lines. */
-RCCL_TEL_STATIC_ASSERT(sizeof(RcclDeviceStats) == 2560,
-  "RcclDeviceStats size changed; re-check the cache-line layout");
+RCCL_TEL_STATIC_ASSERT(sizeof(RcclDeviceStats) == 2560, "RcclDeviceStats size changed; re-check the cache-line layout");
 RCCL_TEL_STATIC_ASSERT(sizeof(RcclDeviceStats) % RCCL_TELEMETRY_CACHELINE == 0,
-  "RcclDeviceStats must stay a whole number of cache lines");
+                       "RcclDeviceStats must stay a whole number of cache lines");
 
 /* Global device statistics array */
 extern RcclDeviceStats rcclTelemetryDevs[RCCL_TELEMETRY_MAX_DEVS];
-extern int             rcclTelemetryNumDevs;
+extern int rcclTelemetryNumDevs;
 
 /*
  * Helper to register a device for telemetry collection.
@@ -886,8 +883,7 @@ static inline void rcclTelemetryChRequestCompleted(RcclChannelStats* ch) {
  */
 static inline void rcclTelemetryBytes(int devIdx, int isSend, uint64_t bytes) {
   if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
-  uint64_t* field = isSend ? &rcclTelemetryDevs[devIdx].tx_bytes
-                           : &rcclTelemetryDevs[devIdx].rx_bytes;
+  uint64_t* field = isSend ? &rcclTelemetryDevs[devIdx].tx_bytes : &rcclTelemetryDevs[devIdx].rx_bytes;
   __atomic_fetch_add(field, bytes, __ATOMIC_RELAXED);
 }
 
@@ -1030,8 +1026,7 @@ static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
   int bucket = 0;
   if (bytes > 0) {
     bucket = 64 - __builtin_clzll((unsigned long long)bytes);
-    if (bucket >= RCCL_TELEMETRY_WQE_SIZE_BUCKETS)
-      bucket = RCCL_TELEMETRY_WQE_SIZE_BUCKETS - 1;
+    if (bucket >= RCCL_TELEMETRY_WQE_SIZE_BUCKETS) bucket = RCCL_TELEMETRY_WQE_SIZE_BUCKETS - 1;
   }
   __atomic_fetch_add(&rcclTelemetryDevs[devIdx].wqe_size_histogram[bucket], 1, __ATOMIC_RELAXED);
 }
@@ -1105,10 +1100,8 @@ static inline void rcclTelemetrySetQpRole(int devIdx, int chIdx, int qpIdx, int 
   RcclQpStats* qp = rcclTelemetryQp(ch, qpIdx);
   if (qp == NULL) return;
   qp->is_data_qp = isDataQp ? 1 : 0;
-  if (isDataQp)
-    __atomic_fetch_add(&ch->num_data_qp, 1, __ATOMIC_RELAXED);
-  else
-    __atomic_fetch_add(&ch->num_cts_qp, 1, __ATOMIC_RELAXED);
+  if (isDataQp) __atomic_fetch_add(&ch->num_data_qp, 1, __ATOMIC_RELAXED);
+  else __atomic_fetch_add(&ch->num_cts_qp, 1, __ATOMIC_RELAXED);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1122,7 +1115,7 @@ static inline void rcclTelemetrySetQpRole(int devIdx, int chIdx, int qpIdx, int 
 #define RCCL_TEL_ETHTOOL_KEY_MAX 64
 
 typedef struct {
-  char     key[RCCL_TEL_ETHTOOL_KEY_MAX];
+  char key[RCCL_TEL_ETHTOOL_KEY_MAX];
   int64_t* target;
 } RcclEthtoolWantedEx;
 

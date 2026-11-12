@@ -59,9 +59,9 @@ struct ncclIbQpCreateAttr {
   bool useIonic;
   int isP2p;
   bool isQpSharingEnabled;
-  int  cqDepthMultiplier;
-  int  qpSharingGroupIdx;
-  int  qpIdx;               // Per-device QP ordinal (for UDMA alternation)
+  int cqDepthMultiplier;
+  int qpSharingGroupIdx;
+  int qpIdx;               // Per-device QP ordinal (for UDMA alternation)
 };
 
 // QPs are striped across a comm's devices: QP qpIndex lives on device
@@ -124,10 +124,10 @@ struct ncclIbConnectionMetadata {
   bool isRMA;
 
   // QP Sharing metadata
-  int      sharedGroupIdx;      // QP sharing group index (-1 = not shared)
+  int sharedGroupIdx;      // QP sharing group index (-1 = not shared)
   uint16_t commId;              // QP sharing comm ID (0 = not shared)
-  int      senderIbDevIdx;      // sender's IB device index
-  bool     optRecvCompletion;
+  int senderIbDevIdx;      // sender's IB device index
+  bool optRecvCompletion;
 };
 
 // Initialize QP sharing fields to defaults (sharing disabled)
