@@ -222,17 +222,6 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
                 throw std::runtime_error("Invalid IoType");
         }
     }
-    catch (const std::system_error &) {
-        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
-        // A failed AIS call records hipErrorUnknown as this thread's last HIP
-        // error. Don't leave it behind if the I/O will be retried on the
-        // fallback. Async I/O runs on a HIP callback thread, so its last error
-        // never reaches the caller.
-        if (is_fallback_eligible(std::current_exception(), 0)) {
-            (void)Context<Hip>::get()->hipGetLastError();
-        }
-        throw;
-    }
     catch (...) {
         Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
         throw;
@@ -295,6 +284,15 @@ Fastpath::is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const
         // Thrown exception not eligible for fallback.
         return false;
     }
+}
+
+void
+Fastpath::on_fallback() const
+{
+    // Clear the HIP error set by a failed hipAmdFile{Read,Write}
+    // If the fallback backend successfully completes IO, we don't want a set
+    // HIP Runtime Error left around.
+    (void)Context<Hip>::get()->hipGetLastError();
 }
 
 extern "C" {

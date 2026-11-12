@@ -162,6 +162,9 @@ protected:
     /// @return True if this BackendWithFallback can retry the IO, else False.
     virtual bool is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const = 0;
 
+    /// @brief Hook called when the IO will be retried by the fallback backend
+    virtual void on_fallback() const = 0;
+
 private:
     std::shared_ptr<Backend> fallback_backend;
 };

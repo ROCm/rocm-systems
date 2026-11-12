@@ -789,7 +789,6 @@ TEST_P(FastpathIoParam, IoDoesNotMaskSystemError)
     switch (GetParam()) {
         case IoType::Read:
             EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(system_error(ENODEV, generic_category())));
-            EXPECT_CALL(mhip, hipGetLastError);
             break;
         case IoType::Write:
             EXPECT_CALL(mhip, hipAmdFileWrite).WillOnce(Throw(system_error(EINVAL, generic_category())));
@@ -834,6 +833,7 @@ TEST_P(FastpathIoParam, IoWithFallbackThrowsAFallbackIneligibleException)
     backend->register_fallback_backend(m_fallback);
 
     expect_io();
+    EXPECT_CALL(mhip, hipGetLastError).Times(0);
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -885,7 +885,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleENODEV)
     backend->register_fallback_backend(m_fallback);
 
     expect_io();
-    EXPECT_CALL(mhip, hipGetLastError);
+    EXPECT_CALL(mhip, hipGetLastError).Times(1);
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -914,7 +914,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleEREMOTEIO)
     backend->register_fallback_backend(m_fallback);
 
     expect_io();
-    EXPECT_CALL(mhip, hipGetLastError);
+    EXPECT_CALL(mhip, hipGetLastError).Times(1);
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -945,7 +945,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleENOTTY)
     backend->register_fallback_backend(m_fallback);
 
     expect_io();
-    EXPECT_CALL(mhip, hipGetLastError);
+    EXPECT_CALL(mhip, hipGetLastError).Times(1);
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -978,8 +978,8 @@ TEST_P(FastpathIoParam, FallbackRejectsIoRequest)
     backend->register_fallback_backend(m_fallback);
 
     expect_io();
-    EXPECT_CALL(mhip, hipGetLastError);
     EXPECT_CALL(*m_fallback, score).WillOnce(Return(SCORE_REJECT));
+    EXPECT_CALL(mhip, hipGetLastError).Times(0);
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
