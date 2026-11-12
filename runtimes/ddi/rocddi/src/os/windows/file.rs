@@ -17,18 +17,20 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::path::PathBuf;
 use std::ptr;
 use windows_sys::Win32::Foundation::{
-    DUPLICATE_SAME_ACCESS, DuplicateHandle, ERROR_HANDLE_EOF, ERROR_IO_PENDING, GENERIC_READ,
-    GENERIC_WRITE, INVALID_HANDLE_VALUE,
+    DUPLICATE_SAME_ACCESS, DuplicateHandle, ERROR_HANDLE_EOF, ERROR_IO_PENDING,
+    INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, FILE_FLAG_OVERLAPPED, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, GetFileInformationByHandle, GetFinalPathNameByHandleW, ReOpenFile, ReadFile,
-    WriteFile,
+    FILE_FLAG_OVERLAPPED, FILE_ID_INFO, FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, FILE_WRITE_DATA, FileIdInfo, GetFileInformationByHandleEx,
+    GetFinalPathNameByHandleW, ReOpenFile, ReadFile, WriteFile,
 };
 use windows_sys::Win32::System::IO::{
     GetOverlappedResult, OVERLAPPED, OVERLAPPED_0, OVERLAPPED_0_0,
 };
+use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows_sys::Win32::System::Threading::{CreateEventW, GetCurrentProcess};
+use windows_sys::Win32::System::WindowsProgramming::PUBLIC_OBJECT_BASIC_INFORMATION;
 
 pub(crate) fn duplicate_file(handle: RawHandle) -> io::Result<File> {
     let mut duplicate = ptr::null_mut();
@@ -52,7 +54,53 @@ pub(crate) fn duplicate_file(handle: RawHandle) -> io::Result<File> {
     Ok(unsafe { File::from_raw_handle(duplicate) })
 }
 
+/// Queries the access granted to the retained handle, without reopening it.
+fn granted_access(file: &File) -> io::Result<u32> {
+    // NtQueryObject's public contract requires dynamic resolution. Ntdll is a
+    // process-lifetime system module; GetModuleHandleW does not acquire a lease.
+    type Query =
+        unsafe extern "system" fn(RawHandle, i32, *mut std::ffi::c_void, u32, *mut u32) -> i32;
+    // SAFETY: Both names are constant and terminated; the module remains loaded.
+    let address = unsafe {
+        let module = GetModuleHandleW(windows_sys::w!("ntdll.dll"));
+        if module.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        GetProcAddress(module, c"NtQueryObject".as_ptr().cast())
+    }
+    .ok_or_else(io::Error::last_os_error)?;
+    // SAFETY: The documented symbol has the Query signature and system ABI.
+    let query: Query = unsafe { std::mem::transmute(address) };
+    let mut info = PUBLIC_OBJECT_BASIC_INFORMATION::default();
+    // SAFETY: Class zero is ObjectBasicInformation; the complete output record
+    // and retained handle live through this synchronous query.
+    let status = unsafe {
+        query(
+            file.as_raw_handle(),
+            0,
+            (&raw mut info).cast(),
+            u32::try_from(size_of::<PUBLIC_OBJECT_BASIC_INFORMATION>())
+                .map_err(|_| io::ErrorKind::InvalidData)?,
+            ptr::null_mut(),
+        )
+    };
+    if status < 0 {
+        return Err(io::Error::other(crate::Error::DriverOperation {
+            kind: crate::ErrorKind::Driver,
+            operation: "NtQueryObject file access",
+            status: crate::NativeStatus {
+                domain: crate::NativeStatusDomain::NtStatus,
+                code: u32::from_ne_bytes(status.to_ne_bytes()),
+            },
+        }));
+    }
+    Ok(info.GrantedAccess)
+}
+
 fn reopen(file: &File, access: u32) -> io::Result<File> {
+    if granted_access(file)? & access != access {
+        return Err(io::ErrorKind::PermissionDenied.into());
+    }
     // SAFETY: The File retains the original handle. OVERLAPPED mode gives
     // this independent reference explicit per-operation offsets.
     let handle = unsafe {
@@ -99,7 +147,7 @@ fn raw_status(error: &io::Error) -> Option<u32> {
         .map(|code| u32::from_ne_bytes(code.to_ne_bytes()))
 }
 
-fn completed(file: &File, request: &OVERLAPPED, accepted: i32) -> io::Result<usize> {
+fn completed(file: &File, request: *const OVERLAPPED, accepted: i32) -> io::Result<usize> {
     if accepted == 0 {
         let error = io::Error::last_os_error();
         if raw_status(&error) == Some(ERROR_HANDLE_EOF) {
@@ -124,7 +172,7 @@ fn completed(file: &File, request: &OVERLAPPED, accepted: i32) -> io::Result<usi
 }
 
 pub(crate) fn read_at(file: &File, bytes: &mut [u8], offset: u64) -> io::Result<usize> {
-    let file = reopen(file, GENERIC_READ)?;
+    let file = reopen(file, FILE_READ_DATA)?;
     let (_event, mut request) = request(offset)?;
     let count = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
     let mut immediate = 0;
@@ -139,11 +187,11 @@ pub(crate) fn read_at(file: &File, bytes: &mut [u8], offset: u64) -> io::Result<
             &raw mut request,
         )
     };
-    completed(&file, &request, accepted)
+    completed(&file, &raw const request, accepted)
 }
 
 pub(crate) fn write_at(file: &File, bytes: &[u8], offset: u64) -> io::Result<usize> {
-    let file = reopen(file, GENERIC_WRITE)?;
+    let file = reopen(file, FILE_WRITE_DATA)?;
     let (_event, mut request) = request(offset)?;
     let count = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
     let mut immediate = 0;
@@ -158,20 +206,25 @@ pub(crate) fn write_at(file: &File, bytes: &[u8], offset: u64) -> io::Result<usi
             &raw mut request,
         )
     };
-    completed(&file, &request, accepted)
+    completed(&file, &raw const request, accepted)
 }
 
-fn identity(file: &File) -> io::Result<(u32, u32, u32)> {
-    let mut info = BY_HANDLE_FILE_INFORMATION::default();
-    // SAFETY: The retained file and complete output record live for the call.
-    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut info) } == 0 {
+fn identity(file: &File) -> io::Result<(u64, [u8; 16])> {
+    let mut info = FILE_ID_INFO::default();
+    // SAFETY: FileIdInfo writes the complete record. The full 128-bit ID is
+    // required for uniqueness on ReFS; legacy 64-bit file IDs are insufficient.
+    if unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileIdInfo,
+            (&raw mut info).cast(),
+            u32::try_from(size_of::<FILE_ID_INFO>()).map_err(|_| io::ErrorKind::InvalidData)?,
+        )
+    } == 0
+    {
         return Err(io::Error::last_os_error());
     }
-    Ok((
-        info.dwVolumeSerialNumber,
-        info.nFileIndexHigh,
-        info.nFileIndexLow,
-    ))
+    Ok((info.VolumeSerialNumber, info.FileId.Identifier))
 }
 
 pub(crate) fn path(file: &File) -> io::Result<PathBuf> {

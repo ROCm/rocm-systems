@@ -85,3 +85,17 @@ fn positioned_io_keeps_the_original_cursor_and_native_owner() {
     drop(caller);
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn positioned_io_requires_the_original_handle_access() {
+    let path = std::env::temp_dir().join(format!("rocddi-host-file-access-{}", std::process::id()));
+    std::fs::write(&path, b"unchanged").unwrap();
+    let reader = std::fs::File::open(&path).unwrap();
+    assert!(file::write_at(&reader, b"X", 0).is_err());
+    let writer = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    assert!(file::read_at(&writer, &mut [0; 1], 0).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), b"unchanged");
+    drop(reader);
+    drop(writer);
+    std::fs::remove_file(path).unwrap();
+}
