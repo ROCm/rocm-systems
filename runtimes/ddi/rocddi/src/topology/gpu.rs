@@ -16,12 +16,35 @@ pub enum GpuCopyTransport {
     Kernel,
 }
 
-/// Queue transports qualified for one AMD GPU endpoint.
-///
-/// Queue formats are GPU capabilities rather than properties shared by every
-/// endpoint kind. A `false` value means the current backend did not qualify the
-/// corresponding transport; it does not make claims about the hardware in a
-/// different operating-system or driver environment.
+/// Provider-qualified direct queue controls, independent of packet encoding.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent native queue controls"
+)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GpuUserQueueCapabilities {
+    /// Device-side publication and peer producer mappings are supported.
+    pub device_producer: bool,
+    /// Concurrent host producers are supported.
+    pub multiple_producers: bool,
+    /// Low scheduling priority is supported in addition to normal.
+    pub low_priority: bool,
+    /// High scheduling priority is supported in addition to normal.
+    pub high_priority: bool,
+    /// Cooperative AQL queue lifecycle is supported; availability is not reserved.
+    pub cooperative: bool,
+    /// Provider resources support the dialect's dispatch scratch encoding.
+    pub dispatch_scratch: bool,
+    /// Smallest supported power-of-two ring byte length.
+    pub minimum_ring_bytes: u64,
+    /// Largest supported power-of-two ring byte length.
+    pub maximum_ring_bytes: u64,
+    /// Required ring byte-length multiple.
+    pub ring_alignment: u64,
+}
+
+/// Queue transports qualified by this provider for one AMD GPU endpoint.
+/// Absent direct profiles and false kernel flags make no hardware support claim.
 #[allow(
     clippy::struct_excessive_bools,
     reason = "each independently qualified GPU queue transport is an observable capability"
@@ -32,19 +55,19 @@ pub struct GpuQueueCapabilities {
     /// Absence means that generic queue support alone does not qualify copies.
     pub copy: Option<GpuCopyTransport>,
     /// Direct AQL transport is implemented for this endpoint.
-    pub aql: bool,
+    pub aql: Option<GpuUserQueueCapabilities>,
     /// System-memory release/acquire through AQL packet fence scopes is
     /// qualified for this endpoint and host architecture.
     pub aql_system_cache_control: bool,
     /// Direct native PM4 transport is implemented for this endpoint.
-    pub pm4: bool,
+    pub pm4: Option<GpuUserQueueCapabilities>,
     /// Bounded driver-mediated PM4 submission is qualified for this endpoint.
     pub kernel_pm4: bool,
     /// System-memory release/acquire through PM4 cache controls is qualified
     /// for this endpoint and host architecture.
     pub pm4_system_cache_control: bool,
     /// Direct monotonic-64-bit SDMA transport is implemented.
-    pub sdma: bool,
+    pub sdma: Option<GpuUserQueueCapabilities>,
     /// Bounded driver-mediated SDMA submission is qualified for this endpoint.
     pub kernel_sdma: bool,
     /// System-memory release/acquire through the selected SDMA protocol is

@@ -83,8 +83,27 @@ pub(crate) unsafe fn create_hardware_queue(
         let Some(index) = runtime.gpu_index(agent) else {
             return INVALID_AGENT;
         };
+        let info = runtime.gpus[index].info();
+        let Some((minimum, maximum)) = aql_queue_limits(&info) else {
+            return INVALID_QUEUE_CREATION;
+        };
+        if size < minimum
+            || size > maximum
+            || (queue_type != QUEUE_TYPE_SINGLE
+                && info
+                    .queues
+                    .aql
+                    .is_none_or(|controls| !controls.multiple_producers))
+        {
+            return INVALID_QUEUE_CREATION;
+        }
         if cooperative {
-            if runtime.gpus[index].info().gws_count == 0 {
+            if !runtime.gpus[index]
+                .info()
+                .queues
+                .aql
+                .is_some_and(|queue| queue.cooperative)
+            {
                 return INVALID_QUEUE_CREATION;
             }
             if runtime

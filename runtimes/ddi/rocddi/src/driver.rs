@@ -206,6 +206,17 @@ pub(crate) trait AllocationOperations: Driver {
     fn backing_offset(_allocation: &Self::Allocation) -> Option<u64> {
         None
     }
+    /// Qualifies one complete memory request without activating the endpoint.
+    fn memory_capabilities(
+        &self,
+        _endpoint: &Endpoint,
+        _request: crate::memory::device::MemoryCapabilityRequest<'_>,
+    ) -> Result<crate::memory::device::DeviceMemoryCapabilities, Error> {
+        Err(Error::Operation {
+            kind: ErrorKind::Unsupported,
+            detail: "provider has not qualified this memory request",
+        })
+    }
     /// Reports whether this endpoint can register caller-owned host pages.
     fn supports_host_registration(&self, endpoint: &Endpoint) -> bool;
     /// Checks that an allocation's native backing remains usable.
