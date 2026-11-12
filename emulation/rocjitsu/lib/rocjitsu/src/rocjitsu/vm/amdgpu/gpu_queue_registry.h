@@ -23,7 +23,6 @@
 namespace rocjitsu::amdgpu {
 
 class GpuVm;
-class GpuQueueRegistryTestAccess;
 
 enum class QueueType : uint8_t { Compute, Sdma };
 
@@ -188,7 +187,10 @@ class QueueBindingFactory {
 public:
   virtual ~QueueBindingFactory() = default;
 
-  /// @brief Create a fully attached binding or leave no processor state behind.
+  /// @brief Create a fully attached binding or reject without leaving processor state.
+  /// @details A factory that propagates an exception must undo its own attachment:
+  /// the registry cannot destroy a binding it has not received. SDMA worker startup
+  /// failures before publication can propagate to the frontend boundary.
   [[nodiscard]] virtual QueueBindingCreateResult
   create_binding(const QueueRegistrationRequest &request) = 0;
 };
@@ -221,6 +223,9 @@ public:
   explicit GpuQueueRegistry(GpuVm &gpu_vm) : gpu_vm_(gpu_vm) {}
   ~GpuQueueRegistry();
 
+  /// @brief Register a queue or return an empty handle on rejection.
+  /// @details If admission closes after a factory returns a bound queue, destroy
+  /// that binding before releasing its VM retention so cleanup can access the VM.
   [[nodiscard]] QueueHandle register_queue(const QueueRegistrationRequest &request);
   [[nodiscard]] QueueReconfigureResult reconfigure_queue(QueueHandle handle,
                                                          QueueReconfigureRequest request);
@@ -239,8 +244,6 @@ public:
   [[nodiscard]] bool accepting_registrations_for_test() const;
 
 private:
-  friend class GpuQueueRegistryTestAccess;
-
   enum class QueueState : uint8_t { Open, Closing, Dead };
 
   class QueueRecord {
@@ -338,7 +341,6 @@ private:
   uint32_t active_closes_ = 0;
   bool admission_open_ = true;
   bool close_all_in_progress_ = false;
-  bool fail_next_registry_allocation_ = false;
 };
 
 } // namespace rocjitsu::amdgpu

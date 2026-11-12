@@ -16,11 +16,15 @@ on:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-build.yml'
   push:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-build.yml'
   workflow_dispatch:
 
@@ -106,6 +110,8 @@ jobs:
         with:
           sparse-checkout: |
             projects/amdsmi
+            shared/cuid
+            shared/sha256
             .github/workflows
 
       - name: Mark workspace safe for git
@@ -251,6 +257,12 @@ jobs:
           source detect_asic_filter.sh
           echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
           run "$RESULTS_DIR/amdsmi_tests.log" ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}"
+
+          # Standalone NIC suites. They read fake sysfs trees, so they need no NIC and no root.
+          for suite in test_nic_telemetry_suite test_nic_discovery_suite test_nic_stats_suite \
+              test_nic_log_suite test_nic_vpd_suite test_nic_check_suite; do
+            run "$RESULTS_DIR/${suite}.log" "./${suite}"
+          done
 
           cd /opt/rocm/share/amd_smi/tests/python_unittest
           run "$RESULTS_DIR/integration_test_output.txt" ./integration_test.py -v

@@ -20,7 +20,6 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -490,28 +489,6 @@ rsmi_status_t rsmi_shut_down(void) {
     return RSMI_STATUS_INIT_ERROR;
   }
 
-  // Release any device mutexes that are being held
-#if DEBUG
-  int ret = 0;
-#endif
-  for (uint32_t i = 0; i < smi.devices().size(); ++i) {
-#if DEBUG
-    ret = pthread_mutex_unlock(smi.devices()[i]->mutex());
-    if (ret != EPERM) {  // We expect to get EPERM if the lock has already
-                         // been released
-      if (ret == 0) {
-        std::cout << "WARNING: Unlocked monitor_devices lock; "
-                  << "it should have already been unlocked." << std::endl;
-      } else {
-        std::cout << "WARNING: pthread_mutex_unlock() returned " << ret << " for device " << i
-                  << " in rsmi_shut_down()" << std::endl;
-      }
-    }
-#else
-    (void)pthread_mutex_unlock(smi.devices()[i]->mutex());
-#endif
-  }
-
   (void)smi.ref_count_dec();
 
   if (smi.ref_count() == 0) {
@@ -553,32 +530,6 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t* num_devices) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
   *num_devices = static_cast<uint32_t>(smi.devices().size());
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_num_nic_monitor_devices(uint32_t* num_devices) {
-  TRY assert(num_devices != nullptr);
-  if (num_devices == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  *num_devices = static_cast<uint32_t>(smi.nic_devices().size());
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_num_switch_monitor_devices(uint32_t* num_devices) {
-  TRY assert(num_devices != nullptr);
-  if (num_devices == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  *num_devices = static_cast<uint32_t>(smi.switch_devices().size());
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -822,40 +773,6 @@ rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
      << " returning pci_id = " << std::to_string(pci_id) << " ("
      << amd::smi::print_int_as_hex(pci_id) << ")";
   LOG_INFO(ss);
-
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
-  LOG_TRACE(ss);
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_nic_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-
-  GET_NIC_DEV_FROM_INDX
-
-  uint64_t domain = 0;
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
-
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
-  LOG_TRACE(ss);
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_switch_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-
-  GET_SWITCH_DEV_FROM_INDX
-
-  uint64_t domain = 0;
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="
      << ", reporting RSMI_STATUS_SUCCESS";
@@ -3867,19 +3784,8 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64
 
   DEVICE_MUTEX
 
-  // On gpu_od GPUs (Navi3x+), hwmon pwm1 does not reflect the actual fan speed.
-  // Read the FAN_MINIMUM_PWM value from the gpu_od sysfs instead.
-  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
-  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
-    uint64_t current_pwm = 0;
-    int parse_ret = amd::smi::ParseGpuOdFanCurrentPwm(fan_ctrl_path, &current_pwm);
-    if (parse_ret == 0) {
-      *speed = static_cast<int64_t>(current_pwm);
-      return RSMI_STATUS_SUCCESS;
-    }
-  }
-
-  // Legacy hwmon path
+  // hwmon pwm1 is the running fan duty cycle. The gpu_od fan_minimum_pwm node is
+  // only a user-set curve floor (0 by default), so it must not be read here.
   ret = get_dev_mon_value(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
 
   return ret;
@@ -4024,20 +3930,8 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
   CHK_SUPPORT_SUBVAR_ONLY(max_speed, sensor_ind)
   DEVICE_MUTEX
 
-  // On gpu_od GPUs (Navi3x+), the effective max fan speed is the OD_RANGE
-  // maximum from fan_minimum_pwm, not the hwmon pwm1_max (which is always 255).
-  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
-  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
-    uint64_t od_min_pwm = 0;
-    uint64_t od_max_pwm = 0;
-    int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, &od_max_pwm);
-    if (parse_ret == 0) {
-      *max_speed = od_max_pwm;
-      return RSMI_STATUS_SUCCESS;
-    }
-  }
-
-  // Legacy hwmon path
+  // Pair with rsmi_dev_fan_speed_get: the running duty cycle comes from hwmon
+  // pwm1, so its max must be hwmon pwm1_max, not the gpu_od OD_RANGE limit.
   ret = get_dev_mon_value(amd::smi::kMonMaxFanSpeed, dv_ind, sensor_ind,
                           reinterpret_cast<int64_t*>(max_speed));
 

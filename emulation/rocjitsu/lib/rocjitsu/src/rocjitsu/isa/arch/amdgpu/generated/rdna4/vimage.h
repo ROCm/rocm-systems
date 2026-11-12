@@ -10,6 +10,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address_instruction.h"
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -18,6 +20,20 @@ class ImageLoadVimage : public Vimage {
 public:
   ImageLoadVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    if (inst_.d16)
+      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
+                                        vdata.size_bits() / 32);
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -27,6 +43,20 @@ class ImageLoadMipVimage : public Vimage {
 public:
   ImageLoadMipVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
+    if (inst_.d16)
+      modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}),
+                                        vdata.size_bits() / 32);
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -72,6 +102,18 @@ class ImageStoreVimage : public Vimage {
 public:
   ImageStoreVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.packed_store_data = &vdata;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -81,6 +123,18 @@ class ImageStoreMipVimage : public Vimage {
 public:
   ImageStoreMipVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.packed_store_data = &vdata;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -109,6 +163,7 @@ public:
   ImageAtomicSwapVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -120,6 +175,7 @@ public:
   ImageAtomicCmpswapVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -131,6 +187,7 @@ public:
   ImageAtomicAddUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -142,6 +199,7 @@ public:
   ImageAtomicSubUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -153,6 +211,7 @@ public:
   ImageAtomicMinIntVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -164,6 +223,7 @@ public:
   ImageAtomicMinUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -175,6 +235,7 @@ public:
   ImageAtomicMaxIntVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -186,6 +247,7 @@ public:
   ImageAtomicMaxUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -197,6 +259,7 @@ public:
   ImageAtomicAndVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -208,6 +271,7 @@ public:
   ImageAtomicOrVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -219,6 +283,7 @@ public:
   ImageAtomicXorVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -230,6 +295,7 @@ public:
   ImageAtomicIncUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -241,22 +307,34 @@ public:
   ImageAtomicDecUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
   Operand gpumem_in;
 };
 
-class ImageGetResinfoVimage : public Vimage {
+class ImageGetResinfoVimage
+    : public amdgpu::ImageAddressInstruction<
+          Vimage, false, amdgpu::ImageAddressForm{.kind = amdgpu::ImageAddressKind::ResourceInfo}> {
 public:
   ImageGetResinfoVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    if (index == 1 && inst_.r128) {
+      out += Operand(256, OperandType::OPR_SREG, src_operand(1)->encoding_value()).name();
+      return;
+    }
+    ImageAddressInstruction::append_src_operand(out, index);
+  }
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
 };
 
-class ImageBvhIntersectRayVimage : public Vimage {
+class ImageBvhIntersectRayVimage
+    : public amdgpu::ImageAddressInstruction<
+          Vimage, false, amdgpu::ImageAddressForm{.kind = amdgpu::ImageAddressKind::Bvh}> {
 public:
   ImageBvhIntersectRayVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -265,7 +343,9 @@ public:
   Operand rsrc;
 };
 
-class ImageBvh64IntersectRayVimage : public Vimage {
+class ImageBvh64IntersectRayVimage
+    : public amdgpu::ImageAddressInstruction<
+          Vimage, false, amdgpu::ImageAddressForm{.kind = amdgpu::ImageAddressKind::Bvh64}> {
 public:
   ImageBvh64IntersectRayVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -297,6 +377,7 @@ public:
   ImageAtomicAddFltVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -308,6 +389,7 @@ public:
   ImageAtomicMinFltVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -319,6 +401,7 @@ public:
   ImageAtomicMaxFltVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -330,6 +413,7 @@ public:
   ImageAtomicPkAddF16Vimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -341,6 +425,7 @@ public:
   ImageAtomicPkAddBf16Vimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;

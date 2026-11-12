@@ -22,7 +22,7 @@ int64_t IbCastArThreshold = 8192;
 NCCL_PARAM(IbCastReceiverSideMatchingScheme, "IB_RECEIVER_SIDE_MATCHING_SCHEME", -2);
 RCCL_PARAM(IbCastGdrFlushGpuMemNoRelaxedOrdering, "GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING", 1);
 
-const char* IbCastReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut"};
+const char* IbCastReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut", "IGet", "Failed"};
 
 ncclResult_t IbCastGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req) {
   for (int i = 0; i < NET_IB_MAX_REQUESTS; i++) {
@@ -211,8 +211,11 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     // Selective retransmission
     if (comm->base.resiliency && reqs[0]->send.sentData[qpIndex] == true) {
       for (int r = 0; r < nreqs; r++) {
-        comm->wrs[r].sg_list->addr += comm->wrs[r].sg_list->length;
-        comm->wrs[r].wr.rdma.remote_addr += comm->wrs[r].sg_list->length;
+        // Advance by the equal-split chunk, not sg_list: an empty post clears it, and its length is not the chunk.
+        int chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+        sendOffsets[r] += chunkSize;
+        comm->sges[r].addr += chunkSize;
+        comm->wrs[r].wr.rdma.remote_addr += chunkSize;
       }
       INFO(NCCL_NET,
            "NET/IB: %s: Skipping retransmission on QP index %d (req=%p, slot=%d) as it was already delivered.",
@@ -248,6 +251,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
         comm->wrs[r].sg_list = NULL;
         comm->wrs[r].num_sge = 0;
         length = 0;
+        rcclTelemetryWqeSize(telDevIdx, 0);
       } else {
         // Select proper lkey
         comm->sges[r].lkey = reqs[r]->send.lkeys[devIndex];
@@ -393,6 +397,13 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
 
 ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle,
                          void** request) {
+  // Same reasoning as regMr/deregMr in reg.cc: a caller whose connection was
+  // never established arrives here with a null comm, and the next line reads
+  // through it. Report that instead of faulting inside the plugin.
+  if (sendComm == NULL) {
+    WARN("NET/IB-CAST: isend called with a null comm");
+    return ncclInvalidArgument;
+  }
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
   if (comm->base.ready == 0) {
     WARN("NET/IB: IbCastIsend() called when comm->base.ready == 0");
@@ -526,7 +537,14 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     TIME_START(0);
     NCCLCHECK(IbCastMultiSend(comm, slot, nqps, startQpIndex, wrrSched, useWriteOp));
 
-    rcclTelemetryBytes(comm->base.vProps.devs[0], 1, (uint64_t)size);
+    // Reached once per multi-send, when sendReqsCnt[slot] == nreqs, so every
+    // reqs[i] is set; fifoHead then moves on. Resiliency replays call
+    // IbCastMultiSend directly and are not counted again.
+    if (rcclTelemetryOn()) {
+      uint64_t sentBytes = 0;
+      for (int i = 0; i < nreqs; i++) sentBytes += reqs[i]->send.size;
+      rcclTelemetryBytes(comm->base.vProps.devs[0], 1, sentBytes);
+    }
 
     comm->base.fifoHead++;
     TIME_STOP(0);
@@ -633,6 +651,11 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
 
 ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles,
                          void** request) {
+  // See IbCastIsend above.
+  if (recvComm == NULL) {
+    WARN("NET/IB-CAST: irecv called with a null comm");
+    return ncclInvalidArgument;
+  }
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   uint16_t rxReqIndex = 0;
   ncclResult_t res = ncclSuccess;
@@ -762,6 +785,11 @@ err:
 }
 
 ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void** mhandles, void** request) {
+  // See IbCastIsend above.
+  if (recvComm == NULL) {
+    WARN("NET/IB-CAST: iflush called with a null comm");
+    return ncclInvalidArgument;
+  }
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   int last = -1;
   for (int i = 0; i < n; i++)
@@ -785,8 +813,9 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
     // RCCL: fence the RO=1 bulk data through an RO=0 scratchpad - RDMA_WRITE a
     // dummy payload into it, then RDMA_READ it back. The WRITE needs REMOTE_WRITE
     // on the flush QP.
-    bool useGpuFlushMem = rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering() &&
-                          comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr && comm->devs[i].gpuFlush.gpuMr != nullptr;
+    const bool useGpuFlushMem = rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering() &&
+                                comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr &&
+                                comm->devs[i].gpuFlush.gpuMr != nullptr;
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
     if (IbCastCommIsSharing(&comm->base)) {
@@ -805,8 +834,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
       writeWr.send_flags = 0;
       struct ibv_send_wr* badWriteWr;
       NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr));
-    }
-    if (useGpuFlushMem) {
+
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
     } else {
@@ -1101,6 +1129,7 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
       req->events[devIndex]--;
     } else if (wc->opcode == IBV_WC_RDMA_WRITE) {
       TRACE(NCCL_NET, "NET/IB: %s: Got completion for a CTS (devIndex=%d, qp_num=%u)", __func__, devIndex, wc->qp_num);
+      IbCastTelemetryWqeComplete(commBase, wc, devIndex, 0);
       req->events[devIndex]--;
       return ncclSuccess;
     } else {
@@ -1212,6 +1241,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
         NCCLCHECK(IbCastCommBaseGetQpByQpNum(commBase, devIndex, wc->qp_num, &qp, &qpIndex));
         req->recv.cmplsRecords->completions[qpIndex] = 1;
         NCCLCHECK(IbCastPostRecvWorkRequest(qp->qp, &recvComm->ibRecvWorkRequest));
+        rcclTelemetryQpRecvPosted(qp->telQpStats);
       } else {
         // In the prepost path wr_id is UINT64_MAX (sentinel); only decrement rxPosts
         // in the non-prepost path where wr_id is a valid slot index.
@@ -1253,6 +1283,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
              be32toh(wc->imm_data));
         return ncclSuccess;
       }
+      IbCastTelemetryWqeComplete(commBase, wc, devIndex, 0);
     } else {
       WARN("NET/IB: %s: Unknown completion (req=%p, comm=%p, id=%ld, devIndex=%d, req->type=%s, wc.wr_id=0x%lx, "
            "wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=0x%x)",
@@ -1493,3 +1524,7 @@ ncclResult_t ncclIbCastFaultOpsClear(void* comm) {
 }
 
 #endif /* ENABLE_FAULT_INJECTION */
+
+extern "C" const char* ncclIbCastTestGinIgetName(void) {
+  return IbCastReqTypeStr[NCCL_NET_IB_REQ_GIN_IGET];
+}

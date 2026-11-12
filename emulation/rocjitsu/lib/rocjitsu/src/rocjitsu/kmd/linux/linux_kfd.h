@@ -144,6 +144,9 @@ public:
                                                      int fd, off_t offset) = 0;
 
   /// @brief Return true if this driver should synthesize /dev/dri/renderD@p minor.
+  /// @details A legacy single-GPU simulator accepts every minor for compatibility;
+  /// a manifest simulator accepts only selected minors. Other drivers use their
+  /// own GPU ownership rules. Unhandled opens reach the host device.
   [[nodiscard]] virtual bool handles_drm_render_minor(uint32_t minor) const = 0;
 
   /// @brief Return synthetic GPU properties for a handled DRM render minor.

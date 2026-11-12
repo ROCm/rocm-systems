@@ -5,7 +5,6 @@
 
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
-#include "util/except.h"
 
 #include <algorithm>
 #include <cassert>
@@ -106,8 +105,9 @@ DeviceCacheCoherence::AtomicBoundary DeviceCacheCoherence::acquire_atomic_bounda
   return AtomicBoundary(this, locked_l2_count, std::move(atomic_lock), std::move(coherence_lock));
 }
 
-DeviceCacheMaintenanceLease
-DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation) {
+util::FailureOr<DeviceCacheMaintenanceLease>
+DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
+                                                util::DiagnosticEmitter emit_error) {
   std::unique_lock atomic_lock(atomic_mutex_);
   std::unique_lock coherence_lock(mutex_);
 
@@ -118,26 +118,31 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation) 
         std::ranges::any_of(memory_side_caches_, [](const MemorySideCache *cache) {
           return !cache->has_legacy_maintenance_backing();
         });
-    if (missing_l2_backing || missing_memory_side_backing)
-      throw util::ConfigError("cache hierarchy lacks legacy maintenance backing");
+    if (missing_l2_backing || missing_memory_side_backing) {
+      coherence_lock.unlock();
+      atomic_lock.unlock();
+      return emit_error.emit() << "cache hierarchy lacks legacy maintenance backing";
+    }
   }
 
   size_t locked_l2_count = 0;
   size_t locked_memory_side_count = 0;
+  const auto fail_writeback = [&](std::string_view message) -> util::Result {
+    // Direct publication bypasses the MSC. Drop all clean MSC lines while
+    // retaining dirty lines for retry. Advancing the epoch would make their
+    // next access treat them as stale, which requires them to be clean.
+    for (MemorySideCache *cache : memory_side_caches_)
+      cache->invalidate_clean_locked();
+    release_cache_locks(std::exchange(locked_l2_count, 0),
+                        std::exchange(locked_memory_side_count, 0));
+    coherence_lock.unlock();
+    atomic_lock.unlock();
+    return emit_error.emit() << message;
+  };
   try {
     for (L2Cache *cache : l2_caches_) {
       cache->maintenance_mutex_.lock();
       ++locked_l2_count;
-    }
-
-    // This path can run on the standalone SDMA worker. It must never enter the
-    // simulation topology from that thread, so legacy dirty state is published
-    // directly to the SoC's GpuMemory backing while cache access is excluded.
-    if (operation == DeviceCacheOperation::WritebackInvalidate) {
-      for (L2Cache *cache : l2_caches_) {
-        if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete)
-          throw util::Exception(std::string_view("L2 cache maintenance backing write failed"));
-      }
     }
 
     for (MemorySideCache *cache : memory_side_caches_) {
@@ -145,11 +150,22 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation) 
       ++locked_memory_side_count;
     }
 
+    // This path can run on the standalone SDMA worker. It must never enter the
+    // simulation topology from that thread, so legacy dirty state is published
+    // directly to the SoC's GpuMemory backing while cache access is excluded.
+    if (operation == DeviceCacheOperation::WritebackInvalidate) {
+      for (L2Cache *cache : l2_caches_) {
+        if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
+          return fail_writeback("L2 cache maintenance backing write failed");
+        }
+      }
+    }
+
     if (operation == DeviceCacheOperation::WritebackInvalidate) {
       for (MemorySideCache *cache : memory_side_caches_) {
-        if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete)
-          throw util::Exception(
-              std::string_view("memory-side cache maintenance backing write failed"));
+        if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
+          return fail_writeback("memory-side cache maintenance backing write failed");
+        }
       }
     }
 
@@ -187,6 +203,11 @@ void DeviceCacheCoherence::release_cache_locks(size_t locked_l2_count,
     --locked_l2_count;
     l2_caches_[locked_l2_count]->maintenance_mutex_.unlock();
   }
+}
+
+bool DeviceCacheCoherence::has_multiple_l2_caches() const {
+  std::shared_lock lock(mutex_);
+  return l2_caches_.size() > 1;
 }
 
 void DeviceCacheCoherence::register_l2_cache(L2Cache *cache) {

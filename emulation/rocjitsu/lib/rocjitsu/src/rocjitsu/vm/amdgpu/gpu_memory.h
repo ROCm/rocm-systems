@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/memory_transaction.h"
 #include "simdojo/components/sparse_memory.h"
 
 #include <string>
@@ -20,7 +21,13 @@ namespace rocjitsu::amdgpu {
 /// this backing store.
 class GpuMemory : public simdojo::SparseMemory {
 public:
-  explicit GpuMemory(std::string name) : simdojo::SparseMemory(std::move(name)) {}
+  explicit GpuMemory(std::string name, MemoryTransactionPolicy transactions = {})
+      : simdojo::SparseMemory(std::move(name)), transactions_(transactions) {}
+
+  MemoryTransactionPolicy transaction_policy() const { return transactions_; }
+
+private:
+  const MemoryTransactionPolicy transactions_;
 };
 
 } // namespace rocjitsu::amdgpu

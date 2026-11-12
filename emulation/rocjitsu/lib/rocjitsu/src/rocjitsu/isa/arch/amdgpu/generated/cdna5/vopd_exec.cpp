@@ -9,7 +9,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -115,7 +114,9 @@ uint64_t Vopd::execute_slot64(const Slot &slot, amdgpu::Wavefront &wf, uint32_t 
     return std::bit_cast<uint64_t>(result);
   }
   default:
-    throw util::UnimplementedInst(op_name(slot.op));
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return 0;
   }
 }
 
@@ -174,15 +175,17 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdSubF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(
-        std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(),
-        wf.fp_denorm_mode_f32());
+    // The ISA defines VOPD by the VOP2 instructions (16.11): add the
+    // negated subtrahend, keeping the sources in operand order.
+    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
+        std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u), 0.0f,
+        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdSubrevF32: {
-    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(
-        std::bit_cast<float>(src1), std::bit_cast<float>(src0), 0.0f, wf.fp_round_mode_f32(),
-        wf.fp_denorm_mode_f32());
+    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(
+        std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1), 0.0f,
+        wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdMovB32:
@@ -222,21 +225,19 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
     return static_cast<uint32_t>(std::max(static_cast<int32_t>(src0), static_cast<int32_t>(src1)));
   case kVopdMinI32:
     return static_cast<uint32_t>(std::min(static_cast<int32_t>(src0), static_cast<int32_t>(src1)));
-  case kVopdFmaF64:
-  case kVopdAddF64:
-  case kVopdMulF64:
-  case kVopdMaxNumF64:
-  case kVopdMinNumF64:
-    throw util::UnimplementedInst(std::string(op_name(slot.op)) +
-                                  " (VOPD F64 execution requires 64-bit VGPR pair support)");
   default:
-    throw util::UnimplementedInst(op_name(slot.op));
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return 0;
   }
 }
 
 void Vopd::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.wf_size() != 32)
-    throw util::UnimplementedInst("VOPD requires Wave32");
+  if (wf.wf_size() != 32) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
   if (amdgpu::try_execute_vopd_integer_pair_simd<kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(
           wf, x_, y_))
     return;
@@ -249,9 +250,17 @@ void Vopd::execute_impl(amdgpu::Wavefront &wf) {
     bool x64 = is_float64_op(x_.op);
     bool y64 = is_float64_op(y_.op);
     uint64_t x_result64 = x64 ? execute_slot64(x_, wf, lane) : 0;
+    if (wf.instruction_execution_failed())
+      return;
     uint64_t y_result64 = y64 ? execute_slot64(y_, wf, lane) : 0;
+    if (wf.instruction_execution_failed())
+      return;
     uint32_t x_result32 = x64 ? 0 : execute_slot(x_, wf, lane);
+    if (wf.instruction_execution_failed())
+      return;
     uint32_t y_result32 = y64 ? 0 : execute_slot(y_, wf, lane);
+    if (wf.instruction_execution_failed())
+      return;
     if (x64)
       amdgpu::RegisterAccess(wf).write_lane64(*x_.dst, lane, x_result64);
     else

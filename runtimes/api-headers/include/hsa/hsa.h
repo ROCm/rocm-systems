@@ -83,8 +83,8 @@
 #define LITTLEENDIAN_CPU
 #elif defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 #define BIGENDIAN_CPU
-#elif defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || \
-      defined(_M_X64) || defined(__loongarch64) || defined(__riscv)
+#elif defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64) ||           \
+    defined(__loongarch64) || defined(__riscv) || defined(__aarch64__) || defined(__arm__)
 #define LITTLEENDIAN_CPU
 #endif
 #endif
@@ -315,6 +315,8 @@ typedef struct hsa_dim3_s {
 
 /**
  * @brief Access permissions.
+ *
+ * Read, write, and execute are independent bits and may be combined.
  */
 typedef enum {
   /**
@@ -324,15 +326,19 @@ typedef enum {
   /**
    * Read-only access.
    */
-  HSA_ACCESS_PERMISSION_RO = 1,
+  HSA_ACCESS_PERMISSION_RO = (1 << 0),
   /**
    * Write-only access.
    */
-  HSA_ACCESS_PERMISSION_WO = 2,
+  HSA_ACCESS_PERMISSION_WO = (1 << 1),
   /**
    * Read and write access.
    */
-  HSA_ACCESS_PERMISSION_RW = 3
+  HSA_ACCESS_PERMISSION_RW = (1 << 0) | (1 << 1),
+  /**
+   * Execute access. May be combined with the read and write permissions.
+   */
+  HSA_ACCESS_PERMISSION_EX = (1 << 2),
 } hsa_access_permission_t;
 
 /**

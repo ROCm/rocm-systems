@@ -123,6 +123,7 @@ extern void _loader_debug_state();
 namespace core {
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
+bool g_use_yielding_poll;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
@@ -225,13 +226,19 @@ void Runtime::RegisterAgent(Agent* agent, bool Enabled) {
       // Default system pool must support kernarg
       for (auto pool : system_regions_fine_) {
         if (pool->kernarg()) {
-          system_allocator_ = [pool](size_t size, size_t alignment,
-                                     MemoryRegion::AllocateFlags alloc_flags,
-                                     int agent_node_id) -> void* {
+          // Capture a raw pointer (not the shared_ptr) so the closure state is
+          // trivially destructible and stored inline in std::function.  The
+          // region outlives the closure via system_regions_fine_ and the owning
+          // CPU agent, and this avoids a heap-buffer-overflow when the closure
+          // copy held by BaseShared is torn down during Unload().
+          const core::MemoryRegion* pool_ptr = pool.get();
+          system_allocator_ = [pool_ptr](size_t size, size_t alignment,
+                                         MemoryRegion::AllocateFlags alloc_flags,
+                                         int agent_node_id) -> void* {
             assert(alignment <= 4096);
             void* ptr = NULL;
             return (HSA_STATUS_SUCCESS ==
-                    core::Runtime::runtime_singleton_->AllocateMemory(pool.get(), size, alloc_flags,
+                    core::Runtime::runtime_singleton_->AllocateMemory(pool_ptr, size, alloc_flags,
                                                                       &ptr, agent_node_id))
                 ? ptr
                 : NULL;
@@ -984,6 +991,13 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_cond
   return HSA_STATUS_SUCCESS;
 }
 
+void Runtime::WakeAsyncSignalMonitor() {
+  // Notify unconditionally, as SetAsyncSignalHandler() does, so a monitor about to park can't
+  // miss it. Like SetAsyncSignalHandler(), this assumes waiters are gone before teardown.
+  if (!asyncSignals_.empty())
+    hsa_signal_handle((*asyncSignals_)->control.wake)->StoreReleaseAndNotify(1);
+}
+
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
                                  hsa_interop_map_flag_t flags, size_t size_hint, size_t* size,
                                  void** ptr, size_t* metadata_size, const void** metadata) {
@@ -1075,6 +1089,25 @@ hsa_status_t Runtime::InteropUnmap(void* ptr) {
     allocation_map_.erase(ptr);
   }
   return HSA_STATUS_SUCCESS;
+}
+
+void Runtime::MarkReservedAddressSvm(const void* ptr, size_t size) {
+  if (ptr == nullptr || size == 0) return;
+
+  const uint8_t* start = reinterpret_cast<const uint8_t*>(ptr);
+  const uint8_t* end = start + size;
+
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  auto it = reserved_address_map_.upper_bound(ptr);
+  if (it != reserved_address_map_.begin()) --it;
+
+  for (; it != reserved_address_map_.end(); ++it) {
+    const uint8_t* range_start = reinterpret_cast<const uint8_t*>(it->first);
+    const uint8_t* range_end = range_start + it->second.size;
+    if (range_end <= start) continue;
+    if (range_start >= end) break;
+    it->second.svm_attrib = true;
+  }
 }
 
 /* This should be called memory_lock_ held */
@@ -1184,9 +1217,17 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
   /* This is not a mapped address. Check if it is a reserved address range */
   auto addressHandle = VMemoryFindReservedAddressHandle(ptr);
   if (addressHandle) {
-    info->type = HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
-    info->agentBaseAddress = NULL;
+    /*
+     * Reservations that have had hsa_amd_svm_attributes_set applied are backed
+     * by SVM system memory. Bare reservations have no backing.
+     */
+    info->type = addressHandle->svm_attrib ? HSA_EXT_POINTER_TYPE_SVM
+                                           : HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
     info->hostBaseAddress = addressHandle->os_addr;
+    // The driver query supplies an agent address when it recognizes the
+    // reservation. Until then the agent base stays null. Fill and copy treat a
+    // non-null agent base as a mapped allocation and require an owner.
+    info->agentBaseAddress = nullptr;
     info->sizeInBytes = addressHandle->size;
     info->registered = addressHandle->registered;
     info->agentOwner = {};
@@ -1257,12 +1298,15 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     if (VMemoryPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible) ==
         HSA_STATUS_SUCCESS) {
       /*
-       * For SVM allocations, the VA is reserved using hsa_amd_vmem_address_reserve with
-       * HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag. So for SVM allocations, we do not return
-       * yet as we can check whether this address was registered via hsa_amd_svm_attributes_set
-       * and provide additional information from hsaKmtQueryPointerInfo.
+       * An unregistered reservation falls through to the driver query, including
+       * after hsa_amd_svm_attributes_set has changed its type to SVM. That is the
+       * query these NO_REGISTER addresses went through before. A registered
+       * reservation, bare or SVM, is fully described here.
        */
-      if (!(retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR && !retInfo.registered)) {
+      const bool query_driver = !retInfo.registered &&
+          (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+           retInfo.type == HSA_EXT_POINTER_TYPE_SVM);
+      if (!query_driver) {
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
       }
@@ -1297,11 +1341,11 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       if (described) ptr_driver = driver;
     }
     if (ptr_driver == nullptr) {
-      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
-        /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
-         * the HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag, but the address was not registered
-         * with hsa_amd_svm_attributes_set. So we return the contents of retInfo that
-         * were previously filled with VMemoryPtrInfo.
+      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+          retInfo.type == HSA_EXT_POINTER_TYPE_SVM) {
+        /* NO_REGISTER reservation. The driver has no object for it, whether or
+         * not hsa_amd_svm_attributes_set has run. Keep the reservation record:
+         * RESERVED_ADDR until attributes are set, SVM afterwards.
          */
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
@@ -2144,7 +2188,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       if (core::Runtime::runtime_singleton_->flag().wait_any()) {
         index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
                                      &async_events_.cond_[0], &async_events_.value_[0],
-                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false);
+                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false,
+                                     /*wake_async_monitor=*/false);
       } else {
         // Skip wake-up signal logic
         index = 1;
@@ -2169,17 +2214,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // once per outer-loop iteration (one per new wait batch), so the backoff
       // only compounds within a single idle wait and every new wait starts
       // again at the floor -- the escalated value cannot carry across waits.
-      // The ceiling depends on why we would be polling: with interrupts
-      // unavailable globally (WSL/dxg, DTIF, KFD 1.0, HSA_ENABLE_INTERRUPT=0)
-      // every signal is polling-only and a long nap costs only the napping
-      // wait's own observation latency. With interrupts available, polling can
-      // still be forced by a single EopEvent-less signal in the batch (an IPC
-      // signal or an internal DefaultSignal such as gang-copy signals); the
-      // nap then delays unrelated interrupt-backed handlers on this shared
-      // thread, so it is capped at the interrupt path's 200us active-poll
-      // window instead.
-      const int poll_nap_ceiling_us =
-          g_use_interrupt_wait ? kPollNapCeilingMixedUs : kPollNapCeilingUs;
       int poll_nap_us = kPollNapFloorUs;
 
       while (!finish) {
@@ -2270,7 +2304,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
-        } else if (polling && !finish) {
+        } else if (polling && !finish && !g_use_interrupt_wait) {
           // No interrupt-backed event is available for at least one pending
           // signal (PrepareInterrupt forced polling) -- on the WSL/dxg thunk
           // that is every signal, since it implements no KFD events at all.
@@ -2280,15 +2314,13 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // process that has merely touched the GPU
           // (https://github.com/ROCm/librocdxg/issues/60). Nap between scans,
           // doubling from 20us up to poll_nap_ceiling_us (2ms when the whole
-          // runtime is polling-only, 200us when a mixed batch also carries
-          // interrupt-backed handlers this nap would delay -- see the ceiling
-          // selection above), so a wait that completes quickly keeps low
+          // runtime is polling-only, so a wait that completes quickly keeps low
           // observation latency while a long-lived idle wait costs almost no
           // CPU. The nap is re-initialized at the outer-loop boundary (see
           // poll_nap_us above), so the escalation only compounds within a
           // single idle wait batch.
           os::uSleep(poll_nap_us);
-          poll_nap_us = NextPollNapUs(poll_nap_us, poll_nap_ceiling_us);
+          poll_nap_us = NextPollNapUs(poll_nap_us, kPollNapCeilingUs);
         }
       }
     }
@@ -2786,6 +2818,7 @@ Runtime::Runtime()
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
+  g_use_yielding_poll = false;
   ::_amdgpu_r_debug = {11, nullptr, reinterpret_cast<uintptr_t>(&_loader_debug_state),
                        r_debug::RT_CONSISTENT, 0};
   log_file = stderr;
@@ -2820,6 +2853,7 @@ hsa_status_t Runtime::Load() {
 
   g_use_interrupt_wait = flag_.enable_interrupt();
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
+  g_use_yielding_poll = flag_.enable_yielding_poll();
 
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -2946,6 +2980,13 @@ void Runtime::Unload() {
   // contain allocations from memory regions owned by agents.
   SharedSignalPool.clear();
   EventPool.clear();
+
+  // Release static allocators while agents and the thunk are still valid so
+  // system memory regions kept alive by the allocator closures can run
+  // fragment heap teardown safely.
+  system_allocator_ = {};
+  system_deallocator_ = {};
+  BaseShared::SetAllocateAndFree({}, {});
 
   // Clear system regions before destroying agents to prevent use-after-free
   // when agent destructors access region memory.
@@ -3112,6 +3153,11 @@ void Runtime::LoadTools() {
   typedef Agent* (*tool_wrap_t)(Agent*);
   typedef void (*tool_add_t)(Runtime*);
 
+  // Set when a v3 tool owns the API table. Tools named in HSA_TOOLS_LIB are an
+  // explicit request and still load; tools that are merely loaded in the
+  // process are not picked up, since they would wrap the table a second time.
+  bool skip_loaded_tools = false;
+
 #if defined(HSA_ROCPROFILER_REGISTER) && HSA_ROCPROFILER_REGISTER > 0
   if (!flag().disable_tool_register()) {
     auto* profiler_api_table_ = static_cast<void*>(&hsa_api_table());
@@ -3142,9 +3188,7 @@ void Runtime::LoadTools() {
       }
     }
 
-    // if rocprofiler library supports registration and v1 support not explicitly requested,
-    // do not use old method
-    if (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration) return;
+    skip_loaded_tools = (rocp_reg_status == ROCP_REG_SUCCESS && !allow_v1_registration);
   }
 #endif
 
@@ -3189,7 +3233,8 @@ void Runtime::LoadTools() {
   }
 
   // Discover loaded tools.
-  std::vector<os::LibHandle> loaded_hds = os::GetLoadedToolsLib();
+  std::vector<os::LibHandle> loaded_hds;
+  if (!skip_loaded_tools) loaded_hds = os::GetLoadedToolsLib();
   for (auto& handle : loaded_hds) {
     const uint32_t* order = (const uint32_t*)os::GetExportAddress(handle, "HSA_AMD_TOOL_PRIORITY");
     if (order) {
@@ -3637,6 +3682,8 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   if (error != HSAKMT_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMSetAttr failed.");
 
+  MarkReservedAddressSvm(base, len);
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4018,9 +4065,12 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
       return status;
     }
 
-    // Only SVM allocations that were reserved using hsa_amd_vmem_address_reserve are valid for
-    // discard
-    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered) {
+    // Managed SVM is reserved with HSA_AMD_VMEM_ADDRESS_NO_REGISTER (registered == false).
+    // After hsa_amd_svm_attributes_set the same reservation is reported as
+    // HSA_EXT_POINTER_TYPE_SVM. Registered VMM reservations stay ineligible.
+    if (ptr_info.registered ||
+        (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR &&
+         ptr_info.type != HSA_EXT_POINTER_TYPE_SVM)) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
@@ -4181,7 +4231,11 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
       debug_warning(false && "Retrieving SVM pointer information failed");
       return status;
     }
-    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered)
+    // Same eligibility as SvmBatchDiscard: unregistered reservations, including those
+    // reported as HSA_EXT_POINTER_TYPE_SVM after hsa_amd_svm_attributes_set.
+    if (ptr_info.registered ||
+        (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR &&
+         ptr_info.type != HSA_EXT_POINTER_TYPE_SVM))
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -5101,8 +5155,14 @@ hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handl
 hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapped_handle,
                                                void* va) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto mappedHandleIt = mapped_handle_map_.find(va);
-  if (mappedHandleIt == mapped_handle_map_.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  // Look-up any mapped handle that contains this address.
+  auto mappedHandleIt = mapped_handle_map_.upper_bound(va);
+  if (mappedHandleIt == mapped_handle_map_.begin()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  mappedHandleIt--;
+  if (reinterpret_cast<const uint8_t*>(va) >=
+      reinterpret_cast<const uint8_t*>(mappedHandleIt->first) + mappedHandleIt->second.size) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
 
   MemoryHandle* memoryHandle = mappedHandleIt->second.mem_handle;
   memoryHandle->ref_count++;

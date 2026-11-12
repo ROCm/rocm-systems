@@ -9,8 +9,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"
 #include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
@@ -785,6 +785,15 @@ public:
 class Mubuf : public IsaInstruction<Isa> {
 public:
   Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const MubufMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    if (inst_.lds && !(inst_.op == 0 || (inst_.op >= 16 && inst_.op <= 20) ||
+                       (inst_.op >= 22 && inst_.op <= 23))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support LDS";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
@@ -831,6 +840,20 @@ public:
 class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const FlatMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    static constexpr uint8_t segment_masks[128] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 6, 6, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+        5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5, 5, 5, 5,
+        5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 0};
+    if (!(segment_masks[inst_.op] & (1u << inst_.seg))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " has an invalid segment";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;

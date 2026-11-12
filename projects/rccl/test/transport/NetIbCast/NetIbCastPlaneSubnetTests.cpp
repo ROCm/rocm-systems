@@ -104,4 +104,18 @@ TEST(NetIbCastSubnet, SubnetMatchesAny) {
   EXPECT_EQ(ncclIbCastTestSubnetMatchesAny(local, rem, 3, 24), 0);
 }
 
+// speed: ibvSpeeds[] must have one entry per signaling rate, FDR10 included,
+// or every rate from FDR up reads one slot too fast (regresses AICOMRCCL-2021).
+TEST(NetIbCastSpeed, SignalingRateTable) {
+  EXPECT_EQ(ncclIbCastTestSpeed(1 << 0), 2500);    // SDR
+  EXPECT_EQ(ncclIbCastTestSpeed(1 << 1), 5000);    // DDR
+  EXPECT_EQ(ncclIbCastTestSpeed(1 << 2), 10000);   // QDR
+  EXPECT_EQ(ncclIbCastTestSpeed(1 << 3), 10000);   // FDR10
+  EXPECT_EQ(ncclIbCastTestSpeed(1 << 4), 14000);   // FDR
+  EXPECT_EQ(ncclIbCastTestSpeed(1 << 5), 25000);   // EDR
+  EXPECT_EQ(ncclIbCastTestSpeed(1 << 6), 50000);   // HDR
+  EXPECT_EQ(ncclIbCastTestSpeed(1 << 7), 100000);  // NDR
+  EXPECT_EQ(ncclIbCastTestSpeed(1 << 8), 200000);  // XDR
+}
+
 }  // namespace

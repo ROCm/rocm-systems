@@ -86,10 +86,11 @@ Recorder::Recorder() {
   pid = getpid();
   output_json = 0;
 
-  size_t dot;
+  const size_t slash = filename.find_last_of('/');
+  const size_t dot = filename.find_last_of('.');
   std::string output_name, output_extension;
 
-  if ((dot = std::string(filename).find(".")) != std::string::npos) {
+  if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
     output_name = std::string(filename).substr(0, dot);
     output_extension = std::string(filename).substr(dot);
     if (output_extension.compare(".json") == 0) {
@@ -99,8 +100,12 @@ Recorder::Recorder() {
     output_name = std::string(filename);
   }
 
-  outputFile.open(output_name + "." + std::to_string(pid) + "." + std::string(hostname) + output_extension,
-                  output_json ? std::ofstream::out : std::ofstream::binary);
+  const std::string outputPath = output_name + "." + std::to_string(pid) + "." + hostname + output_extension;
+  outputFile.open(outputPath, output_json ? std::ofstream::out : std::ofstream::binary);
+  if (!outputFile.is_open()) {
+    WARN("Could not open RCCL replay file %s", outputPath.c_str());
+    return;
+  }
   if (output_json) {
     outputFile << "{" << std::endl;
     indent(2, outputFile);

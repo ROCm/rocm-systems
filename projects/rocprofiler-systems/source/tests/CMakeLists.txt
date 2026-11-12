@@ -8,11 +8,10 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:demangler-tests>
     $<TARGET_OBJECTS:containers-tests>
     $<TARGET_OBJECTS:tracing-config-tests>
-    $<TARGET_OBJECTS:control-posix-clock-tests>
-    $<TARGET_OBJECTS:control-timeline-clock-tests>
-    $<TARGET_OBJECTS:control-steady-clock-tests>
     $<TARGET_OBJECTS:control-session-scope-tests>
     $<TARGET_OBJECTS:control-roctx-trigger-tests>
+    $<TARGET_OBJECTS:control-waitable-posix-tests>
+    $<TARGET_OBJECTS:control-waitable-steady-tests>
     $<TARGET_OBJECTS:trace-period-config-tests>
     $<TARGET_OBJECTS:track-registry-tests>
     $<TARGET_OBJECTS:packet-framing-tests>
@@ -22,8 +21,10 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:output-format-tests>
     $<TARGET_OBJECTS:output-summary-tests>
     $<TARGET_OBJECTS:parse-numeric-range-tests>
+    $<TARGET_OBJECTS:process-environment-tests>
     $<TARGET_OBJECTS:rank-passes-filter-tests>
     $<TARGET_OBJECTS:state-tests>
+    $<TARGET_OBJECTS:library-checker-tests>
     $<TARGET_OBJECTS:progress-tests>
     $<TARGET_OBJECTS:logger-tests>
     $<TARGET_OBJECTS:lib-components-tests>
@@ -32,6 +33,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:callback-domains-unit-tests>
     $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
     $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
+    $<$<TARGET_EXISTS:rocsys-tests>:$<TARGET_OBJECTS:rocsys-tests>>
     $<$<TARGET_EXISTS:instrument-tests>:$<TARGET_OBJECTS:instrument-tests>>
 )
 
@@ -76,6 +78,7 @@ target_link_libraries(
         rocprofiler-systems-core-library
         rocprofiler-systems::rocprofiler-systems-binary
         $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
+        $<$<TARGET_EXISTS:rocprofiler-systems-rocsys-core>:rocprofiler-systems::rocprofiler-systems-rocsys-core>
         rocprofiler-systems::rocprofiler-systems-interface-library
 )
 

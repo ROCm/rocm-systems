@@ -32,6 +32,7 @@ class RunCorpusTests(unittest.TestCase):
             'CORPUS_TEST_CALLS': str(self.calls),
             'ROCJITSU_CPU_THREAD_BUDGET': '4',
         }
+        self.env.pop('ROCJITSU_RACE_CASE_TIMEOUT', None)
         self.write_tool('rocjitsu', '#!/bin/sh\nexit 0\n')
         self.write_tool(
             'pytest',
@@ -43,11 +44,19 @@ if "--suite" not in args:
 suite = args[args.index("--suite") + 1]
 target = args[args.index("--target") + 1]
 with open(os.environ["CORPUS_TEST_CALLS"], "a") as log:
-    log.write(json.dumps({"args": args, "config": os.getenv("ROCJITSU_RACE_CONFIG")}) + "\\n")
+    log.write(json.dumps({"args": args, "config": os.getenv("ROCJITSU_RACE_CONFIG"),
+                         "case_timeout": os.getenv("ROCJITSU_RACE_CASE_TIMEOUT")}) + "\\n")
 if "--junitxml" in args:
     report = Path(args[args.index("--junitxml") + 1])
     report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text("<testsuites/>")
+    duration = os.getenv("CORPUS_TEST_RACE_DURATION", "0") if suite == "race" else "0"
+    case = f'<testcase classname="{suite}" name="passing" time="{duration}"/>'
+    if suite == "race" and target == os.getenv("CORPUS_TEST_EMPTY_RACE_TARGET"):
+        # pytest's placeholder for a target with no corpus cases.
+        case = ('<testcase classname="tests.test_corpus" name="test_corpus_case[NOTSET]" time="0">'
+                '<skipped type="pytest.skip" message="got empty parameter set for (corpus_case)"/>'
+                '</testcase>')
+    report.write_text(f'<testsuites><testsuite>{case}</testsuite></testsuites>')
 sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-failed" not in args else 0)
 ''',
         )
@@ -81,13 +90,28 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
         self.assertTrue(
             all(self.option(c, '--suite') == 'iree,kernels,cts' for c in calls)
         )
+        self.assertTrue(all('-k' not in c['args'] for c in calls))
+
+    def test_ubsan_excludes_slow_simulator_cases_from_every_pass(self):
+        self.env['CORPUS_TEST_FAIL'] = '1'
+        result, calls = self.run_script('--ubsan', '--race-tests', '--rerun-failed')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        simulator = [c for c in calls if self.option(c, '--suite') != 'race']
+        self.assertTrue(any('--last-failed' in c['args'] for c in simulator))
+        for call in simulator:
+            self.assertEqual(
+                self.option(call, '-k'), 'not (rocblas_sgemm.large_2048x2048)'
+            )
+        race = [c for c in calls if self.option(c, '--suite') == 'race']
+        self.assertTrue(race)
+        self.assertTrue(all('-k' not in c['args'] for c in race))
 
     def test_race_uses_private_config_and_shared_launch_wrapper(self):
         result, calls = self.run_script(
             '--race-tests', '--workers', '3', '--soft-timeout', '17'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(calls), 7)
+        self.assertEqual(len(calls), 9)
         for call in calls:
             wrapper = shlex.split(self.option(call, '--run-wrapper'))
             self.assertIn(
@@ -101,14 +125,64 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
                 self.assertEqual(wrapper[wrapper.index('--config') + 1], '{config}')
                 self.assertTrue(Path(call['config']).is_file())
                 self.assertNotIn('--skip-tests-config', call['args'])
+                self.assertEqual(call['case_timeout'], '17')
             else:
                 self.assertIn('--skip-tests-config', call['args'])
+                self.assertIsNone(call['case_timeout'])
         self.assertEqual(
-            [self.option(c, '--target') for c in calls[-2:]], ['gfx950', 'gfx1151']
+            [self.option(c, '--target') for c in calls[-4:]],
+            ['gfx942', 'gfx950', 'gfx1151', 'gfx1250'],
         )
         reports = self.root / '.pytest-artifacts/junit'
+        self.assertTrue((reports / 'race-gfx942.xml').is_file())
         self.assertTrue((reports / 'race-gfx950.xml').is_file())
         self.assertTrue((reports / 'race-gfx1151.xml').is_file())
+        self.assertTrue((reports / 'race-gfx1250.xml').is_file())
+
+    def test_empty_race_suite_is_reported_instead_of_passing(self):
+        self.env['CORPUS_TEST_EMPTY_RACE_TARGET'] = 'gfx1250'
+        result, _ = self.run_script('--race-tests')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            '::notice::No race (gfx1250) tests ran; the corpus has no cases for this target.',
+            result.stdout,
+        )
+        self.assertNotIn('All race (gfx1250) tests passed.', result.stdout)
+        self.assertIn('All race (gfx1151) tests passed.', result.stdout)
+
+    def test_required_race_cases_fail_an_empty_race_suite(self):
+        self.env['CORPUS_TEST_EMPTY_RACE_TARGET'] = 'gfx1250'
+        result, calls = self.run_script('--race-tests', '--require-race-cases')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(
+            '::error::No race (gfx1250) tests ran; the corpus has no cases for this target.',
+            result.stdout,
+        )
+        self.assertIn('All race (gfx1151) tests passed.', result.stdout)
+        self.assertFalse(any('--last-failed' in c['args'] for c in calls))
+
+    def test_required_race_cases_accept_suites_that_ran(self):
+        result, _ = self.run_script('--race-tests', '--require-race-cases')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for target in ['gfx942', 'gfx950', 'gfx1151', 'gfx1250']:
+            self.assertIn(f'All race ({target}) tests passed.', result.stdout)
+
+    def test_required_race_cases_need_the_race_suite(self):
+        result = subprocess.run(
+            [
+                'bash',
+                str(SOURCE_DIR / 'tests/corpus/run-corpus-tests.sh'),
+                '--require-race-cases',
+            ],
+            cwd=self.root,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('--require-race-cases requires --race-tests', result.stderr)
+        self.assertFalse(self.calls.exists())
 
     def test_successful_retry_preserves_failure_for_both_suites(self):
         self.env['CORPUS_TEST_FAIL'] = '1'
@@ -124,7 +198,68 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
             self.assertIn('--last-failed-no-failures=none', call['args'])
             self.assertNotIn('--junitxml', call['args'])
             self.assertIn('43s', shlex.split(self.option(call, '--run-wrapper')))
-        self.assertEqual(self.option(calls[-1], '--target'), 'gfx1151')
+            if self.option(call, '--suite') == 'race':
+                self.assertNotIn('--skip-tests-config', call['args'])
+                self.assertEqual(call['case_timeout'], '43')
+            else:
+                self.assertIsNone(call['case_timeout'])
+                self.assertEqual(
+                    Path(self.option(call, '--skip-tests-config')),
+                    SOURCE_DIR / 'tests/corpus/gfx950_skip_tests.json',
+                )
+        self.assertEqual(self.option(calls[-1], '--target'), 'gfx1250')
+        self.assertTrue(
+            all(
+                c['case_timeout'] == '30'
+                for c in calls
+                if '--last-failed' not in c['args']
+                and self.option(c, '--suite') == 'race'
+            )
+        )
+
+    def test_race_retry_deadline_does_not_leak_into_first_pass(self):
+        self.env['CORPUS_TEST_FAIL'] = '1'
+        self.env['ROCJITSU_RACE_CASE_TIMEOUT'] = '7'
+        result, calls = self.run_script(
+            '--race-tests',
+            '--rerun-failed',
+            '--soft-timeout',
+            '17',
+            '--hard-timeout',
+            '43',
+            '--rerun-timeout',
+            '120',
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        race_calls = [c for c in calls if self.option(c, '--suite') == 'race']
+        self.assertEqual(
+            [c['case_timeout'] for c in race_calls], ['17', '17', '43', '17', '17']
+        )
+
+    def test_race_near_timeout_reporting_uses_the_execution_deadline(self):
+        for timeout, duration in [('30', '29'), ('360', '349')]:
+            with self.subTest(timeout=timeout):
+                self.calls.unlink(missing_ok=True)
+                self.env['CORPUS_TEST_RACE_DURATION'] = duration
+                result, calls = self.run_script(
+                    '--race-tests', '--soft-timeout', timeout, '--warn-perf'
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                race_calls = [c for c in calls if self.option(c, '--suite') == 'race']
+                for call in race_calls:
+                    self.assertEqual(call['case_timeout'], timeout)
+                    self.assertIn(
+                        f'{timeout}s', shlex.split(self.option(call, '--run-wrapper'))
+                    )
+                self.assertIn(f'close to the {timeout}s timeout', result.stdout)
+                self.assertIn(f'{duration}s, race-gfx950, race::passing', result.stdout)
+                self.assertIn(
+                    f'{duration}s, race-gfx1151, race::passing', result.stdout
+                )
+                self.assertIn(
+                    f'{duration}s, race-gfx1250, race::passing', result.stdout
+                )
+                self.assertIn('::warning::Near-timeout tests found.', result.stdout)
 
     def test_race_preserves_clang_asan_child_preload(self):
         rocm = Path(self.env['ROCM_PATH'])

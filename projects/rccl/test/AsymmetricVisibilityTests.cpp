@@ -17,8 +17,8 @@
 // This test spawns its own worker processes via fork()+execv(), each with a
 // distinct HIP_VISIBLE_DEVICES set before HIP is initialized.
 // The orchestrator generates the ncclUniqueId and hands it to the workers
-// hex-encoded in the environment. Each worker binds its device, joins a
-// 2-rank communicator, asserts that init left no pending HIP error, and runs a
+// hex-encoded in the environment. Each worker binds its device, joins the
+// communicator, asserts that init left no pending HIP error, and runs a
 // small AllReduce to confirm the communicator is functional.
 //
 // Note: the legacy IPC path requires the cuMem/VMM handle path to survive
@@ -38,21 +38,43 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
+
+#include "ProcessIsolatedTestRunner.hpp"
 
 namespace RcclUnitTesting {
 namespace {
 
 // Env var names shared between orchestrator and worker.
-constexpr const char* kEnvRank = "RCCL_ASYM_RANK"; // worker rank (0 or 1)
+constexpr const char* kEnvRank = "RCCL_ASYM_RANK"; // worker rank
+constexpr const char* kEnvNumRanks = "RCCL_ASYM_NRANKS";
 constexpr const char* kEnvLocalDev =
   "RCCL_ASYM_LOCALDEV"; // ordinal to bind within visible set
 constexpr const char* kEnvUid = "RCCL_ASYM_UID"; // hex-encoded ncclUniqueId
 
-constexpr int kNumRanks = 2;
+// Which devices a worker sees and which ordinal within them it binds.
+struct WorkerSpec {
+  std::string visibleDevices;
+  int localDev;
+};
 
-// Minimum GPUs for the asymmetric topology: rank0 sees 2 devices, rank1 sees
-// a third, disjoint device.
-constexpr int kMinDevices = 3;
+// A layout returns one WorkerSpec per rank, or nothing if numDevices is too few.
+using VisibilityLayout = std::vector<WorkerSpec> (*)(int numDevices);
+
+// ROCM-27034: rank0 sees devices {0,1} and binds ordinal 1, rank1 sees {2}.
+std::vector<WorkerSpec> asymmetricLayout(int numDevices) {
+  if (numDevices < 3) { return {}; }
+  return {{"0,1", 1}, {"2", 0}};
+}
+
+// One rank per GPU, each seeing only its own GPU, so every rank binds HIP
+// ordinal 0 and the topology has to tell the GPUs apart by something else.
+std::vector<WorkerSpec> oneGpuPerRankLayout(int numDevices) {
+  if (numDevices < 2) { return {}; }
+  std::vector<WorkerSpec> workers;
+  for (int dev = 0; dev < numDevices; ++dev) { workers.push_back({std::to_string(dev), 0}); }
+  return workers;
+}
 
 // Process exit codes shared between workers and coordinator. kCoordSkip is
 // returned by the coordinator when there aren't enough GPUs; the parent maps
@@ -138,7 +160,7 @@ struct WorkerResources {
   } while (0)
 
 // Body executed inside a re-exec'd worker process. Returns kOk on success.
-int runWorker(int rank, int localDev, const ncclUniqueId& id) {
+int runWorker(int rank, int numRanks, int localDev, const ncclUniqueId& id) {
   char tag[32];
   snprintf(tag, sizeof(tag), "[asym rank%d]", rank);
 
@@ -151,7 +173,7 @@ int runWorker(int rank, int localDev, const ncclUniqueId& id) {
 
   WorkerResources res;
   ncclResult_t nres;
-  ASYM_NCCLCHECK(ncclCommInitRank(&res.comm, kNumRanks, id, rank), tag,
+  ASYM_NCCLCHECK(ncclCommInitRank(&res.comm, numRanks, id, rank), tag,
                  return kWorkerFailed);
 
   // Core of the ROCM-27034 regression: a successful ncclCommInitRank must not
@@ -186,7 +208,7 @@ int runWorker(int rank, int localDev, const ncclUniqueId& id) {
                           hipMemcpyDeviceToHost),
                 tag, return kWorkerFailed);
 
-  const float expected = static_cast<float>(kNumRanks) * (kNumRanks + 1) / 2.0f;
+  const float expected = static_cast<float>(numRanks) * (numRanks + 1) / 2.0f;
   if (result != expected) {
     fprintf(stderr, "%s wrong AllReduce result %.1f (expected %.1f)\n", tag,
             result, expected);
@@ -198,7 +220,7 @@ int runWorker(int rank, int localDev, const ncclUniqueId& id) {
 }
 
 // Spawn one worker: fork, set the asymmetric environment, re-exec the worker.
-pid_t spawnWorker(int rank, const char* visibleDevices, int localDev,
+pid_t spawnWorker(int rank, int numRanks, const WorkerSpec& spec,
                   const std::string& uidHex) {
   pid_t pid = fork();
   if (pid != 0) {
@@ -207,10 +229,11 @@ pid_t spawnWorker(int rank, const char* visibleDevices, int localDev,
 
   // Child: set the per-rank environment BEFORE HIP initializes, then re-exec
   // a fresh image so the restricted visibility takes effect cleanly.
-  setenv("HIP_VISIBLE_DEVICES", visibleDevices, 1);
-  setenv("CUDA_VISIBLE_DEVICES", visibleDevices, 1);
+  setenv("HIP_VISIBLE_DEVICES", spec.visibleDevices.c_str(), 1);
+  setenv("CUDA_VISIBLE_DEVICES", spec.visibleDevices.c_str(), 1);
   setenv(kEnvRank, std::to_string(rank).c_str(), 1);
-  setenv(kEnvLocalDev, std::to_string(localDev).c_str(), 1);
+  setenv(kEnvNumRanks, std::to_string(numRanks).c_str(), 1);
+  setenv(kEnvLocalDev, std::to_string(spec.localDev).c_str(), 1);
   setenv(kEnvUid, uidHex.c_str(), 1);
   setenv("NCCL_CUMEM_ENABLE", "1", 0);
   // The worker filter lands on shard 0 only; inherited shard vars make it run 0 tests and exit kOk.
@@ -233,43 +256,41 @@ pid_t spawnWorker(int rank, const char* visibleDevices, int localDev,
 // fresh child for every collective test, and HIP is not fork-safe once
 // initialized in the parent, so touching it here would crash later TestBed
 // children. Returns an exit code the parent maps to skip/pass/fail.
-int runCoordinator() {
+int runCoordinator(VisibilityLayout layout) {
   const char* tag = "[asym]";
 
   int numDevices = 0;
   hipError_t err;
   ASYM_HIPCHECK(hipGetDeviceCount(&numDevices), tag, return kWorkerFailed);
-  if (numDevices < kMinDevices) { return kCoordSkip; }
+  const std::vector<WorkerSpec> workers = layout(numDevices);
+  if (workers.empty()) { return kCoordSkip; }
+  const int numRanks = static_cast<int>(workers.size());
 
   ncclUniqueId id;
   ncclResult_t nres;
   ASYM_NCCLCHECK(ncclGetUniqueId(&id), tag, return kWorkerFailed);
   const std::string uidHex = toHex(id);
 
-  // rank0: HIP_VISIBLE_DEVICES=0,1 -> bind ordinal 1; rank1: =2 -> bind ordinal 0.
-  const pid_t child0 = spawnWorker(0, "0,1", 1, uidHex);
-  const pid_t child1 = (child0 > 0) ? spawnWorker(1, "2", 0, uidHex) : -1;
-  if (child0 <= 0 || child1 <= 0) {
-    if (child0 > 0) {
-      kill(child0, SIGKILL);
-      waitpid(child0, nullptr, 0);
+  std::vector<pid_t> children;
+  for (int rank = 0; rank < numRanks; ++rank) {
+    const pid_t child = spawnWorker(rank, numRanks, workers[rank], uidHex);
+    if (child <= 0) {
+      fprintf(stderr, "%s fork of rank %d failed\n", tag, rank);
+      for (pid_t spawned : children) {
+        kill(spawned, SIGKILL);
+        waitpid(spawned, nullptr, 0);
+      }
+      return kWorkerFailed;
     }
-    if (child1 > 0) {
-      kill(child1, SIGKILL);
-      waitpid(child1, nullptr, 0);
-    }
-    fprintf(stderr, "%s fork failed (child0=%d, child1=%d)\n", tag, child0,
-            child1);
-    return kWorkerFailed;
+    children.push_back(child);
   }
 
-  // Reap whichever worker exits first. If it failed, kill its peer right
-  // away instead of waiting on it - a rank already blocked in ncclAllReduce
+  // Reap workers as they exit. Once one fails, kill the rest right away
+  // instead of waiting on them - a rank already blocked in ncclAllReduce
   // would otherwise hang forever for a partner that already gave up.
-  const pid_t children[kNumRanks] = {child0, child1};
-  bool reaped[kNumRanks] = {false, false};
+  std::vector<bool> reaped(numRanks, false);
   int rc = kOk;
-  for (int done_count = 0; done_count < kNumRanks; ++done_count) {
+  for (int done_count = 0; done_count < numRanks; ++done_count) {
     int status = 0;
     const pid_t done = waitpid(-1, &status, 0);
     if (done < 0) {
@@ -278,15 +299,17 @@ int runCoordinator() {
       continue;
     }
 
-    const int rank = (done == child0) ? 0 : 1;
+    int rank = 0;
+    while (rank < numRanks && children[rank] != done) { ++rank; }
+    if (rank == numRanks) { continue; }
     reaped[rank] = true;
     if (!WIFEXITED(status) || WEXITSTATUS(status) != kOk) {
       fprintf(stderr, "%s rank %d failed or terminated abnormally\n", tag,
               rank);
       if (!rc) { rc = kWorkerFailed; }
-      // Only signal the peer if it hasn't already been reaped
-      const int peer = 1 - rank;
-      if (!reaped[peer]) { kill(children[peer], SIGKILL); }
+      for (int peer = 0; peer < numRanks; ++peer) {
+        if (!reaped[peer]) { kill(children[peer], SIGKILL); }
+      }
     }
   }
   return rc;
@@ -299,13 +322,14 @@ int runCoordinator() {
 TEST(AsymmetricVisibilityWorker, Run) {
   const char* rankEnv = getenv(kEnvRank);
   if (rankEnv == nullptr) {
-    GTEST_SKIP() << "worker entry point, driven by "
-                    "AsymmetricVisibility.CommInitRankAllReduce";
+    GTEST_SKIP() << "worker entry point, driven by AsymmetricVisibility.*";
   }
 
   const int rank = atoi(rankEnv);
+  const char* numRanksEnv = getenv(kEnvNumRanks);
   const char* devEnv = getenv(kEnvLocalDev);
   const char* uidEnv = getenv(kEnvUid);
+  ASSERT_NE(numRanksEnv, nullptr);
   ASSERT_NE(devEnv, nullptr);
   ASSERT_NE(uidEnv, nullptr);
 
@@ -314,15 +338,14 @@ TEST(AsymmetricVisibilityWorker, Run) {
 
   // Exit with the WorkerStatus code so the orchestrator's WEXITSTATUS reflects
   // this worker's own result rather than gtest's generic exit code.
-  const int rc = runWorker(rank, atoi(devEnv), id);
-  if (rc != kOk) { _exit(rc); }
+  const int rc = runWorker(rank, atoi(numRanksEnv), atoi(devEnv), id);
+  ProcessIsolatedTestRunner::exitChild(rc);
 }
 
-// Orchestrator: reproduces the ROCM-27034 asymmetric topology with two workers,
-// rank0 seeing devices {0,1} and binding ordinal 1, rank1 seeing device {2} and
-// binding ordinal 0. All HIP/NCCL work happens in a forked coordinator so the
-// main gtest process stays HIP-clean for TestBed's per-test forks.
-TEST(AsymmetricVisibility, CommInitRankAllReduce) {
+// Runs the workers of a layout. All HIP/NCCL work happens in a forked
+// coordinator so the main gtest process stays HIP-clean for TestBed's per-test
+// forks.
+static void runLayout(VisibilityLayout layout) {
   const char* cumemEnv = getenv("NCCL_CUMEM_ENABLE");
   const int cumemValue = cumemEnv != nullptr ? atoi(cumemEnv) : 1;
   if (cumemValue == 0) {
@@ -331,7 +354,7 @@ TEST(AsymmetricVisibility, CommInitRankAllReduce) {
   }
 
   const pid_t coord = fork();
-  if (coord == 0) { _exit(runCoordinator()); }
+  if (coord == 0) { _exit(runCoordinator(layout)); }
   ASSERT_GT(coord, 0) << "fork of coordinator process failed";
 
   int status = 0;
@@ -339,12 +362,15 @@ TEST(AsymmetricVisibility, CommInitRankAllReduce) {
   ASSERT_TRUE(WIFEXITED(status)) << "coordinator terminated abnormally";
   const int code = WEXITSTATUS(status);
   if (code == kCoordSkip) {
-    GTEST_SKIP() << "requires at least " << kMinDevices
-                 << " GPUs for an asymmetric topology";
+    GTEST_SKIP() << "not enough GPUs for this visibility layout";
   }
   EXPECT_EQ(code, kOk)
     << "asymmetric-visibility workers reported failure (exit code " << code
     << "); see stderr for the failing rank";
 }
+
+TEST(AsymmetricVisibility, CommInitRankAllReduce) { runLayout(asymmetricLayout); }
+
+TEST(AsymmetricVisibility, OneGpuPerRankAllReduce) { runLayout(oneGpuPerRankLayout); }
 
 } // namespace RcclUnitTesting

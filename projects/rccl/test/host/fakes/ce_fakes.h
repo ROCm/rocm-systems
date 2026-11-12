@@ -49,6 +49,18 @@ extern std::function<ncclResult_t(struct ncclComm* /*comm*/,
                                   struct ncclCeCollArgs* /*profilerArgs*/)>
     g_ceLaunchBatchOps;
 
+// AlltoAllv's CE gates and the CE AllReduce / ReduceScatter launchers. Fail loud until a test installs them.
+extern std::function<bool(struct ncclComm*, ncclDataType_t, ncclSymRegType_t, bool, bool)> g_ceAlltoAllvEligible;
+extern std::function<bool(struct ncclComm*, ncclDataType_t, ncclSymRegType_t, struct ncclDevrWindow*,
+                          struct ncclDevrWindow*, bool, bool)>
+    g_hierCeAlltoAllvEligible;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                  hipStream_t, struct ncclDevrWindow*, struct ncclCeCollArgs*)>
+    g_ceAllReduce;
+extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                  hipStream_t, struct ncclDevrWindow*, struct ncclCeCollArgs*)>
+    g_ceReduceScatter;
+
 void ResetCeFakes();
 
 #endif  // RCCL_TEST_HOST_CE_FAKES_H_

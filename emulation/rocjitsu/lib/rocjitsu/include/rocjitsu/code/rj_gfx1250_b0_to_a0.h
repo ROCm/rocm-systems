@@ -68,7 +68,7 @@ typedef void (*rj_gfx1250_b0_to_a0_diagnostic_callback_t)(
 /// @param[in] diagnostic_callback Optional synchronous sink invoked for every
 ///            non-success return, including an invalid argument, an input that
 ///            is not a gfx1250 code object, a non-dispatchable result, a failed
-///            allocation, and a translator exception. Only a failure that came
+///            allocation, and an internal translator error or exception. Only a failure that came
 ///            from translation delivers the complete translator diagnostic set
 ///            with its required-work items; the other paths report one
 ///            diagnostic describing the failure itself.
@@ -80,7 +80,8 @@ typedef void (*rj_gfx1250_b0_to_a0_diagnostic_callback_t)(
 ///         repeating the call reaches the same verdict.
 /// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Output allocation failed. Environmental: the same
 ///         input may translate on a later attempt.
-/// @retval ROCJITSU_STATUS_ERROR The translator threw. Carries no promise about the input.
+/// @retval ROCJITSU_STATUS_ERROR Internal translator error or exception. Carries no promise
+///         about the input.
 #ifdef __cplusplus
 [[nodiscard]]
 #endif

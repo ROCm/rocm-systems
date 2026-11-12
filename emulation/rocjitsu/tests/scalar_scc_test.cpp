@@ -4,6 +4,7 @@
 /// @file scalar_scc_test.cpp
 /// @brief Cross-architecture scalar SCC execution and preservation tests.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
@@ -12,6 +13,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 
@@ -28,6 +30,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
@@ -185,19 +188,22 @@ EncodingWords encode_sopk(const ScalarSccProfile &profile, std::string_view mnem
 
 class ScalarSccFixture {
 public:
-  ScalarSccFixture(const ScalarSccProfile &profile, std::string_view test_name)
+  ScalarSccFixture(const ScalarSccProfile &profile, std::string_view test_name,
+                   uint32_t wave_size = 0, uint32_t num_sgprs = 106)
       : profile(profile),
         gpu_mem(std::string(profile.name) + "_" + std::string(test_name) + "_mem"),
         l2(std::string(profile.name) + "_" + std::string(test_name) + "_l2") {
     config.arch = profile.arch;
     config.num_wf_slots = 1;
-    config.sgprs_per_wf = 106;
+    config.sgprs_per_wf = num_sgprs;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create(std::string(profile.name), config, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, std::string(profile.name), config, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(profile.arch);
     if (cu)
-      wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+      wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf, wave_size);
   }
 
   ~ScalarSccFixture() {
@@ -241,6 +247,59 @@ public:
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 };
+
+TEST(ScalarSccTest, Cdna1ReadsUnallocatedSourcesAndZeroPredicates) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "scalar_sources", /*wave_size=*/0,
+                     /*num_sgprs=*/32);
+  ASSERT_TRUE(f.ready());
+  f.cu->write_sgpr(f.sgpr_base(), 0x12345678);
+  f.cu->write_sgpr(f.sgpr_base() + 1, 0xabcdef01);
+  f.wf->write_exec(0);
+  f.wf->set_vcc_raw(0);
+  for (const auto &[selector, expected] : std::array<std::pair<unsigned, uint64_t>, 3>{
+           {{40, 0xabcdef0112345678ULL}, {251, 1}, {252, 1}}}) {
+    auto mov = f.decode({0xbe840100u | selector, 0}, "s_mov_b64");
+    ASSERT_TRUE(mov);
+    ASSERT_TRUE(f.cu->execute_instruction(mov.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), static_cast<uint32_t>(expected));
+    EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 5), expected >> 32);
+  }
+  auto mov = f.decode({0xbe840028, 0}, "s_mov_b32"); // s4, s40
+  ASSERT_TRUE(mov);
+  ASSERT_TRUE(f.cu->execute_instruction(mov.get(), *f.wf).succeeded());
+  EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), 0x12345678u);
+}
+
+TEST(ScalarSccTest, CdnaForkConsumesOneSharedLiteralWord) {
+  struct ForkCase {
+    uint32_t word, register_value, literal, target;
+  };
+  constexpr ForkCase cases[] = {
+      {0x948000ffu, 0x200, 0x100, 0x200}, // Literal mask, SGPR target.
+      {0x9480ff00u, 0x100, 0x200, 0x200}, // SGPR mask, literal target.
+      {0x9480ffffu, 0, 0x100, 0x100},     // One literal shared by both sources.
+  };
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch > ROCJITSU_CODE_ARCH_CDNA4)
+      continue;
+    SCOPED_TRACE(profile.name);
+    ScalarSccFixture f(profile, "fork_literal");
+    ASSERT_TRUE(f.ready());
+    f.cu->write_sgpr(f.sgpr_base() + 1, 0);
+    for (const auto &c : cases) {
+      SCOPED_TRACE(c.word);
+      f.cu->write_sgpr(f.sgpr_base(), c.register_value);
+      auto fork = f.decode({c.word, c.literal}, "s_cbranch_g_fork");
+      ASSERT_TRUE(fork);
+      EXPECT_EQ(fork->size(), 8u);
+      f.wf->pc = 0x400;
+      f.wf->write_exec(0x100);
+      ASSERT_TRUE(f.cu->execute_instruction(fork.get(), *f.wf).succeeded());
+      EXPECT_EQ(f.wf->pc + fork->size(), c.target);
+      EXPECT_EQ(f.wf->cond_stack_ptr(), 0u);
+    }
+  }
+}
 
 class WrexecPair {
 public:
@@ -303,7 +362,7 @@ void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pa
       EXPECT_FALSE(inst->dst_operand(i)->to_register_ref()) << profile.name << " " << mnemonic;
     }
 
-    const InstDefUse def_use(*inst);
+    const InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.uses.contains(source)) << profile.name << " " << mnemonic;
     EXPECT_FALSE(def_use.uses.contains(destination)) << profile.name << " " << mnemonic;
     EXPECT_TRUE(def_use.defs.contains(destination)) << profile.name << " " << mnemonic;
@@ -388,6 +447,33 @@ void run_wrexec_scc_cases(const ScalarSccProfile &profile, const WrexecPair &pai
     EXPECT_EQ(fixture.wf->exec(), test_case.expected & lane_mask)
         << profile.name << " " << test_case.mnemonic;
     fixture.expect_scc_consumer(expected_scc, test_case.mnemonic);
+  }
+}
+
+TEST(ScalarSccTest, B32ExecInstructionsPreserveTheOtherHalfOfAWave) {
+  for (const auto &profile : kScalarSccProfiles) {
+    if (!profile.has_wrexec_b32)
+      continue;
+    SCOPED_TRACE(profile.name);
+    // The CDNA5 ISA exposes these B32 operations on wave32.
+    const uint32_t wave_size = profile.arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+    ScalarSccFixture fixture(profile, "b32_exec", wave_size);
+    ASSERT_TRUE(fixture.ready());
+    const char *wrexec = profile.wrexec_dialect == WrexecDialect::Andn ? "s_andn1_wrexec_b32"
+                                                                       : "s_and_not0_wrexec_b32";
+    for (const std::string_view mnemonic : {"s_and_saveexec_b32", wrexec}) {
+      SCOPED_TRACE(mnemonic);
+      auto inst = fixture.decode(encode_sop1(profile, mnemonic, 4, 0), mnemonic);
+      ASSERT_NE(inst, nullptr);
+      const uint64_t high = wave_size == 64 ? uint64_t{0xdeadbeef} << 32 : 0;
+      fixture.wf->set_exec_raw(high | 15);
+      fixture.cu->write_sgpr(fixture.sgpr_base(), mnemonic == "s_and_saveexec_b32" ? 0 : 15);
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
+      EXPECT_EQ(fixture.wf->exec_raw(), high);
+      EXPECT_FALSE(fixture.wf->read_scc());
+      EXPECT_EQ(fixture.cu->read_sgpr(fixture.sgpr_base() + 4),
+                mnemonic == "s_and_saveexec_b32" ? 15u : 0u);
+    }
   }
 }
 
@@ -721,7 +807,7 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
       EXPECT_EQ(inst->dst_operand(0)->to_register_ref(), (RegisterRef{RegClass::SGPR, 4, 1}))
           << profile.name << " " << mnemonic;
 
-      const InstDefUse def_use(*inst);
+      const InstDefUse def_use(*inst, 64);
       EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::SGPR, 4, 1}))
           << profile.name << " " << mnemonic;
       EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::SGPR, 4, 1}))

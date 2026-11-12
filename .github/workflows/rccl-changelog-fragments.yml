@@ -1,0 +1,123 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+name: RCCL changelog fragments
+
+# Each night, fold the fragments in projects/rccl/changelog.d/ into
+# projects/rccl/CHANGELOG.md on one rolling PR to develop. Every run starts
+# again from develop, so a PR that nobody merges loses nothing: the fragments
+# stay on develop and the next run folds them in again.
+#
+# Nothing can push to develop, so the GitHub App token pushes $BRANCH and opens
+# the PR. The token is limited to contents, workflows and pull requests on this
+# repository. A PR from the App token runs the required checks; a PR from
+# GITHUB_TOKEN would not. GitHub refuses an App push that brings in a
+# .github/workflows change without the workflows permission, and the reset
+# from develop brings in every workflow change since the last push.
+#
+# The script orders the fragments by merge, so it needs full history:
+# fetch-depth 0, with blob:none to keep that fetch to commits and trees.
+#
+# The run skips the push when $BRANCH is one commit on develop that changes
+# only the changelog, and that changelog matches tonight's fold. A push for
+# every move of develop would restart CI on the PR each night, and the develop
+# ruleset does not require the branch to be up to date. Any other commit on
+# $BRANCH makes the run push, which replaces it.
+
+on:
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  BRANCH: bot/rccl-changelog-fragments
+  # gh pr list --head matches the branch name only, so drop fork PRs from a
+  # branch with the same name.
+  BOT_PR_NUMBERS: '.[] | select(.isCrossRepository | not) | .number'
+
+jobs:
+  fold:
+    name: Fold changelog fragments
+    if: github.repository == 'ROCm/rocm-systems'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Create a GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: rocm-systems
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: develop
+          fetch-depth: 0
+          filter: blob:none
+          # Cone mode also checks out the files directly in projects/rccl,
+          # which include CHANGELOG.md.
+          sparse-checkout: |
+            .github/scripts
+            projects/rccl/changelog.d
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Fold the fragments into CHANGELOG.md
+        run: python3 .github/scripts/rccl_assemble_changelog.py
+
+      - name: Push the branch and open the PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/rccl-changelog-fragments.yml
+        run: |
+          if git diff --quiet; then
+            echo "No changelog fragments on develop."
+            # An open bot PR is stale here, for example after a fragment was reverted.
+            gh pr list --head "$BRANCH" --base develop --state open --json number,isCrossRepository --jq "$BOT_PR_NUMBERS" \
+              | xargs -r -n1 gh pr close --comment "develop has no changelog fragments to fold."
+            exit 0
+          fi
+          git config user.name "systems-assistant[bot]"
+          git config user.email "systems-assistant[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git commit -a -m "docs(rccl): fold changelog fragments into CHANGELOG.md"
+
+          paths=(projects/rccl/CHANGELOG.md projects/rccl/changelog.d)
+          if git fetch --quiet origin "$BRANCH" \
+            && [ "$(git rev-list --count HEAD~1..FETCH_HEAD)" = 1 ] \
+            && git diff --quiet FETCH_HEAD~1 FETCH_HEAD -- . "${paths[@]/#/:(exclude)}" \
+            && git diff --quiet FETCH_HEAD HEAD -- "${paths[@]}"; then
+            echo "$BRANCH already has this changelog."
+          else
+            git push --force origin "HEAD:refs/heads/$BRANCH"
+          fi
+
+          if [ -z "$(gh pr list --head "$BRANCH" --base develop --state open --json number,isCrossRepository --jq "$BOT_PR_NUMBERS")" ]; then
+            gh pr create --base develop --head "$BRANCH" \
+              --title "docs(rccl): fold changelog fragments into CHANGELOG.md" \
+              --body "This PR moves the entries in \`projects/rccl/changelog.d/\` into \`projects/rccl/CHANGELOG.md\`, in merge order, and deletes those fragment files.
+
+          The [RCCL changelog fragments]($WORKFLOW_URL) workflow updates this PR each night. Do not push to \`$BRANCH\`: the next run replaces it."
+          fi
+
+      - name: Report a failure on the open PR
+        if: failure()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base develop --state open --json number,isCrossRepository --jq "$BOT_PR_NUMBERS")
+          if [ -n "$pr" ]; then
+            gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body "The nightly update of this PR failed, so it does not have the newest fragments. See $RUN_URL."
+          fi

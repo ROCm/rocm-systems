@@ -3,13 +3,21 @@
 
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
 namespace roctx_range_intercept
 {
 
-void                     start_recording();
-std::vector<std::string> stop_recording();
+struct Recording
+{
+    std::vector<std::string> messages;
+    std::size_t              pops = 0;
+};
+
+void      start_recording();
+void      fail_next_push();
+Recording stop_recording();
 
 }  // namespace roctx_range_intercept

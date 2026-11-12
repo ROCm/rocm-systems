@@ -3,6 +3,8 @@
 
 /// @file rj_code.h
 /// @brief C API for instruction decoding, executables, code objects, and basic blocks.
+/// @note Allocation failures in rj_code_executable_create(), rj_code_inst_list_create(),
+/// and rj_code_basic_block_list_create() terminate the calling process.
 
 #ifndef ROCJITSU_CODE_RJ_CODE_H_
 #define ROCJITSU_CODE_RJ_CODE_H_
@@ -71,12 +73,15 @@ typedef struct rj_code_inst_t rj_code_inst_t;
 typedef struct rj_code_decoder_t rj_code_decoder_t;
 
 /// @brief Create a decoder for the architecture specified by @p arch.
+///
+/// @details Allocation failure in rj_code_decoder_create,
+/// rj_code_decoder_create_for_target, or rj_code_decoder_decode terminates the
+/// calling process; these calls do not return ROCJITSU_STATUS_OUT_OF_RESOURCES.
 /// @param[in] arch Architecture to create a decoder for.
 /// @param[out] decoder Newly created decoder handle (refcount = 0). Set to NULL
 /// on any failure when @p decoder itself is non-NULL.
 /// @retval ROCJITSU_STATUS_SUCCESS Decoder was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if @p arch is invalid or @p decoder is NULL.
-/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Allocation failed.
 /// @retval ROCJITSU_STATUS_ERROR if this component did not bind @p arch.
 RJ_API_EXPORT rj_status_t rj_code_decoder_create(rj_code_arch_t arch, rj_code_decoder_t **decoder);
 
@@ -87,7 +92,6 @@ RJ_API_EXPORT rj_status_t rj_code_decoder_create(rj_code_arch_t arch, rj_code_de
 /// on any failure when @p decoder itself is non-NULL.
 /// @retval ROCJITSU_STATUS_SUCCESS Decoder was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if an argument is NULL or empty.
-/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Allocation failed.
 /// @retval ROCJITSU_STATUS_ERROR if this component did not include @p target_id.
 RJ_API_EXPORT rj_status_t rj_code_decoder_create_for_target(const char *target_id,
                                                             rj_code_decoder_t **decoder);
@@ -120,7 +124,6 @@ RJ_API_EXPORT void rj_code_decoder_destroy(rj_code_decoder_t *decoder);
 /// @param[out] inst Pointer to the newly decoded instruction object.
 /// @retval ROCJITSU_STATUS_SUCCESS Instruction was decoded successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Allocation failed.
 /// @retval ROCJITSU_STATUS_ERROR Decoding failed.
 RJ_API_EXPORT rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
                                                  const rj_code_binary_inst_t *binary_inst,
@@ -164,10 +167,12 @@ typedef enum rj_code_target_id_t {
   ROCJITSU_CODE_TARGET_GFX1250 = 5,
   /// @brief gfx1251 target ID.
   ROCJITSU_CODE_TARGET_GFX1251 = 6,
+  /// @brief gfx1100 target ID (RDNA3).
+  ROCJITSU_CODE_TARGET_GFX1100 = 7,
   // \NPI new GPU: add its public target identifier here and bind its
   // code-object name and ELF machine value in the corresponding ISA provider.
   /// @brief Number of named GPU targets and their exclusive upper bound.
-  ROCJITSU_CODE_TARGET_NUM_TARGETS = 7,
+  ROCJITSU_CODE_TARGET_NUM_TARGETS = 8,
   /// @brief Stable sentinel value representing an invalid target.
   ROCJITSU_CODE_TARGET_INVALID = INT32_MAX
 } rj_code_target_id_t;
@@ -196,8 +201,10 @@ typedef struct rj_code_executable_t rj_code_executable_t;
 /// @brief Load an executable from a file.
 /// @param[in] path Path to the executable file.
 /// @param[out] exec Handle to the newly created executable (refcount = 0; caller owns it).
+/// The value of @p *exec is unchanged on failure.
 /// @returns ROCJITSU_STATUS_SUCCESS on success.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if @p path or @p exec is NULL.
+/// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT if loading or parsing the file fails.
 RJ_API_EXPORT rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **exec);
 
 /// @brief Increment the executable's reference count.

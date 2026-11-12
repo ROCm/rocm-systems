@@ -639,6 +639,10 @@ the commit side) where the C++ version took them as template parameters instanti
    advance the hardware write pointer and ring the doorbell, then release the next producer. The
    doorbell is thus monotone even when producers finish writing out of order.
 
+On device, publish and the commit hand-off use store waits, not release fences: the ring is
+uncached and the queue words are written through, so no L2 writeback is needed. The caller
+releases the buffers a copy names.
+
 A producer may keep the engine read index it last loaded (`abce_ring_control_t::cached_read_index`)
 and read the engine's own word only when that value says the ring is full; the read index only
 grows, so a stale value can understate free space but never overstate it. The device ring does
@@ -651,6 +655,17 @@ padding separate means any payload smaller than the ring can still make progress
 drains, even when padding plus payload exceeds the ring size. Verified on a 256-byte ring: a
 200-byte reservation at offset 0, then a 100-byte reservation lands at monotonic 256 (offset 0)
 after a 56-byte NOP pad, leaving the doorbell at 356.
+
+The device ring folds the padding into the payload's reservation instead (`publish_padding` left
+null): the tail becomes counted NOPs and the payload is written at offset zero, all under one publish.
+That saves a second turn on the commit cursor, at the cost of a frame being at most half the ring.
+
+Device producers still publish in turn. Publishing in batches instead (each producer marks its frame
+written and leaves; whoever is at the head publishes every written frame with one doorbell) was
+measured on MI300X: it raised a lone submit from 2.5 to 4 us and lost throughput with hundreds of
+concurrent producers, because marking, claiming and walking the marks are device-memory round
+trips. What does pay is fewer publishes: lanes of a wave on one ring share one reservation and one
+publish, and a route can hand out several rings.
 
 Attaching to an already-in-use queue seeds the cursors from the queue's current write pointer,
 so the first acquire cannot hand out bytes the engine still owns.

@@ -200,7 +200,7 @@ static int create_buffer(struct workload *w, struct buffer *buffer,
   create.byte_length = bytes;
   create.minimum_alignment = PAGE_BYTES;
   create.accesses = &w->access;
-  CALL(w->api->memory_create(w->scope, &create, &buffer->memory));
+  CALL(w->api->memory_create(w->scope, &create, &buffer->memory, NULL));
   INIT(buffer->info, AMDF_STRUCTURE_TYPE_MEMORY_INFO);
   CALL(w->api->memory_query_info(buffer->memory, &buffer->info));
   REQUIRE(buffer->info.flags & AMDF_MEMORY_FLAG_SHAREABLE);
@@ -236,7 +236,7 @@ static int import_buffer(struct workload *w, amdf_external_memory_t *external) {
   ++invalid.source_byte_offset;
   amdf_memory_t *sentinel = (amdf_memory_t *)(uintptr_t)1;
   amdf_memory_t *output = sentinel;
-  REQUIRE(w->api->memory_import(w->scope, &import, &invalid, &output) ==
+  REQUIRE(w->api->memory_import(w->scope, &import, &invalid, &output, NULL) ==
           amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
   REQUIRE(output == sentinel && invalid.source_byte_offset == PAGE_BYTES + 1);
 
@@ -245,7 +245,7 @@ static int import_buffer(struct workload *w, amdf_external_memory_t *external) {
   invalid.release_user_data = NULL;
   invalid.payload.file_descriptor = -1;
   output = sentinel;
-  REQUIRE(w->api->memory_import(w->scope, &import, &invalid, &output) ==
+  REQUIRE(w->api->memory_import(w->scope, &import, &invalid, &output, NULL) ==
           amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
   REQUIRE(output == sentinel && invalid.payload.file_descriptor == -1);
 
@@ -254,7 +254,7 @@ static int import_buffer(struct workload *w, amdf_external_memory_t *external) {
   invalid.release_user_data = NULL;
   invalid.physical_backing_id.words[0] ^= 1;
   output = sentinel;
-  REQUIRE(w->api->memory_import(w->scope, &import, &invalid, &output) ==
+  REQUIRE(w->api->memory_import(w->scope, &import, &invalid, &output, NULL) ==
           amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION));
   REQUIRE(output == sentinel && invalid.type == external->type);
   REQUIRE(invalid.payload.file_descriptor == external->payload.file_descriptor);
@@ -263,7 +263,7 @@ static int import_buffer(struct workload *w, amdf_external_memory_t *external) {
 
   const int consumed_descriptor = (int)external->payload.file_descriptor;
   CALL(w->api->memory_import(w->scope, &import, external,
-                             &w->imported.memory));
+                             &w->imported.memory, NULL));
   amdf_external_memory_t empty;
   memset(&empty, 0, sizeof(empty));
   REQUIRE(memcmp(external, &empty, sizeof(empty)) == 0);
@@ -335,7 +335,7 @@ static int verify_child_import(const struct workload *parent,
   borrowed.release = NULL;
   borrowed.release_user_data = NULL;
   CALL(child.api->memory_import(child.scope, &request, &borrowed,
-                                &child.imported.memory));
+                                &child.imported.memory, NULL));
   amdf_external_memory_t empty = {0};
   REQUIRE(memcmp(&borrowed, &empty, sizeof(empty)) == 0);
   amdf_memory_map_info_t map;
@@ -351,7 +351,7 @@ static int verify_child_import(const struct workload *parent,
   for (uint32_t i = 0; i < PAGE_BYTES; ++i)
     REQUIRE(bytes[i] == (unsigned char)(i * 17));
   CALL(child.api->host_mapping_destroy(child.imported.mapping));
-  CALL(child.api->memory_destroy(child.imported.memory));
+  CALL(child.api->memory_destroy(child.imported.memory, NULL));
   CALL(child.api->device_destroy(child.device));
   CALL(child.api->endpoint_close(child.endpoint));
   CALL(child.api->instance_destroy(child.instance));
@@ -517,7 +517,7 @@ static int prepare(struct workload *w, amdf_native_lifetime_t lifetime) {
                  PAGE_BYTES) == 0);
   CALL(w->api->host_mapping_destroy(w->original.mapping));
   w->original.mapping = NULL;
-  CALL(w->api->memory_destroy(w->original.memory));
+  CALL(w->api->memory_destroy(w->original.memory, NULL));
   w->original.memory = NULL;
   REQUIRE(((unsigned char *)w->imported.host.pointer)[17] ==
           (unsigned char)(17 * 17));
@@ -550,7 +550,7 @@ static int release_buffer(struct workload *w, struct buffer *buffer) {
     buffer->mapping = NULL;
   }
   if (buffer->memory) {
-    CALL(w->api->memory_destroy(buffer->memory));
+    CALL(w->api->memory_destroy(buffer->memory, NULL));
     buffer->memory = NULL;
   }
   return 0;

@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
@@ -56,8 +57,8 @@ struct SmfmacCase {
 #define C4(OP, NAME, A, B, D, AFMT, BFMT)                                                          \
   SmfmacCase { ROCJITSU_CODE_ARCH_CDNA4, cdna4::k##OP##Vop3pMfma, NAME, AFMT, BFMT, A, B, D }
 
-// Every generated, implemented F32 SMFMAC form. The I32 forms currently
-// report UnimplementedInstruction and are intentionally outside this suite.
+// Every generated F32 SMFMAC form. Integer execution has separate exact
+// dense-reference checks in instruction_execution_harness_test.cpp.
 constexpr std::array CDNA3_CASES{
     C3(VSmfmacF3216x16x32F16, "v_smfmac_f32_16x16x32_f16", 2, 4, 4, Fmt::F16, Fmt::F16),
     C3(VSmfmacF3232x32x16F16, "v_smfmac_f32_32x32x16_f16", 2, 4, 16, Fmt::F16, Fmt::F16),
@@ -107,6 +108,84 @@ constexpr std::array CDNA4_CASES{
 struct SmfmacFixture : ExactFixture {
   explicit SmfmacFixture(rj_code_arch_t arch) : ExactFixture(arch, WF_SIZE) {}
 };
+
+TEST(Cdna4MatrixControlTest, SparseMetadataSelectsUpperHalfOnlyWithZeroCbsz) {
+  SmfmacFixture fx(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(fx.wf, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    for (uint32_t r = 0; r < 4; ++r)
+      fx.cu->write_vgpr(fx.vbase + A_OFF + r, lane, 0x3c003c00); // FP16 ones
+    for (uint32_t r = 0; r < 8; ++r)
+      fx.cu->write_vgpr(fx.vbase + B_OFF + r, lane, (r & 1) ? 0x40004000 : 0x3c003c00);
+    fx.cu->write_vgpr(fx.vbase + INDEX_OFF, lane, 0xeeee4444); // (2,3) or (0,1)
+  }
+  for (uint8_t cbsz : {0, 1}) {
+    for (uint32_t r = 0; r < 4; ++r)
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+        fx.cu->write_vgpr(fx.vbase + DST_OFF + r, lane, 0);
+    auto words =
+        cdna4::build_vop3p_mfma(cdna4::kVSmfmacF3216x16x64F16Vop3pMfma, {.vdst = DST_OFF,
+                                                                         .cbsz = cbsz,
+                                                                         .abid = 1,
+                                                                         .src0 = 256 + A_OFF,
+                                                                         .src1 = 256 + B_OFF,
+                                                                         .src2 = 256 + INDEX_OFF});
+    std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+    ASSERT_NE(instruction, nullptr);
+    ASSERT_TRUE(fx.cu->execute_instruction(instruction.get(), *fx.wf).succeeded());
+    EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + DST_OFF, 0), std::bit_cast<uint32_t>(cbsz ? 32.f : 64.f));
+  }
+}
+
+TEST(MatrixControlTest, IntegerMatrixOverflowSaturatesAtBothSignedLimits) {
+  struct Case {
+    rj_code_arch_t arch;
+    bool sparse;
+    uint32_t products;
+  };
+  for (const Case test :
+       {Case{ROCJITSU_CODE_ARCH_CDNA3, false, 32}, Case{ROCJITSU_CODE_ARCH_CDNA4, false, 64},
+        Case{ROCJITSU_CODE_ARCH_CDNA4, true, 64}}) {
+    SCOPED_TRACE(::testing::Message() << "arch=" << test.arch << " sparse=" << test.sparse);
+    SmfmacFixture fx(test.arch);
+    ASSERT_NE(fx.wf, nullptr);
+    auto decoder = Decoder::create(test.arch);
+    ASSERT_NE(decoder, nullptr);
+    const uint16_t src2 = 256 + (test.sparse ? INDEX_OFF : DST_OFF);
+    auto words =
+        test.arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? cdna3::build_vop3p_mfma(
+                  cdna3::kVMfmaI3216x16x32I8Vop3pMfma,
+                  {.vdst = DST_OFF, .src0 = 256 + A_OFF, .src1 = 256 + B_OFF, .src2 = src2})
+            : cdna4::build_vop3p_mfma(
+                  test.sparse ? cdna4::kVSmfmacI3216x16x128I8Vop3pMfma
+                              : cdna4::kVMfmaI3216x16x64I8Vop3pMfma,
+                  {.vdst = DST_OFF, .src0 = 256 + A_OFF, .src1 = 256 + B_OFF, .src2 = src2});
+    std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+    ASSERT_NE(instruction, nullptr);
+    for (bool negative : {false, true}) {
+      const uint32_t limit = negative ? 0x80000000u : 0x7fffffffu;
+      const uint32_t initial = negative ? limit + 1 : limit - 1;
+      for (bool clamp : {false, true}) {
+        fx.wf->set_mode_raw(clamp ? amdgpu::Wavefront::FP16_OVFL_BIT : 0);
+        for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+          for (uint32_t r = 0; r < 4; ++r) {
+            fx.cu->write_vgpr(fx.vbase + DST_OFF + r, lane, initial);
+            fx.cu->write_vgpr(fx.vbase + A_OFF + r, lane, negative ? 0xffffffffu : 0x01010101u);
+          }
+          for (uint32_t r = 0; r < 8; ++r)
+            fx.cu->write_vgpr(fx.vbase + B_OFF + r, lane, 0x01010101u);
+          fx.cu->write_vgpr(fx.vbase + INDEX_OFF, lane, 0x44444444u);
+        }
+        ASSERT_TRUE(fx.cu->execute_instruction(instruction.get(), *fx.wf).succeeded());
+        const uint32_t wrapped = negative ? initial - test.products : initial + test.products;
+        EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + DST_OFF, 0), clamp ? limit : wrapped);
+      }
+    }
+  }
+}
 
 void restore_window(SmfmacFixture &fx, uint32_t off, const std::vector<uint32_t> &words) {
   const uint32_t regs = static_cast<uint32_t>(words.size() / WF_SIZE);
@@ -539,6 +618,121 @@ TEST(SmfmacSimdExact, Cdna4NaNSourcePriority) {
   if (util::native<float>::size() != 16)
     GTEST_SKIP() << "SMFMAC AVX-512 fast path requires 16-wide native SIMD";
   run_all_nan_sources(CDNA4_CASES);
+}
+
+TEST(Cdna4MatrixControlTest, SparseBf16ClampsFiniteOverflowAndPreservesInfiniteInputs) {
+  struct Case {
+    uint16_t a, b;
+    uint32_t c, normal, clamped;
+  };
+  constexpr Case cases[] = {
+      {0x7f7f, 0x4000, 0, 0x7f800000, 0x7f7fffff},          // finite positive overflow
+      {0xff7f, 0x4000, 0, 0xff800000, 0xff7fffff},          // finite negative overflow
+      {0xff80, 0x4000, 0, 0xff800000, 0xff800000},          // infinite A
+      {0x4000, 0x7f80, 0, 0x7f800000, 0x7f800000},          // selected infinite B
+      {0x3f80, 0x4000, 0xff800000, 0xff800000, 0xff800000}, // infinite C
+      {0x7fc1, 0x4000, 0, 0x7fc10000, 0x7fc10000},          // NaN payload
+  };
+  SmfmacFixture fx(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(fx.wf, nullptr);
+  for (const auto &test : CDNA4_CASES) {
+    if (test.a_fmt != Fmt::BF16)
+      continue;
+    auto instruction = decode(test, A_OFF, B_OFF, INDEX_OFF);
+    ASSERT_NE(instruction, nullptr);
+    for (const Case &tc : cases) {
+      std::vector<uint32_t> initial(STATE_REGS * WF_SIZE);
+      for (unsigned r = 0; r < test.a_regs; ++r)
+        std::fill_n(initial.begin() + (A_OFF + r) * WF_SIZE, WF_SIZE, tc.a * 0x10001u);
+      for (unsigned r = 0; r < test.b_regs; ++r) {
+        // Select only K positions 0 and 1 in each group. An infinity in
+        // either unused position cannot turn finite overflow into a true INF.
+        const uint16_t b = (r & 1) ? 0x7f80 : tc.b;
+        std::fill_n(initial.begin() + (B_OFF + r) * WF_SIZE, WF_SIZE, b * 0x10001u);
+      }
+      std::fill_n(initial.begin() + INDEX_OFF * WF_SIZE, WF_SIZE, 0x44444444u);
+      std::fill_n(initial.begin() + DST_OFF * WF_SIZE, test.dst_regs * WF_SIZE, tc.c);
+      for (bool clamp : {false, true}) {
+        SCOPED_TRACE(::testing::Message() << test.name << " A=" << tc.a << " B=" << tc.b
+                                          << " C=" << tc.c << " clamp=" << clamp);
+        // Round-toward-zero in MODE must not change the matrix's forced RNE.
+        fx.wf->set_mode_raw(3u | (clamp ? amdgpu::Wavefront::FP16_OVFL_BIT : 0));
+        ASSERT_NO_FATAL_FAILURE(execute_both(fx, test, *instruction, initial));
+        EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + DST_OFF, 0), clamp ? tc.clamped : tc.normal);
+      }
+    }
+  }
+}
+
+TEST(Cdna4MatrixControlTest, DenseF32AndBf16ClampFiniteOverflowOnly) {
+  SmfmacFixture fx(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(fx.wf, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  ForceScalarGuard scalar_guard;
+  for (bool force_scalar : {false, true}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    for (const auto opcode :
+         {cdna4::kVMfmaF3216x16x4F32Vop3pMfma, cdna4::kVMfmaF324x4x116bF32Vop3pMfma,
+          cdna4::kVMfmaF3216x16x32Bf16Vop3pMfma, cdna4::kVMfmaF324x4x416bBf16Vop3pMfma}) {
+      const bool bf16 = opcode == cdna4::kVMfmaF3216x16x32Bf16Vop3pMfma ||
+                        opcode == cdna4::kVMfmaF324x4x416bBf16Vop3pMfma;
+      const auto words = cdna4::build_vop3p_mfma(
+          opcode,
+          {.vdst = DST_OFF, .src0 = 256 + A_OFF, .src1 = 256 + B_OFF, .src2 = 256 + INDEX_OFF});
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      struct Case {
+        uint32_t a, c, normal, clamped;
+      };
+      const Case cases[] = {
+          {bf16 ? 0x7f7f7f7fu : 0x7f7fffffu, 0, 0x7f800000, 0x7f7fffff},
+          {bf16 ? 0xff7fff7fu : 0xff7fffffu, 0, 0xff800000, 0xff7fffff},
+          {bf16 ? 0x7f807f80u : 0x7f800000u, 0, 0x7f800000, 0x7f800000},
+          {0, 0xff800000, 0xff800000, 0xff800000},
+      };
+      for (const Case &tc : cases) {
+        for (uint32_t r = 0; r < 4; ++r)
+          for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+            fx.cu->write_vgpr(fx.vbase + A_OFF + r, lane, tc.a);
+            fx.cu->write_vgpr(fx.vbase + B_OFF + r, lane, bf16 ? 0x40004000 : 0x40000000);
+            fx.cu->write_vgpr(fx.vbase + INDEX_OFF + r, lane, tc.c);
+          }
+        for (bool clamp : {false, true}) {
+          SCOPED_TRACE(::testing::Message()
+                       << instruction->mnemonic() << " A=" << tc.a << " C=" << tc.c
+                       << " clamp=" << clamp << " scalar=" << force_scalar);
+          fx.wf->set_mode_raw(3u | (clamp ? amdgpu::Wavefront::FP16_OVFL_BIT : 0));
+          ASSERT_TRUE(fx.cu->execute_instruction(instruction.get(), *fx.wf).succeeded());
+          EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + DST_OFF, 0), clamp ? tc.clamped : tc.normal);
+        }
+      }
+    }
+
+    // CBSZ=1 broadcasts one half of A to both halves of the result.
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+      fx.cu->write_vgpr(fx.vbase + A_OFF, lane, lane < 32 ? 0x7f7fffffu : 0x7f800000u);
+      fx.cu->write_vgpr(fx.vbase + B_OFF, lane, 0x40000000u);
+      fx.cu->write_vgpr(fx.vbase + INDEX_OFF, lane, 0);
+    }
+    fx.wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
+    for (uint8_t abid : {0, 1}) {
+      SCOPED_TRACE(::testing::Message() << "ABID=" << unsigned(abid) << " scalar=" << force_scalar);
+      auto words =
+          cdna4::build_vop3p_mfma(cdna4::kVMfmaF324x4x116bF32Vop3pMfma, {.vdst = DST_OFF,
+                                                                         .cbsz = 1,
+                                                                         .abid = abid,
+                                                                         .src0 = 256 + A_OFF,
+                                                                         .src1 = 256 + B_OFF,
+                                                                         .src2 = 256 + INDEX_OFF});
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      ASSERT_TRUE(fx.cu->execute_instruction(instruction.get(), *fx.wf).succeeded());
+      const uint32_t expected = abid ? 0x7f800000u : 0x7f7fffffu;
+      for (uint32_t lane : {0u, 32u})
+        EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + DST_OFF, lane), expected);
+    }
+  }
 }
 
 TEST(SmfmacSimdExact, Bf16OverflowCancellationRequiresFusion) {

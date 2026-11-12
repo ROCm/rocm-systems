@@ -1,0 +1,46 @@
+# rccl-UnitTestsMicroDdaIpc — shared/ctest schema.
+# Host-only micro-tests for src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu (no GPU, no librccl).
+# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+
+test_categories:
+  quick: &micro_dda_ipc_quick
+    description: "Smoke — host-only src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu micro-tests, sub-second."
+    test_patterns:
+      - "DdaAllReduceIpc*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_dda_ipc_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_dda_ipc_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_dda_ipc_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

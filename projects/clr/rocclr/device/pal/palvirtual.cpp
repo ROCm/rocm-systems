@@ -548,6 +548,9 @@ bool VirtualGPU::Queue::waitForEvent(uint id) {
   constexpr bool IbReuse = true;
   bool result = waitForFence<!IbReuse>(slotId);
   cmbBufIdRetired_ = id;
+  // The fence is signaled even when the KMD tore the queue down after a fault,
+  // so a successful wait doesn't mean the submission ran.
+  gpu_.dev().CheckExecutionState();
   return result;
 }
 
@@ -570,6 +573,8 @@ bool VirtualGPU::Queue::isDone(uint id) {
     return false;
   }
   cmbBufIdRetired_ = id;
+  // Only on a new retirement, so polling an already retired buffer stays free.
+  gpu_.dev().CheckExecutionState();
   return true;
 }
 
@@ -1907,11 +1912,8 @@ void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
 
     bool force_blit = false;
     if (amd::IS_HIP) {
-      constexpr uint32_t kManagedAlloc = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR);
-      // In case of HMM, use blit kernel instead of CPU memcpy
-      if ((cmd.memory().getMemFlags() & kManagedAlloc) == kManagedAlloc) {
-        force_blit = true;
-      }
+      // Always use blit for memset for HIP.
+      force_blit = true;
     }
 
     for (size_t slice = 0; slice < depth; slice++) {
@@ -2124,6 +2126,43 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
     for (const auto& op : copyOps) {
       op.dstMemory->signalWrite(&dev());
     }
+  }
+
+  profilingEnd(cmd);
+}
+
+void VirtualGPU::SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd);
+
+  const std::vector<amd::BatchCopyRectOp>& copy_ops = cmd.CopyOps();
+
+  device::Memory::SyncFlags sync_flags;
+  sync_flags.skipEntire_ = false;
+  for (const amd::BatchCopyRectOp& op : copy_ops) {
+    Memory* src_dev_mem = dev().getGpuMemory(op.src_memory);
+    Memory* dst_dev_mem = dev().getGpuMemory(op.dst_memory);
+    if (src_dev_mem == nullptr || dst_dev_mem == nullptr) {
+      LogError("SubmitBatchCopyMemoryRect: Invalid memory objects!");
+      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      profilingEnd(cmd);
+      return;
+    }
+    dst_dev_mem->syncCacheFromHost(*this, sync_flags);
+    src_dev_mem->syncCacheFromHost(*this);
+  }
+
+  if (!blitMgr().CopyBufferRectBatch(copy_ops)) {
+    LogError("SubmitBatchCopyMemoryRect: Batch rect copy failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    profilingEnd(cmd);
+    return;
+  }
+
+  for (const amd::BatchCopyRectOp& op : copy_ops) {
+    op.dst_memory->signalWrite(&dev());
   }
 
   profilingEnd(cmd);
@@ -3195,8 +3234,13 @@ void VirtualGPU::submitAcquireExtObjects(amd::AcquireExtObjectsCommand& vcmd) {
     pal::Memory* memory = dev().getGpuMemory(it);
 
     // If resource is a shared copy of original resource, then
-    // runtime needs to copy data from original resource
-    it->getInteropObj()->copyOrigToShared();
+    // runtime needs to copy data from original resource. A failure leaves the staged
+    // surface holding stale or uninitialised pixels, so report it instead of letting
+    // the kernel read them.
+    if (!it->getInteropObj()->copyOrigToShared()) {
+      LogError("copyOrigToShared() failed; the shared surface was not updated");
+      vcmd.setStatus(CL_INVALID_OPERATION);
+    }
   }
 
   profilingEnd(vcmd);

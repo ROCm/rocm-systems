@@ -27,7 +27,7 @@ enum class WaitcheckAccess { Read, Write };
 struct WaitcheckMemoryDiagnostic {
   uint64_t producer_offset = 0;
   uint64_t consumer_offset = 0;
-  WaitCounterKind counter = WaitCounterKind::Load;
+  amdgpu::WaitCounterKind counter = amdgpu::WaitCounterKind::Load;
   RegisterRef reg;
   WaitcheckAccess access = WaitcheckAccess::Read;
   uint32_t required_count = 0;

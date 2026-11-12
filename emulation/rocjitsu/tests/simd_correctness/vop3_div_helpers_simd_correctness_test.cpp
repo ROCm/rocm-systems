@@ -17,6 +17,7 @@
 /// Independent numerical expectations live in division_test.cpp and
 /// division_macro_test.cpp; this suite checks the execution-path integration.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -121,7 +122,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_div", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_div", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -198,6 +201,8 @@ void check_div_fixup_f32(uint64_t exec) {
                         uint32_t r2) -> std::array<uint32_t, WF_SIZE> {
       util::set_force_scalar_for_testing(force_scalar);
       Fixture fx;
+      if (::testing::Test::HasFatalFailure())
+        return {};
       EXPECT_NE(fx.cu, nullptr);
       EXPECT_NE(fx.wf, nullptr);
       uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -239,6 +244,8 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f16_opsel(bool force_scalar, uint32_
                                                       uint32_t op_sel = 0xFu) {
   util::set_force_scalar_for_testing(force_scalar);
   Fixture fx;
+  if (::testing::Test::HasFatalFailure())
+    return {};
   EXPECT_NE(fx.cu, nullptr);
   EXPECT_NE(fx.wf, nullptr);
   uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -271,6 +278,8 @@ void check_div_fixup_f64(uint64_t exec) {
                       uint32_t r2) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -311,6 +320,8 @@ void check_div_fixup_f64(uint64_t exec) {
 std::array<uint32_t, WF_SIZE> run_div_fixup_f32_nan_precedence(bool force_scalar, uint32_t opcode) {
   util::set_force_scalar_for_testing(force_scalar);
   Fixture fx;
+  if (::testing::Test::HasFatalFailure())
+    return {};
   EXPECT_NE(fx.cu, nullptr);
   EXPECT_NE(fx.wf, nullptr);
   uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -342,6 +353,8 @@ std::array<uint32_t, WF_SIZE> run_div_fixup_f32_nan_precedence(bool force_scalar
 std::array<uint64_t, WF_SIZE> run_div_fixup_f64_nan_precedence(bool force_scalar) {
   util::set_force_scalar_for_testing(force_scalar);
   Fixture fx;
+  if (::testing::Test::HasFatalFailure())
+    return {};
   EXPECT_NE(fx.cu, nullptr);
   EXPECT_NE(fx.wf, nullptr);
   uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -384,6 +397,8 @@ void check_div_fmas_f32(uint64_t exec) {
                       uint32_t r1) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -428,6 +443,8 @@ void check_div_fmas_f64(uint64_t exec) {
                       uint32_t r1) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -517,8 +534,10 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFixupF16Family_OpSelHighHalves) {
   struct Op {
     uint32_t opcode;
     const char *name;
+    uint16_t high_half_after_low_write;
   };
-  for (const Op &o : {Op{519, "v_div_fixup_f16_vop3"}, Op{495, "v_div_fixup_legacy_f16_vop3"}}) {
+  for (const Op &o :
+       {Op{519, "v_div_fixup_f16_vop3", 0xCAFEu}, Op{495, "v_div_fixup_legacy_f16_vop3", 0u}}) {
     for (const bool force_scalar : {true, false}) {
       const auto normal = run_div_fixup_f16_opsel(force_scalar, o.opcode, util::f32_to_f16(2.0f),
                                                   util::f32_to_f16(3.0f), util::f32_to_f16(4.0f));
@@ -531,7 +550,7 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFixupF16Family_OpSelHighHalves) {
           run_div_fixup_f16_opsel(force_scalar, o.opcode, util::f32_to_f16(2.0f),
                                   util::f32_to_f16(3.0f), util::f32_to_f16(4.0f), 0x7u);
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-        EXPECT_EQ(low_dst[lane], util::f32_to_f16(2.0f))
+        EXPECT_EQ(low_dst[lane], pack16(util::f32_to_f16(2.0f), o.high_half_after_low_write))
             << o.name << " low dst force_scalar=" << force_scalar << " lane " << lane;
       }
 

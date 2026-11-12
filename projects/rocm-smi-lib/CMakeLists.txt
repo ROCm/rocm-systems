@@ -7,9 +7,9 @@ message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 cmake_minimum_required(VERSION 3.14)
 project(rocm_smi_lib)
 
-# ROCm SMI is deprecated in favor of AMD SMI. Builds (including TheRock) set
-# ROCM_SMI_DISABLE=True to skip building the library entirely. Honor both the
-# cache variable and the environment variable of the same name.
+# ROCm SMI is deprecated in favor of AMD SMI. Set ROCM_SMI_DISABLE=True to skip
+# building the library entirely. Honor both the cache variable and the
+# environment variable of the same name.
 if(DEFINED ENV{ROCM_SMI_DISABLE} AND NOT DEFINED ROCM_SMI_DISABLE)
     set(ROCM_SMI_DISABLE
         "$ENV{ROCM_SMI_DISABLE}"
@@ -24,7 +24,7 @@ if(ROCM_SMI_DISABLE)
     message(
         WARNING
         "rocm-smi-lib is deprecated and ROCM_SMI_DISABLE is set; skipping build. "
-        "Use AMD SMI instead: https://github.com/ROCm/amdsmi"
+        "Use AMD SMI instead: https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi"
     )
     return()
 endif()

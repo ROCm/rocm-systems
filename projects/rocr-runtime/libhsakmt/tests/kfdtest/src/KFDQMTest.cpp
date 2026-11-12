@@ -777,7 +777,10 @@ HSAint64 KFDQMTest::TimeConsumedwithCUMask(int node, uint32_t* mask, uint32_t ma
     dispatch.SetDim(1024, 16, 16);
 
     PM4Queue queue;
-    EXPECT_SUCCESS(queue.Create(node));
+    HSAKMT_STATUS status = queue.Create(node);
+    EXPECT_SUCCESS(status);
+    if (status != HSAKMT_STATUS_SUCCESS)
+        return 0;
     EXPECT_SUCCESS(queue.SetCUMask(mask, mask_count));
     queue.SetSkipWaitConsump(true);
 
@@ -1338,7 +1341,10 @@ static bool testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfig, H
     if (maskConfig.numXcc > 1)
         queuePercentage |= (maskConfig.targetXcc << 8);
 
-    EXPECT_SUCCESS_GPU(queue.Create(gpuNode, BaseQueue::DEFAULT_QUEUE_SIZE, NULL, queuePercentage), gpuNode);
+    HSAKMT_STATUS status = queue.Create(gpuNode, BaseQueue::DEFAULT_QUEUE_SIZE, NULL, queuePercentage);
+    EXPECT_SUCCESS_GPU(status, gpuNode);
+    if (status != HSAKMT_STATUS_SUCCESS)
+        return false;
 
     EXPECT_SUCCESS_GPU(queue.SetCUMask(pAdjMask, maskConfig.numBits), gpuNode);
 
@@ -1941,12 +1947,12 @@ void KFDQMTest::testQueuePriority(int gpuNode, bool isSamePipe)
      *   about the number of pipes used by KFD. Queue #12 is a multiple
      *   of 1, 2, 3 and 4, so it falls on pipe 0 for any number of pipes
      */
-	EXPECT_SUCCESS_GPU(queue[0].Create(gpuNode), gpuNode);  // Queue 0 is on Pipe 0
+	ASSERT_SUCCESS_GPU(queue[0].Create(gpuNode), gpuNode);  // Queue 0 is on Pipe 0
     if (isSamePipe) {
         for (i = 2; i < queueCount; i++)
-            EXPECT_SUCCESS_GPU(queue[i].Create(gpuNode), gpuNode);
+            ASSERT_SUCCESS_GPU(queue[i].Create(gpuNode), gpuNode);
     }
-    EXPECT_SUCCESS_GPU(queue[1].Create(gpuNode), gpuNode);
+    ASSERT_SUCCESS_GPU(queue[1].Create(gpuNode), gpuNode);
 
     for (i = 0; i < 2; i++) {
         syncBuffer[i] = -1;
