@@ -31,42 +31,42 @@ foreach(
                 set(_wave_size_options -mno-wavefrontsize64)
             endif()
         endif()
-        set(_barrier_cases)
+        math(EXPR _barrier_max_below "${_wave_size} - 1")
+        math(EXPR _barrier_max_above "${_wave_size} + 1")
+        set(_barrier_cases
+            15
+            16
+            17
+            18
+            19
+            20
+            21
+            22
+            23
+            24
+            25
+            26
+            27
+            28
+            29
+            30
+            31
+            32
+            33
+            34
+            35
+            36
+            37
+            38
+            39
+            42
+            barrier-max${_barrier_max_below}
+            barrier-max${_wave_size}
+            barrier-max${_barrier_max_above}
+            no-barrier-max${_wave_size}
+        )
         if(_gpu STREQUAL "gfx1250")
-            set(_barrier_cases
-                9
-                15
-                16
-                17
-                18
-                19
-                20
-                21
-                22
-                23
-                24
-                25
-                26
-                27
-                28
-                29
-                30
-                31
-                32
-                33
-                34
-                35
-                36
-                37
-                38
-                39
-                40
-                41
-                barrier-max31
-                barrier-max32
-                barrier-max33
-                no-barrier-max32
-            )
+            list(APPEND _barrier_cases 9 40 41)
         endif()
         foreach(
             _case
@@ -114,12 +114,12 @@ foreach(
             elseif(_case STREQUAL "dense-sites")
                 set(_case_number 2)
                 set(_layout_options -DCONSAN_LDS_ACCESS_PAIRS=256)
-            elseif(_case MATCHES "^barrier-max(31|32|33)$")
+            elseif(_case MATCHES "^barrier-max([0-9]+)$")
                 set(_case_number 15)
                 set(_layout_options -DCONSAN_MAX_WORKGROUP=${CMAKE_MATCH_1})
-            elseif(_case STREQUAL "no-barrier-max32")
+            elseif(_case STREQUAL "no-barrier-max${_wave_size}")
                 set(_case_number 1)
-                set(_layout_options -DCONSAN_MAX_WORKGROUP=32)
+                set(_layout_options -DCONSAN_MAX_WORKGROUP=${_wave_size})
             endif()
             set(_object ${_directory}/${_fixture_name}.o)
             set(_image ${_directory}/${_fixture_name}.hsaco)
@@ -274,10 +274,14 @@ foreach(
             )
             list(APPEND _target_fixtures ${_image})
         endforeach()
-        set(_group_cases 1 3 4 6)
-        if(_gpu STREQUAL "gfx1250")
-            list(APPEND _group_cases 2 5)
-        endif()
+        set(_group_cases
+            1
+            2
+            3
+            4
+            5
+            6
+        )
         foreach(_case IN LISTS _group_cases)
             set(_object ${_directory}/group-${_case}.o)
             set(_image ${_directory}/group-${_case}.hsaco)
