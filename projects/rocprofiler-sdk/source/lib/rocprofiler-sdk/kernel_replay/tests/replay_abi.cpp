@@ -66,6 +66,16 @@ size_t
 rocprofiler_test_c_replay_offset_replay_stop_context(void);
 size_t
 rocprofiler_test_c_replay_offset_replay_set_thread_trace_parameters(void);
+size_t
+rocprofiler_test_c_replay_offset_app_dispatch(void);
+size_t
+rocprofiler_test_c_replay_offset_replay_set_dispatch(void);
+size_t
+rocprofiler_test_c_replay_dispatch_size(void);
+size_t
+rocprofiler_test_c_replay_dispatch_offset_cluster_size(void);
+size_t
+rocprofiler_test_c_replay_dispatch_offset_private_segment_size(void);
 int
 rocprofiler_test_c_replay_operation_last(void);
 int
@@ -130,7 +140,10 @@ TEST(kernel_replay_abi, members_are_in_declaration_order)
               offsetof(replay_data_t, replay_stop_context));
     EXPECT_LT(offsetof(replay_data_t, replay_stop_context),
               offsetof(replay_data_t, replay_set_thread_trace_parameters));
-    EXPECT_LT(offsetof(replay_data_t, replay_set_thread_trace_parameters), sizeof(replay_data_t));
+    EXPECT_LT(offsetof(replay_data_t, replay_set_thread_trace_parameters),
+              offsetof(replay_data_t, app_dispatch));
+    EXPECT_LT(offsetof(replay_data_t, app_dispatch), offsetof(replay_data_t, replay_set_dispatch));
+    EXPECT_LT(offsetof(replay_data_t, replay_set_dispatch), sizeof(replay_data_t));
 }
 
 // No member may overlap the one after it, and the last member must fit inside the struct. This
@@ -156,9 +169,36 @@ TEST(kernel_replay_abi, members_do_not_overlap_and_fit)
     EXPECT_GE(
         offsetof(replay_data_t, replay_set_thread_trace_parameters),
         offsetof(replay_data_t, replay_stop_context) + sizeof(replay_data_t{}.replay_stop_context));
-    EXPECT_GE(sizeof(replay_data_t),
+    EXPECT_GE(offsetof(replay_data_t, app_dispatch),
               offsetof(replay_data_t, replay_set_thread_trace_parameters) +
                   sizeof(replay_data_t{}.replay_set_thread_trace_parameters));
+    EXPECT_GE(offsetof(replay_data_t, replay_set_dispatch),
+              offsetof(replay_data_t, app_dispatch) + sizeof(replay_data_t{}.app_dispatch));
+    EXPECT_GE(
+        sizeof(replay_data_t),
+        offsetof(replay_data_t, replay_set_dispatch) + sizeof(replay_data_t{}.replay_set_dispatch));
+}
+
+// rocprofiler_kernel_replay_dispatch_t is read by the tool (app_dispatch) and written by the tool
+// (replay_set_dispatch), so its layout is ABI too. It is size-prefixed like the record.
+TEST(kernel_replay_abi, dispatch_struct_layout)
+{
+    using dispatch_t = rocprofiler_kernel_replay_dispatch_t;
+    EXPECT_TRUE(std::is_standard_layout<dispatch_t>::value);
+    EXPECT_TRUE(std::is_trivially_copyable<dispatch_t>::value);
+    EXPECT_EQ(offsetof(dispatch_t, size), 0u);
+    EXPECT_LT(offsetof(dispatch_t, size), offsetof(dispatch_t, kernel_object));
+    EXPECT_LT(offsetof(dispatch_t, kernel_object), offsetof(dispatch_t, kernarg_address));
+    EXPECT_LT(offsetof(dispatch_t, kernarg_address), offsetof(dispatch_t, workgroup_size));
+    EXPECT_LT(offsetof(dispatch_t, workgroup_size), offsetof(dispatch_t, grid_size));
+    EXPECT_LT(offsetof(dispatch_t, grid_size), offsetof(dispatch_t, cluster_size));
+    EXPECT_LT(offsetof(dispatch_t, cluster_size), offsetof(dispatch_t, group_segment_size));
+    EXPECT_LT(offsetof(dispatch_t, group_segment_size), offsetof(dispatch_t, private_segment_size));
+    EXPECT_EQ(rocprofiler_test_c_replay_dispatch_size(), sizeof(dispatch_t));
+    EXPECT_EQ(rocprofiler_test_c_replay_dispatch_offset_cluster_size(),
+              offsetof(dispatch_t, cluster_size));
+    EXPECT_EQ(rocprofiler_test_c_replay_dispatch_offset_private_segment_size(),
+              offsetof(dispatch_t, private_segment_size));
 }
 
 // Pass counters are documented as uint64_t. A tool reading them through the header's type must see
@@ -182,6 +222,7 @@ TEST(kernel_replay_abi, callback_signatures_are_pinned)
     using toggle_fn              = rocprofiler_status_t (*)(rocprofiler_context_id_t);
     using thread_trace_params_fn = rocprofiler_status_t (*)(
         rocprofiler_context_id_t, const rocprofiler_thread_trace_parameter_t*, size_t);
+    using dispatch_fn = rocprofiler_status_t (*)(const rocprofiler_kernel_replay_dispatch_t*);
 
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_pass_count), pass_count_fn>::value));
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_continue), continue_fn>::value));
@@ -189,6 +230,9 @@ TEST(kernel_replay_abi, callback_signatures_are_pinned)
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_stop_context), toggle_fn>::value));
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_set_thread_trace_parameters),
                               thread_trace_params_fn>::value));
+    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_set_dispatch), dispatch_fn>::value));
+    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.app_dispatch),
+                              const rocprofiler_kernel_replay_dispatch_t*>::value));
 }
 
 // A zeroed record must mean "do not replay this dispatch". The header documents a NULL
@@ -202,6 +246,8 @@ TEST(kernel_replay_abi, zero_initialized_record_opts_out_of_replay)
     EXPECT_EQ(rec.replay_start_context, nullptr);
     EXPECT_EQ(rec.replay_stop_context, nullptr);
     EXPECT_EQ(rec.replay_set_thread_trace_parameters, nullptr);
+    EXPECT_EQ(rec.app_dispatch, nullptr);
+    EXPECT_EQ(rec.replay_set_dispatch, nullptr);
     EXPECT_EQ(rec.current_pass, 0u);
     EXPECT_EQ(rec.total_passes, 0u);
     EXPECT_EQ(rec.size, 0u);
@@ -215,7 +261,7 @@ TEST(kernel_replay_abi, size_member_carries_the_layout_prefix)
     replay_data_t rec = {};
     rec.size          = sizeof(replay_data_t);
     EXPECT_EQ(rec.size, sizeof(replay_data_t));
-    EXPECT_GT(rec.size, offsetof(replay_data_t, replay_set_thread_trace_parameters));
+    EXPECT_GT(rec.size, offsetof(replay_data_t, replay_set_dispatch));
 }
 
 // replay_set_thread_trace_parameters was appended after replay_stop_context. A record from an SDK
@@ -394,6 +440,10 @@ TEST(kernel_replay_abi, c_and_cxx_agree_on_every_field_offset)
               offsetof(replay_data_t, replay_stop_context));
     EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_set_thread_trace_parameters(),
               offsetof(replay_data_t, replay_set_thread_trace_parameters));
+    EXPECT_EQ(rocprofiler_test_c_replay_offset_app_dispatch(),
+              offsetof(replay_data_t, app_dispatch));
+    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_set_dispatch(),
+              offsetof(replay_data_t, replay_set_dispatch));
 }
 
 TEST(kernel_replay_abi, c_and_cxx_agree_on_enum_values)
@@ -423,4 +473,6 @@ TEST(kernel_replay_abi, record_written_by_c_reads_back_in_cxx)
     EXPECT_EQ(rec.replay_start_context, nullptr);
     EXPECT_EQ(rec.replay_stop_context, nullptr);
     EXPECT_EQ(rec.replay_set_thread_trace_parameters, nullptr);
+    EXPECT_EQ(rec.app_dispatch, nullptr);
+    EXPECT_EQ(rec.replay_set_dispatch, nullptr);
 }

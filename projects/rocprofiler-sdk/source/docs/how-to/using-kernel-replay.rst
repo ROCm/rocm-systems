@@ -198,12 +198,34 @@ each trace with its pass through ``userdata_shader``, because shader data may be
 another thread. Only the target parameters can change per pass, and the selection follows the same
 arm window, stickiness and loop scope as the context toggles.
 
+Replacing a pass's dispatch
+===========================
+
+A pass can submit a different dispatch than the application's, for example a rewritten copy of the
+kernel with extra kernel arguments or a padded grid. Load the replacement kernel through HSA (for
+example during ``CONFIG`` ``PHASE_ENTER``), then during ``PASS`` ``PHASE_ENTER`` start from the
+application's dispatch and change what the pass needs:
+
+.. code-block:: cpp
+
+    auto dispatch            = *payload->app_dispatch;
+    dispatch.kernel_object   = my_kernel_object;
+    dispatch.kernarg_address = my_kernargs;
+    payload->replay_set_dispatch(&dispatch);
+
+Passes that do not call it submit the application's dispatch, and the application keeps the output
+of the last pass, so end the loop with an original pass. Read results the replacement produced in
+``PASS`` ``PHASE_EXIT``, before the restore, using host reads or ``hsa_memory_copy``; never launch
+work on an application stream from a replay callback.
+
 In-tree examples
 ================
 
 * ``samples/kernel_replay/basic_client_with_user_data.cpp`` — threads mutable tool state through
   ``user_data.ptr`` without a dispatch-id side table.
 * ``samples/kernel_replay/att_targets_client.cpp`` — traces each SIMD of one WGP on its own pass.
+* ``tests/kernel-replay-dispatch/`` — custom client that loads a substitute kernel through HSA and
+  replaces one pass's dispatch with its own kernel arguments and a doubled grid.
 * ``tests/kernel-replay-concurrency/`` — custom client that replays one kernel and opts another
   out, asserting concurrent non-replayed work is not corrupted by snapshot/restore.
 * ``tests/kernel-replay-local-context/`` — custom client that starts/stops per-service contexts

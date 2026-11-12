@@ -1224,7 +1224,12 @@ WriteInterceptor(const void* packets,
                 kernel_replay::execute_pass_phase_enter(
                     replay_plan, pass, thr_id, internal_corr_id, ancestor_corr_id, pass_state);
 
-                process_packet_batch(packets_arr,
+                // A tool may have replaced this pass's dispatch (replay_set_dispatch); the
+                // injected profiling packets, signal handling and dispatch id are the same either
+                // way.
+                const rocprofiler_packet* pass_packets =
+                    pass_state.dispatch_override ? &*pass_state.dispatch_override : packets_arr;
+                process_packet_batch(pass_packets,
                                      1,
                                      forward_to_writer,
                                      /*is_replay_pass=*/true,

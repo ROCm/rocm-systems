@@ -29,6 +29,7 @@
 #include <rocprofiler-sdk/fwd.h>
 
 #include <cstdint>
+#include <optional>
 
 namespace rocprofiler
 {
@@ -48,6 +49,11 @@ struct replay_plan_t
     rocprofiler_callback_tracing_kernel_replay_data_t config_data = {};
     tracing::callback_context_data_vec_t              config_contexts{};
     tracing::external_correlation_id_map_t            external_correlation_ids{};
+
+    // The application's packet, the template for a pass's replacement dispatch, and the dispatch it
+    // describes (delivered to tools as app_dispatch).
+    hsa::rocprofiler_packet              app_packet   = {};
+    rocprofiler_kernel_replay_dispatch_t app_dispatch = {};
 
     uint64_t (*replay_pass_count)(rocprofiler_kernel_dispatch_info_t dispatch_info,
                                   rocprofiler_user_data_t            user_data) = nullptr;
@@ -75,6 +81,10 @@ struct pass_context_state_t
     // Pass-scoped user_data delivered to replay_continue: the value this pass's PASS PHASE_EXIT
     // left (see should_continue_replay), not the sequence-wide CONFIG value.
     rocprofiler_user_data_t user_data = {.value = 0};
+
+    // The packet this pass submits instead of the application's, set by the tool through
+    // replay_set_dispatch during PASS PHASE_ENTER. Empty means the application's packet.
+    std::optional<hsa::rocprofiler_packet> dispatch_override = std::nullopt;
 };
 
 // Set once when a tool configures a KERNEL_REPLAY callback-tracing service. Acts as a cheap
@@ -132,6 +142,12 @@ void
 execute_pass_phase_exit(const replay_plan_t&  plan,
                         uint64_t              current_pass,
                         pass_context_state_t& pass_state);
+
+// Tool-facing callback (rocprofiler_callback_tracing_kernel_replay_data_t::replay_set_dispatch).
+// Legal only while a PASS PHASE_ENTER callback runs; returns
+// ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR otherwise.
+rocprofiler_status_t
+replay_set_dispatch(const rocprofiler_kernel_replay_dispatch_t* dispatch);
 
 bool
 should_continue_replay(const replay_plan_t&        plan,

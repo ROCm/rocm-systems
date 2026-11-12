@@ -72,6 +72,36 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_thread_trace_params_cb_
     size_t                                             num_parameters);
 
 /**
+ * @brief A kernel dispatch as a kernel replay pass submits it.
+ *
+ * Sizes are in work-items, except @c cluster_size, which counts workgroups per cluster. A
+ * @c cluster_size of {0, 0, 0} means an ordinary kernel dispatch packet; a nonzero one means an
+ * AMD extended kernel dispatch packet (gfx1250), whose grid is a whole number of clusters. HIP on
+ * gfx1250 submits ordinary launches as extended packets with a cluster size of {1, 1, 1}.
+ *
+ * The tool fills this struct for @c replay_set_dispatch, so @c size must be set to the size the
+ * tool was compiled with. Members are only ever appended, and an SDK accepts any size that covers
+ * the members it requires.
+ */
+typedef struct rocprofiler_kernel_replay_dispatch_t
+{
+    uint64_t           size;                  ///< Size of this struct
+    uint64_t           kernel_object;         ///< Kernel descriptor address
+    void*              kernarg_address;       ///< Kernel argument segment
+    rocprofiler_dim3_t workgroup_size;        ///< Work-items per workgroup
+    rocprofiler_dim3_t grid_size;             ///< Work-items in the grid
+    rocprofiler_dim3_t cluster_size;          ///< Workgroups per cluster, or {0, 0, 0}
+    uint32_t           group_segment_size;    ///< Group (LDS) bytes per workgroup
+    uint32_t           private_segment_size;  ///< Private (scratch) bytes per work-item
+} rocprofiler_kernel_replay_dispatch_t;
+
+/**
+ * @brief SDK-provided callback replacing the dispatch the current replay pass submits.
+ */
+typedef rocprofiler_status_t (*rocprofiler_kernel_replay_dispatch_cb_t)(
+    const rocprofiler_kernel_replay_dispatch_t* dispatch);
+
+/**
  * @brief ROCProfiler Kernel Replay Callback Tracer Record.
  *
  * Payload for @ref ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY callbacks.
@@ -136,6 +166,8 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     rocprofiler_kernel_replay_context_cb_t    replay_start_context;
     rocprofiler_kernel_replay_context_cb_t    replay_stop_context;
     rocprofiler_kernel_replay_thread_trace_params_cb_t replay_set_thread_trace_parameters;
+    const rocprofiler_kernel_replay_dispatch_t*        app_dispatch;
+    rocprofiler_kernel_replay_dispatch_cb_t            replay_set_dispatch;
 
     /// @var replay_pass_count
     /// @brief [CONFIG] Tool-provided callback returning the number of replay passes.
@@ -226,6 +258,39 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     ///    every selection shares the context's trace buffer.
     ///  - A tool built against an older header ignores this member; a tool must check that
     ///    @c size covers it before calling it.
+    ///
+    /// @var app_dispatch
+    /// @brief [CONFIG/PASS] The dispatch the application submitted, read-only, populated by the
+    /// SDK. Valid only for the duration of the callback; copy what is needed. Its
+    /// @c kernarg_address points at the application's kernel arguments, which stay unchanged
+    /// until the replay loop ends.
+    ///
+    /// @var replay_set_dispatch
+    /// @brief [PASS] Replace the dispatch the current pass submits. The SDK populates this
+    /// function pointer before each PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER. Semantics:
+    ///  - Only valid to call during PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER; otherwise it
+    ///    returns @ref ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR.
+    ///  - Applies to the current pass only. A pass that does not call it submits the
+    ///    application's dispatch; @c NULL clears a replacement made earlier in the same callback.
+    ///  - The SDK copies @p dispatch. The memory at @c kernarg_address must stay valid and
+    ///    unchanged until the pass's @ref ROCPROFILER_CALLBACK_PHASE_EXIT.
+    ///  - The packet keeps the application's packet type, header and fences: an ordinary
+    ///    dispatch packet needs @c cluster_size {0, 0, 0}, and an extended dispatch packet needs a
+    ///    nonzero @c cluster_size with a grid that is a whole number of clusters. Start from
+    ///    @c app_dispatch to keep both right.
+    ///  - @c kernel_object must belong to a code object loaded through HSA on the replayed agent,
+    ///    so the SDK knows its kernel id. Sizes must be nonzero and fit the packet's fields.
+    ///    @c kernarg_address may be NULL only for a kernel without kernel arguments. A rejected
+    ///    call returns @ref ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT and keeps the previous
+    ///    choice.
+    ///  - Everything else replay does is unchanged: the memory snapshot and restore, the
+    ///    profiling packets injected around the kernel, the dispatch id, and the deferred
+    ///    application completion signal. Services observing the pass (dispatch tracing, counters,
+    ///    thread trace) see the replacement's kernel id and geometry; @c dispatch_info in this
+    ///    payload keeps describing the application's dispatch.
+    ///  - The application keeps the output of the last pass that runs, so a tool replacing
+    ///    dispatches normally lets the final pass submit the application's dispatch.
+    ///  - A tool must check that @c size covers this member before calling it.
 } rocprofiler_callback_tracing_kernel_replay_data_t;
 
 /** @} */

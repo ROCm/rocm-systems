@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/dispatch_override.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -68,6 +69,46 @@ bit_extract(Integral x, int first, int last)
                               ? ~Integral{0}
                               : static_cast<Integral>((Integral{1} << num_bits) - 1);
     return (x >> first) & mask;
+}
+
+// The pass a tool may currently replace the dispatch of: set only while that pass's PASS
+// PHASE_ENTER callbacks run, so replay_set_dispatch fails outside that window.
+struct pass_dispatch_slot
+{
+    const replay_plan_t*                    plan     = nullptr;
+    std::optional<hsa::rocprofiler_packet>* override = nullptr;
+};
+
+thread_local pass_dispatch_slot* tl_pass_dispatch = nullptr;
+
+struct kernel_lookup
+{
+    bool                   found         = false;
+    uint64_t               kernarg_bytes = 0;
+    rocprofiler_agent_id_t agent         = {.handle = 0};
+};
+
+// The loaded kernel whose descriptor is `kernel_object`, from the code objects the SDK registered
+// when their executables were frozen.
+kernel_lookup
+find_kernel(uint64_t kernel_object)
+{
+    auto result = kernel_lookup{};
+    code_object::iterate_loaded_code_objects(
+        [&result, kernel_object](const code_object::hsa::code_object& co) {
+            if(result.found) return;
+            for(const auto& sym : co.symbols)
+            {
+                if(sym && sym->rocp_data.kernel_object == kernel_object)
+                {
+                    result.found         = true;
+                    result.kernarg_bytes = sym->rocp_data.kernarg_segment_size;
+                    result.agent         = co.rocp_data.rocp_agent;
+                    return;
+                }
+            }
+        });
+    return result;
 }
 
 bool
@@ -211,6 +252,9 @@ execute_config_phase_enter(const hsa::Queue&              queue,
     plan.config_data =
         common::init_public_api_struct(rocprofiler_callback_tracing_kernel_replay_data_t{});
     plan.config_data.dispatch_info = make_dispatch_info(queue, pkt, dispatch_id);
+    plan.app_packet                = pkt;
+    if(auto app_dispatch = describe_dispatch(pkt)) plan.app_dispatch = *app_dispatch;
+    plan.config_data.app_dispatch = &plan.app_dispatch;
 
     tracing::execute_phase_enter_callbacks(config_contexts,
                                            thr_id,
@@ -263,9 +307,10 @@ execute_config_phase_exit(const replay_plan_t& plan,
 {
     if(plan.config_contexts.empty()) return;
 
-    auto config_contexts = plan.config_contexts;
-    auto extern_corr_ids = plan.external_correlation_ids;
-    auto config_data     = plan.config_data;
+    auto config_contexts     = plan.config_contexts;
+    auto extern_corr_ids     = plan.external_correlation_ids;
+    auto config_data         = plan.config_data;
+    config_data.app_dispatch = &plan.app_dispatch;
 
     tracing::execute_phase_exit_callbacks(config_contexts,
                                           extern_corr_ids,
@@ -311,13 +356,20 @@ execute_pass_phase_enter(const replay_plan_t&    plan,
     pass_data.replay_start_context               = &replay_local_enable_context;
     pass_data.replay_stop_context                = &replay_local_disable_context;
     pass_data.replay_set_thread_trace_parameters = &replay_local_set_thread_trace_parameters;
+    pass_data.app_dispatch                       = &plan.app_dispatch;
+    pass_data.replay_set_dispatch                = &replay_set_dispatch;
 
     // Disarm through a scope guard: execute_phase_enter_callbacks can throw (std::out_of_range from
     // an .at() lookup, or a throwing tool callback), and the armed flag must not leak past this
     // call.
     {
+        auto slot = pass_dispatch_slot{&plan, &out_pass_state.dispatch_override};
         set_toggles_armed(true);
-        const auto _disarm = common::scope_destructor{[]() { set_toggles_armed(false); }};
+        tl_pass_dispatch   = &slot;
+        const auto _disarm = common::scope_destructor{[]() {
+            set_toggles_armed(false);
+            tl_pass_dispatch = nullptr;
+        }};
         tracing::execute_phase_enter_callbacks(out_pass_state.contexts,
                                                thr_id,
                                                internal_corr_id,
@@ -341,6 +393,7 @@ execute_pass_phase_exit(const replay_plan_t&  plan,
     pass_data.dispatch_info = plan.config_data.dispatch_info;
     pass_data.current_pass  = current_pass;
     pass_data.total_passes  = plan.indefinite ? 0 : plan.total_passes;
+    pass_data.app_dispatch  = &plan.app_dispatch;
 
     // Carry the replay_continue chosen so far (config default or a PASS PHASE_ENTER override) so
     // the tool sees the current value and may replace it here
@@ -357,6 +410,34 @@ execute_pass_phase_exit(const replay_plan_t&  plan,
     pass_state.replay_continue = pass_data.replay_continue;
     pass_state.user_data =
         pass_state.contexts.empty() ? plan.user_data : pass_state.contexts.front().user_data;
+}
+
+rocprofiler_status_t
+replay_set_dispatch(const rocprofiler_kernel_replay_dispatch_t* dispatch)
+{
+    auto* slot = tl_pass_dispatch;
+    if(slot == nullptr) return ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR;
+
+    if(dispatch == nullptr)
+    {
+        slot->override->reset();
+        return ROCPROFILER_STATUS_SUCCESS;
+    }
+
+    // The kernel must be one the SDK registered on the replayed agent, so the pass's services can
+    // name it (kernel id, thread trace code-object markers).
+    const auto kernel = find_kernel(dispatch->kernel_object);
+    if(!kernel.found || kernel.agent != slot->plan->config_data.dispatch_info.agent_id)
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    if(kernel.kernarg_bytes > 0 && dispatch->kernarg_address == nullptr)
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto packet = hsa::rocprofiler_packet{};
+    auto status = build_dispatch_packet(slot->plan->app_packet, *dispatch, packet);
+    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+
+    *slot->override = packet;
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 bool

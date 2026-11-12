@@ -85,7 +85,8 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_kernel_replay_data_t*`
      - ``PHASE_ENTER``
      - Read ``current_pass`` / ``total_passes``. Optionally call
        ``replay_start_context`` / ``replay_stop_context``, and
-       ``replay_set_thread_trace_parameters`` to choose the pass's thread trace target.
+       ``replay_set_thread_trace_parameters`` to choose the pass's thread trace target, and
+       ``replay_set_dispatch`` to submit a different dispatch on this pass.
    * - ``ROCPROFILER_KERNEL_REPLAY_PASS``
      - ``PHASE_EXIT``
      - Pass complete; ``replay_continue`` (if set) runs after this.
@@ -167,6 +168,23 @@ dispatch. To trace several targets of the same dispatch with identical inputs, c
 * The member was appended to the payload; check that ``size`` covers it before calling it.
 
 ``samples/kernel_replay/att_targets_client.cpp`` traces each SIMD of one WGP on its own pass.
+
+Replacing a pass's dispatch
+---------------------------
+
+``app_dispatch`` (CONFIG and PASS) describes the dispatch the application submitted, including its
+kernel argument address. During PASS ``PHASE_ENTER``, ``replay_set_dispatch`` makes the current pass
+submit a different dispatch: another kernel object, kernel argument buffer, grid, workgroup, cluster
+and segment sizes.
+
+* It applies to the current pass only; ``NULL`` clears it.
+* The packet keeps the application's type, header and fences. A gfx1250 cluster dispatch stays a
+  cluster dispatch, with its cluster counts recomputed from the new grid.
+* The kernel object must come from a code object loaded through HSA on the replayed agent, and the
+  kernel argument memory must stay valid until PASS ``PHASE_EXIT``.
+* Snapshot and restore, injected profiling packets, the dispatch id and the deferred completion
+  signal are unchanged. Services see the replacement's kernel id and geometry.
+* Both members were appended to the payload; check that ``size`` covers them before use.
 
 Doxygen
 -------

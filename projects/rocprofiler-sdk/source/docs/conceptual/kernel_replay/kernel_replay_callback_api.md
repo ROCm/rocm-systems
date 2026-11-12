@@ -73,6 +73,11 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     rocprofiler_kernel_replay_context_cb_t replay_start_context;
     rocprofiler_kernel_replay_context_cb_t replay_stop_context;
     rocprofiler_kernel_replay_thread_trace_params_cb_t replay_set_thread_trace_parameters;
+
+    // [CONFIG/PASS] read-only, populated by the SDK: the dispatch the application submitted
+    const rocprofiler_kernel_replay_dispatch_t* app_dispatch;
+    // [PASS] SDK-provided; the tool calls it during PASS PHASE_ENTER
+    rocprofiler_kernel_replay_dispatch_cb_t     replay_set_dispatch;
 } rocprofiler_callback_tracing_kernel_replay_data_t;
 ```
 
@@ -248,6 +253,45 @@ own callback on each submit; a tool that increments it blindly will emit a diffe
 pass. Use `current_pass` (or `replay_pass` on counter records) as the reliable per-pass
 discriminator, not the external correlation ID.
 
+### Replacing a pass's dispatch
+
+A pass normally resubmits the application's packet. A tool that needs a pass to run something
+else, for example a rewritten copy of the kernel that reads extra kernel arguments or runs on a
+padded grid, calls `replay_set_dispatch` during `PASS` `PHASE_ENTER`:
+
+```c
+rocprofiler_kernel_replay_dispatch_t dispatch = *payload->app_dispatch;
+dispatch.kernel_object   = rewritten_kernel_object;   // loaded through HSA by the tool
+dispatch.kernarg_address = tool_kernargs;             // valid until PASS PHASE_EXIT
+dispatch.grid_size.x    *= 2;
+payload->replay_set_dispatch(&dispatch);
+```
+
+- **One pass at a time.** A pass that does not call it submits the application's dispatch; `NULL`
+  clears a replacement made earlier in the same callback.
+- **Same packet type.** The SDK builds the pass's packet from the application's, keeping its type,
+  header, fences and dependency signal. An ordinary dispatch packet takes `cluster_size`
+  {0, 0, 0}; a gfx1250 extended dispatch packet takes a nonzero `cluster_size` and a grid that is a
+  whole number of clusters, and its cluster counts are recomputed. HIP on gfx1250 submits ordinary
+  launches as extended packets with `cluster_size` {1, 1, 1}, so start from `app_dispatch`.
+- **Validated.** The kernel object must belong to a code object loaded through HSA on the replayed
+  agent, so the SDK knows its kernel id; sizes must be nonzero and fit the packet; a kernel with
+  kernel arguments needs a `kernarg_address`. A rejected call returns
+  `ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT`.
+- **Nothing else changes.** Snapshot and restore, the profiling packets injected around the
+  kernel, the dispatch id and the deferred application completion all behave as for any pass.
+  Services observing the pass see the replacement's kernel id and geometry; the payload's
+  `dispatch_info` keeps describing the application's dispatch.
+- **The application keeps the last pass's output**, so let the final pass submit the application's
+  dispatch.
+
+`app_dispatch` describes what the application submitted, including its `kernarg_address`, which
+stays unchanged until the loop ends. A tool copies the application's kernel arguments from there
+when its replacement extends them. Inside the replay callbacks, move memory with host writes or
+`hsa_memory_copy`, as the snapshot does: launching work on an application queue from a callback
+deadlocks against the replay lock. `tests/kernel-replay-dispatch/` loads a substitute kernel,
+replaces one pass with its own kernel arguments and a doubled grid, and checks the result.
+
 ## Configuring the service
 
 Configuring the service is an ordinary callback tracing subscription. Doing so also switches on the
@@ -362,6 +406,7 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Dispatch info population | `source/lib/rocprofiler-sdk/kernel_replay/replay_callbacks.cpp` | `make_dispatch_info()` |
 | Operation name/id queries | `source/lib/rocprofiler-sdk/kernel_replay/kernel_replay.cpp` | `name_by_id()`, `id_by_name()` |
 | Localized context callbacks | `source/lib/rocprofiler-sdk/kernel_replay/local_context.cpp` | `replay_local_enable_context()`, `replay_local_disable_context()`, `replay_local_set_thread_trace_parameters()` |
+| Dispatch replacement | `source/lib/rocprofiler-sdk/kernel_replay/dispatch_override.cpp` | `describe_dispatch()`, `build_dispatch_packet()`; setter `replay_set_dispatch()` in `replay_callbacks.cpp` |
 | Per-pass thread trace packets | `source/lib/rocprofiler-sdk/thread_trace/core.cpp` | `DispatchThreadTracer::resolve_target()`, `ThreadTracerAgent::get_start_packet()` |
 | Replay loop and dispatch-id reservation | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `WriteInterceptor` |
 | Tool-side subscription | `source/lib/rocprofiler-sdk-tool/tool.cpp` | `kernel_replay_callback()`, `kernel_replay_pass_count_callback()` |
