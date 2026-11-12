@@ -32,6 +32,7 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <cstdint>
 
 namespace rocprofiler
@@ -71,11 +72,19 @@ struct profiling_time
     profiling_time& operator*=(uint64_t scale);
 };
 
+enum class profiling_time_bounds_policy
+{
+    preserve_duration,
+    clip,
+};
+
 inline profiling_time
-adjust_profiling_time(std::string_view _label,
-                      std::string_view _responsible,
-                      profiling_time   _value,
-                      profiling_time&& _bounds)
+adjust_profiling_time(
+    std::string_view             _label,
+    std::string_view             _responsible,
+    profiling_time               _value,
+    profiling_time&&             _bounds,
+    profiling_time_bounds_policy _policy = profiling_time_bounds_policy::preserve_duration)
 {
     static auto sysclock_period = hsa::get_hsa_timestamp_period();
     static auto normalize_env   = common::get_env("ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS", false);
@@ -132,6 +141,18 @@ adjust_profiling_time(std::string_view _label,
             (_value.start - _value.end));
 
         std::swap(_value.start, _value.end);
+    }
+
+    if(_policy == profiling_time_bounds_policy::clip)
+    {
+        const auto clipped_start = std::max(_value.start, _bounds.start);
+        const auto clipped_end   = std::min(_value.end, _bounds.end);
+        if(clipped_start < clipped_end)
+        {
+            _value.start = clipped_start;
+            _value.end   = clipped_end;
+            return _value;
+        }
     }
 
     // below are hacks for clock skew issues:
