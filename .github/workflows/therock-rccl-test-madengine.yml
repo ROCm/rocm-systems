@@ -345,7 +345,7 @@ jobs:
             ${{ env.WORK_DIR }}/ab/*/manifest.json
             ${{ env.WORK_DIR }}/ab/*/slurm_output/*.out
             ${{ env.WORK_DIR }}/ab/*/slurm_output/*.err
-            ${{ env.WORK_DIR }}/ab/*/slurm_output/run_logs/*/*.log
+            ${{ env.WORK_DIR }}/ab/*/slurm_output/server_logs/*.log
           retention-days: 30
 
       # What a rerun by hand needs once the cleanup below has deleted WORK_DIR:

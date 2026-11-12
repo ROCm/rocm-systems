@@ -758,7 +758,9 @@ def squash_log_spam(run_dir: Path) -> int:
 
     The first occurrence of each stays where it was, and one line at the end
     of the file says how many repeats went. Files with no repeats are left
-    untouched. Returns the number of bytes saved.
+    untouched. run_logs is skipped: any user can write there, and its server
+    logs are squashed in their snapshot_server_logs copies instead. Returns
+    the number of bytes saved.
     """
     log_dir = run_dir / "slurm_output"
     if not log_dir.is_dir():
@@ -767,6 +769,7 @@ def squash_log_spam(run_dir: Path) -> int:
     for path in sorted(
         p for p in log_dir.rglob("*")
         if p.suffix in (".out", ".err", ".log") and p.is_file()
+        and "run_logs" not in p.relative_to(log_dir).parts
     ):
         dropped: dict[bytes, int] = {}
         tmp = path.with_name(path.name + ".squash")
@@ -814,59 +817,77 @@ def ignored_mad_knobs(work_dir: Path) -> list[str]:
     ]
 
 
-def _trusted_server_logs(log_dir: Path, slurm_job_id: str) -> list[Path]:
-    """The sglang server logs of *slurm_job_id* that no other user could plant.
+SERVER_LOGS = "server_logs"
+
+
+def snapshot_server_logs(run_dir: Path, slurm_job_id: str) -> list[Path]:
+    """Copy *slurm_job_id*'s sglang server logs out of run_logs; returns the copies.
 
     run_logs is world-writable so the container's root, squashed to nobody on
-    NFS, can write there. Its sticky bit stops other users from replacing the
-    job's directory but not from creating it first, so the directory and each
-    log must be a real directory or file owned by the runner, root or nobody.
+    NFS, can write there, and MAD's job directory inside it is too. Anything
+    later read or uploaded from there could have been planted, or swapped for
+    a symlink to a file of the runner's. So each log is opened without
+    following links, must be a regular file owned by the runner, root or
+    nobody, and is copied into slurm_output/server_logs, which only the runner
+    can write; nothing reads run_logs after this.
     """
-    if not slurm_job_id:
+    log_dir = run_dir / "slurm_output"
+    job_dir = log_dir / "run_logs" / slurm_job_id
+    if not slurm_job_id or not job_dir.is_dir():
         return []
     owners = {os.getuid(), 0}
     try:
         owners.add(pwd.getpwnam("nobody").pw_uid)
     except KeyError:
         pass
-    job_dir = log_dir / "run_logs" / slurm_job_id
-    try:
-        job_stat = job_dir.lstat()
-    except FileNotFoundError:
-        return []
+    job_stat = job_dir.lstat()
     if not stat.S_ISDIR(job_stat.st_mode) or job_stat.st_uid not in owners:
         log.warning("Ignoring %s: not a directory this run created", job_dir)
         return []
-    logs = []
-    for path in sorted(job_dir.glob("*_NODE*.log")):
-        if not path.name.startswith(("prefill_", "decode_")):
+    dest_dir = log_dir / SERVER_LOGS
+    dest_dir.mkdir(mode=0o755, exist_ok=True)
+    copies = []
+    for path in sorted(job_dir.glob("*.log")):
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError as exc:
+            log.warning("Ignoring %s: %s", path, exc)
             continue
-        path_stat = path.lstat()
-        if not stat.S_ISREG(path_stat.st_mode) or path_stat.st_uid not in owners:
-            log.warning("Ignoring %s: not a file this run wrote", path)
-            continue
-        logs.append(path)
-    return logs
+        with os.fdopen(fd, "rb") as src:
+            src_stat = os.fstat(src.fileno())
+            if not stat.S_ISREG(src_stat.st_mode) or src_stat.st_uid not in owners:
+                log.warning("Ignoring %s: not a file this run wrote", path)
+                continue
+            dest = dest_dir / path.name
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+            with os.fdopen(os.open(dest, flags, 0o644), "wb") as dst:
+                shutil.copyfileobj(src, dst)
+        copies.append(dest)
+    return copies
 
 
-def rccl_banner_logs(work_dir: Path, slurm_job_id: str = "") -> list[Path]:
+def rccl_banner_logs(work_dir: Path) -> list[Path]:
     """One log per node of a phase, the one its RCCL version banner lands in.
 
     madengine's per-node logs, unless the phase has sglang server logs: that
-    launcher sends the servers' output, and with it the banner, to
-    /run_logs/$SLURM_JOB_ID (one prefill or decode log per node) instead.
+    launcher sends the servers' output, and with it the banner, to /run_logs
+    (one prefill or decode log per node) instead, read from their
+    snapshot_server_logs copies.
     """
     log_dir = work_dir / "slurm_output"
     if not log_dir.is_dir():
         return []
-    server_logs = _trusted_server_logs(log_dir, slurm_job_id)
+    server_logs = sorted(
+        p for p in (log_dir / SERVER_LOGS).glob("*_NODE*.log")
+        if p.name.startswith(("prefill_", "decode_"))
+    )
     return server_logs or sorted(log_dir.glob("*node_*.out"))
 
 
-def runtime_rccl_versions(work_dir: Path, slurm_job_id: str = "") -> list[str]:
+def runtime_rccl_versions(work_dir: Path) -> list[str]:
     """Distinct ``RCCL version :`` banners across one phase's node logs."""
     versions: list[str] = []
-    for log_file in rccl_banner_logs(work_dir, slurm_job_id):
+    for log_file in rccl_banner_logs(work_dir):
         for v in re.findall(r"RCCL version\s*:\s*(\S+)", log_file.read_text(errors="replace")):
             if v not in versions:
                 versions.append(v)
@@ -890,7 +911,7 @@ def verify_rccl_replacement(
     if not expected.get("version"):
         return True, "No RCCL version to verify"
 
-    node_logs = rccl_banner_logs(work_dir, slurm_job_id)
+    node_logs = rccl_banner_logs(work_dir)
     if not node_logs:
         return False, "No node logs found — cannot verify RCCL"
     logged = {
@@ -3135,6 +3156,7 @@ def main() -> None:
 
     # Step 5a: Shrink the node logs before anything reads or uploads them.
     for phase, run_dir in phases:
+        snapshot_server_logs(run_dir, allocation["job_id"])
         saved = squash_log_spam(run_dir)
         if saved:
             log.info("%s: dropped %.1f MB of repeated RCCL warnings from the node logs",
@@ -3146,7 +3168,6 @@ def main() -> None:
     if rccl_fingerprint.get("version"):
         rccl_ok, rccl_msg = verify_rccl_replacement(
             phase_dirs[CANDIDATE], rccl_fingerprint, args.nodes,
-            slurm_job_id=allocation["job_id"],
         )
         if rccl_ok:
             log.info("RCCL verification: %s", rccl_msg)
@@ -3334,7 +3355,7 @@ def main() -> None:
         nodelist=allocation["nodelist"],
         job_id=allocation["job_id"],
         phase_rccl={
-            phase: ", ".join(runtime_rccl_versions(run_dir, allocation["job_id"]))
+            phase: ", ".join(runtime_rccl_versions(run_dir))
             for phase, run_dir in phases
         },
         unit=workload_config.get("metric_unit", "tok/s/GPU"),

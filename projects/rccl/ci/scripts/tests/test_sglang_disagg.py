@@ -3,6 +3,7 @@
 Run from projects/rccl/ci/scripts:  python3 -m unittest discover -s tests
 """
 
+import contextlib
 import json
 import os
 import re
@@ -172,25 +173,31 @@ class BannerLogsTest(unittest.TestCase):
                          "decode_NODE2.log", "decode_NODE3.log"):
                 (logs / name).write_text(banner)
             (logs / "proxy_NODE0.log").write_text("router\n")
-            self.assertEqual([p.name for p in tm.rccl_banner_logs(run_dir, "79405")],
+            self.assertEqual(tm.rccl_banner_logs(run_dir),
+                             [out / "madengine-x_79405_node_0.out"])
+            tm.snapshot_server_logs(run_dir, "79405")
+            self.assertEqual([p.name for p in tm.rccl_banner_logs(run_dir)],
                              ["decode_NODE2.log", "decode_NODE3.log",
                               "prefill_NODE0.log", "prefill_NODE1.log"])
+            self.assertTrue(all(p.parent == out / tm.SERVER_LOGS
+                                for p in tm.rccl_banner_logs(run_dir)))
+            snapshot = out / tm.SERVER_LOGS
             ok, msg = tm.verify_rccl_replacement(
-                run_dir, {"version": "2.32.3-develop:2b88119"}, 4, "79405")
+                run_dir, {"version": "2.32.3-develop:2b88119"}, 4)
             self.assertTrue(ok, msg)
-            (logs / "decode_NODE3.log").write_text("died before init\n")
+            (snapshot / "decode_NODE3.log").write_text("died before init\n")
             ok, _ = tm.verify_rccl_replacement(
-                run_dir, {"version": "2.32.3-develop:2b88119"}, 4, "79405")
+                run_dir, {"version": "2.32.3-develop:2b88119"}, 4)
             self.assertFalse(ok)
-            (logs / "decode_NODE3.log").unlink()
+            (snapshot / "decode_NODE3.log").unlink()
             ok, msg = tm.verify_rccl_replacement(
-                run_dir, {"version": "2.32.3-develop:2b88119"}, 4, "79405")
+                run_dir, {"version": "2.32.3-develop:2b88119"}, 4)
             self.assertFalse(ok)
             self.assertIn("node(s) 3 of 4", msg)
 
 
 class PlantedServerLogsTest(unittest.TestCase):
-    """run_logs is world-writable; only what this run's job wrote counts."""
+    """run_logs is world-writable; only what this run's job wrote is copied out."""
 
     BANNER = "h:1:1 [0] NCCL INFO RCCL version : 2.32.3-develop:2b88119\n"
 
@@ -208,54 +215,96 @@ class PlantedServerLogsTest(unittest.TestCase):
             (logs / name).write_text(self.BANNER)
         return logs
 
-    def names(self, job: str = "79405") -> list[str]:
-        return [p.name for p in tm.rccl_banner_logs(self.run_dir, job)]
-
-    def test_another_jobs_logs_are_ignored(self):
-        self.write_logs("11111")
-        self.assertEqual(self.names(), [])
-        self.assertEqual(self.names(""), [])
+    def snapshot(self, job: str = "79405") -> list[str]:
+        return [p.name for p in tm.snapshot_server_logs(self.run_dir, job)]
 
     def owned_by_someone_else(self, name: str):
-        real_lstat = Path.lstat
+        real_lstat, real_fstat = Path.lstat, os.fstat
         stranger = max(os.getuid(), 65534) + 1
 
-        def lstat(path):
-            st = real_lstat(path)
-            if path.name != name:
-                return st
+        def foreign(st):
             fields = list(st)
             fields[stat.ST_UID] = stranger
             return os.stat_result(fields)
 
-        return mock.patch.object(Path, "lstat", lstat)
+        def lstat(path):
+            st = real_lstat(path)
+            return foreign(st) if path.name == name else st
+
+        def fstat(fd):
+            st = real_fstat(fd)
+            linked = os.readlink(f"/proc/self/fd/{fd}")
+            return foreign(st) if os.path.basename(linked) == name else st
+
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(Path, "lstat", lstat))
+        stack.enter_context(mock.patch.object(tm.os, "fstat", fstat))
+        return stack
+
+    def test_the_copies_are_what_the_job_wrote(self):
+        self.write_logs("79405")
+        self.assertEqual(self.snapshot(), ["decode_NODE1.log", "prefill_NODE0.log"])
+        snapshot = self.run_dir / "slurm_output" / tm.SERVER_LOGS
+        self.assertEqual((snapshot / "decode_NODE1.log").read_text(), self.BANNER)
+        self.assertEqual(stat.S_IMODE(snapshot.stat().st_mode) & 0o022, 0)
+
+    def test_another_jobs_logs_are_ignored(self):
+        self.write_logs("11111")
+        self.assertEqual(self.snapshot(), [])
+        self.assertEqual(self.snapshot(""), [])
 
     def test_a_directory_another_user_created_is_ignored(self):
         self.write_logs("79405")
         with self.owned_by_someone_else("79405"):
-            self.assertEqual(self.names(), [])
+            self.assertEqual(self.snapshot(), [])
 
     def test_a_log_another_user_wrote_is_ignored(self):
         self.write_logs("79405")
         with self.owned_by_someone_else("decode_NODE1.log"):
-            self.assertEqual(self.names(), ["prefill_NODE0.log"])
+            self.assertEqual(self.snapshot(), ["prefill_NODE0.log"])
 
     def test_a_symlinked_job_directory_is_ignored(self):
         real = self.write_logs("elsewhere")
         (self.run_logs / "79405").symlink_to(real)
-        self.assertEqual(self.names(), [])
+        self.assertEqual(self.snapshot(), [])
 
-    def test_a_symlinked_log_is_ignored(self):
+    def test_a_symlinked_log_is_not_followed(self):
         logs = self.write_logs("79405")
-        target = self.run_dir / "planted.log"
-        target.write_text(self.BANNER)
+        secret = self.run_dir / "secret"
+        secret.write_text("runner's own file\n")
         (logs / "decode_NODE1.log").unlink()
-        (logs / "decode_NODE1.log").symlink_to(target)
-        self.assertEqual(self.names(), ["prefill_NODE0.log"])
+        (logs / "decode_NODE1.log").symlink_to(secret)
+        self.assertEqual(self.snapshot(), ["prefill_NODE0.log"])
         ok, msg = tm.verify_rccl_replacement(
-            self.run_dir, {"version": "2.32.3-develop:2b88119"}, 2, "79405")
+            self.run_dir, {"version": "2.32.3-develop:2b88119"}, 2)
         self.assertFalse(ok)
         self.assertIn("node(s) 1 of 2", msg)
+
+    def test_a_fifo_does_not_block(self):
+        logs = self.write_logs("79405")
+        os.mkfifo(logs / "decode_NODE2.log")
+        self.assertEqual(self.snapshot(), ["decode_NODE1.log", "prefill_NODE0.log"])
+
+    def test_squash_never_writes_through_run_logs(self):
+        logs = self.write_logs("79405")
+        target = self.run_dir / "madengine_results.jsonl"
+        target.write_text("results\n")
+        spam = b"x NCCL WARN Please note that ncclFoo is deprecated\n" * 3
+        (logs / "a.log").write_bytes(spam)
+        (logs / "a.log.squash").symlink_to(target)
+        tm.squash_log_spam(self.run_dir)
+        self.assertEqual(target.read_text(), "results\n")
+        self.assertEqual((logs / "a.log").read_bytes(), spam)
+
+    def test_squash_shrinks_the_copies(self):
+        logs = self.write_logs("79405")
+        spam = b"x NCCL WARN Please note that ncclFoo is deprecated\n" * 3
+        (logs / "decode_NODE1.log").write_bytes(self.BANNER.encode() + spam)
+        self.snapshot()
+        self.assertGreater(tm.squash_log_spam(self.run_dir), 0)
+        copy = self.run_dir / "slurm_output" / tm.SERVER_LOGS / "decode_NODE1.log"
+        self.assertEqual(copy.read_bytes().count(b"is deprecated'"), 1)
+        self.assertEqual((logs / "decode_NODE1.log").read_bytes().count(b"x NCCL"), 3)
 
 
 class AllocationScriptTest(TempWork):
