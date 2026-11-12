@@ -1,0 +1,21 @@
+{
+    "_comment": "AMD 1 node: trainer TP2 PP2 (4 GPUs) -> generator TP1 DP4 (4 GPUs).",
+    "train": {
+        "num_gpus": 4,
+        "tp_size": 2,
+        "cp_size": 1,
+        "ep_size": 1,
+        "pp_size": 2,
+        "fsdp_size": 1,
+        "dp_size": 1
+    },
+    "generation": {
+        "num_gpus": 4,
+        "tp_size": 1,
+        "cp_size": 1,
+        "ep_size": 1,
+        "pp_size": 1,
+        "fsdp_size": 1,
+        "dp_size": 4
+    }
+}

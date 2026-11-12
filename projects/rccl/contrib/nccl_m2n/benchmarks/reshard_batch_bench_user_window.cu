@@ -264,8 +264,8 @@ static void benchPrintUsage(const char* prog) {
   printf("  --warmup <N>                           Warmup iterations (default: "
          "4)\n");
   printf("  --validate                             Check data correctness\n");
-  printf("  --algorithm <ring|direct>              Legacy compatibility setting "
-         "(default: ring)\n");
+  printf("  --algorithm <auto|ring|direct>         Legacy compatibility setting "
+         "(default: $NCCL_RESHARD_ALGORITHM, else auto)\n");
   printf("  --api <default|window>                 Public entry point (default: default)\n");
   printf("  --copy-algorithm <a>                   Advanced staging override: "
          "'pack',\n");
@@ -302,7 +302,7 @@ int main(int argc, char* argv[]) {
   bool bValidate = false;
   bool bVerbose = false;
   bool bPrintAllRanks = false;
-  const char* algorithm = "RING";
+  const char* algorithm = nullptr;
   ReshardApiMode apiMode = ReshardApiMode::Default;
   const char* copyAlgorithm = nullptr;
   const char* lbMode = "UNIFORM";
@@ -348,8 +348,8 @@ int main(int argc, char* argv[]) {
     .flag("--validate", [&] { bValidate = true; })
     .flag("--verbose", [&] { bVerbose = true; })
     .flag("--print-all-ranks", [&] { bPrintAllRanks = true; })
-    .enumValue("--algorithm", &algorithm, {{"direct", "DIRECT"}, {"ring", "RING"}},
-               "ERROR: unknown algorithm '%s' (use 'ring' or 'direct')\n")
+    .enumValue("--algorithm", &algorithm, {{"auto", "AUTO"}, {"direct", "DIRECT"}, {"ring", "RING"}},
+               "ERROR: unknown algorithm '%s' (use 'auto', 'ring' or 'direct')\n")
     .apiMode("--api", &apiMode)
     .enumValue("--copy-algorithm", &copyAlgorithm,
                {{"direct", "DIRECT"}, {"pack", "PACK"}, {"pipe", "PIPE"}},
@@ -414,7 +414,8 @@ int main(int argc, char* argv[]) {
   CUDACHECK(cudaSetDevice(mpiRank % numDevices));
 
   if (bVerbose) benchSetEnv("NCCL_RESHARD_LOG_LEVEL", "DEBUG");
-  benchSetEnv("NCCL_RESHARD_ALGORITHM", algorithm);
+  benchConfigureAlgorithm(algorithm);
+  algorithm = benchResolvedAlgorithm();
   benchSetEnv("NCCL_RESHARD_LB_MODE", lbMode);
   ncclM2nHandle_t m2nHandle = nullptr;
   NCCLCHECK(ncclM2nInit(&m2nHandle, NULL));
