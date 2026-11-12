@@ -10,6 +10,7 @@
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "util/bit.h"
 
 #include <algorithm>
 #include <cassert>
@@ -120,15 +121,6 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   }
 }
 
-[[nodiscard]] uint64_t checked_lcm_u64(uint64_t lhs, uint64_t rhs) {
-  const uint64_t gcd = std::gcd(lhs, rhs);
-  if (gcd == 0)
-    return 0;
-  assert(lhs / gcd <= std::numeric_limits<uint64_t>::max() / rhs &&
-         "ELF load alignment LCM overflow");
-  return std::lcm(lhs, rhs);
-}
-
 [[nodiscard]] uint64_t align_up(uint64_t value, uint64_t alignment) {
   if (alignment <= 1)
     return value;
@@ -136,18 +128,68 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return remainder == 0 ? value : value + alignment - remainder;
 }
 
-[[nodiscard]] uint64_t shifted_load_delta_alignment(std::span<const Elf64_Phdr> phdrs,
-                                                    uint64_t file_offset) {
-  uint64_t alignment = 1;
-  // Later LOAD segments remain loader-valid only when their file shift keeps
-  // p_offset % p_align congruent with p_vaddr % p_align.
-  for (const Elf64_Phdr &phdr : phdrs) {
-    if (phdr.p_type != PT_LOAD || phdr.p_align <= 1)
+[[nodiscard]] std::optional<uint64_t>
+padded_insertion_size(std::span<const Elf64_Shdr> shdrs, std::span<const Elf64_Phdr> phdrs,
+                      uint64_t file_offset, uint64_t vaddr, size_t text_index,
+                      uint64_t requested_size, uint64_t max_delta) {
+  uint64_t alignment = sizeof(uint32_t);
+  uint64_t largest_shifted_end = 0;
+  const auto include_alignment = [&](uint64_t required) {
+    if (required <= 1)
+      return true;
+    const std::optional<uint64_t> combined =
+        util::checked_mul(alignment / std::gcd(alignment, required), required);
+    if (!combined)
+      return false;
+    alignment = *combined;
+    return true;
+  };
+  const auto include_extent = [&](uint64_t offset, uint64_t size) {
+    const std::optional<uint64_t> end = util::checked_add(offset, size);
+    if (!end)
+      return false;
+    largest_shifted_end = std::max(largest_shifted_end, *end);
+    return true;
+  };
+  for (size_t index = 0; index < shdrs.size(); ++index) {
+    const Elf64_Shdr &section = shdrs[index];
+    if (index == text_index || section.sh_type == SHT_NULL)
       continue;
-    if (phdr.p_offset >= file_offset)
-      alignment = checked_lcm_u64(alignment, phdr.p_align);
+    const bool file_moves = section.sh_offset >= file_offset;
+    const bool address_moves = (section.sh_flags & SHF_ALLOC) != 0 && section.sh_addr >= vaddr;
+    // NOBITS has no file payload, but its offset field still moves with the tables.
+    const bool file_backed = section.sh_type != SHT_NOBITS;
+    if (((file_moves && file_backed) || address_moves) && !include_alignment(section.sh_addralign))
+      return std::nullopt;
+    if (file_moves && !include_extent(section.sh_offset, file_backed ? section.sh_size : 0))
+      return std::nullopt;
+    if (address_moves && !include_extent(section.sh_addr, section.sh_size))
+      return std::nullopt;
   }
-  return alignment;
+  // Keep the existing LOAD congruence rule as well as section alignment, even
+  // when the object has no program headers or a LOAD's alignment is weaker.
+  for (const Elf64_Phdr &phdr : phdrs) {
+    if (phdr.p_offset >= file_offset) {
+      if (!include_extent(phdr.p_offset, phdr.p_filesz) ||
+          (phdr.p_type == PT_LOAD && !include_alignment(phdr.p_align)))
+        return std::nullopt;
+      if (phdr.p_vaddr < vaddr)
+        continue;
+    } else if (phdr.p_type != PT_LOAD || file_offset - phdr.p_offset > phdr.p_filesz) {
+      continue;
+    } else if (!include_extent(phdr.p_offset, phdr.p_filesz)) {
+      return std::nullopt;
+    }
+    if (!include_extent(phdr.p_vaddr, phdr.p_memsz) || !include_extent(phdr.p_paddr, phdr.p_memsz))
+      return std::nullopt;
+  }
+  const uint64_t remainder = requested_size % alignment;
+  const std::optional<uint64_t> padded =
+      util::checked_add(requested_size, remainder == 0 ? uint64_t{0} : alignment - remainder);
+  if (!padded || *padded > max_delta ||
+      *padded > std::numeric_limits<uint64_t>::max() - largest_shifted_end)
+    return std::nullopt;
+  return padded;
 }
 
 [[nodiscard]] std::optional<size_t> validated_text_section(std::span<const Elf64_Shdr> shdrs,
@@ -1577,13 +1619,14 @@ bool CodeObjectPatcher::replace_text(
         return false;
     }
 
-    // Growing .text can shift later LOAD segments. Pad the inserted file range
-    // so every shifted LOAD keeps p_offset % p_align congruent with p_vaddr %
-    // p_align. The padding is executable segment filler, not part of .text.
-    const uint64_t file_delta_alignment = shifted_load_delta_alignment(phdrs, old_text_end_file);
-    const uint64_t padded_file_delta = align_up(growth, file_delta_alignment);
-    assert(padded_file_delta >= growth && "aligned text growth underflowed");
-    assert(padded_file_delta % sizeof(uint32_t) == 0 && "text growth must stay word-aligned");
+    // Padding preserves moved section alignment and LOAD congruence. It is
+    // executable segment filler rather than part of the replacement .text.
+    const std::optional<uint64_t> padded =
+        padded_insertion_size(shdrs, phdrs, old_text_end_file, old_text_end_vaddr, *text_index,
+                              growth, image_.max_size() - image_.size());
+    if (!padded)
+      return false;
+    const uint64_t padded_file_delta = *padded;
 
     std::vector<uint8_t> inserted(padded_file_delta, 0);
     std::vector<bool> shift_section_vaddr(shdrs.size(), false);
@@ -1791,10 +1834,15 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
   if (!text_index)
     return std::nullopt;
 
-  const uint64_t insertion_file_offset = text_offset_ + text_size_ + text_tail_size_;
-  const uint64_t insertion_vaddr = text_vaddr_ + text_size_ + text_tail_size_;
-  if (insertion_file_offset > image_.size())
+  if (!image_contains_range(image_.size(), text_offset_, text_size_) ||
+      text_tail_size_ > image_.size() - text_offset_ - text_size_)
     return std::nullopt;
+  const uint64_t insertion_file_offset = text_offset_ + text_size_ + text_tail_size_;
+  const std::optional<uint64_t> checked_vaddr =
+      util::checked_add(text_vaddr_, insertion_file_offset - text_offset_);
+  if (!checked_vaddr)
+    return std::nullopt;
+  const uint64_t insertion_vaddr = *checked_vaddr;
 
   const bool insertion_is_loaded = std::ranges::any_of(phdrs, [&](const Elf64_Phdr &phdr) {
     if (phdr.p_type != PT_LOAD)
@@ -1838,16 +1886,13 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
     cursor_vaddr = descriptor_vaddr + sizeof(desc);
   }
 
-  // Later LOAD segments remain valid only if the file shift preserves their
-  // p_offset/p_vaddr congruence. Any padding after the descriptor payload is
-  // intentionally unsectioned loaded data; runtime metadata points only at the
-  // descriptor starts recorded above.
-  const uint64_t file_delta_alignment = shifted_load_delta_alignment(phdrs, insertion_file_offset);
-  const uint64_t padded_size = align_up(inserted.size(), file_delta_alignment);
-  if (padded_size < inserted.size() ||
-      padded_size > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
+  // Tail padding is unsectioned loaded data; metadata names descriptor starts.
+  const std::optional<uint64_t> padded =
+      padded_insertion_size(shdrs, phdrs, insertion_file_offset, insertion_vaddr, *text_index,
+                            inserted.size(), image_.max_size() - image_.size());
+  if (!padded)
     return std::nullopt;
-  inserted.resize(static_cast<size_t>(padded_size), 0);
+  inserted.resize(static_cast<size_t>(*padded), 0);
 
   std::vector<bool> shift_section_vaddr(shdrs.size(), false);
   for (size_t i = 0; i < shdrs.size(); ++i) {

@@ -545,6 +545,7 @@ add_executable(
     patch/probe_live_in_test.cpp
     patch/error_report_test.cpp
     dbi/dbi_spill_sim_test.cpp
+    dbi/dbi_replacement_sim_test.cpp
     dbi/dbi_arg_sim_test.cpp
     dbi/dbi_mask_sim_test.cpp
     dbi/dbi_wave32_sim_test.cpp
@@ -1079,11 +1080,12 @@ if(RJ_BUILD_CONSAN_ANALYZER)
     endif()
 endif()
 
-# Host-only checked anchor regressions use model ISA providers.
+# Host-only instruction replacement and checked-edit regressions use model ISA providers.
 add_executable(
     rocjitsu_text_edit_tests
     patch/checked_text_edits_test.cpp
     patch/bi_edit_safety_test.cpp
+    patch/instrumentor_replacement_test.cpp
 )
 target_include_directories(
     rocjitsu_text_edit_tests
