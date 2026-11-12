@@ -126,9 +126,14 @@ fill_catalog(reader_catalog_t& catalog, pytorch_store_t& store)
         track->process_info = process_by_pid.at(source.pid);
         if(source.category == reader_types::track_kind_t::stream)
         {
-            track->db_pid        = track->process_info->id;
-            auto stream          = std::make_shared<reader_types::stream_info_t>();
-            stream->stream_id    = source.stream_id;
+            track->db_pid     = track->process_info->id;
+            auto stream       = std::make_shared<reader_types::stream_info_t>();
+            stream->stream_id = source.stream_id;
+            // pid and tid of a GPU lane's thread_name are the device and the stream.
+            const auto lane =
+                store.thread_names.find({ static_cast<std::int64_t>(source.agent_id) - 1,
+                                          static_cast<std::int64_t>(source.stream_id) });
+            if(lane != store.thread_names.end()) stream->name = lane->second;
             stream->nid          = node->node_id;
             stream->pid          = track->process_info->id;
             stream->node_info    = node;
