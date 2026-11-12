@@ -518,7 +518,7 @@ void SAndSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -558,7 +558,7 @@ void SOrSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -598,7 +598,7 @@ void SXorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -638,7 +638,7 @@ void SNandSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -678,7 +678,7 @@ void SNorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -718,7 +718,7 @@ void SXnorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -758,7 +758,7 @@ void SAndNot0SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -798,7 +798,7 @@ void SOrNot0SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -838,7 +838,7 @@ void SAndNot1SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -878,7 +878,7 @@ void SOrNot1SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -918,7 +918,7 @@ void SAndNot0WrexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -958,7 +958,7 @@ void SAndNot1WrexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   registers.write_scalar(sdst, result);
-  wf.set_exec(new_exec);
+  wf.write_exec_lo(new_exec);
   wf.write_scc(scc);
 }
 
@@ -1115,25 +1115,10 @@ void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_rfe_b6
 
 void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
-  uint64_t value = 0;
-  switch (msg) {
-  case 0x83: {
-    value = wf.realtime_timestamp();
-    break;
-  }
-  case 0x80:
-  case 0x81:
-  case 0x82:
-  case 0x84:
-  case 0x85:
-  case 0x86:
-  case 0x87:
-  case 0x88:
-  case 0x98:
-  default:
-    value = 0;
-    break;
-  }
+  const auto message_result = wf.cu().return_message(msg);
+  if (message_result.failed())
+    return;
+  const uint64_t value = message_result.value();
   if (sdst.size_bits() == 64)
     amdgpu::RegisterAccess(wf).write_scalar64(sdst, value);
   else
@@ -1142,25 +1127,10 @@ void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 
 void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
-  uint64_t value = 0;
-  switch (msg) {
-  case 0x83: {
-    value = wf.realtime_timestamp();
-    break;
-  }
-  case 0x80:
-  case 0x81:
-  case 0x82:
-  case 0x84:
-  case 0x85:
-  case 0x86:
-  case 0x87:
-  case 0x88:
-  case 0x98:
-  default:
-    value = 0;
-    break;
-  }
+  const auto message_result = wf.cu().return_message(msg);
+  if (message_result.failed())
+    return;
+  const uint64_t value = message_result.value();
   if (sdst.size_bits() == 64)
     amdgpu::RegisterAccess(wf).write_scalar64(sdst, value);
   else

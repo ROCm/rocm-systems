@@ -590,6 +590,39 @@ void GraphExecSegmented::BuildSyncPlan() {
   // be dropped when a copy/blit node also contributed an empty-string entry.
   static const std::string* const kBarrierKernelNamePtr = nullptr;
 
+  // DEBUG_CLR_GRAPH_FAST_LAUNCH: a segment that starts with a captured empty node starts
+  // with its nop barrier-AND, which can wait on up to five dependencies itself instead of
+  // following a barrier-AND that waits on them
+  auto merge_empty_node = [](const Segment& seg, const SegmentBatch& seg_batch, int num_deps) {
+    if (!DEBUG_CLR_GRAPH_FAST_LAUNCH || (num_deps > 5) || seg.nodes.empty() ||
+        (seg.nodes.front()->GetType() != hipGraphNodeTypeEmpty) ||
+        (!seg_batch.node_capture_status.empty() && !seg_batch.node_capture_status[0]) ||
+        seg_batch.packet_batches.empty() ||
+        seg_batch.packet_batches[0].dispatchPackets.empty()) {
+      return false;
+    }
+    // hsa_barrier_and_packet_t: the type in the header's low byte, dep_signal[5] at bytes 8-47
+    // and completion_signal at 56, all clear in a nop barrier-AND
+    const uint8_t* pkt = seg_batch.packet_batches[0].dispatchPackets[0];
+    constexpr uint8_t kBarrierAndType = 3;
+    constexpr size_t kDepSignalOffset = 8;
+    constexpr size_t kCompletionSignalOffset = 56;
+    if (pkt[0] != kBarrierAndType) {
+      return false;
+    }
+    auto handle_at = [pkt](size_t offset) {
+      uint64_t handle;
+      memcpy(&handle, pkt + offset, sizeof(handle));
+      return handle;
+    };
+    for (size_t d = 0; d < 5; ++d) {
+      if (handle_at(kDepSignalOffset + d * sizeof(uint64_t)) != 0) {
+        return false;
+      }
+    }
+    return handle_at(kCompletionSignalOffset) == 0;
+  };
+
   // PASS 3: Materialize barrier packets and patch entries using the compact
   // hw_event slot indices computed in PASS 1.
   for (auto& segment : segments_) {
@@ -639,6 +672,17 @@ void GraphExecSegmented::BuildSyncPlan() {
         firstBatch.fallbackDepBarrier = device->CreateBarrierPacket(1);
         sync_plan_.barrier_packets.push_back(firstBatch.fallbackDepBarrier);
         sync_plan_.patch_list.push_back({firstBatch.fallbackDepBarrier, nullptr, dep_hw_slot, 0});
+      } else if (merge_empty_node(segment, segBatch, num_deps)) {
+        // The empty node's own barrier-AND waits, in the dep_signal slots it doesn't use. Like
+        // the ext dispatch's dependency, a standalone wait takes over if the node is disabled.
+        uint8_t* empty_barrier = firstBatch.dispatchPackets[0];
+        firstBatch.fallbackDepBarrier = device->CreateBarrierPacket(num_deps);
+        sync_plan_.barrier_packets.push_back(firstBatch.fallbackDepBarrier);
+        for (int d = 0; d < num_deps; ++d) {
+          const int dep_hw_slot = sync_plan_.seg_to_hw_event[barrier_dep_indices[d]];
+          sync_plan_.patch_list.push_back({empty_barrier, nullptr, dep_hw_slot, d});
+          sync_plan_.patch_list.push_back({firstBatch.fallbackDepBarrier, nullptr, dep_hw_slot, d});
+        }
       } else {
         // One barrier packet holds up to five dependencies. A packet that
         // carries exactly one is a barrier-value packet on devices that
@@ -1653,14 +1697,63 @@ void GraphExecSegmented::SelectStreamAssignment() {
 // stream removes both barriers and signals (it runs inline, 0/0), so the full
 // sync cost is what multi-stream genuinely pays over collapse. Tunable via
 // DEBUG_HIP_GRAPH_MIN_OVERLAP; 0 disables the gate.
+//
+// DEBUG_HIP_GRAPH_COLLAPSE_RULE=1 (C1) checks first for a cross-stream edge that touches a node
+// that isn't AQL-captured (its producer segment's last node or its consumer segment's first node:
+// host<->device memcpy, host, event and memory nodes; not a child graph node, which synchronizes
+// its own nodes): such an edge is synchronized across engines on every launch, so the graph
+// collapses. Otherwise the slack rule applies only if
+// DEBUG_HIP_GRAPH_MIN_OVERLAP is set explicitly. Rule 0 is the slack rule alone, as before.
 bool GraphExecSegmented::ShouldCollapseToSingleStream() const {
-  const uint32_t min_overlap = DEBUG_HIP_GRAPH_MIN_OVERLAP;
-  if (min_overlap == 0) return false;            // gate disabled
-  if (segments_.size() < 2) return false;        // nothing to parallelize
+  const uint32_t rule = DEBUG_HIP_GRAPH_COLLAPSE_RULE;
+  const uint32_t min_overlap =
+      ((rule == 1) && flagIsDefault(DEBUG_HIP_GRAPH_MIN_OVERLAP)) ? 0 : DEBUG_HIP_GRAPH_MIN_OVERLAP;
+  if ((rule == 0) && (min_overlap == 0)) {  // gate disabled
+    ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+            "[hipGraph] Single-stream gate: rule=%u segments=%zu decided by none (min_overlap=0) "
+            "-> keep multi-stream",
+            rule, segments_.size());
+    return false;
+  }
+  if (segments_.size() < 2) return false;               // nothing to parallelize
 
   const int dev0 = segments_.front().dev_id;
   for (const auto& seg : segments_) {
     if (seg.dev_id != dev0) return false;
+  }
+
+  if (rule == 1) {
+    // A child graph node is a segment of its own, launched with its own synchronization, so its
+    // capture status (false unless set) doesn't describe the edges into or out of it: multi-stream
+    // child graphs with kernels, a memcpy or a host node inside measured 13-24% faster than
+    // collapsed
+    auto uncaptured = [](Node node) {
+      return (node->GetType() != hipGraphNodeTypeGraph) && !node->GraphCaptureEnabled();
+    };
+    for (const auto& seg : segments_) {
+      for (int dep_id : seg.segment_ids_dependencies) {
+        if (dep_id < 0 || dep_id >= static_cast<int>(segments_.size())) continue;
+        const auto& dep_seg = segments_[dep_id];
+        if (dep_seg.stream_id == seg.stream_id) continue;
+        const bool consumer_uncaptured = !seg.nodes.empty() && uncaptured(seg.nodes.front());
+        const bool producer_uncaptured = !dep_seg.nodes.empty() && uncaptured(dep_seg.nodes.back());
+        if (consumer_uncaptured || producer_uncaptured) {
+          ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+                  "[hipGraph] Single-stream gate: rule=%u segments=%zu decided by uncaptured-edge "
+                  "(segment %d -> %d, %s node uncaptured) -> collapse to single stream",
+                  rule, segments_.size(), dep_id, seg.id,
+                  producer_uncaptured ? "producer's last" : "consumer's first");
+          return true;
+        }
+      }
+    }
+    if (min_overlap == 0) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+              "[hipGraph] Single-stream gate: rule=%u segments=%zu decided by none "
+              "(no uncaptured cross-stream edge, slack rule off) -> keep multi-stream",
+              rule, segments_.size());
+      return false;
+    }
   }
 
   size_t machine_threads = 0;
@@ -1699,7 +1792,13 @@ bool GraphExecSegmented::ShouldCollapseToSingleStream() const {
     total_work += seg_work[i];
   }
   const size_t sync_cost = barrier_est + signal_est;
-  if (sync_cost == 0) return false;
+  if (sync_cost == 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+            "[hipGraph] Single-stream gate: rule=%u segments=%zu decided by slack (no cross-stream "
+            "sync) -> keep multi-stream",
+            rule, segments_.size());
+    return false;
+  }
 
   std::vector<size_t> cp(segments_.size(), 0);
   size_t critical_path_work = 0;
@@ -1723,11 +1822,12 @@ bool GraphExecSegmented::ShouldCollapseToSingleStream() const {
       (total_work > critical_path_work) ? (total_work - critical_path_work) : 0;
   const bool collapse = parallel_slack < static_cast<size_t>(min_overlap) * sync_cost;
 
-  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
-          "[hipGraph] Single-stream gate: work=%zu critical_path=%zu slack=%zu "
-          "barrier_packets~=%zu signals~=%zu sync_cost=%zu min_overlap=%u -> %s",
-          total_work, critical_path_work, parallel_slack, barrier_est, signal_est,
-          sync_cost, min_overlap,
+  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+          "[hipGraph] Single-stream gate: rule=%u segments=%zu decided by slack: work=%zu "
+          "critical_path=%zu slack=%zu barrier_packets~=%zu signals~=%zu sync_cost=%zu "
+          "min_overlap=%u -> %s",
+          rule, segments_.size(), total_work, critical_path_work, parallel_slack, barrier_est,
+          signal_est, sync_cost, min_overlap,
           collapse ? "collapse to single stream" : "keep multi-stream");
   return collapse;
 }
@@ -2733,6 +2833,16 @@ hipError_t GraphExecSegmented::UpdatePacketBatchesForNodeEnableDisable(hip::Grap
 void GraphExecBase::OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data) {
   auto* cleanup = reinterpret_cast<GraphLaunchCleanup*>(user_data);
   GraphExecBase* execBase = cleanup->exec;
+  // DEBUG_CLR_GRAPH_FAST_LAUNCH: the launch's end marker holds the command its side queues' fork
+  // waits waited on. The launch completed, so those waits are done: drop it now rather than when
+  // the end marker is destroyed, which the next launch's end marker holding this one would defer,
+  // launch after launch
+  if (event != nullptr) {
+    auto* accumulate = dynamic_cast<amd::AccumulateCommand*>(&as_amd(event)->command());
+    if (accumulate != nullptr) {
+      accumulate->releaseHeldCommands();
+    }
+  }
   // Re-arm and recycle the launch's signals while the GraphExecBase (and thus its
   // signal pool) is still alive, then drop the launch's reference.
   execBase->RecycleLaunchSignals(cleanup->device, cleanup->signal_set);
@@ -2786,6 +2896,12 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
   // addKernelDispatch in dispatchAqlPacketBatchFlat) — no string borrowing,
   // no GraphExecBase pin.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
+  // A launch whose segments all run on the launch stream (one segment, or collapsed to a single
+  // stream) has no side queue to gate (DEBUG_CLR_GRAPH_FAST_LAUNCH)
+  graph_accumulate->setMultiStream(
+      std::any_of(segments_.begin(), segments_.end(), [&](const Segment& seg) {
+        return resolveSegmentStream(seg) != launch_stream;
+      }));
 
   // Apply pre-computed patches -- writes HW events directly into flatPacketData
   // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
@@ -2831,6 +2947,14 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
         for (int segment_id : segments_at_level) {
           hip::Stream* seg_stream = resolveSegmentStream(segments_[segment_id]);
           if (seg_stream != launch_stream) {
+            // DEBUG_CLR_GRAPH_FAST_LAUNCH: the marker is a batch head, so its completion signal
+            // is an interrupt signal, ahead of the segment's first kernel. The wait goes on the
+            // side queue without a command instead; graph_accumulate, which completes after
+            // every segment, holds the waited command
+            if (DEBUG_CLR_GRAPH_FAST_LAUNCH &&
+                seg_stream->vdev()->dispatchGraphForkWait(launch_last_cmd, graph_accumulate)) {
+              continue;
+            }
             auto marker = new amd::Marker(*seg_stream, true, launch_wait_list);
             if (marker != nullptr) {
               // Like hipStreamWaitEvent, the fork only orders the side stream after the
@@ -3112,7 +3236,33 @@ void GraphExecBase::UpdateStreams(hip::Stream* launch_stream) {
     streams_.push_back(stream);
   }
 }
-
+// ================================================================================================
+GraphExecBase::ResolvedExecNode GraphExecBase::ResolveClonedNode(Node node) {
+  if (node == nullptr) {
+    return {};
+  }
+  // Depth 0: the node belongs directly to the graph this exec was instantiated from.
+  auto it = clonedNodes_.find(node);
+  if (it != clonedNodes_.end()) {
+    return {it->second, this};
+  }
+  // Depth >= 1: the node may live inside a child graph. Its parent graph is then the
+  // caller-visible ChildGraphNode; resolve that one level up, then translate within it.
+  auto* parentChildNode = dynamic_cast<ChildGraphNode*>(node->GetParentGraph());
+  if (parentChildNode == nullptr) {
+    return {};  // not a member of any child graph -> not part of this exec
+  }
+  ResolvedExecNode resolvedParent = ResolveClonedNode(parentChildNode);
+  if (!resolvedParent) {
+    return {};
+  }
+  auto* execChildNode = static_cast<ChildGraphNode*>(resolvedParent.node);
+  Node cloned = execChildNode->GetClonedNode(node);
+  if (cloned == nullptr) {
+    return {};
+  }
+  return {cloned, execChildNode};
+}
 // ================================================================================================
 hipError_t Graph::RunOneNode(Node node) {
   // Clear the storage of the wait nodes

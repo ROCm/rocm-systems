@@ -737,6 +737,23 @@ in the following table.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
 
+    * - | ``RCCL_IB_MAX_MSG_SIZE``
+        | Largest data payload, in bytes, of one work request posted by the
+          ``IB-CAST`` transport. A GIN ``iput``, ``iget``, or ``iputSignal``, or
+          a point-to-point send, that is larger than the cap is posted as
+          several work requests on the same queue pair. Only the last data work
+          request is signaled. For ``iputSignal`` the atomic remains the
+          signaled tail, and for a point-to-point send the tail keeps the
+          write-with-immediate.
+      - | Integer bytes. Default: ``-1`` (unset).
+        | A positive value explicitly sets the cap, overriding the automatic
+          gfx1250 and port limits. The result is raised to at least 1 MiB and
+          rounded down to a multiple of 128 bytes.
+        | When unset, gfx1250 is limited to 256 MiB and every architecture is
+          limited by the smallest non-zero port ``max_msg_sz`` across devices.
+          A port that reports 0 does not participate. The same 1 MiB floor and
+          128-byte rounding apply. ``0`` is treated as unset.
+
     * - | ``RCCL_NET_SHARED_HOST_HUGEPAGES``
         | Backs the host-memory shared P2P network staging pools (used by
           connections without GPU Direct RDMA) with 2 MiB pages, so each
