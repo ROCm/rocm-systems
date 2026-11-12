@@ -17,11 +17,11 @@ Panel Config:
   title: Memory Chart
   data source:
   - metric_table:
-      id: 306
+      id: 308
       metric:
-        GL1 Returns:
-          value: GL1C_GL1_RET_32B_sum
-          unit: Bytes
+        GL2 Requests:
+          value: GL2C_REQ_sum
+          unit: Count
   - metric_table:
       id: 309
       metric:
@@ -35,7 +35,7 @@ Panel Config:
           value: None
           unit: Bytes/s
   metrics_description:
-    GL1 Returns: Bytes returned to GL1 clients.
+    GL2 Requests: Requests that reach GL2.
     DRAM-Bound Reads: Traffic may be served by Infinity Cache.
     Physical GDDR6 Reads: This measurement is unavailable.
 """
@@ -55,11 +55,11 @@ def test_navi48_descriptions_use_distinct_memory_sections(memory_arch_dir):
     )
 
     assert descriptions == {
-        "Memory chart - GL1 Cache (L1)": {
-            "GL1 Returns": {
-                "plain": "Bytes returned to GL1 clients.",
-                "rst": "Bytes returned to GL1 clients.",
-                "unit": "Bytes",
+        "Memory chart - GL2 Cache (L2)": {
+            "GL2 Requests": {
+                "plain": "Requests that reach GL2.",
+                "rst": "Requests that reach GL2.",
+                "unit": "Count",
             }
         },
         "Memory chart - EA to DRAM": {
