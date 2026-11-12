@@ -166,13 +166,17 @@ wall_clock_processor_t::finalize_processing()
         return;
     }
 
-    if(m_options.cout)
+    if(m_options.cout || m_options.text_path)
     {
-        std::cout << m_report.text();
-    }
-    if(m_options.text_path)
-    {
-        write_file(*m_options.text_path, m_report.text(), m_pid);
+        auto const table = m_report.text();
+        if(m_options.cout)
+        {
+            std::cout << table;
+        }
+        if(m_options.text_path)
+        {
+            write_file(*m_options.text_path, table, m_pid);
+        }
     }
     if(m_options.json_path)
     {

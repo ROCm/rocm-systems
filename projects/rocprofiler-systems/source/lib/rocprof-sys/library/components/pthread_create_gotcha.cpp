@@ -19,7 +19,6 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
-#include <timemory/hash/types.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/utility/types.hpp>
@@ -50,9 +49,8 @@ auto  shutdown_dtor = scope::destructor{ []() { pthread_create_gotcha::shutdown(
 
 using native_handle_set_t = std::set<pthread_create_gotcha::native_handle_t>;
 
-auto native_handles          = native_handle_set_t{};
-auto internal_native_handles = native_handle_set_t{};
-auto native_handles_mutex    = locking::atomic_mutex{};
+auto native_handles       = native_handle_set_t{};
+auto native_handles_mutex = locking::atomic_mutex{};
 
 // Shared across the parent interceptor and the child wrapper so the thread-limit
 // warning is emitted exactly once per process, regardless of which gate trips first.
@@ -159,12 +157,6 @@ pthread_create_gotcha::wrapper::operator()() const
     };
 
     auto const _active = (state::process::get() == ::rocprofsys::state::process::Active);
-
-    if(m_config.offset)
-    {
-        auto const _lk = locking::atomic_lock{ native_handles_mutex };
-        internal_native_handles.emplace(pthread_self());
-    }
 
     if(_active && !_coverage && !m_config.offset)
     {

@@ -36,11 +36,9 @@
 #include "library/tracing.hpp"
 #include "rocprofiler-sdk.hpp"
 
-#include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/variadic/lightweight_tuple.hpp>
 
 #include <cstddef>
 #include <exception>
