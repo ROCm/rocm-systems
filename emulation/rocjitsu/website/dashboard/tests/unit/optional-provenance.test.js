@@ -1,5 +1,5 @@
-import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import { expect, test } from 'vitest';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
 import { readMaintainedExamplePublication } from '../helpers/maintainedExamplePublication.js';
@@ -13,10 +13,10 @@ test('optional provenance renders em dashes with zero/false intact and source nu
   const before = structuredClone(source);
   const { data, sourceData } = adaptPublishedDashboardData(source);
   const run = data.runs[0];
-  const branch = renderToStaticMarkup(createElement(BranchEnvironment, { candidate: run, selection: { target: 'gfx950', mode: 'default' } }));
+  const branch = renderToStaticMarkup(themed(BranchEnvironment, { candidate: run, selection: { target: 'gfx950', mode: 'default' } }));
   expect(branch).toMatch(/branch-source-commit[\s\S]*?>—<\/td>/);
   expect(branch).toContain('Benchmark set');
-  const metadata = renderToStaticMarkup(createElement(RunMetadataDiff, { baseline: run, candidate: run, filters: { targets: run.targets, suites: data.suites, modes: run.modes } }));
+  const metadata = renderToStaticMarkup(themed(RunMetadataDiff, { baseline: run, candidate: run, filters: { targets: run.targets, suites: data.suites, modes: run.modes } }));
   expect(metadata).toContain('>0</td>');
   expect(metadata).toContain('>false</td>');
   expect(run.pullRequest).toEqual({ number: 12 });

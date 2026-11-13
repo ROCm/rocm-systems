@@ -32,7 +32,7 @@ void FlatLoadU8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -46,7 +46,7 @@ void FlatLoadI8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->sign_extend = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -59,7 +59,7 @@ void FlatLoadU16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -73,7 +73,7 @@ void FlatLoadI16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->sign_extend = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -86,7 +86,7 @@ void FlatLoadB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -99,7 +99,7 @@ void FlatLoadB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 2;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -112,7 +112,7 @@ void FlatLoadB96Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 3;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -125,7 +125,7 @@ void FlatLoadB128Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 4;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -137,7 +137,7 @@ void FlatStoreB8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
@@ -159,7 +159,7 @@ void FlatStoreB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
@@ -181,14 +181,15 @@ void FlatStoreB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
   d->store_data.resize(wf.wf_size() * 4);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -198,14 +199,15 @@ void FlatStoreB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 2;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 2, exec);
   d->store_data.resize(wf.wf_size() * 8);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -215,14 +217,15 @@ void FlatStoreB96Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 3;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 3, exec);
   d->store_data.resize(wf.wf_size() * 12);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -232,14 +235,15 @@ void FlatStoreB128Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 4;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data;
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 4, exec);
   d->store_data.resize(wf.wf_size() * 16);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -251,7 +255,7 @@ void FlatLoadD16U8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -266,7 +270,7 @@ void FlatLoadD16I8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->sign_extend = true;
   d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -280,7 +284,7 @@ void FlatLoadD16B16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -294,7 +298,7 @@ void FlatLoadD16HiU8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->d16_hi = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -309,7 +313,7 @@ void FlatLoadD16HiI8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->sign_extend = true;
   d->d16_hi = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -323,7 +327,7 @@ void FlatLoadD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->d16_hi = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
@@ -335,7 +339,7 @@ void FlatStoreD16HiB8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
@@ -358,7 +362,7 @@ void FlatStoreD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   uint64_t exec = wf.exec();
@@ -384,7 +388,7 @@ void FlatAtomicSwapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -409,7 +413,7 @@ void FlatAtomicCmpswapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -436,7 +440,7 @@ void FlatAtomicAddU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -461,7 +465,7 @@ void FlatAtomicSubU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -486,7 +490,7 @@ void FlatAtomicMinI32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -511,7 +515,7 @@ void FlatAtomicMinU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -536,7 +540,7 @@ void FlatAtomicMaxI32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -561,7 +565,7 @@ void FlatAtomicMaxU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -586,7 +590,7 @@ void FlatAtomicAndB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -611,7 +615,7 @@ void FlatAtomicOrB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -636,7 +640,7 @@ void FlatAtomicXorB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -661,7 +665,7 @@ void FlatAtomicIncU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -686,7 +690,7 @@ void FlatAtomicDecU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -711,7 +715,7 @@ void FlatAtomicSwapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -738,7 +742,7 @@ void FlatAtomicCmpswapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -769,7 +773,7 @@ void FlatAtomicAddU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -796,7 +800,7 @@ void FlatAtomicSubU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -823,7 +827,7 @@ void FlatAtomicMinI64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -850,7 +854,7 @@ void FlatAtomicMinU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -877,7 +881,7 @@ void FlatAtomicMaxI64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -904,7 +908,7 @@ void FlatAtomicMaxU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -931,7 +935,7 @@ void FlatAtomicAndB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -958,7 +962,7 @@ void FlatAtomicOrB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -985,7 +989,7 @@ void FlatAtomicXorB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -1012,7 +1016,7 @@ void FlatAtomicIncU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -1039,7 +1043,7 @@ void FlatAtomicDecU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -1069,7 +1073,7 @@ void FlatAtomicCmpswapF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_legacy_minmax = true;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -1099,7 +1103,7 @@ void FlatAtomicMinF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_legacy_minmax = true;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -1127,7 +1131,7 @@ void FlatAtomicMaxF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_legacy_minmax = true;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -1155,7 +1159,7 @@ void FlatAtomicAddF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_legacy_minmax = true;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
@@ -1178,7 +1182,7 @@ void GlobalLoadAddtidB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   {
     uint64_t exec = wf.exec();
@@ -1205,7 +1209,7 @@ void GlobalStoreAddtidB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   {
     uint64_t exec = wf.exec();
@@ -1245,7 +1249,7 @@ void GlobalAtomicCsubU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SUB_CLAMP;
   d->wait_counter_type =
       ((inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT);
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();

@@ -26,7 +26,7 @@ fn execute_access_permission_matches_the_native_bitmask() {
 /// Verifies that completed memory workers are reaped without joining active
 /// work.
 fn completed_memory_workers_are_reaped_without_joining_active_work() {
-    let mut state = MemoryState::new();
+    let mut state = MemoryState::new(Arc::new(crate::runtime::GenerationHealth::new()));
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = stop.clone();
     let active = thread::spawn(move || {

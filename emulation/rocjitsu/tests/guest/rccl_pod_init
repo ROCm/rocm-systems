@@ -1,0 +1,135 @@
+#!/bin/busybox sh
+
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Eight-rank same-host pod workload. The stock amdgpu module is staged in
+# /modules; no guest-driver control channel is involved in peer access.
+set -eu
+
+/bin/busybox --install -s /bin
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+mkdir -p /dev/shm
+mount -t tmpfs -o mode=1777,nodev,nosuid tmpfs /dev/shm
+ip link set lo up
+
+node=""
+run_id=""
+amdgpu_args=""
+for word in $(cat /proc/cmdline); do
+  case "$word" in
+    amdgpu.*) amdgpu_args="$amdgpu_args ${word#amdgpu.}" ;;
+    rocjitsu.pod.node=*) node="${word#rocjitsu.pod.node=}" ;;
+    rocjitsu.pod.run_id=*) run_id="${word#rocjitsu.pod.run_id=}" ;;
+  esac
+done
+case "$node" in
+  0 | 1 | 2 | 3) ;;
+  *) echo "pod: FATAL: invalid node $node"; poweroff -f; exit 1 ;;
+esac
+case "$run_id" in
+  "" | *[!0-9a-f]*) echo "pod: FATAL: invalid run ID"; poweroff -f; exit 1 ;;
+esac
+
+while read -r module; do
+  case "$module" in
+    "" | \#*) continue ;;
+    amdgpu.ko) insmod "/modules/$module" $amdgpu_args ;;
+    *) insmod "/modules/$module" ;;
+  esac
+done </modules/load-order
+
+gpu_count=0
+for device in /sys/bus/pci/devices/*; do
+  [ -f "$device/vendor" ] || continue
+  [ "$(cat "$device/vendor")" = 0x1002 ] || continue
+  [ "$(cat "$device/device")" = 0x75c1 ] || continue
+  [ -L "$device/driver" ] || { echo "pod: FATAL: unbound GPU $device"; poweroff -f; exit 1; }
+  [ "$(basename "$(readlink "$device/driver")")" = amdgpu ] || {
+    echo "pod: FATAL: non-amdgpu GPU $device"; poweroff -f; exit 1;
+  }
+  gpu_count=$((gpu_count + 1))
+done
+echo "pod: node=$node gpu_count=$gpu_count driver_sha256=$(sha256sum /modules/amdgpu.ko | cut -d' ' -f1)"
+[ "$gpu_count" -eq 2 ] && [ -e /dev/kfd ] || {
+  echo "pod: FATAL: expected two bound GPUs and /dev/kfd"; poweroff -f; exit 1;
+}
+
+ip="10.77.0.$((node + 1))"
+if [ "$node" -eq 0 ]; then peer=10.77.0.2; else peer=10.77.0.1; fi
+ip link set eth0 up
+ip addr add "$ip/24" dev eth0
+network_ready=0
+for attempt in $(seq 1 120); do
+  if ping -c 1 -W 1 -I eth0 "$peer" >/dev/null 2>&1; then
+    network_ready=1
+    break
+  fi
+  sleep 1
+done
+[ "$network_ready" -eq 1 ] || {
+  echo "pod: FATAL: NIC peer $peer unreachable"; poweroff -f; exit 1;
+}
+echo "pod: node=$node nic_ip=$ip peer=$peer PASS"
+
+hostname "pod-node-$node"
+export NCCL_HOSTID="pod-node-$node"
+export NCCL_NET=Socket NCCL_SOCKET_IFNAME=eth0 NCCL_IB_DISABLE=1
+export NCCL_P2P_DISABLE=0 NCCL_P2P_LEVEL=SYS NCCL_SHM_DISABLE=1
+export NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,NET,GRAPH
+export HSA_NO_SCRATCH_RECLAIM=1
+export LD_LIBRARY_PATH=/opt/rocm/core-7.14/lib:/opt/rocm/core-7.14/lib/llvm/lib:/opt/rocm/core-7.14/lib/rocm_sysdeps/lib
+unset HIP_VISIBLE_DEVICES CUDA_VISIBLE_DEVICES GPU_DEVICE_ORDINAL HSA_VISIBLE_DEVICES
+
+rank_base=$((node * 2))
+case_filter='RcclTest.AllReduce:RcclTest.Broadcast:RcclTest.AllGather:RcclTest.ReduceScatter:RcclTest.SendRecv'
+for size in 64 262144; do
+  if [ "$size" -eq 64 ]; then port=24317; else port=24319; fi
+  pids=""
+  for local_gpu in 0 1; do
+    rank=$((rank_base + local_gpu))
+    if [ "$rank" -eq 0 ]; then
+      bootstrap="--bootstrap-listen=$ip:$port"
+    else
+      bootstrap="--bootstrap-connect=10.77.0.1:$port"
+    fi
+    (
+      export ROCR_VISIBLE_DEVICES="$local_gpu"
+      echo "pod: rank=$rank gpu=$local_gpu size=$size begin"
+      /bin/busybox timeout -s TERM -k 10 1200 \
+        /opt/rocjitsu/bin/hip_rccl_gfx1250_test \
+        "--rank=$rank" --world-size=8 "$bootstrap" \
+        "--bootstrap-run-id=$run_id" --bootstrap-timeout-ms=180000 \
+        --collective-timeout-ms=180000 --expected-devices=1 \
+        "--payload-elements=$size" --seed=79 \
+        "--gtest_filter=$case_filter"
+    ) > "/tmp/pod-rank${rank}-size${size}.log" 2>&1 &
+    pids="$pids $!"
+  done
+  failed=0
+  local_gpu=0
+  for pid in $pids; do
+    rank=$((rank_base + local_gpu))
+    if wait "$pid"; then
+      echo "pod: rank=$rank size=$size exit=0"
+    else
+      failed=1
+      echo "pod: rank=$rank size=$size exit=failed"
+    fi
+    local_gpu=$((local_gpu + 1))
+  done
+  for local_gpu in 0 1; do
+    rank=$((rank_base + local_gpu))
+    echo "pod: === rank=$rank size=$size log ==="
+    cat "/tmp/pod-rank${rank}-size${size}.log"
+  done
+  [ "$failed" -eq 0 ] || {
+    echo "pod: FATAL: rank failed at size $size"; poweroff -f; exit 1;
+  }
+done
+
+echo "pod: node=$node result=PASS"
+sleep 3
+poweroff -f

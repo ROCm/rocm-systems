@@ -15,6 +15,40 @@ use crate::driver;
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Identity of the driver event stream serving an activated device.
+/// Devices from one installed driver share an event source in this backend.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeviceEventSourceId(pub(crate) driver::DriverInstanceId);
+
+/// Driver-local identity of the native device named by an event.
+/// Compare values only for devices with the same [`DeviceEventSourceId`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeviceEventOriginId(u64);
+
+impl DeviceEventOriginId {
+    /// Wraps an identifier defined by the event source's driver.
+    #[must_use]
+    pub const fn from_driver_key(key: u64) -> Self {
+        Self(key)
+    }
+}
+
+impl Device {
+    /// Returns the event source shared by this driver's activated devices.
+    /// This is a cached identity and does not subscribe or query native state.
+    #[must_use]
+    pub fn event_source_id(&self) -> DeviceEventSourceId {
+        DeviceEventSourceId(self.endpoint.driver_instance)
+    }
+
+    /// Returns this device's identity within its driver event source, when
+    /// the backend can attribute events before public endpoint activation.
+    #[must_use]
+    pub fn event_origin_id(&self) -> Option<DeviceEventOriginId> {
+        self.driver_state.event_origin_id()
+    }
+}
+
 /// Driver-independent cause of a GPU virtual-memory fault.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GpuMemoryFaultCause {
@@ -78,6 +112,8 @@ pub enum GpuResetCause {
 pub struct GpuHardwareException {
     /// Activated endpoint that reported the exception, when known.
     pub endpoint_id: Option<[u8; 16]>,
+    /// Native origin retained even when the endpoint has not been activated.
+    pub origin_id: Option<DeviceEventOriginId>,
     /// Scope of the reset reported by the driver.
     pub scope: GpuResetScope,
     /// Whether the driver reported loss of device memory.

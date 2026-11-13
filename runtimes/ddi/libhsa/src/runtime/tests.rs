@@ -56,6 +56,7 @@ fn shutdown_waits_for_inflight_calls() {
     let (done_send, done_recv) = std::sync::mpsc::channel();
     let worker_inflight = inflight.clone();
     let worker = thread::spawn(move || {
+        worker_inflight.close();
         started_send.send(()).unwrap();
         worker_inflight.wait_idle();
         done_send.send(()).unwrap();
@@ -91,6 +92,35 @@ fn callback_scope_restricts_queue_and_sampling_teardown() {
         assert!(CallbackScope::active());
     }
     assert!(!CallbackScope::active());
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn parked_shutdown_helper_exits_if_commit_is_aborted() {
+    let mut lifecycle = HsaLifecycle::new();
+    let generation = lifecycle.begin_init().unwrap().unwrap();
+    let (commit, instruction) = std::sync::mpsc::channel::<u64>();
+    let (finished, completion) = std::sync::mpsc::channel();
+    let cleanup_called = Arc::new(AtomicBool::new(false));
+    let observed = cleanup_called.clone();
+    defer_cleanup(instruction, move |instruction| {
+        if instruction.recv().is_ok() {
+            observed.store(true, Ordering::Release);
+        }
+        finished.send(()).unwrap();
+    })
+    .unwrap();
+    // A failed commit drops its instruction sender without advancing the
+    // generation or asking the parked helper to retire it.
+    assert_eq!(
+        lifecycle.begin_shutdown().err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+    drop(commit);
+    completion.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert!(!cleanup_called.load(Ordering::Acquire));
+    assert_eq!(lifecycle.begin_init().err(), Some(INVALID_RUNTIME_STATE));
+    lifecycle.cancel_init(generation, false).unwrap();
 }
 
 #[test]
@@ -188,6 +218,24 @@ fn callback_init_does_not_wait_for_preparing_shutdown() {
 }
 
 #[test]
+fn admitted_call_init_does_not_wait_for_preparing_shutdown() {
+    let lifecycle = Mutex::new(HsaLifecycle::new());
+    let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+    lifecycle
+        .lock()
+        .unwrap()
+        .prepare_without_runtime_for_test(generation);
+    let gate = Arc::new(InFlightTracker::new());
+    gate.close();
+    gate.open(generation);
+    let _scope = ApiLeaseScope::enter(gate.enter().unwrap());
+    assert_eq!(
+        begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+}
+
+#[test]
 fn same_thread_lifecycle_reentry_is_rejected() {
     let entry = LifecycleCallScope::enter().unwrap();
     assert_eq!(
@@ -211,6 +259,7 @@ fn failed_initialization_cleanup_quarantines_the_next_generation() {
     let generation = registry.begin_init().unwrap().unwrap();
     registry.cancel_init(generation, true).unwrap();
     assert_eq!(registry.begin_init().unwrap_err(), INVALID_RUNTIME_STATE);
+    assert_eq!(registry.begin_shutdown().err(), Some(INVALID_RUNTIME_STATE));
 }
 
 #[test]
@@ -259,6 +308,49 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
         assert!(pending.cleanup());
         assert_eq!(live.load(AtomicOrdering::Relaxed), 0);
         assert_eq!(joins.load(AtomicOrdering::Relaxed), 0);
+    }
+}
+
+#[test]
+fn failed_or_unwound_initialization_retains_the_native_session() {
+    /// Records whether failed native rollback releases its owner.
+    struct SessionProbe {
+        /// Drop count that must remain zero after an uncertain rollback.
+        drops: Arc<AtomicUsize>,
+        /// Injects an unwind instead of a returned native error.
+        panic_on_retire: bool,
+    }
+
+    impl RetireSession for SessionProbe {
+        fn retire(&mut self) -> bool {
+            assert!(!self.panic_on_retire, "injected native rollback unwind");
+            false
+        }
+    }
+
+    impl Drop for SessionProbe {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+    }
+
+    for panic_on_retire in [false, true] {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut pending = PendingInit {
+            session: Some(SessionProbe {
+                drops: drops.clone(),
+                panic_on_retire,
+            }),
+            gpus: Vec::<()>::new(),
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pending.cleanup()));
+        if panic_on_retire {
+            assert!(result.is_err());
+        } else {
+            assert!(!result.unwrap());
+        }
+        drop(pending);
+        assert_eq!(drops.load(AtomicOrdering::Relaxed), 0);
     }
 }
 
@@ -451,6 +543,7 @@ fn hardware_exception_events_match_the_amd_extension_layout() {
             agent,
             GpuHardwareException {
                 endpoint_id: Some([42; 16]),
+                origin_id: None,
                 scope: rocddi::device::event::GpuResetScope::WholeGpu,
                 memory_lost: false,
                 cause,
@@ -589,14 +682,14 @@ fn cache_handles_and_names_are_stable_runtime_objects() {
 #[test]
 /// Verifies that OS caches are not assigned to an unidentified CPU node.
 fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
-    use rocddi::topology::host::{CpuCache, HostCaches, HostTopologySnapshot};
+    use rocddi::topology::host::{CpuCache, HostCaches, HostTopologyGraphSnapshot};
 
     let cache = |cpu| CpuCache {
         cpu,
         shared_cpus: None,
         info: rocddi::topology::CacheInfo::new(1, 32 * 1024, None, CpuCacheKind::Data),
     };
-    let topology = HostTopologySnapshot {
+    let topology = HostTopologyGraphSnapshot {
         memory_bytes: None,
         cpu: None,
         cpu_apic_ids: Vec::new(),
@@ -618,7 +711,7 @@ fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
 #[test]
 /// Verifies separate KFD CPU nodes retain their bank sizes and APU policy.
 fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
-    use rocddi::topology::host::{HostCaches, HostTopologySnapshot};
+    use rocddi::topology::host::{HostCaches, HostTopologyGraphSnapshot};
     use rocddi::topology::{
         CpuNodeInfo, MemoryBank, MemoryBankKind, NativeNodeId, NodeId, NodeKind, SourceId,
         TopologyNode,
@@ -628,8 +721,8 @@ fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
         name: "test CPU".into(),
         compute_units: 12,
     };
-    let topology = TopologySnapshot {
-        host: HostTopologySnapshot {
+    let topology = TopologyGraphSnapshot {
+        host: HostTopologyGraphSnapshot {
             memory_bytes: Some(3 << 30),
             cpu: Some(host.clone()),
             cpu_apic_ids: Vec::new(),

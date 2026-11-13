@@ -1,6 +1,6 @@
-# Rocjitsu web applications
+# rocjitsu web applications
 
-This directory contains the public web applications for Rocjitsu.
+This directory contains the public web applications for rocjitsu.
 
 | Directory | Purpose | Published path |
 | --- | --- | --- |

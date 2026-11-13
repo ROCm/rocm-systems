@@ -109,10 +109,13 @@ rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
       return RDC_ST_NOT_FOUND;
     }
 
+    // A failed amd-smi call may still have written its output parameters, so
+    // each failure puts them back to N/A rather than leaving what it wrote.
     uint64_t weight = std::numeric_limits<uint64_t>::max();
     err = amdsmi_topo_get_link_weight(processor_handle, peer_handle, &weight);
     if (err != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(RDC_INFO, "Fail to get process GPUs weight information: " << err);
+      weight = std::numeric_limits<uint64_t>::max();
     }
 
     uint64_t min_bandwidth = std::numeric_limits<uint64_t>::max();
@@ -121,6 +124,8 @@ rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
                                                          &min_bandwidth, &max_bandwidth);
     if (err != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(RDC_INFO, "Fail to get process GPUs detail information: " << err);
+      min_bandwidth = std::numeric_limits<uint64_t>::max();
+      max_bandwidth = std::numeric_limits<uint64_t>::max();
     }
 
     uint64_t hops = std::numeric_limits<uint64_t>::max();
@@ -128,12 +133,15 @@ rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
     err = amdsmi_topo_get_link_type(processor_handle, peer_handle, &hops, &type);
     if (err != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(RDC_INFO, "Fail to get process GPUs hops and type information: " << err);
+      hops = std::numeric_limits<uint64_t>::max();
+      type = AMDSMI_LINK_TYPE_UNKNOWN;
     }
 
     bool accessible = false;
     err = amdsmi_is_P2P_accessible(processor_handle, peer_handle, &accessible);
     if (err != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(RDC_INFO, "Fail to get process GPUs P2P accessible information: " << err);
+      accessible = false;
     }
 
     results->link_infos[i].weight = weight;

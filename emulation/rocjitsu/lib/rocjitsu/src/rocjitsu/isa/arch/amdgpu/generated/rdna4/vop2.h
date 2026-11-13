@@ -368,6 +368,11 @@ class VSubrevCoCiU32Vop2 : public Vop2 {
 public:
   VSubrevCoCiU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop2::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8)
+      modifiers.src0 = &vsrc1;
+  }
   Operand vdst;
   Operand vcc;
   Operand src0;
@@ -406,6 +411,11 @@ class VSubrevNcU32Vop2 : public Vop2 {
 public:
   VSubrevNcU32Vop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop2::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8)
+      modifiers.src0 = &vsrc1;
+  }
   Operand vdst;
   Operand src0;
   Operand vsrc1;

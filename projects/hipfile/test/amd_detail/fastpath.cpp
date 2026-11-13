@@ -75,6 +75,7 @@ public:
     static constexpr bool          DEFAULT_IS_BLOCK_DEVICE{false};
     static constexpr bool          DEFAULT_ON_EXT4_ORDERED{true};
     static constexpr bool          DEFAULT_ON_XFS{false};
+    static constexpr bool          DEFAULT_ON_NFS_RDMA{false};
     static constexpr bool          DEFAULT_UNSUPPORTED_FILE_SYSTEMS{false};
 
     // Buffer and file mocks used to setup expectations
@@ -102,6 +103,7 @@ public:
     optional<bool>          m_is_block_device;
     optional<bool>          m_on_ext4_ordered;
     optional<bool>          m_on_xfs;
+    optional<bool>          m_on_nfs_rdma;
     optional<bool>          m_unsupported_file_systems;
     optional<bool>          m_count_rejection;
 
@@ -166,6 +168,12 @@ public:
         return *this;
     }
 
+    FastpathScoreExpectationsBuilder &onNfsRdma(bool on_nfs_rdma)
+    {
+        m_on_nfs_rdma = on_nfs_rdma;
+        return *this;
+    }
+
     FastpathScoreExpectationsBuilder &countRejection(bool count_rejection)
     {
         m_count_rejection = count_rejection;
@@ -191,6 +199,8 @@ public:
             .WillOnce(Return(builder.m_on_ext4_ordered.value_or(FastpathTestBase::DEFAULT_ON_EXT4_ORDERED)));
         EXPECT_CALL(*builder.m_mfile, onXfs)
             .WillOnce(Return(builder.m_on_xfs.value_or(FastpathTestBase::DEFAULT_ON_XFS)));
+        EXPECT_CALL(*builder.m_mfile, onNfsRdma)
+            .WillOnce(Return(builder.m_on_nfs_rdma.value_or(FastpathTestBase::DEFAULT_ON_NFS_RDMA)));
         EXPECT_CALL(builder.m_mcfg, unsupportedFileSystems)
             .WillOnce(Return(builder.m_unsupported_file_systems.value_or(
                 FastpathTestBase::DEFAULT_UNSUPPORTED_FILE_SYSTEMS)));
@@ -312,12 +322,26 @@ TEST_F(FastpathTest, ScoreAcceptsIoIfFileIsRegularAndOnXfs)
               SCORE_ACCEPT);
 }
 
-TEST_F(FastpathTest, ScoreRejectsIoIfFileIsRegularAndNotOnExt4OrderedNorXfs)
+TEST_F(FastpathTest, ScoreAcceptsIoIfFileIsRegularAndOnNfsRdma)
 {
     FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
         .isRegularFile(true)
         .onExt4Ordered(false)
         .onXfs(false)
+        .onNfsRdma(true)
+        .unsupportedFileSystems(false)
+        .build();
+
+    ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
+              SCORE_ACCEPT);
+}
+
+TEST_F(FastpathTest, ScoreRejectsIoIfFileIsNotRegularOnNfsRdma)
+{
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
+        .isRegularFile(false)
+        .onExt4Ordered(false)
+        .onNfsRdma(true)
         .countRejection(true)
         .build();
 
@@ -325,12 +349,28 @@ TEST_F(FastpathTest, ScoreRejectsIoIfFileIsRegularAndNotOnExt4OrderedNorXfs)
               SCORE_REJECT);
 }
 
-TEST_F(FastpathTest, ScoreAcceptsIoIfFileIsRegularNotOnExt4OrderedNorXfsIfUnsupportedFileSystemsIsTrue)
+TEST_F(FastpathTest, ScoreRejectsIoIfFileIsRegularAndNotOnExt4OrderedNorXfsNorNfsRdma)
 {
     FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
         .isRegularFile(true)
         .onExt4Ordered(false)
         .onXfs(false)
+        .onNfsRdma(false)
+        .countRejection(true)
+        .build();
+
+    ASSERT_EQ(Fastpath().score(mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
+              SCORE_REJECT);
+}
+
+TEST_F(FastpathTest,
+       ScoreAcceptsIoIfFileIsRegularNotOnExt4OrderedNorXfsNorNfsRdmaIfUnsupportedFileSystemsIsTrue)
+{
+    FastpathScoreExpectationsBuilder(mcfg, mfile, mbuffer, mstats)
+        .isRegularFile(true)
+        .onExt4Ordered(false)
+        .onXfs(false)
+        .onNfsRdma(false)
         .unsupportedFileSystems(true)
         .build();
 
@@ -371,7 +411,8 @@ TEST_P(FastpathSupportedHipMemoryParam, Score)
               SCORE_ACCEPT);
 }
 
-INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathSupportedHipMemoryParam, ValuesIn(SupportedHipMemoryTypes));
+INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathSupportedHipMemoryParam,
+                         ValuesIn(SupportedFastpathMemoryTypes));
 
 struct FastpathUnsupportedHipMemoryParam : public FastpathTestBase, public TestWithParam<hipMemoryType> {};
 
@@ -387,7 +428,7 @@ TEST_P(FastpathUnsupportedHipMemoryParam, Score)
 }
 
 INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathUnsupportedHipMemoryParam,
-                         ValuesIn(UnsupportedHipMemoryTypes));
+                         ValuesIn(set_difference(KnownHipMemoryTypes, SupportedFastpathMemoryTypes)));
 
 struct FastpathAlignedIoSizesParam : public FastpathTestBase, public TestWithParam<size_t> {};
 

@@ -40,28 +40,36 @@ fn reset_epoch_policy_uses_reset_evidence_and_device_identity() {
         imprecise: false,
         cause: GpuMemoryFaultCause::None,
     });
-    assert!(!instance::event_resets_device(memory_fault, endpoint_id));
+    assert!(!instance::event_resets_device(
+        memory_fault,
+        endpoint_id,
+        None
+    ));
 
     let exception = GpuHardwareException {
         endpoint_id: Some(endpoint_id),
+        origin_id: None,
         scope: GpuResetScope::Other,
         memory_lost: false,
         cause: GpuResetCause::Hang,
     };
     assert!(instance::event_resets_device(
         DeviceEvent::GpuHardwareException(exception),
-        endpoint_id
+        endpoint_id,
+        None
     ));
     assert!(!instance::event_resets_device(
         DeviceEvent::GpuHardwareException(exception),
-        [2; 16]
+        [2; 16],
+        None
     ));
     assert!(instance::event_resets_device(
         DeviceEvent::GpuHardwareException(GpuHardwareException {
             memory_lost: true,
             ..exception
         }),
-        [2; 16]
+        [2; 16],
+        None
     ));
 }
 
@@ -134,6 +142,98 @@ fn parameters() -> amdf_instance_create_info_t {
         structure_size: size_of::<amdf_instance_create_info_t>() as u32,
         ..Default::default()
     }
+}
+
+#[test]
+fn busy_instance_does_not_affect_an_independent_instance() {
+    let mut create = parameters();
+    create.native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS;
+    let mut first = std::ptr::null_mut();
+    let mut second = std::ptr::null_mut();
+    // SAFETY: Each input and output remains live for its call; destruction is
+    // serialized and the reservation is released before its parent instance.
+    unsafe {
+        assert_eq!(instance::create(&raw const create, &raw mut first), 0);
+        assert_eq!(instance::create(&raw const create, &raw mut second), 0);
+        assert_ne!(first, second);
+
+        let mut caps = amdf_memory_reservation_capabilities_t {
+            r#type: AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES,
+            structure_size: size_of::<amdf_memory_reservation_capabilities_t>() as u32,
+            ..Default::default()
+        };
+        assert_eq!(reservation::host_capabilities(first, &raw mut caps), 0);
+        let access = amdf_memory_reservation_access_t {
+            address_domain_ordinal: AMDF_ADDRESS_DOMAIN_ORDINAL_NONE,
+            access: AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+            ..Default::default()
+        };
+        let reservation_create = amdf_memory_reservation_create_info_t {
+            r#type: AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO,
+            structure_size: size_of::<amdf_memory_reservation_create_info_t>() as u32,
+            byte_length: caps.reservation_granularity,
+            access_count: 1,
+            accesses: &raw const access,
+            ..Default::default()
+        };
+        let mut owner = std::ptr::null_mut();
+        assert_eq!(
+            reservation::create(first, &raw const reservation_create, &raw mut owner),
+            0
+        );
+        assert_eq!(instance::destroy(first), support::BUSY);
+
+        let mut scope = std::ptr::null_mut();
+        let mut count = 0;
+        assert_eq!(
+            memory::instance_scopes(second, 1, &raw mut scope, &raw mut count),
+            0
+        );
+        assert!(!scope.is_null());
+        assert_eq!(instance::destroy(second), 0);
+        assert_eq!(reservation::destroy(owner), 0);
+        assert_eq!(instance::destroy(first), 0);
+    }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn fork_child_rejects_inherited_instance_before_its_mutex() {
+    let mut pointer = std::ptr::null_mut();
+    // SAFETY: The descriptor and output slot remain live for instance creation.
+    assert_eq!(
+        unsafe { instance::create(&parameters(), &raw mut pointer) },
+        0
+    );
+    // SAFETY: The public instance remains live until its serialized destroy.
+    let owner = unsafe { &*pointer.cast::<instance::Instance>() };
+    let held = owner.host_backing_head.lock().unwrap();
+    // SAFETY: The child makes only guarded ABI calls and uses _exit instead
+    // of running destructors that could enter inherited locks.
+    let child = unsafe { libc::syscall(libc::SYS_fork) };
+    assert!(child >= 0);
+    if child == 0 {
+        // SAFETY: Bound a regression if a call enters the inherited mutex.
+        unsafe { libc::alarm(3) };
+        let mut count = 0;
+        // SAFETY: The inherited handle is still addressable but cannot be
+        // used for stateful AMDF work in the child process.
+        let rejected = unsafe {
+            instance::enumerate(pointer, 0, std::ptr::null_mut(), &raw mut count)
+                == support::PRECONDITION
+                && instance::destroy(pointer) == support::PRECONDITION
+        };
+        // SAFETY: _exit leaves the copied parent ownership graph untouched.
+        unsafe { libc::_exit(i32::from(!rejected)) }
+    }
+    let pid = i32::try_from(child).unwrap();
+    let mut status = 0;
+    // SAFETY: This waits only for the child created above.
+    assert_eq!(unsafe { libc::waitpid(pid, &raw mut status, 0) }, pid);
+    assert_eq!(status, 0);
+    drop(held);
+    // SAFETY: The parent still owns the instance and has no live children.
+    assert_eq!(unsafe { instance::destroy(pointer) }, 0);
 }
 
 #[test]

@@ -30,12 +30,14 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve(
     requested: u64,
     flags: u64,
 ) -> Status {
-    // SAFETY: This entry point is the default-alignment form of the same ABI.
-    let page = match current_host_page() {
-        Ok(page) => page,
-        Err(status) => return status,
-    };
-    unsafe { hsa_amd_vmem_address_reserve_align(address, size, requested, page as u64, flags) }
+    boundary(|| {
+        // SAFETY: This entry point is the default-alignment form of the same ABI.
+        let page = match current_host_page() {
+            Ok(page) => page,
+            Err(status) => return status,
+        };
+        unsafe { hsa_amd_vmem_address_reserve_align(address, size, requested, page as u64, flags) }
+    })
 }
 
 #[cfg_attr(

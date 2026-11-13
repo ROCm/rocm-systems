@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_VM_VIRTUAL_MACHINE_H_
 #define ROCJITSU_VM_VIRTUAL_MACHINE_H_
 
+#include "rocjitsu/config/system_graph.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/component.h"
@@ -15,7 +16,13 @@
 #include <memory>
 #include <vector>
 
+namespace simdojo {
+class Topology;
+} // namespace simdojo
+
 namespace rocjitsu {
+
+class FabricEndpoint;
 
 /// @brief AMDGPU virtual machine modeling a complete SoC hierarchy.
 ///
@@ -59,12 +66,22 @@ public:
   const Config &config() const { return config_; }
 
   SimulatedKfd *driver() { return driver_.get(); }
+  FabricEndpoint *fabric_endpoint() { return fabric_endpoint_; }
+  const FabricEndpoint *fabric_endpoint() const { return fabric_endpoint_; }
+  const config::SystemPeerRouteProjection &peer_routes() const { return peer_routes_; }
+
+  /// Copy the selected node's executable route projection before LoadedConfig
+  /// and its global SystemGraph are released. This does not enable peer access.
+  void install_peer_routes(config::SystemPeerRouteProjection routes, simdojo::Topology &topology,
+                           simdojo::ExecMode mode);
 
 private:
   Config config_;
   SoC *soc_ = nullptr;
   std::vector<SoC *> socs_;
   std::unique_ptr<SimulatedKfd> driver_;
+  config::SystemPeerRouteProjection peer_routes_;
+  FabricEndpoint *fabric_endpoint_ = nullptr;
 };
 
 } // namespace rocjitsu

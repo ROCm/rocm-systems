@@ -26,7 +26,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
-#include <stdexcept>
 #include <type_traits>
 
 #if RJ_HOST_ARCH_X86
@@ -280,6 +279,23 @@ inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch, bool ieee_mode) {
   if (quiets_nan(arch, ieee_mode) && magnitude > 0x7f800000u)
     bits |= 0x00400000u;
   return bits;
+}
+
+/// @brief Convert one V_CVT_SR_PK_F16_F32 component with its 16-bit addend.
+inline uint16_t cvt_sr_pk_f16_f32(uint32_t bits, uint16_t addend, bool fp16_ovfl) {
+  // Model the full 16-bit addition in the CDNA5 pseudocode (p. 646) and the
+  // truncation in section 7.6. The upper three addend bits can change an exact
+  // F16 value by several ULPs. Their placement still needs a gfx1250 measurement.
+  // At 2^16 and above the F16 result has already overflowed, or the input is Inf/NaN.
+  if ((bits & fp_format::F32::kMagnitude) < std::bit_cast<uint32_t>(0x1p16f))
+    bits += addend;
+  return util::f32_to_f16_sr_mode(std::bit_cast<float>(bits), 0, fp16_ovfl);
+}
+
+/// @brief Convert one V_CVT_SR_PK_BF16_F32 component with its 16-bit addend.
+inline uint16_t cvt_sr_pk_bf16_f32(uint32_t bits, uint16_t addend, bool fp16_ovfl) {
+  // The single-result converter consumes the high half of a 32-bit seed.
+  return util::f32_to_bf16_sr_mode(std::bit_cast<float>(bits), uint32_t{addend} << 16, fp16_ovfl);
 }
 
 /// @brief Return the OMOD value supported by an ordinary floating-point result.
@@ -696,8 +712,8 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
     return (denorm_mode & 2u) ? result : flush(result);
   }
 
-  if (operation != ScalarAtomicOp::FMIN && operation != ScalarAtomicOp::FMAX)
-    throw std::invalid_argument("unsupported scalar floating-point atomic operation");
+  assert((operation == ScalarAtomicOp::FMIN || operation == ScalarAtomicOp::FMAX) &&
+         "unsupported scalar floating-point atomic operation");
 
   // CDNA1-4 / RDNA1-3.5 preserve selected denormals and propagate SNaNs.
   // CDNA5 / RDNA4 MIN_NUM/MAX_NUM select from the flushed values instead.
@@ -960,9 +976,8 @@ inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_
 
 /// @brief Round an F16 arithmetic destination and apply output-denormal policy.
 /// @details Migrated VOP3 callers leave omod=0 and modify the rounded bits
-/// afterward. SDWA supplies omod here to keep the emulator's pre-round scaling,
-/// which gfx1030 SDWA MUL_F16 and ADD_F16 captures contradict; see
-/// output_modifier.h.
+/// afterward. CDNA SDWA supplies omod for pre-round scaling here. GFX10 SDWA
+/// applies the modifier after arithmetic rounding, like VOP3.
 /// The unscoped form leaves the nearest-even environment to the caller, keeping
 /// the same rounding, output flushing and FP16_OVFL handling.
 inline uint16_t finish_arithmetic_f16_unscoped(double value, uint32_t round_mode,
@@ -1158,8 +1173,12 @@ inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, 
 
 /// @brief Apply F64 OMOD/CLAMP under the architectural rounding mode.
 /// @details A nonzero OMOD flushes a denormal result and converts either signed zero to +0.
+/// With OMOD and CLAMP disabled, no floating-point work is needed, so the original bits are
+/// returned without entering the host floating-point environment.
 inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, bool clamp,
                            bool clamp_nan_to_zero) {
+  if (omod == 0 && !clamp)
+    return value;
   double result;
   {
     detail::ScopedFenv environment(round_mode);
@@ -1197,6 +1216,16 @@ inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
   if ((bits & 0x7fffffffu) > 0x7f800000u)
     return static_cast<uint16_t>(((bits >> 16) & 0x8000u) | 0x7c00u | ((bits >> 13) & 0x3ffu));
   return util::f32_to_f16_mode(value, fp16_ovfl);
+}
+
+/// Convert the F32 source of a scaled narrowing instruction before applying its E8M0 scale.
+/// A preserved F32 subnormal is normal in double, even if the host flushes F32 operands.
+inline double widen_scalef32_source(uint32_t bits, uint32_t denorm_mode) {
+  const uint32_t magnitude = bits & 0x7fffffffu;
+  if (magnitude >= 0x00800000u)
+    return static_cast<double>(std::bit_cast<float>(bits));
+  const double value = (denorm_mode & 1u) ? std::ldexp(static_cast<double>(magnitude), -149) : 0.0;
+  return (bits >> 31) ? -value : value;
 }
 
 struct FrexpF32Result {

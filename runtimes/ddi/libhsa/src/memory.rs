@@ -169,7 +169,7 @@ pub(crate) struct MemoryState {
     /// Outstanding asynchronous copy borrows per allocation address.
     async_copy_borrows: HashMap<usize, usize>,
     /// Prevents unsafe reuse after uncertain asynchronous copy retirement.
-    pub(crate) async_copy_quarantine: Arc<AtomicBool>,
+    pub(crate) health: Arc<crate::runtime::GenerationHealth>,
     /// Process setting captured by new asynchronous copies.
     pub(crate) async_copy_profiling: AsyncCopyProfiling,
     /// Virtual address reservations ordered by base address.
@@ -184,14 +184,14 @@ pub(crate) struct MemoryState {
 
 impl MemoryState {
     /// Initializes the allocation, registration, and virtual memory registries.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(health: Arc<crate::runtime::GenerationHealth>) -> Self {
         Self {
             allocations: HashMap::new(),
             ipc_allocations: HashMap::new(),
             interop_allocations: HashMap::new(),
             locked_allocations: Vec::new(),
             async_copy_borrows: HashMap::new(),
-            async_copy_quarantine: Arc::new(AtomicBool::new(false)),
+            health,
             async_copy_profiling: AsyncCopyProfiling::Disabled,
             vmem_reservations: BTreeMap::new(),
             vmem_handles: HashMap::new(),
@@ -231,11 +231,6 @@ impl MemoryState {
     /// Detaches workers so shutdown can join them outside the lifecycle lock.
     pub(crate) fn take_workers(&mut self) -> Vec<JoinHandle<()>> {
         std::mem::take(&mut self.workers)
-    }
-
-    /// Reports whether an unfinished native copy still retains memory borrows.
-    pub(crate) fn is_quarantined(&self) -> bool {
-        self.async_copy_quarantine.load(Ordering::Acquire)
     }
 
     /// Releases HSA metadata after queues, copies, and signal users stop.

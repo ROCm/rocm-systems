@@ -22,6 +22,7 @@
 #include "hrr_test_process.hh"
 #include "hrr_reader.h"
 #include "hrr/hrr_api_args.h"
+#include "hrr/hrr_archive_notice.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -475,7 +476,7 @@ HRR_TEST_CASE(Unit_HRR_Recovery_RepairWritesProcessManifest) {
  *     end of events.bin but counts one record too few.
  *   - hrr-playback --repair on the root must not take the miscounting trailer
  *     as clean: it rewrites that sub-archive, which then loads complete with a
- *     trailer that counts its records.
+ *     trailer that counts its records. NOTICE.txt at the root is left as it was.
  */
 HRR_TEST_CASE(Unit_HRR_Recovery_RepairRootRewritesMiscountedTrailer) {
   TmpRootArchive root("repair_root_miscount");
@@ -483,6 +484,7 @@ HRR_TEST_CASE(Unit_HRR_Recovery_RepairRootRewritesMiscountedTrailer) {
   fs::path bad = root.add_process(/*pid=*/222, /*parent_pid=*/111,
                                   /*records=*/4, /*trailer=*/true,
                                   /*manifest=*/true, /*trailer_count=*/3);
+  std::ofstream(root.root / "NOTICE.txt", std::ios::binary) << kHrrArchiveNotice;
 
   auto [ret, out] = run_hrr_playback(root.root, "--repair");
   INFO("hrr-playback --repair stdout:\n" << out);
@@ -494,6 +496,7 @@ HRR_TEST_CASE(Unit_HRR_Recovery_RepairRootRewritesMiscountedTrailer) {
   CHECK(repaired.complete);
   CHECK(repaired.events.size() == 4);
   CHECK(repaired.trailer_events == 4);
+  CHECK(read_text_file(root.root / "NOTICE.txt") == kHrrArchiveNotice);
 }
 
 /**
@@ -555,6 +558,7 @@ HRR_TEST_CASE(Unit_HRR_Recovery_RootInfoChecksTrailerCount) {
  *     as a single replay archive.
  *   - hrr-playback --info should still aggregate and list both process
  *     manifests, which guards the multi-process root path.
+ *   - The short archive notice goes to stderr, not to stdout.
  */
 HRR_TEST_CASE(Unit_HRR_Recovery_MultiProcessRootInfo) {
   TmpRootArchive root("multi_process_root");
@@ -571,4 +575,9 @@ HRR_TEST_CASE(Unit_HRR_Recovery_MultiProcessRootInfo) {
   CHECK(out.find("Processes:    2") != std::string::npos);
   CHECK(out.find("111") != std::string::npos);
   CHECK(out.find("222") != std::string::npos);
+  CHECK(out.find(kHrrArchiveNoticeShort) == std::string::npos);
+
+  const std::string merged = hrr_playback_merged(root.root, "--info").second;
+  INFO("hrr-playback --info stdout and stderr:\n" << merged);
+  CHECK(merged.find(std::string("[HRR] ") + kHrrArchiveNoticeShort) != std::string::npos);
 }
