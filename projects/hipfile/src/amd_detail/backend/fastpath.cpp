@@ -228,6 +228,15 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
                 throw std::runtime_error("Invalid IoType");
         }
     }
+    catch (const std::system_error &e) {
+        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
+        // ENOTTY: the GPU driver has no AIS ioctl. That can't change while
+        // the process runs, so stop trying the fastpath.
+        if (e.code().value() == ENOTTY) {
+            Context<Configuration>::get()->fastpath(false);
+        }
+        throw;
+    }
     catch (...) {
         Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
         throw;
