@@ -556,6 +556,15 @@ test_categories:
     env_variables:
       - "RCCL_DDA_BC=1"
       - "RCCL_DDA_LL_THRESHOLD=262144"
+  # RCCL_HOST_HIER_ALLREDUCE is cached per process; the suite skips unless it is forced on.
+  standard_env_host_hier_allreduce:
+    description: "Host-hierarchical AllReduce data checks (sum, max, avg, bf16, in place, scratch regrowth) and its fallbacks."
+    test_patterns:
+      - "HostHierAllReduceMPITest.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "RCCL_HOST_HIER_ALLREDUCE=1"
   comprehensive:
     description: "MPI exhaustive — same suites as standard; env enables implicit launch, CE memcpy paths, and verbose rank logs."
     test_patterns: *mpi_all_patterns

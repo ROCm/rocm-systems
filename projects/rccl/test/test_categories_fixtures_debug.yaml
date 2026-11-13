@@ -48,6 +48,8 @@ test_categories:
       - "CeHierAlltoAllvEligibilityTest.*"
       - "CeAlltoAllEligibilityTest.*"
       - "GinAllReduceEligibilityTest.*"
+      - "HostHierLayout.*"
+      - "HostHierAllReduce.*"
       - "NetSocketTests.*"
       - "NetBootstrapInterfaceTest.*"
       - "BcmLinksTest.*"

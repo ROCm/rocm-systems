@@ -443,6 +443,7 @@ function(rccl_define_micro_source_lists)
     fakes/socket_fakes.cc
     fakes/devcomm_fakes.cc
     fakes/hip_fakes.cc
+    fakes/hier_host_fakes.cc
     fakes/env_fakes.cc
     fakes/ce_fakes.cc
     fakes/collectives_fakes.cc
@@ -522,6 +523,7 @@ function(rccl_define_micro_source_lists)
     fakes/enqueue_fakes.cc
     fakes/group_fakes.cc
     fakes/hip_fakes.cc
+    fakes/hier_host_fakes.cc
     fakes/nccl_fakes.cc
     fakes/nccl_stubs.cc
     fakes/mgmt_task_enq_fakes.cc
@@ -567,6 +569,7 @@ function(rccl_define_micro_source_lists)
     fakes/channel_fakes.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
+    fakes/hier_host_fakes.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
     fakes/amdsmi_fakes.cc
     fakes/api_trace_fakes.cc
