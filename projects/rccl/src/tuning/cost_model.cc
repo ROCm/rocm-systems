@@ -228,9 +228,7 @@ static const ncclTunerConstants_t ncclTunerConstantsDefaults = {
 float treeCorrectionFactor[NCCL_NUM_PROTOCOLS][24] = {
   {1.0, 1.0, 1.0, 1.0, .9, .8, .7, .7, .7, .7, .6, .5, .4, .4, .5, .6, .7, .8, .9, 1.0, 1.0, 1.0, 1.0, 1.0},
   {1.0, 1.0, 1.0, 1.0, 1.0, .9, .8, .8, .8, .7, .6, .6, .6, .6, .6, .6, .8, .9, .9, .9, .9, 1.0, 1.0, 1.0},
-  {.9, .9, .9, .9, .9, .9, .9, .8, .7, .6, .6, .5, .5, .5, .5, .6, .7, .8, .7, .7, .8, .9, .9, .9},
-  // NaN: mirrors LL128.
-  {1.0, 1.0, 1.0, 1.0, 1.0, .9, .8, .8, .8, .7, .6, .6, .6, .6, .6, .6, .8, .9, .9, .9, .9, 1.0, 1.0, 1.0}
+  {.9, .9, .9, .9, .9, .9, .9, .8, .7, .6, .6, .5, .5, .5, .5, .6, .7, .8, .7, .7, .8, .9, .9, .9}
 };
 
 // IMPORTANT: this table need must be consistent with the algRegistry in src/config/algorithm_registry.cc
@@ -330,18 +328,18 @@ ncclResult_t ncclTuningCostModelInit(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
   // ncclTunerConstantsDefaults only spells out the three original protocol
   // columns, so the NaN column comes out zero-initialized and would model as
-  // infinitely slow. Seed it from LL128, whose wire format it matches apart from
-  // the flag lane.
+  // infinitely slow.
+  const int nanSrc = rcclTuningProto(NCCL_PROTO_NAN);
   for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
     comm->tuningContext.tuningConstants.baseLatencies[a][NCCL_PROTO_NAN] =
-      comm->tuningContext.tuningConstants.baseLatencies[a][NCCL_PROTO_LL128];
+      comm->tuningContext.tuningConstants.baseLatencies[a][nanSrc];
     for (int hw = 0; hw < NCCL_NUM_HW_LINKS; hw++) {
       comm->tuningContext.tuningConstants.hwLatencies[hw][a][NCCL_PROTO_NAN] =
-        comm->tuningContext.tuningConstants.hwLatencies[hw][a][NCCL_PROTO_LL128];
+        comm->tuningContext.tuningConstants.hwLatencies[hw][a][nanSrc];
     }
     for (int n = 0; n < 2; n++) {
       comm->tuningContext.tuningConstants.bwRatio[n][a][NCCL_PROTO_NAN] =
-        comm->tuningContext.tuningConstants.bwRatio[n][a][NCCL_PROTO_LL128];
+        comm->tuningContext.tuningConstants.bwRatio[n][a][nanSrc];
     }
   }
   // Protocols/Algorithms enable/disable, and user overrides.
@@ -523,8 +521,8 @@ ncclResult_t ncclTuningCostModelSimModel(int id, struct ncclTuningInput_t* const
     // Symmetric and CE ids expand to NCCL_PROTO_UNDEF, so they drop out under NaN like any other protocol.
     int algo = NCCL_ALGO_UNDEF, proto = NCCL_PROTO_UNDEF, symKernelId, ceMethodId;
     if (ncclTuningExpandId(id, &algo, &proto, &symKernelId, &ceMethodId) == ncclSuccess) {
-      const bool nanOnly = rcclNanProtoOnly(input->comm, input->func, input->datatype, input->nBytes);
-      if (proto == NCCL_PROTO_NAN ? !(nanOnly && rcclNanProtoKernel(input->func, algo)) : nanOnly) {
+      const bool nanOnly = rcclNanProtoOnly(input->comm, input->func, input->datatype, input->nBytes, input->algMask);
+      if (rcclNanCellOff(nanOnly, input->func, algo, proto)) {
         goto not_valid;
       }
     }

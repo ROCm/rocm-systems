@@ -505,4 +505,36 @@ TEST_F(CsvTunerMicrotest, AppliesEmbeddedConfigToCostTable) {
   EXPECT_EQ(ncclSuccess, csvTunerFinalize(context));
 }
 
+// The core hands plugins a table NCCL_NUM_PROTOCOLS_V5 columns wide. A rule past row 0 and column 0 lands on a
+// different cell under a NCCL_NUM_PROTOCOLS stride, so this fails if the tuner strides by the core's width.
+TEST_F(CsvTunerMicrotest, AppliesConfigToPluginWidthTable) {
+  const std::string path = WriteTempCsv("allgather,0,1048576,ring,ll128,-1,-1,-1\n");
+  ASSERT_FALSE(path.empty());
+  SetMicroEnv("NCCL_TUNER_CONFIG_FILE", path.c_str());
+
+  void* context = nullptr;
+  ASSERT_EQ(ncclSuccess, csvTunerInit(&context, /*commId=*/0, /*nRanks=*/8, /*nNodes=*/1,
+                                      /*logFunction=*/nullptr, /*nvlDomainInfo=*/nullptr,
+                                      /*constants=*/nullptr));
+  ASSERT_NE(nullptr, context);
+  ASSERT_EQ(1, ((CsvTunerContext*)context)->numConfigs);
+
+  float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS_V5];
+  for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
+    for (int p = 0; p < NCCL_NUM_PROTOCOLS_V5; p++) table[a][p] = 1.0f;
+  }
+  int nChannels = -1;
+  ASSERT_EQ(ncclSuccess, csvTunerGetCollInfo(context, ncclFuncAllGather, 4096, /*numPipeOps=*/1, (float**)table,
+                                             NCCL_NUM_ALGORITHMS, NCCL_NUM_PROTOCOLS_V5, /*regBuff=*/0, &nChannels));
+
+  for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
+    for (int p = 0; p < NCCL_NUM_PROTOCOLS_V5; p++) {
+      const bool target = a == NCCL_ALGO_RING && p == NCCL_PROTO_LL128;
+      EXPECT_FLOAT_EQ(target ? 0.0f : 1.0f, table[a][p]) << "algo " << a << " proto " << p;
+    }
+  }
+
+  EXPECT_EQ(ncclSuccess, csvTunerFinalize(context));
+}
+
 }  // namespace

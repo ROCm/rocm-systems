@@ -3133,7 +3133,7 @@ static void initCollCostTable(float** collCostTable) {
 // and the Direct collectives take it on the send/recv path (addP2pToPlan).
 // Everything else keeps the default protocol set.
 static bool nanProtoOnly(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
-  return rcclNanProtoOnly(comm, info->func, info->datatype, nBytes);
+  return rcclNanProtoOnly(comm, info->func, info->datatype, nBytes, info->algMask);
 }
 
 // numPipeOps: number of pipelined ops. Can be greater than 1 in aggregation mode. Used to adjust latency.
@@ -3209,7 +3209,7 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         continue;
       }
-      if (p == NCCL_PROTO_NAN ? !(nanOnly && rcclNanProtoKernel(info->func, a)) : nanOnly) {
+      if (rcclNanCellOff(nanOnly, info->func, a, p)) {
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         continue;
       }
@@ -3394,7 +3394,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
 #endif
   if (info->func == ncclFuncAllReduce && comm->topo->pivotA2ANumBiRings == 3) {
     static const bool userAlgoTune = getenv("NCCL_ALGO") != nullptr;
-    const bool userTuneInput = userAlgoTune || rcclProtoPinned(comm, info->func, info->datatype, nBytes);
+    const bool userTuneInput = userAlgoTune || rcclProtoPinned(comm, info->func, info->datatype, nBytes, info->algMask);
     info->nMaxChannels = nc;
     if (!userTuneInput) {
       // always respect user settings
@@ -3517,7 +3517,7 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
     NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float**)collCostTable, simInfo));
     // override algo, tree doesn't work with fewer than 64 bytes
     size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
-    const bool userProtoInput = rcclProtoPinned(comm, info->func, info->datatype, nBytes);
+    const bool userProtoInput = rcclProtoPinned(comm, info->func, info->datatype, nBytes, info->algMask);
     // This hardcode names Tree/LL, so it stands down where NCCL_PROTO or NaN left Tree/LL out.
     const bool treeLLOffered = collCostTable[NCCL_ALGO_TREE][NCCL_PROTO_LL] >= 0.0f;
     if (!userAlgoInput && treeLLOffered && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") &&
@@ -4281,11 +4281,8 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
 #endif
 
     size_t elementSize = ncclTypeSize(t->datatype);
-    // AllGather's LL/LL128/Simple kernels are int8. NaN is a typed float kernel,
-    // so keep the original dtype only where NaN is the protocol that will run;
-    // elsewhere (multi-node) an int8-only kernel would be looked up as float.
     if ((t->func == ncclFuncAllGather &&
-         !rcclNanProtoFor(comm, t->func, t->datatype, t->count * elementSize * comm->nRanks)) ||
+         !rcclNanAllGatherKeepsDtype(comm, t->datatype, t->count * elementSize * comm->nRanks, t->algMask)) ||
         t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAlltoAllGda ||
         t->func == ncclFuncAlltoAllvGda) {
       t->count *= elementSize;

@@ -102,18 +102,17 @@ ncclResult_t ncclTuningSetThreadThresholds(struct ncclComm* comm) {
     comm->tuningContext.maxThreads[NCCL_ALGO_TREE][NCCL_PROTO_LL128] =
       ncclTuningGetNthreads("NCCL_LL128_NTHREADS", ncclParamLl128Nthreads(), NCCL_LL128_MAX_NTHREADS / 4,
                             NCCL_LL128_MAX_NTHREADS, NCCL_LL128_MAX_NTHREADS);
-  // The NaN protocol moves the same 128-bit lines as LL128, minus the flag lane,
-  // so it inherits LL128's thread budget.
   comm->tuningContext.maxThreads[NCCL_ALGO_RING][NCCL_PROTO_NAN] =
     comm->tuningContext.maxThreads[NCCL_ALGO_TREE][NCCL_PROTO_NAN] =
-      comm->tuningContext.maxThreads[NCCL_ALGO_RING][NCCL_PROTO_LL128];
+      comm->tuningContext.maxThreads[NCCL_ALGO_RING][rcclTuningProto(NCCL_PROTO_NAN)];
 
   // Set per-thread amount of work before we increase nThreads and nChannels
   for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
     comm->tuningContext.threadThresholds[a][NCCL_PROTO_LL] = NCCL_LL_THREAD_THRESHOLD;
     comm->tuningContext.threadThresholds[a][NCCL_PROTO_LL128] = NCCL_LL128_THREAD_THRESHOLD;
     comm->tuningContext.threadThresholds[a][NCCL_PROTO_SIMPLE] = NCCL_SIMPLE_THREAD_THRESHOLD;
-    comm->tuningContext.threadThresholds[a][NCCL_PROTO_NAN] = NCCL_LL128_THREAD_THRESHOLD;
+    comm->tuningContext.threadThresholds[a][NCCL_PROTO_NAN] =
+      comm->tuningContext.threadThresholds[a][rcclTuningProto(NCCL_PROTO_NAN)];
   }
   comm->tuningContext.threadThresholds[NCCL_ALGO_RING][NCCL_PROTO_LL] *= comm->nRanks;
   comm->tuningContext.threadThresholds[NCCL_ALGO_COLLNET_DIRECT][NCCL_PROTO_SIMPLE] = 512;

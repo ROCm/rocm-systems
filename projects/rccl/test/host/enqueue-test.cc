@@ -5366,6 +5366,33 @@ void UnderNanProto(Body body) {
       ::testing::ExitedWithCode(0), "");
   ::testing::GTEST_FLAG(death_test_style) = style;
 }
+
+template <typename Body>
+void UnderNanAuto(Body body) {
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+  EXPECT_EXIT(
+      {
+        SetMicroEnv("RCCL_NAN_PROTO_AUTO", "1");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        body();
+        std::exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
+}
+
+// Two gfx950 nodes of 8, where RCCL_NAN_PROTO_AUTO picks NaN for a 1 MiB float AllReduce.
+struct NanAutoCostComm : CostComm {
+  char arch[8] = "gfx950";
+  NanAutoCostComm() : CostComm(/*nRanks=*/16, /*nNodes=*/2) {
+    get()->archName = arch;
+    get()->buffSizes[NCCL_PROTO_NAN] = 1 << 20;
+#if ENABLE_TDM_NAN
+    get()->nanTdmMinBytes = -1;
+#endif
+  }
+};
 }  // namespace
 
 TEST_F(EnqueueMicrotest, AddP2pToPlan_NanAlltoAll_UsesNanKernelAndMarksF64) {
@@ -5471,10 +5498,40 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_NanForced_KeepsOnlyNanCells) {
   }
 }
 
+// Under RCCL_NAN_PROTO_AUTO a per-call selection naming no NaN row is priced on exactly the rows it names, and
+// with no selection AUTO still prices NaN alone.
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_NanAuto_PerCallSelectionWithoutNanKeepsItsRows) {
+  UnderNanAuto([] {
+    NanAutoCostComm cc;
+    CostTable tbl;
+    auto task = CostTask(ncclFuncAllReduce, ncclFloat32);
+    task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    task.forceAlgSelection = 1;
+    ScriptAllTimes(1.0f);
+
+    ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0, /*nvls=*/0, 1, 0, tbl.ptr()));
+    EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_LL128));
+    EXPECT_EQ(1, tbl.countWritten());
+  });
+  UnderNanAuto([] {
+    NanAutoCostComm cc;
+    CostTable tbl;
+    auto task = CostTask(ncclFuncAllReduce, ncclFloat32);
+    task.algMask = 0;
+    ScriptAllTimes(1.0f);
+
+    ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0, /*nvls=*/0, 1, 0, tbl.ptr()));
+    EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_NAN));
+    EXPECT_FALSE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_LL128));
+  });
+}
+
 // AllGather's default kernels are int8, so a task collapses to bytes unless NaN, a typed float kernel, will run.
-void AppendFloatAllGather(ncclTaskColl* out) {
+// Ring is AllGather's only NaN algorithm, so NCCL_ALGO without Ring (zero Ring/NaN bandwidth) collapses it too.
+void AppendFloatAllGather(ncclTaskColl* out, float ringNanBw = 1.0f) {
   CollTaskComm cc;
   cc.get()->buffSizes[NCCL_PROTO_NAN] = 1 << 20;
+  cc.get()->bandwidths[ncclFuncAllGather][NCCL_ALGO_RING][NCCL_PROTO_NAN] = ringNanBw;
   ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
   info.coll = ncclFuncAllGather;
   ncclDevRedOpFull opDev{};
@@ -5497,6 +5554,15 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_NanAllGather_KeepsFloatDtype) {
     AppendFloatAllGather(&t);
     EXPECT_EQ(ncclFloat32, t.datatype);
     EXPECT_EQ(4u, t.count);
+  });
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_NanAllGatherWithoutRing_CollapsesToBytes) {
+  UnderNanProto([] {
+    ncclTaskColl t{};
+    AppendFloatAllGather(&t, /*ringNanBw=*/0.0f);
+    EXPECT_EQ(ncclInt8, t.datatype);
+    EXPECT_EQ(4u * 4, t.count);
   });
 }
 

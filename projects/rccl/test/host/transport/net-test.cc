@@ -1972,7 +1972,7 @@ class NetConnectMicrotest : public NetClientMicrotestBase {
 
   // The proxy's map: send/recv control words in host memory and the SIMPLE buffer in device
   // memory, either a dedicated bank or the per-local-rank shared one.
-  void BuildMap(int sameProcess, int cudaDev, int shared, bool sharedDevBank = false) {
+  void BuildMap(int sameProcess, int cudaDev, int shared, bool sharedDevBank = false, size_t nanBytes = 0) {
     map_ = {};
     map_.sameProcess = sameProcess;
     map_.cudaDev = cudaDev;
@@ -1980,6 +1980,7 @@ class NetConnectMicrotest : public NetClientMicrotestBase {
     NCCL_NET_MAP_ADD_POINTER(&map_, 0, 0, sizeof(ncclSendMem), sendMem);
     NCCL_NET_MAP_ADD_POINTER(&map_, 0, 0, sizeof(ncclRecvMem), recvMem);
     NCCL_NET_MAP_ADD_POINTER(&map_, sharedDevBank ? 1 : 0, 1, kSimpleBytes, buffs[NCCL_PROTO_SIMPLE]);
+    if (nanBytes > 0) NCCL_NET_MAP_ADD_POINTER(&map_, 0, 1, nanBytes, buffs[NCCL_PROTO_NAN]);
     if (sharedDevBank) map_.mems[NCCL_NET_MAP_SHARED_DEVMEM].size = kSimpleBytes;
     hostMem_.assign(map_.mems[NCCL_NET_MAP_HOSTMEM].size, 0);
     devMem_.assign(map_.mems[NCCL_NET_MAP_DEVMEM].size, 0);
@@ -2352,6 +2353,44 @@ TEST_F(NetConnectMicrotest, RecvConnect_GdrFlushFlag_WiredToConnector) {
 
   EXPECT_EQ(conn_.conn.gdrFlushFlag, flags);
   EXPECT_EQ(conn_.conn.gdrFlushSeq, seq);
+}
+
+// A free NaN slot reads back as the all-ones sentinel, so connect fills the whole NaN buffer with 0xFF. A map
+// with no NaN buffer (the shared p2p bank) gets no fill even though the comm sizes one.
+TEST_F(NetConnectMicrotest, RecvConnect_SeedsNanBufferWithSentinel) {
+  constexpr size_t kNanBytes = 1 << 16;
+  comm_.buffSizes[NCCL_PROTO_NAN] = kNanBytes;
+  struct Fill {
+    void* ptr;
+    int value;
+    size_t bytes;
+  };
+  std::vector<Fill> fills;
+  ScopedHook memsetAsync(g_hipMemsetAsync, [&fills](void* p, int v, size_t n, hipStream_t) {
+    fills.push_back({p, v, n});
+    return hipSuccess;
+  });
+
+  for (bool withNanBuffer : {true, false}) {
+    SCOPED_TRACE(withNanBuffer ? "map has a NaN buffer" : "map has no NaN buffer");
+    fills.clear();
+    free(conn_.transportResources);
+    conn_.transportResources = nullptr;
+    BuildMap(1, comm_.cudaDev, /*shared=*/0, /*sharedDevBank=*/false, withNanBuffer ? kNanBytes : 0);
+
+    ASSERT_EQ(RecvConnect(), ncclSuccess);
+
+    if (withNanBuffer) {
+      ASSERT_NE(conn_.conn.buffs[NCCL_PROTO_NAN], nullptr);
+      ASSERT_EQ(fills.size(), 1u);
+      EXPECT_EQ(fills[0].ptr, conn_.conn.buffs[NCCL_PROTO_NAN]);
+      EXPECT_EQ(fills[0].value, 0xFF);
+      EXPECT_EQ(fills[0].bytes, kNanBytes);
+    } else {
+      EXPECT_EQ(conn_.conn.buffs[NCCL_PROTO_NAN], nullptr);
+      EXPECT_TRUE(fills.empty());
+    }
+  }
 }
 
 TEST_F(NetConnectMicrotest, Free_NoMap_ReturnsSuccess) {

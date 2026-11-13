@@ -56,6 +56,13 @@ static inline bool rcclNanProtoForced() {
   return forced;
 }
 
+// NaN has no tuning constants of its own. It moves LL128's 128-bit lines without the flag lane, so every
+// protocol-indexed tuning table (latencies, bandwidths, thread budgets, correction factors) reads LL128's
+// entry for it.
+static inline int rcclTuningProto(int proto) {
+  return proto == NCCL_PROTO_NAN ? NCCL_PROTO_LL128 : proto;
+}
+
 // Collectives with a NaN kernel: AllReduce (ring and tree), ring AllGather and
 // ring ReduceScatter. AlltoAll takes NaN on the send/recv path instead.
 static inline bool rcclNanProtoKernel(ncclFunc_t func, int algo) {

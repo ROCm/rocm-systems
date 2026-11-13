@@ -1391,6 +1391,7 @@ static void rcclFillSharedParentInfo(struct ncclPeerInfo* info, struct ncclComm*
   info->sharedLl128BuffSize = parent->buffSizes[NCCL_PROTO_LL128];
   info->sharedP2pLl128BuffSize = parent->p2pLl128BuffSize;
   info->sharedNanBuffSize = parent->buffSizes[NCCL_PROTO_NAN];
+  info->sharesParentProxy = true;
 }
 
 // Every rank sets up its net receives and picks algorithms on its own, so RCCL_IB_GDR_FLUSH_FLAG is on
@@ -1664,9 +1665,9 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
   // ncclCommGrow mixes such ranks with new ranks that have no parent). Take this rank's own, else the lowest rank's.
   if (comm->peerInfo) {
     const ncclPeerInfo* self = comm->peerInfo + comm->rank;
-    const ncclPeerInfo* shared = self->sharedLl128BuffSize > 0 ? self : nullptr;
+    const ncclPeerInfo* shared = self->sharesParentProxy ? self : nullptr;
     for (int r = 0; shared == nullptr && r < comm->nRanks; r++) {
-      if (comm->peerInfo[r].sharedLl128BuffSize > 0) shared = comm->peerInfo + r;
+      if (comm->peerInfo[r].sharesParentProxy) shared = comm->peerInfo + r;
     }
     if (shared) {
       comm->buffSizes[NCCL_PROTO_LL128] = shared->sharedLl128BuffSize;

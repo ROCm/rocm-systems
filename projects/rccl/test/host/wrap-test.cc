@@ -786,7 +786,7 @@ TEST(WrapMicrotest, NanProtoFor_OffWithoutNcclProtoOrAuto) {
   comm->nRanks = 16;
   comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
   EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 64 * kNanMiB));
-  EXPECT_FALSE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 64 * kNanMiB));
+  EXPECT_FALSE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 64 * kNanMiB, 0));
   DeleteCommWithArch(comm);
 }
 
@@ -809,14 +809,14 @@ TEST(WrapMicrotestIsolated, NanProtoFor_AutoOnUsesWindowsOnGfx950EightPerNode) {
         EXPECT_EQ(4 << 20, sizes[NCCL_PROTO_NAN]);
         comm->buffSizes[NCCL_PROTO_NAN] = sizes[NCCL_PROTO_NAN];
         EXPECT_TRUE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
-        EXPECT_TRUE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        EXPECT_TRUE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB, 0));
         EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 4 * kNanMiB));
-        EXPECT_FALSE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 4 * kNanMiB));
+        EXPECT_FALSE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 4 * kNanMiB, 0));
         EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclInt32, 1 * kNanMiB));
         EXPECT_FALSE(rcclNanProtoForcedFor(comm, ncclFloat32));
         EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllGather, ncclFloat32, 1 * kNanMiB));
-        EXPECT_TRUE(rcclNanProtoOnly(comm, ncclFuncAllGather, ncclFloat32, 1 * kNanMiB));
-        EXPECT_FALSE(rcclNanProtoOnly(comm, ncclFuncAllGather, ncclInt8, 1 * kNanMiB));
+        EXPECT_TRUE(rcclNanProtoOnly(comm, ncclFuncAllGather, ncclFloat32, 1 * kNanMiB, 0));
+        EXPECT_FALSE(rcclNanProtoOnly(comm, ncclFuncAllGather, ncclInt8, 1 * kNanMiB, 0));
 
         comm->nRanks = 12;
         EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
@@ -840,7 +840,58 @@ TEST(WrapMicrotestIsolated, NanProtoFor_NcclProtoTurnsAutoOff) {
         comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
         EXPECT_FALSE(rcclNanProtoAutoTuned(comm));
         EXPECT_FALSE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
-        EXPECT_TRUE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB));
+        EXPECT_TRUE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB, 0));
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+constexpr uint64_t RowBit(int algo, int proto) { return 1ULL << (algo * NCCL_NUM_PROTOCOLS + proto); }
+
+// A per-call algSelection that names no NaN row turns RCCL_NAN_PROTO_AUTO off for that call; one naming a NaN row,
+// or none at all, leaves AUTO's choice standing.
+TEST(WrapMicrotestIsolated, NanProtoForCall_AutoStandsDownForSelectionWithoutNan) {
+  RUN_ISOLATED_TEST(
+      "Wrap_NanProtoForCall_AutoStandsDownForSelectionWithoutNan",
+      []() {
+        SetMicroEnv("RCCL_NAN_PROTO_AUTO", "1");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+#if ENABLE_TDM_NAN
+        comm->nanTdmMinBytes = -1;
+#endif
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        const size_t bytes = 1 * kNanMiB;
+        ASSERT_TRUE(rcclNanProtoFor(comm, ncclFuncAllReduce, ncclFloat32, bytes));
+
+        const uint64_t ringLl128 = RowBit(NCCL_ALGO_RING, NCCL_PROTO_LL128);
+        EXPECT_TRUE(rcclNanProtoForCall(comm, ncclFuncAllReduce, ncclFloat32, bytes, 0));
+        EXPECT_FALSE(rcclNanProtoForCall(comm, ncclFuncAllReduce, ncclFloat32, bytes, ringLl128));
+        EXPECT_FALSE(rcclNanProtoOnly(comm, ncclFuncAllReduce, ncclFloat32, bytes, ringLl128));
+        EXPECT_FALSE(rcclProtoPinned(comm, ncclFuncAllReduce, ncclFloat32, bytes, ringLl128));
+        EXPECT_TRUE(rcclNanProtoForCall(comm, ncclFuncAllReduce, ncclFloat32, bytes,
+                                        ringLl128 | RowBit(NCCL_ALGO_RING, NCCL_PROTO_NAN)));
+        EXPECT_TRUE(rcclNanProtoForCall(comm, ncclFuncAllReduce, ncclFloat32, bytes,
+                                        RowBit(NCCL_ALGO_TREE, NCCL_PROTO_NAN)));
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
+// NCCL_PROTO=NaN overrides a per-call algSelection, so a selection without NaN rows still runs NaN.
+TEST(WrapMicrotestIsolated, NanProtoForCall_ForcedIgnoresSelection) {
+  RUN_ISOLATED_TEST(
+      "Wrap_NanProtoForCall_ForcedIgnoresSelection",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1;
+        comm->nRanks = 8;
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        EXPECT_TRUE(rcclNanProtoForCall(comm, ncclFuncAllReduce, ncclFloat32, 1 * kNanMiB,
+                                        RowBit(NCCL_ALGO_RING, NCCL_PROTO_LL128)));
         ClearMicroEnv();
         DeleteCommWithArch(comm);
       });

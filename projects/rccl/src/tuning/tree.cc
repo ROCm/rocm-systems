@@ -33,7 +33,7 @@ ncclResult_t ncclTuningTreeModelInit(struct ncclComm* comm, int id, int enabled[
     if (proto == NCCL_PROTO_LL) {
       busBw = std::min(busBw * 1.0 / 3.8, llMaxBw);
     }
-    if (proto == NCCL_PROTO_LL128 || proto == NCCL_PROTO_NAN)
+    if (rcclTuningProto(proto) == NCCL_PROTO_LL128)
       busBw = std::min(busBw * (comm->nNodes == 1 ? 7.0 / 9.0 : 120.0 / 128.0),
                        comm->graphs[algo].nChannels * perChMaxTreeLL128Bw);
     if (comm->maxTreePattern == NCCL_TOPO_PATTERN_TREE) busBw *= .85;
@@ -76,7 +76,7 @@ ncclResult_t ncclTuningTreeModelSim(struct ncclTuningInput_t* const inputs, stru
   float bw = inputs->comm->tuningContext.generalBandwidths[inputs->func][tuning->algo][tuning->proto];
   float lat = inputs->comm->tuningContext.generalLatencies[inputs->func][tuning->algo][tuning->proto];
   if (inputs->func == ncclFuncAllReduce && logSize >= 0 && logSize < 23)
-    bw *= treeCorrectionFactor[tuning->proto][logSize];
+    bw *= treeCorrectionFactor[rcclTuningProto(tuning->proto)][logSize];
   tuning->timeUs = ncclTuningGetTime(inputs, tuning->algo, &lat, &bw);
   return ret;
 }

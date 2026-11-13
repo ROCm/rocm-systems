@@ -560,7 +560,7 @@ ncclCollConfig_t
   use for this call. ``NULL`` or an empty string requests automatic selection.
 
   Each name is matched as a prefix from the start of a known name. For example,
-  ``ring`` selects ``RING_LL``, ``RING_LL128``, and ``RING_SIMPLE``, but does not
+  ``ring`` selects ``RING_LL``, ``RING_LL128``, ``RING_SIMPLE``, and ``RING_NAN``, but does not
   select ``SYMK_RailRing_LsaSTMC``; similarly, ``nvls`` selects both ``NVLS_SIMPLE``
   and ``NVLSTREE_SIMPLE``. The supported operators are ``+`` (AND), ``,``
   (OR), and ``^`` (NOT); parentheses are not supported. For example,
@@ -569,16 +569,16 @@ ncclCollConfig_t
 
   The selectable built-in names and the collectives for which they are valid are:
 
-  * AllReduce: ``TREE_LL``, ``TREE_LL128``, ``TREE_SIMPLE``, ``RING_LL``,
-    ``RING_LL128``, ``RING_SIMPLE``, ``COLLNET_DIRECT_SIMPLE``,
+  * AllReduce: ``TREE_LL``, ``TREE_LL128``, ``TREE_SIMPLE``, ``TREE_NAN``, ``RING_LL``,
+    ``RING_LL128``, ``RING_SIMPLE``, ``RING_NAN``, ``COLLNET_DIRECT_SIMPLE``,
     ``COLLNET_CHAIN_SIMPLE``, ``NVLS_SIMPLE``, ``NVLSTREE_SIMPLE``,
     ``SYMK_AGxLL_R``, ``SYMK_AGxLLMC_R``, ``SYMK_RSxTmaLD_AGxTmaST``,
     ``SYMK_RSxLD_AGxST``, and ``SYMK_RSxLDMC_AGxSTMC``.
-  * AllGather: ``RING_LL``, ``RING_LL128``, ``RING_SIMPLE``,
+  * AllGather: ``RING_LL``, ``RING_LL128``, ``RING_SIMPLE``, ``RING_NAN``,
     ``COLLNET_DIRECT_SIMPLE``, ``NVLS_SIMPLE``, ``PAT_SIMPLE``, ``SYMK_LL``,
     ``SYMK_LLMC``, ``SYMK_TmaST``, ``SYMK_ST``, ``SYMK_TmaSTMC``,
     ``SYMK_STMC``, and ``SYMK_RailRing_LsaSTMC``.
-  * ReduceScatter: ``RING_LL``, ``RING_LL128``, ``RING_SIMPLE``,
+  * ReduceScatter: ``RING_LL``, ``RING_LL128``, ``RING_SIMPLE``, ``RING_NAN``,
     ``COLLNET_DIRECT_SIMPLE``, ``NVLS_SIMPLE``, ``PAT_SIMPLE``, ``SYMK_LL``,
     ``SYMK_TmaLD``, ``SYMK_LD``, ``SYMK_LDMC``, ``SYMK_RailA2A_LsaLD``, and
     ``SYMK_RailA2A_LsaLDMC``.
@@ -594,6 +594,9 @@ ncclCollConfig_t
   ``Rail``/``Lsa`` names are multi-node kernels that combine a local
   NVLink-domain (``Lsa``) step with a network exchange between same-rail ranks
   across nodes.
+
+  ``NAN`` is RCCL's NaN-flag protocol. Its rows run only where ``NCCL_PROTO=NaN``
+  or ``RCCL_NAN_PROTO_AUTO=1`` applies, and only for floating-point data.
 
   Algorithm names are implementation details and may evolve. AllToAll,
   Gather, and Scatter lower to point-to-point sends and receives and expose

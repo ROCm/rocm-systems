@@ -410,7 +410,8 @@ collected in the following table.
         | Uses the NaN-flag protocol (see ``NCCL_PROTO``) only in the message-size
           windows where it measured faster than the default selection, per
           collective and node count, on gfx950 with 8 GPUs per node. Off when
-          ``NCCL_PROTO`` is set.
+          ``NCCL_PROTO`` is set, and for a call whose per-call ``algSelection``
+          names no ``NAN`` row.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
 

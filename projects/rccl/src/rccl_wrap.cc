@@ -246,7 +246,7 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct 
                                    float table[][NCCL_NUM_PROTOCOLS]) {
   // With NCCL_PROTO set, rcclUpdateCollectiveProtocol leaves the protocol alone, so a
   // switch to Tree would keep the protocol picked for Ring.
-  if (rcclNcclAlgoEnvIsSet() || rcclProtoPinned(comm, info->func, info->datatype, nBytes)) return;
+  if (rcclNcclAlgoEnvIsSet() || rcclProtoPinned(comm, info->func, info->datatype, nBytes, info->algMask)) return;
   if (info->func != ncclFuncAllReduce || info->algorithm != NCCL_ALGO_RING) return;
   const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/true);
   if (t == nullptr || t->arTreeMaxPerRank == 0 || nBytes > (uint64_t)comm->nRanks * t->arTreeMaxPerRank) return;
@@ -266,7 +266,7 @@ static bool rcclRemoteFlushTuned(struct ncclComm* comm) {
 
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
   // Honor user input for protocol choice
-  const bool userProtocolInput = rcclProtoPinned(comm, info->func, info->datatype, nBytes);
+  const bool userProtocolInput = rcclProtoPinned(comm, info->func, info->datatype, nBytes, info->algMask);
   size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
 
   // Broadcast on a table with total-byte ceilings (gfx1250 DPX). NCCL_PROTO still wins.
