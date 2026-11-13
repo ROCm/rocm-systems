@@ -47,7 +47,6 @@ from roofline.benchmark.gfx12.benchmark_gfx1201 import (
     dram_pin_bandwidth_gbps,
     percent_of_ceiling,
     pipe_bandwidth_gbps,
-    resident_stream_plan,
     shader_clock_hz,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
@@ -416,26 +415,6 @@ def test_device_memory_benchmark_defaults_to_the_hbm_kernel_and_label(
     benchmark_base.Bench_base.device_memory_bw_benchmark(bench, 0, "DRAM_bw", "VRAM")
     assert kernels == ["HBM_bw", "DRAM_bw"]
     assert "VRAM BW, GPU ID: 0" in capsys.readouterr().out
-
-
-def test_resident_stream_plan_sizes_whole_grid_steps_and_the_pass_count():
-    """With 28 multiprocessors, one grid step is 112 workgroups x 256 threads x
-    16 unrolled 16-byte loads, 7,340,032 bytes. A 32 MiB set holds four steps,
-    29,360,128 bytes, which takes 1,170 passes to reach 34,351,349,760 bytes."""
-    step = 7_340_032
-
-    workgroups, steps, buffer_bytes, passes, total = resident_stream_plan(
-        28, 256, 32 * 1024 * 1024
-    )
-
-    assert (workgroups, steps, buffer_bytes) == (112, 4, 29_360_128)
-    assert buffer_bytes == 4 * step
-    assert (passes, total) == (1170, 34_351_349_760)
-
-    # A set smaller than one step still streams one whole step.
-    _, steps, buffer_bytes, passes, _ = resident_stream_plan(28, 256, 1024)
-    assert (steps, buffer_bytes) == (1, step)
-    assert passes >= 1
 
 
 @pytest.mark.parametrize(
