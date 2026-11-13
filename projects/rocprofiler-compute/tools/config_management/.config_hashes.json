@@ -58,7 +58,7 @@
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "351893abac99742209bceb12d7d76484",
         "1600_vector_l1_data_cache.yaml": "12aa7fbde94767ba830d3373c7987dff",
         "1700_l2_cache.yaml": "6efc012759383b0602f56c9ef81b0b6c",
-        "1800_l2_cache_per_channel.yaml": "17eb4dec1b555d6fb7e6e11cffe36622",
+        "1800_l2_cache_per_channel.yaml": "02afc837c9957fabb795b503741b86cb",
         "2100_pc_sampling.yaml": "24c8aa42c3162070bc5b8023c27586a3"
       }
     },
@@ -80,7 +80,7 @@
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "ffd35eb8edecdb23c58b308c8fbb49fe",
         "1600_vector_l1_data_cache.yaml": "12aa7fbde94767ba830d3373c7987dff",
         "1700_l2_cache.yaml": "0fbe69c41975adec7516441823441475",
-        "1800_l2_cache_per_channel.yaml": "5fba55606e7a4cc31d745be8254d41f4",
+        "1800_l2_cache_per_channel.yaml": "9f53ad8464b83faf31e250d911e7b47e",
         "2100_pc_sampling.yaml": "24c8aa42c3162070bc5b8023c27586a3"
       }
     },
@@ -102,7 +102,7 @@
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "30d5165412c86a7fda6e60415857f602",
         "1600_vector_l1_data_cache.yaml": "043cd059cfb0b4291188ab6c9301ad55",
         "1700_l2_cache.yaml": "0c934935621bf349224bd3994fdaaf52",
-        "1800_l2_cache_per_channel.yaml": "5c9cb158d155d78fe3d4523eed7829a8",
+        "1800_l2_cache_per_channel.yaml": "02afc837c9957fabb795b503741b86cb",
         "2100_pc_sampling.yaml": "24c8aa42c3162070bc5b8023c27586a3"
       }
     },
@@ -124,7 +124,7 @@
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "5b4d7dbe52db2c3cbde60c6a769e16f7",
         "1600_vector_l1_data_cache.yaml": "7132daf4a5b188a274ca216c8eb67631",
         "1700_l2_cache.yaml": "59483fa0068dd33a0061cd60d3c6051d",
-        "1800_l2_cache_per_channel.yaml": "cfeddd1e9ab3174f7e8a105aeb60157b",
+        "1800_l2_cache_per_channel.yaml": "37507caf67115d0acd694838a9976380",
         "2100_pc_sampling.yaml": "24c8aa42c3162070bc5b8023c27586a3",
         "3000_mem_bw.yaml": "6467e3a9ad9c95a885193025155c2562"
       }
