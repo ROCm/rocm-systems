@@ -678,65 +678,6 @@ function(rccl_define_micro_source_lists)
     fakes/os_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroP2pResiliency -- src/transport/net_ib_cast/p2p_resiliency*.cc. Own binary: the
-  # net_ib_cast fakes stand in for connect.cc, p2p.cc and common.cc, which other targets do not fake.
-  set(TEST_MICRO_P2P_RESILIENCY_SOURCE_FILES
-    p2p-resiliency-test.cc
-    p2p-resiliency-recovery-test.cc
-    p2p-resiliency-recovery-ainic-test.cc
-    fakes/ibvwrap_fakes.cc
-    fakes/libc_fakes.cc                  # g_malloc / g_free for the recovery context
-    fakes/nccl_fakes.cc
-    fakes/net_ib_cast_capability_fakes.cc
-    fakes/net_ib_cast_common_fakes.cc
-    fakes/net_ib_cast_connect_fakes.cc
-    fakes/net_ib_cast_init_fakes.cc
-    fakes/net_ib_cast_p2p_fakes.cc
-    fakes/net_ib_cast_qp_sharing_fakes.cc
-    fakes/os_fakes.cc                    # ncclOsGetPageSize for ncclIbMalloc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroNetIbCastQpSharing -- src/transport/net_ib_cast/qp_sharing.cc. Own binary: it
-  # needs the net_ib_cast fakes and include directories that no shared binary links.
-  set(TEST_MICRO_NET_IB_CAST_QP_SHARING_SOURCE_FILES
-    net-ib-cast-qp-sharing-test.cc
-    fakes/env_fakes.cc
-    fakes/hip_fakes.cc
-    fakes/ibvwrap_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/net_ib_cast_common_fakes.cc    # IbCastDevs
-    fakes/os_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real getHostHash/getPidHash
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroNetIbCastConnect -- src/transport/net_ib_cast/connect.cc with the real
-  # qp_sharing.cc. Own binary: no shared binary links the net_ib_cast or socket fakes it needs.
-  set(TEST_MICRO_NET_IB_CAST_CONNECT_SOURCE_FILES
-    net-ib-cast-connect-test.cc
-    fakes/env_fakes.cc
-    fakes/hip_fakes.cc
-    fakes/hsa_fakes.cc
-    fakes/ibvwrap_fakes.cc
-    fakes/ionicdvwrap_fakes.cc
-    fakes/libc_fakes.cc
-    fakes/mlx5dvwrap_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/net_ib_cast_common_fakes.cc
-    fakes/net_ib_cast_gdr_fakes.cc
-    fakes/net_ib_cast_init_fakes.cc
-    fakes/net_ib_cast_multiplane_fakes.cc
-    fakes/net_ib_cast_p2p_fakes.cc
-    fakes/net_ib_cast_p2p_resiliency_fakes.cc
-    fakes/os_fakes.cc
-    fakes/rocmwrap_fakes.cc
-    fakes/socket_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real getHostHash/getPidHash
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1561,52 +1502,6 @@ target_compile_definitions(rccl-UnitTestsMicroDiagnostics PRIVATE
   DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics.cc")
 
 include("${CMAKE_CURRENT_LIST_DIR}/diagnostics/host_tests.cmake")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroP2pResiliency
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroP2pResiliency
-  SOURCES ${TEST_MICRO_P2P_RESILIENCY_SOURCE_FILES}
-  EXTRA_INCLUDES
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    # The _tmp names: src/CMakeLists.txt lists net_ib/p2p_resiliency*.cc first, so
-    # add_file_unique() renames these. Re-check after any source-list reorder.
-    P2P_RESILIENCY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_tmp.cc"
-    P2P_RESILIENCY_RECOVERY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_tmp.cc"
-    P2P_RESILIENCY_RECOVERY_AINIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_p2p_resiliency.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroNetIbCastQpSharing
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastQpSharing
-  SOURCES ${TEST_MICRO_NET_IB_CAST_QP_SHARING_SOURCE_FILES}
-  EXTRA_INCLUDES
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h, qp_sharing.h
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    NET_IB_CAST_QP_SHARING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_qp_sharing.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroNetIbCastConnect
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastConnect
-  SOURCES ${TEST_MICRO_NET_IB_CAST_CONNECT_SOURCE_FILES}
-  EXTRA_INCLUDES
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h, connect_cast.h
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    # connect_tmp.cc, not connect.cc: graph/connect.cc is listed first in src/CMakeLists.txt, so
-    # add_file_unique() renames this one. Re-check after any source-list reorder.
-    NET_IB_CAST_CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/connect_tmp.cc"
-    NET_IB_CAST_QP_SHARING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_connect.yaml")
 
 include("${CMAKE_CURRENT_LIST_DIR}/transport/host_tests.cmake")
 

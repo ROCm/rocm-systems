@@ -21,6 +21,7 @@ set(_MICRO_TRANSPORT_SIBLINGS
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/gdr_tmp.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/init_tmp.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_ops_fault.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/reg_tmp.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/scheduler.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket.cc
@@ -62,12 +63,20 @@ set(_MICRO_TRANSPORT_DEFS
   NET_IB_CAST_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/reg_tmp.cc"
   NET_IB_CAST_GDR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/gdr_tmp.cc"
   NET_IB_CAST_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/gin_tmp.cc"
+  # connect_tmp.cc, not connect.cc: graph/connect.cc is listed first in src/CMakeLists.txt, so
+  # add_file_unique() renames this one. Re-check after any source-list reorder.
+  NET_IB_CAST_CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/connect_tmp.cc"
   NET_IB_CAST_CAPABILITY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/capability.cc"
   NET_IB_CAST_MULTIPLANE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/multiplane.cc"
   NET_IB_CAST_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_cast_gid_inspect.cc"
   # p2p_tmp.cc, not p2p.cc: src/CMakeLists.txt lists transport/net_ib/p2p.cc first, so
   # add_file_unique() renames this one. Re-check after any source-list reorder.
   NET_IB_CAST_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_tmp.cc"
+  NET_IB_CAST_P2P_RESILIENCY_RECOVERY_AINIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc"
+  # The two _tmp names: src/CMakeLists.txt lists net_ib/p2p_resiliency*.cc first, so add_file_unique() renames
+  # them. Re-check after any source-list reorder.
+  NET_IB_CAST_P2P_RESILIENCY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_tmp.cc"
+  NET_IB_CAST_P2P_RESILIENCY_RECOVERY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_tmp.cc"
   NET_IB_CAST_QP_SHARING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc"
   NET_IB_CAST_SCHEDULER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/scheduler.cc"
   NET_IB_OPS_FAULT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_ops_fault.cc"
@@ -598,10 +607,88 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastScheduler n
     fakes/net_ib_cast_connect_fakes.cc
     fakes/transport_stubs.cc)
 
+# connect.cc with the real qp_sharing.cc, both #included by the test.
+rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastConnect net_ib_cast/net-ib-cast-connect-test.cc
+  SOURCES
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/ionicdvwrap_fakes.cc
+    fakes/libc_fakes.cc
+    fakes/mlx5dvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc
+    fakes/net_ib_cast_gdr_fakes.cc
+    fakes/net_ib_cast_init_fakes.cc
+    fakes/net_ib_cast_multiplane_fakes.cc
+    fakes/net_ib_cast_p2p_fakes.cc
+    fakes/net_ib_cast_p2p_resiliency_fakes.cc
+    fakes/os_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/socket_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc  # real getHostHash/getPidHash
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc)
+
+rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastQpSharing
+  net_ib_cast/net-ib-cast-qp-sharing-test.cc
+  SOURCES
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc  # IbCastDevs
+    fakes/os_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc)  # real getHostHash/getPidHash
+
 rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastOpsFault net_ib_cast/net-ib-ops-fault-test.cc
   SOURCES
     fakes/env_fakes.cc
     fakes/nccl_fakes.cc)
+
+rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastP2pResiliency
+  net_ib_cast/net-ib-cast-p2p-resiliency-test.cc
+  SOURCES
+    fakes/ibvwrap_fakes.cc
+    fakes/libc_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_capability_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc
+    fakes/net_ib_cast_connect_fakes.cc
+    fakes/net_ib_cast_init_fakes.cc
+    fakes/net_ib_cast_p2p_fakes.cc
+    fakes/net_ib_cast_qp_sharing_fakes.cc
+    fakes/os_fakes.cc
+    transport/net_ib_cast/p2p_resiliency_recovery_wrapper.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc)
+
+rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastP2pResiliencyRecovery
+  net_ib_cast/net-ib-cast-p2p-resiliency-recovery-test.cc
+  SOURCES
+    fakes/ibvwrap_fakes.cc
+    fakes/libc_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_capability_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc
+    fakes/net_ib_cast_connect_fakes.cc
+    fakes/net_ib_cast_init_fakes.cc
+    fakes/net_ib_cast_p2p_fakes.cc
+    fakes/net_ib_cast_qp_sharing_fakes.cc
+    fakes/os_fakes.cc
+    transport/net_ib_cast/p2p_resiliency_wrapper.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc)
+
+rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastP2pResiliencyRecoveryAinic
+  net_ib_cast/net-ib-cast-p2p-resiliency-recovery-ainic-test.cc
+  SOURCES
+    fakes/ibvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_capability_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc
+    fakes/net_ib_cast_connect_fakes.cc
+    fakes/net_ib_cast_init_fakes.cc
+    fakes/net_ib_cast_p2p_fakes.cc
+    fakes/net_ib_cast_qp_sharing_fakes.cc)
 
 rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNvls nvls-test.cc
   SOURCES
