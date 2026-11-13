@@ -4014,4 +4014,36 @@ bool KernelBlitManager::RunGwsInit(uint32_t value) const {
   return result;
 }
 
+// ================================================================================================
+bool KernelBlitManager::RunAtomicProbe(uint64_t va, uint32_t value) const {
+  std::scoped_lock k(lockXferOps_);
+
+  // The probe kernel is only present in the HIP blit programs
+  if (kernels_[AtomicProbe] == nullptr) {
+    return false;
+  }
+
+  size_t globalWorkOffset[1] = {0};
+  size_t globalWorkSize[1] = {1};
+  size_t localWorkSize[1] = {1};
+
+  setArgument(kernels_[AtomicProbe], 0, sizeof(uint64_t), &va);
+  setArgument(kernels_[AtomicProbe], 1, sizeof(uint32_t), &value);
+
+  amd::NDRangeContainer ndrange(1, globalWorkOffset, globalWorkSize, localWorkSize);
+
+  address parameters = captureArguments(kernels_[AtomicProbe]);
+
+  // attach_signal, so the wait below has a completion signal to wait on
+  bool result = gpu().submitKernelInternal(ndrange, *kernels_[AtomicProbe], parameters, nullptr, 0,
+                                           nullptr, nullptr, true);
+
+  releaseArguments(parameters);
+
+  // The caller reads the result back on the host, so the dispatch has to be complete
+  gpu().Barriers().WaitCurrent();
+
+  return result;
+}
+
 }  // namespace amd::roc

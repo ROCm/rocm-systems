@@ -229,8 +229,14 @@ void Device::checkAtomicSupport() {
   if (findLinkInfo(cpu_agent_info_->fine_grain_pool, &link_attrs)) {
     if (link_attrs[0].second == 1) {
       info_.pcie_atomics_ = true;
+      // The platform says the link completes atomics, take it at its word
+      hostcall_support_.store(HostcallSupport::Supported, std::memory_order_relaxed);
     }
   }
+  // Otherwise leave the state Unknown. Some drivers report no atomic support on links
+  // that do in fact carry them, which would needlessly fail every hostcall (device side
+  // printf) launch, so the answer is measured on first use instead. See
+  // ProbeHostcallAtomics().
 }
 
 Device::~Device() {
@@ -4688,6 +4694,46 @@ void Device::HiddenHeapInit(const VirtualGPU& gpu) {
     return result;
   };
   std::call_once(heap_initialized_, HeapZeroOut);
+}
+
+// ================================================================================================
+void Device::ProbeHostcallAtomics(const VirtualGPU& gpu) {
+  auto Probe = [this, &gpu]() {
+    // Pessimistic first: the dispatch below goes through the same path that asks this
+    // question, and it must take the "no hostcall" branch rather than recurse into the
+    // probe.
+    hostcall_support_.store(HostcallSupport::Unsupported, std::memory_order_relaxed);
+
+    // Fine grained host memory, so the atomic has to be completed by the host link. On
+    // coarse grained memory the device could service it in its own cache and the probe
+    // would pass even where hostcall can't work.
+    constexpr uint32_t kSeed = 0x600d0000;
+    constexpr uint32_t kAddend = 0x0000beef;
+    auto* probe = reinterpret_cast<uint32_t*>(
+        hostAlloc(sizeof(uint32_t), sizeof(uint32_t), MemorySegment::kAtomics, nullptr, false));
+    if (probe == nullptr) {
+      return;
+    }
+    *probe = kSeed;
+
+    bool dispatched = static_cast<const KernelBlitManager&>(gpu.blitMgr())
+                          .RunAtomicProbe(reinterpret_cast<uint64_t>(probe), kAddend);
+    const uint32_t observed = *probe;
+    hostFree(probe, sizeof(uint32_t));
+
+    if (dispatched && observed == kSeed + kAddend) {
+      ClPrint(amd::LOG_INFO, amd::LOG_INIT,
+              "System scope atomics on host memory work, enabling hostcall even though the "
+              "platform reports no atomic support on the host link");
+      hostcall_support_.store(HostcallSupport::Supported, std::memory_order_relaxed);
+    } else {
+      ClPrint(amd::LOG_INFO, amd::LOG_INIT,
+              "System scope atomic probe failed (dispatch %d, read back 0x%x, expected 0x%x), "
+              "hostcall stays disabled",
+              dispatched, observed, kSeed + kAddend);
+    }
+  };
+  std::call_once(hostcall_probe_once_, Probe);
 }
 
 // ================================================================================================
