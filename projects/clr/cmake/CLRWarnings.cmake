@@ -47,6 +47,16 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
   # are HSA packets in rocvirtual.hpp that must sit on 64-byte boundaries.
   target_compile_options(clr_warnings INTERFACE /wd4324)
 
+  # C4702: "unreachable code". Every site is a defensive trailing return after
+  # a construct MSVC can prove already returns on all paths -- `return false;`
+  # after an #if/#else that both return, `return nullptr;` after a switch whose
+  # default returns. Deleting them is the obvious move and the wrong one: they
+  # exist because other compilers warn "not all control paths return a value"
+  # on exactly these shapes, so removing them trades C4702 on Windows for
+  # -Wreturn-type on GCC/Clang -- the regression the Linux -Werror work exists
+  # to prevent.
+  target_compile_options(clr_warnings INTERFACE /wd4702)
+
   # C4200: "nonstandard extension used: zero-sized array in struct/union".
   # rocglinterop.hpp's metadata_amd_ci_vi_t ends in a flexible array member
   # (per-mip-level offsets) overlaid on a hardware descriptor. The trailing
