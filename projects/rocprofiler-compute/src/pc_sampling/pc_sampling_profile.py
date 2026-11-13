@@ -14,9 +14,12 @@ from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
     capture_subprocess_output,
     get_rocprof_cmd,
+)
+from utils.utils_profile import (
+    ProfilerOptions,
+    is_live_attach,
     perform_attach_detach,
 )
-from utils.utils_profile import ProfilerOptions, is_live_attach
 
 # Interval defaults: cycles for stochastic, microseconds for host_trap.
 PC_SAMPLING_DEFAULT_INTERVALS = {"stochastic": 1048576, "host_trap": 512}
