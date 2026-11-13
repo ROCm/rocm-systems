@@ -8041,6 +8041,26 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_FollowsRankScaledLLTier) {
       });
 }
 
+// Below rankScaledMinRanks a table's ddaArLLTwoShotMaxPerRank replaces the default; rank-scaled comms ignore it.
+TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_SmallCommPerRankCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLTwoShotThreshold_SmallCommPerRankCap",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL_TWOSHOT_THRESHOLD");
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaArLLTwoShotMaxPerRank = 1 * kMiB;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        comm->nRanks = 4;
+        EXPECT_EQ(4 * kMiB, rcclDdaLLTwoShotThreshold(comm));
+        comm->nRanks = 2;
+        EXPECT_EQ(2 * kMiB, rcclDdaLLTwoShotThreshold(comm));
+        comm->nRanks = 16;
+        EXPECT_EQ(16 * kMiB, rcclDdaLLTwoShotThreshold(comm)) << "the LL tier cap";
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaLLTwoShotThreshold_EnvOverridesRankScaling",
@@ -8051,6 +8071,8 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
         comm->archThresholds = Gfx1250Table();
         comm->nRanks = 16;
         EXPECT_EQ(4 * kMiB, rcclDdaLLTwoShotThreshold(comm));
+        comm->nRanks = 2;
+        EXPECT_EQ(4 * kMiB, rcclDdaLLTwoShotThreshold(comm)) << "over ddaArLLTwoShotMaxPerRank too";
         DeleteCommWithArch(comm);
       });
 }

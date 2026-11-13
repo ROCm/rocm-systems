@@ -125,6 +125,10 @@ struct rcclArchThresholds {
   size_t ddaArRegEagerMinShardBytes;   // eager: DDA LL128 instead of CE-registered from this per-rank shard
   size_t ddaArRegEagerMaxShardBytes;   // up to this per-rank shard
 
+  // AllReduce only: DDA LL two-shot up to nRanks x this on comms below rankScaledMinRanks ranks (larger comms run it
+  // to the LL tier's cap). 0 = the RCCL_DDA_LL_TWOSHOT_THRESHOLD default; that env var, when set, wins.
+  size_t ddaArLLTwoShotMaxPerRank;
+
   // DDA VMM (AllReduce / ReduceScatter) launches min(init block cap,
   // clamp(ddaVmmBlockBudget / nRanks, ddaVmmMinBlocks, ddaVmmMaxBlocks)) blocks
   // on comms of at least rankScaledMinRanks ranks. Budget 0 = the init block cap.

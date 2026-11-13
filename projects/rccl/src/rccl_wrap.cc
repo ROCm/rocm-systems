@@ -1274,12 +1274,16 @@ size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
 
 // RCCL_DDA_LL_TWOSHOT_THRESHOLD wins when the user sets it. On rank-scaled comms
 // whose table scales the AllReduce LL tier, two-shot runs to that tier's cap;
+// on smaller comms to nRanks x the table's ddaArLLTwoShotMaxPerRank when set;
 // otherwise the env var's default applies.
 inline size_t rcclDdaLLTwoShotThresholdTab(const rcclArchThresholds* table, int nRanks) {
   static const bool envSet = rcclEnvIsSet("RCCL_DDA_LL_TWOSHOT_THRESHOLD");
   if (!envSet && rcclDdaRankScaled(table, nRanks) &&
       funcThresholdFromTable(table->ddaLLMaxPerRank, ncclFuncAllReduce) != 0) {
     return rcclDdaLLThresholdTab(table, ncclFuncAllReduce, nRanks);
+  }
+  if (!envSet && table != nullptr && !rcclDdaRankScaled(table, nRanks) && table->ddaArLLTwoShotMaxPerRank != 0) {
+    return (size_t)std::max(nRanks, 1) * table->ddaArLLTwoShotMaxPerRank;
   }
   return (size_t)rcclParamDdaLLTwoShotThreshold();
 }

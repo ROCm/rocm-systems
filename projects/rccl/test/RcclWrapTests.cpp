@@ -3159,6 +3159,11 @@ TEST(RcclDdaTierThresholds, RankScalingOnlyOnGfx1250)
             comm->archThresholds = rcclGetArchThresholds("gfx1250");
             EXPECT_EQ(rcclDdaLLTwoShotThreshold(comm.get()), 16 * MiB);
             EXPECT_EQ(rcclDdaLL128TwoShotThreshold(comm.get()), 256 * MiB);
+            // Below 8 ranks the LL two-shot runs to nRanks x 1M.
+            comm->nRanks = 4;
+            EXPECT_EQ(rcclDdaLLTwoShotThreshold(comm.get()), 4 * MiB);
+            comm->nRanks = 2;
+            EXPECT_EQ(rcclDdaLLTwoShotThreshold(comm.get()), 2 * MiB);
         },
         {});
 }

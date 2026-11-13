@@ -241,6 +241,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaArRegCapturePerRankBytes = 2ULL*1024*1024,
   .ddaArRegEagerMinShardBytes = 512ULL*1024,
   .ddaArRegEagerMaxShardBytes = 1ULL*1024*1024,
+  // Below 8 ranks: LL two-shot beats DDA LL128 1.2x at 4M on 4 ranks and loses 1.2x from 8M; on 2 ranks it
+  // loses 1.2x at 4M, so 2M stays.
+  .ddaArLLTwoShotMaxPerRank = 1ULL*1024*1024,
   // VMM peaks at 128 / 128 / 64 / 32 blocks on 8 / 16 / 32 / 64 ranks.
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
