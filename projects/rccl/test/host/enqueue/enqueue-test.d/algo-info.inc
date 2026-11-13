@@ -343,6 +343,23 @@ TEST_F(EnqueueMicrotest, GetAlgoInfo_NoTunerGfx950SingleNodeAllReduce_UsesTreeLl
   }
 }
 
+// The override names Tree/LL, so where the table left Tree/LL out (NCCL_PROTO without LL, or NaN) it stands down.
+TEST_F(EnqueueMicrotest, GetAlgoInfo_NoTunerGfx950SingleNodeAllReduce_StandsDownWithoutTreeLl) {
+  AlgoInfoComm cc;
+  cc.get()->nNodes = 1;
+  SetSingleGpuArch(&cc.base.topo(), "gfx950");
+  g_topoGetAlgoTime = [](ncclComm*, int, int a, int p, size_t, int, float* time) {
+    *time = a == NCCL_ALGO_TREE && p == NCCL_PROTO_LL ? NCCL_ALGO_PROTO_IGNORE
+            : a == NCCL_ALGO_RING && p == NCCL_PROTO_SIMPLE ? 1.0f
+                                                            : 5.0f;
+    return ncclSuccess;
+  };
+  ncclTaskColl task = NoTunerTask(1024 / sizeof(float));
+  ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, nullptr));
+  EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+}
+
 TEST_F(EnqueueMicrotest, GetAlgoInfo_NoTunerNaviSingleNodeAllReduce_UsesRing) {
   for (const char* gcn : {"gfx1200", "gfx1201", "gfx942"}) {
     AlgoInfoComm cc;

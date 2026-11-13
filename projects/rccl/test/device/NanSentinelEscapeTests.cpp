@@ -8,8 +8,8 @@
 // written", so a sender must never put one on the wire. Real data can hold one
 // (as a NaN), and the sender escapes it to another NaN by clearing bit 0. These
 // tests feed such data through the ring/tree primitives (prims_nan.h) via the
-// public API on 2-4 GPUs and check that every collective completes and delivers
-// the escaped value.
+// public API on 2-4 GPUs (8 for Direct AllGather) and check that every
+// collective completes and delivers the escaped value.
 //
 // Without the escape these hang; the child-process timeout reports that as a
 // failure.
@@ -217,15 +217,37 @@ std::string reduceDiff(const NanDtype& dt, const std::vector<uint8_t>& out, size
   return "";
 }
 
+// Empty if no dword the wire escapes (every dword, or each f64's high dword) is still all-ones. Other protocols
+// carry an all-ones value through unchanged, so this holds only where a NaN kernel forwarded every value.
+std::string sentinelLeft(size_t elemSize, const std::vector<uint8_t>& out) {
+  const size_t first = elemSize == 8 ? 4 : 0, stride = elemSize == 8 ? 8 : 4;
+  for (size_t o = first; o + 4 <= out.size(); o += stride) {
+    if (loadDword(out, o) != kAllOnes) continue;
+    std::ostringstream s;
+    s << "all-ones dword at byte " << o;
+    return s.str();
+  }
+  return "";
+}
+
+// Whether some dword the wire escapes reads 0xFFFFFFFE, which only the escape produces from these payloads.
+bool anyEscaped(size_t elemSize, const std::vector<uint8_t>& out) {
+  const size_t first = elemSize == 8 ? 4 : 0, stride = elemSize == 8 ? 8 : 4;
+  for (size_t o = first; o + 4 <= out.size(); o += stride) {
+    if (loadDword(out, o) == 0xFFFFFFFEu) return true;
+  }
+  return false;
+}
+
 struct Ranks {
   int                      n = 0;
   std::vector<ncclComm_t>  comms;
   std::vector<hipStream_t> streams;
 };
 
-void initRanks(Ranks& R) {
+void initRanks(Ranks& R, int maxRanks = 4) {
   HIP_CHECK(hipGetDeviceCount(&R.n));
-  R.n = std::min(R.n, 4);
+  R.n = std::min(R.n, maxRanks);
   ASSERT_GE(R.n, 2);
   R.comms.resize(R.n);
   R.streams.resize(R.n);
@@ -247,16 +269,21 @@ void finiRanks(Ranks& R) {
 using Issue = std::function<ncclResult_t(int r, const void* send, void* recv, hipStream_t stream)>;
 
 // Runs one collective with in[r] as rank r's send buffer and returns each rank's
-// recv buffer of recvBytes in out.
+// recv buffer of recvBytes in out. In place, rank r's send buffer is its slice r
+// of the recv buffer, as for AllGather.
 void runColl(Ranks& R, const std::vector<std::vector<uint8_t>>& in, size_t recvBytes, const Issue& issue,
-             std::vector<std::vector<uint8_t>>& out) {
+             std::vector<std::vector<uint8_t>>& out, bool inPlace = false) {
   std::vector<void*> send(R.n), recv(R.n);
   for (int r = 0; r < R.n; r++) {
     HIP_CHECK(hipSetDevice(r));
-    HIP_CHECK(hipMalloc(&send[r], in[r].size()));
     HIP_CHECK(hipMalloc(&recv[r], recvBytes));
-    HIP_CHECK(hipMemcpy(send[r], in[r].data(), in[r].size(), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemset(recv[r], 0, recvBytes));
+    if (inPlace) {
+      send[r] = static_cast<char*>(recv[r]) + r * in[r].size();
+    } else {
+      HIP_CHECK(hipMalloc(&send[r], in[r].size()));
+    }
+    HIP_CHECK(hipMemcpy(send[r], in[r].data(), in[r].size(), hipMemcpyHostToDevice));
   }
   ASSERT_EQ(ncclGroupStart(), ncclSuccess);
   for (int r = 0; r < R.n; r++) {
@@ -269,15 +296,16 @@ void runColl(Ranks& R, const std::vector<std::vector<uint8_t>>& in, size_t recvB
     HIP_CHECK(hipSetDevice(r));
     HIP_CHECK(hipStreamSynchronize(R.streams[r]));
     HIP_CHECK(hipMemcpy(out[r].data(), recv[r], recvBytes, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipFree(send[r]));
+    if (!inPlace) HIP_CHECK(hipFree(send[r]));
     HIP_CHECK(hipFree(recv[r]));
   }
 }
 
-void primsAllGather(Ranks& R, const std::vector<size_t>& counts) {
+// Every rank, the owner included, holds each slice as the wire carries it.
+void primsAllGather(Ranks& R, const std::vector<size_t>& counts, bool inPlace = false) {
   for (const NanDtype& dt : kNanDtypes) {
     for (size_t count : counts) {
-      SCOPED_TRACE(std::string(dt.name) + " count " + std::to_string(count));
+      SCOPED_TRACE(std::string(dt.name) + " count " + std::to_string(count) + (inPlace ? " in place" : ""));
       std::vector<std::vector<uint8_t>> in(R.n), out;
       std::vector<uint8_t>              want;
       for (int r = 0; r < R.n; r++) {
@@ -287,7 +315,7 @@ void primsAllGather(Ranks& R, const std::vector<size_t>& counts) {
       }
       ASSERT_NO_FATAL_FAILURE(runColl(R, in, want.size(), [&](int r, const void* s, void* d, hipStream_t st) {
         return ncclAllGather(s, d, count, dt.type, R.comms[r], st);
-      }, out));
+      }, out, inPlace));
       for (int r = 0; r < R.n; r++) EXPECT_EQ(firstDiff(out[r], want, dt.size), "") << "rank " << r;
     }
   }
@@ -333,6 +361,7 @@ void primsAllReduce(Ranks& R, const std::vector<size_t>& counts) {
         EXPECT_EQ(reduceDiff(dt, out[r], 0, R.n), "") << "rank " << r;
         // Whoever forwards a reduced value escapes its own copy too.
         EXPECT_EQ(firstDiff(out[r], out[0], dt.size), "") << "rank " << r << " vs rank 0";
+        EXPECT_EQ(sentinelLeft(dt.size, out[r]), "") << "rank " << r;
       }
     }
   }
@@ -347,7 +376,14 @@ void primsReduceScatter(Ranks& R, const std::vector<size_t>& counts) {
       ASSERT_NO_FATAL_FAILURE(runColl(R, in, count * dt.size, [&](int r, const void* s, void* d, hipStream_t st) {
         return ncclReduceScatter(s, d, count, dt.type, ncclSum, R.comms[r], st);
       }, out));
-      for (int r = 0; r < R.n; r++) EXPECT_EQ(reduceDiff(dt, out[r], r * count, R.n), "") << "rank " << r;
+      // The last hop reduces without forwarding, so the owner's own all-ones can stay; what came over the wire
+      // arrives escaped.
+      bool escaped = false;
+      for (int r = 0; r < R.n; r++) {
+        EXPECT_EQ(reduceDiff(dt, out[r], r * count, R.n), "") << "rank " << r;
+        escaped |= anyEscaped(dt.size, out[r]);
+      }
+      EXPECT_TRUE(escaped) << "no output carries an escaped dword";
     }
   }
 }
@@ -361,6 +397,7 @@ void runPrimsRing() {
   {
     SCOPED_TRACE("AllGather");
     primsAllGather(R, *Counts);
+    primsAllGather(R, *Counts, /*inPlace=*/true);
   }
   {
     SCOPED_TRACE("AlltoAll");
@@ -387,17 +424,30 @@ void runPrimsTree() {
   finiRanks(R);
 }
 
-// tdmMinBytes, when set, is RCCL_TDM_NAN_MIN_BYTES. Builds without ENABLE_TDM_NAN ignore it.
+// Direct AllGather takes a multiple of 8 ranks: per-peer send/recv on the NaN-flag protocol, and a copy to itself.
+void runPrimsDirect() {
+  Ranks R;
+  ASSERT_NO_FATAL_FAILURE(initRanks(R, 8));
+  {
+    SCOPED_TRACE("AllGather");
+    primsAllGather(R, kCounts);
+    primsAllGather(R, kCounts, /*inPlace=*/true);
+  }
+  finiRanks(R);
+}
+
+// tdmMinBytes, when set, is RCCL_TDM_NAN_MIN_BYTES. Builds without ENABLE_TDM_NAN ignore it. Without algo,
+// NCCL_ALGO stays unset.
 ProcessIsolatedTestRunner::TestConfig primsConfig(const char* name, const char* algo, int gpus, void (*body)(),
                                                   const char* tdmMinBytes = nullptr) {
   std::unordered_map<std::string, std::string> env = {
     {"NCCL_PROTO", "NaN"},
-    {"NCCL_ALGO", algo},
     {"RCCL_DDA_ENABLE", "0"},
     {"NCCL_IB_DISABLE", "1"},
     {"NCCL_SOCKET_IFNAME", "lo"},
     {"RCCL_TDM_NAN_ENABLE", tdmMinBytes ? "1" : "0"},
   };
+  if (algo) env["NCCL_ALGO"] = algo;
   if (tdmMinBytes) env["RCCL_TDM_NAN_MIN_BYTES"] = tdmMinBytes;
   return ProcessIsolatedTestRunner::TestConfig(name, body)
     .withEnvironment(env)
@@ -430,6 +480,14 @@ TEST(PrimsNanSentinelEscape, RingTdm)
   if (!gpus) GTEST_SKIP() << "needs at least 2 GPUs";
   RUN_ISOLATED_TESTS(
     primsConfig("PrimsNanSentinelEscape.RingTdm", "Ring", gpus, runPrimsRing<&kTdmCounts>, /*tdmMinBytes=*/"0"));
+}
+
+// Direct AllGather, on gfx942 and gfx950 with 8 GPUs.
+TEST(PrimsNanSentinelEscape, AllGatherDirect)
+{
+  int n = 0;
+  if (hipGetDeviceCount(&n) != hipSuccess || n < 8) GTEST_SKIP() << "needs 8 GPUs";
+  RUN_ISOLATED_TESTS(primsConfig("PrimsNanSentinelEscape.AllGatherDirect", nullptr, 8, runPrimsDirect));
 }
 
 // AllReduce, the only collective with a NaN tree kernel.

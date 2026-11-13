@@ -162,6 +162,7 @@ void InstallSendRecvDevFuncIds() {
   };
   ncclDevFuncNameToId[key(0)] = 100;  // legacy LL kernel
   ncclDevFuncNameToId[key(1)] = 101;  // LL128 kernel
+  ncclDevFuncNameToId[key(2)] = 102;  // NaN kernel
 }
 }  // namespace
 
@@ -219,4 +220,21 @@ struct RedOpComm {
   ~RedOpComm() { delete[] storage->userRedOps; }
   ncclComm* get() { return storage.get(); }
 };
+}  // namespace
+
+namespace {
+// NCCL_PROTO is read once per process, so the NaN cases run in a re-executed child.
+template <typename Body>
+void UnderNanProto(Body body) {
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+  EXPECT_EXIT(
+      {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        body();
+        std::exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
+}
 }  // namespace

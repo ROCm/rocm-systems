@@ -92,9 +92,9 @@ typedef struct {
 } ncclTunerConstants_t;
 
 #ifdef __cplusplus
-// Narrow to the plugin-visible layout. Protocols beyond NCCL_NUM_PROTOCOLS_V5 are
-// dropped; no plugin knows about them.
-inline void ncclTunerConstantsToV7(ncclTunerConstants_v7_t* dst, const ncclTunerConstants_t* src) {
+// Copies every field over the V7 extents, which both layouts share.
+template <typename Dst, typename Src>
+inline void ncclTunerConstantsCopyV7(Dst* dst, const Src* src) {
   for (int a = 0; a < NCCL_NUM_ALGORITHMS_V5; a++) {
     for (int p = 0; p < NCCL_NUM_PROTOCOLS_V5; p++) {
       dst->baseLatencies[a][p] = src->baseLatencies[a][p];
@@ -113,25 +113,16 @@ inline void ncclTunerConstantsToV7(ncclTunerConstants_v7_t* dst, const ncclTuner
   }
 }
 
+// Narrow to the plugin-visible layout. Protocols beyond NCCL_NUM_PROTOCOLS_V5 are
+// dropped; no plugin knows about them.
+inline void ncclTunerConstantsToV7(ncclTunerConstants_v7_t* dst, const ncclTunerConstants_t* src) {
+  ncclTunerConstantsCopyV7(dst, src);
+}
+
 // Widen back after the plugin has written its values. Columns the plugin cannot
 // see keep whatever the caller had in them.
 inline void ncclTunerConstantsFromV7(ncclTunerConstants_t* dst, const ncclTunerConstants_v7_t* src) {
-  for (int a = 0; a < NCCL_NUM_ALGORITHMS_V5; a++) {
-    for (int p = 0; p < NCCL_NUM_PROTOCOLS_V5; p++) {
-      dst->baseLatencies[a][p] = src->baseLatencies[a][p];
-      for (int hw = 0; hw < NCCL_NUM_HW_LINKS_V5; hw++) dst->hwLatencies[hw][a][p] = src->hwLatencies[hw][a][p];
-      for (int n = 0; n < 2; n++) dst->bwRatio[n][a][p] = src->bwRatio[n][a][p];
-    }
-  }
-  for (int c = 0; c < NCCL_NUM_COMPCAPS_V7; c++) {
-    for (int s = 0; s < NCCL_NUM_TUNING_SCALES_V5; s++) {
-      dst->llMaxBws[c][s] = src->llMaxBws[c][s];
-      dst->perChMaxRingLL128Bws[c][s] = src->perChMaxRingLL128Bws[c][s];
-      dst->perChMaxTreeLL128Bws[c][s] = src->perChMaxTreeLL128Bws[c][s];
-      dst->perChMaxTreeBws[c][s] = src->perChMaxTreeBws[c][s];
-      dst->perChMaxNVLSTreeBws[c][s] = src->perChMaxNVLSTreeBws[c][s];
-    }
-  }
+  ncclTunerConstantsCopyV7(dst, src);
 }
 #endif
 

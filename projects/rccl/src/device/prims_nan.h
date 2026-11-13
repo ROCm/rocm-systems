@@ -445,9 +445,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   }
 
   // Re-reads the rows of vr that some lane still sees at the sentinel until none
-  // does. The whole wave leaves together (letting lanes exit independently was
-  // measurably worse below ~32 MiB), the votes are ballots, and a row that has
-  // landed is not read again: it stays put until this receiver restores it.
+  // does. The whole wave leaves together, the votes are ballots, and a row that
+  // has landed is not read again: it stays put until this receiver restores it.
   template <int NR>
   __device__ __forceinline__ void pollRows(v4u (&vr)[NR], v4u_gptr ptr, int& abortCache) {
     if (!waveAny(anyNan<NR>(vr))) return;
@@ -488,13 +487,6 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
                                                      int lane, int& abortCache, int eltN, bool postOp, Ahead* ah) {
     constexpr int SRC = SrcBuf != -1 ? 1 : 0;
 
-    // Sparse readiness was tried here and removed. The sender drained with an
-    // s_waitcnt before writing a marker pair so the receiver could poll one line
-    // and then stream the rest open-loop, on the theory that the per-line
-    // load -> test -> branch dependency was what capped throughput. It measured
-    // 251.7 vs 251.8 GB/s at 1 GiB: the sender's drain costs exactly what the
-    // receiver's open-loop reads gain. Worth knowing before anyone tries it
-    // again -- the value dependency is not the ceiling.
     if (RECV) {
 #pragma unroll
       for (int i = 0; i < MaxRecv; i++) {
@@ -605,7 +597,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     const int bytes = nelem * (int)sizeof(T);
     const int full = bytes / SliceBytes * SliceBytes;
     const int rows = divUp(bytes - full, RowBytes);
-    const int nr = rows == 0 ? 0 : (PackPerThread > 1 && rows <= 1) ? 1 : (PackPerThread > 2 && rows <= 2) ? 2 : PackPerThread;
+    const int nr = rows == 0                               ? 0
+                   : (PackPerThread > 1 && rows <= 1) ? 1
+                   : (PackPerThread > 2 && rows <= 2) ? 2
+                                                      : PackPerThread;
     return full + nr * RowBytes;
   }
 
@@ -819,11 +814,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     v4u_gptr recvFifo[RecvSlots];
     v4u_gptr sendFifo[SendSlots];
 #pragma unroll
-    for (int i = 0; i < MaxRecv; i++)
+    for (int i = 0; i < MaxRecv; i++) {
       recvFifo[i] = RECV && i < nrecv ? (v4u_gptr)recvPtr(i) + PackPerSlice * warp + lane : nullptr;
+    }
 #pragma unroll
-    for (int i = 0; i < MaxSend; i++)
+    for (int i = 0; i < MaxSend; i++) {
       sendFifo[i] = SEND && i < nsend ? (v4u_gptr)sendPtr(i) + PackPerSlice * warp + lane : nullptr;
+    }
     int abortCache = __builtin_amdgcn_readfirstlane(abort);
 
     // A proxy ships exactly these bytes, so rows past padBytes() must not be
@@ -850,8 +847,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
       if constexpr (RECV) {
         if (__builtin_expect(nrecv == MaxRecv && (!SEND || nsend == MaxSend) && accPtr == nullptr &&
                                nelem - DataEltPerSlice * nwarps >= DataEltPerSlice,
-                             0))
+                             0)) {
           steadyOp<SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, recvFifo, sendFifo, lane, nwarps, abortCache, nelem, postOp);
+        }
       }
       // warp is wave-uniform, so this loop and the row dispatch are scalar
       // branches. A slice that fits in one row -- every slice of a small op --
@@ -891,12 +889,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 
     sqtt_marker_exit("PRIM_NAN_DATA_PROCESS");
 
-    if (SEND)
+    if (SEND) {
       for (int i = 0; i < MaxSend; i++) sendStep[i] += 1;
-    if (SEND) postSend();
-    if (RECV)
+      postSend();
+    }
+    if (RECV) {
       for (int i = 0; i < MaxRecv; i++) recvStep[i] += 1;
-    if (RECV) postRecv();
+      postRecv();
+    }
   }
 
   __device__ __forceinline__ void loadRecvConn(struct ncclConnInfo* conn, int i) {
@@ -938,7 +938,8 @@ public:
                         uint8_t connIndexRecv = 0, uint8_t connIndexSend = 0, struct ncclDevWorkColl* e = nullptr,
                         bool ipcReg = false, bool netReg = false, int stepSize_ = 0)
     : redOp(redOpArg), tid(tid), nthreads(nthreads), wid(tid % WARP_SIZE),
-      stepSize(ncclShmem.comm.buffSizes[NCCL_PROTO_NAN] / NCCL_STEPS / sizeof(uint64_t)), warp(__builtin_amdgcn_readfirstlane(tid / WARP_SIZE)),
+      stepSize(ncclShmem.comm.buffSizes[NCCL_PROTO_NAN] / NCCL_STEPS / sizeof(uint64_t)),
+      warp(__builtin_amdgcn_readfirstlane(tid / WARP_SIZE)),
       warpInBlock(threadIdx.x / WARP_SIZE), group(group), threadsPerBlock(blockDim.x) {
 #ifdef ENABLE_WARP_SPEED
     auto* channel = ncclShmem.warpComm ? &ncclShmem.warpChannel[warpInBlock] : &ncclShmem.channel;

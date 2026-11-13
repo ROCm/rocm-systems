@@ -424,8 +424,9 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionAcceptsAFamilyOfRows) {
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
-  for (int p : {NCCL_PROTO_LL, NCCL_PROTO_LL128, NCCL_PROTO_SIMPLE})
+  for (int p : {NCCL_PROTO_LL, NCCL_PROTO_LL128, NCCL_PROTO_SIMPLE}) {
     EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, p)) << "p=" << p;
+  }
   EXPECT_EQ(3, tbl.countWritten());
 }
 
@@ -636,5 +637,35 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_PatSizeWindowWidensWithNodeCount) {
     ScriptAllTimes(1.0f);
     ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, c.nBytes, 0, 0, 1, /*userAlgoInput=*/0, tbl.ptr()));
     EXPECT_EQ(c.written, tbl.written(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE)) << c.nNodes << " nodes, " << c.nBytes;
+  }
+}
+
+// Under NCCL_PROTO=NaN a float collective with a NaN kernel is priced on its NaN cells alone, and one without
+// keeps the default set.
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_NanForced_KeepsOnlyNanCells) {
+  struct Case {
+    ncclFunc_t func;
+    ncclDataType_t datatype;
+    bool ringNan, treeNan;
+  };
+  for (const Case& c : {Case{ncclFuncAllReduce, ncclFloat32, true, true}, Case{ncclFuncAllGather, ncclFloat32, true, false},
+                        Case{ncclFuncReduceScatter, ncclFloat32, true, false},
+                        Case{ncclFuncAllReduce, ncclInt32, false, false}}) {
+    UnderNanProto([c] {
+      CostComm cc;
+      cc.get()->buffSizes[NCCL_PROTO_NAN] = 1 << 20;
+      CostTable tbl;
+      auto task = CostTask(c.func, c.datatype);
+      ScriptAllTimes(1.0f);
+
+      ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0, /*nvls=*/0, 1, 0, tbl.ptr()));
+      EXPECT_EQ(c.ringNan, tbl.written(NCCL_ALGO_RING, NCCL_PROTO_NAN));
+      EXPECT_EQ(c.treeNan, tbl.written(NCCL_ALGO_TREE, NCCL_PROTO_NAN));
+      if (c.ringNan) {
+        EXPECT_EQ(c.treeNan ? 2 : 1, tbl.countWritten());
+      } else {
+        EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE));
+      }
+    });
   }
 }
