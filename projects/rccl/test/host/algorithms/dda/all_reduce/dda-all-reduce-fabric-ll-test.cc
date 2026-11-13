@@ -16,6 +16,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "../common/DdaFabricTestHelpers.hpp"
@@ -107,11 +108,19 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     ResetDdaCollSeams();
     ResetHipFakes();
     ResetNcclFakes();
-    ddaArSplitHandoffLdsDevs<float> = 0;
-    ddaArSplitHandoffLdsDevs<half> = 0;
-    ddaArSplitHandoffLdsDevs<bf16> = 0;
-    ddaArSplitHandoffLdsDevs<dda::common::fp8e4m3> = 0;
-    ddaArSplitHandoffLdsDevs<dda::common::fp8e5m2> = 0;
+    ResetLdsDevs<float>();
+    ResetLdsDevs<half>();
+    ResetLdsDevs<bf16>();
+    ResetLdsDevs<dda::common::fp8e4m3>();
+    ResetLdsDevs<dda::common::fp8e5m2>();
+  }
+
+  // Clears every hand-off kernel's LDS cache of T.
+  template <typename T>
+  static void ResetLdsDevs() {
+    ddaArSplitHandoffLdsDevs<T> = 0;
+    ddaArSplitHandoffLdsDevs<T, kDdaArSplitBWide> = 0;
+    ddaArSplitHandoffLdsDevs<T, kDdaArSplitBWideChunked> = 0;
   }
 
   ncclComm& comm() { return mock_.comm; }
@@ -958,9 +967,17 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedKernelsPerRankCountAndDatat
 constexpr int kWide = dda::common::kDdaLL128FlagBytesWide;
 constexpr int kNarrow = dda::common::kDdaLL128FlagBytesNarrow;
 
-template <typename T, int kFlagBytes = kWide, bool kHandoff = false>
+template <typename T, int kFlagBytes = kWide, bool kHandoff = false, DdaArSplitB kB = kDdaArSplitBPairwise>
 const void* LL128Split() {
-  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, kHandoff>);
+  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, kHandoff, kB>);
+}
+
+// The narrow hand-off kernel of T with B form b.
+template <typename T>
+const void* LL128SplitHandoff(DdaArSplitB b) {
+  return b == kDdaArSplitBWide          ? LL128Split<T, kNarrow, true, kDdaArSplitBWide>()
+         : b == kDdaArSplitBWideChunked ? LL128Split<T, kNarrow, true, kDdaArSplitBWideChunked>()
+                                        : LL128Split<T, kNarrow, true>();
 }
 
 // Slices of one shard of a `bytes` message on nRanks, for a flag of flagBytes.
@@ -984,12 +1001,15 @@ rcclDdaLaunchCap GridOf(const DdaLaunch& l) {
   return {l.grid.x, l.block.x};
 }
 
-// A narrow split launch of T: the hand-off kernel and its LDS area where ddaArSplitTakesHandoff says, else my own slot.
+// A narrow split launch of T: the hand-off kernel and its LDS area where ddaArSplitTakesHandoff says, with the B form
+// and its stage ddaArSplitB says, else my own slot. The rules are pinned on their own by RuleEdges and the tier table.
 template <typename T>
 void ExpectNarrowSplit(const DdaLaunch& l, int nRanks) {
   const bool handoff = ddaArSplitTakesHandoff(nRanks, l.Arg<size_t>(8), l.grid.x, l.block.x);
-  EXPECT_EQ(l.kernel, handoff ? (LL128Split<T, kNarrow, true>()) : (LL128Split<T, kNarrow>()));
-  EXPECT_EQ(l.sharedMemBytes, dda::common::ddaLL128ArSplitSharedBytes(l.block.x, nRanks, handoff));
+  const DdaArSplitB b =
+    handoff ? ddaArSplitB(nRanks, l.Arg<size_t>(3), l.Arg<size_t>(8), l.grid.x) : kDdaArSplitBPairwise;
+  EXPECT_EQ(l.kernel, handoff ? LL128SplitHandoff<T>(b) : (LL128Split<T, kNarrow>()));
+  EXPECT_EQ(l.sharedMemBytes, dda::common::ddaLL128ArSplitSharedBytes(l.block.x, nRanks, handoff, b));
 }
 
 // The gfx1250 tables' tiers (LL128 to 256 MiB, LL to nRanks x 2 MiB) on wave32 with RCCL_DDA_LL128_ASYNC_WIRE=1.
@@ -1050,11 +1070,13 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitTakesTheWindowWithinTheR
     EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), c.bytes / 4, ncclFloat32, bound, /*split=*/true),
               l.grid.x);
   }
-  comm().nRanks = 8;  // 2 MiB hands off
-  EXPECT_EQ(RunSelectedLL128(2 * kMiB / 2, ncclBfloat16).kernel, (LL128Split<bf16, kNarrow, true>()));
-  EXPECT_EQ(RunSelectedLL128(2 * kMiB / 2, ncclFloat16).kernel, (LL128Split<half, kNarrow, true>()));
-  EXPECT_EQ(RunSelectedLL128(2 * kMiB, ncclFloat8e4m3).kernel, (LL128Split<dda::common::fp8e4m3, kNarrow, true>()));
-  EXPECT_EQ(RunSelectedLL128(2 * kMiB, ncclFloat8e5m2).kernel, (LL128Split<dda::common::fp8e5m2, kNarrow, true>()));
+  comm().nRanks = 8;  // 2 MiB hands off to wide B
+  EXPECT_EQ(RunSelectedLL128(2 * kMiB / 2, ncclBfloat16).kernel, LL128SplitHandoff<bf16>(kDdaArSplitBWide));
+  EXPECT_EQ(RunSelectedLL128(2 * kMiB / 2, ncclFloat16).kernel, LL128SplitHandoff<half>(kDdaArSplitBWide));
+  EXPECT_EQ(RunSelectedLL128(2 * kMiB, ncclFloat8e4m3).kernel,
+            LL128SplitHandoff<dda::common::fp8e4m3>(kDdaArSplitBWide));
+  EXPECT_EQ(RunSelectedLL128(2 * kMiB, ncclFloat8e5m2).kernel,
+            LL128SplitHandoff<dda::common::fp8e5m2>(kDdaArSplitBWide));
 }
 
 // The window: above two ranks, from 2 MiB with no shard cap, up to the LL128 cap and past a pinned LL128 one-shot.
@@ -1093,10 +1115,10 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Split_Window) {
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitPassesTheTwoShotsArguments) {
   SplitTiersOn(comm(), params_);
   const DdaLaunch& launch = RunSelectedLL128(2 * kMiB / 2, ncclBfloat16);
-  EXPECT_EQ(launch.kernel, (LL128Split<bf16, kNarrow, true>()));
+  EXPECT_EQ(launch.kernel, LL128SplitHandoff<bf16>(kDdaArSplitBWide));
   EXPECT_EQ(launch.stopEvent, kStopEvent);
-  // 16 warps' two windows, the hand-off area's 32 slices and ready words, the peer table.
-  EXPECT_EQ(launch.sharedMemBytes, 16 * 2 * kSliceWire + 32 * (kSliceWire + 4) + 8 * sizeof(void*));
+  // 16 warps' two windows, the hand-off area's 32 slices and ready words, wide B's 48 copies, the peer table.
+  EXPECT_EQ(launch.sharedMemBytes, 16 * 2 * kSliceWire + 32 * (kSliceWire + 4) + 48 * kSliceWire + 8 * sizeof(void*));
   ASSERT_EQ(launch.args.size(), 11u);
   EXPECT_EQ(launch.Arg<bf16**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<bf16*>(1), kRecvbuff);
@@ -1377,8 +1399,8 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitStaysWithinTheCappedRepl
   }
 }
 
-// Every even cell on gfx1250 SPX tiers, 4-32 ranks and 2-128 MiB: grid, flag and hand-off, within the launch the
-// selector makes without the split.
+// Every even cell on gfx1250 SPX tiers, 4-32 ranks and 2-128 MiB: grid, flag, hand-off and B form, within the launch
+// the selector makes without the split.
 TEST_F(DdaAllReduceFabricLLMicrotest, Split_RuleGridAndHandoffOnProductionTiers) {
   const struct {
     int nRanks;
@@ -1386,13 +1408,16 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Split_RuleGridAndHandoffOnProductionTiers)
     unsigned grid;
     unsigned block;
     bool handoff;  // off: 4r 2M-4M under a unit a warp, past 17 slices a block, and 32r 2M on 8 blocks
+    DdaArSplitB b = kDdaArSplitBPairwise;  // wide B to 256 KiB shards: 8r 2M wide, 32r 4M-8M chunked
   } cells[] = {
     {4, 2, 64, 480, false},    {4, 4, 137, 384, false},   {4, 8, 69, 512, true},     {4, 16, 137, 512, true},
-    {4, 32, 192, 512, false},  {4, 64, 192, 512, false},  {4, 128, 192, 512, false}, {8, 2, 32, 512, true},
+    {4, 32, 192, 512, false},  {4, 64, 192, 512, false},  {4, 128, 192, 512, false},
+    {8, 2, 32, 512, true, kDdaArSplitBWide},
     {8, 4, 64, 512, true},     {8, 8, 128, 512, true},    {8, 16, 69, 512, true},    {8, 32, 137, 512, true},
     {8, 64, 192, 512, false},  {8, 128, 192, 512, false}, {16, 2, 16, 512, true},    {16, 4, 32, 512, true},
     {16, 8, 64, 512, true},    {16, 16, 128, 512, true},  {16, 32, 69, 512, true},   {16, 64, 137, 512, true},
-    {16, 128, 192, 512, false}, {32, 2, 8, 512, false},   {32, 4, 64, 512, true},    {32, 8, 64, 512, true},
+    {16, 128, 192, 512, false}, {32, 2, 8, 512, false},
+    {32, 4, 64, 512, true, kDdaArSplitBWideChunked},      {32, 8, 64, 512, true, kDdaArSplitBWideChunked},
     {32, 16, 64, 512, true},   {32, 32, 128, 512, true},  {32, 64, 69, 512, true},   {32, 128, 137, 512, true}};
   for (const auto& c : cells) {
     SCOPED_TRACE(testing::Message() << c.nRanks << "r " << c.mib << " MiB");
@@ -1411,7 +1436,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Split_RuleGridAndHandoffOnProductionTiers)
     const DdaLaunch& l = RunSelectedLL128(count, ncclFloat32, {}, vmmFirst);
     EXPECT_EQ(l.grid.x, c.grid);
     EXPECT_EQ(l.block.x, c.block);
-    EXPECT_EQ(l.kernel, c.handoff     ? (LL128Split<float, kNarrow, true>())
+    EXPECT_EQ(l.kernel, c.handoff     ? LL128SplitHandoff<float>(c.b)
                         : c.grid <= 8 ? (LL128Split<float>())
                                       : (LL128Split<float, kNarrow>()));
     EXPECT_LE(l.grid.x, noSplit.blocks);
@@ -1433,10 +1458,29 @@ TEST(DdaArSplitHandoff, RuleEdges) {
   EXPECT_TRUE(ddaArSplitTakesHandoff(4, 548, 137, 384));
 }
 
+// Wide B's edges: 8 and 9 copies, 8 and 9 slices a block, the 256 KiB shard; chunked: 16 and 17 copies and blocks,
+// 5 and 6 slices a block; the shard cap holds for both.
+TEST(DdaArSplitWideB, RuleEdges) {
+  constexpr size_t kShard = kDdaArSplitWideMaxShardBytes;
+  EXPECT_EQ(kShard, 256u * 1024);
+  EXPECT_EQ(ddaArSplitB(9, kShard, 8 * 32, 32), kDdaArSplitBWide) << "8 copies, 8 slices a block";
+  EXPECT_EQ(ddaArSplitB(2, kShard, 1, 1), kDdaArSplitBWide) << "one copy";
+  EXPECT_EQ(ddaArSplitB(10, kShard, 8 * 32, 32), kDdaArSplitBPairwise) << "9 copies";
+  EXPECT_EQ(ddaArSplitB(9, kShard, 8 * 32 + 1, 32), kDdaArSplitBPairwise) << "9 slices in a block";
+  EXPECT_EQ(ddaArSplitB(9, kShard + 16, 8 * 32, 32), kDdaArSplitBPairwise) << "past the shard cap";
+  EXPECT_EQ(ddaArSplitB(18, kShard, 5 * 17, 17), kDdaArSplitBWideChunked) << "17 copies, 17 blocks, 5 slices a block";
+  EXPECT_EQ(ddaArSplitB(17, kShard, 5 * 17, 17), kDdaArSplitBPairwise) << "16 copies";
+  EXPECT_EQ(ddaArSplitB(18, kShard, 5 * 16, 16), kDdaArSplitBPairwise) << "16 blocks";
+  EXPECT_EQ(ddaArSplitB(18, kShard, 5 * 17 + 1, 17), kDdaArSplitBPairwise) << "6 slices in a block";
+  EXPECT_EQ(ddaArSplitB(18, kShard + 16, 5 * 17, 17), kDdaArSplitBPairwise) << "past the shard cap";
+  EXPECT_EQ(ddaArSplitB(144, kShard, 1, 1), kDdaArSplitBPairwise) << "one block";
+  EXPECT_EQ(ddaArSplitB(8, kShard, 8, 0), kDdaArSplitBPairwise) << "no block";
+}
+
 // The hand-off kernel's dynamic LDS limit is raised once per device; a refused raise keeps my own slot.
 TEST_F(DdaAllReduceFabricLLMicrotest, Split_HandoffRaisesTheLdsLimitOncePerDevice) {
   SplitTiersOn(comm(), params_);
-  const size_t count = 2 * kMiB / 4;  // 8 ranks: hands off
+  const size_t count = 4 * kMiB / 4;  // 8 ranks: hands off, pairwise B
   int dev = 7;
   hipError_t getDevice = hipSuccess;
   hipError_t answer = hipErrorInvalidValue;
@@ -1483,6 +1527,68 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Split_HandoffRaisesTheLdsLimitOncePerDevic
   EXPECT_EQ(RunSelectedLL128(count * 2, ncclBfloat16).kernel, (LL128Split<bf16, kNarrow, true>()));
   EXPECT_EQ(RunSelectedLL128(count * 2, ncclBfloat16).kernel, (LL128Split<bf16, kNarrow, true>()));
   EXPECT_EQ(calls, 6) << "bf16 cached its own raise";
+}
+
+// B's form reads the launched grid: 128 ranks of 16400 B shards launch 9 of the VMM bound's 32 blocks, too few to
+// chunk.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_WideBReadsTheLaunchedGrid) {
+  ProductionTiersOn(comm(), params_, 128);
+  const size_t count = 128 * 16400 / 4;
+  rcclDdaLaunchCap bound = {};
+  ASSERT_TRUE(TakesSplit(count, ncclFloat32, {}, /*vmmFirst=*/true, &bound));
+  EXPECT_EQ(bound.blocks, 32u);
+  const DdaLaunch& l = RunSelectedLL128(count, ncclFloat32, {}, /*vmmFirst=*/true);
+  EXPECT_EQ(l.grid.x, 9u);
+  EXPECT_EQ(l.kernel, LL128SplitHandoff<float>(kDdaArSplitBPairwise));
+}
+
+// Wide and chunked B raise their own kernel's limit, with the stage, once per device and type; refused, B is pairwise.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_WideBRaisesItsOwnLdsLimit) {
+  std::vector<std::pair<const void*, int>> raised;
+  hipError_t wideAnswer = hipErrorInvalidValue;
+  g_hipFuncSetAttribute = [&](const void* kernel, hipFuncAttribute attr, int value) {
+    EXPECT_EQ(attr, hipFuncAttributeMaxDynamicSharedMemorySize);
+    raised.emplace_back(kernel, value);
+    return kernel == LL128SplitHandoff<float>(kDdaArSplitBPairwise) ||
+               kernel == LL128SplitHandoff<bf16>(kDdaArSplitBPairwise)
+             ? hipSuccess
+             : wideAnswer;
+  };
+  // 8 ranks at 2 MiB run wide B, 32 ranks at 4 MiB chunked wide B; each first refused, then granted.
+  for (const auto& form : {std::make_pair(8, kDdaArSplitBWide), std::make_pair(32, kDdaArSplitBWideChunked)}) {
+    SCOPED_TRACE(testing::Message() << form.first << "r");
+    ProductionTiersOn(comm(), params_, form.first);
+    const size_t count = (form.first == 8 ? 2 : 4) * kMiB / 4;
+    const bool vmmFirst = form.first == 32;
+    wideAnswer = hipErrorInvalidValue;
+    const DdaLaunch refused = RunSelectedLL128(count, ncclFloat32, {}, vmmFirst);
+    EXPECT_EQ(refused.kernel, LL128SplitHandoff<float>(kDdaArSplitBPairwise)) << "refused: pairwise B";
+    EXPECT_EQ(refused.sharedMemBytes, dda::common::ddaLL128ArSplitSharedBytes(refused.block.x, form.first, true));
+    wideAnswer = hipSuccess;
+    const DdaLaunch granted = RunSelectedLL128(count, ncclFloat32, {}, vmmFirst);
+    EXPECT_EQ(granted.kernel, LL128SplitHandoff<float>(form.second));
+    EXPECT_EQ(granted.sharedMemBytes,
+              dda::common::ddaLL128ArSplitSharedBytes(granted.block.x, form.first, true, form.second));
+    EXPECT_EQ(RunSelectedLL128(count, ncclFloat32, {}, vmmFirst).kernel, LL128SplitHandoff<float>(form.second))
+        << "raised";
+    EXPECT_EQ(RunSelectedLL128(count * 2, ncclBfloat16, {}, vmmFirst).kernel, LL128SplitHandoff<bf16>(form.second));
+    EXPECT_EQ(RunSelectedLL128(count * 2, ncclBfloat16, {}, vmmFirst).kernel, LL128SplitHandoff<bf16>(form.second))
+        << "bf16 raised";
+  }
+  const int handoffLds =
+    (int)dda::common::ddaLL128ArSplitSharedBytes(kDdaArLL128Threads, dda::common::kDdaMaxNranks, true);
+  const int wideLds = (int)dda::common::ddaLL128ArSplitSharedBytes(kDdaArLL128Threads, dda::common::kDdaMaxNranks,
+                                                                   true, kDdaArSplitBWide);
+  const std::vector<std::pair<const void*, int>> want = {
+    {LL128SplitHandoff<float>(kDdaArSplitBPairwise), handoffLds},
+    {LL128SplitHandoff<float>(kDdaArSplitBWide), wideLds},
+    {LL128SplitHandoff<float>(kDdaArSplitBWide), wideLds},
+    {LL128SplitHandoff<bf16>(kDdaArSplitBPairwise), handoffLds},
+    {LL128SplitHandoff<bf16>(kDdaArSplitBWide), wideLds},
+    {LL128SplitHandoff<float>(kDdaArSplitBWideChunked), wideLds},
+    {LL128SplitHandoff<float>(kDdaArSplitBWideChunked), wideLds},
+    {LL128SplitHandoff<bf16>(kDdaArSplitBWideChunked), wideLds}};
+  EXPECT_EQ(raised, want) << "each form refused, then raised once a type";
 }
 
 // ---- The peer-split's narrow 4 B LL128 flag ----
