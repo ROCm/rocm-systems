@@ -257,7 +257,7 @@ class SummarizeTests(unittest.TestCase):
 
 
 class BuildWheelTests(unittest.TestCase):
-    def _build_commands(self, version_info):
+    def _build_commands(self, version_info, setuptools_major=84):
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
         tmp = Path(tmpdir.name)
@@ -289,6 +289,7 @@ class BuildWheelTests(unittest.TestCase):
         for patcher in (
             mock.patch.object(rab, "run_command", record),
             mock.patch.object(rab, "_mark_safe_git_dir"),
+            mock.patch.object(rab, "setuptools_major", return_value=setuptools_major),
             mock.patch.object(rab, "sys", SimpleNamespace(version_info=version_info)),
         ):
             patcher.start()
@@ -296,10 +297,14 @@ class BuildWheelTests(unittest.TestCase):
         rab.build_amdsmi(cfg)
         return commands
 
-    def test_wheel_build_lets_pip_install_setuptools(self):
+    def test_wheel_build_uses_new_enough_installed_setuptools(self):
+        wheel_cmd = self._build_commands((3, 12, 0), setuptools_major=84)["python-wheel"]
+        self.assertIn("--no-build-isolation", wheel_cmd)
+
+    def test_wheel_build_lets_pip_install_newer_setuptools(self):
         # The distro setuptools on Debian 12 and Azure Linux 3 is older than
         # the version pyproject.toml requires.
-        wheel_cmd = self._build_commands((3, 12, 0))["python-wheel"]
+        wheel_cmd = self._build_commands((3, 11, 2), setuptools_major=66)["python-wheel"]
         self.assertNotIn("--no-build-isolation", wheel_cmd)
 
     def test_wheel_build_skipped_on_python_38(self):

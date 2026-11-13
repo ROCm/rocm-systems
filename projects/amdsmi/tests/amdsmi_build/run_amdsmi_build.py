@@ -625,6 +625,20 @@ def is_externally_managed() -> bool:
     return (Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED").exists()
 
 
+def setuptools_major() -> int:
+    """Major version of the setuptools python3 imports, or 0 if it has none."""
+    result = subprocess.run(
+        ["python3", "-c", "import setuptools; print(setuptools.__version__)"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        return int(result.stdout.split(".")[0])
+    except ValueError:
+        return 0
+
+
 def upgrade_setuptools(cfg: "RunnerConfig") -> None:
     # On PEP 668 systems the pip upgrade is refused outright, and the distro
     # may preinstall neither pip nor setuptools (Debian 12/13), which the
@@ -756,13 +770,17 @@ def build_amdsmi(cfg: "RunnerConfig") -> None:
         if subdir.exists():
             shutil.rmtree(subdir)
 
-    # Build isolation lets pip fetch the setuptools that pyproject.toml needs
-    # (>= 77); distro copies can be older, and none that new runs on Python 3.8.
+    # pyproject.toml needs setuptools >= 77 (none runs on Python 3.8). Build in
+    # isolation only when python3's copy is older: isolation breaks on images
+    # whose site-packages hold legacy namespace .pth files (RHEL 10).
     if sys.version_info < (3, 9):
         print("Skipping the Python wheel: building it needs Python 3.9 or later")
     else:
+        wheel_cmd = ["python3", "-m", "pip", "wheel", "--no-deps", "-w", ".", "."]
+        if setuptools_major() >= 77:
+            wheel_cmd.insert(5, "--no-build-isolation")
         run_command(
-            ["python3", "-m", "pip", "wheel", "--no-deps", "-w", ".", "."],
+            wheel_cmd,
             name="python-wheel",
             cwd=wheel_dir,
             retries=cfg.retries,
