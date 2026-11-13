@@ -74,10 +74,6 @@ test_categories:
       # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
-      # misc/gdr_probe.cc
-      - "GdrProbeTest.*"
-      # misc/ionicdvsymbols.cc, misc/mlx5dvsymbols.cc
-      - "DvSymbolsTestIsolated.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
       - "CeInitMicrotest.*"
