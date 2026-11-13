@@ -68,8 +68,8 @@ std::map<std::string, std::string> g_fopenRedirect;
 void ResetSeams() {
   // Kept across every reset: the first ncclParamIsCacheDisabled() call latches it for the process.
   g_pluginEnv = {{"NCCL_NO_CACHE", std::string(kUncachedKey) + ", " + kUncachedLegacyKey +
-                                       ", RCCL_PARAM_TEST_UNCACHED_RCCL, RCCL_PARAM_TEST_UNCACHED_ALIAS"
-                                       ", NCCL_PARAM_TEST_UNCACHED_ALIAS"}};
+                                       ", RCCL_PARAM_TEST_UNCACHED_RCCL, RCCL_PARAM_TEST_UNCACHED_RCCL_ALIAS"
+                                       ", NCCL_PARAM_TEST_UNCACHED_NCCL_ALIAS"}};
   g_pluginLookups.clear();
   g_pluginInitialized = false;
   g_initEnvCalls = 0;
@@ -728,18 +728,19 @@ TEST_F(ParamLoadMicrotest, GetEnv_InitializesThePluginAndReadsIt) {
 
 RCCL_PARAM(ParamTestCachedRccl, "PARAM_TEST_CACHED_RCCL", 5);
 RCCL_PARAM(ParamTestUncachedRccl, "PARAM_TEST_UNCACHED_RCCL", 5);
-RCCL_PARAM_NCCL_ALIAS(ParamTestUncachedAlias, "PARAM_TEST_UNCACHED_ALIAS", 5);
+RCCL_PARAM_NCCL_ALIAS(ParamTestUncachedRcclAlias, "PARAM_TEST_UNCACHED_RCCL_ALIAS", 5);
+RCCL_PARAM_NCCL_ALIAS(ParamTestUncachedNcclAlias, "PARAM_TEST_UNCACHED_NCCL_ALIAS", 5);
 
-class RcclParamMicrotest : public ParamMicrotest {};
+class ParamRcclMicrotest : public ParamMicrotest {};
 
-TEST_F(RcclParamMicrotest, Cached_KeepsTheFirstValue) {
+TEST_F(ParamRcclMicrotest, Cached_KeepsTheFirstValue) {
   g_pluginEnv["RCCL_PARAM_TEST_CACHED_RCCL"] = "7";
   EXPECT_EQ(7, rcclParamParamTestCachedRccl());
   g_pluginEnv["RCCL_PARAM_TEST_CACHED_RCCL"] = "8";
   EXPECT_EQ(7, rcclParamParamTestCachedRccl());
 }
 
-TEST_F(RcclParamMicrotest, NoCache_ReturnsTheLoadedValueOnEveryCall) {
+TEST_F(ParamRcclMicrotest, NoCache_ReturnsTheLoadedValueOnEveryCall) {
   EXPECT_EQ(5, rcclParamParamTestUncachedRccl());
   g_pluginEnv["RCCL_PARAM_TEST_UNCACHED_RCCL"] = "7";
   EXPECT_EQ(7, rcclParamParamTestUncachedRccl());
@@ -747,12 +748,21 @@ TEST_F(RcclParamMicrotest, NoCache_ReturnsTheLoadedValueOnEveryCall) {
   EXPECT_EQ(8, rcclParamParamTestUncachedRccl());
 }
 
-TEST_F(RcclParamMicrotest, NcclAliasNoCache_ReturnsTheLoadedValueOnEveryCall) {
-  EXPECT_EQ(5, rcclParamParamTestUncachedAlias());
-  g_pluginEnv["NCCL_PARAM_TEST_UNCACHED_ALIAS"] = "3";
-  EXPECT_EQ(3, rcclParamParamTestUncachedAlias());
-  g_pluginEnv["RCCL_PARAM_TEST_UNCACHED_ALIAS"] = "4";
-  EXPECT_EQ(4, rcclParamParamTestUncachedAlias());
+// Only the RCCL_ name is listed; the first load reads the NCCL_ name.
+TEST_F(ParamRcclMicrotest, NcclAlias_RcclNameInNoCache_ReturnsTheLoadedValueOnEveryCall) {
+  EXPECT_EQ(5, rcclParamParamTestUncachedRcclAlias());
+  g_pluginEnv["NCCL_PARAM_TEST_UNCACHED_RCCL_ALIAS"] = "3";
+  EXPECT_EQ(3, rcclParamParamTestUncachedRcclAlias());
+  g_pluginEnv["RCCL_PARAM_TEST_UNCACHED_RCCL_ALIAS"] = "4";
+  EXPECT_EQ(4, rcclParamParamTestUncachedRcclAlias());
+}
+
+// Only the NCCL_ name is listed; every load reads the RCCL_ name.
+TEST_F(ParamRcclMicrotest, NcclAlias_NcclNameInNoCache_ReturnsTheLoadedValueOnEveryCall) {
+  g_pluginEnv["RCCL_PARAM_TEST_UNCACHED_NCCL_ALIAS"] = "4";
+  EXPECT_EQ(4, rcclParamParamTestUncachedNcclAlias());
+  g_pluginEnv["RCCL_PARAM_TEST_UNCACHED_NCCL_ALIAS"] = "6";
+  EXPECT_EQ(6, rcclParamParamTestUncachedNcclAlias());
 }
 
 class ParamEnvFileMicrotest : public ParamMicrotest {};

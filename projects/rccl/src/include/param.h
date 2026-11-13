@@ -17,6 +17,8 @@ void initEnv();
 const char* ncclGetEnv(const char* name);
 
 int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int64_t* cache, int8_t* noCache);
+// Cache policy for a param read under two names: uncached if NCCL_NO_CACHE lists either.
+int8_t ncclAliasCachePolicy(char const* env, char const* aliasEnv);
 
 #define NCCL_PARAM(name, env, deftVal) \
   int64_t ncclParam##name() { \
@@ -53,8 +55,8 @@ int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, i
     constexpr int64_t uninitialized = INT64_MIN; \
     static_assert(deftVal != uninitialized, "default value cannot be the uninitialized value."); \
     static int64_t cache = uninitialized; \
-    static int8_t noCache = /*uninitialized*/ -1; \
     if (__builtin_expect(__atomic_load_n(&cache, __ATOMIC_RELAXED) == uninitialized, false)) { \
+      static int8_t noCache = ncclAliasCachePolicy("RCCL_" env, "NCCL_" env); \
       const char* _s = ncclGetEnv("RCCL_" env); \
       if (_s && strlen(_s) > 0) return ncclLoadParam("RCCL_" env, deftVal, uninitialized, &cache, &noCache); \
       return ncclLoadParam("NCCL_" env, deftVal, uninitialized, &cache, &noCache); \

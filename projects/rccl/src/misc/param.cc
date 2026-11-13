@@ -86,6 +86,10 @@ static void ncclGetCachePolicy(char const* env, int8_t* noCache) {
   *noCache = ncclParamIsCacheDisabled(env) ? /*noCache*/ 1 : /*cache*/ 0;
 }
 
+int8_t ncclAliasCachePolicy(char const* env, char const* aliasEnv) {
+  return (ncclParamIsCacheDisabled(env) || ncclParamIsCacheDisabled(aliasEnv)) ? /*noCache*/ 1 : /*cache*/ 0;
+}
+
 int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int64_t* cache, int8_t* noCache) {
   static std::mutex mutex;
   std::lock_guard<std::mutex> lock(mutex);
