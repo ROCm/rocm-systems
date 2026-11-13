@@ -16,11 +16,12 @@ if(COLLECTOR_TEST_LTTNG_UST_FOUND)
     target_sources(collector-test-app PRIVATE test_app.c)
     target_include_directories(collector-test-app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(collector-test-app PRIVATE PkgConfig::COLLECTOR_TEST_LTTNG_UST
-                                                     ${CMAKE_DL_LIBS})
+                                                     Threads::Threads ${CMAKE_DL_LIBS})
     set(collector_test_app_path "$<TARGET_FILE:collector-test-app>")
 endif()
 
-set(collector_test_sources collector.cpp)
+set(collector_test_sources clock.cpp collector.cpp ctf_metadata.cpp ctf_reader.cpp
+                           join.cpp)
 
 add_executable(collector-tests)
 # c_api.c checks that the public headers compile as C.
@@ -28,8 +29,10 @@ target_sources(collector-tests PRIVATE ${collector_test_sources} c_api.c)
 target_compile_definitions(
     collector-tests PRIVATE ROCPROFILER_COLLECTOR_TEST_APP="${collector_test_app_path}")
 target_link_libraries(
-    collector-tests PRIVATE rocprofiler-sdk::rocprofiler-sdk-collector-shared-library
-                            GTest::gtest GTest::gtest_main)
+    collector-tests
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-collector-shared-library
+            rocprofiler-sdk::rocprofiler-sdk-collector-static-library GTest::gtest
+            GTest::gtest_main)
 if(COLLECTOR_TEST_LTTNG_UST_FOUND)
     add_dependencies(collector-tests collector-test-app)
 endif()

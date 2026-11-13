@@ -21,33 +21,57 @@
 // SOFTWARE.
 
 // Test target for the collector unit tests:
-//   collector-test-app <events> <exit status> [child]
-// writes <events> rocprofiler_collector_test:ping events, then exits with <exit status>.
-// With "child", it first runs itself as a child process (fork and exec), which writes as
-// many events.
+//   collector-test-app <calls> <exit status> [child] [threads=<n>]
+// Each of <n> threads (default 1) makes <calls> "outer" calls, each with a nested "inner"
+// call, written as rocprofiler_collector_test:<api>_enter / <api>_exit events, and a
+// rocprofiler_collector_test:ping event per call. Then the process exits with <exit status>.
+// With "child", it first runs itself as a child process (fork and exec), which makes as
+// many calls.
 
 #define LTTNG_UST_TRACEPOINT_DEFINE
 #define LTTNG_UST_TRACEPOINT_CREATE_PROBES
 #include "test_provider.h"
 
+#include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-static void
-emit(int count)
+static int calls = 1;
+
+static void*
+make_calls(void* arg)
 {
-    for(int i = 0; i < count; ++i)
+    (void) arg;
+    for(int i = 0; i < calls; ++i)
+    {
+        char label[32];
+        snprintf(label, sizeof(label), "call-%d", i);
         lttng_ust_tracepoint(rocprofiler_collector_test, ping, i);
+        lttng_ust_tracepoint(rocprofiler_collector_test, outer_enter, i, label, 0.5 * i);
+        lttng_ust_tracepoint(rocprofiler_collector_test, inner_enter, (uint64_t) 0xABCD0000 + i);
+        lttng_ust_tracepoint(rocprofiler_collector_test, inner_exit, 2 * i);
+        lttng_ust_tracepoint(rocprofiler_collector_test, outer_exit, i);
+    }
+    return NULL;
 }
 
 int
 main(int argc, char** argv)
 {
-    int events      = (argc > 1) ? atoi(argv[1]) : 1;
+    calls           = (argc > 1) ? atoi(argv[1]) : 1;
     int exit_status = (argc > 2) ? atoi(argv[2]) : 0;
-    int with_child  = (argc > 3) && strcmp(argv[3], "child") == 0;
+    int with_child  = 0;
+    int threads     = 1;
+    for(int i = 3; i < argc; ++i)
+    {
+        if(strcmp(argv[i], "child") == 0) with_child = 1;
+        if(strncmp(argv[i], "threads=", 8) == 0) threads = atoi(argv[i] + 8);
+    }
+    if(threads < 1) threads = 1;
 
     if(with_child)
     {
@@ -64,6 +88,13 @@ main(int argc, char** argv)
             waitpid(child, &status, 0);
         }
     }
-    emit(events);
+
+    pthread_t* workers = calloc((size_t) threads, sizeof(pthread_t));
+    for(int i = 1; i < threads; ++i)
+        pthread_create(&workers[i], NULL, make_calls, NULL);
+    make_calls(NULL);
+    for(int i = 1; i < threads; ++i)
+        pthread_join(workers[i], NULL);
+    free(workers);
     return exit_status;
 }

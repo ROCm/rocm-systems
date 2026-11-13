@@ -28,6 +28,7 @@
 #include <rocprofiler-sdk-collector/collector.h>
 
 #include "lib/common/logging.hpp"
+#include "lib/rocprofiler-sdk-collector/clock.hpp"
 #include "lib/rocprofiler-sdk-collector/daemon.hpp"
 #include "lib/rocprofiler-sdk-collector/launch.hpp"
 #include "lib/rocprofiler-sdk-collector/session.hpp"
@@ -80,6 +81,8 @@ struct collector_state
     bool                       stopped       = false;
     std::set<int>              launched      = {};
     std::vector<std::string>   target_env    = {};  // added to launched targets
+    clock_sample               start_clocks  = {};  // converts the trace's timestamps
+    clock_sample               stop_clocks   = {};
 };
 
 std::mutex&
@@ -266,6 +269,7 @@ rocprofiler_collector_start(rocprofiler_collector_t collector)
     if(!state) return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_ARGUMENT;
     if(state->session.started || state->stopped)
         return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_STATE;
+    state->start_clocks = collector::sample_clocks();
     return collector::start_trace_session(&state->session);
 }
 
@@ -313,7 +317,11 @@ rocprofiler_collector_stop(rocprofiler_collector_t collector)
     if(!state) return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_ARGUMENT;
     if(!state->session.started) return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_STATE;
     auto status = collector::stop_trace_session(&state->session);
-    if(status == ROCPROFILER_COLLECTOR_STATUS_SUCCESS) state->stopped = true;
+    if(status == ROCPROFILER_COLLECTOR_STATUS_SUCCESS)
+    {
+        state->stopped     = true;
+        state->stop_clocks = collector::sample_clocks();
+    }
     return status;
 }
 

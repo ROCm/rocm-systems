@@ -22,6 +22,11 @@
 
 #include <rocprofiler-sdk-collector/collector.h>
 
+#include "lib/rocprofiler-sdk-collector/ctf/reader.hpp"
+#include "lib/rocprofiler-sdk-collector/join.hpp"
+
+#include "scratch_dir.hpp"
+
 #include <gtest/gtest.h>
 
 #include <unistd.h>
@@ -30,6 +35,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <memory>
+#include <set>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -40,31 +48,7 @@ namespace fs = std::filesystem;
 
 constexpr auto test_app = ROCPROFILER_COLLECTOR_TEST_APP;
 
-// A fresh, empty directory for one test; removed when the test ends.
-struct scratch_dir
-{
-    fs::path path = {};
-
-    scratch_dir()
-    {
-        auto templ = (fs::temp_directory_path() / "collector-test-XXXXXX").string();
-        auto buf   = std::vector<char>{templ.begin(), templ.end()};
-        buf.emplace_back('\0');
-        EXPECT_NE(::mkdtemp(buf.data()), nullptr);
-        path = buf.data();
-    }
-
-    ~scratch_dir()
-    {
-        auto ec = std::error_code{};
-        fs::remove_all(path, ec);
-    }
-
-    scratch_dir(const scratch_dir&) = delete;
-    scratch_dir(scratch_dir&&)      = delete;
-    scratch_dir& operator=(const scratch_dir&) = delete;
-    scratch_dir& operator=(scratch_dir&&) = delete;
-};
+using rocprofiler::collector::test::scratch_dir;
 
 rocprofiler_collector_config_t
 make_config(const char* output_dir, const char* const* providers)
@@ -355,4 +339,205 @@ TEST(collector, records_a_launched_process_tree)
     EXPECT_TRUE(fs::exists(dir.path / "trace"));
     EXPECT_TRUE(fs::exists(dir.path / "lttng-sessiond.log"));
     ::unsetenv("LTTNG_HOME");
+}
+
+namespace
+{
+namespace collector = rocprofiler::collector;
+namespace ctf       = rocprofiler::collector::ctf;
+
+// Records the test app with the given arguments and joins its calls.
+struct recorded_calls
+{
+    std::vector<collector::api_call>  calls = {};
+    std::vector<collector::event_gap> gaps  = {};
+    collector::join_statistics        stats = {};
+};
+
+void
+record_and_join(std::vector<const char*>              args,
+                uint64_t                              subbuffer_size,
+                uint64_t                              num_subbuffers,
+                rocprofiler_collector_buffer_policy_t policy,
+                recorded_calls*                       result)
+{
+    auto dir              = scratch_dir{};
+    auto config           = make_config(dir.path.c_str(), test_providers);
+    config.subbuffer_size = subbuffer_size;
+    config.num_subbuffers = num_subbuffers;
+    config.buffer_policy  = policy;
+    auto handle           = rocprofiler_collector_t{};
+    ASSERT_EQ(rocprofiler_collector_create(&config, &handle), ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_collector_start(handle), ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+    args.insert(args.begin(), test_app);
+    args.push_back(nullptr);
+    auto pid = 0;
+    ASSERT_EQ(rocprofiler_collector_launch(handle, args.data(), &pid),
+              ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+    auto exit_status = -1;
+    ASSERT_EQ(rocprofiler_collector_wait(handle, pid, &exit_status),
+              ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+    EXPECT_EQ(exit_status, 0);
+    ASSERT_EQ(rocprofiler_collector_stop(handle), ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+    const char* trace_path = nullptr;
+    ASSERT_EQ(rocprofiler_collector_get_trace_path(handle, &trace_path),
+              ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+
+    auto traces = std::vector<ctf::trace_ptr>{};
+    auto error  = std::string{};
+    for(const auto& path : ctf::find_traces(trace_path))
+    {
+        auto source = std::make_shared<ctf::trace>();
+        ASSERT_TRUE(ctf::load_trace(path, source.get(), &error)) << error;
+        traces.push_back(source);
+    }
+    EXPECT_TRUE(collector::join_api_calls(
+        traces,
+        [result](const collector::api_call& call) { result->calls.push_back(call); },
+        &result->gaps,
+        &result->stats,
+        &error))
+        << error;
+    EXPECT_EQ(rocprofiler_collector_destroy(handle), ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+}
+}  // namespace
+
+TEST(collector, joins_recorded_calls)
+{
+    SKIP_WITHOUT_SESSION_DAEMON();
+    SKIP_WITHOUT_TEST_APP();
+
+    // 4 threads of 50 calls in the target, and a child with one thread of 50 calls; each
+    // "outer" call makes an "inner" call. The buffers hold every event.
+    auto result = recorded_calls{};
+    record_and_join({"50", "0", "child", "threads=4"},
+                    1 << 20,
+                    4,
+                    ROCPROFILER_COLLECTOR_BUFFER_POLICY_DISCARD,
+                    &result);
+    if(HasFatalFailure()) return;
+
+    EXPECT_EQ(result.stats.read.discarded, 0u);
+    EXPECT_TRUE(result.gaps.empty());
+    EXPECT_EQ(result.stats.lost_exits + result.stats.open_at_stop + result.stats.unmatched_exits +
+                  result.stats.ambiguous_exits,
+              0u);
+    EXPECT_EQ(result.stats.other_events, 250u);  // ping
+    ASSERT_EQ(result.calls.size(), 500u);
+
+    auto by_id   = std::map<std::pair<uint64_t, uint64_t>, const collector::api_call*>{};
+    auto threads = std::map<uint64_t, std::set<uint64_t>>{};
+    for(const auto& call : result.calls)
+    {
+        by_id[{call.pid, call.correlation_id}] = &call;
+        threads[call.pid].insert(call.tid);
+    }
+    ASSERT_EQ(threads.size(), 2u);
+    auto thread_counts = std::multiset<size_t>{};
+    for(const auto& [pid, tids] : threads)
+        thread_counts.insert(tids.size());
+    EXPECT_EQ(thread_counts, (std::multiset<size_t>{1, 4}));
+
+    for(const auto& call : result.calls)
+    {
+        EXPECT_EQ(call.provider, "rocprofiler_collector_test");
+        ASSERT_NE(call.end, collector::no_end);
+        EXPECT_LE(call.start, call.end);
+        if(call.name == "outer")
+        {
+            EXPECT_EQ(call.depth, 0u);
+            EXPECT_EQ(call.parent_id, 0u);
+            ASSERT_EQ(call.arguments.size(), 6u);
+            auto index = call.arguments[0].i64;
+            EXPECT_EQ(call.arguments[0].name, "index");
+            EXPECT_EQ(call.arguments[1].i64, -index);
+            EXPECT_EQ(call.arguments[2].str, "call-" + std::to_string(index));
+            EXPECT_EQ(call.arguments[3].str, call.arguments[2].str);  // sequence of text
+            EXPECT_DOUBLE_EQ(call.arguments[4].f64, 0.5 * static_cast<double>(index));
+            EXPECT_EQ(call.arguments[5].enum_label, (index % 2 == 0) ? "even" : "odd");
+            ASSERT_EQ(call.results.size(), 1u);
+            EXPECT_EQ(call.results[0].i64, index);
+        }
+        else
+        {
+            ASSERT_EQ(call.name, "inner");
+            EXPECT_EQ(call.depth, 1u);
+            const auto* parent = by_id.at({call.pid, call.parent_id});
+            EXPECT_EQ(parent->name, "outer");
+            EXPECT_EQ(parent->tid, call.tid);
+            EXPECT_LE(parent->start, call.start);
+            EXPECT_GE(parent->end, call.end);
+            auto index = parent->arguments[0].i64;
+            ASSERT_EQ(call.arguments.size(), 1u);
+            EXPECT_EQ(call.arguments[0].u64, 0xABCD0000u + static_cast<uint64_t>(index));
+            EXPECT_EQ(call.results[0].i64, 2 * index);
+        }
+    }
+}
+
+TEST(collector, joins_calls_when_events_are_discarded)
+{
+    SKIP_WITHOUT_SESSION_DAEMON();
+    SKIP_WITHOUT_TEST_APP();
+
+    // Small buffers, many threads and the discard policy: some events are discarded. Every
+    // call is still reported, and missing events are counted, not mispaired.
+    auto result = recorded_calls{};
+    record_and_join(
+        {"20000", "0", "threads=8"}, 4096, 2, ROCPROFILER_COLLECTOR_BUFFER_POLICY_DISCARD, &result);
+    if(HasFatalFailure()) return;
+
+    auto gap_events = uint64_t{0};
+    for(const auto& gap : result.gaps)
+    {
+        gap_events += gap.count;
+        EXPECT_LE(gap.begin, gap.end);
+        EXPECT_NE(gap.pid, 0u);
+    }
+    EXPECT_EQ(gap_events, result.stats.read.discarded);
+
+    auto complete = uint64_t{0};
+    for(const auto& call : result.calls)
+    {
+        if(call.end == collector::no_end) continue;
+        ++complete;
+        EXPECT_LE(call.start, call.end);
+        ASSERT_EQ(call.results.size(), 1u);
+        if(call.name == "outer")
+        {
+            EXPECT_EQ(call.results[0].i64, call.arguments[0].i64);  // paired with its own exit
+        }
+    }
+    EXPECT_EQ(result.calls.size(), complete + result.stats.lost_exits + result.stats.open_at_stop);
+    // Every recorded event is in a call, or counted.
+    EXPECT_EQ(result.stats.read.events,
+              (2 * complete) + result.stats.lost_exits + result.stats.open_at_stop +
+                  result.stats.unmatched_exits + result.stats.ambiguous_exits +
+                  result.stats.other_events);
+    EXPECT_EQ(result.stats.read.events + result.stats.read.discarded, 8u * 20000u * 5u);
+}
+
+TEST(collector, loses_no_calls_when_lossless)
+{
+    SKIP_WITHOUT_SESSION_DAEMON();
+    SKIP_WITHOUT_TEST_APP();
+
+    // Buffers that discard events under the discard policy (8 threads writing 800 000
+    // events back to back): with the lossless policy the threads wait for space, and every
+    // event is recorded. (Smaller buffers also work, but the threads then mostly wait.)
+    auto result = recorded_calls{};
+    record_and_join({"20000", "0", "threads=8"},
+                    65536,
+                    2,
+                    ROCPROFILER_COLLECTOR_BUFFER_POLICY_LOSSLESS,
+                    &result);
+    if(HasFatalFailure()) return;
+
+    EXPECT_EQ(result.stats.read.discarded, 0u);
+    EXPECT_TRUE(result.gaps.empty());
+    EXPECT_EQ(result.stats.read.events, 8u * 20000u * 5u);
+    EXPECT_EQ(result.calls.size(), 8u * 20000u * 2u);
+    EXPECT_EQ(result.stats.lost_exits + result.stats.open_at_stop + result.stats.unmatched_exits +
+                  result.stats.ambiguous_exits,
+              0u);
 }
