@@ -6,8 +6,11 @@
 
 * Added a Host backend that enables file I/O using host memory. `hipFileBufRegister` now accepts host memory.
 * MD and LVM software RAID arrays running pass-through personalities whose member devices are all local NVMe are now fastpath capable, and `ais-check` reports them as such.
+* Added the `HIPFILE_DEVICE_STREAM_POOL_SIZE` environment variable, which sets the number of streams in the per-GPU pool that fallback I/O uses for its device copies. The default is 4; setting it to 0 selects the default.
 
 ### Changed
+
+* Fallback I/O operations now perform their device copies on a pool of per-GPU non-blocking streams instead of the default stream, so they no longer serialize against other work on the GPU's default (null) stream.
 
 ### Fixed
 
