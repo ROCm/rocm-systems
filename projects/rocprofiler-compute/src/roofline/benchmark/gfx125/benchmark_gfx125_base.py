@@ -2,9 +2,9 @@
 # SPDX-License-Identifier:  MIT
 
 # -----------------------------------------------------------------------------
-# benchmark_base_gfx12.py
+# benchmark_gfx125_base.py
 #
-# Benchmarking base class for all gfx12-based products.
+# Benchmarking base class for all gfx125-based products.
 #
 # -----------------------------------------------------------------------------
 
@@ -12,9 +12,9 @@ from .. import benchmark_base
 
 
 # =============================================================================
-# Bench_gfx12 Class (ABSTRACT)
+# Bench_gfx125 Class (ABSTRACT)
 # =============================================================================
-class Bench_gfx12(benchmark_base.Bench_base):
+class Bench_gfx125(benchmark_base.Bench_base):
     def __init__(self, device_id: int, cache_sizes: dict) -> None:
         super().__init__(device_id, cache_sizes)
 
