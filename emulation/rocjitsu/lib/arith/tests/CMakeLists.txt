@@ -212,7 +212,7 @@ foreach(
 endforeach()
 
 # VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
-foreach(family IN ITEMS alu fused dot)
+foreach(family IN ITEMS alu fused dot gfx1250)
     set(target "rj_arith_dual_${family}_test")
     rj_arith_add_test(${target} dual/${family}_test.cpp)
 endforeach()

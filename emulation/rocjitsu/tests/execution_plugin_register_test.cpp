@@ -2969,8 +2969,9 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
        {{8, 1u}, {9, 0x3ff00000u}, {10, 0x3f800001u}}},
   };
   for (const Case &test : cases) {
-    const bool uses_arith =
-        test.arch == ROCJITSU_CODE_ARCH_RDNA3 || test.arch == ROCJITSU_CODE_ARCH_RDNA4;
+    const bool uses_arith = test.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                            test.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                            test.arch == ROCJITSU_CODE_ARCH_CDNA5;
     const uint32_t observed_bits = uses_arith ? ~uint32_t(_MM_EXCEPT_MASK) : UINT32_MAX;
     for (bool force_scalar : {false, true}) {
       SCOPED_TRACE(

@@ -40,6 +40,7 @@ add_library(
     dot/half_dot.cpp
     dot/integer_dot.cpp
     dual/dual.cpp
+    dual/dual_gfx1250.cpp
     fp/scalar_repair.cpp
     fp/fma.cpp
     fp/binary.cpp
