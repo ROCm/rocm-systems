@@ -4,7 +4,7 @@
 //! ROCr-compatible IPC signal representation and retained native backing.
 
 use super::*;
-use crate::platform::memory::{self as linux_interop, KfdIpcMemoryHandle};
+use crate::platform::memory as native_memory;
 
 /// IPC signal allocation size in bytes.
 pub(super) const IPC_SIGNAL_ALLOCATION_BYTES: u64 = 4096;
@@ -91,6 +91,7 @@ impl SignalState {
         host_page_size: usize,
         value: SignalValue,
     ) -> Result<HsaSignal, Status> {
+        reserve_wait_signal_slots(1)?;
         let allocation = {
             let (gpu, peers) = gpus.split_first().ok_or(OUT_OF_RESOURCES)?;
             let peers = peers.iter().map(|peer| &peer.device).collect::<Vec<_>>();
@@ -120,7 +121,9 @@ impl SignalState {
         }
         match self.owned_ipc_signals.entry(host) {
             Entry::Vacant(entry) => {
+                register_ipc_signal(host)?;
                 entry.insert(OwnedIpcSignal { allocation });
+                publish_wait_signal(host);
             }
             Entry::Occupied(_) => return Err(OUT_OF_RESOURCES),
         }
@@ -136,6 +139,7 @@ impl SignalState {
         gpus: &[crate::runtime::Gpu],
         words: [u32; 8],
     ) -> Result<HsaSignal, Status> {
+        reserve_wait_signal_slots(1)?;
         if let Some((address, imported)) = self
             .imported_ipc_signals
             .iter_mut()
@@ -150,6 +154,7 @@ impl SignalState {
                     record.revive();
                 }
             }
+            publish_wait_signal(address);
             return Ok(HsaSignal {
                 handle: address as u64,
             });
@@ -157,17 +162,16 @@ impl SignalState {
 
         let allocation = {
             let devices = gpus.iter().map(|gpu| &gpu.device).collect::<Vec<_>>();
-            linux_interop::import_kfd_ipc_memory(
+            native_memory::import_ipc_memory(
                 session,
                 &devices,
                 &devices,
-                KfdIpcMemoryHandle { words },
+                words,
                 IPC_SIGNAL_ALLOCATION_BYTES,
             )
             .map_err(|error| match error.kind() {
-                rocddi::ErrorKind::InvalidArgument | rocddi::ErrorKind::Unsupported => {
-                    INVALID_ARGUMENT
-                }
+                rocddi::ErrorKind::InvalidArgument => INVALID_ARGUMENT,
+                rocddi::ErrorKind::Unsupported => NOT_SUPPORTED,
                 rocddi::ErrorKind::ResourceExhausted => OUT_OF_RESOURCES,
                 _ => ERROR,
             })?
@@ -186,11 +190,13 @@ impl SignalState {
             .map_err(|_| OUT_OF_RESOURCES)?;
         match self.imported_ipc_signals.entry(host) {
             Entry::Vacant(entry) => {
+                register_ipc_signal(host)?;
                 entry.insert(ImportedIpcSignal {
                     allocation,
                     ipc_handle: words,
                     references: 1,
                 });
+                publish_wait_signal(host);
             }
             Entry::Occupied(_) => return Err(OUT_OF_RESOURCES),
         }
@@ -214,9 +220,7 @@ impl SignalState {
                     .map(|signal| &signal.allocation)
             })
             .ok_or(INVALID_ARGUMENT)?;
-        linux_interop::export_kfd_ipc_memory(allocation)
-            .map(|handle| handle.words)
-            .map_err(map_error)
+        native_memory::export_ipc_memory(allocation).map_err(map_error)
     }
 }
 

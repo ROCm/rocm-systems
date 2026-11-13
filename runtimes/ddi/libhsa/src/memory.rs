@@ -17,6 +17,7 @@
 //! allocations, pointer metadata, IPC and interop, virtual memory, and
 //! copy/SVM operations. This root retains shared state and shutdown order.
 
+pub(crate) mod advice;
 pub(crate) mod copy_svm;
 pub(crate) mod interop;
 pub(crate) use crate::api::memory::copy_svm::hsa_memory_copy;
@@ -24,23 +25,23 @@ pub(crate) use copy_svm::image_device_address;
 use copy_svm::*;
 pub(crate) mod virtual_memory;
 
-use crate::platform::fd::{AsFd, IntoRawFd};
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_void;
 use std::mem::{align_of, size_of};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::thread;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::platform::memory as linux_interop;
-use crate::platform::memory::AisFileOperation as AisOperation;
-use crate::platform::memory::{KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation};
+use crate::platform::memory as native_memory;
+
 use rocddi::device::Device;
 use rocddi::device::gpu::{
     CopyRect, GpuCopyOptions, GpuCopySequence, GpuCopySignal, GpuCopySignalOperation,
     GpuCopyTimestamps, GpuCopyWait,
 };
+use rocddi::memory::advice::{AdviceLocation as SvmLocation, MemoryAdvice};
 use rocddi::memory::device::{
     Allocation, DeviceAccess, HostMappingPolicy, MemoryKind, VirtualAddress, VirtualDeviceMapping,
     VirtualHostMapping, VirtualMemory,
@@ -122,24 +123,10 @@ const ALLOC_EXECUTABLE: u32 = 1 << 2;
 pub(crate) const ALLOC_UNCACHED: u32 = 1 << 3;
 /// Native allocation flags accepted by this frontend.
 const ALLOC_FLAGS: u32 = ALLOC_PCIE | ALLOC_CONTIGUOUS | ALLOC_EXECUTABLE | ALLOC_UNCACHED;
-/// SVM policy bit allowing host access.
-pub(crate) const SVM_FLAG_HOST_ACCESS: u32 = 0x01;
-/// SVM policy bit requesting coherent access.
-pub(crate) const SVM_FLAG_COHERENT: u32 = 0x02;
-/// SVM policy bit restricting placement to the local hive.
-pub(crate) const SVM_FLAG_HIVE_LOCAL: u32 = 0x04;
-/// SVM policy bit making GPU access read-only.
-pub(crate) const SVM_FLAG_GPU_READ_ONLY: u32 = 0x08;
-/// SVM policy bit allowing GPU execution.
-pub(crate) const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
-/// SVM policy bit marking a range read-mostly for GPUs.
-pub(crate) const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
 /// Largest accepted SVM migration-granularity encoding.
 pub(crate) const SVM_MAX_MIGRATION_GRANULARITY: u64 = 18;
 /// Maximum number of SVM attributes accepted in one request.
 pub(crate) const SVM_MAX_ATTRIBUTES: usize = 2044;
-/// Linux I/O error number used when native cleanup cannot be proved.
-const EIO: i32 = 5;
 
 /// Accepts only the HSA virtual-memory access bits implemented here.
 pub(crate) fn valid_access_permissions(access: u32) -> bool {
@@ -168,7 +155,7 @@ pub(crate) struct MemoryState {
     /// Outstanding asynchronous copy borrows per allocation address.
     async_copy_borrows: HashMap<usize, usize>,
     /// Prevents unsafe reuse after uncertain asynchronous copy retirement.
-    pub(crate) async_copy_quarantine: Arc<AtomicBool>,
+    pub(crate) health: Arc<crate::runtime::GenerationHealth>,
     /// Process setting captured by new asynchronous copies.
     pub(crate) async_copy_profiling: AsyncCopyProfiling,
     /// Virtual address reservations ordered by base address.
@@ -183,14 +170,14 @@ pub(crate) struct MemoryState {
 
 impl MemoryState {
     /// Initializes the allocation, registration, and virtual memory registries.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(health: Arc<crate::runtime::GenerationHealth>) -> Self {
         Self {
             allocations: HashMap::new(),
             ipc_allocations: HashMap::new(),
             interop_allocations: HashMap::new(),
             locked_allocations: Vec::new(),
             async_copy_borrows: HashMap::new(),
-            async_copy_quarantine: Arc::new(AtomicBool::new(false)),
+            health,
             async_copy_profiling: AsyncCopyProfiling::Disabled,
             vmem_reservations: BTreeMap::new(),
             vmem_handles: HashMap::new(),
@@ -222,14 +209,14 @@ impl MemoryState {
 
     /// Joins memory workers after the shared stop request is published.
     pub(crate) fn join_workers(&mut self) {
-        for worker in self.workers.drain(..) {
+        for worker in self.take_workers() {
             let _ = worker.join();
         }
     }
 
-    /// Reports whether an unfinished native copy still retains memory borrows.
-    pub(crate) fn is_quarantined(&self) -> bool {
-        self.async_copy_quarantine.load(Ordering::Acquire)
+    /// Detaches workers so shutdown can join them outside the lifecycle lock.
+    pub(crate) fn take_workers(&mut self) -> Vec<JoinHandle<()>> {
+        std::mem::take(&mut self.workers)
     }
 
     /// Releases HSA metadata after queues, copies, and signal users stop.
@@ -291,7 +278,7 @@ impl PointerDescription {
     }
 
     /// Translates a device address to its host mapping when available.
-    fn host_address(&self, address: usize) -> Option<usize> {
+    pub(crate) fn host_address(&self, address: usize) -> Option<usize> {
         if self
             .host_base
             .is_some_and(|host| contains(host, self.size, address))
@@ -311,7 +298,7 @@ impl PointerDescription {
     }
 
     /// Returns the offset of a complete range within this allocation.
-    fn offset_range(&self, address: usize, size: usize) -> Option<usize> {
+    pub(crate) fn offset_range(&self, address: usize, size: usize) -> Option<usize> {
         let base = if contains(self.agent_base, self.size, address) {
             self.agent_base
         } else if self
@@ -611,7 +598,7 @@ impl VmemHandle {
             VmemBacking::Fabric { token, imports } => {
                 if !imports.contains_key(&gpu_index) {
                     imports.try_reserve(1).map_err(|_| OUT_OF_RESOURCES)?;
-                    let memory = linux_interop::import_fabric_virtual_memory(device, *token)
+                    let memory = native_memory::import_fabric_virtual_memory(device, *token)
                         .map_err(map_error)?;
                     imports.insert(gpu_index, memory);
                 }
@@ -641,6 +628,10 @@ impl VmemHandle {
 }
 
 /// Native device mapping owner; CPU accesses share the host map on `VmemMapping`.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "device mapping owners stay inline in the preallocated access transaction"
+)]
 pub(crate) enum VmemAccessOwner {
     /// Native mapping in an activated device VM.
     Device(VirtualDeviceMapping),

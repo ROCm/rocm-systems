@@ -88,6 +88,7 @@ The RCCL build and installation helper script options are as follows:
           --enable_backtrace      Build with custom backtrace support
           --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)
           --enable-tdm-simple     Build the experimental gfx1250 TDM SIMPLE copy path
+          --enable-tdm-prim-ll128 Build the experimental gfx1250 TDM LL128 user-buffer path
        -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)
           --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes
        -h|--help                  Prints this help message

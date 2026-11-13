@@ -5,156 +5,6 @@
 
 use super::*;
 
-/// Writes an AIS transfer result into the caller’s output record.
-unsafe fn publish_ais_result(
-    result: linux_interop::AisFileResult,
-    size_copied: *mut u64,
-    operation_status: *mut i32,
-) -> Status {
-    // SAFETY: Both outputs are optional in the public ABI and, when non-null,
-    // point to caller-owned writable storage for the duration of this call.
-    unsafe {
-        if !size_copied.is_null() {
-            size_copied.write(result.size_copied);
-        }
-        if !operation_status.is_null() {
-            operation_status.write(result.status);
-        }
-    }
-    if result.status == 0 { SUCCESS } else { ERROR }
-}
-
-/// Transfers data between an HSA allocation and an AIS file handle.
-pub(super) unsafe fn ais_transfer(
-    descriptor: i32,
-    host: usize,
-    size: usize,
-    file_offset: i64,
-    size_copied: *mut u64,
-    operation_status: *mut i32,
-    operation: AisOperation,
-) -> Status {
-    if size > 0 && (host == 0 || host.checked_add(size).is_none() || size > isize::MAX as usize) {
-        return ERROR;
-    }
-    // SAFETY: ais_file_io validates the full host mapping and holds the
-    // runtime lock until this synchronous positioned I/O call returns.
-    let buffer = match operation {
-        AisOperation::Read => linux_interop::AisHostBuffer::Read(if size == 0 {
-            &mut []
-        } else {
-            unsafe { std::slice::from_raw_parts_mut(host as *mut u8, size) }
-        }),
-        AisOperation::Write => linux_interop::AisHostBuffer::Write(if size == 0 {
-            &[]
-        } else {
-            unsafe { std::slice::from_raw_parts(host as *const u8, size) }
-        }),
-    };
-    let result = linux_interop::ais_host_transfer(descriptor, buffer, file_offset);
-    // SAFETY: The caller owns the optional output storage for this call.
-    unsafe { publish_ais_result(result, size_copied, operation_status) }
-}
-
-/// Reads or writes a file descriptor for an AIS transfer.
-pub(crate) unsafe fn ais_file_io(
-    handle: HsaAmdAisFileHandle,
-    device_pointer: *mut c_void,
-    size: u64,
-    file_offset: i64,
-    size_copied: *mut u64,
-    operation_status: *mut i32,
-    operation: AisOperation,
-) -> Status {
-    // SAFETY: Linux defines the public union's active member as fd.
-    let descriptor = unsafe { handle.fd };
-    let guard = match lock() {
-        Ok(guard) => guard,
-        Err(status) => return status,
-    };
-    let Some(runtime) = guard.as_ref() else {
-        return NOT_INITIALIZED;
-    };
-    if device_pointer.is_null() || descriptor < 0 {
-        return INVALID_ARGUMENT;
-    }
-    let transfer_size = match usize::try_from(size.min(linux_interop::AIS_MAX_TRANSFER_BYTES)) {
-        Ok(size) => size,
-        Err(_) => return ERROR,
-    };
-    let Some(description) = pointer_description(runtime, device_pointer as usize) else {
-        return ERROR;
-    };
-    if runtime.is_cpu_agent(description.owner) {
-        return ERROR;
-    }
-    let address = device_pointer as usize;
-    let Some(offset) = description.offset_range(address, transfer_size) else {
-        return ERROR;
-    };
-    // Hold the runtime lock through either synchronous transfer, preventing
-    // another HSA call from freeing the allocation during the borrow.
-    let status = if let Some(host) = description.host_address(address) {
-        // SAFETY: The mapped host range stays owned by the locked runtime.
-        // The public call keeps its descriptor live until this call returns.
-        unsafe {
-            ais_transfer(
-                descriptor,
-                host,
-                transfer_size,
-                file_offset,
-                size_copied,
-                operation_status,
-                operation,
-            )
-        }
-    } else {
-        let Some(memory) = owned_memory(runtime, address).filter(|memory| {
-            memory.description.agent_base == description.agent_base
-                && memory.description.host_base == description.host_base
-                && memory.description.offset_range(address, transfer_size) == Some(offset)
-        }) else {
-            return ERROR;
-        };
-        let offset = match u64::try_from(offset) {
-            Ok(offset) => offset,
-            Err(_) => return ERROR,
-        };
-        let size = match u64::try_from(transfer_size) {
-            Ok(size) => size,
-            Err(_) => return ERROR,
-        };
-        match linux_interop::ais_transfer(
-            &memory.allocation,
-            descriptor,
-            offset,
-            size,
-            file_offset,
-            operation,
-        ) {
-            Ok(result) => {
-                // SAFETY: Optional outputs belong to the caller for this call.
-                unsafe { publish_ais_result(result, size_copied, operation_status) }
-            }
-            Err(error) => {
-                // The ioctl input overlaps its output. On error KFD's copied
-                // count cannot be trusted, so leave size_copied untouched.
-                let errno = error
-                    .native_error_code()
-                    .filter(|errno| *errno > 0)
-                    .unwrap_or(EIO);
-                if !operation_status.is_null() {
-                    // SAFETY: The non-null optional output is caller-owned.
-                    unsafe { operation_status.write(-errno) };
-                }
-                ERROR
-            }
-        }
-    };
-    drop(guard);
-    status
-}
-
 /// Exports an allocation as a portable DMA-BUF descriptor.
 pub(crate) unsafe fn portable_export_dmabuf(
     pointer: *const c_void,
@@ -196,7 +46,7 @@ pub(crate) unsafe fn portable_export_dmabuf(
     if flags & DMABUF_MAPPING_PCIE != 0 && !gpu_pcie_dmabuf_supported(runtime, index) {
         return NOT_SUPPORTED;
     }
-    let dma_buf = match linux_interop::export_dma_buf(&memory.allocation) {
+    let dma_buf = match native_memory::export_dma_buf(&memory.allocation) {
         Ok(dma_buf) => dma_buf,
         Err(error) => return map_error(error),
     };
@@ -208,7 +58,7 @@ pub(crate) unsafe fn portable_export_dmabuf(
         Some(exported_offset) => exported_offset,
         None => return INVALID_ALLOCATION,
     };
-    let exported_descriptor = dma_buf.into_fd().into_raw_fd();
+    let exported_descriptor = dma_buf.into_descriptor();
     // SAFETY: Both output pointers were validated above and are written only
     // after the export has completed successfully.
     unsafe {
@@ -216,21 +66,6 @@ pub(crate) unsafe fn portable_export_dmabuf(
         offset.write(exported_offset);
     }
     SUCCESS
-}
-
-/// Finds a registered host range covering the requested bytes.
-pub(super) fn registered_range(
-    host: usize,
-    size: usize,
-    page: usize,
-) -> Option<(usize, usize, usize)> {
-    host.checked_add(size)?;
-    let page_offset = host & (page - 1);
-    let extent = page_offset
-        .checked_add(size)?
-        .checked_add(page - 1)
-        .map(|extent| extent & !(page - 1))?;
-    Some((host - page_offset, extent, page_offset))
 }
 
 /// # Safety
@@ -325,12 +160,7 @@ pub(crate) unsafe fn memory_lock_to_pool(
     let host_base = host_ptr as usize;
     let (allocation, device_base) =
         if let Some((&first_index, peer_indexes)) = gpu_indexes.split_first() {
-            let Some((registered_base, native_size, page_offset)) =
-                registered_range(host_base, size, runtime.host_page_size)
-            else {
-                return INVALID_ARGUMENT;
-            };
-            let allocation = {
+            let (allocation, page_offset) = {
                 let first = &runtime.gpus[first_index].device;
                 let peers: Vec<_> = peer_indexes
                     .iter()
@@ -340,11 +170,11 @@ pub(crate) unsafe fn memory_lock_to_pool(
                 // cover until unlock succeeds; ambiguous native failures keep
                 // the registration backing caller-owned through teardown.
                 match unsafe {
-                    first.register_host_with_peers(
+                    first.register_host_range_with_peers(
                         &peers,
-                        registered_base,
+                        host_base,
                         cpu_pool_mapping_policy(pool, flags & ALLOC_UNCACHED),
-                        native_size as u64,
+                        size as u64,
                         runtime.host_page_size as u64,
                         DeviceAccess::READ | DeviceAccess::WRITE,
                     )
@@ -354,7 +184,7 @@ pub(crate) unsafe fn memory_lock_to_pool(
                 }
             };
             let Some(device_base) =
-                (allocation.info().device_address as usize).checked_add(page_offset)
+                (allocation.info().device_address as usize).checked_add(page_offset as usize)
             else {
                 return OUT_OF_RESOURCES;
             };
@@ -400,7 +230,7 @@ pub(crate) unsafe fn interop_map_buffer(
 ) -> Status {
     if num_agents == 0
         || agents.is_null()
-        || interop_handle < 0
+        || !native_memory::valid_graphics_handle(interop_handle)
         || flags != 0
         || size.is_null()
         || pointer.is_null()
@@ -429,22 +259,24 @@ pub(crate) unsafe fn interop_map_buffer(
         devices.push(&runtime.gpus[index].device);
         accessible.push(*agent);
     }
-    let descriptor = match linux_interop::duplicate_descriptor(interop_handle) {
+    let descriptor = match native_memory::duplicate_graphics_handle(interop_handle) {
         Ok(descriptor) => descriptor,
         Err(error) => return map_error(error),
     };
-    let allocation = match linux_interop::import_graphics_dma_buf(
-        &runtime.session,
+    let Some(session) = runtime.session() else {
+        return ERROR;
+    };
+    let allocation = match native_memory::import_graphics_dma_buf(
+        session,
         &devices,
-        descriptor.as_fd(),
+        &descriptor,
         size_hint as u64,
     ) {
         Ok(allocation) => allocation,
         Err(error) => {
             return match error.kind() {
-                rocddi::ErrorKind::InvalidArgument | rocddi::ErrorKind::Unsupported => {
-                    INVALID_ARGUMENT
-                }
+                rocddi::ErrorKind::InvalidArgument => INVALID_ARGUMENT,
+                rocddi::ErrorKind::Unsupported => NOT_SUPPORTED,
                 rocddi::ErrorKind::ResourceExhausted => OUT_OF_RESOURCES,
                 _ => ERROR,
             };

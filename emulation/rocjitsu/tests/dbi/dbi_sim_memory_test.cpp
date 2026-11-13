@@ -22,7 +22,6 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
-#include <stdexcept>
 #include <string_view>
 #include <vector>
 
@@ -40,18 +39,36 @@ const std::vector<uint32_t> kRdna4Load{0xee050002, 0x00000001, 0x00004000};
 const std::vector<uint32_t> kRdna4Store{0xee068002, 0x00800000, 0x00004000};
 
 TEST(GlobalMemoryBuilders, MatchLlvmOnCdna3) {
-  EXPECT_EQ(build_global_load_dword(1, 0, 2, 64, ROCJITSU_CODE_ARCH_CDNA3), kCdnaLoad);
-  EXPECT_EQ(build_global_store_dword(1, 0, 2, 64, ROCJITSU_CODE_ARCH_CDNA3), kCdnaStore);
+  util::FailureOr<std::vector<uint32_t>> maybe_load =
+      build_global_load_dword(1, 0, 2, 64, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_load.succeeded());
+  EXPECT_EQ(maybe_load.value(), kCdnaLoad);
+  util::FailureOr<std::vector<uint32_t>> maybe_store =
+      build_global_store_dword(1, 0, 2, 64, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_store.succeeded());
+  EXPECT_EQ(maybe_store.value(), kCdnaStore);
 }
 
 TEST(GlobalMemoryBuilders, MatchLlvmOnCdna4) {
-  EXPECT_EQ(build_global_load_dword(1, 0, 2, 64, ROCJITSU_CODE_ARCH_CDNA4), kCdnaLoad);
-  EXPECT_EQ(build_global_store_dword(1, 0, 2, 64, ROCJITSU_CODE_ARCH_CDNA4), kCdnaStore);
+  util::FailureOr<std::vector<uint32_t>> maybe_load =
+      build_global_load_dword(1, 0, 2, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_load.succeeded());
+  EXPECT_EQ(maybe_load.value(), kCdnaLoad);
+  util::FailureOr<std::vector<uint32_t>> maybe_store =
+      build_global_store_dword(1, 0, 2, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_store.succeeded());
+  EXPECT_EQ(maybe_store.value(), kCdnaStore);
 }
 
 TEST(GlobalMemoryBuilders, MatchLlvmOnRdna4) {
-  EXPECT_EQ(build_global_load_dword(1, 0, 2, 64, ROCJITSU_CODE_ARCH_RDNA4), kRdna4Load);
-  EXPECT_EQ(build_global_store_dword(1, 0, 2, 64, ROCJITSU_CODE_ARCH_RDNA4), kRdna4Store);
+  util::FailureOr<std::vector<uint32_t>> maybe_load =
+      build_global_load_dword(1, 0, 2, 64, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_load.succeeded());
+  EXPECT_EQ(maybe_load.value(), kRdna4Load);
+  util::FailureOr<std::vector<uint32_t>> maybe_store =
+      build_global_store_dword(1, 0, 2, 64, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_store.succeeded());
+  EXPECT_EQ(maybe_store.value(), kRdna4Store);
 }
 
 // The 64-, 96- and 128-bit forms. gfx942 and gfx950 accept a multi-dword VGPR
@@ -78,10 +95,22 @@ const WideGlobalWords kRdna4Wide{{0xee054004, 0x00000006, 0x00004005},
                                  {0xee074004, 0x07000000, 0x00001008}};
 
 void expect_wide_encodings(rj_code_arch_t arch, const WideGlobalWords &expected) {
-  EXPECT_EQ(build_global_load_dwordx2(6, 5, 4, 64, arch), expected.load_x2);
-  EXPECT_EQ(build_global_store_dwordx2(28, 5, 4, 64, arch), expected.store_x2);
-  EXPECT_EQ(build_global_store_dwordx3(10, 8, 4, 4, arch), expected.store_x3);
-  EXPECT_EQ(build_global_store_dwordx4(14, 8, 4, 16, arch), expected.store_x4);
+  util::FailureOr<std::vector<uint32_t>> maybe_load_x2 =
+      build_global_load_dwordx2(6, 5, 4, 64, arch);
+  ASSERT_TRUE(maybe_load_x2.succeeded());
+  EXPECT_EQ(maybe_load_x2.value(), expected.load_x2);
+  util::FailureOr<std::vector<uint32_t>> maybe_store_x2 =
+      build_global_store_dwordx2(28, 5, 4, 64, arch);
+  ASSERT_TRUE(maybe_store_x2.succeeded());
+  EXPECT_EQ(maybe_store_x2.value(), expected.store_x2);
+  util::FailureOr<std::vector<uint32_t>> maybe_store_x3 =
+      build_global_store_dwordx3(10, 8, 4, 4, arch);
+  ASSERT_TRUE(maybe_store_x3.succeeded());
+  EXPECT_EQ(maybe_store_x3.value(), expected.store_x3);
+  util::FailureOr<std::vector<uint32_t>> maybe_store_x4 =
+      build_global_store_dwordx4(14, 8, 4, 16, arch);
+  ASSERT_TRUE(maybe_store_x4.succeeded());
+  EXPECT_EQ(maybe_store_x4.value(), expected.store_x4);
 }
 
 TEST(GlobalMemoryBuilders, WideFormsMatchLlvmOnCdna3) {
@@ -97,23 +126,25 @@ TEST(GlobalMemoryBuilders, WideFormsMatchLlvmOnRdna4) {
 // llvm-mc rejects an odd-based tuple on gfx942 and gfx950 ("vgpr tuples must be
 // 64 bit aligned"); the simulator would not, so the encoder does.
 TEST(GlobalMemoryBuilders, CdnaRefusesAnOddBasedTuple) {
-  EXPECT_THROW((void)build_global_store_dwordx2(29, 5, 4, 0, ROCJITSU_CODE_ARCH_CDNA3),
-               std::invalid_argument);
-  EXPECT_THROW((void)build_global_load_dwordx2(7, 5, 4, 0, ROCJITSU_CODE_ARCH_CDNA4),
-               std::invalid_argument);
-  EXPECT_NO_THROW((void)build_global_store_dword(29, 5, 4, 0, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_NO_THROW((void)build_global_store_dwordx2(29, 5, 4, 0, ROCJITSU_CODE_ARCH_RDNA4));
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(
+      build_global_store_dwordx2(29, 5, 4, 0, ROCJITSU_CODE_ARCH_CDNA3, diagnostic.emitter())
+          .failed());
+  EXPECT_EQ(diagnostic.message(), "multi-dword VGPR operand must start on an even register");
+  EXPECT_TRUE(build_global_load_dwordx2(7, 5, 4, 0, ROCJITSU_CODE_ARCH_CDNA4).failed());
+  EXPECT_TRUE(build_global_store_dword(29, 5, 4, 0, ROCJITSU_CODE_ARCH_CDNA3).succeeded());
+  EXPECT_TRUE(build_global_store_dwordx2(29, 5, 4, 0, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
 }
 
 // llvm-mc rejects an odd SGPR base on gfx942, gfx950 and gfx1200 ("invalid
 // register alignment"); the decoder does not.
 TEST(GlobalMemoryBuilders, RefusesAnOddScalarBase) {
-  EXPECT_THROW((void)build_global_load_dword(1, 0, 3, 0, ROCJITSU_CODE_ARCH_CDNA3),
-               std::invalid_argument);
-  EXPECT_THROW((void)build_global_store_dwordx2(28, 5, 5, 0, ROCJITSU_CODE_ARCH_CDNA4),
-               std::invalid_argument);
-  EXPECT_THROW((void)build_global_store_dword(1, 0, 3, 0, ROCJITSU_CODE_ARCH_RDNA4),
-               std::invalid_argument);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(
+      build_global_load_dword(1, 0, 3, 0, ROCJITSU_CODE_ARCH_CDNA3, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "SGPR base pair must start on an even register");
+  EXPECT_TRUE(build_global_store_dwordx2(28, 5, 5, 0, ROCJITSU_CODE_ARCH_CDNA4).failed());
+  EXPECT_TRUE(build_global_store_dword(1, 0, 3, 0, ROCJITSU_CODE_ARCH_RDNA4).failed());
 }
 
 // Past the ordinary SGPRs the field selects something other than an SGPR pair.
@@ -123,28 +154,46 @@ TEST(GlobalMemoryBuilders, RefusesAnOddScalarBase) {
 TEST(GlobalMemoryBuilders, RefusesAScalarBasePastTheOrdinarySgprs) {
   for (const rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4})
-    EXPECT_THROW((void)build_global_store_dword(1, 0, 128, 0, arch), std::invalid_argument)
-        << "arch " << arch;
-  EXPECT_THROW((void)build_global_store_dword(1, 0, 124, 0, ROCJITSU_CODE_ARCH_RDNA4),
-               std::invalid_argument);
-  EXPECT_THROW((void)build_global_load_dword(1, 0, 106, 0, ROCJITSU_CODE_ARCH_RDNA4),
-               std::invalid_argument);
-  EXPECT_THROW((void)build_global_store_dword(1, 0, 102, 0, ROCJITSU_CODE_ARCH_CDNA3),
-               std::invalid_argument);
-  EXPECT_THROW((void)build_global_load_dword(1, 0, 106, 0, ROCJITSU_CODE_ARCH_CDNA4),
-               std::invalid_argument);
+    EXPECT_TRUE(build_global_store_dword(1, 0, 128, 0, arch).failed()) << "arch " << arch;
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(build_global_store_dword(1, 0, 124, 0, ROCJITSU_CODE_ARCH_RDNA4, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "SGPR base pair must lie within the ordinary SGPRs");
+  EXPECT_TRUE(build_global_load_dword(1, 0, 106, 0, ROCJITSU_CODE_ARCH_RDNA4).failed());
+  EXPECT_TRUE(build_global_store_dword(1, 0, 102, 0, ROCJITSU_CODE_ARCH_CDNA3).failed());
+  EXPECT_TRUE(build_global_load_dword(1, 0, 106, 0, ROCJITSU_CODE_ARCH_CDNA4).failed());
   // The last ordinary pair on each family.
-  EXPECT_NO_THROW((void)build_global_store_dword(1, 0, 100, 0, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_NO_THROW((void)build_global_store_dword(1, 0, 104, 0, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_TRUE(build_global_store_dword(1, 0, 100, 0, ROCJITSU_CODE_ARCH_CDNA3).succeeded());
+  EXPECT_TRUE(build_global_store_dword(1, 0, 104, 0, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
 }
 
 // The generated CDNA builder carries 12 offset bits; a larger offset is refused
 // rather than truncated into a different address.
 TEST(GlobalMemoryBuilders, RejectsAnOffsetPastTheCdnaField) {
-  EXPECT_NO_THROW((void)build_global_store_dword(1, 0, 2, 0xFFF, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_THROW((void)build_global_store_dword(1, 0, 2, 0x1000, ROCJITSU_CODE_ARCH_CDNA3),
-               std::out_of_range);
-  EXPECT_NO_THROW((void)build_global_store_dword(1, 0, 2, 0x1000, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_TRUE(build_global_store_dword(1, 0, 2, 0xFFF, ROCJITSU_CODE_ARCH_CDNA3).succeeded());
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(
+      build_global_store_dword(1, 0, 2, 0x1000, ROCJITSU_CODE_ARCH_CDNA3, diagnostic.emitter())
+          .failed());
+  EXPECT_EQ(diagnostic.message(), "global memory offset does not fit the immediate field");
+  EXPECT_TRUE(build_global_store_dword(1, 0, 2, 0x1000, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+}
+
+TEST(GlobalMemoryBuilders, RejectUnsupportedArchitectures) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_CDNA1}) {
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(build_global_load_dword(1, 0, 2, 0, arch, diagnostic.emitter()).failed());
+    EXPECT_EQ(diagnostic.message(),
+              "Unimplemented instruction: global load for target architecture");
+    EXPECT_TRUE(build_global_store_dword(1, 0, 2, 0, arch, diagnostic.emitter()).failed());
+    EXPECT_EQ(diagnostic.message(),
+              "Unimplemented instruction: global store for target architecture");
+  }
+}
+
+TEST(GlobalMemoryBuilders, RejectsAnRdna4OffsetThatSetsTheSignBit) {
+  EXPECT_TRUE(build_global_load_dword(1, 0, 2, 0x7fffff, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+  EXPECT_TRUE(build_global_load_dword(1, 0, 2, 0x800000, ROCJITSU_CODE_ARCH_RDNA4).failed());
 }
 
 struct SimArch {
@@ -166,21 +215,39 @@ constexpr uint16_t kInlineZero = scalar_positive_inline_u32(0);
 
 // Copies the dword at kSource to kSource + kDestinationDelta, addressing both
 // through s[2:3] and a zero per-lane offset in v0. Without @p with_store the
-// store is replaced by s_nops of the same length.
-std::vector<uint32_t> make_copy_kernel(rj_code_arch_t arch, bool with_store) {
-  std::vector<uint32_t> code{build_s_mov_b32(2, kScalarSrcLiteral, arch),
-                             static_cast<uint32_t>(kSource), build_s_mov_b32(3, kInlineZero, arch),
-                             build_v_mov_b32_src(0, kInlineZero, arch)};
-  const std::vector<uint32_t> load = build_global_load_dword(1, 0, 2, 0, arch);
+// store is replaced by s_nops of the same length. Replaces @p code with the
+// kernel words.
+void make_copy_kernel(rj_code_arch_t arch, bool with_store, std::vector<uint32_t> &code) {
+  const auto zero = build_v_mov_b32_src(0, kInlineZero, arch);
+  ASSERT_TRUE(zero.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_5 = build_s_mov_b32(3, kInlineZero, arch);
+  ASSERT_TRUE(maybe_s_mov_b32_5.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_6 = build_s_mov_b32(2, kScalarSrcLiteral, arch);
+  ASSERT_TRUE(maybe_s_mov_b32_6.succeeded());
+  code = {maybe_s_mov_b32_6.value(), static_cast<uint32_t>(kSource), maybe_s_mov_b32_5.value(),
+          zero.value()};
+  const util::FailureOr<std::vector<uint32_t>> maybe_load =
+      build_global_load_dword(1, 0, 2, 0, arch);
+  ASSERT_TRUE(maybe_load.succeeded());
+  const std::vector<uint32_t> &load = maybe_load.value();
   code.insert(code.end(), load.begin(), load.end());
-  code.push_back(build_wait_loads_complete(arch));
-  const std::vector<uint32_t> store = build_global_store_dword(1, 0, 2, kDestinationDelta, arch);
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(arch);
+  ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+  code.push_back(maybe_wait_loads_complete.value());
+  const util::FailureOr<std::vector<uint32_t>> maybe_store =
+      build_global_store_dword(1, 0, 2, kDestinationDelta, arch);
+  ASSERT_TRUE(maybe_store.succeeded());
+  const std::vector<uint32_t> &store = maybe_store.value();
   if (with_store)
     code.insert(code.end(), store.begin(), store.end());
-  else
-    code.insert(code.end(), store.size(), build_s_nop(0, arch));
-  code.push_back(build_s_endpgm(arch));
-  return code;
+  else {
+    util::FailureOr<uint32_t> maybe_s_nop_4 = build_s_nop(0, arch);
+    ASSERT_TRUE(maybe_s_nop_4.succeeded());
+    code.insert(code.end(), store.size(), maybe_s_nop_4.value());
+  }
+  util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(arch);
+  ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+  code.push_back(maybe_s_endpgm_3.value());
 }
 
 // Seeds kSource, runs the copy kernel, and returns the destination dword, or
@@ -193,9 +260,12 @@ std::optional<uint32_t> run_copy(const SimArch &target, bool with_store) {
   std::array<uint8_t, sizeof(kSeed)> seed{};
   std::memcpy(seed.data(), &kSeed, sizeof(kSeed));
   sim.write_memory(kSource, seed);
-  const std::optional<std::vector<uint8_t>> bytes =
-      sim.run_and_read_memory(make_copy_kernel(target.arch, with_store), /*private_bytes=*/0,
-                              kSource + kDestinationDelta, sizeof(uint32_t));
+  std::vector<uint32_t> code;
+  make_copy_kernel(target.arch, with_store, code);
+  if (testing::Test::HasFatalFailure())
+    return std::nullopt;
+  const std::optional<std::vector<uint8_t>> bytes = sim.run_and_read_memory(
+      code, /*private_bytes=*/0, kSource + kDestinationDelta, sizeof(uint32_t));
   if (!bytes)
     return std::nullopt;
   uint32_t value = 0;
@@ -222,7 +292,9 @@ void expect_destination_untouched_without_the_store(const SimArch &target) {
 void expect_reuse_is_rejected(const SimArch &target) {
   DbiSim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize(target.name, target.wave_size));
-  const std::vector<uint32_t> halt{build_s_endpgm(target.arch)};
+  util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(target.arch);
+  ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
+  const std::vector<uint32_t> halt{maybe_s_endpgm_2.value()};
   ASSERT_TRUE(
       sim.run_and_read_memory(halt, /*private_bytes=*/0, kSource, sizeof(uint32_t)).has_value())
       << "the first dispatch did not halt";
@@ -236,8 +308,10 @@ void expect_no_read_back_without_a_halt(const SimArch &target) {
   DbiSim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize(target.name, target.wave_size));
   // s_branch to itself.
-  EXPECT_FALSE(sim.run_and_read_memory({build_s_branch(-1, target.arch)}, /*private_bytes=*/0,
-                                       kSource, sizeof(uint32_t))
+  util::FailureOr<uint32_t> maybe_s_branch_1 = build_s_branch(-1, target.arch);
+  ASSERT_TRUE(maybe_s_branch_1.succeeded());
+  EXPECT_FALSE(sim.run_and_read_memory({maybe_s_branch_1.value()},
+                                       /*private_bytes=*/0, kSource, sizeof(uint32_t))
                    .has_value());
 }
 

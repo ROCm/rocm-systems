@@ -20,6 +20,18 @@ returns, C headers such as `<stdint.h>`, and traditional include guards.
 Public integer constants use typed `constexpr` declarations.
 Internal C++ code lives in `rocjitsu::arith`, not a top-level `arith` namespace.
 
+Implementation and test files include the instruction-family headers they use,
+not the public umbrella header. Shared numeric helpers include
+`common/validation.h` or `common/float_encoding.h`; matrix-specific controls
+stay out of these common headers. This keeps unrelated instruction changes
+from invalidating cached compilations.
+
+External consumers include `rj_arith/rj_arith.h`. The detail headers’
+`IWYU pragma: private` mappings direct consumers to that public umbrella;
+library implementations and tests deliberately include the detail headers
+directly. These internal includes do not make the detail headers a supported
+external interface. Dedicated umbrella-header tests still include the umbrella.
+
 Short arithmetic names such as `a`, `b`, `c`, and `d` are appropriate when they
 match instruction operands or a nearby mathematical expression.
 
@@ -35,3 +47,31 @@ Prefer short, precise comments over verbose descriptions. File comments explain
 scope; function comments explain purpose and contract. Comments within a function
 explain nontrivial arithmetic or layout decisions. Plain `//` comments suffice;
 Doxygen markup is not required.
+
+## CPU-specific implementation symbols
+
+CMake selects `RJ_ARITH_IMPL_NAMESPACE` together with each source's CPU options.
+Shared implementation definitions belong to that namespace, so the linker cannot
+substitute a definition compiled for a different ISA. Backend entry points carry
+their ISA in their name; cross-backend headers contain declarations only.
+File-local helpers may instead have internal linkage.
+
+Implementation code avoids runtime C++ standard-library functions, including
+implicit calls through containers and initializer lists. Use the small internal
+bit helpers, compiler intrinsics, fixed arrays, or C library functions as needed.
+Compile-time traits are fine. Tests and benchmarks are not subject to this rule.
+
+The baseline resets the CPU model with `-march=x86-64`. Enclosing builds must
+not enable stronger explicit ISA flags globally: a trailing `-march` does not
+cancel options such as `-mavx2`. The archive audit checks symbol ownership,
+not the instruction set of each function. Debug CI exercises emitted inline
+definitions that optimized builds may remove.
+
+## Performance-sensitive loops
+
+Use `RJ_ARITH_UNROLL(count)` from `common/compiler.h` when a bounded arithmetic
+loop relies on unrolling for constant operand offsets or register-resident
+accumulators. Check GCC and Clang output at the intended ISA levels, and measure
+runtime and code size. Do not annotate staging loops or large loops indiscriminately;
+the hint must not be needed for correctness. Keep floating-point reduction order
+unchanged when unrolling.

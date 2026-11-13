@@ -120,12 +120,13 @@ HSAKMTAPI int amdgpu_bo_import(amdgpu_device_handle dev,
   }
 
   wsl::thunk::WDDMDevice *pDevice = reinterpret_cast<wsl::thunk::WDDMDevice *>(dev);
+  HSAuint32 node_id = static_cast<HSAuint32>(pDevice->NodeId());
   wsl::thunk::GpuMemoryHandle mem_handle;
   bool is_ipc_memfd = is_ipc_sysmemfd(shared_handle);
   bool alloc_va = is_ipc_memfd;
 
   // kmt handle importer is false for dma_buf_fd
-  HSAKMT_STATUS ret = import_dmabuf_fd(shared_handle, pDevice->NodeId(), alloc_va, is_ipc_memfd,
+  HSAKMT_STATUS ret = import_dmabuf_fd(shared_handle, 1, &node_id, alloc_va, is_ipc_memfd,
                                        &mem_handle, false);
   if (ret == HSAKMT_STATUS_SUCCESS) {
     //use GpuMemory object handle as drm buf handle

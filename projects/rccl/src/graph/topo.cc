@@ -80,9 +80,8 @@ static ncclResult_t ncclTopoGetInterCpuBw(struct ncclTopoNode* cpu, float* bw) {
                                                             BDW_QPI_BW;
   }
   if (cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_AMD) {
-    *bw = cpu->cpu.model == NCCL_TOPO_CPU_MODEL_AMD_ZEN5  ? AMD_ZEN5_BW :
-          cpu->cpu.model == NCCL_TOPO_CPU_MODEL_AMD_ZEN34 ? AMD_ZEN34_BW :
-                                                            AMD_ZEN12_BW;
+    // RCCL: AMD_ZEN34_BW/AMD_ZEN5_BW are not yet validated with AMD GPUs; keep one value for every Zen generation.
+    *bw = AMD_ZEN12_BW;
   }
   if (cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_ZHAOXIN) {
     *bw = cpu->cpu.model == NCCL_TOPO_CPU_MODEL_YONGFENG ? YONGFENG_ZPI_BW : ZPI_BW;
@@ -125,6 +124,7 @@ ncclResult_t ncclTopoCreateNode(struct ncclTopoSystem* system, struct ncclTopoNo
     n->cpu.arch = NCCL_TOPO_UNDEF;
     n->cpu.vendor = NCCL_TOPO_UNDEF;
     n->cpu.model = NCCL_TOPO_UNDEF;
+    n->cpu.rome = 0;
   } else if (type == NET) {
     n->net.vendor = UINT64_MAX;
     n->net.device = UINT64_MAX;
@@ -833,6 +833,12 @@ struct kvDict kvDictCpuVendor[] = {{"GenuineIntel", NCCL_TOPO_CPU_VENDOR_INTEL},
                                    {"  Shanghai  ", NCCL_TOPO_CPU_VENDOR_ZHAOXIN},
                                    {NULL, 0}};
 
+// RCCL: Rome class is family 17h model >= 0x31, or all of 19h; also accepts the old file encoding (0x8F/0xAF).
+static bool rcclAmdCpuIsRome(int familyId, int modelId) {
+  if (familyId == 0x17 || familyId == 0x8F) return modelId >= 0x31;
+  return familyId == 0x19 || familyId == 0xAF;
+}
+
 ncclResult_t ncclGetSystemId(struct ncclTopoSystem* system, struct ncclXmlNode* xmlCpu, int* systemIdPtr) {
   const char* hostHashStr;
   NCCLCHECK(xmlGetAttr(xmlCpu, "host_hash", &hostHashStr));
@@ -900,9 +906,7 @@ ncclResult_t ncclTopoAddCpu(struct ncclXmlNode* xmlCpu, struct ncclTopoSystem* s
       int familyId, modelId;
       NCCLCHECK(xmlGetAttrInt(xmlCpu, "familyid", &familyId));
       NCCLCHECK(xmlGetAttrInt(xmlCpu, "modelid", &modelId));
-      // Treat "Milan" also as "Rome"
-      cpu->cpu.model = ((familyId == 143 && modelId >= 49) || familyId == 175) ? NCCL_TOPO_CPU_MODEL_AMD_ROME :
-                                                                                 NCCL_TOPO_CPU_MODEL_AMD_ZEN;
+      cpu->cpu.rome = rcclAmdCpuIsRome(familyId, modelId);
     }
   }
   for (int s = 0; s < xmlCpu->nSubs; s++) {
@@ -980,6 +984,19 @@ static ncclResult_t ncclTopoGetDevForPciBusId(struct ncclTopoSystem* system, int
   return ncclSuccess;
 }
 
+// RCCL: workaround (AICOMNET-435) until fused MNNVL hosts are recognised as NVL-connected. Only a
+// scale-out comm (cross_clique on <system>, set by ncclTopoGetSystem) links UALoE fabric peers through
+// the shared NVS; a comm inside one clique keeps the per-host topology its ring search and channel
+// setup are tuned for.
+static ncclResult_t rcclTopoXmlIsCrossClique(struct ncclXmlNode* node, bool* crossClique) {
+  struct ncclXmlNode* topNode = node;
+  while (topNode->parent) topNode = topNode->parent;
+  int value = 0;
+  NCCLCHECK(xmlGetAttrIntDefault(topNode, "cross_clique", &value, 0));
+  *crossClique = value == 1;
+  return ncclSuccess;
+}
+
 // RCCL: XGMI is the AMD analogue of NVLink. Upstream v2.30 introduced the generic DEV
 // (physical device) topology node, with GPU (rank) nodes hanging off their parent DEV node
 // via LINK_LOC. ncclTopoComputePaths()/search now assemble inter-GPU links as DEV->DEV hops
@@ -1013,7 +1030,15 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
     int targetType;
     NCCLCHECK(kvConvertToInt(targetClass, &targetType, kvDictPciClass));
     struct ncclTopoNode* remote = NULL;
-    if (targetType == GPU) {
+    // RCCL: amd-smi lists only local fabric peers, so with several MNNVL hosts link every GPU's fabric
+    // entries to one shared NVS (each adds one link width); a single host keeps direct links.
+    int fabricSupported = 0;
+    NCCLCHECK(xmlGetAttrIntDefault(node, "fabric_supported", &fabricSupported, 0));
+    bool viaFabricSwitch = false;
+    if (targetType == GPU && fabricSupported == 1 && system->nHosts > 1) {
+      NCCLCHECK(rcclTopoXmlIsCrossClique(node, &viaFabricSwitch));
+    }
+    if (targetType == GPU && !viaFabricSwitch) {
       // XGMI P2P connection to another GPU (between physical DEV nodes)
       const char* target;
       NCCLCHECK(xmlGetAttrStr(node, "target", &target));
@@ -1033,7 +1058,7 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
     if (remote) {
       float nvlSpeed = ncclTopoXGMISpeed(devNode->dev.gcn);
       NCCLCHECK(ncclTopoConnectNodes(devNode, remote, LINK_NVL, count * nvlSpeed));
-      if (targetType != GPU) {
+      if (targetType != GPU || viaFabricSwitch) {
         NCCLCHECK(ncclTopoConnectNodes(remote, devNode, LINK_NVL, count * nvlSpeed));
       }
     }
@@ -2388,6 +2413,15 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
     NCCLCHECKGOTO(ncclTopoFuseXml(xml, peerXml), ret, fail);
   }
 
+  {
+    struct ncclXmlNode* topNode;
+    NCCLCHECKGOTO(xmlFindTag(xml, "system", &topNode), ret, fail);
+    if (topNode) {
+      NCCLCHECKGOTO(xmlSetAttrInt(topNode, "cross_clique", comm->MNNVL && comm->clique.size < comm->nRanks),
+                    ret, fail);
+    }
+  }
+
   if (dumpXmlFile && comm->rank == ncclParamTopoDumpFileRank()) {
     INFO(NCCL_ENV, "NCCL_TOPO_DUMP_FILE set by environment to %s", dumpXmlFile);
     NCCLCHECKGOTO(ncclTopoDumpXmlToFile(dumpXmlFile, xml), ret, fail);
@@ -2690,6 +2724,11 @@ ncclResult_t ncclTopoCpuType(struct ncclTopoSystem* system, int* arch, int* vend
   *vendor = system->nodes[CPU].nodes[0].cpu.vendor;
   *model = system->nodes[CPU].nodes[0].cpu.model;
   return ncclSuccess;
+}
+
+bool rcclTopoCpuIsRome(struct ncclTopoSystem* system) {
+  const struct ncclTopoNode* cpu = system->nodes[CPU].nodes;
+  return cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_AMD && cpu->cpu.rome;
 }
 
 NCCL_PARAM(IgnoreCpuAffinity, "IGNORE_CPU_AFFINITY", 0);

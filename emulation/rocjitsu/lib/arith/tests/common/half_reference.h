@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Test-side FP16 encoding, decoding, and NaN canonicalization.
+// Test-side FP16 encoding and decoding.
 
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <algorithm>
 #include <cmath>

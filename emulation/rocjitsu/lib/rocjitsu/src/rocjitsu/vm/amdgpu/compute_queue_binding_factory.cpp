@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
 #include <memory>
+#include <utility>
 namespace rocjitsu::amdgpu {
 namespace {
 
@@ -31,23 +32,31 @@ public:
     return status;
   }
 
+  QueuePrepareCloseStatus prepare_preempt_close() noexcept override {
+    if (registration_id_ == 0)
+      return QueuePrepareCloseStatus::Ready;
+    const QueuePrepareCloseStatus status =
+        command_processor_.prepare_preempt_queue_registration(registration_id_);
+    if (status == QueuePrepareCloseStatus::Ready)
+      registration_id_ = 0;
+    return status;
+  }
+
   QueueReconfigureStatus reconfigure(const QueueReconfigureRequest &request) override {
     if (format_ == QueuePacketFormat::Pm4)
       return command_processor_.update_pm4_queue_registration(registration_id_, request);
-    const bool disabled = !request.scheduling_percentage;
-    const uint64_t ring_base = disabled ? ring_base_ : request.ring_base_address;
-    const uint32_t ring_size = disabled ? ring_size_ : request.ring_size_bytes;
-    if (request.scheduling_percentage > 100 || !valid_aql_packet_ring(ring_base, ring_size))
-      return QueueReconfigureStatus::Invalid;
-    if (!registration_id_ ||
-        !command_processor_.update_queue_registration(registration_id_, ring_base, ring_size,
-                                                      disabled ? 0 : request.scheduling_percentage))
-      return QueueReconfigureStatus::Stale;
-    if (!disabled) {
-      ring_base_ = ring_base;
-      ring_size_ = ring_size;
+    QueueReconfigureRequest effective = request;
+    if (!request.scheduling_percentage) {
+      effective.ring_base_address = ring_base_;
+      effective.ring_size_bytes = ring_size_;
     }
-    return disabled ? QueueReconfigureStatus::Disabled : QueueReconfigureStatus::Applied;
+    const QueueReconfigureStatus status =
+        command_processor_.reconfigure_queue_registration(registration_id_, effective);
+    if (status == QueueReconfigureStatus::Applied) {
+      ring_base_ = effective.ring_base_address;
+      ring_size_ = effective.ring_size_bytes;
+    }
+    return status;
   }
 
   QueueSubmissionStatus submit_producer(uint64_t producer_cursor) override {
@@ -81,6 +90,7 @@ public:
         .address_space = request.identity.address_space,
         .interrupt_sink = request.identity.interrupt_sink,
         .process_id = request.identity.process_id,
+        .process_identity_kind = request.identity.process_identity_kind,
         .queue_id = request.identity.queue_id,
         .ring_base_va = request.ring.base_address,
         .ring_size = request.ring.size_bytes,
@@ -103,15 +113,14 @@ public:
     });
     if (registration_id == 0)
       return {};
-    try {
+    // The processor attachment is live. A failed ownership allocation must not
+    // reach a recovering frontend without a binding that owns that attachment.
+    return [&]() noexcept -> QueueBindingCreateResult {
       return {.status = QueueBindingCreateStatus::Bound,
               .binding = std::make_unique<ComputeQueueBinding>(
                   command_processor_, registration_id, request.packet_format,
                   request.ring.base_address, request.ring.size_bytes)};
-    } catch (...) {
-      (void)command_processor_.unregister_queue_registration(registration_id);
-      throw;
-    }
+    }();
   }
 
 private:

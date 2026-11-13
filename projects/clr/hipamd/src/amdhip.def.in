@@ -509,6 +509,8 @@ hipStreamSetAttribute
 hipModuleLoadFatBinary
 hipMemcpyBatchAsync
 hipMemcpy3DBatchAsync
+hipMemcpyWithAttributesAsync
+hipMemcpy3DWithAttributesAsync
 hipMemcpy3DPeer
 hipMemcpy3DPeerAsync
 hipGetDriverEntryPoint
@@ -568,4 +570,5 @@ hipMemGetDefaultMemPool
 hipKernelNameRefByPtr
 hipModuleEnumerateFunctions
 hipDeviceFlushGPUDirectRDMAWrites
+hipExtMemcpyBatchAsync
 @HSA_EXPORTS@

@@ -653,5 +653,12 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 38
     ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelSetCacheConfig,
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 39
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExtMemcpyBatchAsync,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 40
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyWithAttributesAsync,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy3DWithAttributesAsync,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;

@@ -87,6 +87,12 @@ static inline uint64_t LoadSyncValue(const uint64_t* sync_addr) {
   return rocr::atomic::Load(sync_addr, std::memory_order_acquire);
 }
 
+static constexpr uint32_t kPoisonFenceHiDword = 0xFFFFFFFFu;
+
+static inline bool IsFencePoisoned(const uint64_t* sync_addr) {
+  return sync_addr && (LoadSyncValue(sync_addr) >> 32) == kPoisonFenceHiDword;
+}
+
 hsa_status_t WDDMQueue::SwsInit(void) {
   if (!device->CreateSyncobj(&syncobj, &sync_addr)) return HSA_STATUS_ERROR;
 
@@ -220,11 +226,22 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
   auto last_progress = std::chrono::steady_clock::now();
 
   while (!queue->thread_stop_) {
-    // Stall detection: check both rptr and GPU fence since rptr stalls during CpuWait.
+    // Check both rptr and GPU fence since rptr stalls during CpuWait.
+    uint64_t current_rptr = queue->ring_rptr->load(std::memory_order_relaxed);
+    uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
+    uint64_t current_fence = queue->sync_addr ? LoadSyncValue(queue->sync_addr) : 0;
+
+    if (IsFencePoisoned(queue->sync_addr)) {
+      if (queue->thread_stop_.exchange(true)) return;
+      pr_err("GPU memory fault detected: monitored fence poisoned (0x%" PRIx64
+             ") rptr=%" PRIu64 " wptr=%" PRIu64 "\n",
+             current_fence, current_rptr, current_wptr);
+      queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+      return;
+    }
+
+    // Time-based stall detection is only a heuristic; gate it on the wait-timeout policy.
     if (!dxg_runtime->disable_wait_timeout_) {
-      uint64_t current_rptr = queue->ring_rptr->load(std::memory_order_relaxed);
-      uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
-      uint64_t current_fence = queue->sync_addr ? LoadSyncValue(queue->sync_addr) : 0;
       if (current_rptr != last_rptr || current_fence != last_fence) {
         last_rptr = current_rptr;
         last_fence = current_fence;
@@ -271,7 +288,9 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
       hsa_status_t status = queue->Process();
       if (status != HSA_STATUS_SUCCESS) {
         pr_err("process compute queue fail status = %08x\n", status);
-        queue->HandleError(status);
+        // Process() already reports poison faults under a thread_stop_ one-shot guard; only
+        // report here if it has not already claimed the teardown (e.g. non-poison errors).
+        if (!queue->thread_stop_.exchange(true)) queue->HandleError(status);
         break;
       }
       sleep = false;
@@ -358,6 +377,25 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
   doorbell_mem_ = doorbell_mem->GetGpuMemoryHandle();
   doorbell_ptr_ = reinterpret_cast<uint64_t*>(doorbell_mem->GpuAddress());
   *doorbell_ptr_ = 0;
+
+#if defined(__linux__)
+  static_assert(sizeof(*doorbell_ptr_) <= kIrqBarrierSignalOffset &&
+                    kIrqBarrierSignalOffset % alignof(amd_signal_t) == 0 &&
+                    kIrqBarrierMailboxOffset + sizeof(uint32_t) <= 4096,
+                "doorbell, IRQ barrier signal and mailbox must not overlap within one 4K page");
+  assert(kIrqBarrierMailboxOffset + sizeof(uint32_t) <= dxg_runtime->page_size);
+  if (native_aql_) {
+    // The doorbell uses only its first 8 bytes, so the barrier signal and its mailbox share its page.
+    char* page = reinterpret_cast<char*>(doorbell_ptr_);
+    irq_barrier_signal_ = reinterpret_cast<amd_signal_t*>(page + kIrqBarrierSignalOffset);
+    memset(irq_barrier_signal_, 0, sizeof(*irq_barrier_signal_));
+    irq_barrier_signal_->kind = AMD_SIGNAL_KIND_USER;
+    // Agreed with the KMD: an all-ones event id only reports the fence, and the mailbox must be a
+    // valid GPU VA owned by the UMD rather than one from the event-registration escape.
+    irq_barrier_signal_->event_mailbox_ptr = reinterpret_cast<uint64_t>(page + kIrqBarrierMailboxOffset);
+    irq_barrier_signal_->event_id = kIrqBarrierEventId;
+  }
+#endif
 
   // Native AQL submission bypasses the PM4 translation thread.
   if (!native_aql_) {
@@ -653,10 +691,11 @@ void ComputeQueue::RingDoorbell(uint64_t value) {
   if (!native_aql_) {
     thread_cond_lock_.lock();
     thread_cond_lock_.unlock();
-    pr_debug("notify %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", ring, GetRingWptr()->load(),
+    pr_debug("compute queue notify %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", ring, GetRingWptr()->load(),
              GetRingRptr()->load());
     thread_cond_.notify_one();
   } else {
+    pr_debug("compute queue notify %p value=%" PRIx64 "\n", ring, value);
     constexpr uint32_t kSizeOfAqlPacket = 64;
     auto aql_addr = reinterpret_cast<uintptr_t>(reinterpret_cast<char*>(ring) +
                                                 (value % ring_size) * kSizeOfAqlPacket);
@@ -691,7 +730,75 @@ hsa_status_t ComputeQueue::Init(void) {
   return ret;
 }
 
-hsa_status_t ComputeQueue::Fini(void) { return use_hws ? HwsFini() : SwsFini(); }
+hsa_status_t ComputeQueue::Fini(void) {
+#if defined(__linux__)
+  if (native_aql_) {
+    // KMD advances the HwQueue progress fence only on an EOP interrupt, and DestroyHwQueue
+    // waits for that fence, so end with a barrier whose completion signal raises one.
+    SubmitIrqBarrier();
+    return HwsFini();
+  }
+#endif
+  return use_hws ? HwsFini() : SwsFini();
+}
+
+#if defined(__linux__)
+void ComputeQueue::SubmitIrqBarrier(void) {
+  amd_signal_t* signal = irq_barrier_signal_;
+  if (signal == nullptr) return;
+
+  rocr::atomic::Store(&signal->value, int64_t{1}, std::memory_order_release);
+  if (!SubmitIrqBarrierPacket(reinterpret_cast<uint64_t>(signal))) return;
+
+  constexpr auto kSpinTime = std::chrono::microseconds(100);
+  constexpr auto kTimeout = std::chrono::milliseconds(6000);
+  constexpr auto kMaxSleep = std::chrono::milliseconds(1);
+  const auto start = std::chrono::steady_clock::now();
+  const auto spin_end = start + kSpinTime;
+  const auto deadline = start + kTimeout;
+  std::chrono::microseconds sleep_time(100);
+  while (rocr::atomic::Load(&signal->value, std::memory_order_acquire) != 0) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now < spin_end) continue;
+    if (now >= deadline) {
+      pr_err("IRQ barrier timed out, wptr=%" PRIx64 " rptr=%" PRIx64 "\n",
+             ring_wptr->load(), ring_rptr->load());
+      break;
+    }
+    std::this_thread::sleep_for(sleep_time);
+    sleep_time = std::min<std::chrono::microseconds>(sleep_time * 2, kMaxSleep);
+  }
+}
+
+bool ComputeQueue::SubmitIrqBarrierPacket(uint64_t completion_signal) {
+  uint64_t index = ring_wptr->load(std::memory_order_acquire);
+  if ((index - ring_rptr->load(std::memory_order_acquire)) >= ring_size) {
+    pr_err("no ring slot for IRQ barrier, wptr=%" PRIx64 "\n", index);
+    return false;
+  }
+  if (!ring_wptr->compare_exchange_strong(index, index + 1, std::memory_order_acq_rel)) {
+    pr_err("ring wptr moved during queue destroy, wptr=%" PRIx64 "\n", index);
+    return false;
+  }
+
+  auto* packet = reinterpret_cast<hsa_barrier_and_packet_t*>(
+      static_cast<char*>(ring) + (index % ring_size) * sizeof(hsa_barrier_and_packet_t));
+  // Leave the header for last so the CP never sees a half-written packet.
+  memset(reinterpret_cast<char*>(packet) + sizeof(uint32_t), 0,
+         sizeof(*packet) - sizeof(uint32_t));
+  packet->completion_signal.handle = completion_signal;
+
+  const uint32_t header =
+      (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+      (1 << HSA_PACKET_HEADER_BARRIER) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+  rocr::atomic::Store(reinterpret_cast<uint32_t*>(packet), header, std::memory_order_release);
+
+  RingDoorbell(index);
+  return true;
+}
+#endif
 
 hsa_status_t ComputeQueue::PreSubmit(void) {
   if (!device->WaitPagingFence(this)) return HSA_STATUS_ERROR;
@@ -1158,8 +1265,20 @@ hsa_status_t ComputeQueue::Process(void) {
     // and re-evaluating here can never name a value this queue has not
     // submitted yet.
     uint64_t reuse_fence = CmdbufFrameRing::NextFrameReuseFence(sync_point, frame_num);
+    if (IsFencePoisoned(sync_addr)) {
+      pending_signals_.clear();
+      if (!thread_stop_.exchange(true))
+        HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+    }
     if (LoadSyncValue(sync_addr) < reuse_fence) {
       if (!device->CpuWait(&syncobj, &reuse_fence, 1, false)) return HSA_STATUS_ERROR;
+      if (IsFencePoisoned(sync_addr)) {
+        pending_signals_.clear();
+        if (!thread_stop_.exchange(true))
+          HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+        return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+      }
     }
 
     ret = SwitchAql2PM4();
@@ -1177,12 +1296,24 @@ hsa_status_t ComputeQueue::Process(void) {
     // Without platform atomics the GPU cannot decrement signals itself, so the
     // AqlToPm4Thread does it on the CPU once the submission has retired.
     if (!platform_atomic_support_ && !pending_signals_.empty()) {
+      if (IsFencePoisoned(sync_addr)) {
+        pending_signals_.clear();
+        if (!thread_stop_.exchange(true))
+          HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+        return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+      }
       if (LoadSyncValue(sync_addr) < sync_point) {
         if (!device->CpuWait(&syncobj, &sync_point, 1, false)) {
           pr_err("GPU fence wait failed (sync_addr=%" PRIu64 " expected=%" PRIu64 ")\n",
                  LoadSyncValue(sync_addr), sync_point);
           pending_signals_.clear();
           return HSA_STATUS_ERROR;
+        }
+        if (IsFencePoisoned(sync_addr)) {
+          pending_signals_.clear();
+          if (!thread_stop_.exchange(true))
+            HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+          return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
         }
       }
       for (uint64_t* addr : pending_signals_)
@@ -1240,9 +1371,13 @@ void SDMAQueue::SdmaThread(SDMAQueue* queue) {
         uint64_t signal_handle = reinterpret_cast<uint64_t>(signal);
         pr_debug("poll signal %#" PRIx64 " addr %#" PRIx64 " val %" PRId64 "\n", signal_handle, poll_addr, poll_val);
         hsa_signal_t hsa_signal = {signal_handle};
+        // HACK: We use WAIT_STATE_ACTIVE because SDMA occasionally misses
+        // interrupts. Reason is still unknown.
         hsa_signal_value_t value = hsakmt_hsa_signal_wait_relaxed(
-            hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-        assert(value == poll_val);
+            hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, kMaxWaitTimeoutTicks, HSA_WAIT_STATE_ACTIVE);
+        if (value != poll_val) {
+          pr_err("poll signal %llu != %llu, stalled for more than %llu ticks?\n", value, poll_val, kMaxWaitTimeoutTicks);
+        }
 
         memset(poll_pkt, 0, skip * sizeof(*poll_pkt));
         poll_pkt += skip;
@@ -1415,6 +1550,7 @@ bool SDMAQueue::ContainPollPacket(uint64_t start, uint64_t end) {
 }
 
 void SDMAQueue::RingDoorbell(uint64_t /*value*/) {
+  pr_debug("sdma ringdoorbell %#" PRIx64 " %#" PRIx64 "\n", wptr_pre_, wptr_next_);
   // The synchronization with worker thread is lock-free when SDMA user queue enabled.
   if (native_sdma_ && thread_pending_.load(std::memory_order_acquire) == 0 &&
       (gpu_poll_ || !ContainPollPacket(wptr_pre_, wptr_next_))) {

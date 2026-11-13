@@ -19,6 +19,8 @@ find_package(AMD_OPENCL)
 add_library(rocclr STATIC)
 
 include(ROCclrCompilerOptions)
+# Applies -Werror if CLR_ENABLE_WERROR is set
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/CLRWarnings.cmake")
 
 # To Fix path issue due to current dir (cmake folder - cmake/../) in debuginfo
 get_filename_component(_ROCCLR_SRC_DIR_PATH "${CMAKE_CURRENT_LIST_DIR}/../" REALPATH)
@@ -99,6 +101,7 @@ if(WIN32)
   ${ROCCLR_SRC_DIR}/platform/interop_d3d11.cpp)
   if(ROCCLR_ENABLE_HSA)
     target_sources(rocclr PRIVATE
+    ${ROCCLR_SRC_DIR}/device/rocm/rocd3d9interop.cpp
     ${ROCCLR_SRC_DIR}/device/rocm/rocd3d10interop.cpp
     ${ROCCLR_SRC_DIR}/device/rocm/rocd3d11interop.cpp)
   endif()
@@ -107,6 +110,9 @@ if(WIN32)
 else()
   target_compile_definitions(rocclr PUBLIC ATI_OS_LINUX)
 endif()
+
+# Unconditional: clr::warnings is empty unless CLR_ENABLE_WERROR is on.
+target_link_libraries(rocclr PRIVATE clr::warnings)
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 4)
   target_compile_definitions(rocclr PUBLIC ATI_BITS_32)

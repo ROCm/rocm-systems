@@ -74,11 +74,11 @@ enum MemcpyType {
   hipCopyBufferP2P,   //!< Memcpy from device A to device B
 };
 
-struct Graph;
-struct GraphNode;
+class Graph;
+class GraphNode;
 class GraphExecBase;
 class GraphExecSegmented;
-struct UserObject;
+class UserObject;
 class Stream;
 
 #define IHIP_IPC_EVENT_HANDLE_SIZE 32
@@ -270,23 +270,34 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
     HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                  \
   }
 
-// Helper: invalidate all capturing streams and return an error code.
-#define INVALIDATE_ALL_CAPTURING_AND_RETURN(err)                                                   \
-  if (!g_allCapturingStreams.empty()) {                                                            \
-    for (auto stream : g_allCapturingStreams) {                                                    \
-      stream->InvalidateCapture();                                                                 \
+// Helper: invalidate all capturing streams on the current device and return an error.
+// Invalidation is device-scoped, not thread-scoped or mode-scoped. A sync API invalidates
+// all captures on the same device, regardless of which thread they belong to or what
+// capture mode they use.
+#define INVALIDATE_DEVICE_CAPTURING_AND_RETURN(err)                                                \
+  {                                                                                                \
+    int _devId = hip::ihipGetDevice();                                                             \
+    bool _found = false;                                                                           \
+    {                                                                                              \
+      amd::ScopedLock lock(g_streamSetLock);                                                      \
+      for (auto* _s : g_allCapturingStreams) {                                                    \
+        if (_s->DeviceId() == _devId) {                                                           \
+          _s->InvalidateCapture();                                                                 \
+          _found = true;                                                                           \
+        }                                                                                          \
+      }                                                                                            \
     }                                                                                              \
-    return err;                                                                                    \
+    if (_found) return err;                                                                        \
   }
 
 // Device sync is not supported during capture.
 #define CHECK_SUPPORTED_DURING_CAPTURE()                                                           \
-  INVALIDATE_ALL_CAPTURING_AND_RETURN(hipErrorStreamCaptureUnsupported)
+  INVALIDATE_DEVICE_CAPTURING_AND_RETURN(hipErrorStreamCaptureUnsupported)
 
 // Sync APIs (hipMemset, hipMemcpy, etc.) cannot be called when stream capture is active
 // for any capture mode (Global, ThreadLocal, or Relaxed).
 #define CHECK_STREAM_CAPTURING()                                                                   \
-  INVALIDATE_ALL_CAPTURING_AND_RETURN(hipErrorStreamCaptureImplicit)
+  INVALIDATE_DEVICE_CAPTURING_AND_RETURN(hipErrorStreamCaptureImplicit)
 
 #define STREAM_CAPTURE(name, stream, ...)                                                          \
   hip::getStreamPerThread(stream);                                                                 \
@@ -617,6 +628,21 @@ namespace hip {
     int deviceId() const { return deviceId_; }
     void retain() const { context_->retain(); }
     void release() const { context_->release(); }
+
+    void IncrementCtxCreateCount() {
+      std::scoped_lock lock(lock_);
+      ++ctxCreateCount_;
+    }
+
+    bool DecrementCtxCreateCount() {
+      std::scoped_lock lock(lock_);
+      if (ctxCreateCount_ == 0) {
+        return false;
+      }
+      --ctxCreateCount_;
+      return true;
+    }
+
     const std::vector<amd::Device*>& devices() const { return context_->devices(); }
     unsigned int getFlags() const { return flags_; }
     void setFlags(unsigned int flags) { flags_ = flags; }
@@ -713,6 +739,7 @@ namespace hip {
     int deviceId_;                             //!< Cached device ID (avoids linear scan)
     Stream* null_stream_ = nullptr;            //!< Default (null/legacy) stream
     unsigned int flags_;                       //!< Device flags (e.g. hipDeviceScheduleSpin)
+    uint32_t ctxCreateCount_ = 0;              //!< Outstanding hipCtxCreate calls
     std::vector<int> userEnabledPeers_;        //!< Peer device IDs enabled via hipEnablePeerAccess
     std::atomic<bool> isActive_{false};        //!< True once any work has been submitted
 
@@ -805,6 +832,17 @@ namespace hip {
   extern int ihipGetDevice();
 
   extern hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
+
+  //! Owner of the storage behind a managed allocation, which determines its lifetime.
+  enum class ManagedMemOwner {
+    kApplication,     //!< Released by the application, or by a device reset
+    kModuleVariable,  //!< Released with the module declaring the __managed__ variable
+  };
+
+  extern hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0,
+                                       bool use_host_ptr = false,
+                                       ManagedMemOwner owner = ManagedMemOwner::kApplication);
+
   extern hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
   extern amd::Memory* getMemoryObject(hip::Device* device, const void* ptr, size_t& offset,

@@ -6,6 +6,8 @@
 // Capability implementations share the concrete driver's types and helpers.
 #[allow(clippy::wildcard_imports)]
 use super::*;
+use crate::device::gpu::profiling::PcSamplingIntervalRestriction;
+use crate::memory::HostCacheability;
 use crate::memory::storage::TryPush;
 
 /// Reads DRM facts only when they describe the endpoint's PCI device.
@@ -17,6 +19,18 @@ pub(super) fn matching_device_info(
     drm::device_info_prefix(render)
         .ok()
         .filter(|info| info.device_id == pci.device_id)
+}
+
+/// Uses active matching DRM information when it reports a family; discovery
+/// remains the fallback and is never rewritten with activation results.
+pub(super) fn resolved_family_id(discovered: u32, native: Option<drm::DeviceInfoPrefix>) -> u32 {
+    native.map_or(discovered, |info| {
+        if info.family_id == 0 {
+            discovered
+        } else {
+            info.family_id
+        }
+    })
 }
 
 pub(super) fn device_counter_frequency_hz(info: drm::DeviceInfoPrefix) -> Option<u64> {
@@ -38,7 +52,6 @@ pub(super) fn populate_endpoint(endpoint: &mut Endpoint) {
     if let (Some(device_info), crate::topology::EndpointKind::Gpu { info }) =
         (device_info, &mut endpoint.kind)
     {
-        info.drm_asic_family_id = (device_info.family_id != 0).then_some(device_info.family_id);
         info.counter_frequency_hz = device_counter_frequency_hz(device_info);
     }
     endpoint.product_name = std::fs::metadata("/usr/share/libdrm/amdgpu.ids")
@@ -48,7 +61,7 @@ pub(super) fn populate_endpoint(endpoint: &mut Endpoint) {
         .and_then(|contents| marketing_name(&contents, pci.device_id, pci.revision_id));
 }
 
-impl GpuDriver for LinuxKfdDriver {
+impl GpuFaultModeOperations for LinuxKfdDriver {
     fn xnack_enabled(&self, device: &DeviceState) -> Result<bool, Error> {
         self.ensure_open()?;
         device.vm.check()?;
@@ -58,7 +71,9 @@ impl GpuDriver for LinuxKfdDriver {
             .xnack_enabled()
             .map_err(|source| native_error("KFD XNACK mode query", source))
     }
+}
 
+impl GpuMemoryQueryOperations for LinuxKfdDriver {
     fn available_memory(&self, device: &DeviceState) -> Result<u64, Error> {
         self.ensure_open()?;
         device
@@ -67,7 +82,9 @@ impl GpuDriver for LinuxKfdDriver {
             .available_memory(device.native.gpu_id)
             .map_err(|source| native_error("KFD available memory query", source))
     }
+}
 
+impl GpuCacheControlOperations for LinuxKfdDriver {
     fn set_persisting_l2_cache_size(
         &self,
         device: &DeviceState,
@@ -87,7 +104,9 @@ impl GpuDriver for LinuxKfdDriver {
             }
         })
     }
+}
 
+impl GpuSurfaceOperations for LinuxKfdDriver {
     fn surface_config(
         &self,
         device: &DeviceState,
@@ -100,6 +119,7 @@ impl GpuDriver for LinuxKfdDriver {
             .tile_config(device.native.gpu_id)
             .map_err(|source| native_error("KFD tile configuration query", source))?;
         Ok(crate::device::gpu::GpuSurfaceConfig {
+            asic_family_id: device.asic_family_id,
             gb_addr_config: config.gb_addr_config,
         })
     }
@@ -112,7 +132,8 @@ impl GpuUserQueueOperations for LinuxKfdDriver {
         self.ensure_open()?;
         device.vm.check()?;
         let version = device.vm.version;
-        Ok((version.major, version.minor) >= (1, 20))
+        Ok(device.native.queues.gfx_target / 10_000 >= 12
+            && (version.major, version.minor) >= (1, 20))
     }
 
     #[allow(unsafe_code)]
@@ -166,17 +187,18 @@ impl GpuKernelQueueOperations for LinuxKfdDriver {
     fn available_sdma_engines(&self, device: &DeviceState) -> Result<u32, Error> {
         self.ensure_open()?;
         if cfg!(target_arch = "x86_64")
-            && matches!(
-                device.native.queues.gfx_target,
-                90008 | 90010 | 90402 | 90500
-            )
+            && device.native.queues.target_profile == crate::topology::GpuTargetProfile::Gfx9
             && device.native.queues.sdma_qualified
         {
             let count = device.native.queues.sdma_engines.min(u32::BITS);
             return Ok(u32::MAX >> (u32::BITS - count));
         }
         if !cfg!(target_arch = "x86_64")
-            || !matches!(device.native.queues.gfx_target, 120_000 | 120_001 | 120_500)
+            || !device
+                .native
+                .queues
+                .target_profile
+                .supports_kernel_submission()
             || !device.native.queues.sdma_qualified
         {
             return Err(error(
@@ -197,7 +219,11 @@ impl GpuKernelQueueOperations for LinuxKfdDriver {
     ) -> Result<Owned<KfdKernelQueue>, Error> {
         self.ensure_open()?;
         if !cfg!(target_arch = "x86_64")
-            || !matches!(device.native.queues.gfx_target, 120_000 | 120_001 | 120_500)
+            || !device
+                .native
+                .queues
+                .target_profile
+                .supports_kernel_submission()
         {
             return Err(error(
                 ErrorKind::Unsupported,
@@ -225,9 +251,7 @@ impl GpuKernelQueueOperations for LinuxKfdDriver {
     }
 }
 
-impl GpuInstrumentationOperations for LinuxKfdDriver {
-    type PcSampling = KfdPcSampling;
-
+impl GpuClockOperations for LinuxKfdDriver {
     fn clock_counters(&self, device: &DeviceState) -> Result<ClockCounters, Error> {
         self.ensure_open()?;
         let counters = device
@@ -238,11 +262,24 @@ impl GpuInstrumentationOperations for LinuxKfdDriver {
         Ok(ClockCounters {
             gpu: counters.gpu_clock_counter,
             host: counters.cpu_clock_counter,
-            system: counters.system_clock_counter,
-            system_frequency: counters.system_clock_frequency,
-            gpu_frequency: device.gpu_counter_frequency_hz,
+            gpu_info: crate::host::clock::ClockInfo {
+                frequency_hz: device.gpu_counter_frequency_hz,
+                counter_bit_count: 0,
+            },
+            system: Some(crate::device::gpu::profiling::SystemClockSample {
+                domain: crate::device::gpu::profiling::SystemClockDomain::BootTime,
+                ticks: counters.system_clock_counter,
+                info: crate::host::clock::ClockInfo {
+                    frequency_hz: counters.system_clock_frequency,
+                    counter_bit_count: 64,
+                },
+            }),
         })
     }
+}
+
+impl GpuPcSamplingOperations for LinuxKfdDriver {
+    type PcSampling = KfdPcSampling;
 
     fn pc_sampling_configurations(
         &self,
@@ -331,12 +368,15 @@ impl GpuInstrumentationOperations for LinuxKfdDriver {
                     } else {
                         (item.interval_min, item.interval_max)
                     };
+                let Some(restriction) = sampling_interval_restriction(item.flags) else {
+                    continue;
+                };
                 configurations.push(PcSamplingConfiguration {
                     method,
                     unit,
                     minimum_interval,
                     maximum_interval,
-                    flags: item.flags,
+                    restriction,
                 });
             }
             return Ok(configurations);
@@ -351,8 +391,26 @@ impl GpuInstrumentationOperations for LinuxKfdDriver {
         &self,
         device: &DeviceState,
         request: PcSamplingRequest,
-        existing_trace_id: Option<std::num::NonZeroU32>,
     ) -> Result<Owned<KfdPcSampling>, Error> {
+        self.validate_pc_sampling_request(device, request)?;
+        KfdPcSampling::create(device.vm.clone(), device.native.gpu_id, request)
+    }
+}
+
+fn sampling_interval_restriction(flags: u64) -> Option<PcSamplingIntervalRestriction> {
+    match flags {
+        0 => Some(PcSamplingIntervalRestriction::Any),
+        uapi::PC_SAMPLE_FLAG_POWER_OF_TWO => Some(PcSamplingIntervalRestriction::PowerOfTwo),
+        _ => None,
+    }
+}
+
+impl LinuxKfdDriver {
+    fn validate_pc_sampling_request(
+        &self,
+        device: &DeviceState,
+        request: PcSamplingRequest,
+    ) -> Result<(), Error> {
         self.ensure_open()?;
         device.vm.check()?;
         let supported = self
@@ -363,8 +421,7 @@ impl GpuInstrumentationOperations for LinuxKfdDriver {
                     && config.unit == request.unit
                     && request.interval >= config.minimum_interval
                     && request.interval <= config.maximum_interval
-                    && (config.flags & uapi::PC_SAMPLE_FLAG_POWER_OF_TWO == 0
-                        || request.interval.is_power_of_two())
+                    && config.restriction.permits(request.interval)
             });
         if !supported {
             return Err(error(
@@ -372,14 +429,21 @@ impl GpuInstrumentationOperations for LinuxKfdDriver {
                 "PC sampling method or interval is unavailable",
             ));
         }
-        match existing_trace_id {
-            Some(trace_id) => {
-                KfdPcSampling::adopt(device.vm.clone(), device.native.gpu_id, trace_id)
-            }
-            None => KfdPcSampling::create(device.vm.clone(), device.native.gpu_id, request),
-        }
+        Ok(())
     }
 
+    pub(crate) fn adopt_pc_sampling(
+        &self,
+        device: &DeviceState,
+        request: PcSamplingRequest,
+        trace_id: std::num::NonZeroU32,
+    ) -> Result<Owned<KfdPcSampling>, Error> {
+        self.validate_pc_sampling_request(device, request)?;
+        KfdPcSampling::adopt(device.vm.clone(), device.native.gpu_id, trace_id)
+    }
+}
+
+impl GpuTrapOperations for LinuxKfdDriver {
     #[allow(unsafe_code)]
     unsafe fn set_trap_handler(
         &self,
@@ -394,7 +458,9 @@ impl GpuInstrumentationOperations for LinuxKfdDriver {
             .set_trap_handler(device.native.gpu_id, handler_address, memory_address)
             .map_err(|source| native_error("KFD trap handler update", source))
     }
+}
 
+impl GpuSpmOperations for LinuxKfdDriver {
     fn spm_acquire(&self, device: &DeviceState) -> Result<(), Error> {
         let mut args = uapi::Spm {
             operation: uapi::SPM_OP_ACQUIRE,
@@ -426,25 +492,33 @@ impl GpuInstrumentationOperations for LinuxKfdDriver {
         &self,
         device: &DeviceState,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
-    ) -> Result<(), Error> {
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure> {
         let mut args = uapi::Spm {
             destination: destination.map_or(0, |address| address as u64),
             size,
             operation: uapi::SPM_OP_SET_DESTINATION,
-            timeout: *timeout,
+            timeout,
             gpu_id: device.native.gpu_id,
             bytes_copied: 0,
             has_data_loss: 0,
         };
         let result = device.vm.kfd().spm(&mut args);
-        *timeout = args.timeout;
-        *bytes_copied = args.bytes_copied;
-        *data_loss = args.has_data_loss != 0;
-        result.map_err(|source| native_error("KFD SPM destination update", source))
+        let report = SpmDestinationReport {
+            remaining_timeout_milliseconds: args.timeout,
+            previous_destination_bytes_copied: args.bytes_copied,
+            data_loss: args.has_data_loss != 0,
+        };
+        result.map_or_else(
+            |source| {
+                Err(SpmDestinationFailure {
+                    error: native_error("KFD SPM destination update", source),
+                    report,
+                })
+            },
+            |()| Ok(report),
+        )
     }
 }
 pub(super) fn marketing_name(contents: &str, device_id: u32, revision: u32) -> Option<String> {
@@ -460,6 +534,140 @@ pub(super) fn marketing_name(contents: &str, device_id: u32, revision: u32) -> O
 
 impl AllocationOperations for LinuxKfdDriver {
     type Allocation = LinuxAllocation;
+
+    fn publish_local_backing_identity(
+        allocation: &LinuxAllocation,
+        identity: crate::memory::device::LocalBackingIdentity,
+    ) -> Result<(), Error> {
+        allocation.set_host_alias_identity([identity.namespace, identity.object])
+    }
+    fn backing_offset(allocation: &LinuxAllocation) -> Option<u64> {
+        allocation.host_alias_source_offset()
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one provider query keeps complete construction guarantees together"
+    )]
+    fn memory_capabilities(
+        &self,
+        endpoint: &Endpoint,
+        request: crate::memory::device::MemoryCapabilityRequest<'_>,
+    ) -> Result<crate::memory::device::DeviceMemoryCapabilities, Error> {
+        use crate::memory::device::{DeviceMemoryCapabilities, MemoryCapabilityRequest};
+        self.ensure_open()?;
+        if !self.supports_host_registration(endpoint) {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "foreign or non-GPU memory endpoint",
+            ));
+        }
+        let page = os_memory::page_size()
+            .map_err(|source| native_error("native page size", source))? as u64;
+        let (registered, kind) = match request {
+            MemoryCapabilityRequest::Allocation(kind) => (false, kind),
+            MemoryCapabilityRequest::Registration(policy) => {
+                (true, MemoryKind::OwnedHost { policy })
+            }
+            MemoryCapabilityRequest::Access { owner, kind } => {
+                if matches!(kind, MemoryKind::DeviceLocal { .. })
+                    && !self.can_access_local_memory(endpoint, owner)
+                {
+                    return Err(error(
+                        ErrorKind::Unsupported,
+                        "peer backing is not accessible",
+                    ));
+                }
+                let mut capabilities =
+                    self.memory_capabilities(owner, MemoryCapabilityRequest::Allocation(kind))?;
+                capabilities.supported_access = DeviceAccess::from_bits(
+                    capabilities.supported_access.bits() & endpoint.supported_permissions.bits(),
+                )
+                .ok_or_else(|| error(ErrorKind::InvalidData, "invalid peer permissions"))?;
+                return Ok(capabilities);
+            }
+        };
+        if let MemoryKind::OwnedHost { policy } = kind {
+            if self.lifetime == DriverContextLifetime::Session
+                && (!registered
+                    || (policy == HostMappingPolicy::Extended
+                        && endpoint.gpu().is_none_or(|info| {
+                            info.target_profile != crate::topology::GpuTargetProfile::Gfx1201
+                        })))
+            {
+                return Err(error(
+                    ErrorKind::Unsupported,
+                    "host mapping policy unavailable for this context",
+                ));
+            }
+        }
+        let (maximum, cacheability, coherent, host_visible) = match kind {
+            MemoryKind::System => (
+                isize::MAX as u64,
+                Some(HostCacheability::WriteBack),
+                true,
+                true,
+            ),
+            MemoryKind::OwnedHost { policy } => (
+                isize::MAX as u64,
+                Some(HostCacheability::WriteBack),
+                policy != HostMappingPolicy::Coarse,
+                true,
+            ),
+            MemoryKind::DeviceLocal {
+                host_visible,
+                coherent,
+                extended_coherent,
+                uncached,
+                ..
+            } => {
+                if extended_coherent && (!coherent || uncached) {
+                    return Err(error(
+                        ErrorKind::InvalidArgument,
+                        "invalid extended local coherence",
+                    ));
+                }
+                let maximum = if host_visible {
+                    endpoint.host_visible_local_memory_bytes
+                } else {
+                    endpoint.local_memory_bytes
+                };
+                if maximum == 0 {
+                    return Err(error(
+                        ErrorKind::Unsupported,
+                        "local memory projection unavailable",
+                    ));
+                }
+                (
+                    maximum,
+                    if host_visible {
+                        endpoint.host_local_cacheability
+                    } else {
+                        None
+                    },
+                    false,
+                    host_visible,
+                )
+            }
+        };
+        Ok(DeviceMemoryCapabilities {
+            native: AllocationLimits {
+                alignment: page,
+                granularity: page,
+                maximum_size: maximum.min(isize::MAX as u64),
+            },
+            maximum_alignment: 1 << 63,
+            logical_alignment: if registered { 1 } else { page },
+            logical_size_granularity: 1,
+            required_access: DeviceAccess::READ,
+            supported_access: endpoint.supported_permissions,
+            host_visible,
+            host_cacheability: cacheability,
+            host_writable: host_visible,
+            host_coherent: coherent,
+            queue_storage: true,
+        })
+    }
 
     fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
         endpoint.driver_instance == self.driver_instance && endpoint.gpu().is_some()
@@ -585,12 +793,16 @@ impl AllocationOperations for LinuxKfdDriver {
             permissions,
             backing,
         } = request;
-        let desc = checked_allocation_desc(size, alignment)?;
+        let desc = checked_host_registration_desc(size, alignment)?;
+        let mut backing = backing;
         if self.lifetime == DriverContextLifetime::Session {
             if policy == HostMappingPolicy::Extended
                 && std::iter::once(device)
                     .chain(peers.iter().copied())
-                    .any(|peer| peer.native.queues.gfx_target != 120_001)
+                    .any(|peer| {
+                        peer.native.queues.target_profile
+                            != crate::topology::GpuTargetProfile::Gfx1201
+                    })
             {
                 return Err(error(
                     ErrorKind::Unsupported,
@@ -613,6 +825,17 @@ impl AllocationOperations for LinuxKfdDriver {
                 )
             }
         } else {
+            if let Some(alias) = memory::KfdHostAlias::try_create(
+                &device.vm,
+                peers,
+                address,
+                size,
+                policy,
+                permissions,
+                &mut backing,
+            )? {
+                return LinuxAllocation::from_host_alias(alias);
+            }
             // SAFETY: Raw callers retain these pages through cleanup; owned
             // registrations transfer a lease into the native allocation.
             let pages = unsafe { memory::BorrowedHostPages::new(address, policy) };
@@ -646,6 +869,19 @@ fn checked_allocation_desc(size: u64, alignment: u64) -> Result<AllocationDesc, 
     Ok(desc)
 }
 
+fn checked_host_registration_desc(size: u64, alignment: u64) -> Result<AllocationDesc, Error> {
+    let desc = AllocationDesc { size, alignment };
+    let page =
+        os_memory::page_size().map_err(|source| native_error("native page size", source))? as u64;
+    if size == 0 || size > isize::MAX as u64 || !alignment.is_power_of_two() || alignment < page {
+        return Err(error(
+            ErrorKind::InvalidArgument,
+            "invalid host registration extent or alignment",
+        ));
+    }
+    Ok(desc)
+}
+
 impl VirtualMemoryOperations for LinuxKfdDriver {
     type VirtualAddress = KfdVirtualAddress;
     type VirtualDeviceMapping = KfdVirtualDeviceMapping;
@@ -670,11 +906,10 @@ impl VirtualMemoryOperations for LinuxKfdDriver {
         device: &DeviceState,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<Owned<KfdVirtualMemory>, Error> {
         self.ensure_open()?;
-        KfdVirtualMemory::create(device.vm.clone(), kind, size, pinned, uncached)
+        KfdVirtualMemory::create(device.vm.clone(), kind, size, options)
     }
     fn free_virtual_memory(memory: &mut KfdVirtualMemory) -> Result<(), Error> {
         memory.free()
@@ -798,5 +1033,43 @@ impl KernelQueueResource for KfdKernelQueue {
 
     fn destroy(&mut self) -> Result<(), Error> {
         KfdKernelQueue::destroy(self)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod registration_extent_tests {
+    use super::{checked_allocation_desc, checked_host_registration_desc, os_memory};
+
+    #[test]
+    fn host_registration_accepts_an_exact_subpage_length() {
+        let page = os_memory::page_size().unwrap() as u64;
+        assert!(checked_host_registration_desc(1, page).is_ok());
+        assert!(checked_allocation_desc(1, page).is_err());
+        assert!(checked_host_registration_desc(0, page).is_err());
+    }
+}
+
+#[cfg(test)]
+mod sampling_tests {
+    use super::*;
+    #[test]
+    fn unknown_native_interval_restrictions_do_not_advertise_unrestricted_support() {
+        assert_eq!(
+            sampling_interval_restriction(0),
+            Some(PcSamplingIntervalRestriction::Any)
+        );
+        assert_eq!(
+            sampling_interval_restriction(uapi::PC_SAMPLE_FLAG_POWER_OF_TWO),
+            Some(PcSamplingIntervalRestriction::PowerOfTwo)
+        );
+        assert_eq!(sampling_interval_restriction(2), None);
+        assert_eq!(
+            sampling_interval_restriction(uapi::PC_SAMPLE_FLAG_POWER_OF_TWO | 2),
+            None
+        );
+        assert!(!PcSamplingIntervalRestriction::Any.permits(0));
+        assert!(!PcSamplingIntervalRestriction::PowerOfTwo.permits(3));
+        assert!(PcSamplingIntervalRestriction::PowerOfTwo.permits(8));
     }
 }

@@ -56,6 +56,7 @@ fn shutdown_waits_for_inflight_calls() {
     let (done_send, done_recv) = std::sync::mpsc::channel();
     let worker_inflight = inflight.clone();
     let worker = thread::spawn(move || {
+        worker_inflight.close();
         started_send.send(()).unwrap();
         worker_inflight.wait_idle();
         done_send.send(()).unwrap();
@@ -91,6 +92,35 @@ fn callback_scope_restricts_queue_and_sampling_teardown() {
         assert!(CallbackScope::active());
     }
     assert!(!CallbackScope::active());
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn parked_shutdown_helper_exits_if_commit_is_aborted() {
+    let mut lifecycle = HsaLifecycle::new();
+    let generation = lifecycle.begin_init().unwrap().unwrap();
+    let (commit, instruction) = std::sync::mpsc::channel::<u64>();
+    let (finished, completion) = std::sync::mpsc::channel();
+    let cleanup_called = Arc::new(AtomicBool::new(false));
+    let observed = cleanup_called.clone();
+    defer_cleanup(instruction, move |instruction| {
+        if instruction.recv().is_ok() {
+            observed.store(true, Ordering::Release);
+        }
+        finished.send(()).unwrap();
+    })
+    .unwrap();
+    // A failed commit drops its instruction sender without advancing the
+    // generation or asking the parked helper to retire it.
+    assert_eq!(
+        lifecycle.begin_shutdown().err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+    drop(commit);
+    completion.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert!(!cleanup_called.load(Ordering::Acquire));
+    assert_eq!(lifecycle.begin_init().err(), Some(INVALID_RUNTIME_STATE));
+    lifecycle.cancel_init(generation, false).unwrap();
 }
 
 #[test]
@@ -148,12 +178,88 @@ fn initialization_gate_rejects_overlapping_generations() {
 }
 
 #[test]
+fn concurrent_init_waits_for_the_first_generation_to_finish() {
+    let lifecycle = Arc::new(Mutex::new(HsaLifecycle::new()));
+    let changed = Arc::new(Condvar::new());
+    let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+    let ready = Arc::new(std::sync::Barrier::new(2));
+    let worker_lifecycle = lifecycle.clone();
+    let worker_changed = changed.clone();
+    let worker_ready = ready.clone();
+    let worker = std::thread::spawn(move || {
+        let guard = worker_lifecycle.lock().unwrap();
+        worker_ready.wait();
+        begin_init_waiting(guard, &worker_changed)
+    });
+    ready.wait();
+    lifecycle
+        .lock()
+        .unwrap()
+        .cancel_init_with_notification(generation, false, &changed)
+        .unwrap();
+    let next = worker.join().unwrap().unwrap().unwrap();
+    assert_ne!(next, generation);
+    lifecycle.lock().unwrap().cancel_init(next, false).unwrap();
+}
+
+#[test]
+fn callback_init_does_not_wait_for_preparing_shutdown() {
+    let lifecycle = Mutex::new(HsaLifecycle::new());
+    let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+    lifecycle
+        .lock()
+        .unwrap()
+        .prepare_without_runtime_for_test(generation);
+    let _scope = CallbackScope::enter();
+    assert_eq!(
+        begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+}
+
+#[test]
+fn admitted_call_init_does_not_wait_for_preparing_shutdown() {
+    let lifecycle = Mutex::new(HsaLifecycle::new());
+    let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+    lifecycle
+        .lock()
+        .unwrap()
+        .prepare_without_runtime_for_test(generation);
+    let gate = Arc::new(InFlightTracker::new());
+    gate.close();
+    gate.open(generation);
+    let _scope = ApiLeaseScope::enter(gate.enter().unwrap());
+    assert_eq!(
+        begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+}
+
+#[test]
+fn same_thread_lifecycle_reentry_is_rejected() {
+    let entry = LifecycleCallScope::enter().unwrap();
+    assert_eq!(
+        LifecycleCallScope::enter().err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+    let helper = LifecycleCallScope::enter_helper();
+    drop(helper);
+    assert_eq!(
+        LifecycleCallScope::enter().err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+    drop(entry);
+    assert!(LifecycleCallScope::enter().is_ok());
+}
+
+#[test]
 /// Verifies that failed initialization cleanup quarantines the next generation.
 fn failed_initialization_cleanup_quarantines_the_next_generation() {
     let mut registry = HsaLifecycle::new();
     let generation = registry.begin_init().unwrap().unwrap();
     registry.cancel_init(generation, true).unwrap();
     assert_eq!(registry.begin_init().unwrap_err(), INVALID_RUNTIME_STATE);
+    assert_eq!(registry.begin_shutdown().err(), Some(INVALID_RUNTIME_STATE));
 }
 
 #[test]
@@ -202,6 +308,49 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
         assert!(pending.cleanup());
         assert_eq!(live.load(AtomicOrdering::Relaxed), 0);
         assert_eq!(joins.load(AtomicOrdering::Relaxed), 0);
+    }
+}
+
+#[test]
+fn failed_or_unwound_initialization_retains_the_native_session() {
+    /// Records whether failed native rollback releases its owner.
+    struct SessionProbe {
+        /// Drop count that must remain zero after an uncertain rollback.
+        drops: Arc<AtomicUsize>,
+        /// Injects an unwind instead of a returned native error.
+        panic_on_retire: bool,
+    }
+
+    impl RetireSession for SessionProbe {
+        fn retire(&mut self) -> bool {
+            assert!(!self.panic_on_retire, "injected native rollback unwind");
+            false
+        }
+    }
+
+    impl Drop for SessionProbe {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+    }
+
+    for panic_on_retire in [false, true] {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut pending = PendingInit {
+            session: Some(SessionProbe {
+                drops: drops.clone(),
+                panic_on_retire,
+            }),
+            gpus: Vec::<()>::new(),
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pending.cleanup()));
+        if panic_on_retire {
+            assert!(result.is_err());
+        } else {
+            assert!(!result.unwrap());
+        }
+        drop(pending);
+        assert_eq!(drops.load(AtomicOrdering::Relaxed), 0);
     }
 }
 
@@ -394,6 +543,7 @@ fn hardware_exception_events_match_the_amd_extension_layout() {
             agent,
             GpuHardwareException {
                 endpoint_id: Some([42; 16]),
+                origin_id: None,
                 scope: rocddi::device::event::GpuResetScope::WholeGpu,
                 memory_lost: false,
                 cause,
@@ -410,21 +560,39 @@ fn hardware_exception_events_match_the_amd_extension_layout() {
 }
 
 #[test]
-/// Verifies that GPU ticks translate around the correlated system sample.
-fn gpu_ticks_translate_around_the_correlated_system_sample() {
+/// Verifies that GPU ticks translate around the correlated host sample.
+fn gpu_ticks_translate_around_the_correlated_host_sample() {
     let counters = ClockCounters {
         gpu: 100,
-        host: 0,
-        system: 1_000,
-        system_frequency: 1_000_000_000,
-        gpu_frequency: 100_000_000,
+        host: 1_000,
+        system: None,
+        gpu_info: rocddi::host::clock::ClockInfo {
+            frequency_hz: 100_000_000,
+            counter_bit_count: 0,
+        },
     };
+    assert_eq!(
+        translate_gpu_tick(
+            ClockCounters {
+                gpu_info: rocddi::host::clock::ClockInfo {
+                    counter_bit_count: 32,
+                    ..counters.gpu_info
+                },
+                ..counters
+            },
+            110
+        ),
+        Err(NOT_SUPPORTED)
+    );
     assert_eq!(translate_gpu_tick(counters, 110), Ok(1_100));
     assert_eq!(translate_gpu_tick(counters, 90), Ok(900));
     assert_eq!(
         translate_gpu_tick(
             ClockCounters {
-                gpu_frequency: 200_000_000,
+                gpu_info: rocddi::host::clock::ClockInfo {
+                    frequency_hz: 200_000_000,
+                    ..counters.gpu_info
+                },
                 ..counters
             },
             110,
@@ -434,7 +602,10 @@ fn gpu_ticks_translate_around_the_correlated_system_sample() {
     assert_eq!(
         translate_gpu_tick(
             ClockCounters {
-                system_frequency: 0,
+                gpu_info: rocddi::host::clock::ClockInfo {
+                    frequency_hz: 0,
+                    ..counters.gpu_info
+                },
                 ..counters
             },
             100,
@@ -532,20 +703,20 @@ fn cache_handles_and_names_are_stable_runtime_objects() {
 #[test]
 /// Verifies that OS caches are not assigned to an unidentified CPU node.
 fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
-    use rocddi::topology::host::{CpuCache, HostCaches, HostTopologySnapshot};
+    use rocddi::topology::host::{CpuCache, HostCaches, HostTopologyGraphSnapshot};
 
     let cache = |cpu| CpuCache {
         cpu,
         shared_cpus: None,
         info: rocddi::topology::CacheInfo::new(1, 32 * 1024, None, CpuCacheKind::Data),
     };
-    let topology = HostTopologySnapshot {
+    let topology = HostTopologyGraphSnapshot {
         memory_bytes: None,
         cpu: None,
         cpu_apic_ids: Vec::new(),
         online_cpus: None,
         caches: HostCaches {
-            records: vec![cache(7)],
+            records: vec![cache(rocddi::topology::host::CpuId::linux(7))],
             complete: true,
         },
         domains: Vec::new(),
@@ -553,26 +724,27 @@ fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
     };
     assert_eq!(
         host_caches_for_cpu(&topology, None, 1).unwrap().records[0].cpu,
-        7
+        rocddi::topology::host::CpuId::linux(7)
     );
     assert!(host_caches_for_cpu(&topology, None, 2).is_none());
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 /// Verifies separate KFD CPU nodes retain their bank sizes and APU policy.
 fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
-    use rocddi::topology::host::{HostCaches, HostTopologySnapshot};
+    use rocddi::topology::host::{HostCaches, HostTopologyGraphSnapshot};
     use rocddi::topology::{
         CpuNodeInfo, MemoryBank, MemoryBankKind, NativeNodeId, NodeId, NodeKind, SourceId,
         TopologyNode,
     };
 
     let host = CpuInfo {
-        name: "test CPU".into(),
+        name: Some("test CPU".into()),
         compute_units: 12,
     };
-    let topology = TopologySnapshot {
-        host: HostTopologySnapshot {
+    let topology = TopologyGraphSnapshot {
+        host: HostTopologyGraphSnapshot {
             memory_bytes: Some(3 << 30),
             cpu: Some(host.clone()),
             cpu_apic_ids: Vec::new(),
@@ -586,7 +758,7 @@ fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
         },
         endpoints: Vec::new(),
         sources: Vec::new(),
-        nodes: [(2, NodeKind::KfdHost, 8), (7, NodeKind::KfdGpu, 4)]
+        nodes: [(2, NodeKind::Host, 8), (7, NodeKind::Gpu, 4)]
             .into_iter()
             .enumerate()
             .map(|(id, (native, kind, count))| TopologyNode {
@@ -701,4 +873,16 @@ fn hsa_runtime_reinitializes_after_shutdown() {
         assert_eq!(crate::hsa_init(), SUCCESS);
         assert_eq!(crate::hsa_shut_down(), SUCCESS);
     }
+}
+
+#[test]
+/// Unsupported native services retain an actionable public status.
+fn unsupported_native_services_report_not_supported() {
+    assert_eq!(
+        map_error(rocddi::Error::Operation {
+            kind: rocddi::ErrorKind::Unsupported,
+            detail: "unqualified transport",
+        }),
+        NOT_SUPPORTED
+    );
 }
