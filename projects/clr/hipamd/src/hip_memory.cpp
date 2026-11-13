@@ -4708,6 +4708,41 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
   HIP_RETURN(ihipArray3DGetDescriptor(pArrayDescriptor, array));
 }
 
+// Planes are created eagerly with the parent, so this is a lookup and never allocates. The
+// null-argument asymmetry below is CUDA's: null output is invalid value, null handle is invalid handle.
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx) {
+  HIP_INIT_API(hipArrayGetPlane, pPlaneArray, hArray, planeIdx);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  if (hArray == nullptr) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+
+  if (pPlaneArray == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    if (hip::hipArraySet.find(hArray) == hip::hipArraySet.end()) {
+      HIP_RETURN(hipErrorInvalidHandle);
+    }
+  }
+
+  // A plane is itself an ordinary single-plane array, so it lands here too.
+  if (hArray->numPlanes == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (planeIdx >= hArray->numPlanes) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  *pPlaneArray = hArray->planes[planeIdx];
+
+  HIP_RETURN(hipSuccess);
+}
+
 hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream) {
   HIP_INIT_API(hipMemcpyParam2DAsync, pCopy);
   STREAM_CAPTURE(hipMemcpyParam2DAsync, stream, pCopy);
