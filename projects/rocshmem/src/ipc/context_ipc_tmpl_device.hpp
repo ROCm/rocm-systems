@@ -972,9 +972,9 @@ __device__ void IPCContext::fcollect_wg(rocshmem_team_t team, T *dst,
 #else
   if (sizeof(T) * nelems < 512)
 #endif
-    fcollectmem_wg_linear_thread_puts(team, dst, src, nelems * sizeof(T));
+    fcollectmem_linear_thread_puts_wg(team, dst, src, nelems * sizeof(T));
   else
-    fcollectmem_wg_linear(team, dst, src, nelems * sizeof(T));
+    fcollectmem_linear_wg(team, dst, src, nelems * sizeof(T));
 }
 
 template <typename T>

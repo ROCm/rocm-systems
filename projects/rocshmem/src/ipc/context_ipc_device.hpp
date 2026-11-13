@@ -486,10 +486,10 @@ class IPCContext : public Context {
   __device__ void internal_alltoallmem_wg(rocshmem_team_t team, void *dst,
                                           const void *src, int nelems);
 
-  __device__ void alltoallmem_wg_linear(rocshmem_team_t team, void *dest,
+  __device__ void alltoallmem_linear_wg(rocshmem_team_t team, void *dest,
                                         const void *source, int nelems);
 
-  __device__ void alltoallmem_wg_linear_thread_puts(rocshmem_team_t team, void *dest,
+  __device__ void alltoallmem_linear_thread_puts_wg(rocshmem_team_t team, void *dest,
                                                     const void *source, int nelems);
 
   __device__ void fcollectmem_linear_wave(rocshmem_team_t team, void *dest,
@@ -498,10 +498,10 @@ class IPCContext : public Context {
   __device__ void fcollectmem_linear_thread_puts_wave(rocshmem_team_t team,
       void *dst, const void *src, int nelems);
 
-  __device__ void fcollectmem_wg_linear(rocshmem_team_t team, void *dest,
+  __device__ void fcollectmem_linear_wg(rocshmem_team_t team, void *dest,
                                         const void *source, int nelems);
 
-  __device__ void fcollectmem_wg_linear_thread_puts(rocshmem_team_t team,
+  __device__ void fcollectmem_linear_thread_puts_wg(rocshmem_team_t team,
                                                     void *dest,
                                                     const void *source,
                                                     int nelems);

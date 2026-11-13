@@ -245,12 +245,12 @@ __device__ void IPCContext::internal_alltoallmem_wg(rocshmem_team_t team, void *
 #else
   if (nelems < 512)
 #endif
-    alltoallmem_wg_linear_thread_puts(team, dst, src, nelems);
+    alltoallmem_linear_thread_puts_wg(team, dst, src, nelems);
   else
-    alltoallmem_wg_linear(team, dst, src, nelems);
+    alltoallmem_linear_wg(team, dst, src, nelems);
 }
 
-__device__ void IPCContext::alltoallmem_wg_linear(rocshmem_team_t team, void *dst,
+__device__ void IPCContext::alltoallmem_linear_wg(rocshmem_team_t team, void *dst,
                                             const void *src, int nelems) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
@@ -273,7 +273,7 @@ __device__ void IPCContext::alltoallmem_wg_linear(rocshmem_team_t team, void *ds
   internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
 }
 
-__device__ void IPCContext::alltoallmem_wg_linear_thread_puts(rocshmem_team_t team,
+__device__ void IPCContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t team,
     void *dst, const void *src, int nelems) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
@@ -706,9 +706,9 @@ __device__ void IPCContext::internal_fcollectmem_wg(rocshmem_team_t team, void *
 #else
   if (nelems < 512)
 #endif
-    fcollectmem_wg_linear_thread_puts(team, dst, src, nelems);
+    fcollectmem_linear_thread_puts_wg(team, dst, src, nelems);
   else
-    fcollectmem_wg_linear(team, dst, src, nelems);
+    fcollectmem_linear_wg(team, dst, src, nelems);
 }
 
 __device__ void IPCContext::fcollectmem_wg(rocshmem_team_t team, void *dst,
@@ -716,7 +716,7 @@ __device__ void IPCContext::fcollectmem_wg(rocshmem_team_t team, void *dst,
   internal_fcollectmem_wg(team, dst, src, nelems);
 }
 
-__device__ void IPCContext::fcollectmem_wg_linear_thread_puts(rocshmem_team_t team,
+__device__ void IPCContext::fcollectmem_linear_thread_puts_wg(rocshmem_team_t team,
     void *dst, const void *src, int nelems) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
@@ -761,7 +761,7 @@ __device__ void IPCContext::fcollectmem_wg_linear_thread_puts(rocshmem_team_t te
   __syncthreads();
 }
 
-__device__ void IPCContext::fcollectmem_wg_linear(rocshmem_team_t team, void *dst,
+__device__ void IPCContext::fcollectmem_linear_wg(rocshmem_team_t team, void *dst,
                                             const void *src, int nelems) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
