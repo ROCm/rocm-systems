@@ -1,0 +1,70 @@
+view: Local Data Share (LDS)
+legacy_panel_id: 1200
+alias: lds
+tables:
+- id: 1201
+  title: LDS Speed-of-Light
+  cli_style: simple_bar
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: lds.util
+    label: Utilization
+  - metric: lds.access_rate
+    label: Access Rate
+    legacy_id: 12.1.1
+  - metric: lds.theoretical_bw_util
+    label: Theoretical Bandwidth Utilization
+    legacy_id: 12.1.2
+  - metric: lds.bank_conflict_rate
+    label: Bank Conflict Rate
+    legacy_id: 12.1.3
+- id: 1202
+  title: LDS Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: lds.insts
+  - metric: lds.load
+  - metric: lds.store
+  - metric: lds.atomic
+  - metric: lds.load_bw
+    legacy_id: 12.2.4
+  - metric: lds.store_bw
+    legacy_id: 12.2.5
+  - metric: lds.atomic_bw
+    legacy_id: 12.2.6
+  - metric: lds.theoretical_bw
+    label: Theoretical Bandwidth
+  - metric: lds.lat
+    legacy_id: 12.2.8
+  - metric: lds.bank_conflicts_access
+    label: Bank Conflicts/Access
+  - metric: lds.index_accesses
+    label: Index Accesses
+    legacy_id: 12.2.10
+  - metric: lds.atomic_return_cycles
+    label: Atomic Return Cycles
+    legacy_id: 12.2.11
+  - metric: lds.bank_conflict
+    label: Bank Conflict
+    legacy_id: 12.2.12
+  - metric: lds.addr_conflict
+    label: Addr Conflict
+    legacy_id: 12.2.13
+  - metric: lds.unaligned_stall
+    label: Unaligned Stall
+    legacy_id: 12.2.14
+  - metric: lds.mem_violations
+    label: Mem Violations
+    legacy_id: 12.2.15
+  - metric: lds.command_fifo_full_rate
+    legacy_id: 12.2.16
+  - metric: lds.data_fifo_full_rate
+    legacy_id: 12.2.17

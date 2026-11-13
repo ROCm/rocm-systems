@@ -77,7 +77,19 @@ repos:
         name: Metric library validation
         entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_metric_library.py'
         language: system
-        files: (metric_library/.*\.(yaml|py)|mi_gpu_spec\.yaml|tools/(validate_metric_library|format_yaml)\.py)$
+        files: (metric_library/.*\.(yaml|py)|mi_gpu_spec\.yaml|utils/equation_format\.py|tools/(validate_metric_library|format_yaml)\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+
+  # Local hook: analysis view validation
+  - repo: local
+    hooks:
+      - id: analysis-views-check
+        name: Analysis view validation
+        entry: bash -lc 'cd projects/rocprofiler-compute && python tools/validate_views.py'
+        # Standard library and the vendored PyYAML only.
+        language: python
+        files: (rocprof_compute_soc/views/.*\.yaml|metric_library/.*\.(yaml|py)|utils/(analysis_views|equation_format|utils_common)\.py|tools/validate_views\.py)$
         pass_filenames: false
         stages: [pre-commit]
 

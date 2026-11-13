@@ -1,0 +1,122 @@
+view: Memory Chart
+legacy_panel_id: 300
+alias: memchart
+tables:
+- id: 301
+  title: Memory Chart
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: wave.occupancy_pct
+    label: Wavefront Occupancy
+    round: 1
+    legacy_id: 3.1.0
+  - metric: dispatch.vgprs
+    label: VGPR
+    round: 0
+    legacy_id: 3.1.1
+  - metric: dispatch.sgprs
+    label: SGPR
+    round: 0
+    legacy_id: 3.1.2
+  - metric: dispatch.lds_allocation
+    round: 0
+    legacy_id: 3.1.3
+  - metric: dispatch.scratch_allocation_per_wave
+    label: Scratch Allocation
+    round: 3
+    legacy_id: 3.1.4
+  - metric: spi.workgroups_per_cu
+    label: Workgroups
+    round: 1
+    legacy_id: 3.1.5
+  - metric: ta.global_rd_insts
+    label: Flat Read
+    round: 0
+    legacy_id: 3.1.6
+  - metric: ta.global_wr_insts
+    label: Flat Write
+    round: 0
+    legacy_id: 3.1.7
+  - metric: ta.global_atomic_insts
+    label: Flat Atomic
+    round: 0
+    legacy_id: 3.1.8
+  - metric: ta.spill_rd_insts
+    label: Buffer Read
+    round: 0
+    legacy_id: 3.1.9
+  - metric: ta.spill_wr_insts
+    label: Buffer Write
+    round: 0
+    legacy_id: 3.1.10
+  - metric: ta.spill_atomic_insts
+    label: Buffer Atomic
+    round: 0
+    legacy_id: 3.1.11
+  - metric: lds.insts
+    label: LDS Req
+    round: 0
+    legacy_id: 3.1.12
+  - metric: lds.util
+    label: LDS Util
+    round: 0
+    legacy_id: 3.1.13
+  - metric: vl1d.hit_rate
+    label: VL1 Hit
+    round: 0
+    legacy_id: 3.1.14
+  - metric: vl1d.coalescing
+    label: VL1 Coalesce
+    round: 0
+    legacy_id: 3.1.15
+  - metric: vl1d.l2_rd_bw
+    label: VL1_L2 Read BW
+    legacy_id: 3.1.16
+  - metric: vl1d.l2_wr_bw
+    label: VL1_L2 Write BW
+    legacy_id: 3.1.17
+  - metric: vl1d.l2_atomic_bw
+    label: VL1_L2 Atomic BW
+    legacy_id: 3.1.18
+  - metric: sl1d.req
+    label: sL1D Rd
+    round: 0
+    legacy_id: 3.1.19
+  - metric: sl1d.hits_per_req
+    label: sL1D Hit
+    round: 0
+    legacy_id: 3.1.20
+  - metric: sl1d.l2_rd_bw
+    label: sL1D_L2 Read BW
+    legacy_id: 3.1.21
+  - metric: l1i.req
+    label: IL1 Fetch
+    round: 0
+    legacy_id: 3.1.22
+  - metric: l1i.hits_per_req
+    label: IL1 Hit
+    round: 0
+    legacy_id: 3.1.23
+  - metric: l1i.l2_bw
+    label: IL1_L2 Read BW
+    legacy_id: 3.1.24
+  - metric: l2.hit_rate
+    label: L2 Hit
+    round: 0
+    legacy_id: 3.1.25
+  - metric: fabric.rd_bw
+    label: L2-Fabric Read BW
+    legacy_id: 3.1.26
+  - metric: fabric.wr_atomic_bw
+    label: L2-Fabric Write and Atomic BW
+    legacy_id: 3.1.27
+  - metric: fabric.hbm_rd_bw_est
+    label: Estimated HBM Read BW
+    legacy_id: 3.1.28
+  - metric: fabric.hbm_wr_atomic_bw_est
+    label: Estimated HBM Write and Atomic BW
+    legacy_id: 3.1.29

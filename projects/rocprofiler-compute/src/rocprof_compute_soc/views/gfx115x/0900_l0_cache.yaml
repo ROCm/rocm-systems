@@ -1,0 +1,79 @@
+view: GL0 Cache (TCP Cache)
+legacy_panel_id: 900
+alias: gl0
+tables:
+- id: 901
+  title: GL0 Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.busy
+    legacy_id: 9.1.0
+- id: 902
+  title: GL0 Request Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.total_req
+    label: Total Requests
+    legacy_id: 9.2.0
+  - metric: gl0.rd_req
+    label: Read Requests
+  - metric: gl0.wr_req
+    label: Write Requests
+  - metric: gl0.miss_req
+    label: Miss Requests
+    legacy_id: 9.2.3
+- id: 903
+  title: GL0 Cache Performance
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.hit_rate
+    label: Hit Rate
+- id: 904
+  title: GL0-GL1 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.gl1_rd_req
+    label: GL1 Read Requests
+    legacy_id: 9.4.0
+  - metric: gl0.gl1_rd_128b_req
+    legacy_id: 9.4.1
+  - metric: gl0.gl1_wr_req
+    label: GL1 Write Requests
+    legacy_id: 9.4.2
+- id: 905
+  title: GL0 Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.ta_req_stall
+    label: TA Req Stall
+    legacy_id: 9.5.0
+  - metric: gl0.gl1_back_pressure
+    legacy_id: 9.5.1
+  - metric: gl0.data_fifo_stall
+    label: Data FIFO Stall
+    legacy_id: 9.5.2

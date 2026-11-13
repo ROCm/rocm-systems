@@ -1,0 +1,83 @@
+view: Command Processor Compute (CPC)
+legacy_panel_id: 500
+alias: cpc
+tables:
+- id: 501
+  title: CPC Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.cpc_busy
+    legacy_id: 5.1.0
+  - metric: cp.cpc_idle
+    legacy_id: 5.1.1
+  - metric: cp.cpc_stalled
+    legacy_id: 5.1.2
+- id: 502
+  title: CPC Interface Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.tciu_busy
+    legacy_id: 5.2.0
+  - metric: cp.utcl2_busy
+    legacy_id: 5.2.1
+  - metric: cp.gcriu_busy
+    legacy_id: 5.2.2
+- id: 503
+  title: MEC Stall Cycles
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.me1_stall_on_rciu_ready
+    legacy_id: 5.3.0
+  - metric: cp.me1_stall_on_memory_rd
+    legacy_id: 5.3.1
+  - metric: cp.me1_stall_on_memory_wr
+    legacy_id: 5.3.2
+  - metric: cp.me1_stall_on_roq_data
+    legacy_id: 5.3.3
+- id: 504
+  title: CPC Memory Requests
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.tciu_rd_req
+    legacy_id: 5.4.0
+  - metric: cp.tciu_wr_req
+    legacy_id: 5.4.1
+  - metric: cp.gus_rd_req
+    legacy_id: 5.4.2
+  - metric: cp.gus_wr_req
+    legacy_id: 5.4.3
+- id: 505
+  title: MEC Instruction Cache
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.inst_cache_hits
+    legacy_id: 5.5.0
+  - metric: cp.inst_cache_misses
+    legacy_id: 5.5.1
+  - metric: cp.inst_cache_hit_rate
+    legacy_id: 5.5.2

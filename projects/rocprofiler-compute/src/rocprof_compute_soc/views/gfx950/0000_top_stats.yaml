@@ -1,0 +1,12 @@
+view: Top Stats
+legacy_panel_id: 0
+alias: topstats
+tables:
+- render: raw_csv_table
+  id: 1
+  title: Top Kernels
+  source: pmc_kernel_top.csv
+- render: raw_csv_table
+  id: 2
+  title: Dispatch List
+  source: pmc_dispatch_info.csv

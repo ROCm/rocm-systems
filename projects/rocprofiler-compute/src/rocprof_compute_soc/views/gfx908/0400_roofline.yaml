@@ -1,0 +1,22 @@
+view: Roofline
+legacy_panel_id: 400
+alias: roof
+tables:
+- id: 401
+  title: Roofline Performance Rates
+  cli_style: Roofline
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+    peak: Peak (Empirical)
+  metrics:
+  - metric: vl1d.l2_bw
+    label: L2 Cache Bandwidth
+    legacy_id: 4.1.9
+  - metric: vl1d.cache_bw
+    label: L1 Cache Bandwidth
+    legacy_id: 4.1.10
+  - metric: lds.theoretical_bw
+    label: LDS Bandwidth
+    legacy_id: 4.1.11

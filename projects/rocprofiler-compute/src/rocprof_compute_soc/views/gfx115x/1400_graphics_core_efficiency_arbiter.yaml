@@ -1,0 +1,77 @@
+view: Graphics Core Efficiency Arbiter (GCEA)
+legacy_panel_id: 1400
+alias: gcea
+tables:
+- id: 1401
+  title: DRAM Read Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gcea.dram_rd_req
+    legacy_id: 14.1.0
+  - metric: gcea.dram_rd_chained_req
+    legacy_id: 14.1.1
+  - metric: gcea.dram_rd_banks_active
+    legacy_id: 14.1.2
+  - metric: gcea.dram_rd_size_32b_increments
+    label: DRAM Read Size (32B increments)
+    legacy_id: 14.1.3
+- id: 1402
+  title: DRAM Write Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gcea.dram_wr_req
+    legacy_id: 14.2.0
+  - metric: gcea.dram_wr_chained_req
+    legacy_id: 14.2.1
+  - metric: gcea.dram_wr_banks_active
+    legacy_id: 14.2.2
+  - metric: gcea.dram_wr_size_32b_increments
+    label: DRAM Write Size (32B increments)
+    legacy_id: 14.2.3
+- id: 1404
+  title: System Arbiter (SARB)
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gcea.sarb_busy
+    legacy_id: 14.4.0
+  - metric: gcea.sarb_stalled
+    legacy_id: 14.4.1
+  - metric: gcea.sarb_starving
+    legacy_id: 14.4.2
+  - metric: gcea.sarb_total_req
+    legacy_id: 14.4.3
+  - metric: gcea.sarb_dram_req
+    legacy_id: 14.4.4
+- id: 1405
+  title: Return Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gcea.rd_returns
+    label: Read Returns
+    legacy_id: 14.5.0
+  - metric: gcea.wr_returns
+    label: Write Returns
+    legacy_id: 14.5.1
+  - metric: gcea.probe_req
+    label: Probe Requests
+    legacy_id: 14.5.2

@@ -1,0 +1,64 @@
+view: Workgroup Manager (SPI)
+legacy_panel_id: 600
+alias: spi
+tables:
+- id: 601
+  title: Workgroup manager utilizations
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.accelerator_util
+    legacy_id: 6.1.0
+  - metric: spi.scheduler_pipe_util
+    legacy_id: 6.1.1
+  - metric: spi.workgroup_manager_util
+    legacy_id: 6.1.2
+  - metric: compute.se_util
+    legacy_id: 6.1.3
+  - metric: compute.cu_util
+    label: SIMD Utilization
+  - metric: spi.dispatched_workgroups
+    legacy_id: 6.1.5
+  - metric: spi.dispatched_wavefronts
+    legacy_id: 6.1.6
+  - metric: spi.vgpr_writes
+    legacy_id: 6.1.7
+  - metric: spi.sgpr_writes
+    legacy_id: 6.1.8
+- id: 602
+  title: Workgroup Manager - Resource Allocation
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.not_scheduled_rate_workgroup_manager
+    label: Not-scheduled Rate (Workgroup Manager)
+    legacy_id: 6.2.0
+  - metric: spi.not_scheduled_rate_scheduler_pipe
+    label: Not-scheduled Rate (Scheduler-Pipe)
+    legacy_id: 6.2.1
+  - metric: spi.scheduler_pipe_stall_rate
+    legacy_id: 6.2.2
+  - metric: spi.scratch_stall_rate
+    legacy_id: 6.2.3
+  - metric: spi.insufficient_simd_waveslots
+    legacy_id: 6.2.4
+  - metric: spi.insufficient_simd_vgprs
+    legacy_id: 6.2.5
+  - metric: spi.insufficient_simd_sgprs
+    legacy_id: 6.2.6
+  - metric: spi.insufficient_cu_lds
+    legacy_id: 6.2.7
+  - metric: spi.insufficient_cu_barriers
+    legacy_id: 6.2.8
+  - metric: spi.reached_cu_workgroup_limit
+    legacy_id: 6.2.9
+  - metric: spi.reached_cu_wavefront_limit
+    legacy_id: 6.2.10

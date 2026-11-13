@@ -20,6 +20,8 @@ from unittest.mock import Mock
 import config
 from memory_chart.loader import Layouts, PanelConfigs
 from utils import csv_compression
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import ROOFLINE_PANEL_ID, canonical_config_arch
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 src_candidate = os.path.join(ROOT, "src")
@@ -65,6 +67,22 @@ def with_metric_change(data: dict, metric: str, **fields) -> dict:
         if entry["metric_id"] == metric:
             entry.update(fields)
     return data
+
+
+def member_arch(arch: str) -> str:
+    """Return a GPU arch with the analysis configs of arch (gfx1150 for gfx115x)."""
+    return next(
+        gpu_arch
+        for gpu_arch in sorted(mi_gpu_specs.get_gpu_series_dict())
+        if canonical_config_arch(gpu_arch) == arch
+    )
+
+
+def unshown_file_ids(arch: str) -> Set[str]:
+    """Return the ids of analysis config files hidden on arch."""
+    if member_arch(arch) in mi_gpu_specs.get_roofline_archs():
+        return set()
+    return {f"{ROOFLINE_PANEL_ID:04d}"}
 
 
 def check_resource_allocation():
