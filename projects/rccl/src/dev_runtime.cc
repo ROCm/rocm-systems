@@ -1548,7 +1548,7 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
     // builds can't use this single-descriptor path.
     exportCuMem = false;
     if (ncclCuMemEnable() && ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
-        CUPFN(cuMemRetainAllocationHandle(&localCuMemHandle,
+        CUPROBE(cuMemRetainAllocationHandle(&localCuMemHandle,
                                           reinterpret_cast<void*>(allocBase))) == CUDA_SUCCESS) {
       haveLocalCuMemHandle = true;
       const size_t retainedSize = allocSize;

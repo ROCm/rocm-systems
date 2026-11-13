@@ -278,9 +278,9 @@ bool ncclMcAddrBindable(const void* addr, size_t size) {
     CUmemAllocationProp prop;
     CUresult err;
 
-    if (CUPFN(cuMemGetAddressRange(&base, &baseSize, cur)) != CUDA_SUCCESS) return false;
-    if (CUPFN(cuMemRetainAllocationHandle(&handle, (void*)cur)) != CUDA_SUCCESS) return false;
-    err = CUPFN(cuMemGetAllocationPropertiesFromHandle(&prop, handle));
+    if (CUPROBE(cuMemGetAddressRange(&base, &baseSize, cur)) != CUDA_SUCCESS) return false;
+    if (CUPROBE(cuMemRetainAllocationHandle(&handle, (void*)cur)) != CUDA_SUCCESS) return false;
+    err = CUPROBE(cuMemGetAllocationPropertiesFromHandle(&prop, handle));
     CUCHECKIGNORE(cuMemRelease(handle));
     // Multicast can only back device-located allocations (same gate as symBindTeamMemory).
     if (err != CUDA_SUCCESS || prop.location.type != CU_MEM_LOCATION_TYPE_DEVICE) return false;
