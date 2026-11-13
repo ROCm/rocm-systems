@@ -195,6 +195,7 @@ bool Event::resetStatus(int32_t status) {
     ClPrint(LOG_ERROR, LOG_CMD, "Failed to reset command status");
     return false;
   }
+  deferResourceRelease_ = false;
   notified_.clear();
   return true;
 }
