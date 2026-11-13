@@ -4,6 +4,11 @@ All notable changes to the hipFile Python bindings will be documented in this fi
 
 ## [0.7.0.dev0]
 
+### Changed
+
+- Building the bindings now requires CMake 3.25.2 or later, instead of 3.21,
+  to match the hipFile library.
+
 ## [0.6.0.dev0]
 
 ## [0.5.0.dev0]

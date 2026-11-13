@@ -27,10 +27,9 @@ endif()
 set(INSTALL_GTEST OFF CACHE BOOL "Don't install GoogleTest")
 set(GTEST_HAS_ABSL OFF CACHE BOOL "Don't use Abseil for GoogleTest")
 
-# We use find_package manually instead of FIND_PACKAGE_ARGS with
-# FetchContent_Declare, since FIND_PACKAGE_ARGS was introduced in CMake
-# version 3.24, which is unavailable on some operating systems:
-# https://cmake.org/cmake/help/latest/module/FetchContent.html
+# We call find_package() ourselves instead of passing FIND_PACKAGE_ARGS to
+# FetchContent_Declare, so that sanitizer builds skip a system GoogleTest
+# and always fetch it.
 if(HIPFILE_GTEST_TRY_SYSTEM)
     find_package(GTest QUIET)
 endif()
@@ -94,9 +93,9 @@ foreach(gtest_target GTest::gtest GTest::gmock)
     # via -isystem. clang-tidy suppresses diagnostics from system headers by
     # default, which keeps GoogleTest's macros and templates from polluting our
     # test builds with warnings we can't fix. The SYSTEM keyword passed to
-    # FetchContent_Declare only takes effect on CMake >= 3.25, and a system
-    # find_package(GTest) is not guaranteed to mark them either, so set the
-    # property here directly to cover every path.
+    # FetchContent_Declare marks a fetched GoogleTest's headers, but a system
+    # find_package(GTest) is not guaranteed to, so set the property here
+    # directly to cover every path.
     set_target_properties(${gtest_target} PROPERTIES
         INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
             "$<TARGET_PROPERTY:${gtest_target},INTERFACE_INCLUDE_DIRECTORIES>")
