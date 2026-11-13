@@ -56,6 +56,7 @@ using dda::common::ddaLL128ArSlotWords;
 using dda::common::ddaLL128ArTwoShotSlotWords;
 using dda::common::ddaLL128Slices;
 using dda::common::ddaLL128SlicesOf;
+using dda::common::kDdaArSplitBDma;
 using dda::common::kDdaArSplitBPairwise;
 using dda::common::kDdaArSplitBWide;
 using dda::common::kDdaArSplitBWideChunked;
@@ -278,8 +279,10 @@ static bool ddaArSplitSmallGrid(unsigned blocks) {
   return blocks <= kDdaArSplitSmallGridBlocks;
 }
 
+static size_t ddaArSplitDmaGroup(int nRanks, size_t shardBytes, size_t slices, unsigned blocks, unsigned threads);
+
 // Peer-split grid: the replaced launch's blocks and threads, a warp per unit a block owns on 8 B flag slices.
-// Ranks must agree on it: it sets the wire format.
+// Ranks must agree on it: it sets the wire format. A launch DMA B takes keeps the 8 B flag.
 static std::pair<dim3, dim3> ddaArLL128SplitGrid(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap bound,
                                                  int* flagBytes = nullptr) {
   const size_t n = (size_t)std::max(comm->nRanks, 2);
@@ -292,7 +295,8 @@ static std::pair<dim3, dim3> ddaArLL128SplitGrid(const ncclComm* comm, size_t by
   const size_t maxThreads = bound.threads > 0 ? std::min(bound.threads, kDdaArLL128Threads) : kDdaArLL128Threads;
   const size_t unitThreads = (size_t)kDdaLL128Warp * ((slices + blocks - 1) / blocks) * (n - 1);
   const size_t threads = std::max<size_t>(std::min(unitThreads, maxThreads) / kDdaLL128Warp, 1) * kDdaLL128Warp;
-  const bool narrow = !ddaArSplitSmallGrid((unsigned)blocks);
+  const bool narrow = !ddaArSplitSmallGrid((unsigned)blocks) &&
+                      ddaArSplitDmaGroup((int)n, bytes / n, slices, (unsigned)blocks, (unsigned)threads) == 0;
   if (narrow) {
     blocks = std::min(blocks, ddaLL128SlicesOf<kDdaLL128FlagBytesNarrow>(bytes / n));
   }
@@ -345,12 +349,39 @@ static DdaArSplitB ddaArSplitB(int nRanks, size_t shardBytes, size_t slices, uns
   return kDdaArSplitBPairwise;
 }
 
+// DMA B gathers a block's peer copies into LDS with async loads before folding them: on hand-off launches of shards
+// of at most 512 KiB where the copies of a block's slices are at least 128 KiB, a block owns at most 9 slices and one
+// group holds them all; not where chunked wide B would run (it does take 9-rank launches wide B would). Such a launch
+// keeps the 8 B flag. As measured: larger shards, fewer copies, more slices or groups lost to the other B forms.
+constexpr size_t kDdaArSplitDmaMaxShardBytes = 512 * 1024;
+constexpr size_t kDdaArSplitDmaMinCopyBytes = 128 * 1024;
+constexpr size_t kDdaArSplitDmaMaxSlices = 9;
+
+// Slices a DMA B group stages for a split launch of `slices` 8 B flag slices of `shardBytes` shards on `blocks` x
+// `threads`, or 0 where DMA B does not take it.
+static size_t ddaArSplitDmaGroup(int nRanks, size_t shardBytes, size_t slices, unsigned blocks, unsigned threads) {
+  if (nRanks < 2 || blocks == 0 || shardBytes > kDdaArSplitDmaMaxShardBytes) {
+    return 0;
+  }
+  const size_t blockSlices = (slices + blocks - 1) / blocks;
+  const size_t copyBytes = (size_t)(nRanks - 1) * blockSlices * dda::common::kDdaLL128WireBytesPerSlice;
+  if (copyBytes < kDdaArSplitDmaMinCopyBytes || blockSlices > kDdaArSplitDmaMaxSlices) {
+    return 0;
+  }
+  if (!ddaArSplitTakesHandoff(nRanks, slices, blocks, threads) ||
+      ddaArSplitB(nRanks, shardBytes, slices, blocks) == kDdaArSplitBWideChunked) {
+    return 0;
+  }
+  const size_t group = dda::common::ddaArSplitDmaGroupSlices(threads, nRanks, true, blockSlices);
+  return group < blockSlices ? 0 : group;
+}
+
 // Devices (a bit each, below 64) on which the hand-off kernel of T with B form kB may use its largest LDS.
 template <typename T, DdaArSplitB kB = kDdaArSplitBPairwise>
 std::atomic<uint64_t> ddaArSplitHandoffLdsDevs{0};
 
-// Raises the hand-off kernel's dynamic LDS limit once per device; false (the own-slot path, or pairwise B for a wide
-// form) if the runtime refuses.
+// Raises the hand-off kernel's dynamic LDS limit once per device; false (the own-slot path, pairwise B for a wide form,
+// the 8 B flag's own slot for DMA B) if the runtime refuses. DMA B's kernel runs the 8 B flag within its LDS budget.
 template <typename T, DdaArSplitB kB = kDdaArSplitBPairwise>
 static bool ddaArSplitHandoffLdsOk() {
   int dev = 0;
@@ -362,24 +393,28 @@ static bool ddaArSplitHandoffLdsOk() {
   if ((ddaArSplitHandoffLdsDevs<T, kB>.load(std::memory_order_acquire) & devBit) != 0) {
     return true;
   }
-  const void* kernel =
-    reinterpret_cast<const void*>(&dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow, true, kB>);
-  const int lds =
-    (int)dda::common::ddaLL128ArSplitSharedBytes(kDdaArLL128Threads, dda::common::kDdaMaxNranks, /*handoff=*/true, kB);
+  constexpr bool kDma = kB == kDdaArSplitBDma;
+  const void* kernel = reinterpret_cast<const void*>(
+    &dda::common::ddaAllReduceTwoShotLL128Split<T, kDma ? kDdaLL128FlagBytesWide : kDdaLL128FlagBytesNarrow, true, kB>);
+  const int lds = kDma ? (int)dda::common::kDdaArSplitDmaLdsBudget
+                       : (int)dda::common::ddaLL128ArSplitSharedBytes(kDdaArLL128Threads, dda::common::kDdaMaxNranks,
+                                                                      /*handoff=*/true, kB);
   if (cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, lds) != cudaSuccess) {
     (void)cudaGetLastError();
     INFO(NCCL_COLL, "DDA fabric AllReduce LL128 peer-split: no %d B dynamic LDS for b=%d, %s", lds, (int)kB,
-         kB == kDdaArSplitBPairwise ? "no hand-off" : "pairwise B");
+         kB == kDdaArSplitBPairwise ? "no hand-off" : kB == kDdaArSplitBDma ? "8 B own slot" : "pairwise B");
     return false;
   }
   ddaArSplitHandoffLdsDevs<T, kB>.fetch_or(devBit, std::memory_order_release);
   return true;
 }
 
-// The 4 B flag's hand-off kernel of T for B form b.
+// The hand-off kernel of T for B form b: the 4 B flag's, DMA B's on the 8 B flag.
 template <typename T>
 static DdaArLL128Kernel<T> ddaArLL128SplitHandoffKernel(DdaArSplitB b) {
   switch (b) {
+  case kDdaArSplitBDma:
+    return &dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesWide, true, kDdaArSplitBDma>;
   case kDdaArSplitBWide:
     return &dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow, true, kDdaArSplitBWide>;
   case kDdaArSplitBWideChunked:
@@ -472,12 +507,19 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
   const size_t slices = narrow ? ddaLL128SlicesOf<kDdaLL128FlagBytesNarrow>(shardBytes) : ddaLL128Slices(shardBytes);
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
-  // Past the small grid the flag is narrow, so the hand-off runs only with the narrow flag.
-  const bool handoff = narrow && ddaArSplitTakesHandoff(nRanks, slices, grid.x, block.x) && ddaArSplitHandoffLdsOk<T>();
-  const DdaArSplitB b = handoff ? ddaArSplitBGranted<T>(nRanks, shardBytes, slices, grid.x) : kDdaArSplitBPairwise;
+  // Past the small grid the flag is narrow but where DMA B takes the launch, so the hand-off runs with the narrow flag
+  // or DMA B; DMA B runs where the runtime grants its LDS, else the 8 B flag's own slot.
+  const size_t dmaGroup = split && !narrow ? ddaArSplitDmaGroup(nRanks, shardBytes, slices, grid.x, block.x) : 0;
+  const bool dma = dmaGroup != 0 && ddaArSplitHandoffLdsOk<T, kDdaArSplitBDma>();
+  const bool handoff =
+    dma || (narrow && ddaArSplitTakesHandoff(nRanks, slices, grid.x, block.x) && ddaArSplitHandoffLdsOk<T>());
+  const DdaArSplitB b = dma       ? kDdaArSplitBDma
+                        : handoff ? ddaArSplitBGranted<T>(nRanks, shardBytes, slices, grid.x)
+                                  : kDdaArSplitBPairwise;
   const int wire = split ? dda::common::kDdaLL128WireAsync : ddaArLL128Wire(comm, bytes);
-  const size_t lds =
-    split ? dda::common::ddaLL128ArSplitSharedBytes(block.x, nRanks, handoff, b) : ddaArLL128SharedBytes(wire, block.x);
+  const size_t lds = dma     ? dda::common::ddaLL128ArSplitDmaSharedBytes(block.x, nRanks, true, dmaGroup)
+                     : split ? dda::common::ddaLL128ArSplitSharedBytes(block.x, nRanks, handoff, b)
+                             : ddaArLL128SharedBytes(wire, block.x);
   const DdaArLL128Kernel<T> kernel =
     handoff ? ddaArLL128SplitHandoffKernel<T>(b) :
     narrow  ? &dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow> :
@@ -491,9 +533,9 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
 
   INFO(NCCL_COLL,
        "DDA fabric AllReduce LL128 two-shot: nRanks=%d bytes=%zu shardBytes=%zu slices=%zu grid=%u block=%u wire=%d "
-       "lds=%zu flag=%dB handoff=%d b=%d (%s, bankSize=%zu)",
+       "lds=%zu flag=%dB handoff=%d b=%d dmaGroup=%zu (%s, bankSize=%zu)",
        nRanks, bytes, shardBytes, slices, grid.x, block.x, wire, lds, flagBytes, (int)handoff, (int)b,
-       split ? "peer-split" : "warp-per-slice", bankSize);
+       dma ? dmaGroup : 0, split ? "peer-split" : "warp-per-slice", bankSize);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
