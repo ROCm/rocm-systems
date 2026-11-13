@@ -833,6 +833,7 @@ TEST_P(FastpathIoParam, IoWithFallbackThrowsAFallbackIneligibleException)
     backend->register_fallback_backend(m_fallback);
 
     expect_io();
+    EXPECT_CALL(mhip, hipGetLastError).Times(0);
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -884,6 +885,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleENODEV)
     backend->register_fallback_backend(m_fallback);
 
     expect_io();
+    EXPECT_CALL(mhip, hipGetLastError).Times(1);
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -912,6 +914,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleEREMOTEIO)
     backend->register_fallback_backend(m_fallback);
 
     expect_io();
+    EXPECT_CALL(mhip, hipGetLastError).Times(1);
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
@@ -922,6 +925,35 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleEREMOTEIO)
         case IoType::Write:
             EXPECT_CALL(mhip, hipAmdFileWrite)
                 .WillOnce(Throw(std::system_error(EREMOTEIO, generic_category())));
+            break;
+        default:
+            FAIL() << "Invalid IoType";
+    }
+
+    EXPECT_CALL(*m_fallback, io).WillOnce(Return(DEFAULT_IO_SIZE));
+    EXPECT_CALL(*m_fallback, score).WillOnce(Return(SCORE_ACCEPT));
+
+    ssize_t nbytes =
+        backend->io(GetParam(), mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET);
+    ASSERT_EQ(nbytes, DEFAULT_IO_SIZE);
+}
+
+TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleENOTTY)
+{
+    auto backend    = std::make_shared<Fastpath>();
+    auto m_fallback = std::make_shared<StrictMock<MBackend>>();
+    backend->register_fallback_backend(m_fallback);
+
+    expect_io();
+    EXPECT_CALL(mhip, hipGetLastError).Times(1);
+    EXPECT_CALL(mstats, error).Times(1);
+
+    switch (GetParam()) {
+        case IoType::Read:
+            EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(std::system_error(ENOTTY, generic_category())));
+            break;
+        case IoType::Write:
+            EXPECT_CALL(mhip, hipAmdFileWrite).WillOnce(Throw(std::system_error(ENOTTY, generic_category())));
             break;
         default:
             FAIL() << "Invalid IoType";
@@ -947,6 +979,7 @@ TEST_P(FastpathIoParam, FallbackRejectsIoRequest)
 
     expect_io();
     EXPECT_CALL(*m_fallback, score).WillOnce(Return(SCORE_REJECT));
+    EXPECT_CALL(mhip, hipGetLastError).Times(0);
     EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {

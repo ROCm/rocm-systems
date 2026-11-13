@@ -227,4 +227,10 @@ Hip::hipDeviceGetUuid(int device_id) const
     (void)throwOnHipError<Hip::RuntimeError>(::hipDeviceGetUuid(&uuid, device_id));
     return uuid;
 }
+
+hipError_t
+Hip::hipGetLastError() const
+{
+    return ::hipGetLastError();
+}
 }

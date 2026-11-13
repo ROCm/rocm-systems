@@ -33,7 +33,8 @@ using namespace std;
 static bool
 fastpathFallbackEligibleErrno(int err)
 {
-    return err == ENODEV || err == EREMOTEIO;
+    // ENOTTY: the KFD does not implement the AIS ioctl.
+    return err == ENODEV || err == EREMOTEIO || err == ENOTTY;
 }
 
 /* The fastpath backend is used when:
@@ -70,6 +71,8 @@ fastpathFallbackEligibleErrno(int err)
  *      - returns
  *          - hipErrorInvalidDevice if unable to lookup current device
  *          - hipErrorUnknown if rocr runtime does not return success
+ *      - On ROCm >= 10.3 (HIP 7.18), a failure also sets the thread's last HIP
+ *        error (see hipGetLastError())
  *  - ROCR Runtime (userspace)
  *      - repository: rocm-systems
  *      - file: projects/clr/rocclr/device/rocm/rocdevice.cpp
@@ -93,7 +96,11 @@ fastpathFallbackEligibleErrno(int err)
  *      - functions: hsaKmtAisReadWriteFile(...),
  *      - If the buffer pointer, and io_size combination are invalid, return HSAKMT_STATUS_INVALID_PARAMETER
  *          - converts buffer pointer + io_size to a buffer handle (no alignment check)
- *      - size_copied and status are untouched
+ *      - size_copied and status are untouched if the call fails before the ioctl
+ *      - otherwise, size_copied and status are set from the ioctl
+ *          - if the ioctl fails before the AIS handler runs (e.g. ENOTTY when the
+ *            KFD does not implement the AIS ioctl), status is set to -errno and
+ *            size_copied to 0
  *      - returns
  *          - HSAKMT_STATUS_INVALID_PARAMETER if
  *              - the buffer pointer + size combination are invalid
@@ -283,6 +290,15 @@ Fastpath::is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const
         // Thrown exception not eligible for fallback.
         return false;
     }
+}
+
+void
+Fastpath::on_fallback() const
+{
+    // Clear the HIP error set by a failed hipAmdFile{Read,Write}
+    // If the fallback backend successfully completes IO, we don't want a set
+    // HIP Runtime Error left around.
+    (void)Context<Hip>::get()->hipGetLastError();
 }
 
 extern "C" {

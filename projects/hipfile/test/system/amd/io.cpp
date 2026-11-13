@@ -10,6 +10,7 @@
 #include "hipfile.h"
 
 #include "io-test.h"
+#include "mhip.h"
 #include "test-common.h"
 #include "test-options.h"
 
@@ -17,10 +18,12 @@
 #include <bit>
 #include <cstdlib>
 #include <fcntl.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 #include <linux/stat.h>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -28,6 +31,7 @@
 extern SystemTestOptions test_env;
 
 using namespace hipFile;
+using ::testing::NiceMock;
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 
@@ -207,6 +211,20 @@ TEST_P(HipFileIo, zeroSizedWriteAtAlignedOffsetBeyondEndOfFileReturnsZero)
 }
 #endif
 
+TEST_P(HipFileIo, ValidReadDoesNotSetHipError)
+{
+    (void)hipGetLastError(); // Clear any set HIP Error.
+    ASSERT_EQ(tmpfile_size, hipFileRead(tmpfile_handle, unregistered_device_buffer, tmpfile_size, 0, 0));
+    ASSERT_EQ(hipSuccess, hipGetLastError());
+}
+
+TEST_P(HipFileIo, ValidWriteDoesNotSetHipError)
+{
+    (void)hipGetLastError(); // Clear any set HIP Error.
+    ASSERT_EQ(tmpfile_size, hipFileWrite(tmpfile_handle, unregistered_device_buffer, tmpfile_size, 0, 0));
+    ASSERT_EQ(hipSuccess, hipGetLastError());
+}
+
 INSTANTIATE_TEST_SUITE_P(, HipFileIo, testing::ValuesIn(io_test_params),
                          [](const testing::TestParamInfo<HipFileIo::ParamType> &param_info) {
                              return param_info.param.name;
@@ -270,5 +288,132 @@ TEST_F(HipFileIoHipInit, spawnedThreadWriteRunsWithoutSegfault)
     }).join();
     ASSERT_EQ(io_size, res);
 }
+
+// hipAmdFileRead/hipAmdFileWrite record their failures as the thread's last
+// HIP error. These tests use the default backends (fastpath with fallback).
+struct HipFileIoHipErrors : public testing::Test {
+
+    Tmpfile tmpfile;
+    size_t  io_size;
+    void   *device_buffer;
+
+    HipFileIoHipErrors() : tmpfile{test_env.ais_capable_dir}, io_size{1_MiB}, device_buffer{nullptr}
+    {
+    }
+
+    void SetUp() override
+    {
+        Context<Configuration>::get()->fastpath(true);
+        Context<Configuration>::get()->fallback(true);
+
+        ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(io_size)));
+        ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, io_size));
+        // Clear any errors that might be set.
+        (void)hipGetLastError();
+    }
+
+    void TearDown() override
+    {
+        ASSERT_EQ(hipSuccess, hipFree(device_buffer));
+    }
+
+    hipFileHandle_t registerFd(int fd)
+    {
+        hipFileDescr_t descr{};
+        descr.type      = hipFileHandleTypeOpaqueFD;
+        descr.handle.fd = fd;
+
+        hipFileHandle_t handle{nullptr};
+        EXPECT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&handle, &descr));
+        return handle;
+    }
+};
+
+// The HIP Runtime only sets the HIP error value on a failed fastpath request
+// on ROCm >= 10.3 (HIP 7.18).
+#if HIP_VERSION_MAJOR > 7 || (HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 18)
+// Writing to a read-only file should not be retried, and sets the HIP error for Fastpath.
+TEST_F(HipFileIoHipErrors, FailedFastpathIoSetsHipError)
+{
+    // Re-open the tmpfile read-only
+    int ro_fd{open(("/proc/self/fd/" + std::to_string(tmpfile.fd)).c_str(), O_RDONLY)};
+    ASSERT_NE(-1, ro_fd);
+    hipFileHandle_t ro_handle{registerFd(ro_fd)};
+
+    enforceFastpathGate(ro_handle, device_buffer);
+    if (!IsSkipped() && !HasFatalFailure()) {
+        errno = 0;
+        // Use expect so test-specific cleanup will run.
+        EXPECT_EQ(-1, hipFileWrite(ro_handle, device_buffer, io_size, 0, 0));
+        EXPECT_EQ(EBADF, errno);
+        EXPECT_NE(hipSuccess, hipGetLastError());
+    }
+
+    hipFileHandleDeregister(ro_handle);
+    close(ro_fd);
+}
+
+// A HIP Runtime failure that does not come from the kernel returns
+// -hipFileHipDriverError, and the HIP error is retrievable by the caller.
+TEST_F(HipFileIoHipErrors, FailedHipRuntimeCallReturnsHipDriverError)
+{
+    Context<Configuration>::get()->fallback(false);
+
+    hipFileHandle_t handle{registerFd(tmpfile.fd)};
+
+    enforceFastpathGate(handle, device_buffer);
+    if (!IsSkipped() && !HasFatalFailure()) {
+        NiceMock<MHip> mhip;
+        mhip.enable_passthrough();
+
+        // Pass the real hipAmdFileWrite() a host address. The thunk cannot map
+        // it to a GPU allocation, so the call fails before reaching the kernel.
+        int not_device_memory{};
+        EXPECT_CALL(mhip, hipAmdFileWrite)
+            .WillOnce([&mhip, &not_device_memory](hipAmdFileHandle_t fh, void *, uint64_t size,
+                                                  int64_t file_offset) {
+                return mhip.Hip::hipAmdFileWrite(fh, &not_device_memory, size, file_offset);
+            });
+
+        // Use expect so test-specific cleanup will run.
+        EXPECT_EQ(-hipFileHipDriverError, hipFileWrite(handle, device_buffer, io_size, 0, 0));
+        EXPECT_NE(hipSuccess, hipGetLastError());
+    }
+
+    hipFileHandleDeregister(handle);
+}
+
+// A retryable Fastpath failure that the fallback recovers from does not leave
+// a HIP error behind.
+TEST_F(HipFileIoHipErrors, RecoveredFastpathIoClearsHipError)
+{
+    hipFileHandle_t handle{registerFd(tmpfile.fd)};
+
+    enforceFastpathGate(handle, device_buffer);
+    if (!IsSkipped() && !HasFatalFailure()) {
+        NiceMock<MHip> mhip;
+        mhip.enable_passthrough();
+
+        // Make the real hipAmdFileWrite() fail, as above, so the HIP Runtime
+        // sets a real HIP error. Then report a retryable error so the IO is
+        // retried on the fallback.
+        int not_device_memory{};
+        EXPECT_CALL(mhip, hipAmdFileWrite)
+            .WillOnce([&mhip, &not_device_memory](hipAmdFileHandle_t fh, void *, uint64_t size,
+                                                  int64_t file_offset) -> uint64_t {
+                EXPECT_THROW(mhip.Hip::hipAmdFileWrite(fh, &not_device_memory, size, file_offset),
+                             Hip::RuntimeError);
+                EXPECT_NE(hipSuccess, hipPeekAtLastError());
+                throw std::system_error(ENODEV, std::generic_category());
+            });
+
+        // Use expect so test-specific cleanup will run.
+        EXPECT_EQ(io_size, hipFileWrite(handle, device_buffer, io_size, 0, 0));
+        EXPECT_EQ(hipSuccess, hipGetLastError());
+    }
+
+    hipFileHandleDeregister(handle);
+}
+#endif
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

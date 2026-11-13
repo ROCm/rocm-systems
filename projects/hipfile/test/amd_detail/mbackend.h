@@ -50,5 +50,6 @@ struct MBackendWithFallback : BackendWithFallback {
                  hoff_t *, ssize_t *, std::shared_ptr<IStream>, std::shared_ptr<AsyncFailoverState>),
                 (override));
     MOCK_METHOD(bool, is_fallback_eligible, (std::exception_ptr e_ptr, ssize_t nbytes), (const, override));
+    MOCK_METHOD(void, on_fallback, (), (const, override));
 };
 }

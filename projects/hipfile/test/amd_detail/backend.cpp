@@ -17,6 +17,7 @@
 using namespace hipFile;
 
 using ::testing::AnyNumber;
+using ::testing::InSequence;
 using ::testing::Return;
 using ::testing::StrictMock;
 using ::testing::Throw;
@@ -101,7 +102,11 @@ TEST_P(HipFileBackendWithFallback, IOFailureWithRegisteredFallbackRefusingTheIO)
 TEST_P(HipFileBackendWithFallback, IOFailureWithGoodFallback)
 {
     default_backend->register_fallback_backend(fallback_backend);
+
+    // on_fallback() must run before the fallback IO request is processed.
+    InSequence seq;
     EXPECT_CALL(*default_backend, _io_impl).WillOnce(Throw(std::runtime_error("IO failure")));
+    EXPECT_CALL(*default_backend, on_fallback).WillOnce(Return());
     EXPECT_CALL(*fallback_backend, io).WillOnce(Return(successful_io_size));
 
     ssize_t nbytes = default_backend->io(io_type, mock_file, mock_buffer, 0, 0, 0);
