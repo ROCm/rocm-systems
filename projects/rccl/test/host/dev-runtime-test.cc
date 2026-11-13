@@ -6893,6 +6893,7 @@ protected:
       free(t);
     }
     free(comm->devrState.lsaRankList);
+    FreeMallocdDevrTeams(comm);
     NcclVersionCompatTest::TearDown();
   }
 };
