@@ -11,10 +11,14 @@
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
+#include "param.h"
+#include "recorder.h"
 
 #include <cstdint>
 #include <cstdlib>
 #include <vector>
+
+RCCL_PARAM(HostHierAllReduce, "HOST_HIER_ALLREDUCE", 0);
 
 namespace {
 
@@ -25,6 +29,39 @@ ncclResult_t initChildFabric(struct ncclComm* child) {
   if (child->ddaFabricMemHandler != nullptr) return ncclSuccess;
   if (!ncclDdaUseFabricPath(child)) return ncclSuccess;
   return ncclDdaFabricCommInit(child);
+}
+
+ncclResult_t reserveScratch(struct ncclComm* comm, struct rcclHostHier* h, size_t bytes, cudaStream_t stream) {
+  if (h->scratchBytes >= bytes) return ncclSuccess;
+  if (h->scratch != nullptr) {
+    // Earlier collectives on this stream may still read the old buffer.
+    CUDACHECK(cudaStreamSynchronize(stream));
+    NCCLCHECK(ncclCudaFree(h->scratch, comm->memManager));
+    h->scratch = nullptr;
+    h->scratchBytes = 0;
+  }
+  char* buf = nullptr;
+  NCCLCHECK(ncclCudaMalloc(&buf, bytes, comm->memManager));
+  h->scratch = buf;
+  h->scratchBytes = bytes;
+  return ncclSuccess;
+}
+
+// The child comms cannot use a PreMulSum op created on the parent, and integer
+// averages would round once per stage.
+bool opSplitsAcrossStages(ncclRedOp_t op, ncclDataType_t datatype) {
+  switch (op) {
+  case ncclSum:
+  case ncclProd:
+  case ncclMax:
+  case ncclMin:
+    return true;
+  case ncclAvg:
+    return datatype == ncclFloat16 || datatype == ncclFloat32 || datatype == ncclFloat64 ||
+           datatype == ncclBfloat16 || datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2;
+  default:
+    return false;
+  }
 }
 
 } // namespace
@@ -135,9 +172,41 @@ ncclResult_t rcclHostHierTeardown(struct ncclComm* comm) {
   comm->hostHierState = rcclHostHierOff;
   if (h == nullptr) return ncclSuccess;
   ncclResult_t res = ncclSuccess;
+  if (h->scratch != nullptr) NCCLCHECKGOTO(ncclCudaFree(h->scratch, comm->memManager), res, exit);
   if (h->inter != nullptr) NCCLCHECKGOTO(ncclCommDestroy(h->inter), res, exit);
   if (h->intra != nullptr) NCCLCHECKGOTO(ncclCommDestroy(h->intra), res, exit);
 exit:
   free(h);
+  return res;
+}
+
+bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
+  if (rcclParamHostHierAllReduce() != 1) return false;
+  if (count == 0 || !opSplitsAcrossStages(op, datatype)) return false;
+  const struct rcclHostLayout* layout = rcclHostHierGetLayout(comm);
+  return layout != nullptr && count % layout->ranksPerHost == 0;
+}
+
+ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                   ncclRedOp_t op, struct ncclComm* comm, cudaStream_t stream) {
+  if (comm->hostHierState != rcclHostHierReady) return ncclInternalError;
+  struct rcclHostHier* h = comm->hostHier;
+  const size_t chunk = count / h->layout.ranksPerHost;
+  const size_t chunkBytes = chunk * ncclTypeSize(datatype);
+  const bool doInter = h->inter != nullptr;
+  // The inter-host AllReduce runs out of place: in place it is several times slower.
+  const size_t stride = (chunkBytes + 255) & ~size_t{255};
+  NCCLCHECK(reserveScratch(comm, h, doInter ? stride + chunkBytes : chunkBytes, stream));
+  char* rsOut = static_cast<char*>(h->scratch);
+  char* agIn = doInter ? rsOut + stride : rsOut;
+
+  // The parent AllReduce is already recorded.
+  rccl::Recorder::instance().skip(true);
+  ncclResult_t res = ncclSuccess;
+  NCCLCHECKGOTO(ncclReduceScatter(sendbuff, rsOut, chunk, datatype, op, h->intra, stream), res, exit);
+  if (doInter) NCCLCHECKGOTO(ncclAllReduce(rsOut, agIn, chunk, datatype, op, h->inter, stream), res, exit);
+  NCCLCHECKGOTO(ncclAllGather(agIn, recvbuff, chunk, datatype, h->intra, stream), res, exit);
+exit:
+  rccl::Recorder::instance().skip(false);
   return res;
 }

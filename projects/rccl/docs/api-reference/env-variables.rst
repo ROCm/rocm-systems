@@ -515,6 +515,20 @@ collected in the following table.
         | Default: ``16``
         | ``0``: No lower bound.
 
+    * - | ``RCCL_HOST_HIER_ALLREDUCE``
+        | Runs ``ncclAllReduce`` as a ReduceScatter within each physical host,
+          an AllReduce across hosts, and an AllGather within each host. Hosts
+          are told apart by host hash, so this also works where a scale-up
+          fabric reports the whole job as one node. Each stage picks its own
+          algorithm. Needs the same number of ranks, at least two, on every
+          host, a count divisible by that number, and a built-in reduction
+          operation (``ncclAvg`` only on floating-point types). It is not used
+          inside a group or a graph capture, while ``NCCL_ALGO`` is set, or
+          while a backend is forced. The first eligible call splits the
+          communicator, so all ranks must use the same value.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled for every eligible AllReduce.
+
     * - | ``NCCL_TREE_COMPACT``
         | Builds the inter-node trees with a half-interleave node remapping.
           Intended for jobs whose nodes are ordered by network domain. Both

@@ -1,0 +1,1 @@
+* Host-hierarchical AllReduce, enabled with `RCCL_HOST_HIER_ALLREDUCE=1`: a ReduceScatter within each physical host, an AllReduce across hosts, and an AllGather within each host, on communicators split by host hash. It reports as `HierAR` through `rcclGetAlgoName()` (new `rcclAddonAlgos_t` value `RCCL_HOST_HIER_ALLREDUCE`).
