@@ -15,6 +15,7 @@ from functools import partial
 from typing import NamedTuple, Tuple
 
 import utils.hip_interface as hip
+from utils.logger import console_warning
 
 from .. import benchmark_base
 from . import benchmark_gfx12_base
@@ -344,8 +345,15 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         working_set_divisor: int,
     ) -> float:
         """Stream a fraction of one cache level's capacity. The capacity is the
-        one AMD-SMI reports, or default_capacity_bytes when it reports none."""
-        capacity = self.cache_sizes.get(level, default_capacity_bytes)
+        one AMD-SMI reports, or default_capacity_bytes when it reports none, in which
+        case a warning names the size used."""
+        capacity = self.cache_sizes.get(level)
+        if capacity is None:
+            capacity = default_capacity_bytes
+            console_warning(
+                f"AMD-SMI reported no {level} cache size, so the {level} bandwidth "
+                f"test uses the default {capacity >> 20} MB capacity."
+            )
         return self.resident_stream_bw_bench(
             device, level, capacity // working_set_divisor
         )

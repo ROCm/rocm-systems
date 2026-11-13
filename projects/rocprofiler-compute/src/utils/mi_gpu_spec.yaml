@@ -491,9 +491,9 @@ mi_gpu_spec:
           GL1C: 4
           GL2A: 4
           GL2C: 4
-        # Device memory is VRAM (CSV column VRAMBw). The 64 MB Infinity Cache
-        # uses the MALL column. No counter attributes traffic to the Infinity
-        # Cache, so its roof is drawn without a kernel point.
+        # Device memory is VRAM (CSV column VRAMBw). The Infinity Cache uses
+        # the MALL column. No counter attributes traffic to the Infinity Cache,
+        # so its roof is drawn without a kernel point.
         roofline:
           bandwidth: [VRAM, MALL, L2, L1, L0, LDS]
           plot_mall: true
