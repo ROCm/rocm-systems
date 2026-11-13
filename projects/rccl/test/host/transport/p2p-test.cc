@@ -330,6 +330,14 @@ private:
     hipMemAllocationHandleType saved_;
 };
 
+TEST_F(P2pMicrotest, AlternateConnectorUsesOppositeTransferMode) {
+    EXPECT_EQ(1, p2pReadModeForConnIndex(/*defaultRead=*/0, RCCL_CONN_IDX_P2P_ALT, /*p2pNet=*/false));
+    EXPECT_EQ(0, p2pReadModeForConnIndex(/*defaultRead=*/1, RCCL_CONN_IDX_P2P_ALT, /*p2pNet=*/false));
+    EXPECT_EQ(0, p2pReadModeForConnIndex(/*defaultRead=*/0, RCCL_CONN_IDX_P2P_ALT, /*p2pNet=*/true));
+    EXPECT_EQ(0, p2pReadModeForConnIndex(/*defaultRead=*/0, /*default P2P connIndex=*/1, /*p2pNet=*/false));
+    EXPECT_EQ(1, p2pReadModeForConnIndex(/*defaultRead=*/1, /*default P2P connIndex=*/1, /*p2pNet=*/false));
+}
+
 // ===========================================================================
 // Helpers: lightweight builders for the recurring input/output shapes.
 //

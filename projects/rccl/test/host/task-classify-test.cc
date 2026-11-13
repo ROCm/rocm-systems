@@ -342,6 +342,71 @@ TEST_F(TaskClassifyMicrotest, CollToP2pTasks_AllToAllAtANarrowerDatatype_ScalesT
   TaskClassify_ExpectLoweredPayload(&queue, ncclFuncAlltoAll, ncclInt8, kCount);
 }
 
+// This rank's AlltoAllv table: send counts, send displacements, recv counts, recv displacements.
+std::vector<size_t> TaskClassify_AllToAllvTable() {
+  std::vector<size_t> table(4 * kRanks);
+  for (int r = 0; r < kRanks; r++) {
+    table[r] = r + 1;
+    table[kRanks + r] = 16 * r;
+    table[2 * kRanks + r] = 2 * r + 1;
+    table[3 * kRanks + r] = 32 * r;
+  }
+  return table;
+}
+
+std::vector<TaskClassify_P2p> TaskClassify_AllToAllvShape(const void* sendBase, const void* recvBase) {
+  std::vector<TaskClassify_P2p> shape;
+  for (int r = 0; r < kRanks; r++) {
+    shape.push_back({ncclFuncSend, OffsetBy(sendBase, 16 * r), r});
+    shape.push_back({ncclFuncRecv, OffsetBy(recvBase, 32 * r), r});
+  }
+  return shape;
+}
+
+// AlltoAllv arrives with either this rank's 4 * nRanks table or every rank's 4 * nRanks * nRanks;
+// both lower to the same per-peer byte-sized send/recv pairs.
+TEST_F(TaskClassifyMicrotest, CollToP2pTasks_AllToAllv_LowersEitherSizeTableLayout) {
+  std::vector<size_t> local = TaskClassify_AllToAllvTable();
+  std::vector<size_t> everyRank(4 * kRanks * kRanks, 999);
+  std::copy(local.begin(), local.end(), everyRank.begin() + kOffRootRank * 4 * kRanks);
+
+  for (std::vector<size_t>* sizes : {&local, &everyRank}) {
+    TaskPrepScene scene(kRanks, kOffRootRank);
+    struct ncclTaskTuningInfo* tInfo = TaskClassify_NewCollInfo(&scene, ncclFuncAlltoAllv, kRoot, ncclInt8);
+    tInfo->raw->coll.sizes = sizes->data();
+    tInfo->raw->coll.sizesCount = sizes->size();
+    const void* sendBase = tInfo->raw->coll.sendbuff;
+    const void* recvBase = tInfo->raw->coll.recvbuff;
+    TaskClassify_Queue queue;
+
+    ASSERT_EQ(ncclSuccess, classifyCollToP2pTasks(scene.comm(), tInfo, &queue)) << sizes->size() << " sizes";
+
+    EXPECT_EQ(TaskClassify_AllToAllvShape(sendBase, recvBase), TaskClassify_P2pShape(&queue));
+    std::vector<struct ncclTaskTuningInfo*> tasks = QueueTasks(&queue);
+    ASSERT_EQ(2u * kRanks, tasks.size());
+    for (int r = 0; r < kRanks; r++) {
+      EXPECT_EQ(local[r], tasks[2 * r]->raw->sendRecv.count);
+      EXPECT_EQ(local[2 * kRanks + r], tasks[2 * r + 1]->raw->sendRecv.count);
+      EXPECT_EQ(ncclInt8, tasks[2 * r]->raw->sendRecv.datatype);
+      EXPECT_EQ(ncclFuncAlltoAllv, tasks[2 * r]->raw->sendRecv.collAPI);
+    }
+  }
+}
+
+TEST_F(TaskClassifyMicrotest, CollToP2pTasks_AllToAllvWithAnyOtherSizeCount_IsRejected) {
+  std::vector<size_t> sizes(4 * kRanks + 1);
+  for (bool missing : {false, true}) {
+    TaskPrepScene scene(kRanks, kOffRootRank);
+    struct ncclTaskTuningInfo* tInfo = TaskClassify_NewCollInfo(&scene, ncclFuncAlltoAllv, kRoot, ncclInt8);
+    tInfo->raw->coll.sizes = missing ? nullptr : sizes.data();
+    tInfo->raw->coll.sizesCount = sizes.size();
+    TaskClassify_Queue queue;
+
+    EXPECT_EQ(ncclInvalidArgument, classifyCollToP2pTasks(scene.comm(), tInfo, &queue)) << "missing=" << missing;
+    EXPECT_TRUE(ncclIntruQueueEmpty(&queue));
+  }
+}
+
 TEST_F(TaskClassifyMicrotest, CollToP2pTasks_GatherAtRoot_SendsToTheRootThenReceivesFromEveryRank) {
   TaskPrepScene scene(kRanks, kRoot);
   struct ncclTaskTuningInfo* tInfo = TaskClassify_NewCollInfo(&scene, ncclFuncGather, kRoot);

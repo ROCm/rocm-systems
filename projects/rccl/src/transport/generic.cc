@@ -8,6 +8,8 @@
 #include "comm.h"
 #include "transport.h"
 #include "bootstrap.h"
+#include "policy_adapter.h"
+#include "rccl_common.h"
 
 // RCCL: HIP leaves multi-segment registration off until a job opts in.
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -31,6 +33,22 @@ ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) {
       NCCLCHECKGOTO(ncclTransportP2pConnect(comm, c, 1, &channel->ring.prev, 1, &channel->ring.next, 0), ret, fail);
     }
     NCCLCHECKGOTO(ncclTransportP2pSetup(comm, &comm->graphs[NCCL_ALGO_RING], 0), ret, fail);
+    if (rcclPolicyCanonicalShmEligible(comm)) {
+      for (int c = 0; c < comm->nChannels; c++) {
+        struct ncclChannel* channel = comm->channels + c;
+        NCCLCHECKGOTO(ncclTransportP2pConnect(
+                        comm, c, 1, &channel->ring.prev, 1,
+                        &channel->ring.next, RCCL_CONN_IDX_COLL_SHM),
+                      ret, fail);
+      }
+      NCCLCHECKGOTO(ncclTransportP2pSetupSpecific(
+                      comm, &comm->graphs[NCCL_ALGO_RING],
+                      RCCL_CONN_IDX_COLL_SHM, nullptr, TRANSPORT_SHM),
+                    ret, fail);
+      INFO(NCCL_INIT,
+           "Provisioned alternate SHM Ring connectors at index %d",
+           RCCL_CONN_IDX_COLL_SHM);
+    }
     if (ncclParamLocalRegister() || ncclParamGraphRegister()) {
       NCCLCHECK(ncclCalloc(&ringInfo, comm->nRanks));
       ringInfo[comm->rank].useGdr = comm->useGdr;

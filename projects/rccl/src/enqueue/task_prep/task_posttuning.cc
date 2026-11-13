@@ -10,6 +10,7 @@
 #include "ce_coll.h"
 #include "channel.h"
 #include "checks.h"
+#include "policy_adapter.h"
 #include "collectives.h"
 #include "comm.h"
 #include "config/collconfig.h"
@@ -158,6 +159,56 @@ static ncclResult_t postTuneP2pChannelBase(struct ncclComm* comm, int peer, bool
   return ncclSuccess;
 }
 
+// Resolves the task's execution policy and marks the connectors it needs beyond the default one:
+// P2P_NET on a peer's first use when the comm has it, and every connector the policy names under
+// either placement. Runs before postTuneP2pRecordPreconnect, which records that first use.
+static ncclResult_t postTuneP2pRecordPolicyPreconnect(struct ncclComm* comm, struct ncclRawTaskSendRecv* raw,
+                                                      bool* needDefaultPreconnect, bool* needSecondaryPreconnect,
+                                                      bool* needShmPreconnect) {
+  struct ncclKernelPlanner* planner = &comm->planner;
+  int peer = raw->peer;
+  bool isSendNotRecv = raw->func == ncclFuncSend;
+  uint8_t base;
+
+  if (peer < 0 || peer >= comm->nRanks) return ncclInvalidArgument;
+
+  struct ncclTaskP2p task{};
+  task.collAPI = raw->collAPI;
+  task.bytes = raw->bytes;
+  task.inPlace = raw->inPlace;
+  rcclPolicyResolveP2pTask(comm, &task);
+  raw->executionPolicyMatched = task.executionPolicyMatched;
+  raw->executionPolicy = task.executionPolicy;
+  if (comm->rank == peer) return ncclSuccess;
+
+  bool firstPeerUse = !(isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen);
+  bool netFirstUse = firstPeerUse && comm->p2pNet;
+  struct rcclP2pPolicyPreconnect policyPreconnects[2];
+  int nPolicyPreconnects = rcclPolicyP2pPreconnects(comm, &task, policyPreconnects);
+  if (!netFirstUse && nPolicyPreconnects == 0) return ncclSuccess;
+
+  NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
+
+  if (netFirstUse &&
+      rcclP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, comm->p2pnChannels, comm->p2pnChannelsPerPeer,
+                                    rcclP2pTaskParts(comm, raw->collAPI), NCCL_CONN_IDX_P2P_NET))
+    *needSecondaryPreconnect = true;
+
+  for (int p = 0; p < nPolicyPreconnects; p++) {
+    const struct rcclP2pPolicyPreconnect& preconnect = policyPreconnects[p];
+    for (int i = 0; i < preconnect.nConnIndices; i++) {
+      int connIndex = preconnect.connIndices[i];
+      bool* needPreconnect = connIndex == RCCL_CONN_IDX_P2P_SHM ? needShmPreconnect
+                             : connIndex == 1                   ? needDefaultPreconnect
+                                                                : needSecondaryPreconnect;
+      if (rcclP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, preconnect.nChannels,
+                                        preconnect.nChannelsPerPeer, preconnect.nChannelsPerPeer, connIndex))
+        *needPreconnect = true;
+    }
+  }
+  return ncclSuccess;
+}
+
 static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer, bool isSendNotRecv, ncclFunc_t collAPI,
                                                 bool* needPreconnect) {
   struct ncclKernelPlanner* planner = &comm->planner;
@@ -216,7 +267,11 @@ static ncclResult_t fillP2pTaskFromRaw(struct ncclComm* comm, struct ncclTaskTun
   task->root = raw->peer;
   task->bytes = raw->bytes;
   task->launchCompletionEvent = raw->launchCompletionEvent;
-  if (task->collAPI == ncclFuncAlltoAll || task->collAPI == ncclFuncScatter || task->collAPI == ncclFuncGather) {
+  task->inPlace = raw->inPlace;
+  task->executionPolicyMatched = raw->executionPolicyMatched;
+  task->executionPolicy = raw->executionPolicy;
+  if (task->collAPI == ncclFuncAlltoAll || task->collAPI == ncclFuncAlltoAllv ||
+      task->collAPI == ncclFuncScatter || task->collAPI == ncclFuncGather) {
     task->allowUB = false;
   } else {
     task->allowUB = true;
@@ -236,6 +291,7 @@ static ncclResult_t postTuneP2pRegisterBuffer(struct ncclComm* comm, struct nccl
   bool network;
   bool proxySameProcess;
 
+  if (!rcclPolicyP2pTaskAllowsRegistration(task)) return ncclSuccess;
   if (protocol != NCCL_PROTO_SIMPLE) return ncclSuccess;
   if (!task->allowUB || task->bytes == 0 || task->buff == nullptr || peer == comm->rank) return ncclSuccess;
 
@@ -957,18 +1013,29 @@ static ncclResult_t postTuneAllGatherVTasks(
 
 static ncclResult_t postTuneP2pTasks(
   struct ncclComm* comm, struct ncclIntruQueue<struct ncclTaskTuningInfo, &ncclTaskTuningInfo::next>* p2pTaskQueue) {
-  bool needPreconnect = false;
+  bool needDefaultPreconnect = false;
+  bool needSecondaryPreconnect = false;
+  bool needShmPreconnect = false;
   struct ncclKernelPlanner* planner = &comm->planner;
 
   for (struct ncclTaskTuningInfo* tInfo = ncclIntruQueueHead(p2pTaskQueue); tInfo != nullptr; tInfo = tInfo->next) {
     struct ncclRawTaskSendRecv* raw = &tInfo->raw->sendRecv;
     bool isSendNotRecv = raw->func == ncclFuncSend;
 
-    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, raw->collAPI, &needPreconnect));
+    NCCLCHECK(postTuneP2pRecordPolicyPreconnect(comm, raw, &needDefaultPreconnect, &needSecondaryPreconnect,
+                                                &needShmPreconnect));
+    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, raw->collAPI, &needDefaultPreconnect));
   }
 
-  if (needPreconnect) {
+  if (needDefaultPreconnect) {
     NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
+  }
+  if (needSecondaryPreconnect) {
+    NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
+  }
+  if (needShmPreconnect) {
+    NCCLCHECK(ncclTransportP2pSetupSpecific(
+      comm, NULL, RCCL_CONN_IDX_P2P_SHM, nullptr, TRANSPORT_SHM));
   }
 
   for (struct ncclTaskTuningInfo* tInfo = ncclIntruQueueHead(p2pTaskQueue); tInfo != nullptr; tInfo = tInfo->next) {
@@ -977,6 +1044,7 @@ static ncclResult_t postTuneP2pTasks(
     NCCLCHECK(fillP2pTaskFromRaw(comm, tInfo, task));
 
     bool isSendNotRecv = task->func == ncclFuncSend;
+    rcclPolicyValidateP2pTask(comm, task, isSendNotRecv);
 
     NCCLCHECK(postTuneP2pRegisterBuffer(comm, task, isSendNotRecv, tInfo->tuningOut.proto));
 

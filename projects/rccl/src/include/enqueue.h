@@ -12,6 +12,7 @@
 #include "info.h"
 #include "group.h"
 #include "collectives.h"
+#include "collective_execution_policy.h"
 #include "utils.h"
 #include "enqueue/raw_task.h"
 #include "enqueue/task_pretuning.h"

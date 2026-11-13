@@ -408,6 +408,7 @@ function(rccl_define_micro_source_lists)
     dv_symbols_test.cc                   # src/misc/ionicdvsymbols.cc, src/misc/mlx5dvsymbols.cc
     register-test.cc                     # src/register/register.cc
     coll-reg-test.cc                     # src/register/coll_reg.cc
+    fakes/policy_adapter_stubs.cc        # coll_reg.cc's registration check
     sendrecv-reg-test.cc                 # src/register/sendrecv_reg.cc
     process-isolated-runner-test.cc
     rccl-graph-gen-test.cc               # src/graph/rccl_graph_gen.cc ring construction + cut balancing
@@ -644,6 +645,7 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_CONNECT_SOURCE_FILES
     connect-test.cc
     fakes/hip_fakes.cc
+    fakes/policy_adapter_stubs.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc
@@ -681,6 +683,9 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicroEnqueue(+-devlinker) -- src/enqueue.cc.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/policy_adapter.cc
     fakes/enqueue_test_deps.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
@@ -1025,6 +1030,9 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_parser.cc   # real alg-selector parsing
     ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc  # real per-func alg validity mask
     ${RCCL_HOST_HIPIFY_DIR}/src/config/collconfig.cc  # real CTA-policy/alg-mask resolution
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/policy_adapter.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc  # real PtrCheck/CommCheck
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real busId/hash helpers
@@ -1244,6 +1252,7 @@ function(rccl_define_micro_source_lists)
     fakes/graph_fakes.cc
     fakes/amdsmi_fakes.cc
     fakes/hip_fakes.cc
+    fakes/policy_adapter_stubs.cc
     # search.cc is tested by rccl-UnitTestsMicroSearch, but paths.cc calls into it
     # (ncclTopoGetNetDev, ncclTopoGetLinkType), so it is linked real here rather
     # than faked -- a collaborator, not a unit under test.
@@ -2329,6 +2338,11 @@ rccl_add_micro_binary(rccl-UnitTestsMicroAlloc
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroEnqueue (+ shipping -devlinker arm standalone)
 # ---------------------------------------------------------------------------
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/policy_adapter.cc
+  PROPERTIES GENERATED TRUE)
 set(_enq_common_args
   SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
   REMOVE_DEFS ENABLE_WARP_SPEED
@@ -2519,6 +2533,9 @@ set_source_files_properties(
   ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_parser.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/config/collconfig.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/policy_adapter.cc
   PROPERTIES GENERATED TRUE)
 rccl_add_micro_binary(rccl-UnitTestsMicroTaskPrep
   SOURCES ${TEST_MICRO_TASKPREP_SOURCE_FILES}

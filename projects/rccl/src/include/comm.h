@@ -34,6 +34,7 @@
 #include "algorithms/dda/dda_init_detail.h"
 #include "mem_manager.h"
 #include "tuning.h"
+#include "collective_execution_policy.h"
 #include "enqueue/raw_task.h"
 #include "enqueue/task_pretuning.h"
 #include "enqueue/task_classify.h"
@@ -260,6 +261,7 @@ struct ncclTaskColl {
   uint32_t isCollnet:1, isNvls:1, isSymLast:1;
   uint32_t devFuncId:29;
   int regBufType;
+  int executionTransport; // rcclExecutionTransport selected by execution policy.
   uint64_t opCount;
   cudaEvent_t launchCompletionEvent;
   // number of elements in planner->ipcMemQueue associated with this collective
@@ -348,6 +350,7 @@ struct ncclTaskP2p {
   uint64_t opCount;
   bool allowUB;
   cudaEvent_t launchCompletionEvent;
+  bool inPlace;
 
   // Profiler plugin
   int eActivationMask;
@@ -361,6 +364,10 @@ struct ncclTaskP2p {
   uint64_t channelMask;
   // Shared by both tasks of an addP2pToPlan() pair; 0 = unassigned.
   uint16_t p2pPairId;
+  // Execution policy resolved once when the task is created; every later
+  // stage (preconnect, registration, planning) reads this decision.
+  bool executionPolicyMatched;
+  struct rcclCollectiveExecutionPolicy executionPolicy;
 };
 
 struct ncclTaskRma {
@@ -589,6 +596,7 @@ struct ncclKernelPlanner {
         int p2pEpoch;
         int p2pRounds[NCCL_MAX_DEV_WORK_P2P_PER_BATCH]; // which rounds are present in this batch.
         bool batchP2P; // whether this batch is eligible for batching multiple p2p operations.
+        uint16_t lastP2pPairId; // plan->p2pPairCounter of the last p2p work added.
       } wipBatch; // work-in-progress batch which will be next tail of workBatchQueue
       int nWorkBatchesP2p; // number of p2p batches for this channel.
       int nWorkBatchesBcast; // number of bcast batches for this channel.
@@ -1312,6 +1320,12 @@ static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
   hipEvent_t stopEvent = comm->addonStopEvent;
   comm->addonStopEvent = nullptr;
   return stopEvent;
+}
+
+// NCCL_CONN_IDX_P2P_NET carries intra-node NET when either p2pNet or useIntraNet enabled it.
+// Otherwise the execution policy reuses the slot as RCCL_CONN_IDX_P2P_ALT.
+static inline bool rcclConnIndexIsIntraNet(const struct ncclComm* comm, int connIndex) {
+  return connIndex == NCCL_CONN_IDX_P2P_NET && (comm->p2pNet || comm->useIntraNet);
 }
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);
