@@ -14,6 +14,7 @@ No GPU is required; the sources are plain strings built in the constructor.
 """
 
 import fcntl
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -356,6 +357,42 @@ def test_gfx1201_cache_roof_rejects_a_working_set_it_cannot_stream(
 
     with pytest.raises(ValueError, match="cache working set"):
         bench.cache_resident_bw(0, "test", roof)
+
+
+@pytest.mark.parametrize(
+    "reported_bytes, warns",
+    [(None, True), (48 * 1024 * 1024, False)],
+    ids=["amd-smi-reports-no-level-3", "amd-smi-reports-level-3"],
+)
+def test_gfx1201_mall_test_warns_when_it_uses_the_default_capacity(
+    reported_bytes, warns, monkeypatch
+):
+    """AMD-SMI normally reports the Infinity Cache size, and the MALL test streams
+    half of it. When it reports none, the test falls back to the default capacity
+    and says so, so a size that does not match the board is not silent."""
+    cache_sizes = dict(CACHE_SIZES)
+    cache_sizes.pop("MALL", None)
+    if reported_bytes is not None:
+        cache_sizes["MALL"] = reported_bytes
+    bench = BENCH_CLASSES["gfx1201"](0, cache_sizes, "gfx1201")
+    streamed = []
+    warnings = []
+    monkeypatch.setattr(
+        bench,
+        "resident_stream_bw_bench",
+        lambda device, label, working_set_bytes: streamed.append(working_set_bytes),
+    )
+    stream_module = sys.modules[type(bench).cache_stream_bw_bench.__module__]
+    monkeypatch.setattr(stream_module, "console_warning", warnings.append)
+
+    bench.tests["MALL"](0)
+
+    mall = bench.tests["MALL"].keywords
+    capacity = reported_bytes or mall["default_capacity_bytes"]
+    assert streamed == [capacity // mall["working_set_divisor"]]
+    assert bool(warnings) == warns
+    if warns:
+        assert "AMD-SMI reported no MALL cache size" in warnings[0]
 
 
 # =============================================================================
