@@ -346,9 +346,10 @@ TEST_P(ConSanTargetStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles
   const test::TargetMode mode = GetParam();
   const TargetProfile &target = *target_profile(mode.target);
   for (const char *name :
-       {"native-25", "native-26", "native-27", "native-30", "native-31", "native-40"}) {
+       {"native-25", "native-26", "native-27", "native-30", "native-31", "native-42"}) {
     SCOPED_TRACE(name);
     std::vector<uint8_t> original = test::read_fixture(test::target_fixture_path(mode, name));
+    ASSERT_FALSE(original.empty());
     InputError error;
     const FailureOr<InputProgram> input =
         build_input_program(original, target, "lds_producer_consumer", error);
