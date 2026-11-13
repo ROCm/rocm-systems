@@ -27,15 +27,17 @@ constexpr uint64_t kProgram = 0x1000;
 constexpr uint32_t kMovS5 = 0xBE850087u;  // s_mov_b32 s5, 7
 constexpr uint32_t kEndpgm = 0xBFB00000u; // s_endpgm
 
-/// A clocked CU model: state of its own, built ahead of the ISA parts.
+/// A clocked CU model: state of its own, built ahead of the ISA parts. Its
+/// private config_ hides ComputeUnitCore's, so the ISA parts must not read the
+/// core's configuration through this class.
 class ClockedComputeUnit : public ExecComputeUnit<simdojo::ExecMode::CLOCKED> {
 public:
   template <typename... CoreArgs>
   ClockedComputeUnit(uint32_t tag, CoreArgs &&...core)
-      : ExecComputeUnit<simdojo::ExecMode::CLOCKED>(std::forward<CoreArgs>(core)...), tag_(tag),
+      : ExecComputeUnit<simdojo::ExecMode::CLOCKED>(std::forward<CoreArgs>(core)...), config_{tag},
         slots_at_construction_(num_wf_slots()) {}
 
-  uint32_t tag() const { return tag_; }
+  uint32_t tag() const { return config_.tag; }
   uint32_t slots_at_construction() const { return slots_at_construction_; }
 
   /// A clocked pipeline learns of new work here, so count the wakeups that
@@ -47,7 +49,10 @@ public:
   uint32_t schedule_work_calls() const { return schedule_work_calls_; }
 
 private:
-  const uint32_t tag_;
+  struct ModelConfig {
+    uint32_t tag;
+  };
+  const ModelConfig config_;
   const uint32_t slots_at_construction_;
   uint32_t schedule_work_calls_ = 0;
 };

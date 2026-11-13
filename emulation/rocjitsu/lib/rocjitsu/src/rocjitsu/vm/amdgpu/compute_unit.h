@@ -2409,7 +2409,7 @@ public:
     if (vgprs_per_block == 0)
       return nullptr;
     const size_t block = reg_idx / vgprs_per_block;
-    return block < this->config_.num_wf_slots ? vgpr_block_owners_[block] : nullptr;
+    return block < ComputeUnitCore::num_wf_slots() ? vgpr_block_owners_[block] : nullptr;
   }
 
 private:
@@ -2427,7 +2427,7 @@ public:
     const uint32_t vgprs_per_block = this->vgpr_allocation_block_size();
     assert(vgprs_per_block != 0 && base % vgprs_per_block == 0);
     const size_t block = base / vgprs_per_block;
-    assert(block < this->config_.num_wf_slots);
+    assert(block < ComputeUnitCore::num_wf_slots());
     vgpr_block_owners_[block] = wf;
   }
 
