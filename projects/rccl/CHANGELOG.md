@@ -81,8 +81,6 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Removed
 
-* `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
-
 ### Resolved issues
 * Fixed `RCCL_REPLAY_FILE` output paths containing dotted directories, relative path components or multiple filename dots. Failed output-file opens now produce a warning.
 * Fixed `ibv_reg_mr_iova2 failed with error Invalid argument` on AMD AINIC when several communicators open P2P network connections without GPU Direct RDMA, for example Direct AllGather with `NCCL_PXN_DISABLE=1`. The host-memory shared P2P pools used 4 KiB pages, so each 256 MiB pool took 65,536 of the NIC's per-LIF page-table entries. They now use 2 MiB pages; `RCCL_NET_SHARED_HOST_HUGEPAGES` (default `1`) set to `0` restores the previous allocation.

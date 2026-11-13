@@ -227,8 +227,9 @@ __device__ __forceinline__ void ddaLL128LoadRegsBegin(
 // The flag-lane shuffle that completes ddaLL128LoadRegsBegin.
 __device__ __forceinline__ void ddaLL128LoadRegsFinish(uint64_t (&regs)[kDdaLL128WordsPerThread], bool flag) {
 #pragma unroll
-  for (int g = 1; g < kDdaLL128Pairs; g += 2)  // move flag-lane data out of odd regs
+  for (int g = 1; g < kDdaLL128Pairs; g += 2) {  // move flag-lane data out of odd regs
     if (flag) regs[2 * g] = regs[2 * g - 1];
+  }
 }
 
 // ddaLL128LoadRegs without per-lane branches. Loads a lane does not need are in bounds and discarded.
