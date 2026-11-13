@@ -126,6 +126,8 @@ entry do not execute its descriptor stub again.
 
 Independent of placement, copied probes on CDNA1–4 must not enable VSKIP:
 the envelope uses vector instructions for restoration, even with `force_full_exec`.
+Copied probes also reject MFMA/SMFMAC and CDNA5 matrix/transcendental producers
+until their completion before restoration can be proven, including padded bodies.
 These checks do not provide general hazard scheduling or prove readiness at
 arbitrary later observation points.
 

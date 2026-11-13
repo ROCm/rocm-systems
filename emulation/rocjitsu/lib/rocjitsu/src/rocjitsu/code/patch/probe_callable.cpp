@@ -123,6 +123,13 @@ template <typename T>
 
 } // namespace
 
+bool may_require_cdna5_valu_spacing(const Instruction &inst) {
+  // MATRIX_REGISTER_ACCESSES describes lane semantics, not every matrix family.
+  // Scaled WMMA pairs need the same admission boundary despite lacking the flag.
+  return (inst.flags() & MATRIX_REGISTER_ACCESSES) != 0 || inst.is_transcendental() ||
+         inst.mnemonic().starts_with("v_wmma_") || inst.mnemonic().starts_with("v_swmmac_");
+}
+
 RegisterSet arg_registers(const ProbeAbi &abi) {
   RegisterSet regs;
   if (!is_valid_probe_abi(abi) || abi.num_arg_vgprs == 0)
@@ -246,6 +253,15 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     const size_t inst_words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
     const std::string_view m = inst->mnemonic();
+    // Memory waits do not prove these producers complete before guest restores.
+    // Until return-path spacing is analyzed, reject them throughout the body.
+    if (inst->is_mfma() ||
+        (arch == ROCJITSU_CODE_ARCH_CDNA5 && may_require_cdna5_valu_spacing(*inst))) {
+      const std::string message = "probe body contains " + std::string(m) +
+                                  " with unproven register completion before restoration";
+      report(error_out, message.c_str());
+      return std::nullopt;
+    }
     if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
         (m.starts_with("s_setreg") || m.starts_with("s_set_vgpr_msb"))) {
       report(error_out, "probe body may change the VGPR bank state required by its call ABI");

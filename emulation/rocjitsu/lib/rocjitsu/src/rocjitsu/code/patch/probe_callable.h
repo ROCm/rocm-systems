@@ -19,7 +19,12 @@
 namespace rocjitsu {
 
 class AmdGpuCodeObject;
+class Instruction;
 struct ResolvedProbeSymbol;
+
+/// @brief Whether a CDNA5 instruction may need software-managed VALU spacing.
+/// @details Includes scaled matrix families without MATRIX_REGISTER_ACCESSES.
+[[nodiscard]] bool may_require_cdna5_valu_spacing(const Instruction &inst);
 
 /// @brief The return-link rule a verified probe body conforms to.
 ///
@@ -271,6 +276,8 @@ struct ProbeCallable {
 ///     descriptor, is not statically detectable here and is not rejected,
 ///   - contain no CDNA1-4 instruction that may enable VSKIP, which suppresses
 ///     the vector instructions used to restore VGPRs and SGPRs after the call,
+///   - contain no MFMA/SMFMAC, or CDNA5 matrix/transcendental instruction:
+///     completion before state restoration is not yet proven, even with padding,
 ///   - contain no RDNA4 image instruction (VIMAGE / VSAMPLE), whose decoded
 ///     operands do not name every register it reads and writes, and
 ///   - end in `s_setpc_b64 s[30:31]`.

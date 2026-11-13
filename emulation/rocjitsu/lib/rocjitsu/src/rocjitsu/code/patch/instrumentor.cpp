@@ -60,13 +60,6 @@ rj_code_target_id_t effective_target(const AmdGpuCodeObject &object, rj_code_arc
   return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
 }
 
-bool may_require_cdna5_valu_spacing(const Instruction &inst) {
-  // MATRIX_REGISTER_ACCESSES describes lane semantics, not every matrix family.
-  // Scaled WMMA pairs need the same admission boundary despite lacking the flag.
-  return (inst.flags() & MATRIX_REGISTER_ACCESSES) != 0 || inst.is_transcendental() ||
-         inst.mnemonic().starts_with("v_wmma_") || inst.mnemonic().starts_with("v_swmmac_");
-}
-
 // These ISA message tables assign MSG_DEALLOC_VGPRS to message 3. Older
 // architectures give that encoding different semantics.
 bool deallocates_vgprs(const Instruction &instruction, rj_code_arch_t arch) {
