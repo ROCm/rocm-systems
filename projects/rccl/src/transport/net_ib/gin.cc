@@ -7,7 +7,10 @@
 
 #include "common.h"
 
+#include "archinfo.h"
+#include "cudawrap.h"
 #include "gin/gin_host.h"
+#include "gin/gin_type_env.h"
 #include "gin.h"
 
 const int NCCL_GIN_IB_ALLGATHER_TAG = 0xa0;
@@ -98,9 +101,37 @@ static bool ncclNetIbDevIsMlx5(int dev) {
   return true;
 }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// net_ib_cast/common.cc; -1 until IbCastInitDevices reaches its ibv_get_device_list.
+extern int IbCastNDevs;
+#endif
+
+// On gfx1250, once IB-CAST has listed the verbs devices, a second ibv_get_device_list SIGSEGVs (ionic, bng_re).
+// Skipping leaves no RMA plugin, so only that case skips, and only when no requested GIN type uses the IB RMA
+// proxy: NCCL_GIN_TYPE unset or Anvil SDMA, and RCCL_GIN_TYPE_LIST not naming proxy GIN.
+static bool ncclGinIbSkipVerbsInit(int type) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (type >= 0 && type != (int)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
+  uint64_t ginTypeMask;
+  if (type < 0 && ncclGinTypeListMask(&ginTypeMask) && (ginTypeMask & (1ULL << NCCL_GIN_TYPE_PROXY))) return false;
+  if (!rcclInternalNetIsIbCast() || IbCastNDevs < 0) return false;
+  int dev = 0;
+  if (cudaGetDevice(&dev) != cudaSuccess) return false;
+  char arch[256];
+  if (GetGcnArchName(dev, arch) != 0) return false;
+  return IsArchMatch(arch, "gfx1250");
+#else
+  return false;
+#endif
+}
+
 // Initlialize GDAKI or PROXY backend. ginType can force a particular backend.
 // If provided, overwrite ginIb with the backend (generic ginIb case).
 ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int type) {
+  if (ncclGinIbSkipVerbsInit(type)) {
+    INFO(NCCL_INIT | NCCL_NET, "RMA/IB: skip verbs init (NCCL_GIN_TYPE=%d)", type);
+    return ncclInternalError; // Caught in plugin init code, not propagated to user.
+  }
   NCCLCHECK(ncclIbInitDevices(logFunction, nullptr));
   if (ncclNIbDevs == 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
 
