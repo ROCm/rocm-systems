@@ -225,6 +225,15 @@ const DivScaleCapture scale_down_f64[] = {
     {0xfa, 0x750000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x10000000000, 0},
     {0xff, 0x750000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x10000000000, 0},
     {0x00, 0x750000000000000, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x0, 0},
+    // Guest rounding away from zero carries the largest denormal to the smallest normal.
+    {0xf0, 0x80fffffffffffff, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x10000000000000, 0},
+    {0xf5, 0x80fffffffffffff, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x10000000000000, 0},
+    {0xfa, 0x80fffffffffffff, 0x7fefffffffffffff, 0x7fefffffffffffff, 0xfffffffffffff, 0},
+    {0xff, 0x80fffffffffffff, 0x7fefffffffffffff, 0x7fefffffffffffff, 0xfffffffffffff, 0},
+    {0xf0, 0x880fffffffffffff, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x8010000000000000, 0},
+    {0xf5, 0x880fffffffffffff, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x800fffffffffffff, 0},
+    {0xfa, 0x880fffffffffffff, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x8010000000000000, 0},
+    {0xff, 0x880fffffffffffff, 0x7fefffffffffffff, 0x7fefffffffffffff, 0x800fffffffffffff, 0},
 };
 
 // gfx1201 output modifiers on window results (RDNA4 entry points; RDNA3 applies OMOD only with
