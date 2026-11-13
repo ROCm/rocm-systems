@@ -252,35 +252,53 @@ class StageBothPhases(unittest.TestCase):
 class MainPhaseLibraries(unittest.TestCase):
     """main() hands each phase its own build's library, not the other's."""
 
-    def test_baseline_gets_the_baseline_build(self):
-        staged = {}
+    class Stop(Exception):
+        pass
 
-        class Stop(Exception):
-            pass
+    GOOD = {tm.BASELINE: "2.30.4-HEAD:aaaaaaa", tm.CANDIDATE: "2.30.4-HEAD:bbbbbbb"}
+
+    def run_main(self, versions: dict[str, str]) -> None:
+        """main() up to the first phase dir; leaves self.staged and self.install."""
+        self.staged = {}
 
         def stage(lib, *args, phase, **kwargs):
-            staged[phase] = lib
+            self.staged[phase] = lib
             return f"image-{phase}"
 
         argv = ["test_madengine.py", "--workload", "llama-3.1-70b-training",
                 "--cluster", "ruby", "--artifact-dir", "/cand",
                 "--baseline-artifact-dir", "/base", "--work-dir", "/nonexistent"]
-        fingerprint = {"md5": "", "version": "", "size": 0}
+        dirs = {"/base": tm.BASELINE, "/cand": tm.CANDIDATE}
+
+        def fingerprint(lib):
+            return {"md5": "", "version": versions[dirs[str(lib.parent)]], "size": 0}
+
         with mock.patch.object(sys, "argv", argv), \
              mock.patch.object(tm, "find_rccl_library",
                                side_effect=lambda d: Path(d) / "librccl.so"), \
-             mock.patch.object(tm, "get_rccl_fingerprint", return_value=fingerprint), \
+             mock.patch.object(tm, "get_rccl_fingerprint", side_effect=fingerprint), \
              mock.patch.object(tm, "artifact_build",
                                return_value={"event": "", "sha": "", "created_at": ""}), \
-             mock.patch.object(tm, "install_madengine"), \
+             mock.patch.object(tm, "install_madengine") as self.install, \
              mock.patch.object(tm, "check_mad_knobs"), \
              mock.patch.object(tm, "resolve_base_digest", return_value="b@sha256:1"), \
              mock.patch.object(tm, "stage_rccl_overlay", side_effect=stage), \
-             mock.patch.object(tm, "prepare_phase_dir", side_effect=Stop), \
-             self.assertRaises(Stop):
+             mock.patch.object(tm, "prepare_phase_dir", side_effect=self.Stop):
             tm.main()
-        self.assertEqual(staged, {tm.BASELINE: Path("/base/librccl.so"),
-                                  tm.CANDIDATE: Path("/cand/librccl.so")})
+
+    def test_baseline_gets_the_baseline_build(self):
+        with self.assertRaises(self.Stop):
+            self.run_main(self.GOOD)
+        self.assertEqual(self.staged, {tm.BASELINE: Path("/base/librccl.so"),
+                                       tm.CANDIDATE: Path("/cand/librccl.so")})
+
+    def test_a_library_without_a_version_fails_before_anything_runs(self):
+        for empty in (tm.BASELINE, tm.CANDIDATE):
+            with self.subTest(empty=empty), self.assertRaises(SystemExit) as cm:
+                self.run_main({**self.GOOD, empty: ""})
+            self.assertEqual(cm.exception.code, 1)
+            self.install.assert_not_called()
+            self.assertEqual(self.staged, {})
 
 
 class ResolveBaselineCli(unittest.TestCase):
