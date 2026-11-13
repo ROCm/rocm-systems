@@ -29,18 +29,25 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
   target_compile_options(clr_warnings INTERFACE /W4 /WX)
 
   # ---------------------------------------------------------------------------
-  # TEMPORARY. Unlike every other suppression below, this one is scaffolding and
-  # is meant to be deleted.
+  # C4100: "unreferenced formal parameter". CLR's own sources and headers are
+  # clean of this -- all 608 first-party sites were fixed by omitting the
+  # parameter name, and the ones that are live under a disabled #if or inside an
+  # assert carry [[maybe_unused]] instead.
   #
-  # C4100 ("unreferenced formal parameter") is the last outstanding /W4 code in
-  # CLR: 641 diagnostics over 445 lines in 67 files. It has no GCC/Clang
-  # equivalent under -Wall -- it lives in -Wextra -- so no Linux build catches
-  # it and there is no existing cleanup to copy.
+  # What this still masks is the vendored third-party headers under
+  # shared/amdgpu-windows-interop, which CLR does not own and cannot fix: 21
+  # sites in pal/inc (palInlineFuncs.h, palDevice.h, palPlatform.h,
+  # palTraceSession.h, palBuddyAllocatorImpl.h, palLinearAllocator.h and the
+  # gpuUtil trace sources) and one in sc/HSAIL/include/amd_hsa_loader.hpp.
+  # Dropping this line today fails the build inside those headers.
   #
-  # Clearing it is a long sequence of mechanical commits. Suppressing it here
-  # lets /WX be enforced *now*, so that the codes already fixed cannot silently
-  # regress while that work is in flight. Remove this line, not the others, once
-  # the C4100 cleanup lands.
+  # The real fix is to give those directories to the compiler as external
+  # includes, since -external:W0 is already on the command line. Note that it
+  # cannot simply be applied to every vendored directory: /external:I is
+  # searched after /I, and the sc/HSAIL dirs share ten header basenames with
+  # rocr-runtime's own include dir (hsa.h, amd_hsa_elf.h, amd_hsa_kernel_code.h,
+  # ...), so reordering them risks changing which header wins. The pal/inc
+  # directories have no such collision and can be moved safely.
   # ---------------------------------------------------------------------------
   target_compile_options(clr_warnings INTERFACE /wd4100)
 
