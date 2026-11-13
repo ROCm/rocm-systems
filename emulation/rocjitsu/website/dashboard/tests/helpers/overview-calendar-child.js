@@ -16,7 +16,6 @@ if (scenario !== 'empty') {
     run.provenance.rocjitsu.rocjitsu_commit_timestamp = timestamps[index];
     run.provenance.corpus.corpus_commit_timestamp = timestamps[index];
     run.execution_summary.timestamp = timestamps[index];
-    run.execution_summary.timestamp = timestamps[index];
     return run;
   });
 }

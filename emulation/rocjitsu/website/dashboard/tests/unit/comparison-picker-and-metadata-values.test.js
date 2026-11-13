@@ -163,9 +163,10 @@ test('branch timestamp tooltips preserve exact values when local labels match', 
   const base = { ...baseline, commitTimestamp: '2026-10-05T09:00:00.123Z', timestamp: '2026-10-05T10:00:00Z' };
   const next = { ...candidate, commitTimestamp: '2026-10-05T09:00:00.456Z', timestamp: '2026-10-05T10:00:30Z' };
   const { html } = renderMetadata(BranchEnvironment, 'light', base, next);
-  for (const [key, field] of [['committedAt', 'commitTimestamp'], ['completedAt', 'timestamp']]) {
+  for (const [key, field] of [['committedAt', 'commitTimestamp'], ['startedAt', 'timestamp']]) {
     expect(formatFullDate(base[field])).toBe(formatFullDate(next[field]));
     const row = metadataRow(html, `branch-source-${key}`);
+    if (key === 'startedAt') { expect(row).toContain('Execution started'); expect(row).not.toContain('Execution completed'); }
     expect(row).toContain('data-different="true"');
     const cells = [...row.matchAll(/<td\b[^>]*>[\s\S]*?<\/td>/g)].map(match => match[0]);
     expect(cells).toHaveLength(2);

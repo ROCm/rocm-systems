@@ -12,7 +12,6 @@ function keyboardPublication() {
     run.publication.id = `qa-keyboard-${index}`;
     run.provenance.rocjitsu.rocjitsu_commit_sha = String(index + 1).repeat(40);
     run.provenance.rocjitsu.rocjitsu_commit_timestamp = `${day}T10:00:00Z`;
-    run.execution_summary.timestamp = `${day}T11:00:00Z`;
     run.execution_summary.timestamp = `${day}T12:00:00Z`;
     if (index === 1 || index === 2) {
       for (const configuration of run.benchmark_results) {
@@ -102,7 +101,6 @@ for (const width of [1440, 390]) test(`keyboard slots expose truthful gaps and p
   }
   publication.runs[0].provenance.rocjitsu.rocjitsu_commit_timestamp = '2026-09-10T10:00:00Z';
   publication.runs[0].execution_summary.timestamp = '2026-09-10T12:00:00Z';
-  publication.runs[0].execution_summary.timestamp = '2026-09-10T11:00:00Z';
   await page.reload(); await ready(page);
   await readChart(trend.getByRole('img'), (instance) => instance.getOption().series.length);
   await group.focus(); await page.keyboard.press('End');

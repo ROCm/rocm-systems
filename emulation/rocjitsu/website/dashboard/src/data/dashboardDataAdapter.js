@@ -72,7 +72,7 @@ function normalizeRun(run) {
   const pr = source.pull_request;
   return {
     runId: publication.id, catalogId: summary.benchmark_suite,
-    timestamp: summary.timestamp, commitTimestamp: native.rocjitsu_commit_timestamp,
+    timestamp: summary.timestamp, finishedAt: summary.finished_at ?? null, commitTimestamp: native.rocjitsu_commit_timestamp,
     trigger: publication.trigger, machineId: publication.machine_label, branch: source.branch,
     ...(object(source.base) ? { sourceBase: { ...source.base } } : {}),
     ...(object(pr) ? { pullRequest: { ...pr, ...(pr.url && !safePublishedUrl(pr.url) ? { url: undefined } : {}) } } : {}),

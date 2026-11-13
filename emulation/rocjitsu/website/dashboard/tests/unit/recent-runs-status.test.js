@@ -29,11 +29,26 @@ test('a run with no finish record is dated and ordered by its start timestamp, n
   expect(selectRecentRunAttempts(data)[0].runId).toBe('fictional-unfinished-develop');
 });
 
-function renderStatus(finishedAt, status) {
+test('a completed run is ordered by its start, not its finish, even when it finished after a later run started', () => {
+  const publication = createFeedbackPublication();
+  const [early, late] = publication.runs.filter((run) => run.publication.source.branch === 'develop');
+  const start = Math.max(...publication.runs.map((run) => Date.parse(run.execution_summary.timestamp)));
+  // early starts first but finishes last; late starts second and finishes first
+  Object.assign(early.execution_summary, { timestamp: new Date(start + 60_000).toISOString(), finished_at: new Date(start + 600_000).toISOString() });
+  Object.assign(late.execution_summary, { timestamp: new Date(start + 120_000).toISOString(), finished_at: new Date(start + 180_000).toISOString() });
+  const { data } = adaptPublishedDashboardData(publication);
+  const [first, second] = selectRecentRunAttempts(data);
+  expect(first.runId).toBe(late.publication.id);
+  expect(second.runId).toBe(early.publication.id);
+  expect(first.timestamp).toBe(late.execution_summary.timestamp);
+});
+
+function renderStatus(finishedAt, status) {  // finishedAt: the run's finish record (null = killed harness); the start timestamp stays valid
   const run = structuredClone(raw);
   run.publication.id = 'fictional-status';
   run.publication.source.branch = 'develop';
-  run.execution_summary.timestamp = finishedAt;
+  run.execution_summary.timestamp = '2026-10-22T10:00:00Z';
+  run.execution_summary.finished_at = finishedAt;
   for (const result of run.benchmark_results) {
     result.status = status;
     result.timing_results_s = status === 'completed' ? [0.25] : [];
