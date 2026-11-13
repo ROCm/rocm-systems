@@ -1049,6 +1049,14 @@ add_test(
         tests/unit/rocprof_compute_soc/test_soc_base.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_sdk_config
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_sdk_config.xml
+        ${COV_OPTION} tests/unit/rocprof_compute_soc/test_sdk_config.py
+        ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # Single-pass metric allocator + bucket helper unit tests
 # -----------------------------------
@@ -1289,6 +1297,7 @@ if(${ENABLE_COVERAGE})
         test_collectable
         test_counter_grouping_buckets
         test_analysis_config_collectables
+        test_sdk_config
         test_tty
         test_file_io
         test_utils_profile_csv

@@ -43,6 +43,11 @@ def is_gfx115x_ip_variant(arch_name: str) -> bool:
     return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
 
 
+def is_gfx1201_arch(arch_name: str) -> bool:
+    """Check if arch is gfx1201 to use the Navi48 analysis layout."""
+    return arch_name == "gfx1201"
+
+
 def is_gfx1250_arch(arch_name: str) -> bool:
     """Check if arch is gfx1250 to correctly use the gfx1250 analysis layout."""
     return arch_name == "gfx1250"
@@ -143,6 +148,40 @@ GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
     1601: "UTCL1 Metrics",
     1701: "GRBM Metrics",
     2101: "PC Sampling",
+}
+
+
+GFX1201_PANEL_ID_TO_SECTION: dict[int, str] = {
+    201: "System Speed-of-Light",
+    301: "Memory chart - Instruction Cache",
+    302: "Memory chart - Scalar Data Cache",
+    303: "Memory chart - GL0 Cache (Vector L0)",
+    304: "Memory chart - LDS (Local Data Share)",
+    308: "Memory chart - GL2 Cache (L2)",
+    309: "Memory chart - L2 to Memory",
+    310: "Memory chart - Workgroup Processors (WGPs)",
+    311: "Memory chart - Infinity Cache and VRAM",
+    602: "Wave Dispatch Statistics",
+    701: "WGP Utilization",
+    702: "WGP Wavefront Launch Stats",
+    703: "WGP Wavefront Dispatch",
+    704: "WGP Wavefront Life",
+    705: "WGP Wavefront Instruction Mix",
+    706: "WGP VMEM Instruction Mix",
+    707: "WGP LDS Instruction Mix",
+    708: "WGP VALU Instruction Mix",
+    710: "WGP WMMA Instruction FLOPs and IOPs Counting",
+    711: "WGP Instruction Issue Stalls",
+    716: "WGP Instruction Cache",
+    717: "WGP Scalar Data Cache",
+    902: "GL0 Request Statistics",
+    903: "GL0 Cache Performance",
+    908: "GL0 Stalls",
+    1101: "GL1A Processing",
+    1103: "GL1 Cache Request Statistics",
+    1310: "GL2 Cache Request Statistics",
+    1311: "GL2 Cache Performance",
+    1701: "GRBM Metrics",
 }
 
 
@@ -302,6 +341,8 @@ def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
         return None
     if is_gfx115x_ip_variant(arch_name):
         return RDNA35_PANEL_ID_TO_SECTION_BY_ARCH.get(table_id)
+    if is_gfx1201_arch(arch_name):
+        return GFX1201_PANEL_ID_TO_SECTION.get(table_id)
     if is_gfx1250_arch(arch_name):
         return GFX1250_PANEL_ID_TO_SECTION.get(table_id)
     return CDNA_PANEL_ID_TO_SECTION.get(table_id)

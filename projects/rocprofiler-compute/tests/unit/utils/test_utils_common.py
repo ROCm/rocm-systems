@@ -14,9 +14,20 @@ from unittest import mock
 
 import pytest
 
+import config
 import utils.utils_common as utils_common
 from utils.utils_common import canonical_config_arch
 from vendored import yaml
+
+
+def analysis_config_archs():
+    """Arch directories under the analysis configs."""
+    return sorted(
+        arch_dir.name
+        for arch_dir in config.analysis_configs_dir.glob("gfx*")
+        if arch_dir.is_dir()
+    )
+
 
 LISTED_METRIC_IDS = ["0", "2", "2.1", "2.1.0", "2.1.1", "18", "18.1", "18.1.0", "18.2"]
 LISTED_METRIC_DETAILS = {
@@ -760,6 +771,14 @@ def test_convert_metric_id_to_panel_info_edge_case_dot_only():
 
     with pytest.raises(ValueError):
         utils_common.convert_metric_id_to_panel_info(".02")
+
+
+@pytest.mark.parametrize(
+    "gpu_arch",
+    analysis_config_archs(),
+)
+def test_get_arch_alias_to_panel_id_finds_template_aliases(gpu_arch):
+    assert utils_common.get_arch_alias_to_panel_id(gpu_arch)
 
 
 # =============================================================================

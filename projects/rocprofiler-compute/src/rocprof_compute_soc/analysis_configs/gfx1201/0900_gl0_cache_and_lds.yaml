@@ -1,0 +1,66 @@
+Panel Config:
+  id: 900
+  alias: gl0
+  title: GL0 Cache (TCP Cache)
+  data source:
+  - metric_table:
+      id: 902
+      title: GL0 Request Statistics
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Total Requests:
+          avg: SUM(TCP_REQ_sum) / SUM($denom)
+          min: MIN(TCP_REQ_sum / $denom)
+          max: MAX(TCP_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+        Miss Requests:
+          avg: SUM(TCP_REQ_MISS_sum) / SUM($denom)
+          min: MIN(TCP_REQ_MISS_sum / $denom)
+          max: MAX(TCP_REQ_MISS_sum / $denom)
+          unit: (Count + $normUnit)
+  - metric_table:
+      id: 903
+      title: GL0 Cache Performance
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Hit Rate:
+          avg: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
+          min: MIN(100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum)
+          max: MAX(100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum)
+          unit: Percent
+  - metric_table:
+      id: 908
+      title: GL0 Stalls
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        TA Req Stall:
+          avg: SUM(TCP_TCP_TA_REQ_STALL_sum) / SUM($denom)
+          min: MIN(TCP_TCP_TA_REQ_STALL_sum / $denom)
+          max: MAX(TCP_TCP_TA_REQ_STALL_sum / $denom)
+          unit: (Cycles + $normUnit)
+  metrics_description:
+    Hit Rate: >-
+      Percentage of TCP requests that do not miss in the vector GL0 cache.
+    Miss Requests: >-
+      Vector GL0 cache requests reported as misses, normalized by the chosen
+      unit.
+    TA Req Stall: >-
+      TCP request-stall counter toward the texture addresser, normalized by
+      the chosen unit.
+    Total Requests: >-
+      Total vector GL0 cache requests, normalized by the chosen unit.

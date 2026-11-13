@@ -1,0 +1,62 @@
+{
+  "archs": ["gfx1201"],
+  "description": "RDNA 4 Navi 48: WGPs, LDS/GL0/SQC, GL1, GL2, Infinity Cache, VRAM.",
+  "scope": {"labels": ["GPU", "VRAM"], "split": "vram"},
+  "blocks": [
+    {"id": "cu", "title": "WGPs", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
+      {"metric_id": "3.10.0", "title": "Wave Occ", "category": "util", "bar": false},
+      {"metric_id": "3.10.1", "title": "vGPRs", "category": "util", "bar": false},
+      {"metric_id": "3.10.2", "title": "sGPRs", "category": "util", "bar": false},
+      {"metric_id": "3.10.4", "title": "Scratch/Wave", "category": "util", "bar": false},
+      {"metric_id": "3.10.3", "title": "LDS Alloc", "category": "util", "bar": false},
+      {"metric_id": "3.10.5", "title": "Workgroups/WGP", "category": "util", "bar": false}
+    ]},
+
+    {"id": "lds", "title": "LDS", "column": 1, "row": 0, "order": 0, "style": "panel", "content": [
+      {"metric_id": "3.4.1", "title": "Util", "category": "util", "bar": true},
+      {"metric_id": "3.4.3", "title": "BW", "category": "bw", "bar": false},
+      {"metric_id": "3.4.2", "title": "Bank Conflict", "category": "stall", "bar": true}
+    ]},
+    {"id": "l0", "title": "GL0", "column": 1, "row": 0, "order": 1, "style": "panel", "content": [
+      {"metric_id": "3.3.0", "title": "Hit Rate", "category": "hit", "bar": true}
+    ]},
+    {"id": "l1", "title": "SQC", "column": 1, "row": 0, "order": 2, "style": "panel"},
+    {"id": "icache", "title": "Instruction Cache", "column": 1, "order": 0, "style": "panel", "parent": "l1", "content": [
+      {"metric_id": "3.1.1", "title": "Hit Rate", "category": "hit", "bar": true}
+    ]},
+    {"id": "dcache", "title": "Scalar Data Cache", "column": 1, "order": 1, "style": "panel", "parent": "l1", "content": [
+      {"metric_id": "3.2.1", "title": "Hit Rate", "category": "hit", "bar": true},
+      {"metric_id": "3.2.2", "title": "Load BW", "category": "read", "bar": false}
+    ]},
+
+    {"id": "gl1", "title": "GL1", "column": 2, "row": 0, "order": 0, "style": "panel"},
+
+    {"id": "l2", "title": "GL2", "column": 3, "row": 0, "order": 0, "style": "panel", "content": [
+      {"metric_id": "3.8.0", "title": "Hit Rate", "category": "hit", "bar": true},
+      {"metric_id": "3.9.0", "title": "Memory Read Req", "category": "read", "bar": false},
+      {"metric_id": "3.9.1", "title": "Memory Write Req", "category": "write", "bar": false},
+      {"metric_id": "3.9.2", "title": "Memory Read BW", "category": "read", "bar": false},
+      {"metric_id": "3.9.3", "title": "Memory Write BW", "category": "write", "bar": false}
+    ]},
+
+    {"id": "infinity_cache", "title": "Infinity Cache", "column": 4, "row": 0, "order": 0, "style": "panel", "content": [
+      {"metric_id": "3.11.0", "title": "Hit Rate", "category": "hit", "bar": true}
+    ]},
+
+    {"id": "vram", "title": "VRAM", "column": 5, "row": 0, "order": 0, "style": "panel", "content": [
+      {"metric_id": "3.11.1", "title": "Read BW", "category": "read", "bar": false},
+      {"metric_id": "3.11.2", "title": "Write BW", "category": "write", "bar": false}
+    ]}
+  ],
+  "arrows": [
+    {"from": "cu", "to": "lds", "direction": "both", "metric_id": "3.4.0", "title": "LDS", "category": "neutral", "style": "inline", "group": "Request"},
+
+    {"from": "cu", "to": "icache", "direction": "backward", "metric_id": "3.1.0", "title": "ICACHE", "category": "read", "style": "inline"},
+
+    {"from": "cu", "to": "dcache", "direction": "backward", "metric_id": "3.2.0", "title": "SMEM", "category": "read", "style": "inline"},
+
+    {"from": "icache", "to": "gl1", "direction": "backward", "metric_id": "3.1.2", "title": "ICache Read BW", "category": "read", "style": "stacked"},
+
+    {"from": "dcache", "to": "gl1", "direction": "backward", "metric_id": "3.2.3", "title": "DCache Read BW", "category": "read", "style": "stacked"}
+  ]
+}

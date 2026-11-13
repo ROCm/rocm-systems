@@ -66,6 +66,7 @@ test_categories:
       - test_counter_grouping_buckets
       - test_pass_provenance
       - test_debug_row_tracker
+      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -164,6 +165,7 @@ test_categories:
       - test_counter_grouping_buckets
       - test_pass_provenance
       - test_debug_row_tracker
+      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -276,6 +278,7 @@ test_categories:
       - test_counter_grouping_buckets
       - test_pass_provenance
       - test_debug_row_tracker
+      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -388,6 +391,7 @@ test_categories:
       - test_counter_grouping_buckets
       - test_pass_provenance
       - test_debug_row_tracker
+      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
