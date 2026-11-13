@@ -2813,14 +2813,7 @@ void SimulatedKfd::setup_topology(const std::vector<config::KfdDeviceConfig> &de
   for (auto &dev : devs) {
     if (!dev.present)
       continue;
-    auto info = gpu_info_from_config(dev, num_xcc, pci);
-    if (!publish_peer_links) {
-      // Executable manifest routes model local effects, but they do not
-      // establish native XGMI discovery through the stock driver. Keep the
-      // KFD metadata that ROCr uses to infer that path conservative.
-      info.hive_id = 0;
-      info.num_sdma_xgmi_engines = 0;
-    }
+    auto info = gpu_info_from_config(dev, num_xcc, pci, publish_peer_links);
     infos.push_back(std::move(info));
   }
   if (infos.empty())
