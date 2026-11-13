@@ -37,8 +37,13 @@ set(USE_AMD_LIBELF "yes" CACHE FORCE "")
 set(NO_SI_SP3 "yes" CACHE FORCE "")
 set(HSAIL_COMPILER_SOURCE_DIR "${AMD_LIBELF_INCLUDE_DIR}/../../../../..")
 set(HSAIL_ELFTOOLCHAIN_DIR ${HSAIL_COMPILER_SOURCE_DIR}/lib/loaders/elf/utils)
-add_subdirectory("${AMD_LIBELF_INCLUDE_DIR}" ${CMAKE_CURRENT_BINARY_DIR}/libelf)
+# SYSTEM: these are vendored third-party sources under
+# shared/amdgpu-windows-interop. CLR cannot fix warnings raised inside their
+# headers, so their interface include directories are handed to the compiler as
+# system includes (-external:I under MSVC, -isystem elsewhere) and silenced by
+# the -external:W0 already on the command line.
+add_subdirectory("${AMD_LIBELF_INCLUDE_DIR}" ${CMAKE_CURRENT_BINARY_DIR}/libelf SYSTEM)
 if (NOT AMD_COMPUTE_WIN OR ROCCLR_ENABLE_PAL)
-add_subdirectory("${AMD_HSAIL_INCLUDE_DIR}/../ext/libamdhsacode" ${CMAKE_CURRENT_BINARY_DIR}/libamdhsacode)
-add_subdirectory("${AMD_HSAIL_INCLUDE_DIR}/../ext/loader" ${CMAKE_CURRENT_BINARY_DIR}/loader)
+add_subdirectory("${AMD_HSAIL_INCLUDE_DIR}/../ext/libamdhsacode" ${CMAKE_CURRENT_BINARY_DIR}/libamdhsacode SYSTEM)
+add_subdirectory("${AMD_HSAIL_INCLUDE_DIR}/../ext/loader" ${CMAKE_CURRENT_BINARY_DIR}/loader SYSTEM)
 endif()

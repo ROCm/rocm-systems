@@ -28,28 +28,11 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
   # strips it, and in any case target options are appended last, so /W4 wins.
   target_compile_options(clr_warnings INTERFACE /W4 /WX)
 
-  # ---------------------------------------------------------------------------
-  # C4100: "unreferenced formal parameter". CLR's own sources and headers are
-  # clean of this -- all 608 first-party sites were fixed by omitting the
-  # parameter name, and the ones that are live under a disabled #if or inside an
-  # assert carry [[maybe_unused]] instead.
-  #
-  # What this still masks is the vendored third-party headers under
-  # shared/amdgpu-windows-interop, which CLR does not own and cannot fix: 21
-  # sites in pal/inc (palInlineFuncs.h, palDevice.h, palPlatform.h,
-  # palTraceSession.h, palBuddyAllocatorImpl.h, palLinearAllocator.h and the
-  # gpuUtil trace sources) and one in sc/HSAIL/include/amd_hsa_loader.hpp.
-  # Dropping this line today fails the build inside those headers.
-  #
-  # The real fix is to give those directories to the compiler as external
-  # includes, since -external:W0 is already on the command line. Note that it
-  # cannot simply be applied to every vendored directory: /external:I is
-  # searched after /I, and the sc/HSAIL dirs share ten header basenames with
-  # rocr-runtime's own include dir (hsa.h, amd_hsa_elf.h, amd_hsa_kernel_code.h,
-  # ...), so reordering them risks changing which header wins. The pal/inc
-  # directories have no such collision and can be moved safely.
-  # ---------------------------------------------------------------------------
-  target_compile_options(clr_warnings INTERFACE /wd4100)
+  # Note there is no /wd4100 here. The vendored PAL and HSAIL trees raise
+  # "unreferenced formal parameter" from their own headers, which CLR cannot
+  # fix; those directories are marked SYSTEM where they are added (see
+  # FindAMD_PAL*.cmake and FindAMD_HSA_LOADER.cmake) so the /external:W0 above
+  # silences them without hiding anything in CLR's own code.
 
   # C4714: "function marked as __forceinline not inlined". Whether the compiler
   # honours __forceinline is its own decision and not something the source can
