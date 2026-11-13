@@ -756,25 +756,19 @@ def build_amdsmi(cfg: "RunnerConfig") -> None:
         if subdir.exists():
             shutil.rmtree(subdir)
 
-    wheel_cmd = [
-        "python3",
-        "-m",
-        "pip",
-        "wheel",
-        "--no-deps",
-        "--no-build-isolation",
-        "-w",
-        ".",
-        ".",
-    ]
-    run_command(
-        wheel_cmd,
-        name="python-wheel",
-        cwd=wheel_dir,
-        retries=cfg.retries,
-        env=env,
-        log_dir=cfg.log_dir,
-    )
+    # Build isolation lets pip fetch the setuptools that pyproject.toml needs
+    # (>= 77); distro copies can be older, and none that new runs on Python 3.8.
+    if sys.version_info < (3, 9):
+        print("Skipping the Python wheel: building it needs Python 3.9 or later")
+    else:
+        run_command(
+            ["python3", "-m", "pip", "wheel", "--no-deps", "-w", ".", "."],
+            name="python-wheel",
+            cwd=wheel_dir,
+            retries=cfg.retries,
+            env=env,
+            log_dir=cfg.log_dir,
+        )
 
     run_command(
         ["make", "package"],

@@ -5,7 +5,8 @@
 
 These tests deliberately avoid anything that requires root, a build env, or
 network access -- they cover argument parsing, /etc/os-release detection,
-package-manager/format inference, package globbing, and the summarize step.
+package-manager/format inference, package globbing, the wheel build command
+and the summarize step.
 
 Run with:  python3 -m unittest discover -s projects/amdsmi/tests/amdsmi_build
 """
@@ -18,6 +19,8 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 def _load_module():
@@ -251,6 +254,58 @@ class SummarizeTests(unittest.TestCase):
             summary = results / "summary.md"
             self.assertEqual(rab.summarize_results(results, "TestOS", summary), 1)
             self.assertIn("unit test (exit 1)", summary.read_text())
+
+
+class BuildWheelTests(unittest.TestCase):
+    def _build_commands(self, version_info):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        tmp = Path(tmpdir.name)
+        cfg = rab.RunnerConfig(
+            project_dir=tmp / "amdsmi",
+            build_dir=tmp / "build",
+            package_manager="apt",
+            package_format="deb",
+            log_dir=tmp / "logs",
+            test_results_dir=tmp / "results",
+            retries=1,
+            build_type="Release",
+            jobs=1,
+            os_label="Test",
+            refresh_apt=False,
+            skip_setuptools_upgrade=False,
+            install_more_itertools=False,
+            qa_rpaths=False,
+            skip_build=False,
+            skip_install=False,
+            upgrade_from=None,
+            python_interpreters=None,
+        )
+        commands = {}
+
+        def record(cmd, *, name, **_kwargs):
+            commands[name] = list(cmd)
+
+        for patcher in (
+            mock.patch.object(rab, "run_command", record),
+            mock.patch.object(rab, "_mark_safe_git_dir"),
+            mock.patch.object(rab, "sys", SimpleNamespace(version_info=version_info)),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        rab.build_amdsmi(cfg)
+        return commands
+
+    def test_wheel_build_lets_pip_install_setuptools(self):
+        # The distro setuptools on Debian 12 and Azure Linux 3 is older than
+        # the version pyproject.toml requires.
+        wheel_cmd = self._build_commands((3, 12, 0))["python-wheel"]
+        self.assertNotIn("--no-build-isolation", wheel_cmd)
+
+    def test_wheel_build_skipped_on_python_38(self):
+        commands = self._build_commands((3, 8, 10))
+        self.assertNotIn("python-wheel", commands)
+        self.assertIn("make-package", commands)
 
 
 if __name__ == "__main__":
