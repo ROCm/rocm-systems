@@ -375,7 +375,6 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_SOURCE_FILES
     param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
     param-parsers-test.cc                # src/include/param/parser_{default,enum,bitset,list}.h
-    param-registry-test.cc               # src/param/param_registry.cc
     group-test.cc
     comm-dump-test.cc                    # src/commDump.cc
     timer-test.cc                        # src/include/timer.h
@@ -383,9 +382,6 @@ function(rccl_define_micro_source_lists)
     dev-runtime-test.cc
     nccl-utility-test.cc                 # src/include/nccl_device/utility.h (header-only, no fakes)
     # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
-    register-test.cc                     # src/register/register.cc
-    coll-reg-test.cc                     # src/register/coll_reg.cc
-    sendrecv-reg-test.cc                 # src/register/sendrecv_reg.cc
     process-isolated-runner-test.cc
     rccl-graph-gen-test.cc               # src/graph/rccl_graph_gen.cc ring construction + cut balancing
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
@@ -682,16 +678,6 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroParam -- src/param/{param,c_api}.cc, src/misc/param.cc. Own binary: misc/param.cc
-  # defines ncclGetEnv, initEnv and ncclLoadParam, which the shared fakes in rccl-UnitTestsMicro also define.
-  set(TEST_MICRO_PARAM_SOURCE_FILES
-    fakes/hip_fakes.cc
-    param-test.cc
-    ../common/GpuCountProbe.cpp
-    ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1429,16 +1415,12 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
     GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
     WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
-    REGISTER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/register.cc"
-    COLL_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/coll_reg.cc"
-    SENDRECV_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/sendrecv_reg.cc"
     RCCL_RMA_FAKES_OMIT_ncclRmaInitialized  # rma_tmp.cc defines it
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
     DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc"
     DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime_segments.cc"
     RCCL_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_dev_runtime.cc"
     RCCL_GRAPH_GEN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc"
-    PARAM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_registry.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 # wrap-test.cc includes rccl_wrap.cc. Production librccl always compiles the LL128
 # arm; without this the broadcast protocol tests exercise the compiled-out fallback.
@@ -1628,20 +1610,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicroCe
     CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroParam
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroParam
-  SOURCES ${TEST_MICRO_PARAM_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    # param_tmp.cc, not param.cc: src/CMakeLists.txt lists misc/param.cc first, so
-    # add_file_unique() renames this one.
-    PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_tmp.cc"
-    C_API_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/c_api.cc"
-    MISC_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/param.cc"
-    PARAM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_registry.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_param.yaml")
+include("${CMAKE_CURRENT_LIST_DIR}/param/host_tests.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/register/host_tests.cmake")
 
 include("${CMAKE_CURRENT_LIST_DIR}/ras/host_tests.cmake")
 
