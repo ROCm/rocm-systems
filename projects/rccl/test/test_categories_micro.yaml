@@ -14,29 +14,6 @@ test_categories:
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
     # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
-      # ras/ras.cc
-      - "RasMicrotest.*"
-      # ras/diagnostics_checks_common.cc
-      - "RasDiagnosticsCommonMicrotest.*"
-      # ras/collectives.cc
-      - "RasCollectivesMicrotest.*"
-      # ras/diagnostics.cc
-      - "RasDiagnosticsMicrotest.*"
-      # ras/rasnet.cc
-      - "RasNetMicrotest.*"
-      # ras/diagnostics_gpu.cc
-      - "RasDiagnosticsGpuMicrotest.*"
-      # ras/peers.cc
-      - "RasPeersMicrotest.*"
-      # ras/diagnostics_env.cc
-      - "RasDiagnosticsEnvMicrotest.*"
-      # ras/client.cc
-      - "RasClientMicrotest.*"
-      # ras/client_support.cc
-      - "RasClientSupportMicrotest.*"
-      - "Commands/RasClientSupportEnqueueFailureMicrotest.*"
-      # ras/ras_param.cc
-      - "RasParamMicrotest.*"
       # rma/rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"
       - "RmaProxyDescriptorTest.*"

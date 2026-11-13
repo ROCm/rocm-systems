@@ -20,33 +20,6 @@
 
 #include <gtest/gtest.h>
 
-#define rasClientsHead DiagnosticsTestRasClientsHead
-#define rasCollFree DiagnosticsTestRasCollFree
-#define rasCollReqInit DiagnosticsTestRasCollReqInit
-#define rasNetSendCollReq DiagnosticsTestRasNetSendCollReq
-#define rasDiagnosticsGpuModelCollectLocal DiagnosticsTestGpuModelCollectLocal
-#define rasDiagnosticsGpuModelSummarize DiagnosticsTestGpuModelSummarize
-#define rasDiagnosticsCudaDriverVersionCollectLocal DiagnosticsTestCudaDriverVersionCollectLocal
-#define rasDiagnosticsCudaDriverVersionSummarize DiagnosticsTestCudaDriverVersionSummarize
-#define rasDiagnosticsEccCollectLocal DiagnosticsTestEccCollectLocal
-#define rasDiagnosticsEccSummarize DiagnosticsTestEccSummarize
-#define rasDiagnosticsNvLinkCollectLocal DiagnosticsTestNvLinkCollectLocal
-#define rasDiagnosticsNvLinkSummarize DiagnosticsTestNvLinkSummarize
-#define rasDiagnosticsNcclEnvCollectLocal DiagnosticsTestNcclEnvCollectLocal
-#define rasDiagnosticsNcclEnvSummarize DiagnosticsTestNcclEnvSummarize
-#define rasDiagnosticsRdmaTopoCollectLocal DiagnosticsTestRdmaTopoCollectLocal
-#define rasDiagnosticsRdmaTopoSummarize DiagnosticsTestRdmaTopoSummarize
-#define rasDiagnosticsIommuCollectLocal DiagnosticsTestIommuCollectLocal
-#define rasDiagnosticsIommuSummarize DiagnosticsTestIommuSummarize
-#define rasDiagnosticsAtsCollectLocal DiagnosticsTestAtsCollectLocal
-#define rasDiagnosticsAtsSummarize DiagnosticsTestAtsSummarize
-#define rasDiagnosticsXidCollectLocal DiagnosticsTestXidCollectLocal
-#define rasDiagnosticsXidSummarize DiagnosticsTestXidSummarize
-#define rasDiagnosticsNvidiaDriverVersionCollectLocal DiagnosticsTestNvidiaDriverVersionCollectLocal
-#define rasDiagnosticsNvidiaDriverVersionSummarize DiagnosticsTestNvidiaDriverVersionSummarize
-#define rasDiagnosticsPathsCollectLocal DiagnosticsTestPathsCollectLocal
-#define rasDiagnosticsPathsSummarize DiagnosticsTestPathsSummarize
-
 #include "comm.h"
 #include "ras/diagnostics.h"
 #include "ras/diagnostics_checks.h"
@@ -105,8 +78,7 @@ uint64_t DiagnosticsTestClockNano() { return static_cast<uint64_t>(g_clockNano);
 
 // Test-local collaborator fakes.
 
-// Keep synthetic clients paired with this TU's rasCollFree and fixture cleanup,
-// independently of ras-test.cc's client ownership and collaborator fakes.
+// Keep synthetic clients paired with this TU's rasCollFree and fixture cleanup.
 struct rasClient* rasClientsHead = nullptr;
 
 namespace {

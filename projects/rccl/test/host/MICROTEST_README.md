@@ -119,76 +119,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `#ifdef ENABLE_WARP_SPEED` cluster (~10 functions) is compiled out of
     this binary entirely, so no seam can reach it without changing the
     binary's own build configuration.
-  - `ras/ras.cc` (`RAS_CC_PATH`, from `ras-test.cc`); suite
-    `RasMicrotest.*`. The suite covers every executable line and function in
-    `ras.cc`: communicator setup and cleanup, local notifications, message
-    allocation and transfer, connection handshakes, message dispatch, the poll
-    loop, timeout handling, and poll-slot management. External socket, network,
-    and neighboring subsystem calls use test-controlled replacements in
-    `ras-test.cc`, their sole consumer. Real multi-process behavior remains
-    integration-test territory. Since this binary uses section GC, validate
-    completeness by checking that the linked coverage report still contains
-    the same `ras.cc` function inventory as the compiled source.
-  - `ras/diagnostics_checks_common.cc` (`RAS_DIAGNOSTICS_COMMON_CC_PATH`, from
-    `ras-diagnostics-common-test.cc`); suite
-    `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
-    filtering, aligned local-record collection, allocation and callback
-    failures, rank ordering and formatting, and reporter output.
-  - `ras/collectives.cc` (`COLLECTIVES_CC_PATH`, from
-    `ras-collectives-test.cc`); suite `RasCollectivesMicrotest.*`. Covers
-    request initialization, collective forwarding and responses, completion,
-    timeout handling, history, connection cleanup, diagnostics-init failure
-    absorption, and dependency-error propagation.
-    `DISABLED_NetSendCollReq_CommsPayloadAllocationFailureKeepsRequestForwardable`
-    tracks [AICOMRCCL-2740](https://amd-hub.atlassian.net/browse/AICOMRCCL-2740).
-    This deferred production regression currently crashes when communicator-data
-    allocation fails after request rewriting. Enable it with the production fix;
-    it is excluded from normal host-test runs. To reproduce explicitly, run
-    `rccl-UnitTestsMicro --gtest_also_run_disabled_tests --gtest_filter=RasCollectivesMicrotest.DISABLED_NetSendCollReq_CommsPayloadAllocationFailureKeepsRequestForwardable`.
-  - `ras/diagnostics.cc` (`RAS_DIAGNOSTICS_CC_PATH`, from
-    `ras-diagnostics-test.cc`); suite `RasDiagnosticsMicrotest.*`. Covers
-    context initialization, request lifecycle, local-data collection,
-    peer-payload aggregation, summaries, timeout propagation, and reporter
-    errors. `DISABLED_Resume_UnknownWireCheckIdReturnsError` tracks
-    AICOMRCCL-2741: production reads an out-of-range peer check ID as an enum
-    before validation. Its raw-byte fixture reproduces the enum UBSan failure;
-    enable it after the production fix. The defined `RAS_DIAG_CHECK_COUNT`
-    sentinel remains covered by enabled dispatch and peer-payload tests.
-  - `ras/rasnet.cc` (`RASNET_CC_PATH`, from `rasnet-test.cc`); suite
-    `RasNetMicrotest.*`. Covers connection and socket lifecycles, event-loop
-    I/O, timeout recovery, keep-alives, and fallback-link maintenance.
-  - `ras/diagnostics_gpu.cc` (`RAS_DIAGNOSTICS_GPU_CC_PATH`, from
-    `ras-diagnostics-gpu-test.cc`); suite `RasDiagnosticsGpuMicrotest.*`. Covers
-    the AMD SMI arm against the `amd_smi_diag*` fakes in `fakes/amdsmi_fakes.cc`:
-    GPU inventory, HIP and AMD GPU driver versions, ECC, and XGMI collection and
-    summaries, including failed queries, bounded driver-version strings, AMD SMI
-    unavailable on some or all nodes, the corrected-error threshold, down and
-    missing XGMI links, and partition bus IDs (CPX, DPX) that fall back to the
-    physical GPU. Also checks that `rasDiagnosticsGpuInit` loads AMD SMI up front.
-  - `ras/peers.cc` (`RAS_PEERS_CC_PATH`, from `ras-peers-test.cc`); suite
-    `RasPeersMicrotest.*`. Covers peer conversion and merging, update
-    propagation, link selection, dead-peer tracking, address ordering, and
-    peer formatting.
-  - `ras/diagnostics_env.cc` (`RAS_DIAGNOSTICS_ENV_CC_PATH`, from
-    `ras-diagnostics-env-test.cc`); suite `RasDiagnosticsEnvMicrotest.*`.
-    Covers NCCL environment collection, filtering, truncation, aggregation,
-    mismatch reporting, and reporter errors.
-  - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
-    `RasClientMicrotest.*`. With
-    `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
-    unit's whole dependency surface is libc, not HIP/nccl; it seams that
-    surface through `fakes/libc_fakes.{h,cc}` plus the `fakes/libc_seam.h` /
-    `fakes/libc_seam_undef.h` positional rename pair (guard-less by design, so
-    every header declaring a renamed name must precede it and the undef half
-    must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
-    of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
-  - `ras/ras_param.cc` (`RAS_PARAM_CC_PATH`, from `ras-param-test.cc`); suite
-    `RasParamMicrotest.*`. Covers environment parsing, invalid-value fallback,
-    cached parameter reads, and nanosecond/second scaling. The test includes the
-    production file under renamed `ncclParamRasTimeoutFactor`,
-    `rasTimeoutFactorNs`, and `rasTimeoutFactorSec` symbols so it can link beside
-    `fakes/ras_param_fakes.cc` and the `ras-test.cc` timeout fake in the shared
-    microtest binary.
   - `tuning/tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from
     `tuning-general-test.cc`); suite `TuningGeneralMicrotest.*`. Covers the
     shared step-count, hardware-index, time-estimation, thread-threshold,
@@ -317,22 +247,88 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ncclOsCpuZero` / `ncclOsCpuSet` / `ncclOsCpuIsSet` one-liners, which would
   otherwise sit in `rccl-UnitTestsMicro` as test-TU definitions. See
   `test_categories_micro_cpuset.yaml`.
-- **`rccl-UnitTestsMicroClientSupport`**: `ras/client_support.cc` (via
-  `CLIENT_SUPPORT_CC_PATH`, from `client-support-test.cc`); suites
-  `RasClientSupportMicrotest.*` and
-  `Commands/RasClientSupportEnqueueFailureMicrotest.*`. Raw socket I/O is
-  redirected through `fakes/libc_fakes.{h,cc}`, the HIP driver query through
-  `fakes/hip_fakes.{h,cc}`, and reusable RAS collaborators through
-  `fakes/ras_fakes.{h,cc}` plus `fakes/ras_param_fakes.{h,cc}` for timeout
-  scaling. Its own binary: this file's inline stand-ins for
-  `ncclSocketsSameNode`/`rasPeerInfoToString`/`rasPeerToString` (its callees
-  into `ras/peers.cc`) collide with the REAL `peers.cc` that
-  `rccl-UnitTestsMicro` links for `ras-peers-test.cc`, which conversely needs
-  those three real and this file's own `ncclSocketToHost`/`rasGpuDevsToString`
-  faked -- the opposite split, so the two cannot share a binary. The
-  guard-less positional pair `libc_seam.h` / `libc_seam_undef.h` must bracket
-  the production source include, after system headers and before test
-  helpers. CMake pins the copied `ncclFuncStr` table to `src/init.cc`.
+- **`rccl-UnitTestsMicroRas<Unit>`** — `src/ras/`, one binary per test file under
+  `test/host/ras/`, registered in `ras/host_tests.cmake`; `<Unit>` is the test's stem in
+  UpperCamel, less a repeated `ras-` (`ras/ras-peers-test.cc` builds
+  `rccl-UnitTestsMicroRasPeers`). They share `test_categories_micro_ras.yaml`.
+  `fakes/ras_comms_fakes.cc` defines `ras.cc`'s communicator registry for the
+  diagnostics tests that read it without compiling `ras.cc`.
+  - `ras/ras.cc` (`RAS_CC_PATH`, from `ras/ras-test.cc`); suite
+    `RasMicrotest.*`. The suite covers every executable line and function in
+    `ras.cc`: communicator setup and cleanup, local notifications, message
+    allocation and transfer, connection handshakes, message dispatch, the poll
+    loop, timeout handling, and poll-slot management. External socket, network,
+    and neighboring subsystem calls use test-controlled replacements in
+    `ras-test.cc`, their sole consumer. Real multi-process behavior remains
+    integration-test territory. Since this binary uses section GC, validate
+    completeness by checking that the linked coverage report still contains
+    the same `ras.cc` function inventory as the compiled source.
+  - `ras/diagnostics_checks_common.cc` (`RAS_DIAGNOSTICS_COMMON_CC_PATH`, from
+    `ras/ras-diagnostics-common-test.cc`); suite
+    `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
+    filtering, aligned local-record collection, allocation and callback
+    failures, rank ordering and formatting, and reporter output.
+  - `ras/collectives.cc` (`COLLECTIVES_CC_PATH`, from
+    `ras/ras-collectives-test.cc`); suite `RasCollectivesMicrotest.*`. Covers
+    request initialization, collective forwarding and responses, completion,
+    timeout handling, history, connection cleanup, diagnostics-init failure
+    absorption, and dependency-error propagation.
+    `DISABLED_NetSendCollReq_CommsPayloadAllocationFailureKeepsRequestForwardable`
+    tracks [AICOMRCCL-2740](https://amd-hub.atlassian.net/browse/AICOMRCCL-2740).
+    This deferred production regression currently crashes when communicator-data
+    allocation fails after request rewriting. Enable it with the production fix;
+    it is excluded from normal host-test runs. To reproduce explicitly, run
+    `rccl-UnitTestsMicroRasCollectives --gtest_also_run_disabled_tests --gtest_filter=RasCollectivesMicrotest.DISABLED_NetSendCollReq_CommsPayloadAllocationFailureKeepsRequestForwardable`.
+  - `ras/diagnostics.cc` (`RAS_DIAGNOSTICS_CC_PATH`, from
+    `ras/ras-diagnostics-test.cc`); suite `RasDiagnosticsMicrotest.*`. Covers
+    context initialization, request lifecycle, local-data collection,
+    peer-payload aggregation, summaries, timeout propagation, and reporter
+    errors. `DISABLED_Resume_UnknownWireCheckIdReturnsError` tracks
+    AICOMRCCL-2741: production reads an out-of-range peer check ID as an enum
+    before validation. Its raw-byte fixture reproduces the enum UBSan failure;
+    enable it after the production fix. The defined `RAS_DIAG_CHECK_COUNT`
+    sentinel remains covered by enabled dispatch and peer-payload tests.
+  - `ras/rasnet.cc` (`RASNET_CC_PATH`, from `ras/rasnet-test.cc`); suite
+    `RasNetMicrotest.*`. Covers connection and socket lifecycles, event-loop
+    I/O, timeout recovery, keep-alives, and fallback-link maintenance.
+  - `ras/diagnostics_gpu.cc` (`RAS_DIAGNOSTICS_GPU_CC_PATH`, from
+    `ras/ras-diagnostics-gpu-test.cc`); suite `RasDiagnosticsGpuMicrotest.*`. Covers
+    the AMD SMI arm against the `amd_smi_diag*` fakes in `fakes/amdsmi_fakes.cc`:
+    GPU inventory, HIP and AMD GPU driver versions, ECC, and XGMI collection and
+    summaries, including failed queries, bounded driver-version strings, AMD SMI
+    unavailable on some or all nodes, the corrected-error threshold, down and
+    missing XGMI links, and partition bus IDs (CPX, DPX) that fall back to the
+    physical GPU. Also checks that `rasDiagnosticsGpuInit` loads AMD SMI up front.
+  - `ras/peers.cc` (`RAS_PEERS_CC_PATH`, from `ras/ras-peers-test.cc`); suite
+    `RasPeersMicrotest.*`. Covers peer conversion and merging, update
+    propagation, link selection, dead-peer tracking, address ordering, and
+    peer formatting.
+  - `ras/diagnostics_env.cc` (`RAS_DIAGNOSTICS_ENV_CC_PATH`, from
+    `ras/ras-diagnostics-env-test.cc`); suite `RasDiagnosticsEnvMicrotest.*`.
+    Covers NCCL environment collection, filtering, truncation, aggregation,
+    mismatch reporting, and reporter errors.
+  - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras/ras-client-test.cc`); suite
+    `RasClientMicrotest.*`. With
+    `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
+    unit's whole dependency surface is libc, not HIP/nccl; it seams that
+    surface through `fakes/libc_fakes.{h,cc}` plus the `fakes/libc_seam.h` /
+    `fakes/libc_seam_undef.h` positional rename pair (guard-less by design, so
+    every header declaring a renamed name must precede it and the undef half
+    must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
+    of the shared `fakes/nccl_fakes.cc` the other RAS units use.
+  - `ras/ras_param.cc` (`RAS_PARAM_CC_PATH`, from `ras/ras-param-test.cc`); suite
+    `RasParamMicrotest.*`. Covers environment parsing, invalid-value fallback,
+    cached parameter reads, and nanosecond/second scaling.
+  - `ras/client_support.cc` (`CLIENT_SUPPORT_CC_PATH`, from
+    `ras/client-support-test.cc`); suites `RasClientSupportMicrotest.*` and
+    `Commands/RasClientSupportEnqueueFailureMicrotest.*`. Raw socket I/O is
+    redirected through `fakes/libc_fakes.{h,cc}`, the HIP driver query through
+    `fakes/hip_fakes.{h,cc}`, and reusable RAS collaborators through
+    `fakes/ras_fakes.{h,cc}` plus `fakes/ras_param_fakes.{h,cc}` for timeout
+    scaling. The guard-less positional pair `libc_seam.h` / `libc_seam_undef.h`
+    must bracket the production source include, after system headers and
+    before test helpers. CMake pins the copied `ncclFuncStr` table to
+    `src/init.cc`.
 - **`rccl-UnitTestsMicroDdaColl`**: the DDA launchers
   `algorithms/dda/{all_gather,alltoall,broadcast,reduce_scatter}/dda_*.cu` and the fabric
   `all_reduce/dda_all_reduce_fabric*.cu` (each via `DDA_<UNIT>_CC_PATH`, from
@@ -942,7 +938,7 @@ symbol.
 | `src/plugin/profiler.cc` (`ncclProfilerCallback`, until it has its own fakes file) | `fakes/nccl_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
 | externals `src/proxy.cc` reaches (`rccl-UnitTestsMicroProxy`, which compiles it) | `fakes/proxy_micro_fakes.cc` |
-| `src/ras/ras_param.cc` (seconds and nanoseconds timeout scaling) | `fakes/ras_param_fakes.{h,cc}` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
+| `src/ras/ras_param.cc` (seconds and nanoseconds timeout scaling) | `fakes/ras_param_fakes.{h,cc}` |
 | `src/rccl_arch_thresholds.cc` | `fakes/rccl_arch_thresholds_fakes.cc` |
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
@@ -976,6 +972,7 @@ symbol.
 | libdl macro-renamed in one unit via `fakes/dl_seam.h` (the `misc/*symbols.cc` builders and `os/linux.cc`) | `fakes/dl_fakes.cc` |
 | `src/init.cc`'s `SetCpuStackSize` param (`rccl-UnitTestsMicroLinux`, which cannot link `init_fakes.cc`) | `fakes/linux_fakes.cc` |
 | reusable RAS poll-entry, message, and diagnostics-context seams | `fakes/ras_fakes.cc` |
+| `src/ras/ras.cc` communicator registry (`ncclComms`, `nNcclComms`, `ncclCommsMutex`, `ncclCommsSorted`) | `fakes/ras_comms_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
 | HIP runtime | `fakes/hip_fakes.cc` |
@@ -1571,7 +1568,7 @@ configure` does this).
 
 ### Peers review follow-up
 
-The peers suite is `ras-peers-test.cc`, with the `RAS_PEERS_CC_PATH` source
+The peers suite is `ras/ras-peers-test.cc`, with the `RAS_PEERS_CC_PATH` source
 definition. `fakes/ras_net_fakes.{h,cc}` owns connection lookup/creation,
 disconnect, and fallback hooks. `fakes/ras_client_support_fakes.{h,cc}` owns
 event notification and synthetic host/device rendering. Both the peers and

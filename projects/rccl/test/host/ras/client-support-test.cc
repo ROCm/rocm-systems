@@ -22,38 +22,11 @@
 #include <utility>
 #include <vector>
 
-// ras-test.cc and the shared RAS fakes supply colliding symbols in the microtest
-// binary. Rename or redirect this translation unit's references so they coexist.
-#define ncclSocketToString ClientSupportTestNcclSocketToString
-#define ncclSocketsCompare ClientSupportTestNcclSocketsCompare
-#define nRasDeadPeers ClientSupportTestNRasDeadPeers
-#define nRasPeers ClientSupportTestNRasPeers
-#define rasClientAcceptNewSocket ClientSupportTestRasClientAcceptNewSocket
-#define rasClientEventLoop ClientSupportTestRasClientEventLoop
-#define rasClientInitSocket ClientSupportTestRasClientInitSocket
-#define rasClientListeningSocket ClientSupportTestRasClientListeningSocket
-#define rasClientSupportTerminate ClientSupportTestRasClientSupportTerminate
-#define rasClientsHead ClientSupportTestRasClientsHead
-#define rasClientsNotifyEvent ClientSupportTestRasClientsNotifyEvent
-#define rasDeadPeers ClientSupportTestRasDeadPeers
-#define rasDeadPeersHash ClientSupportTestRasDeadPeersHash
-#define rasDiagnosticsCancelTarget ClientSupportTestRasDiagnosticsCancelTarget
-#define rasDiagnosticsClientCleanup ClientSupportTestRasDiagnosticsClientCleanup
-#define rasDiagnosticsClientInit ClientSupportTestRasDiagnosticsClientInit
+// Redirect these references to the shared RAS fakes in fakes/ras_fakes.cc.
 #define rasDiagnosticsContextInit RasTestDiagnosticsContextInit
-#define rasDiagnosticsFormatLine ClientSupportTestRasDiagnosticsFormatLine
-#define rasDiagnosticsInProgress ClientSupportTestRasDiagnosticsInProgress
-#define rasDiagnosticsResume ClientSupportTestRasDiagnosticsResume
-#define rasDiagnosticsStart ClientSupportTestRasDiagnosticsStart
 #define rasGetNewPollEntry RasTestGetNewPollEntry
-#define rasLine ClientSupportTestRasLine
-#define rasLocalHandleRunDiag ClientSupportTestRasLocalHandleRunDiag
 #define rasMsgAlloc RasTestMsgAlloc
 #define rasMsgFree RasTestMsgFree
-#define rasPeerFind ClientSupportTestRasPeerFind
-#define rasPeerIsDead ClientSupportTestRasPeerIsDead
-#define rasPeers ClientSupportTestRasPeers
-#define rasPeersHash ClientSupportTestRasPeersHash
 #define rasPfds g_rasFakePfds
 
 #include <gtest/gtest.h>

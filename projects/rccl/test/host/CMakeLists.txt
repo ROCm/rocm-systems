@@ -289,8 +289,8 @@ foreach(_func_str_line
     "\"AlltoAllPivot\", \"AlltoAllGda\", \"AlltoAllvGda\","
     "\"SendRecv\"};")
   rccl_assert_source_line("${_rccl_src_root}/init.cc" "${_func_str_line}"
-    "client-support-test.cc: ncclFuncStr")
-  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/client-support-test.cc" "${_func_str_line}"
+    "ras/client-support-test.cc: ncclFuncStr")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/ras/client-support-test.cc" "${_func_str_line}"
     "the production ncclFuncStr table")
 endforeach()
 # dda-coll-seams.cc copies these rccl_wrap.cc DDA param defaults; pin both copies.
@@ -377,22 +377,12 @@ function(rccl_define_micro_source_lists)
     rma-proxy-progress-test.cc
     rma-test.cc
     rma-ce-test.cc
-    ras-test.cc
-    ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
-    ras-collectives-test.cc              # src/ras/collectives.cc
-    ras-diagnostics-test.cc              # src/ras/diagnostics.cc
-    rasnet-test.cc                       # src/ras/rasnet.cc
-    ras-diagnostics-gpu-test.cc              # src/ras/diagnostics_gpu.cc
-    ras-peers-test.cc                    # src/ras/peers.cc
-    ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
-    ras-param-test.cc                    # src/ras/ras_param.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
     cost-model-test.cc                   # src/tuning/cost_model.cc modelMap + dispatch
     param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
     param-parsers-test.cc                # src/include/param/parser_{default,enum,bitset,list}.h
     param-registry-test.cc               # src/param/param_registry.cc
-    ras-client-test.cc
     group-test.cc
     comm-dump-test.cc                    # src/commDump.cc
     timer-test.cc                        # src/include/timer.h
@@ -731,24 +721,6 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroClientSupport -- src/ras/client_support.cc. Its own binary: this test's
-  # inline stand-ins for ncclSocketsSameNode/rasPeerInfoToString/rasPeerToString (client_support.cc's
-  # callees into src/ras/peers.cc) collide with the REAL peers.cc compiled into rccl-UnitTestsMicro
-  # for ras-peers-test.cc, which in turn needs those 3 real and client_support.cc's own
-  # ncclSocketToHost/rasGpuDevsToString faked -- the opposite split. The two can't share a binary.
-  set(TEST_MICRO_CLIENT_SUPPORT_SOURCE_FILES
-    client-support-test.cc               # src/ras/client_support.cc
-    fakes/hip_fakes.cc
-    fakes/env_fakes.cc
-    fakes/libc_fakes.cc
-    fakes/ras_fakes.cc
-    fakes/ras_param_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/search_fakes.cc
-    fakes/collectives_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1749,17 +1721,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # device.h includes rccl_ptr.h unqualified
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
-    RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
-    # collectives_tmp.cc, not collectives.cc: src/CMakeLists.txt lists src/collectives.cc first,
-    # so add_file_unique() renames this one. Re-check after any source-list reorder.
-    COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/collectives_tmp.cc"
-    RAS_DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_tmp.cc"
-    RASNET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/rasnet.cc"
-    RAS_DIAGNOSTICS_GPU_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_gpu.cc"
-    RAS_PEERS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/peers.cc"
-    RAS_DIAGNOSTICS_ENV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_env.cc"
-    RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
     COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
@@ -1767,7 +1728,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     COST_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/cost_model.cc"
     ALGORITHM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc"
     RING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/ring.cc"
-    RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
     RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
     # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
@@ -2214,15 +2174,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroParam
     PARAM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_registry.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_param.yaml")
 
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroClientSupport
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
-  SOURCES ${TEST_MICRO_CLIENT_SUPPORT_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+include("${CMAKE_CURRENT_LIST_DIR}/ras/host_tests.cmake")
 
 include("${CMAKE_CURRENT_LIST_DIR}/plugin/host_tests.cmake")
 
