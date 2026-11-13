@@ -9,6 +9,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_dense_matrix_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_packed_f32_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -120,7 +123,24 @@ void VPkMaxF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VDot2F32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot2_f32_bf16_vop3p(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.neg & 4) ? RJ_ARITH_DOT_NEG_C : 0u) | ((inst_.neg_hi & 4) ? RJ_ARITH_DOT_ABS_C : 0u) |
+      (inst_.clamp ? RJ_ARITH_DOT_CLAMP : 0u) | ((inst_.op_sel & 1) ? RJ_ARITH_DOT_LO_A_HIGH : 0u) |
+      ((inst_.op_sel_hi & 1) ? 0u : RJ_ARITH_DOT_HI_A_LOW) |
+      ((inst_.neg & 1) ? RJ_ARITH_DOT_NEG_LO_A : 0u) |
+      ((inst_.neg_hi & 1) ? RJ_ARITH_DOT_NEG_HI_A : 0u) |
+      ((inst_.op_sel & 2) ? RJ_ARITH_DOT_LO_B_HIGH : 0u) |
+      ((inst_.op_sel_hi & 2) ? 0u : RJ_ARITH_DOT_HI_B_LOW) |
+      ((inst_.neg & 2) ? RJ_ARITH_DOT_NEG_LO_B : 0u) |
+      ((inst_.neg_hi & 2) ? RJ_ARITH_DOT_NEG_HI_B : 0u);
+  const unsigned narrow_sources =
+      (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()) ? 1u : 0u) |
+      (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()) ? 2u : 0u);
+  const unsigned replicate_sources = 0;
+  amdgpu::arith::execute_dot2_f32(wf, rj_arith_v_dot2_f32_bf16_w32_gfx950,
+                                  rj_arith_v_dot2_f32_bf16_w64_gfx950, wf.cu().arithmetic_flags(),
+                                  modifiers, vdst, src0, src1, src2, true, narrow_sources,
+                                  replicate_sources);
 }
 
 void VPkMinimum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -226,19 +246,84 @@ void VPkMaximum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VMadMixF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_mix_f32_vop3p(*this, wf);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((inst_.op_sel_hi & 1) ? RJ_ARITH_MIX_F16_A : 0u) |
+      ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg_hi & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.op_sel_hi & 2) ? RJ_ARITH_MIX_F16_B : 0u) |
+      ((inst_.op_sel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((inst_.neg_hi & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      (inst_.op_sel_hi_2 ? RJ_ARITH_MIX_F16_C : 0u) |
+      ((inst_.op_sel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | ((inst_.neg_hi & 4) ? RJ_ARITH_ALU_ABS_C : 0u);
+  const unsigned narrow_sources =
+      ((inst_.op_sel_hi & 1) && amdgpu::is_inline_float_src(inst_.src0) ? 1u : 0u) |
+      ((inst_.op_sel_hi & 2) && amdgpu::is_inline_float_src(inst_.src1) ? 2u : 0u) |
+      (inst_.op_sel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
+  amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_mad_mix_f32_w32, rj_arith_v_mad_mix_f32_w64,
+                                   wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
+                                   narrow_sources, 0xF, true, false);
 }
 
 void VMadMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_mixlo_f16_vop3p(*this, wf);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((inst_.op_sel_hi & 1) ? RJ_ARITH_MIX_F16_A : 0u) |
+      ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg_hi & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.op_sel_hi & 2) ? RJ_ARITH_MIX_F16_B : 0u) |
+      ((inst_.op_sel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((inst_.neg_hi & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      (inst_.op_sel_hi_2 ? RJ_ARITH_MIX_F16_C : 0u) |
+      ((inst_.op_sel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | ((inst_.neg_hi & 4) ? RJ_ARITH_ALU_ABS_C : 0u);
+  const unsigned narrow_sources =
+      ((inst_.op_sel_hi & 1) && amdgpu::is_inline_float_src(inst_.src0) ? 1u : 0u) |
+      ((inst_.op_sel_hi & 2) && amdgpu::is_inline_float_src(inst_.src1) ? 2u : 0u) |
+      (inst_.op_sel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
+  amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_mad_mixlo_f16_w32, rj_arith_v_mad_mixlo_f16_w64,
+                                   wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
+                                   narrow_sources, 0x3, true, false);
 }
 
 void VMadMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_mixhi_f16_vop3p(*this, wf);
+  const uint64_t modifiers =
+      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) | ((inst_.op_sel_hi & 1) ? RJ_ARITH_MIX_F16_A : 0u) |
+      ((inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg_hi & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |
+      ((inst_.op_sel_hi & 2) ? RJ_ARITH_MIX_F16_B : 0u) |
+      ((inst_.op_sel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |
+      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) | ((inst_.neg_hi & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      (inst_.op_sel_hi_2 ? RJ_ARITH_MIX_F16_C : 0u) |
+      ((inst_.op_sel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u) |
+      ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | ((inst_.neg_hi & 4) ? RJ_ARITH_ALU_ABS_C : 0u);
+  const unsigned narrow_sources =
+      ((inst_.op_sel_hi & 1) && amdgpu::is_inline_float_src(inst_.src0) ? 1u : 0u) |
+      ((inst_.op_sel_hi & 2) && amdgpu::is_inline_float_src(inst_.src1) ? 2u : 0u) |
+      (inst_.op_sel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
+  amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_mad_mixhi_f16_w32, rj_arith_v_mad_mixhi_f16_w64,
+                                   wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2,
+                                   narrow_sources, 0xC, true, false);
 }
 
 void VDot2F32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot2_f32_f16_vop3p(*this, wf);
+  const uint64_t modifiers =
+      ((inst_.neg & 4) ? RJ_ARITH_DOT_NEG_C : 0u) | ((inst_.neg_hi & 4) ? RJ_ARITH_DOT_ABS_C : 0u) |
+      (inst_.clamp ? RJ_ARITH_DOT_CLAMP : 0u) | ((inst_.op_sel & 1) ? RJ_ARITH_DOT_LO_A_HIGH : 0u) |
+      ((inst_.op_sel_hi & 1) ? 0u : RJ_ARITH_DOT_HI_A_LOW) |
+      ((inst_.neg & 1) ? RJ_ARITH_DOT_NEG_LO_A : 0u) |
+      ((inst_.neg_hi & 1) ? RJ_ARITH_DOT_NEG_HI_A : 0u) |
+      ((inst_.op_sel & 2) ? RJ_ARITH_DOT_LO_B_HIGH : 0u) |
+      ((inst_.op_sel_hi & 2) ? 0u : RJ_ARITH_DOT_HI_B_LOW) |
+      ((inst_.neg & 2) ? RJ_ARITH_DOT_NEG_LO_B : 0u) |
+      ((inst_.neg_hi & 2) ? RJ_ARITH_DOT_NEG_HI_B : 0u);
+  const unsigned narrow_sources =
+      (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()) ? 1u : 0u) |
+      (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()) ? 2u : 0u);
+  const unsigned replicate_sources = 0;
+  amdgpu::arith::execute_dot2_f32(wf, rj_arith_v_dot2_f32_f16_w32_gfx942,
+                                  rj_arith_v_dot2_f32_f16_w64_gfx942, wf.cu().arithmetic_flags(),
+                                  modifiers, vdst, src0, src1, src2, false, narrow_sources,
+                                  replicate_sources);
 }
 
 void VDot2I32I16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -266,39 +351,67 @@ void VDot8U32U4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkFmaF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_fma_f32_vop3p(*this, wf);
+  const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_PK_CLAMP : 0u) |
+                             ((inst_.op_sel & 1) ? RJ_ARITH_PK_LO_A_HIGH : 0u) |
+                             ((inst_.op_sel_hi & 1) ? 0u : RJ_ARITH_PK_HI_A_LOW) |
+                             ((inst_.neg & 1) ? RJ_ARITH_PK_NEG_LO_A : 0u) |
+                             ((inst_.neg_hi & 1) ? RJ_ARITH_PK_NEG_HI_A : 0u) |
+                             ((inst_.op_sel & 2) ? RJ_ARITH_PK_LO_B_HIGH : 0u) |
+                             ((inst_.op_sel_hi & 2) ? 0u : RJ_ARITH_PK_HI_B_LOW) |
+                             ((inst_.neg & 2) ? RJ_ARITH_PK_NEG_LO_B : 0u) |
+                             ((inst_.neg_hi & 2) ? RJ_ARITH_PK_NEG_HI_B : 0u) |
+                             ((inst_.op_sel & 4) ? RJ_ARITH_PK_LO_C_HIGH : 0u) |
+                             (inst_.op_sel_hi_2 ? 0u : RJ_ARITH_PK_HI_C_LOW) |
+                             ((inst_.neg & 4) ? RJ_ARITH_PK_NEG_LO_C : 0u) |
+                             ((inst_.neg_hi & 4) ? RJ_ARITH_PK_NEG_HI_C : 0u);
+  amdgpu::arith::execute_packed_fma32(wf, rj_arith_v_pk_fma_f32_w32_gfx942,
+                                      rj_arith_v_pk_fma_f32_w64_gfx942, wf.cu().arithmetic_flags(),
+                                      modifiers, vdst, src0, src1, src2, true);
 }
 
 void VPkMulF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mul_f32_vop3p(*this, wf);
+  const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_PK_CLAMP : 0u) |
+                             ((inst_.op_sel & 1) ? RJ_ARITH_PK_LO_A_HIGH : 0u) |
+                             ((inst_.op_sel_hi & 1) ? 0u : RJ_ARITH_PK_HI_A_LOW) |
+                             ((inst_.neg & 1) ? RJ_ARITH_PK_NEG_LO_A : 0u) |
+                             ((inst_.neg_hi & 1) ? RJ_ARITH_PK_NEG_HI_A : 0u) |
+                             ((inst_.op_sel & 2) ? RJ_ARITH_PK_LO_B_HIGH : 0u) |
+                             ((inst_.op_sel_hi & 2) ? 0u : RJ_ARITH_PK_HI_B_LOW) |
+                             ((inst_.neg & 2) ? RJ_ARITH_PK_NEG_LO_B : 0u) |
+                             ((inst_.neg_hi & 2) ? RJ_ARITH_PK_NEG_HI_B : 0u);
+  amdgpu::arith::execute_packed_binary32(
+      wf, rj_arith_v_pk_mul_f32_w32_gfx942, rj_arith_v_pk_mul_f32_w64_gfx942,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, true);
 }
 
 void VPkAddF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_add_f32_vop3p(*this, wf);
+  const uint64_t modifiers = (inst_.clamp ? RJ_ARITH_PK_CLAMP : 0u) |
+                             ((inst_.op_sel & 1) ? RJ_ARITH_PK_LO_A_HIGH : 0u) |
+                             ((inst_.op_sel_hi & 1) ? 0u : RJ_ARITH_PK_HI_A_LOW) |
+                             ((inst_.neg & 1) ? RJ_ARITH_PK_NEG_LO_A : 0u) |
+                             ((inst_.neg_hi & 1) ? RJ_ARITH_PK_NEG_HI_A : 0u) |
+                             ((inst_.op_sel & 2) ? RJ_ARITH_PK_LO_B_HIGH : 0u) |
+                             ((inst_.op_sel_hi & 2) ? 0u : RJ_ARITH_PK_HI_B_LOW) |
+                             ((inst_.neg & 2) ? RJ_ARITH_PK_NEG_LO_B : 0u) |
+                             ((inst_.neg_hi & 2) ? RJ_ARITH_PK_NEG_HI_B : 0u);
+  amdgpu::arith::execute_packed_binary32(
+      wf, rj_arith_v_pk_add_f32_w32_gfx942, rj_arith_v_pk_add_f32_w64_gfx942,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, true);
 }
 
 void VPkMovB32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mov_b32_vop3p(*this, wf);
+  amdgpu::arith::execute_pair_move<true>(wf,
+                                         ((inst_.op_sel & 1) ? RJ_ARITH_PK_LO_A_HIGH : 0u) |
+                                             ((inst_.op_sel & 2) ? RJ_ARITH_PK_LO_B_HIGH : 0u),
+                                         vdst, src0, &src1);
 }
 
 void VAccvgprReadVop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane, amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-  }
+  amdgpu::arith::execute_move32(*this, wf, vdst, src0);
 }
 
 void VAccvgprWriteVop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane, amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-  }
+  amdgpu::arith::execute_move32(*this, wf, vdst, src0);
 }
 
 void VMfmaF3216x16x128F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -492,9 +605,11 @@ void VSmfmacF3216x16x64Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_16x16x64_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf16,
-                                       amdgpu::smfmac_index_shift<16>(inst_.cbsz, inst_.abid),
-                                       wf.fp16_ovfl());
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 4, 1, 64>(wf, rj_arith_v_smfmac_f32_16x16x64_bf16_w64,
+                                                    cu.arithmetic_flags() |
+                                                        (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                    controls, dst, s0b, s1b, idx);
 }
 
 void VSmfmacI3216x16x128I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -508,8 +623,11 @@ void VSmfmacI3216x16x128I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_i32_i8<16, 16, 128>(cu, dst, s0b, s1b, idx, inst_.cbsz, inst_.abid,
-                                          wf.fp16_ovfl());
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 4, 1, 64>(wf, rj_arith_v_smfmac_i32_16x16x128_i8_w64,
+                                                    cu.arithmetic_flags() |
+                                                        (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                    controls, dst, s0b, s1b, idx);
 }
 
 void VSmfmacF3216x16x128Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -523,8 +641,11 @@ void VSmfmacF3216x16x128Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_16x16x128_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                        amdgpu::smfmac_read_bf8);
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 4, 1, 64>(wf, rj_arith_v_smfmac_f32_16x16x128_bf8_bf8_w64,
+                                                    cu.arithmetic_flags() |
+                                                        (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                    controls, dst, s0b, s1b, idx);
 }
 
 void VSmfmacF3216x16x128Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -538,8 +659,11 @@ void VSmfmacF3216x16x128Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_16x16x128_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                        amdgpu::smfmac_read_fp8);
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 4, 1, 64>(wf, rj_arith_v_smfmac_f32_16x16x128_bf8_fp8_w64,
+                                                    cu.arithmetic_flags() |
+                                                        (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                    controls, dst, s0b, s1b, idx);
 }
 
 void VSmfmacF3216x16x128Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -553,8 +677,11 @@ void VSmfmacF3216x16x128Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_16x16x128_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                        amdgpu::smfmac_read_bf8);
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 4, 1, 64>(wf, rj_arith_v_smfmac_f32_16x16x128_fp8_bf8_w64,
+                                                    cu.arithmetic_flags() |
+                                                        (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                    controls, dst, s0b, s1b, idx);
 }
 
 void VMfmaF3232x32x12bF32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -661,8 +788,11 @@ void VSmfmacF3216x16x128Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_16x16x128_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                        amdgpu::smfmac_read_fp8);
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 4, 1, 64>(wf, rj_arith_v_smfmac_f32_16x16x128_fp8_fp8_w64,
+                                                    cu.arithmetic_flags() |
+                                                        (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                    controls, dst, s0b, s1b, idx);
 }
 
 void VMfmaF3232x32x2F32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -738,9 +868,11 @@ void VSmfmacF3232x32x32Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_32x32x32_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf16,
-                                       amdgpu::smfmac_index_shift<16>(inst_.cbsz, inst_.abid),
-                                       wf.fp16_ovfl());
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 16, 1, 64>(wf, rj_arith_v_smfmac_f32_32x32x32_bf16_w64,
+                                                     cu.arithmetic_flags() |
+                                                         (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                     controls, dst, s0b, s1b, idx);
 }
 
 void VSmfmacI3232x32x64I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -754,8 +886,11 @@ void VSmfmacI3232x32x64I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_i32_i8<32, 32, 64>(cu, dst, s0b, s1b, idx, inst_.cbsz, inst_.abid,
-                                         wf.fp16_ovfl());
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 16, 1, 64>(wf, rj_arith_v_smfmac_i32_32x32x64_i8_w64,
+                                                     cu.arithmetic_flags() |
+                                                         (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                     controls, dst, s0b, s1b, idx);
 }
 
 void VMfmaF3232x32x42bF16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -859,8 +994,11 @@ void VSmfmacF3232x32x64Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_32x32x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_read_bf8);
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 16, 1, 64>(wf, rj_arith_v_smfmac_f32_32x32x64_bf8_bf8_w64,
+                                                     cu.arithmetic_flags() |
+                                                         (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                     controls, dst, s0b, s1b, idx);
 }
 
 void VMfmaF3232x32x8F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -934,8 +1072,11 @@ void VSmfmacF3232x32x64Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_32x32x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_read_fp8);
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 16, 1, 64>(wf, rj_arith_v_smfmac_f32_32x32x64_bf8_fp8_w64,
+                                                     cu.arithmetic_flags() |
+                                                         (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                     controls, dst, s0b, s1b, idx);
 }
 
 void VSmfmacF3232x32x64Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -949,8 +1090,11 @@ void VSmfmacF3232x32x64Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_32x32x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_read_bf8);
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 16, 1, 64>(wf, rj_arith_v_smfmac_f32_32x32x64_fp8_bf8_w64,
+                                                     cu.arithmetic_flags() |
+                                                         (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                     controls, dst, s0b, s1b, idx);
 }
 
 void VMfmaI3232x32x42bI8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1054,8 +1198,11 @@ void VSmfmacF3232x32x64Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_32x32x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_read_fp8);
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 16, 1, 64>(wf, rj_arith_v_smfmac_f32_32x32x64_fp8_fp8_w64,
+                                                     cu.arithmetic_flags() |
+                                                         (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                     controls, dst, s0b, s1b, idx);
 }
 
 void VMfmaF3216x16x32F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1189,8 +1336,11 @@ void VSmfmacF3216x16x64F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_16x16x64_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_f16,
-                                       amdgpu::smfmac_index_shift<16>(inst_.cbsz, inst_.abid));
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 4, 1, 64>(wf, rj_arith_v_smfmac_f32_16x16x64_f16_w64,
+                                                    cu.arithmetic_flags() |
+                                                        (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                    controls, dst, s0b, s1b, idx);
 }
 
 void VSmfmacF3232x32x32F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1204,8 +1354,11 @@ void VSmfmacF3232x32x32F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_32x32x32_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_f16,
-                                       amdgpu::smfmac_index_shift<16>(inst_.cbsz, inst_.abid));
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<4, 8, 16, 1, 64>(wf, rj_arith_v_smfmac_f32_32x32x32_f16_w64,
+                                                     cu.arithmetic_flags() |
+                                                         (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                     controls, dst, s0b, s1b, idx);
 }
 
 void VMfmaF3232x32x42bBf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1374,8 +1527,11 @@ void VSmfmacF3216x16x32F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_16x16x32_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_f16,
-                                       amdgpu::smfmac_index_shift<8>(inst_.cbsz, inst_.abid));
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 4, 1, 64>(wf, rj_arith_v_smfmac_f32_16x16x32_f16_w64,
+                                                    cu.arithmetic_flags() |
+                                                        (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                    controls, dst, s0b, s1b, idx);
 }
 
 void VSmfmacF3232x32x16F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1389,8 +1545,11 @@ void VSmfmacF3232x32x16F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_32x32x16_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_f16,
-                                       amdgpu::smfmac_index_shift<8>(inst_.cbsz, inst_.abid));
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 16, 1, 64>(wf, rj_arith_v_smfmac_f32_32x32x16_f16_w64,
+                                                     cu.arithmetic_flags() |
+                                                         (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                     controls, dst, s0b, s1b, idx);
 }
 
 void VSmfmacF3216x16x32Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1404,9 +1563,11 @@ void VSmfmacF3216x16x32Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_16x16x32_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf16,
-                                       amdgpu::smfmac_index_shift<8>(inst_.cbsz, inst_.abid),
-                                       wf.fp16_ovfl());
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 4, 1, 64>(wf, rj_arith_v_smfmac_f32_16x16x32_bf16_w64,
+                                                    cu.arithmetic_flags() |
+                                                        (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                    controls, dst, s0b, s1b, idx);
 }
 
 void VSmfmacF3232x32x16Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1420,9 +1581,11 @@ void VSmfmacF3232x32x16Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_32x32x16_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf16,
-                                       amdgpu::smfmac_index_shift<8>(inst_.cbsz, inst_.abid),
-                                       wf.fp16_ovfl());
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 16, 1, 64>(wf, rj_arith_v_smfmac_f32_32x32x16_bf16_w64,
+                                                     cu.arithmetic_flags() |
+                                                         (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                     controls, dst, s0b, s1b, idx);
 }
 
 void VSmfmacI3216x16x64I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1436,8 +1599,11 @@ void VSmfmacI3216x16x64I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_i32_i8<16, 16, 64>(cu, dst, s0b, s1b, idx, inst_.cbsz, inst_.abid,
-                                         wf.fp16_ovfl());
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 4, 1, 64>(wf, rj_arith_v_smfmac_i32_16x16x64_i8_w64,
+                                                    cu.arithmetic_flags() |
+                                                        (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                    controls, dst, s0b, s1b, idx);
 }
 
 void VSmfmacI3232x32x32I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1451,8 +1617,11 @@ void VSmfmacI3232x32x32I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_i32_i8<32, 32, 32>(cu, dst, s0b, s1b, idx, inst_.cbsz, inst_.abid,
-                                         wf.fp16_ovfl());
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 16, 1, 64>(wf, rj_arith_v_smfmac_i32_32x32x32_i8_w64,
+                                                     cu.arithmetic_flags() |
+                                                         (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0),
+                                                     controls, dst, s0b, s1b, idx);
 }
 
 void VMfmaF6416x16x4F64Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1760,9 +1929,11 @@ void VSmfmacF3216x16x64Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_16x16x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_index_shift<16>(inst_.cbsz, inst_.abid));
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 4, 1, 64>(
+      wf, rj_arith_v_smfmac_f32_16x16x64_bf8_bf8_w64_gfx950,
+      cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, s0b, s1b,
+      idx);
 }
 
 void VSmfmacF3216x16x64Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1776,9 +1947,11 @@ void VSmfmacF3216x16x64Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_16x16x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_index_shift<16>(inst_.cbsz, inst_.abid));
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 4, 1, 64>(
+      wf, rj_arith_v_smfmac_f32_16x16x64_bf8_fp8_w64_gfx950,
+      cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, s0b, s1b,
+      idx);
 }
 
 void VSmfmacF3216x16x64Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1792,9 +1965,11 @@ void VSmfmacF3216x16x64Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_16x16x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_index_shift<16>(inst_.cbsz, inst_.abid));
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 4, 1, 64>(
+      wf, rj_arith_v_smfmac_f32_16x16x64_fp8_bf8_w64_gfx950,
+      cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, s0b, s1b,
+      idx);
 }
 
 void VSmfmacF3216x16x64Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1808,9 +1983,11 @@ void VSmfmacF3216x16x64Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_16x16x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_index_shift<16>(inst_.cbsz, inst_.abid));
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 4, 1, 64>(
+      wf, rj_arith_v_smfmac_f32_16x16x64_fp8_fp8_w64_gfx950,
+      cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, s0b, s1b,
+      idx);
 }
 
 void VSmfmacF3232x32x32Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1824,9 +2001,11 @@ void VSmfmacF3232x32x32Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_index_shift<16>(inst_.cbsz, inst_.abid));
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 16, 1, 64>(
+      wf, rj_arith_v_smfmac_f32_32x32x32_bf8_bf8_w64_gfx950,
+      cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, s0b, s1b,
+      idx);
 }
 
 void VSmfmacF3232x32x32Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1840,9 +2019,11 @@ void VSmfmacF3232x32x32Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_index_shift<16>(inst_.cbsz, inst_.abid));
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 16, 1, 64>(
+      wf, rj_arith_v_smfmac_f32_32x32x32_bf8_fp8_w64_gfx950,
+      cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, s0b, s1b,
+      idx);
 }
 
 void VSmfmacF3232x32x32Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1856,9 +2037,11 @@ void VSmfmacF3232x32x32Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_index_shift<16>(inst_.cbsz, inst_.abid));
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 16, 1, 64>(
+      wf, rj_arith_v_smfmac_f32_32x32x32_fp8_bf8_w64_gfx950,
+      cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, s0b, s1b,
+      idx);
 }
 
 void VSmfmacF3232x32x32Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1872,9 +2055,11 @@ void VSmfmacF3232x32x32Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_index_shift<16>(inst_.cbsz, inst_.abid));
+  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);
+  amdgpu::arith::exec_sparse_matrix<2, 4, 16, 1, 64>(
+      wf, rj_arith_v_smfmac_f32_32x32x32_fp8_fp8_w64_gfx950,
+      cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, s0b, s1b,
+      idx);
 }
 
 void VMfmaScaleF3216x16x128F8f6f4Vop3px2::execute_impl(amdgpu::Wavefront &wf) {

@@ -210,6 +210,42 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f'  uint32_t idx = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s2}.encoding_value_)", "Src2")};'
             )
 
+        flags = 'cu.arithmetic_flags()'
+        if arch_name == 'cdna4':
+            flags += ' | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
+
+        if (
+            arch_name in ('cdna3', 'cdna4')
+            and result_type == 'F32'
+            and input_type in ('F16', 'BF16', *_F8_FIXED)
+        ):
+            bits = 16 if input_type in ('F16', 'BF16') else 8
+            suffix = (
+                '_gfx950'
+                if bits == 8 and arch_name == 'cdna4' and M * K == 1024
+                else ''
+            )
+            entry = f'rj_arith_{name.lower()}_w64{suffix}'
+            L.append('  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);')
+            L.append(
+                f'  amdgpu::arith::exec_sparse_matrix<{M*K*bits//4096}, {M*K*bits//2048}, {M*M//64}, 1, 64>'
+                f'(wf, {entry}, {flags}, controls, dst, s0b, s1b, idx);'
+            )
+            return '\n'.join(L)
+
+        if (
+            arch_name in ('cdna3', 'cdna4')
+            and result_type == 'I32'
+            and input_type == 'I8'
+        ):
+            api = 'rj_arith_' + name.lower() + '_w64'
+            L.append('  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);')
+            L.append(
+                f'  amdgpu::arith::exec_sparse_matrix<{M*K//512}, {M*K//256}, {M*N//64}, 1, 64>('
+            )
+            L.append(f'      wf, {api}, {flags}, controls, dst, s0b, s1b, idx);')
+            return '\n'.join(L)
+
         # Each lane stores half its K entries and uses a two-bit selector per stored entry.
         set_bits = M * K // 64
         index_arg = (
@@ -317,6 +353,12 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     swmmac_layout = ctx.profile.swmmac_layout if is_swmmac else SwmmacLayout.NONE
     uses_supported_swmmac_layout = swmmac_layout is not SwmmacLayout.NONE
     uses_fixed_wave_swmmac_layout = swmmac_layout is SwmmacLayout.FIXED_WAVE
+    uses_arith_sparse_integer = (
+        arch == 'cdna5'
+        and uses_fixed_wave_swmmac_layout
+        and (M, N, K, result_type, input_type) == (16, 16, 128, 'I32', 'IU8')
+    )
+
     uses_runtime_wave_swmmac_layout = swmmac_layout is SwmmacLayout.RUNTIME_WAVE
     uses_rdna_swmmac_arithmetic = (
         uses_runtime_wave_swmmac_layout
@@ -345,7 +387,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         # Reject unsupported sparse shapes before resolving operands or index keys.
         L = ['  throw util::UnimplementedInst(mnemonic());']
         return '\n'.join(L)
-    # Fixed-wave OPSEL bits are matrix-reuse hints, not sparse index selectors.
+    # Fixed-wave bit zero is rejected below; the other bits are reuse hints.
     swmmac_index_key_expr = (
         '0u' if uses_fixed_wave_swmmac_layout else 'inst_.opsel & 0x3u'
     )
@@ -408,12 +450,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         src0_base_expr = 'src0_base'
         src1_base_expr = 'src1_base'
         if uses_supported_swmmac_layout:
-            if uses_fixed_wave_swmmac_layout:
+            if uses_fixed_wave_swmmac_layout and not uses_arith_sparse_integer:
                 L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
                 L.append(f'  uint32_t s2 = dst;')
             append_required_vgpr_offset(L, 'index_off', s2, uses_vgpr_msb_indexing=True)
             L.append(f'  uint32_t index_base = vb + *index_off;')
-            L.append(f'  uint32_t index_key = {swmmac_index_key_expr};')
+            if not uses_arith_sparse_integer:
+                L.append(f'  uint32_t index_key = {swmmac_index_key_expr};')
             index_base_expr = 'index_base'
             index_key_expr = 'index_key'
         else:
@@ -543,7 +586,9 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         lanes = 32 if is_dense_iu8_wmma else 64
         api = 'rj_arith_' + name.lower() + f'_w{lanes}'
         if is_dense_iu8_wmma:
-            L.append('  uint64_t controls = inst_.neg & 3;')
+            L.append(
+                '  uint64_t controls = (inst_.neg & 3) | ((inst_.opsel & 1u) ? RJ_ARITH_SWMMAC_INDEX_KEY_1 : 0);'
+            )
             L.append('  if (inst_.clamp) controls |= RJ_ARITH_WMMA_CLAMP;')
             inputs, outputs = 8, 8
         else:
@@ -665,6 +710,59 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         )
         return '\n'.join(L)
 
+    if (
+        arch == 'cdna5'
+        and uses_fixed_wave_swmmac_layout
+        and (M, N) == (16, 16)
+        and (
+            K == 64
+            and (result_type, input_type)
+            in {
+                ('F32', 'F16'),
+                ('F32', 'BF16'),
+                ('F16', 'F16'),
+                ('BF16', 'BF16'),
+                ('BF16F32', 'BF16'),
+            }
+            or K == 128
+            and input_type in _F8_FIXED
+            and result_type in ('F32', 'F16')
+        )
+    ):
+        # These forms have tied register accumulators and a fixed metadata set.
+        L = [
+            line
+            for line in L
+            if line
+            not in (
+                '  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;',
+                '  uint32_t s2 = dst;',
+                '  uint32_t index_key = 0u;',
+            )
+        ]
+        if K == 64:
+            # CDNA5 specifies A/B NEG as MBZ; do not silently accept disputed encodings.
+            L.extend(
+                [
+                    '  if ((inst_.neg | inst_.neg_hi) & 3u) {',
+                    '    wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue);',
+                    '    return;',
+                    '  }',
+                ]
+            )
+        outputs = 8 if result_type == 'F32' else 4
+        accumulators = 8 if result_type in ('F32', 'BF16F32') else 4
+        indices = 2 if K == 128 else 1
+        api = 'rj_arith_' + name.lower() + '_w32'
+        flags = 'cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
+        L.append(
+            f'  amdgpu::arith::exec_sparse_matrix<8, 16, {outputs}, {indices}, 32, {accumulators}>('
+        )
+        L.append(
+            f'      wf, {api}, {flags}, (inst_.opsel & 1u) ? RJ_ARITH_SWMMAC_INDEX_KEY_1 : 0, dst, {src0_base_expr}, {src1_base_expr}, {index_base_expr});'
+        )
+        return '\n'.join(L)
+
     is_split_half = (M, N, K) == (16, 16, 32) and (result_type, input_type) in {
         ('F32', 'F16'),
         ('F32', 'BF16'),
@@ -761,6 +859,18 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,'
                 f' /*a_signed=*/(inst_.neg & 0x1u) != 0,'
                 f' /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);'
+            )
+            return '\n'.join(L)
+
+        if uses_arith_sparse_integer:
+            api = 'rj_arith_' + name.lower() + '_w32'
+            L.append(
+                '  uint64_t controls = (inst_.neg & 3) | ((inst_.opsel & 1u) ? RJ_ARITH_SWMMAC_INDEX_KEY_1 : 0);'
+            )
+            L.append('  if (inst_.clamp) controls |= RJ_ARITH_WMMA_CLAMP;')
+            L.append('  amdgpu::arith::exec_sparse_matrix<8, 16, 8, 2, 32>(')
+            L.append(
+                f'      wf, {api}, cu.arithmetic_flags(), controls, dst, {src0_base_expr}, {src1_base_expr}, {index_base_expr});'
             )
             return '\n'.join(L)
 

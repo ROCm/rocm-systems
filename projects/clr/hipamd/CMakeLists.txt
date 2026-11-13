@@ -26,6 +26,9 @@ list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 #############################
 # Options
 #############################
+# Applies -Werror if CLR_ENABLE_WERROR is set
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/CLRWarnings.cmake")
+
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" OFF)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 option(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS
@@ -330,17 +333,49 @@ if(HIP_RUNTIME STREQUAL "rocclr")
 endif()
 
 # Build doxygen documentation
-find_program(DOXYGEN_EXE doxygen)
-if(DOXYGEN_EXE)
+find_package(Doxygen 1.9.1 QUIET COMPONENTS doxygen)
+if(DOXYGEN_FOUND)
+    set(HIP_DOXYGEN_CONFIG "")
     if(EXISTS "${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg")
-        add_custom_target(doc COMMAND HIP_PATH=${CMAKE_CURRENT_SOURCE_DIR} ${DOXYGEN_EXE} ${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs)
+        set(HIP_DOXYGEN_CONFIG "${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg")
     elseif(EXISTS "${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile")
-        add_custom_target(doc COMMAND HIP_PATH=${CMAKE_CURRENT_SOURCE_DIR} ${DOXYGEN_EXE} ${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs)
+        set(HIP_DOXYGEN_CONFIG "${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile")
     else()
-        message(STATUS "Unable to find doxygen config file. Will not generate doxygen output")
+        message(
+            STATUS
+            "Unable to find doxygen config file. Will not generate doxygen output"
+        )
     endif()
+
+    if(HIP_DOXYGEN_CONFIG)
+        get_filename_component(
+            HIP_DOXYGEN_WORKING_DIRECTORY
+            "${HIP_DOXYGEN_CONFIG}"
+            DIRECTORY
+        )
+        set(HIP_DOXYGEN_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/RuntimeAPI")
+        set(HIP_DOXYGEN_WRAPPER_CFG
+            "${CMAKE_CURRENT_BINARY_DIR}/doxy_build.cfg"
+        )
+        file(
+            WRITE "${HIP_DOXYGEN_WRAPPER_CFG}"
+            "@INCLUDE = \"${HIP_DOXYGEN_CONFIG}\"\n"
+            "OUTPUT_DIRECTORY = \"${HIP_DOXYGEN_OUTPUT_DIR}\"\n"
+            "INCLUDE_PATH = \"${HIP_COMMON_DIR}/include\" \"${PROJECT_BINARY_DIR}/include\"\n"
+        )
+        add_custom_target(
+            doc
+            COMMAND
+                ${CMAKE_COMMAND} -E env "HIP_PATH=${HIP_COMMON_DIR}"
+                "${DOXYGEN_EXECUTABLE}" "${HIP_DOXYGEN_WRAPPER_CFG}"
+            WORKING_DIRECTORY "${HIP_DOXYGEN_WORKING_DIRECTORY}"
+        )
+    endif()
+else()
+    message(
+        STATUS
+        "Doxygen 1.9.1 or newer not found; skipping HIP API documentation"
+    )
 endif()
 
 #############################

@@ -521,6 +521,12 @@ bool Operand::full_execution_backend_complete() {
 std::optional<uint32_t> Operand::resolved_vgpr_offset_exec(const amdgpu::Wavefront &wf) const {
   if (!reads_value())
     return std::nullopt;
+  if (size_bits_ != 16 && wf.vgpr_msb_mode() == 0) {
+    if (opr_type_ == OperandType::OPR_VGPR)
+      return static_cast<uint32_t>(encoding_value_);
+    if (opr_type_ == OperandType::OPR_SRC && encoding_value_ >= 256 && encoding_value_ <= 511)
+      return static_cast<uint32_t>(encoding_value_ - 256);
+  }
   auto packed =
       packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_);
   if (!packed)

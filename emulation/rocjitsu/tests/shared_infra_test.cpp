@@ -291,7 +291,7 @@ public:
   void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
     EXPECT_TRUE(execute_instruction(inst, wf).succeeded());
     if (inst->is_memory_op())
-      route_memory_inst(inst, wf);
+      route_memory_inst(std::unique_ptr<Instruction>(inst), wf);
     else
       delete inst;
   }
@@ -3270,6 +3270,29 @@ TEST(DppPermuteTest, True16SourceByteMaskFollowsOpSel) {
             ExecutionPlugin::kLowHalfByteMask);
   EXPECT_EQ(rocjitsu::amdgpu::true16_source_byte_mask(/*opsel=*/0b0010, /*source_index=*/1),
             ExecutionPlugin::kHighHalfByteMask);
+}
+
+TEST(DppPermuteTest, FullWavePlansTrackControlWidthAndBoundAcrossReuse) {
+  using namespace amdgpu::dpp;
+  for (uint32_t width : {32u, 64u, 32u}) {
+    const uint64_t full = util::mask<uint64_t>(width);
+    // These distinct permutations occupy the same slot in the full-wave plan cache.
+    for (uint32_t ctrl : std::array<uint32_t, 3>{ROW_SHR1, ROW_XMASK_BASE + 6, ROW_SHR1}) {
+      for (bool bound : {false, true, false}) {
+        for (uint64_t exec : {full, full & uint64_t{0x5555555555555555}, full}) {
+          for (bool fi : {false, true}) {
+            const auto expected = compute_dpp_plan(width, ctrl, 15, 15, bound, fi, exec, true);
+            const auto plan = make_dpp_plan(width, ctrl, 15, 15, bound, fi, exec, true);
+            EXPECT_EQ(plan.source_lanes, expected.source_lanes);
+            EXPECT_EQ(plan.physical_read_dest_mask, expected.physical_read_dest_mask);
+            EXPECT_EQ(plan.zero_source_mask, expected.zero_source_mask);
+            EXPECT_EQ(plan.source_write_mask, expected.source_write_mask);
+            EXPECT_EQ(plan.row_bank_mask, expected.row_bank_mask);
+          }
+        }
+      }
+    }
+  }
 }
 
 TEST(DppPermuteTest, AccessPlanTracksSelectedSources) {

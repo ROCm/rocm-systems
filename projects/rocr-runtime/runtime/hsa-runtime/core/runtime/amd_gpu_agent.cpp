@@ -2381,6 +2381,10 @@ void GpuAgent::GetAqlInfoProperties(uint8_t value[8]) const {
   // Fill the HSA_AMD_AQL_PROPERTY_EXT_DISPATCH
   if (ExtendedAqlDispatchSupported())
       setFlag(HSA_AMD_AQL_PROPERTY_EXT_DISPATCH);
+
+  // Fill the HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS
+  if (SignalHintsSupported())
+      setFlag(HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS);
 }
 
 
@@ -2817,9 +2821,6 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       break;
     case HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED:
       *static_cast<bool*>(value) = HostAtomicsSupported();
-      break;
-    case HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED:
-      *static_cast<bool*>(value) = SignalHintsSupported();
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -3564,6 +3565,17 @@ void GpuAgent::BindTrapHandler() {
         supported_isas()[0]->GetStepping() == 6)) {
       // No trap handler support without exception handling, soft error.
       // gfx1036 (Granite Ridge iGPU): KMD does not support the trap handler escape.
+      //
+      // Nothing is bound on this path, and the queue is also created without an event or
+      // an ErrorReason, so there is no way left to deliver a queue exception. Say so once
+      // per agent rather than failing silently - a device-side abort then parks its wave
+      // forever and presents as an unexplained hang rather than as an error.
+      log_warning_n(0,
+                    "No trap handler bound for GPU node %u (%s): the kernel driver does not "
+                    "report support for exception debugging. Queue exceptions such as a "
+                    "device-side abort will not be reported, and a kernel that aborts will "
+                    "leave its dispatch unretired, so the host may wait indefinitely.\n",
+                    node_id(), supported_isas()[0]->GetIsaName().c_str());
       return;
     }
 

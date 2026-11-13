@@ -6,8 +6,7 @@
 // can differ by architecture, and CPU SIMD implementations share these contracts.
 // Internal helpers; not part of the public C API.
 
-#ifndef RJ_ARITH_FLOAT_ENCODING_H_
-#define RJ_ARITH_FLOAT_ENCODING_H_
+#pragma once
 
 #include "common/bits.h"
 #include "common/validation.h"
@@ -88,15 +87,21 @@ inline uint16_t float_to_bf16(float value) {
 
 // OCP FP8 E4M3FN and BF8 E5M2, adapted from rocjitsu util/data_types.h.
 // E4M3FN's top exponent remains finite except codes 0x7f/0xff; E5M2 has
-// infinities. Neither uses the FNUZ encoding. All finite values widen exactly.
-template <bool Bf8> inline float fp8_to_float(uint8_t bits) {
+// infinities. Fnuz selects the inherited higher bias and single 0x80 NaN encoding.
+// All finite values widen exactly.
+template <bool Bf8, bool Fnuz = false> inline float fp8_to_float(uint8_t bits) {
+  if constexpr (Fnuz) {
+    if (bits == 0x80U) {
+      return as_float(0xffc00000U);
+    }
+  }
   constexpr int fraction_bits = Bf8 ? 2 : 3;
-  constexpr int bias = Bf8 ? 15 : 7;
+  constexpr int bias = (Bf8 ? 15 : 7) + int(Fnuz);
   constexpr int max_exponent = Bf8 ? 31 : 15;
   uint32_t sign = uint32_t(bits & 0x80) << 24;
   int exponent = (bits & 0x7f) >> fraction_bits;
   uint32_t fraction = bits & ((1u << fraction_bits) - 1);
-  if (exponent == max_exponent) {
+  if (!Fnuz && exponent == max_exponent) {
     if ((Bf8 && fraction) || (!Bf8 && fraction == 7)) {
       return as_float(sign | 0x7fc00000);
     }
@@ -120,5 +125,3 @@ template <bool Bf8> inline float fp8_to_float(uint8_t bits) {
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
-
-#endif
