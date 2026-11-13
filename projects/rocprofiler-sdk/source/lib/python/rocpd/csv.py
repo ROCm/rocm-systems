@@ -330,6 +330,11 @@ def write_hip_event_csv(importData, config) -> None:
 
     agent_id = build_agent_id_string(config.agent_index_value)
 
+    # Correlation id of the record a wait depends on (and of a record itself)
+    source_corr_id = ""
+    if "hip_event_source_stack_id" in importData.supported_features:
+        source_corr_id = "source_stack_id AS Source_Correlation_Id,"
+
     query = f"""
         SELECT
             guid,
@@ -342,6 +347,7 @@ def write_hip_event_csv(importData, config) -> None:
             hip_event_handle AS Event_Handle,
             source_queue_id AS Source_Queue_Id,
             stack_id AS Correlation_Id,
+            {source_corr_id}
             start AS Start_Timestamp,
             end AS End_Timestamp,
             duration AS Duration

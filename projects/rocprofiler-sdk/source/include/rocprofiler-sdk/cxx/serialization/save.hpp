@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -888,6 +888,7 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_hip_event_data_t data)
     ROCP_SDK_SAVE_DATA_FIELD(queue_id);
     ROCP_SDK_SAVE_DATA_FIELD(hip_event_handle);
     ROCP_SDK_SAVE_DATA_FIELD(source_queue_id);
+    ROCP_SDK_SAVE_DATA_FIELD(source_correlation_id);
 }
 
 template <typename ArchiveT>
@@ -905,6 +906,7 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_hip_event_record_t data)
     ROCP_SDK_SAVE_DATA_FIELD(queue_id);
     ROCP_SDK_SAVE_DATA_FIELD(hip_event_handle);
     ROCP_SDK_SAVE_DATA_FIELD(source_queue_id);
+    ROCP_SDK_SAVE_DATA_FIELD(source_correlation_id);
 }
 
 template <typename ArchiveT>

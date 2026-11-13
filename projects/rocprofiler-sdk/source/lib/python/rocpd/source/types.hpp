@@ -438,6 +438,7 @@ struct hip_events
     std::string             agent_type       = {};
     uint64_t                hip_event_handle = 0;
     uint64_t                source_queue_id  = 0;
+    std::optional<uint64_t> source_stack_id  = std::nullopt;
     uint64_t                stack_id         = 0;
     uint64_t                parent_stack_id  = 0;
     uint64_t                corr_id          = 0;
@@ -964,6 +965,7 @@ load(ArchiveT& ar, rocpd::types::hip_events& data)
     LOAD_DATA_FIELD(agent_type);
     LOAD_DATA_FIELD(hip_event_handle);
     LOAD_DATA_FIELD(source_queue_id);
+    LOAD_DATA_FIELD(source_stack_id);
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
     LOAD_DATA_FIELD(corr_id);

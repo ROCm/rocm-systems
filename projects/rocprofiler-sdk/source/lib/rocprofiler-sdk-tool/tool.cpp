@@ -1317,9 +1317,14 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_hip_event_record_t*>(header->payload);
 
+                // A core older than this tool emits a shorter record. Fields past its size stay
+                // zero, which source_correlation_id reports as "record not seen".
+                auto hip_event = rocprofiler_buffer_tracing_hip_event_record_t{};
+                std::memcpy(&hip_event, record, std::min<size_t>(record->size, sizeof(hip_event)));
+
                 auto attr = get_ext_attribution(record);
                 tool::write_ring_buffer(
-                    tool::tool_buffer_tracing_hip_event_ext_record_t{*record, attr.stream_id},
+                    tool::tool_buffer_tracing_hip_event_ext_record_t{hip_event, attr.stream_id},
                     domain_type::HIP_EVENT);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)

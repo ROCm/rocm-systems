@@ -47,6 +47,15 @@ scale_kernel(float* data, int n, float factor)
     if(tid < n) data[tid] = data[tid] * factor;
 }
 
+// Occupies the GPU for at least the given number of wall clock ticks.
+__global__ void
+spin_kernel(long long ticks)
+{
+    const auto start = wall_clock64();
+    while(wall_clock64() - start < ticks)
+    {}
+}
+
 int
 main(int argc, char** argv)
 {
@@ -229,6 +238,115 @@ main(int argc, char** argv)
     HIP_ASSERT(hipStreamWaitEvent(stream0, same_stream_event, 0));
     HIP_ASSERT(hipDeviceSynchronize());
 
+    // Exercise a wait whose call submits another barrier ahead of its own. stream1 is a
+    // blocking stream, so while the null stream has work in flight, CLR's getStream enqueues a
+    // marker on stream1 that waits for the null stream before the wait's own barrier. The
+    // record is on a non-blocking stream behind a longer kernel, so that marker retires well
+    // before the record does, and only the wait's own barrier ends after the record. A WAIT
+    // timed by the marker ends before its RECORD, which validate.py checks.
+    //
+    // Then the same for a record: stream0 is a blocking stream, so while the null stream has
+    // work in flight, CLR's getStream enqueues a marker on stream0 that waits for the null
+    // stream before the record's own barrier. The wait is from the non-blocking stream, which
+    // gets no marker, and depends on the record's own barrier only. A RECORD timed by the
+    // marker leaves that wait matching nothing, so no WAIT is reported, which validate.py
+    // checks. validate.py finds both scenarios by their position after hipStreamCreateWithFlags,
+    // which the app calls only here.
+    //
+    // ordered_event and marker_event are destroyed only at the end: freeing one here would let
+    // a later event reuse its address, and its WAIT would then hide that event's record-only
+    // handle from the handle-keyed checks in validate_no_hip_api.py.
+    hipEvent_t ordered_event = nullptr;
+    hipEvent_t marker_event  = nullptr;
+    {
+        auto wall_clock_khz = 0;
+        HIP_ASSERT(hipDeviceGetAttribute(&wall_clock_khz, hipDeviceAttributeWallClockRate, 0));
+        const auto ticks_per_msec = static_cast<long long>(wall_clock_khz);
+
+        hipStream_t nonblocking_stream = nullptr;
+        HIP_ASSERT(hipStreamCreateWithFlags(&nonblocking_stream, hipStreamNonBlocking));
+        HIP_ASSERT(hipEventCreate(&ordered_event));
+        HIP_ASSERT(hipEventCreate(&marker_event));
+
+        spin_kernel<<<1, 1, 0, nonblocking_stream>>>(50 * ticks_per_msec);
+        HIP_ASSERT(hipEventRecord(ordered_event, nonblocking_stream));
+        spin_kernel<<<1, 1, 0, nullptr>>>(5 * ticks_per_msec);
+        HIP_ASSERT(hipStreamWaitEvent(stream1, ordered_event, 0));
+        scale_kernel<<<grid_size, block_size, 0, stream1>>>(d_data, n, 0.99f);
+        HIP_ASSERT(hipDeviceSynchronize());
+
+        spin_kernel<<<1, 1, 0, nullptr>>>(5 * ticks_per_msec);
+        HIP_ASSERT(hipEventRecord(marker_event, stream0));
+        HIP_ASSERT(hipStreamWaitEvent(nonblocking_stream, marker_event, 0));
+        scale_kernel<<<grid_size, block_size, 0, nonblocking_stream>>>(d_data, n, 0.99f);
+        HIP_ASSERT(hipDeviceSynchronize());
+
+        HIP_ASSERT(hipStreamDestroy(nonblocking_stream));
+    }
+
+    // Exercise an interprocess event recorded and waited on within this process. The wait
+    // depends on the event's interprocess signal, so it is reported only if the RECORD is
+    // timed by the barrier that completes on that signal. The record is behind a long kernel
+    // so the event is still pending when the wait is made. validate.py finds the record and
+    // the wait as the last hipEventRecord and hipStreamWaitEvent before hipIpcGetEventHandle,
+    // which the app calls only here.
+    //
+    // ipc_event is destroyed only at the end, for the same address-reuse reason as
+    // ordered_event and marker_event.
+    hipEvent_t ipc_event = nullptr;
+    {
+        auto wall_clock_khz = 0;
+        HIP_ASSERT(hipDeviceGetAttribute(&wall_clock_khz, hipDeviceAttributeWallClockRate, 0));
+        const auto ticks_per_msec = static_cast<long long>(wall_clock_khz);
+
+        HIP_ASSERT(
+            hipEventCreateWithFlags(&ipc_event, hipEventInterprocess | hipEventDisableTiming));
+
+        spin_kernel<<<1, 1, 0, stream0>>>(20 * ticks_per_msec);
+        HIP_ASSERT(hipEventRecord(ipc_event, stream0));
+        HIP_ASSERT(hipStreamWaitEvent(stream1, ipc_event, 0));
+        scale_kernel<<<grid_size, block_size, 0, stream1>>>(d_data, n, 0.99f);
+        HIP_ASSERT(hipDeviceSynchronize());
+
+        hipIpcEventHandle_t ipc_handle = {};
+        HIP_ASSERT(hipIpcGetEventHandle(&ipc_handle, ipc_event));
+    }
+
+    // Exercise same-stream waits that name the recording stream differently. Each record is
+    // behind a spin kernel, so it is still in flight when its wait is issued.
+    //
+    // A wait on hipStreamLegacy for an event recorded on nullptr, and a hipStreamWaitEvent_spt
+    // on nullptr for an event recorded on hipStreamPerThread, name the recording stream, so CLR
+    // creates no dependency and no WAIT may be reported. legacy_event and per_thread_event are
+    // not destroyed, for the same reason as same_stream_event above: a wait registered for either
+    // is never claimed, and the execute test fails on its dangling correlation ID. stream1 is a
+    // blocking stream, so the kernel launched on it after the legacy wait makes CLR enqueue a
+    // marker on stream1 that depends on the record, which must not report the wait either.
+    //
+    // validate.py finds the _spt wait as the app's only hipStreamWaitEvent_spt call, and the
+    // legacy wait as the last hipStreamWaitEvent ahead of it.
+    hipEvent_t legacy_event     = nullptr;
+    hipEvent_t per_thread_event = nullptr;
+    {
+        auto wall_clock_khz = 0;
+        HIP_ASSERT(hipDeviceGetAttribute(&wall_clock_khz, hipDeviceAttributeWallClockRate, 0));
+        const auto ticks_per_msec = static_cast<long long>(wall_clock_khz);
+
+        HIP_ASSERT(hipEventCreate(&legacy_event));
+        HIP_ASSERT(hipEventCreate(&per_thread_event));
+
+        spin_kernel<<<1, 1, 0, nullptr>>>(20 * ticks_per_msec);
+        HIP_ASSERT(hipEventRecord(legacy_event, nullptr));
+        HIP_ASSERT(hipStreamWaitEvent(hipStreamLegacy, legacy_event, 0));
+        scale_kernel<<<grid_size, block_size, 0, stream1>>>(d_data, n, 0.99f);
+        HIP_ASSERT(hipDeviceSynchronize());
+
+        spin_kernel<<<1, 1, 0, hipStreamPerThread>>>(20 * ticks_per_msec);
+        HIP_ASSERT(hipEventRecord(per_thread_event, hipStreamPerThread));
+        HIP_ASSERT(hipStreamWaitEvent_spt(nullptr, per_thread_event, 0));
+        HIP_ASSERT(hipDeviceSynchronize());
+    }
+
     // Exercise coalescing: record a hipEventDisableTiming event multiple times
     // on the same stream with no intervening work. CLR's ShouldCoalesceMarker
     // may skip dispatching a barrier for the 2nd and 3rd records, reusing the
@@ -246,6 +364,9 @@ main(int argc, char** argv)
 
     HIP_ASSERT(hipEventDestroy(default_event));
     HIP_ASSERT(hipEventDestroy(coalesce_event));
+    HIP_ASSERT(hipEventDestroy(ordered_event));
+    HIP_ASSERT(hipEventDestroy(marker_event));
+    HIP_ASSERT(hipEventDestroy(ipc_event));
     HIP_ASSERT(hipFree(d_data));
     HIP_ASSERT(hipEventDestroy(event0));
     HIP_ASSERT(hipEventDestroy(event1));

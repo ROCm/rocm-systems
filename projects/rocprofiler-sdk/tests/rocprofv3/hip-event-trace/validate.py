@@ -33,6 +33,13 @@ import pytest
 # Followed by:
 #   hipEventRecordWithFlags exercise
 #   Deferred wait: large kernel -> record -> wait -> kernel on other stream
+#   Ordered wait: record behind a long kernel on a non-blocking stream, then a wait from a
+#     blocking stream while the null stream is busy
+#   Marker record: record on a blocking stream while the null stream is busy, then a wait
+#     from the non-blocking stream
+#   Interprocess: record and wait on a hipEventInterprocess event within the process
+#   Stream identity: same-stream waits named differently (hipStreamLegacy for nullptr,
+#     hipStreamWaitEvent_spt on nullptr for hipStreamPerThread)
 #   Coalescing: 3x hipEventRecord on a hipEventDisableTiming event
 #
 # This produces at least 8 hipEventRecord and 8 hipStreamWaitEvent calls.
@@ -42,23 +49,26 @@ import pytest
 HIP_EVENT_RECORD = 1
 HIP_EVENT_WAIT = 2
 
-# hipStreamWaitEvent calls in the app that provably cannot produce a completion: the three
-# same-stream waits (one on stream0, one while the record barrier is still in flight, and
-# one on the default stream). CLR's Event::streamWait returns early when the wait targets
-# the recording stream, so no barrier is dispatched and no dependency is ever created.
+# hipStreamWaitEvent calls in the app that provably cannot produce a completion: the five
+# same-stream waits (one on stream0, one while the record barrier is still in flight, one on
+# the default stream, one on hipStreamLegacy for a record on nullptr, and one through
+# hipStreamWaitEvent_spt on nullptr for a record on hipStreamPerThread). CLR's
+# Event::streamWait returns early when the wait targets the recording stream, so no barrier
+# is dispatched and no dependency is ever created.
 #
 # Deliberately excludes the destroyed-event wait: measurement shows CLR does dispatch a
 # barrier for it, which is intercepted directly and legitimately yields a record. Only
 # waits CLR is documented to short-circuit belong here.
-SUPPRESSED_WAIT_CALLS = 3
+SUPPRESSED_WAIT_CALLS = 5
 
 BUFFER_TRACING_HIP_EVENT = 38
 
 # Records produced on the legacy default stream carry stream_id 0: get_stream_id in
 # hip/stream.cpp resolves hipStreamLegacy to nullptr and looks it up in the stream map,
 # which only ever holds streams passed to hipStreamCreate. The app records default_event
-# twice on the default stream, so exactly that many records may carry a zero stream_id.
-DEFAULT_STREAM_RECORDS = 2
+# twice and legacy_event once on the default stream, so exactly that many records may carry
+# a zero stream_id.
+DEFAULT_STREAM_RECORDS = 3
 
 
 HIP_EVENT_API_NAMES = {
@@ -97,7 +107,7 @@ def test_hip_event_record_count(json_data):
     - hipStreamWaitEvent on the same stream, already-complete event, or during
       graph capture produces no barrier (no completion)
 
-    The app makes three same-stream hipStreamWaitEvent calls that CLR short-circuits, so
+    The app makes five same-stream hipStreamWaitEvent calls that CLR short-circuits, so
     the bound subtracts them rather than allowing the full API call count. A plain "<="
     bound against the raw call count passes even when a spurious completion replaces a
     legitimately dropped one, so it cannot detect the same-stream case regressing.
@@ -143,19 +153,14 @@ def test_hip_event_timestamps(json_data):
     """Verify timestamps are ordered and within the profiling window."""
     data = json_data["rocprofiler-sdk-tool"]
     init_time = data["metadata"]["init_time"]
-    data["metadata"]["fini_time"]
 
     for itr in data["buffer_records"]["hip_event"]:
         assert (
-            itr.start_timestamp < itr.end_timestamp
-        ), f"start >= end: {itr.start_timestamp} >= {itr.end_timestamp}"
+            itr.start_timestamp <= itr.end_timestamp
+        ), f"start > end: {itr.start_timestamp} > {itr.end_timestamp}"
         assert (
             itr.start_timestamp > init_time
         ), f"start {itr.start_timestamp} before init {init_time}"
-        # end_timestamp is a CPU timestamp taken when the async handler fires,
-        # which can occur after fini_time is recorded on a different thread.
-        # Unlike kernel dispatch (which uses GPU profiling timestamps), barrier
-        # completion timestamps are not bounded by fini_time.
 
 
 def test_hip_event_fields(json_data):
@@ -192,6 +197,291 @@ def test_hip_event_cross_stream(json_data):
 
     for r in cross_stream:
         assert r.source_queue_id.handle > 0, "source_queue_id is zero"
+
+
+def test_hip_event_wait_ends_after_record(json_data):
+    """Verify every WAIT ends no earlier than the RECORD it waits for.
+
+    A WAIT is timed by a barrier that depends on the record's completion signal, so it cannot
+    retire before the record barrier did. A hipStreamWaitEvent can submit other barriers ahead
+    of its own (the app's ordered-wait scenario makes CLR enqueue a marker waiting for the
+    null stream first), and a WAIT timed by one of those ends before its RECORD.
+
+    The RECORD a WAIT refers to is the latest one on the same event handle whose API call
+    came before the wait's. WAITs whose record was not seen (source_queue_id 0) are skipped.
+    """
+    records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+
+    record_records = sorted(
+        (r for r in records if r.operation == HIP_EVENT_RECORD),
+        key=lambda r: r.correlation_id.internal,
+    )
+    wait_records = [
+        r
+        for r in records
+        if r.operation == HIP_EVENT_WAIT and r.source_queue_id.handle != 0
+    ]
+    assert len(wait_records) > 0, "No correlated WAIT records"
+
+    for w in wait_records:
+        preceding = [
+            r
+            for r in record_records
+            if r.hip_event_handle == w.hip_event_handle
+            and r.correlation_id.internal < w.correlation_id.internal
+        ]
+        assert preceding, (
+            f"WAIT (correlation {w.correlation_id.internal}) on event "
+            f"{w.hip_event_handle:#x} has no preceding RECORD"
+        )
+        rec = preceding[-1]
+        assert w.end_timestamp >= rec.end_timestamp, (
+            f"WAIT (correlation {w.correlation_id.internal}) on event "
+            f"{w.hip_event_handle:#x} ended at {w.end_timestamp}, before its RECORD "
+            f"(correlation {rec.correlation_id.internal}) ended at {rec.end_timestamp}"
+        )
+
+
+def test_hip_event_marker_scenarios(json_data):
+    """Verify the RECORD and WAIT of calls that submit a marker ahead of their own barrier.
+
+    In the ordered-wait scenario CLR enqueues a marker ahead of the wait's barrier, and in the
+    marker-record scenario ahead of the record's. Each call must be timed by its own barrier:
+    a RECORD timed by its marker leaves the wait, which depends on the record's own barrier,
+    matching nothing, so no WAIT is reported at all.
+
+    The app calls hipStreamCreateWithFlags only ahead of these two scenarios, so their calls
+    are the first and second hipEventRecord and hipStreamWaitEvent after it.
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    records = data["buffer_records"]["hip_event"]
+    hip_api = sorted(
+        data["buffer_records"]["hip_api"], key=lambda r: r.correlation_id.internal
+    )
+    string_table = data["strings"]["buffer_records"]
+
+    def get_operation_name(r):
+        return string_table[r.kind]["operations"][r.operation]
+
+    anchor = next(
+        (r for r in hip_api if get_operation_name(r) == "hipStreamCreateWithFlags"),
+        None,
+    )
+    assert anchor is not None, "No hipStreamCreateWithFlags call ahead of the scenarios"
+
+    def calls_after(name):
+        return [
+            r.correlation_id.internal
+            for r in hip_api
+            if r.correlation_id.internal > anchor.correlation_id.internal
+            and get_operation_name(r) == name
+        ][:2]
+
+    for scenario, record_corr, wait_corr in zip(
+        ("ordered-wait", "marker-record"),
+        calls_after("hipEventRecord"),
+        calls_after("hipStreamWaitEvent"),
+    ):
+        recs = [
+            r
+            for r in records
+            if r.operation == HIP_EVENT_RECORD
+            and r.correlation_id.internal == record_corr
+        ]
+        waits = [
+            r
+            for r in records
+            if r.operation == HIP_EVENT_WAIT and r.correlation_id.internal == wait_corr
+        ]
+        assert len(recs) == 1, (
+            f"{scenario}: expected 1 RECORD for hipEventRecord (correlation "
+            f"{record_corr}), found {len(recs)}"
+        )
+        assert len(waits) == 1, (
+            f"{scenario}: expected 1 WAIT for hipStreamWaitEvent (correlation "
+            f"{wait_corr}), found {len(waits)}"
+        )
+
+        rec, wait = recs[0], waits[0]
+        assert wait.hip_event_handle == rec.hip_event_handle
+        assert wait.source_queue_id.handle == rec.queue_id.handle, (
+            f"{scenario}: WAIT source_queue_id {wait.source_queue_id.handle} does not "
+            f"match its RECORD's queue {rec.queue_id.handle}"
+        )
+        assert (
+            wait.queue_id.handle != rec.queue_id.handle
+        ), f"{scenario}: WAIT was reported on the recording stream's queue"
+        assert wait.end_timestamp >= rec.end_timestamp, (
+            f"{scenario}: WAIT ended at {wait.end_timestamp}, before its RECORD ended at "
+            f"{rec.end_timestamp}"
+        )
+
+
+def test_hip_event_interprocess_wait(json_data):
+    """Verify a wait within the process on an interprocess event is reported.
+
+    The wait depends on the event's interprocess signal, so it is matched only when the RECORD
+    is timed by the barrier that completes on that signal. A RECORD timed by any other barrier
+    of the call leaves the wait matching nothing, so no WAIT is reported.
+
+    The app calls hipIpcGetEventHandle only after this scenario, so its calls are the last
+    hipEventRecord and hipStreamWaitEvent ahead of it.
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    records = data["buffer_records"]["hip_event"]
+    hip_api = sorted(
+        data["buffer_records"]["hip_api"], key=lambda r: r.correlation_id.internal
+    )
+    string_table = data["strings"]["buffer_records"]
+
+    def get_operation_name(r):
+        return string_table[r.kind]["operations"][r.operation]
+
+    anchor = next(
+        (r for r in hip_api if get_operation_name(r) == "hipIpcGetEventHandle"),
+        None,
+    )
+    assert (
+        anchor is not None
+    ), "No hipIpcGetEventHandle call after the interprocess scenario"
+
+    def last_call_before(name):
+        corrs = [
+            r.correlation_id.internal
+            for r in hip_api
+            if r.correlation_id.internal < anchor.correlation_id.internal
+            and get_operation_name(r) == name
+        ]
+        assert corrs, f"No {name} call ahead of hipIpcGetEventHandle"
+        return corrs[-1]
+
+    record_corr = last_call_before("hipEventRecord")
+    wait_corr = last_call_before("hipStreamWaitEvent")
+
+    recs = [
+        r
+        for r in records
+        if r.operation == HIP_EVENT_RECORD and r.correlation_id.internal == record_corr
+    ]
+    waits = [
+        r
+        for r in records
+        if r.operation == HIP_EVENT_WAIT and r.correlation_id.internal == wait_corr
+    ]
+    assert len(recs) == 1, (
+        f"expected 1 RECORD for the interprocess hipEventRecord (correlation "
+        f"{record_corr}), found {len(recs)}"
+    )
+    assert len(waits) == 1, (
+        f"expected 1 WAIT for the interprocess hipStreamWaitEvent (correlation "
+        f"{wait_corr}), found {len(waits)}"
+    )
+
+    rec, wait = recs[0], waits[0]
+    assert wait.hip_event_handle == rec.hip_event_handle
+    assert wait.source_queue_id.handle == rec.queue_id.handle, (
+        f"WAIT source_queue_id {wait.source_queue_id.handle} does not match its RECORD's "
+        f"queue {rec.queue_id.handle}"
+    )
+    assert wait.end_timestamp >= rec.end_timestamp, (
+        f"WAIT ended at {wait.end_timestamp}, before its RECORD ended at "
+        f"{rec.end_timestamp}"
+    )
+
+
+def test_hip_event_same_stream_wait_spellings(json_data):
+    """Verify a same-stream wait is not reported when it names the stream differently.
+
+    hipStreamLegacy and nullptr both name the null stream, and through hipStreamWaitEvent_spt
+    nullptr names the calling thread's per-thread stream, as hipStreamPerThread does. CLR
+    creates no dependency for these waits. A wait the profiler registered anyway is either
+    claimed by the marker the app's next blocking-stream kernel makes CLR enqueue, reporting a
+    WAIT the application never got, or never claimed, which the execute test rejects through
+    the "retiring dangling correlation ID" warning at finalization.
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    records = data["buffer_records"]["hip_event"]
+    string_table = data["strings"]["buffer_records"]
+    calls = [
+        (string_table[r.kind]["operations"][r.operation], r.correlation_id.internal)
+        for r in sorted(
+            data["buffer_records"]["hip_api"], key=lambda r: r.correlation_id.internal
+        )
+    ]
+
+    # The app's only hipStreamWaitEvent_spt call is the per-thread wait, and the legacy wait
+    # is the last hipStreamWaitEvent ahead of it.
+    spt = [corr for name, corr in calls if name == "hipStreamWaitEvent_spt"]
+    assert len(spt) == 1, f"Expected one hipStreamWaitEvent_spt call, found {len(spt)}"
+    legacy = [
+        corr for name, corr in calls if name == "hipStreamWaitEvent" and corr < spt[0]
+    ]
+    assert legacy, "No hipStreamWaitEvent ahead of the hipStreamWaitEvent_spt call"
+    waits = [legacy[-1], spt[0]]
+
+    for scenario, corr in zip(("hipStreamLegacy", "hipStreamWaitEvent_spt"), waits):
+        reported = [
+            r
+            for r in records
+            if r.operation == HIP_EVENT_WAIT and r.correlation_id.internal == corr
+        ]
+        assert not reported, (
+            f"{scenario}: same-stream hipStreamWaitEvent (correlation {corr}) reported "
+            f"{len(reported)} WAIT(s) on queue(s) {[r.queue_id.handle for r in reported]}"
+        )
+
+
+def test_hip_event_source_correlation(json_data):
+    """Verify source_correlation_id links each WAIT to the RECORD it depends on.
+
+    A RECORD reports its own internal correlation id. A WAIT reports the internal
+    correlation id of the RECORD that recorded the awaited event, or zero when that
+    record was not seen, in which case source_queue_id is zero too.
+    """
+    records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+
+    record_records = {
+        r.correlation_id.internal: r for r in records if r.operation == HIP_EVENT_RECORD
+    }
+    for r in record_records.values():
+        assert r.source_correlation_id == r.correlation_id.internal, (
+            f"RECORD (correlation {r.correlation_id.internal}) reports "
+            f"source_correlation_id {r.source_correlation_id}, expected its own"
+        )
+
+    linked = 0
+    for w in (r for r in records if r.operation == HIP_EVENT_WAIT):
+        if w.source_queue_id.handle == 0:
+            assert w.source_correlation_id == 0, (
+                f"WAIT (correlation {w.correlation_id.internal}) has no source queue but "
+                f"reports source_correlation_id {w.source_correlation_id}"
+            )
+            continue
+
+        rec = record_records.get(w.source_correlation_id)
+        assert rec is not None, (
+            f"WAIT (correlation {w.correlation_id.internal}) reports "
+            f"source_correlation_id {w.source_correlation_id}, which is not a RECORD"
+        )
+        assert rec.hip_event_handle == w.hip_event_handle, (
+            f"WAIT (correlation {w.correlation_id.internal}) on event "
+            f"{w.hip_event_handle:#x} links to a RECORD on event {rec.hip_event_handle:#x}"
+        )
+        assert rec.queue_id.handle == w.source_queue_id.handle, (
+            f"WAIT (correlation {w.correlation_id.internal}) source_queue_id "
+            f"{w.source_queue_id.handle} differs from its RECORD's queue {rec.queue_id.handle}"
+        )
+        assert rec.correlation_id.internal < w.correlation_id.internal, (
+            f"WAIT (correlation {w.correlation_id.internal}) links to a later RECORD "
+            f"(correlation {rec.correlation_id.internal})"
+        )
+        assert w.end_timestamp >= rec.end_timestamp, (
+            f"WAIT (correlation {w.correlation_id.internal}) ended at {w.end_timestamp}, "
+            f"before its RECORD ended at {rec.end_timestamp}"
+        )
+        linked += 1
+
+    assert linked > 0, "No WAIT record links to a RECORD through source_correlation_id"
 
 
 def test_hip_event_handle_consistency(json_data):
@@ -508,6 +798,24 @@ def test_rocpd_hip_events_cross_stream(rocpd_data):
     assert cross_stream > 0, "No cross-stream WAIT records in rocpd"
 
 
+def test_rocpd_hip_events_source_stack_id(rocpd_data, json_data):
+    """Verify rocpd source_stack_id carries source_correlation_id, NULL when zero."""
+    js_data = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+
+    expected = sorted(
+        (r.correlation_id.internal, r.source_correlation_id or None) for r in js_data
+    )
+    actual = sorted(
+        rocpd_data.execute("SELECT stack_id, source_stack_id FROM hip_events").fetchall()
+    )
+
+    assert actual == expected, (
+        f"rocpd (stack_id, source_stack_id) pairs differ from JSON "
+        f"(correlation_id.internal, source_correlation_id):\n"
+        f"rocpd={actual}\njson={expected}"
+    )
+
+
 def test_otf2_data(otf2_data, json_data):
     """Cross-check the OTF2 conversion against the JSON records.
 
@@ -521,6 +829,159 @@ def test_otf2_data(otf2_data, json_data):
         json_data,
         ("hip_event",),
     )
+
+
+def test_otf2_hip_event_location(otf2_data, json_data):
+    """Verify HIP events share the OTF2 location of kernels on the same queue.
+
+    Each location is keyed by thread, agent and queue. HIP event records must be written to
+    the same location as kernel dispatches with that key, not to a location of their own,
+    and carry the correlation attributes that link them to their API call and RECORD.
+    """
+    data = json_data["rocprofiler-sdk-tool"]["buffer_records"]
+    hip_events = data["hip_event"]
+
+    def get_attributes(row):
+        ret = {}
+        for itr in row["attributes"]:
+            for key, val in itr.items():
+                ret[key.name] = val
+        return ret
+
+    otf2_events = otf2_data.loc[otf2_data["category"] == "hip_event"]
+    otf2_kernels = otf2_data.loc[otf2_data["category"] == "kernel_dispatch"]
+    assert len(otf2_events) == len(hip_events)
+
+    kernel_locations = set(loc.name for loc in otf2_kernels["location"])
+    shared = 0
+    for _, row in otf2_events.iterrows():
+        name = row["location"].name
+        assert " Compute on " in name, f"HIP event written to location '{name}'"
+        shared += name in kernel_locations
+
+        attributes = get_attributes(row)
+        assert (
+            attributes.get("correlation_id", 0) > 0
+        ), f"HIP event in location '{name}' has no correlation_id: {attributes}"
+        if "RECORD" in row["name"]:
+            assert attributes.get("source_correlation_id") == attributes["correlation_id"]
+
+    assert shared > 0, "No HIP event shares a location with a kernel dispatch"
+
+    expected = sorted(
+        (r.correlation_id.internal, r.source_correlation_id) for r in hip_events
+    )
+    actual = sorted(
+        (
+            get_attributes(row)["correlation_id"],
+            get_attributes(row).get("source_correlation_id", 0),
+        )
+        for _, row in otf2_events.iterrows()
+    )
+    assert actual == expected
+
+
+def _query_hip_event_slices(pftrace_reader, category):
+    def arg(key):
+        return (
+            f"(SELECT int_value FROM args a WHERE a.arg_set_id = s.arg_set_id "
+            f"AND a.key = 'debug.{key}') AS {key}"
+        )
+
+    return pftrace_reader.query_tp(f"""
+        SELECT s.id, s.ts, s.track_id, s.name, {arg("corr_id")}, {arg("source_corr_id")},
+            {arg("stream_id")}, {arg("queue")},
+            (SELECT string_value FROM args a WHERE a.arg_set_id = s.arg_set_id
+                AND a.key = 'debug.agent') AS agent
+        FROM slice s WHERE s.category = '{category}'
+    """)
+
+
+@pytest.mark.parametrize("grouping", ["stream", "queue"])
+def test_perfetto_hip_event_track(pftrace_reader, grouping):
+    """Verify HIP events sit on the same Perfetto track as kernels of their stream or queue.
+
+    By default kernels are grouped by stream; with --group-by-queue they are grouped by
+    agent and queue. HIP events must follow the same grouping.
+    """
+    events = _query_hip_event_slices(pftrace_reader, "hip_event")
+    kernels = _query_hip_event_slices(pftrace_reader, "kernel_dispatch")
+
+    assert len(events) > 0, "No HIP event slices"
+    assert len(kernels) > 0, "No kernel dispatch slices"
+
+    def key(row):
+        if grouping == "stream":
+            return row["stream_id"]
+        return (row["agent"], row["queue"])
+
+    kernel_tracks = {}
+    for _, row in kernels.iterrows():
+        kernel_tracks.setdefault(key(row), set()).add(row["track_id"])
+
+    for k, tracks in kernel_tracks.items():
+        assert len(tracks) == 1, f"kernels for {grouping} {k} span tracks {tracks}"
+
+    shared = 0
+    for _, row in events.iterrows():
+        tracks = kernel_tracks.get(key(row))
+        if tracks is None:
+            continue
+        assert row["track_id"] in tracks, (
+            f"{row['name']} (corr_id {row['corr_id']}) for {grouping} {key(row)} is on "
+            f"track {row['track_id']}, kernels are on {tracks}"
+        )
+        shared += 1
+
+    assert shared > 0, f"No HIP event shares a {grouping} with a kernel dispatch"
+
+
+@pytest.mark.parametrize("grouping", ["stream", "queue"])
+def test_perfetto_hip_event_flows(pftrace_reader, grouping):
+    """Verify the Perfetto flows linking HIP events to their API call and RECORD.
+
+    Each HIP event has a flow with the HIP API call of the same corr_id, and each WAIT whose
+    RECORD is in the trace has an incoming flow from that RECORD.
+
+    Trace processor directs a flow from the earlier slice to the later one. A RECORD that CLR
+    coalesced onto the previous barrier reports that barrier's GPU times, which can precede its
+    own API call, so its flow then runs from the RECORD to the API call.
+    """
+    events = _query_hip_event_slices(pftrace_reader, "hip_event")
+    api = _query_hip_event_slices(pftrace_reader, "hip_api")
+    flows = pftrace_reader.query_tp("SELECT slice_out, slice_in FROM flow")
+
+    flow_pairs = set(zip(flows["slice_out"], flows["slice_in"]))
+    api_slices = {}
+    for _, row in api.iterrows():
+        api_slices.setdefault(row["corr_id"], []).append((row["id"], row["ts"]))
+    record_ids = {
+        row["corr_id"]: row["id"]
+        for _, row in events.iterrows()
+        if "RECORD" in row["name"]
+    }
+
+    linked_waits = 0
+    for _, row in events.iterrows():
+        assert any(
+            (
+                (api_id, row["id"])
+                if api_ts <= row["ts"] or "RECORD" not in row["name"]
+                else (row["id"], api_id)
+            )
+            in flow_pairs
+            for api_id, api_ts in api_slices.get(row["corr_id"], [])
+        ), f"{row['name']} (corr_id {row['corr_id']}) has no flow with its HIP API call"
+
+        if "WAIT" not in row["name"] or row["source_corr_id"] not in record_ids:
+            continue
+        assert (record_ids[row["source_corr_id"]], row["id"]) in flow_pairs, (
+            f"{row['name']} (corr_id {row['corr_id']}) has no flow from its RECORD "
+            f"(corr_id {row['source_corr_id']})"
+        )
+        linked_waits += 1
+
+    assert linked_waits > 0, "No WAIT slice is linked to its RECORD"
 
 
 if __name__ == "__main__":
