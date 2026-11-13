@@ -4019,6 +4019,40 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
     assert evaluated_row_counts == [2] * (NUM_KERNELS * len(roofline_metrics))
 
 
+@pytest.mark.parametrize(
+    "device_memory_metric", ["AI HBM", "AI VRAM"], ids=["hbm", "vram"]
+)
+def test_calc_roofline_data_stores_the_device_memory_point_in_hbm_cache_data(
+    monkeypatch, device_memory_metric
+):
+    """The column keeps its hbm_cache_data name. MI architectures fill it from
+    AI HBM, and gfx1201, which has no HBM, fills it from AI VRAM."""
+    pmc_df = pd.DataFrame({
+        "Kernel_Name": ["kernel"],
+        "Start_Timestamp": [0],
+        "End_Timestamp": [10],
+    })
+    roofline_df = pd.DataFrame({
+        "Metric": ["Performance (GFLOPs)", device_memory_metric],
+        "Value": ["expr_performance", "expr_device_memory"],
+    })
+    workload_path = "/mock/workload/path"
+    analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
+    values = {"expr_performance": 5.0, "expr_device_memory": 7.0}
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.db_analysis.evaluate",
+        lambda name, value, kernel_pmc_df, sys_info: values[value],
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.console_debug", lambda msg: None
+    )
+
+    df = db_analysis.calc_roofline_data(analyzer)[workload_path]
+
+    assert df["hbm_cache_data"].iloc[0] == 7.0
+    assert df["total_flops"].iloc[0] == 5.0
+
+
 # =============================================================================
 # Memory chart layout (Workload.memory_chart_layout_extdata)
 # =============================================================================

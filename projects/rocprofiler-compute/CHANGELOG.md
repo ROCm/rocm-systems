@@ -27,6 +27,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added Linux GPU metrics and Memory Chart support for Navi48 (gfx1201) Radeon RX 9070 and RX 9070 XT. Profiling requires the `STABLE_STD` performance level. Infinity Cache hit rate and physical VRAM bandwidth are unavailable.
 
+* Added roofline and benchmark support for Navi48 (gfx1201) on Linux, including measured VRAM, Infinity Cache (MALL), L2, L1, L0 and LDS bandwidth roofs and VALU and WMMA compute roofs. Arithmetic intensity for device memory counts requests the Infinity Cache can serve; compare it with both the VRAM and MALL roofs. Roofs are measured in the active performance state, so use `STABLE_STD` consistently.
+
 ### Changed
 
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.

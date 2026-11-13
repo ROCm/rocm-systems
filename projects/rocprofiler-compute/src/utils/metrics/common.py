@@ -26,7 +26,11 @@ class ValuDualIssueDetector:
       message with hardware confirmation.
     """
 
-    candidate_metrics = {"VALU Utilization", "VALU FLOPs (F64)"}
+    candidate_metrics = {
+        "VALU Utilization",
+        "VALU FLOPs (F64)",
+        "VALU FLOPs (FP64)",
+    }
     faq_url = (
         "https://rocm.docs.amd.com/projects/"
         "rocprofiler-compute/en/latest/reference/"

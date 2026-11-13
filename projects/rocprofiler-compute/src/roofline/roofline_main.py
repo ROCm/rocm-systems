@@ -60,7 +60,9 @@ TRACE_COLORS: dict[str, str] = {
     "l0": "#F0E442",
     "l1": "#0072B2",
     "l2": "#009E73",
+    "mall": "#9467BD",
     "hbm": "#D55E00",
+    "vram": "#D55E00",
     "lds": "#E69F00",
     "valu": "#CC79A7",
     "matrix_ops": "#56B4E9",
@@ -509,13 +511,15 @@ class Roofline:
             # This kernel's own achieved bandwidth at this level (not the
             # hardware ceiling): performance (FLOP/s) / AI (FLOP/Byte) = Byte/s.
             # A level with no traffic still gets a 0-valued bandwidth line
-            # instead of silently disappearing from the tooltip.
+            # instead of silently disappearing from the tooltip. A level with
+            # no measured roof, such as gfx1201 L1, has no line at all.
             achieved_bandwidth = performance / ai_value if has_traffic else 0.0
-            bandwidth_entries.append(
-                self._build_bandwidth_entry(
-                    level_name, achieved_bandwidth, peak_bandwidth
+            if peak_bandwidth:
+                bandwidth_entries.append(
+                    self._build_bandwidth_entry(
+                        level_name, achieved_bandwidth, peak_bandwidth
+                    )
                 )
-            )
             if not has_traffic:
                 continue
 
@@ -541,8 +545,8 @@ class Roofline:
 
     @staticmethod
     def _build_bandwidth_hover_html(bandwidth_entries: list[dict[str, Any]]) -> str:
-        """One 'Bandwidth:' block listing every cache level this kernel has
-        data for, each formatted like the Performance field: percent
+        """One 'Bandwidth:' block listing every cache level that has a roof
+        and data for this kernel, each formatted like the Performance field: percent
         (achieved/peak). A level with no traffic still shows up at 0,
         rather than vanishing from the tooltip."""
         if not bandwidth_entries:

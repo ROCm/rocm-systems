@@ -100,7 +100,7 @@ class Bench_base(ABC):
             """
 
         # Kernel source must be set in child classes
-        self.hbm_bw_src: str
+        self.device_memory_bw_src: str
         self.mall_bw_src: str
         self.l2_bw_src: str
         self.l1_bw_src: str
@@ -397,15 +397,19 @@ class Bench_base(ABC):
     # Benchmarking kernel methods
     # -----------------------------------------------------------------------------
 
-    # HBM bandwidth benchmark
-    def hbm_bw_benchmark(self, device: int) -> float:
+    # Device-memory bandwidth benchmark. The defaults are the HBM_bw kernel and
+    # HBM label that MI and gfx1250 use. gfx1201 passes the DRAM_bw kernel and
+    # the VRAM label.
+    def device_memory_bw_benchmark(
+        self, device: int, kernel_name: str = "HBM_bw", label: str = "HBM"
+    ) -> float:
         num_experiments = DEFAULT_NUM_EXPERIMENTS
         hip.hipSetDevice(device)
 
         cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-        prog = self.Program(self.hbm_bw_src)
-        func = prog.get_kernel("HBM_bw")
+        prog = self.Program(self.device_memory_bw_src)
+        func = prog.get_kernel(kernel_name)
 
         workgroup_size = DEFAULT_WORKGROUP_SIZE
         unroll = 16
@@ -450,7 +454,7 @@ class Bench_base(ABC):
         event_ms = total_bytes / peak / 1e6
 
         print(
-            f"HBM BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
+            f"{label} BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
             f"workgroups:{workgroups}, experiments:{num_experiments}, "
             f"traffic:{total_bytes} bytes, duration:{event_ms:.1f} ms, "
             f"peak:{peak:.1f} GB/sec"
@@ -666,6 +670,8 @@ class Bench_base(ABC):
             src = self.matrix_f32_src
         elif type == "F8":
             src = self.matrix_f8_src
+        elif type == "BF8":
+            src = self.matrix_bf8_src
         elif type == "F16":
             src = self.matrix_f16_src
         elif type == "BF16":
@@ -718,6 +724,9 @@ class Bench_base(ABC):
 
     def matrix_f8_bench(self, device: int) -> float:
         return self.matrix_bench(device, "F8", "FLOP", "GFLOPS")
+
+    def matrix_bf8_bench(self, device: int) -> float:
+        return self.matrix_bench(device, "BF8", "FLOP", "GFLOPS")
 
     def matrix_i8_bench(self, device: int) -> float:
         return self.matrix_bench(device, "I8", "IOP", "GOPS")

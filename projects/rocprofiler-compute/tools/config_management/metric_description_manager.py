@@ -161,6 +161,8 @@ GFX1201_PANEL_ID_TO_SECTION: dict[int, str] = {
     309: "Memory chart - L2 to Memory",
     310: "Memory chart - Workgroup Processors (WGPs)",
     311: "Memory chart - Infinity Cache and VRAM",
+    401: "Roofline Performance Rates",
+    402: "Roofline Plot Points",
     602: "Wave Dispatch Statistics",
     701: "WGP Utilization",
     702: "WGP Wavefront Launch Stats",
