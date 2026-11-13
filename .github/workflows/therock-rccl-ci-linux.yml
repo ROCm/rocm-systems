@@ -311,8 +311,8 @@ jobs:
           - workload: llama-3.1-405b-maxtext
             nodes: '4'
             job_timeout_minutes: '450'
-          # 4 nodes: two prefill, two decode. 330 is its 3 h time_limit plus
-          # the same 90 minutes.
+          # 4 nodes: two prefill, two decode. 330 = 60 + 180 (3 h time_limit)
+          # + 90.
           - workload: deepseek-r1-sglang-disagg
             nodes: '4'
             job_timeout_minutes: '330'
