@@ -247,6 +247,7 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
     for (auto& idx : nccl_p2p_udma_idx) idx.store(0);
     ResetQpSharing();
     InstallHooks();
+    IbCastMaxPostSendBytes = UINT32_MAX;
   }
 
   void TearDown() override {
@@ -284,6 +285,7 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
     ResetRocmWrapFakes();
     ResetNcclFakes();
     rcclTelemetryEnabled = 0;
+    IbCastMaxPostSendBytes = UINT32_MAX;
     g_testOpen = nullptr;
     g_verbs = nullptr;
   }
