@@ -1536,6 +1536,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // declines to run, and ncclTopoGetNchannels() hands it straight back as the count for every
     // remote peer, so halving it here would undo it. Multi-node is the network's bottleneck to
     // size against, not the on-package fabric's.
+    // Gather/scatter keep this unhalved count as their part count (rcclP2pPartCount). The halving
+    // below sets the channel stride the device inverts with, which alltoall keeps.
+    comm->p2pnChannelsPerPeerBase = comm->p2pnChannelsPerPeer;
     if (comm->nNodes == 1 && comm->hasMloPart) {
       while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >
                comm->p2pnChannels &&
@@ -1560,8 +1563,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }
 
-  INFO(NCCL_INIT | NCCL_TUNING, "P2P channels: p2pnChannels=%d p2pnChannelsPerPeer=%d maxP2pPeers=%d",
-       comm->p2pnChannels, comm->p2pnChannelsPerPeer, maxP2pPeers);
+  INFO(NCCL_INIT | NCCL_TUNING,
+       "P2P channels: p2pnChannels=%d p2pnChannelsPerPeer=%d p2pnChannelsPerPeerBase=%d maxP2pPeers=%d",
+       comm->p2pnChannels, comm->p2pnChannelsPerPeer, comm->p2pnChannelsPerPeerBase, maxP2pPeers);
 
   // Init channels that weren't used so far
   for (int c = comm->nChannels; c < std::max(comm->nChannels, comm->p2pnChannels); c++) NCCLCHECK(initChannel(comm, c));

@@ -42,6 +42,30 @@ inline uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2pRound, i
   return base & 0xff;
 }
 
+// True when the single-node MLOPart halving loop in paths.cc shrank the per-peer count.
+inline bool rcclP2pHalvedSingleNode(struct ncclComm* comm) {
+  return comm->nNodes == 1 && comm->hasMloPart && comm->p2pnChannelsPerPeerBase > comm->p2pnChannelsPerPeer;
+}
+
+// Single-node MLOPart gather/scatter keep the unhalved per-peer count (the halving
+// loop in paths.cc sizes alltoall, and was also cutting gather to 1 part per peer).
+inline bool rcclP2pPartitionedGather(struct ncclComm* comm, ncclFunc_t collAPI) {
+  return rcclP2pHalvedSingleNode(comm) && (collAPI == ncclFuncGather || collAPI == ncclFuncScatter);
+}
+
+// Parts (channels per peer) one collective places. The device recovers a part with
+// p2pnChannelsPerPeer as the stride, so this only changes how many parts are used.
+inline int rcclP2pPartCount(struct ncclComm* comm, ncclFunc_t collAPI) {
+  return rcclP2pPartitionedGather(comm, collAPI) ? comm->p2pnChannelsPerPeerBase : comm->p2pnChannelsPerPeer;
+}
+
+// Multiplier on the round base. Channel = base * stride + part, so scaling the base by
+// parts/stride gives each round its own block of parts (gather: round*8 + part).
+inline int rcclP2pBaseScale(struct ncclComm* comm, ncclFunc_t collAPI) {
+  int stride = comm->p2pnChannelsPerPeer > 0 ? comm->p2pnChannelsPerPeer : 1;
+  return rcclP2pPartCount(comm, collAPI) / stride;
+}
+
 inline bool rcclP2pBatchEligible(int enabled, ssize_t sendBytes, ssize_t recvBytes, ssize_t threshold) {
   return enabled && sendBytes == recvBytes && sendBytes <= threshold && recvBytes <= threshold;
 }
