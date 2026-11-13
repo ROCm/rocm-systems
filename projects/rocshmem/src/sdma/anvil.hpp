@@ -114,28 +114,27 @@ class AnvilLib {
 
  public:
   void init();
-  bool connect(int srcDeviceId, int dstDeviceId, int numChannels = 1);
+  // dstDeviceId for a peer on another host. Its copies reach the peer through fabric-mapped memory,
+  // so there is no device on this host to name.
+  static constexpr int kOffHostPeer = -1;
+  // Give the peer named by peerKey numChannels queues of its own. Peers never share a queue: a
+  // queue is an in-order ring, so sharing one would serialize their copies. A peer on this host
+  // (dstDeviceId is its HIP device) takes the least loaded engine of the HSA preferred mask for the
+  // pair; a peer on another host (kOffHostPeer) has no agent to ask, so it takes the least loaded
+  // usable engine. The engine choice is the only difference: the queue itself is the same.
+  bool connect(int srcDeviceId, uint64_t peerKey, int dstDeviceId, int numChannels = 1);
   void disconnect();
-  // Drop only the queues held for one destination. The channel map is process-global and a
-  // second communicator reuses a previous create's queues, so a failed create must not take
+  // Drop only the queues held for one peer. The channel map is process-global and a second
+  // communicator reuses a previous create's queues, so a failed create must not take
   // disconnect()'s whole-process path and destroy handles already live on the GPU.
-  void disconnectDevice(int dstDeviceId);
+  void disconnectPeer(uint64_t peerKey);
   // Queues this process currently holds, counted across all engines. The budget is otherwise only
   // visible in a log line, which leaves the refusal in connect() and the teardown in
-  // disconnectDevice() with nothing a test can assert: a refused connect must leave this unchanged
+  // disconnectPeer() with nothing a test can assert: a refused connect must leave this unchanged
   // and a fully abandoned create must bring it back to where it started.
   uint32_t queuesUsed() const { return queuesUsedTotal_; }
-  SdmaQueue* getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx = 0);
-  SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
-                             const EngineSelection& selection, int* channelIdx = nullptr);
-  // Queues for a peer on another host, which copies reach through its fabric-mapped memory. They
-  // are keyed by the caller's peer key rather than a local device id, so such a peer never shares a
-  // queue (and its in-order ring) with a peer on this host. Each queue goes on the usable engine
-  // carrying the fewest of this process's queues.
-  bool connectRemotePeer(int srcDeviceId, uint64_t peerKey, int numChannels = 1);
-  SdmaQueue* getRemotePeerQueue(uint64_t peerKey, int channel_idx = 0);
-  void disconnectRemotePeer(uint64_t peerKey);
-  // This process's queues per engine, across both maps; empty when the engine total is unknown.
+  SdmaQueue* getQueue(uint64_t peerKey, int channel_idx = 0);
+  // This process's queues per engine; empty when the engine total is unknown.
   // Public for the same reason as queuesUsed(): it is the load the engine choice is made from.
   std::vector<uint32_t> queuesPerEngine() const;
 
@@ -193,8 +192,8 @@ class AnvilLib {
 
   std::once_flag init_flag;
   std::vector<hsa_agent_t> gpuAgentsByHipDev_;
-  std::unordered_map<int, std::vector<std::unique_ptr<SdmaQueue>>> sdma_channels_;
-  std::unordered_map<uint64_t, std::vector<std::unique_ptr<SdmaQueue>>> remote_peer_channels_;
+  // Queues by the caller's peer key, for peers on this host and on other hosts alike.
+  std::unordered_map<uint64_t, std::vector<std::unique_ptr<SdmaQueue>>> peer_channels_;
 };
 
 extern AnvilLib& anvil;
