@@ -11,6 +11,7 @@ Before writing a helper, search these locations and use what exists:
 | --- | --- |
 | Units: data size, frequency, power, generic quantity | `source/lib/common/units/` |
 | String split/join/trim, delimiting | `source/lib/common/string_utility.hpp`, `delimit.hpp`, `join.hpp` |
+| Parsing a number from text | `safe_from_chars`, `safe_stoi`, `safe_stol` in `source/lib/common/string_utility.hpp` |
 | Paths, environment, env vars | `source/lib/common/path.hpp`, `environment.hpp`, `env_vars.hpp` |
 | Version handling | `source/lib/common/version.hpp` |
 | Logging | `LOG_*` macros from `source/lib/logger/debug.hpp` |
@@ -124,6 +125,16 @@ switch(kind)
 
 The same applies to any branch that the code's invariants say is impossible.
 
+## No silent acceptance
+
+- A lookup that finds nothing is an error. Never treat "not registered" or
+  "not found" as "valid".
+- Keep the type of an error across a boundary. Do not flatten a severity or
+  an error struct into a string.
+- Offer a value to the user only from an allow-list of what this application
+  handles, not from everything a library reports minus a deny-list.
+- Do not compare enum values by casting them to integers.
+
 ## No fake or dead code in production
 
 Production code contains only code the program really uses. Never add a
@@ -136,6 +147,21 @@ the service work. Fakes and mocks live only under `tests/`.
 - If sharing is impossible or too much work for the current change, do not
   work around it. Mark it as something to fix in a separate PR before the work
   continues.
+
+## Build only what a real caller uses
+
+- Every new field, enum value, parameter, and option has a reader in
+  production code in the same PR. If only a test or sample data sets it,
+  remove it.
+- A new module comes with its first production caller. Code that only tests
+  call is not finished.
+- One concept has one type and one way to express it. Before adding an enum
+  or struct, search for one with the same meaning. Never add a function that
+  maps one enum 1:1 onto another.
+- Do not add a fallback for a compiler or standard the project does not
+  support.
+- Name a thing for what it does. A policy is not an `option`; a check does not
+  `force`.
 
 ## Documentation
 
