@@ -359,5 +359,77 @@ class ExtractDeviceFunctionNoDeadStripTest(unittest.TestCase):
         self.assertEqual(resources["function_name"], "ncclDevFunc_fooPv")
 
 
+class DepfileTest(unittest.TestCase):
+    """CMake passes -MD -MT <obj> -MF <obj>.d. The clang driver drops -MF under
+    --offload-device-only, so the driver must take these itself; if they reach
+    clang, header edits stop recompiling device objects without any error."""
+
+    def _compile_cmd(self, **depfile_args):
+        calls = []
+
+        def fake_run(cmd, description=""):
+            calls.append(cmd)
+            if '-S' in cmd:
+                Path(cmd[cmd.index('-S') + 2]).write_text("")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = str(Path(temp_dir) / "kernel.o")
+            args = argparse.Namespace(
+                clang="clang", arch="gfx942", target_id="gfx942",
+                source="kernel.cpp", keep_temps=False, output=output,
+                **depfile_args)
+
+            saved = (driver.discover_tools, driver.run,
+                     driver.extract_device_function)
+            driver.discover_tools = lambda _: ("clang", "ld.lld")
+            driver.run = fake_run
+            driver.extract_device_function = lambda lines: ([], {})
+            try:
+                driver.do_compile(args, [])
+            finally:
+                (driver.discover_tools, driver.run,
+                 driver.extract_device_function) = saved
+        return calls[0], output
+
+    def test_separate_forms_are_our_args(self):
+        our, forwarded, sources = driver.parse_compiler_flags(
+            ["--compile", "-DFOO", "-MD", "-MT", "k.o", "-MF", "k.o.d",
+             "-o", "k.o", "k.cpp"]
+        )
+
+        self.assertIn("--dep-target=k.o", our)
+        self.assertIn("--depfile=k.o.d", our)
+        self.assertEqual(forwarded, ["-DFOO"])
+        self.assertEqual(sources, ["k.cpp"])
+
+    def test_joined_forms_are_our_args(self):
+        our, forwarded, sources = driver.parse_compiler_flags(
+            ["--compile", "-MMD", "-MTk.o", "-MFk.o.d", "k.cpp"]
+        )
+
+        self.assertEqual(our, ["--compile", "--dep-target=k.o",
+                               "--depfile=k.o.d"])
+        self.assertEqual(forwarded, [])
+        self.assertEqual(sources, ["k.cpp"])
+
+    def test_compile_asks_the_frontend_for_the_depfile(self):
+        cmd, _ = self._compile_cmd(depfile="k.o.d", dep_target="k.o")
+
+        self.assertIn("k.o.d", cmd)
+        self.assertEqual(cmd[cmd.index("-dependency-file") - 1], "-Xclang")
+        self.assertEqual(cmd[cmd.index("-MT") + 2], "k.o")
+        self.assertEqual(cmd[-1], "kernel.cpp")
+
+    def test_target_defaults_to_the_output(self):
+        cmd, output = self._compile_cmd(depfile="k.o.d")
+
+        self.assertEqual(cmd[cmd.index("-MT") + 2], output)
+
+    def test_no_depfile_flags_without_md(self):
+        cmd, _ = self._compile_cmd()
+
+        self.assertNotIn("-dependency-file", cmd)
+
+
 if __name__ == "__main__":
     unittest.main()
