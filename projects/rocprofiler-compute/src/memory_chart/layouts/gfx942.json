@@ -1,0 +1,70 @@
+{
+  "archs": ["gfx942"],
+  "description": "MI300: CU, L1s, L2, Data Fabric, MALL, UMC, HBM; xGMI above the fabric. HBM bandwidth is estimated.",
+  "scope": {"labels": ["GPU (XCD)", "Fabric / Memory"], "split": "data_fabric"},
+  "blocks": [
+    {"id": "cu", "title": "Compute Units", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
+      {"metric_id": "3.1.0", "title": "Wave Occ", "category": "util", "bar": false},
+      {"metric_id": "3.1.1", "title": "vGPRs", "category": "util", "bar": false},
+      {"metric_id": "3.1.2", "title": "sGPRs", "category": "util", "bar": false},
+      {"metric_id": "3.1.4", "title": "Scratch/Wave", "category": "util", "bar": false},
+      {"metric_id": "3.1.3", "title": "LDS Alloc", "category": "util", "bar": false},
+      {"metric_id": "3.1.5", "title": "Workgroups/CU", "category": "util", "bar": false}
+    ]},
+
+    {"id": "vl1d", "title": "VL1D", "column": 1, "row": 0, "order": 0, "style": "panel", "content": [
+      {"metric_id": "3.1.14", "title": "Hit", "category": "hit", "bar": true},
+      {"metric_id": "3.1.15", "title": "Coalesce", "category": "neutral", "bar": true}
+    ]},
+    {"id": "lds", "title": "LDS", "column": 1, "row": 0, "order": 1, "style": "panel", "content": [
+      {"metric_id": "3.1.13", "title": "Util", "category": "util", "bar": true}
+    ]},
+    {"id": "sl1d", "title": "sL1D", "column": 1, "row": 0, "order": 2, "style": "panel", "content": [
+      {"metric_id": "3.1.20", "title": "Hit", "category": "hit", "bar": true}
+    ]},
+    {"id": "l1i", "title": "L1I", "column": 1, "row": 0, "order": 3, "style": "panel", "content": [
+      {"metric_id": "3.1.23", "title": "Hit", "category": "hit", "bar": true}
+    ]},
+
+    {"id": "l2", "title": "L2", "column": 2, "row": 0, "order": 0, "style": "panel", "content": [
+      {"metric_id": "3.1.25", "title": "Hit", "category": "hit", "bar": true}
+    ]},
+
+    {"id": "data_fabric", "title": "Data Fabric", "column": 3, "row": 0, "order": 0, "style": "panel"},
+    {"id": "xgmi", "title": "xGMI (to Peer GPU)", "column": 3, "row": -1, "style": "panel"},
+
+    {"id": "mall", "title": "MALL", "column": 4, "row": 0, "order": 0, "style": "panel"},
+
+    {"id": "umc", "title": "UMC", "column": 5, "row": 0, "order": 0, "style": "panel"},
+
+    {"id": "hbm", "title": "HBM", "column": 6, "row": 0, "order": 0, "style": "panel"}
+  ],
+  "arrows": [
+    {"from": "cu", "to": "vl1d", "direction": "backward", "metric_id": "3.1.6", "title": "Read", "category": "read", "style": "inline", "group": "Non-buffer Request"},
+    {"from": "cu", "to": "vl1d", "direction": "forward", "metric_id": "3.1.7", "title": "Write", "category": "write", "style": "inline", "group": "Non-buffer Request"},
+    {"from": "cu", "to": "vl1d", "direction": "both", "metric_id": "3.1.8", "title": "Atomic", "category": "atomic", "style": "inline", "group": "Non-buffer Request"},
+    {"from": "cu", "to": "vl1d", "direction": "backward", "metric_id": "3.1.9", "title": "Read", "category": "read", "style": "inline", "group": "Buffer Request"},
+    {"from": "cu", "to": "vl1d", "direction": "forward", "metric_id": "3.1.10", "title": "Write", "category": "write", "style": "inline", "group": "Buffer Request"},
+    {"from": "cu", "to": "vl1d", "direction": "both", "metric_id": "3.1.11", "title": "Atomic", "category": "atomic", "style": "inline", "group": "Buffer Request"},
+
+    {"from": "cu", "to": "lds", "direction": "both", "metric_id": "3.1.12", "title": "Instr", "category": "neutral", "style": "inline"},
+
+    {"from": "cu", "to": "sl1d", "direction": "backward", "metric_id": "3.1.19", "title": "Read", "category": "read", "style": "inline", "group": "SMEM"},
+
+    {"from": "cu", "to": "l1i", "direction": "backward", "metric_id": "3.1.22", "title": "Read", "category": "read", "style": "inline", "group": "ICACHE"},
+
+    {"from": "vl1d", "to": "l2", "direction": "backward", "metric_id": "3.1.16", "title": "Read BW", "category": "read", "style": "stacked"},
+    {"from": "vl1d", "to": "l2", "direction": "forward", "metric_id": "3.1.17", "title": "Write BW", "category": "write", "style": "stacked"},
+    {"from": "vl1d", "to": "l2", "direction": "both", "metric_id": "3.1.18", "title": "Atomic BW", "category": "atomic", "style": "stacked"},
+
+    {"from": "sl1d", "to": "l2", "direction": "backward", "metric_id": "3.1.21", "title": "Read BW", "category": "read", "style": "stacked"},
+
+    {"from": "l1i", "to": "l2", "direction": "backward", "metric_id": "3.1.24", "title": "Read BW", "category": "read", "style": "stacked"},
+
+    {"from": "l2", "to": "data_fabric", "direction": "backward", "metric_id": "3.1.26", "title": "Read BW", "category": "read", "style": "stacked"},
+    {"from": "l2", "to": "data_fabric", "direction": "forward", "metric_id": "3.1.27", "title": "Write/Atomic BW", "category": "write", "style": "stacked"},
+
+    {"from": "data_fabric", "to": "mall", "direction": "backward", "metric_id": "3.1.28", "title": "Read BW", "category": "read", "style": "stacked"},
+    {"from": "data_fabric", "to": "mall", "direction": "forward", "metric_id": "3.1.29", "title": "Write/Atomic BW", "category": "write", "style": "stacked"}
+  ]
+}

@@ -9,6 +9,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added a *Limited by* mode to the *AI axis* selector in the standalone roofline HTML. It shows each kernel at its limiting memory-level point, falling back to the leftmost point for compute-bound or unknown kernels.
 
+* `--attach-pid` now works for a process that runs in a container. Run ROCm Compute Profiler on the host, and pass the process ID that the host shows.
+
 * Added Data Fabric to MALL bandwidth arrows to the CDNA (gfx9) Memory Chart. On gfx940–gfx942 these report estimated HBM bandwidth, derived from a 64B-per-request approximation, through the new `Estimated HBM Read BW` and `Estimated HBM Write and Atomic BW` metrics. On gfx950 they use the existing `HBM Read BW` and the new `HBM Write and Atomic BW` metric.
 
 * Added the `VL1 Coalesce` metric to the VL1D panel of the CDNA (gfx9) Memory Chart.
@@ -20,11 +22,22 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Scalar data cache utilization, latency, stall rate, and bandwidth.
   * GL1 request latency.
 
+* Added PC sampling counts per source line.
+  * `rocprof-compute analyze --output-format csv` writes `<file>_pc_sampling.csv` beside each captured source file. It lists every source line of the file with the samples of the instructions compiled from it, and where those instructions sit in the per-kernel ISA files.
+  * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
+  * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
+
+* Added `--speed-of-light`, `--memory-chart`, and `--roofline` options to profile and analyze modes.
+  * They are aliases of `-b 2`, `-b 3`, and `-b 4`.
+  * They can be combined with each other and with `-b`. For example, `--speed-of-light --roofline` is the same as `-b 2 4`.
+
+* Added debug options for troubleshooting ROCm Compute Profiler itself. `--help` lists them only with `--debug`.
+  * `--debug-list-metrics-gfx-id <arch>`: with `--list-metrics`, list the blocks and metrics of another GPU.
+  * `analyze --debug-metric-expression`: print each metric's expression and inputs.
+  * `analyze --debug-table-view`: print every block as plain tables.
+  * `analyze --debug-verify-deps`: check that the Python dependencies of analyze mode are installed, then exit.
+
 ### Changed
-
-* `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
-
-* The PyTorch and Triton operator call trees now show each operator's arguments. `--torch-operator` and `--triton-operator` can now be used together.
 
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
 
@@ -49,12 +62,45 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
 
+* Renamed the `Active count` column of the per-kernel PC sampling ISA CSV files to `Issue count`, to match `issue_count` in the analyze table, `pc_sampling_summary.csv`, and `compute_pc_sampling_summary_view`.
+
+* The PC sampling analyze table, `compute_pc_sampling_summary_view`, and `pc_sampling_summary.csv` now show one row per kernel instead of one row per instruction.
+  * `--pc-sampling-rows` now sets the number of kernels shown.
+  * Per-instruction counts are in the per-kernel ISA CSV files.
+
+* `--list-metrics` no longer takes a GPU architecture. It lists the blocks of the current GPU, or the metrics of the blocks and metrics you name, for example `rocprof-compute --list-metrics sol`. Use `--debug-list-metrics-gfx-id <arch>` to list another GPU.
+
+* `--block` 30 metric IDs (e.g. 30.1.7) now refer to different metrics following the removal of unnecessary gfx950 Memory Bandwidth Analysis metrics.
+
+* The experimental ML API tracing now uses one set of options for all frameworks.
+  * Profile with `--trace-ml-api`, for example `--trace-ml-api torch triton`. With no values, it traces every supported framework.
+  * `--trace-ml-api` now also traces user ROCTx regions.
+  * List the traced operators and user ROCTx regions with `--list-operators`, for example `--list-operators torch user`.
+  * Filter them with `--operator`, for example `--operator 'torch:*conv*'`. A `user:` pattern selects a user ROCTx region with all the operators and kernels inside it.
+  * Operator call trees now show each operator's arguments.
+  * `--trace-ml-api triton` does not capture the Triton kernels that `torch.compile` generates. Use `--trace-ml-api torch` for those kernels.
+
+* The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
+
+* Top-level options such as `--list-metrics` can no longer be abbreviated (for example `--list-metr`), matching profile and analyze options.
+
+* `--specs-correction` takes `name:value` pairs separated by spaces instead of commas, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
+
+* Renamed the roofline options to start with `--roofline`. The old names still work for now but print a warning, so update your commands:
+  * `--roof-only` → `--roofline`
+  * `--bench-only` → `--roofline-bench-only`
+  * `--device` → `--roofline-device`
+
+* Roofline metric ids such as `-b 4.1` now count as selecting roofline, like `-b 4` and `-b roof`. In profile mode they run the roofline benchmark, and in analyze mode they show the roofline section.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
   * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
 
 * Removed the unused `compute_workload_roofline_data` table from the analysis database.
+
+* Removed the `--config-dir` option, which loaded custom panel configs.
 
 * Removed the HBM and remote traffic percentage metrics from the gfx908–gfx942 Memory Chart. On gfx940–gfx942 the new Data Fabric to MALL arrows report estimated HBM bandwidth instead.
 
@@ -68,9 +114,23 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed the `analyze --sort`, `analyze --mem-level`, and `analyze --roofline-data-type` options.
   * These options were utilized solely by roofline plot in CLI analyze output block 4.3, which has been removed. The roofline HTML output shows every memory level and precision, and you can filter them in the browser.
 
+* Removed the `--include-cols` and `--cols` analyze options.
+
+* Removed the `analyze --pc-sampling-sorting-type` option. The PC sampling table is always sorted by sample count.
+
+* Removed unnecessary gfx950 Memory Bandwidth Analysis (block 30) metrics. Block 30 now shows only the L1 cache, L2 bottleneck, and EA bottleneck indicators, as tables 30.1, 30.2, and 30.3.
+
+* Removed support for the gfx940 and gfx941 architectures (MI300A A0 and MI300X A0). MI300A and MI300X on gfx942 remain supported.
+
+* Removed the experimental `--torch-trace`, `--triton-trace`, `--ml-api-trace`, `--list-torch-operators`, `--list-triton-operators`, `--torch-operator`, and `--triton-operator` options. Use `--trace-ml-api`, `--list-operators`, and `--operator` instead.
+
+* Removed the `-g`, `--view table`, and `--verify-deps` analyze options. Use `--debug-metric-expression`, `--debug-table-view`, and `--debug-verify-deps` instead.
+
 ### Optimized
 
 * Profile mode collects only the counters that metric equations use, which can reduce the number of profiling passes.
+
+* PC sampling now writes disassembly only for dispatched kernels, so profiling output is much smaller.
 
 ### Resolved issues
 
@@ -90,6 +150,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
 
 ### Upcoming changes
+
+* `--list-blocks` and `--list-available-metrics` will be removed in a future release.
+
+* The old roofline option names (`--roof-only`, `--bench-only`, and `--device`) will be removed in a future release. Use the new `--roofline-*` names instead.
+
+* `--no-roof` is deprecated and will be removed in a future release. To skip roofline, select blocks with `-b` or `--set` that do not include block 4.
 
 ### Known issues
 

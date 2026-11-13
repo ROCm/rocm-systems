@@ -14,8 +14,10 @@ Run `rocprof-compute analyze --help` before choosing flags.
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b memchart
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> --memory-chart
 ```
+
+On ROCm 10.2 and earlier, use `-b memchart` instead of `--memory-chart`.
 
 The Memory Chart shows the whole hierarchy at once: requests issued, what each
 cache level served, and what reached HBM. Read it before opening any single
@@ -26,7 +28,7 @@ Always analyze one kernel at a time with `-k`.
 If there is no workload yet, collect only the memory blocks:
 
 ```bash
-rocprof-compute profile --name <workload_name> -b memchart vl1d l2 lds -- <application> <args>
+rocprof-compute profile --name <workload_name> --memory-chart -b vl1d l2 lds -- <application> <args>
 ```
 
 The cache aliases differ by architecture; for example, some GPUs name their
@@ -37,15 +39,16 @@ caches `gl0` and `gl2`.
 Never run a full profile. It replays the application once per counter pass and
 also runs the roofline benchmarks.
 
-- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
-  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
-  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
-  Aliases differ by architecture.
+- List what this GPU can collect with `rocprof-compute --list-metrics`, and a
+  block's metrics with `rocprof-compute --list-metrics <alias>`. On ROCm 10.2
+  and earlier, use `--list-blocks <gfx_arch>` and `--list-metrics <gfx_arch>`.
+  Pass `-b` only the block aliases, block ids, or metric ids (for example
+  `2.1.0`) the question needs. Aliases differ by architecture.
 - `--set <set_name>` collects a predefined topic in one pass.
   `rocprof-compute profile --list-sets` lists the sets.
 - Add `-k <kernel_name>` when the user names the kernels that matter.
-- Add `--no-roof` unless the question is about roofline. A `-b` list without
-  block 4 (`roof`) already skips it.
+- Unless the question is about roofline, select blocks with `-b` and leave out
+  block 4 (`roof`), so the roofline benchmark is skipped.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
@@ -75,8 +78,7 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b 
 ```
 
 Aliases are stable; numeric block ids are architecture-specific. List what this
-workload actually has with `--list-available-metrics`, and the aliases for an
-architecture with `rocprof-compute --list-blocks <arch>`.
+workload actually has with `--list-metrics`.
 
 ## 3. Interpret
 
@@ -118,7 +120,7 @@ It is experimental and currently shipped for gfx950 only; see
 only the memory chart (block 3) and block 30, so profile only those two blocks:
 
 ```bash
-rocprof-compute profile --experimental --membw-analysis -b 3 30 \
+rocprof-compute profile --experimental --membw-analysis --memory-chart -b 30 \
     --name <name> -- <application>
 
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id>

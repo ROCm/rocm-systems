@@ -275,8 +275,6 @@ Panel Config:
         min: Min
         max: Max
         unit: Unit
-      style:
-        type: simple_multi_bar
       metric:
         Read - PCIe Stall:
           type: PCIe Stall

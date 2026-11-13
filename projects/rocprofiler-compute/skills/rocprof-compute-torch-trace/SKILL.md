@@ -1,6 +1,6 @@
 ---
 name: rocprof-compute-torch-trace
-description: Attributes AMD GPU kernel performance counters back to the PyTorch or Triton operators that launched them, using rocprof-compute torch and triton tracing. Use when the user asks which PyTorch layer or operator is slow, wants to map GPU kernels to model code, profiles a training or inference script, or asks about torch.compile and Inductor kernels. Not for CUDA tools, Windows, non-Python applications, or user-authored ROCTx ranges.
+description: Attributes AMD GPU kernel performance counters back to the PyTorch or Triton operators that launched them, using rocprof-compute ML API tracing. Use when the user asks which PyTorch layer or operator is slow, wants to map GPU kernels to model code, profiles a training or inference script, asks about torch.compile and Inductor kernels, or wants to select user-defined ROCTx regions from a traced Python profile. Not for CUDA tools, Windows, compiled non-Python binaries, or starting and stopping a profile at ROCTx ranges.
 ---
 
 # Map GPU kernels to PyTorch operators
@@ -34,23 +34,26 @@ full requirement list is in the Torch trace section of
 ```bash
 rocprof-compute profile \
     --experimental \
-    --torch-trace \
-    --no-roof \
+    --trace-ml-api torch \
+    --speed-of-light \
     --name <workload_name> \
     -- python <script.py> <args>
 ```
 
+On ROCm 10.2 and earlier, use `-b sol` instead of `--speed-of-light`.
+
 For Triton kernels launched through Triton's Python runtime (`@triton.jit`):
 
 ```bash
-rocprof-compute profile --experimental --triton-trace --name <name> -- python <script.py>
+rocprof-compute profile --experimental --trace-ml-api triton --name <name> -- python <script.py>
 ```
 
 `torch.compile` / Inductor fused kernels use PyTorch's static launcher, so they
-do not get `|triton` ranges. Attribute them with `--torch-trace`.
+do not get `|triton` ranges. Attribute them with `--trace-ml-api torch`.
 
-The two combine, and `--ml-api-trace` turns on every supported framework
-backend at once.
+The two combine as `--trace-ml-api torch triton`. User-defined ROCTx regions
+are included with every `--trace-ml-api` run. A bare `--trace-ml-api` traces
+all supported ML frameworks as well.
 
 Tracing adds overhead on top of the usual counter replay. Profile a few
 iterations of a steady-state model rather than a full training run, and skip
@@ -69,15 +72,16 @@ Profile preserves each pass's raw marker and counter CSVs with the
 Never run a full profile. It replays the application once per counter pass and
 also runs the roofline benchmarks.
 
-- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
-  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
-  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
-  Aliases differ by architecture.
+- List what this GPU can collect with `rocprof-compute --list-metrics`, and a
+  block's metrics with `rocprof-compute --list-metrics <alias>`. On ROCm 10.2
+  and earlier, use `--list-blocks <gfx_arch>` and `--list-metrics <gfx_arch>`.
+  Pass `-b` only the block aliases, block ids, or metric ids (for example
+  `2.1.0`) the question needs. Aliases differ by architecture.
 - `--set <set_name>` collects a predefined topic in one pass.
   `rocprof-compute profile --list-sets` lists the sets.
 - Add `-k <kernel_name>` when the user names the kernels that matter.
-- Add `--no-roof` unless the question is about roofline. A `-b` list without
-  block 4 (`roof`) already skips it.
+- Unless the question is about roofline, select blocks with `-b` and leave out
+  block 4 (`roof`), so the roofline benchmark is skipped.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
@@ -87,38 +91,45 @@ also runs the roofline benchmarks.
 ## 3. List the captured operators
 
 List when you need the operator names from this run; filtering does not
-require a prior list. Do not pass `--list-*-operators` and `--*-operator`
+require a prior list. Do not pass `--list-operators` and `--operator`
 on the same command; listing ignores the filter. These flags require
 `--output-format stdout` (the default):
 
 ```bash
 rocprof-compute analyze \
     --path ./workloads/<name>/<gpu_model> \
-    --experimental --list-torch-operators
+    --experimental --list-operators torch
 ```
 
 This prints the operators as a call tree sorted by GPU duration, with
 `file:line` on each node that recorded a source location, plus kernel
 launch statistics, so it also shows which operators are worth opening.
 
-The Triton equivalent is `--list-triton-operators`.
+The Triton equivalent is `--list-operators triton`.
+
+`--list-operators user` lists each user ROCTx region with everything that
+ran inside it.
 
 ## 4. Filter to an operator
 
 ```bash
 rocprof-compute analyze \
     --path ./workloads/<name>/<gpu_model> \
-    --experimental --torch-operator '*relu*'
+    --experimental --operator 'torch:*relu*'
 ```
 
 Patterns are shell-style globs, not regexes, matched against a `/`-separated
 operator hierarchy. `*relu*` contains relu, `*/aten::addmm` is an addmm leaf
-on the reconstructed path, and `all` or `'*'` matches everything. Several
-patterns can be given, space or comma separated.
+on the reconstructed path. Several patterns can be given. A pattern without
+a prefix uses the prefix before it. Bare `--operator` or `**` matches
+everything.
 Quote patterns so the shell does not expand them.
 
-`--triton-operator` works the same way. `*rmsnorm_kernel*` matches the
-rmsnorm nodes on a Triton tree.
+`--operator 'triton:*rmsnorm_kernel*'` works the same way.
+
+`--operator 'user:*UserDefined*'` selects matching user ROCTx regions with
+everything inside them. Other patterns in the same command add operators.
+They never remove anything from a selected region.
 
 Worked examples are in the PyTorch operator analysis section of
 [the analyze CLI guide](../../docs/how-to/analyze/cli.rst).
@@ -136,11 +147,12 @@ operator list are what distinguish the two.
 ## 6. ROCTx scope
 
 rocprof-compute uses ROCTx internally: torch tracing injects ROCTx regions to
-annotate operators, which is what makes attribution possible. That is the only
-place ROCTx is involved.
+annotate operators, which is what makes attribution possible.
 
-rocprof-compute does not support ROCTx-range-based profiling control, such as
-starting, stopping, or resuming collection at a user-authored ROCTx range.
-User-defined ranges in the marker CSV are labeled `user`. If the user wants
-ROCTx start/stop control, say so plainly and offer kernel filtering with
-`-k` or dispatch filtering with `-d` instead.
+rocprof-compute does not start, stop, or resume counter collection at a user-authored
+ROCTx range. User-defined ROCTx regions are included with every
+`--trace-ml-api` run. List or filter them at analyze time with
+`--list-operators user` and `--operator user:PATTERN`. That keeps the region
+and nested GPU work.
+To keep only some kernels or dispatches from an already collected profile,
+use `-k` or `-d`.

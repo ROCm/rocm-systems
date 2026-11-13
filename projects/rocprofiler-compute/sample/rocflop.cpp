@@ -478,7 +478,7 @@ Result run_tests(int device, int runs, uint32_t mask)
         }
     }
 
-    // SMFMAC only available on gfx940 (MI300) and later.
+    // SMFMAC only available on CDNA3 (MI300) and later.
     if(mask & SMATRIX_FP16) {
         if(arch.major == 0x9 && arch.minor >= 0x4) {
             res.smfmac_fp16 = sparse_matmul_throughput_test<float16, float>(device, 4096, runs);

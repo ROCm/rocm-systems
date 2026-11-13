@@ -206,8 +206,8 @@ Notice the two main stages in ROCm Compute Profiler's **default** profiling rout
 1. The first stage collects all the counters needed for ROCm Compute Profiler analysis
    (omitting any filters you have provided).
 
-2. The second stage collects data for the roofline analysis (this stage can be
-   disabled using ``--no-roof``).
+2. The second stage runs the roofline benchmark to measure the roofline ceilings
+   (skipped when ``-b`` or ``--set`` selects blocks that do not include block 4).
 
 At the end of profiling, you can find all resulting ``csv`` files in a
 :ref:`SoC <def-soc>`-specific target directory; for
@@ -394,7 +394,6 @@ Raw performance counter data produced by the underlying
 
    Intermediate CSV generation (``results_*.csv``) in ``rocpd`` mode and
    ``--retain-rocpd-output`` are deprecated and will be removed in a future release.
-   ``.db`` files will be retained by default and the analyze step will read them directly.
 
 
 .. _filtering:
@@ -406,24 +405,43 @@ To reduce profiling time and the counters collected, use profiling filters.
 The filters described below apply to the default ``rocprofiler-sdk`` backend.
 See :ref:`core-install-rocprof-var` for details on backend selection.
 
+.. _profile-selection-options:
+
+Choosing what to profile
+------------------------
+
+A profile run collects one of the following. Options in the same group can be
+combined; options from different groups can't be used together, and
+rocprof-compute exits with an error:
+
+* **Blocks:** ``-b`` and its aliases ``--speed-of-light``, ``--memory-chart``,
+  and ``--roofline``, in any combination.
+* **A metric set:** ``--set``. See :ref:`profiling-metric-sets`.
+* **Only the roofline benchmark:** ``--roofline-bench-only``. It also can't be used
+  with the deprecated ``--no-roof``. See :ref:`roofline-bench-only`.
+
+Without any of these options, profile mode collects every block.
+
 Filtering options
 -----------------
 
-``-b``, ``--block <block-id|block-alias|metric-id>``
+``-b``, ``--block``
    Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
-   Note that this option cannot be used with ``--roof-only`` or ``--set``.
 
-``-k``, ``--kernel <kernel-substr>``
+``--speed-of-light``, ``--memory-chart``, ``--roofline``
+   Aliases of ``-b 2``, ``-b 3``, and ``-b 4``. They profile the
+   Speed-of-Light, Memory Chart, and Roofline blocks.
+
+``-k``, ``--kernel``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
 
-``--kernel-iteration-range <iteration>``
+``--kernel-iteration-range``
    Allows for kernel iteration filtering. See :ref:`profiling-kernel-iteration-range`.
 
-``--set <metric-set>``
+``--set``
    Allows for single pass counter collection of sets of metrics with minimized profiling overhead.
-   Cannot be used with ``--roof-only`` or ``--block``.
-   See :ref:`profiling-metric-sets`.
+   See :ref:`profiling-metric-sets` and :ref:`profile-selection-options`.
 
 .. tip::
 
@@ -504,43 +522,8 @@ The following example only collects the counters required to calculate ``Total V
    ...
 
 
-To see a list of available hardware report blocks, use the ``--list-available-metrics`` option.
-
-.. code-block:: shell-session
-
-   $ rocprof-compute profile --list-available-metrics
-
-                                    __                                       _
-    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-                  |_|                                           |_|
-
-   0 -> Top Stats
-   1 -> System Info
-   2 -> System Speed-of-Light
-         2.1 -> Speed-of-Light
-                  2.1.0 -> VALU FLOPs
-                  2.1.1 -> MFMA FLOPs (F8)
-   ...
-   5 -> Command Processor (CPC/CPF)
-         5.1 -> Command Processor Fetcher
-                  5.1.0 -> CPF Utilization
-                  5.1.1 -> CPF Stall
-                  5.1.2 -> CPF-L2 Utilization
-         5.2 -> Packet Processor
-                  5.2.0 -> CPC Utilization
-                  5.2.1 -> CPC Stall Rate
-                  5.2.5 -> CPC-UTCL1 Stall
-   ...
-   6 -> Workgroup Manager (SPI)
-         6.1 -> Workgroup Manager Utilizations
-                  6.1.0 -> Accelerator Utilization
-                  6.1.1 -> Scheduler-Pipe Utilization
-                  6.1.2 -> Workgroup Manager Utilization
-
-
+To see the available report blocks and their metrics, use ``--list-metrics``.
+See :ref:`list-metrics`.
 
 .. _profiling-kernel-filtering:
 
@@ -648,7 +631,8 @@ Metric sets filtering
 
 A metrics set contains a subset of metrics that can be collected in a single pass. This filtering option minimizes profiling overhead by only collecting counters of interest.
 The `--set` filter option provides a convenient way to group related metrics for common profiling scenarios, eliminating the need to manually specify individual metrics for typical analysis workflows.
-This option cannot be used with ``--roof-only`` and ``--block``.
+See :ref:`profile-selection-options` for the options it can be combined with.
+``--set`` can't be used with ``--pc-sampling``.
 
 .. code-block:: shell-session
 
@@ -719,18 +703,17 @@ To see a list of available sets, use the ``--list-sets`` option.
 Standalone roofline
 ===================
 
-Roofline analysis occurs on any profile mode run, provided ``--no-roof`` option is not included.
+Roofline analysis occurs on any profile mode run, unless ``-b`` or ``--set`` selects blocks that do not include block 4.
 You don't need to include any additional roofline-specific options for roofline analysis.
-If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roof-only`` option.
+If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roofline`` option.
 This option checks if there is existing roofline benchmark data in the workload directory (``roofline.csv``):
 
 a) If found, skips microbenchmark execution;
 
 b) Otherwise, profile mode runs microbenchmarks and collects roofline performance counters.
 
-.. note::
-
-  ``--roof-only`` cannot be used with ``--block``, ``--set``, or ``--bench-only`` options.
+See :ref:`profile-selection-options` for the options ``--roofline`` can be combined
+with.
 
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on a profiling output directory
@@ -750,11 +733,11 @@ that contains both ``roofline.csv`` and application performance counters
 Roofline options (profile)
 --------------------------
 
-``--device <gpu_id>``
+``--roofline-device``
    Allows you to specify a device ID to collect performance data from when
    running a roofline benchmark on your system.
 
-``-k``, ``--kernel <kernel-substr>``
+``-k``, ``--kernel``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
 
 .. note::
@@ -769,7 +752,7 @@ The following example demonstrates profiling roofline data only:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name occupancy --roof-only -- ./tests/occupancy -n 1048576 -b 256
+   $ rocprof-compute profile --name occupancy --roofline -- ./tests/occupancy -n 1048576 -b 256
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
    | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
@@ -820,11 +803,13 @@ successfully.
 To generate roofline HTML plots from this data, see :doc:`../analyze/mode`.
 
 
+.. _roofline-bench-only:
+
 Benchmark only
 --------------
 
 If you only want to run the roofline microbenchmark without profiling an application
-or collecting any performance counters, use the ``--bench-only`` option. No
+or collecting any performance counters, use the ``--roofline-bench-only`` option. No
 application run is required.
 
 This is useful for:
@@ -832,42 +817,40 @@ This is useful for:
 * Re-generating ``roofline.csv`` in an existing workload directory without re-profiling.
 * Running the microbenchmark on a system where only HIP is available (no rocprofiler-sdk needed).
 
-.. note::
-
-  ``--bench-only`` cannot be used with ``--block``, ``--set``, ``--roof-only``, or ``--no-roof`` options.
+``--roofline-bench-only`` can't be used with ``-b``, its aliases, ``--set`` or ``--no-roof``.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name my_bench --bench-only
+   $ rocprof-compute profile --name my_bench --roofline-bench-only
 
-To target a specific GPU device, use ``--device``:
+To target a specific GPU device, use ``--roofline-device``:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name my_bench --bench-only --device 2
+   $ rocprof-compute profile --name my_bench --roofline-bench-only --roofline-device 2
 
 To regenerate benchmark data in an existing workload directory, point
 ``--output-directory`` at the workload path. This replaces the existing
 ``roofline.csv``, so it requires ``--overwrite``. Unlike a full profile,
-``--bench-only`` replaces only ``roofline.csv`` and leaves the rest of the
+``--roofline-bench-only`` replaces only ``roofline.csv`` and leaves the rest of the
 workload (counter data, traces) untouched:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
+   $ rocprof-compute profile --roofline-bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
 
 .. note::
 
-   ``--bench-only`` writes ``roofline.csv`` only; rendering a roofline
+   ``--roofline-bench-only`` writes ``roofline.csv`` only; rendering a roofline
    chart additionally requires application performance counters from a
-   ``--roof-only`` (or regular profile) run. The intended workflow is to
-   profile first, then re-run ``--bench-only --overwrite`` against that workload
+   ``--roofline`` (or regular profile) run. The intended workflow is to
+   profile first, then re-run ``--roofline-bench-only --overwrite`` against that workload
    later to refresh stale peak values before analyzing:
 
    .. code-block:: shell-session
 
-      $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy
-      $ rocprof-compute profile --bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
+      $ rocprof-compute profile --name vcopy --roofline -- ./vcopy
+      $ rocprof-compute profile --roofline-bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
       $ rocprof-compute analyze --path workloads/vcopy/MI300X_A1
 
 .. _torch-operator-mapping:
@@ -886,7 +869,7 @@ which operators contribute to specific performance counter values.
 
    Torch trace is currently an experimental feature. You must pass ``--experimental`` to
    both **profile** and **analyze** command when using the Torch trace related options
-   (``--torch-trace`` for profile; ``--list-torch-operators`` and ``--torch-operator``
+   (``--trace-ml-api torch`` for profile; ``--list-operators torch`` and ``--operator``
    for analyze).
 
 .. note::
@@ -895,7 +878,7 @@ which operators contribute to specific performance counter values.
    ``linear``, and ``relu``) are high-level API functions. When executed on GPU, these
    operators may launch multiple low-level GPU kernels (such as
    ``implicit_convolve_sgemm``) that perform the actual computation on the hardware.
-   The ``--torch-trace`` option provides operator-level attribution by injecting
+   The ``--trace-ml-api torch`` option provides operator-level attribution by injecting
    markers that map the collected kernel performance counters to their originating PyTorch
    operators.
 
@@ -908,7 +891,7 @@ Requirements
   operator trace; other versions get the reduced trace described below.
 * PyTorch application must be run as a Python script or a Python command.
 
-``--torch-trace`` records PyTorch operators in one of two ways:
+``--trace-ml-api torch`` records PyTorch operators in one of two ways:
 
 * The **collector** is a small shared library that registers a callback inside
   PyTorch itself. The callback runs on every thread, so the trace includes the
@@ -920,7 +903,7 @@ Requirements
   every other PyTorch version, and whenever the collector cannot be loaded.
 
 Profiling never stops because of this. When the collector is unavailable,
-``--torch-trace`` prints a warning and continues with ``TorchDispatchMode``.
+``--trace-ml-api torch`` prints a warning and continues with ``TorchDispatchMode``.
 
 .. important::
 
@@ -937,12 +920,12 @@ Profiling never stops because of this. When the collector is unavailable,
 Usage
 -----
 
-To enable Torch operator mapping, use ``--experimental`` with the ``--torch-trace``
+To enable Torch operator mapping, use ``--experimental`` with the ``--trace-ml-api torch``
 option when profiling a PyTorch workload:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
+   $ rocprof-compute profile --experimental --trace-ml-api torch --name simple_net -- python simple_net.py
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -953,10 +936,9 @@ option when profiling a PyTorch workload:
 
    INFO Rocprofiler-Compute version: 3.5.0
    INFO Profiler choice: rocprofiler-sdk
-   INFO Path: /home/auser/workloads/mnist_torch/MI325X
+   INFO Path: /home/auser/workloads/simple_net/MI325X
    INFO Target: MI325X
-   INFO Command: python train.py
-   INFO Torch Trace: Enabled
+   INFO Command: python simple_net.py
    INFO Kernel Selection: None
    INFO Kernel Iteration Range: None
    INFO Hardware Blocks: All
@@ -969,7 +951,7 @@ option when profiling a PyTorch workload:
 Reducing instrumentation overhead
 ---------------------------------
 
-By default, ``--torch-trace`` also wraps the device- and layout-related
+By default, ``--trace-ml-api torch`` also wraps the device- and layout-related
 ``torch.Tensor`` methods ``to``, ``cpu``, ``cuda``, and ``contiguous``, which
 attribute tensor movement and layout changes to the originating PyTorch call
 site. These methods are called frequently, so wrapping them adds overhead and
@@ -981,7 +963,7 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 
 .. code-block:: shell-session
 
-   $ ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
+   $ ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 rocprof-compute profile --experimental --trace-ml-api torch --name simple_net -- python simple_net.py
 
 Torch trace collector
 ---------------------
@@ -1003,14 +985,14 @@ the ``ml_api_trace`` prefix. The source marker and counter files are **retained*
 in the workload directory.
 
 Analyze reads those files and prints an operator call tree and a per-operator
-summary (for example with ``--list-torch-operators`` or ``--torch-operator``).
+summary (for example with ``--list-operators torch`` or ``--operator``).
 
 Performance counter data
 ------------------------
 
 The ``ml_api_trace_*_counter_collection.csv.gz`` files hold the same
 performance counters as a profile without Torch trace. In analyze mode,
-``--torch-operator`` and ``--triton-operator`` show the usual metric tables
+``--operator`` shows the usual metric tables
 for the kernels that the matching operators launched.
 
 .. _torch-trace-limitations:
@@ -1020,9 +1002,9 @@ Limitations
 
 The Torch trace feature currently has the following limitations:
 
-* Torch trace is experimental. Use ``rocprof-compute profile ... --experimental --torch-trace`` and ``rocprof-compute analyze ... --experimental`` with ``--list-torch-operators`` or ``--torch-operator`` as needed.
+* Torch trace is experimental. Pass ``--experimental`` to both the profile and analyze commands.
 
-* The ``--torch-trace`` option requires the application to be a Python command or Python script.
+* The ``--trace-ml-api torch`` option requires the application to be a Python command or Python script.
 
 * The workload's Python version must match the Python version used by ``roctx``.
 
@@ -1078,28 +1060,28 @@ Example:
            return x
 
 **Analyzing captured operators**: After profiling, use the analyze CLI (see
-:doc:`../analyze/cli`) to list and filter by operator name. Filtering
-(``--torch-operator``) accepts shell-style glob patterns that match an operator
-name or its call path (for example ``*relu*`` or ``*/aten::addmm``). To select
-all operators, pass
-no arguments, ``all``, ``*``, or ``**`` — all four forms are equivalent.
+:doc:`../analyze/cli`) to list and filter operators. ``--operator`` takes
+shell-style glob patterns, such as ``--operator 'torch:*relu*'`` or
+``--operator '*/aten::addmm'``. A pattern can match an operator name or its
+call path. A ``torch:`` or ``triton:`` prefix limits a pattern to that
+framework. To select all operators, pass no arguments or ``**``.
 
 Combining Torch operator with other options
 -------------------------------------------
 
 Torch operator mapping can be combined with other profiling options. Use
-``--experimental`` with ``--torch-trace`` in all cases:
+``--experimental`` with ``--trace-ml-api torch`` in all cases:
 
 .. code-block:: shell-session
 
    # Combine with block filtering for targeted counter collection
-   $ rocprof-compute profile -b 11 12 --experimental --torch-trace --name mnist -- python train.py
+   $ rocprof-compute profile -b 11 12 --experimental --trace-ml-api torch --name simple_net -- python simple_net.py
 
    # Combine with iteration multiplexing
-   $ rocprof-compute profile --experimental --torch-trace --name mnist --iteration-multiplexing kernel -- python train.py
+   $ rocprof-compute profile --experimental --trace-ml-api torch --name simple_net --iteration-multiplexing kernel -- python simple_net.py
 
    # Combine with kernel filtering (filters by GPU kernel name)
-   $ rocprof-compute profile --experimental --torch-trace --name mnist -k elementwise -- python train.py
+   $ rocprof-compute profile --experimental --trace-ml-api torch --name simple_net -k elementwise -- python simple_net.py
 
 .. _triton-trace:
 
@@ -1108,19 +1090,19 @@ Triton trace
 
 In addition to PyTorch, ROCm Compute Profiler can map performance counters to
 the Triton kernels that your code launches, such as ``@triton.jit`` functions.
-Enable it with the ``--triton-trace`` option. It writes the same
+Enable it with the ``--trace-ml-api triton`` option. It writes the same
 ``ml_api_trace`` output as Torch trace and is analyzed the same way.
 
-``--triton-trace`` does not capture the Triton kernels that ``torch.compile``
-generates, because PyTorch launches those kernels itself. Use ``--torch-trace``
+``--trace-ml-api triton`` does not capture the Triton kernels that ``torch.compile``
+generates, because PyTorch launches those kernels itself. Use ``--trace-ml-api torch``
 for them. They appear under the ``torch.compile`` call in the operator tree.
 
 .. warning::
 
    Triton trace is currently an experimental feature. You must pass
    ``--experimental`` to both **profile** and **analyze** commands when using the
-   Triton trace related options (``--triton-trace`` for profile;
-   ``--list-triton-operators`` and ``--triton-operator`` for analyze).
+   Triton trace related options (``--trace-ml-api triton`` for profile;
+   ``--list-operators triton`` and ``--operator 'triton:PATTERN'`` for analyze).
 
 Requirements
 ------------
@@ -1133,33 +1115,32 @@ Usage
 -----
 
 To enable Triton kernel mapping, use ``--experimental`` with the
-``--triton-trace`` option:
+``--trace-ml-api triton`` option:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --experimental --triton-trace --name triton_gemm -- python gemm.py
+   $ rocprof-compute profile --experimental --trace-ml-api triton --name triton_ffn -- python triton_ffn.py
 
-``--triton-trace`` can be combined with ``--torch-trace`` to instrument both
-frameworks in a single run:
+``--trace-ml-api torch triton`` instruments both frameworks in a single run:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --experimental --torch-trace --triton-trace --name compiled_model -- python train.py
+   $ rocprof-compute profile --experimental --trace-ml-api torch triton --name torch_triton_net -- python torch_triton_net.py
 
 Each captured operator records which framework it came from, so you can
-analyze each framework separately. To enable all supported backends at once,
-use :ref:`--ml-api-trace <ml-api-trace>`.
+analyze each framework separately. To trace every supported framework at once,
+pass :ref:`--trace-ml-api <ml-api-trace>` with no values.
 
-To analyze the captured Triton kernels, use the ``--list-triton-operators`` and
-``--triton-operator`` options in analyze mode (see :doc:`../analyze/cli`).
+To analyze the captured Triton kernels, use ``--list-operators triton`` and
+``--operator 'triton:PATTERN'`` in analyze mode (see :doc:`../analyze/cli`).
 
 .. _ml-api-trace:
 
 ML API trace
 ============
 
-``--ml-api-trace`` enables marker tracing for all supported ML framework backends in a
-single option.
+``--trace-ml-api`` without values traces every supported ML framework.
+Every ``--trace-ml-api`` run also records user ROCTx regions.
 
 .. warning::
 
@@ -1168,11 +1149,14 @@ single option.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --experimental --ml-api-trace --name model -- python train.py
+   $ rocprof-compute profile --experimental --trace-ml-api --name torch_triton_net -- python torch_triton_net.py
 
-The output is identical to enabling each framework's trace flag individually.
-Each kernel is attributed to the framework that launched it. Analyze each
-framework with its own operator options (see :doc:`../analyze/cli`).
+The output is the same as naming every framework, as in
+``--trace-ml-api torch triton``. Each kernel is attributed to the framework
+that launched it. Analyze the results with ``--list-operators`` and
+``--operator`` (see :doc:`../analyze/cli`). To select a user ROCTx region and
+the GPU work inside it, use ``--list-operators user`` or
+``--operator 'user:PATTERN'``.
 
 .. _profile-vllm-workloads:
 
@@ -1196,7 +1180,7 @@ process, which exits normally and writes its counter data. For example:
    $ VLLM_ENABLE_V1_MULTIPROCESSING=0 \
        rocprof-compute profile \
        --iteration-multiplexing \
-       --no-roof \
+       --speed-of-light \
        --name vllm-offline -- \
        python offline_inference.py
 

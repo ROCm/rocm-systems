@@ -234,6 +234,8 @@ def _detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
     unsupported_gpu_arch: set[str] = set()
 
     for idx, line_text in enumerate(rocminfo_lines):
+        # The regex stops at the first non-alphanumeric character (e.g. `-`)
+        # on purpose: variants like gfx1250-strict map to their base arch gfx1250.
         gpu_arch = search_pattern(
             r"^\s*Name\s*:\s* ([Gg][Ff][Xx][a-zA-Z0-9]+).*\s*$", line_text
         )
@@ -291,7 +293,15 @@ def _reconstruct_specs_from_sysinfo(sysinfo: dict[str, Any]) -> MachineSpecs:
                 "You need to reprofile to update data."
             )
 
-        spec_cls = spec_family_for_arch(sysinfo.get("gpu_arch"))
+        gpu_arch = sysinfo.get("gpu_arch")
+        supported_gpu_arch = mi_gpu_specs.get_gpu_series_dict()
+        if gpu_arch not in supported_gpu_arch:
+            console_error(
+                f"The workload was profiled on {gpu_arch}, which is not supported. "
+                f"Supported architectures: {list(supported_gpu_arch)}"
+            )
+
+        spec_cls = spec_family_for_arch(gpu_arch)
         return spec_cls(**sysinfo)
 
     except KeyError:

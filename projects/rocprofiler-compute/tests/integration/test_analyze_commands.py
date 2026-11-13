@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 from pc_sampling.per_kernel_isa_export import PER_KERNEL_DIRECTORY_NAME
+from pc_sampling.per_source_line_export import SOURCE_LINE_FILE_SUFFIX
 from tests.integration import common as integration_common
 
 config = {}
@@ -72,79 +73,6 @@ def test_list_kernels(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.list_metrics
-def test_list_metrics_gfx90a(binary_handler_analyze_rocprof_compute):
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--list-metrics",
-        "gfx90a",
-    ])
-    assert code == 0
-
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--list-metrics",
-            "gfx90a",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.list_metrics
-def test_list_metrics_gfx908(binary_handler_analyze_rocprof_compute):
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--list-metrics",
-        "gfx908",
-    ])
-    assert code == 0
-
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--list-metrics",
-            "gfx908",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.list_metrics
-def test_list_metrics_gfx908_with_block(binary_handler_analyze_rocprof_compute):
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--list-metrics",
-        "gfx908",
-        "--block",
-        "1",
-    ])
-    assert code == 1
-
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--list-metrics",
-            "gfx908",
-            "--block",
-            "1",
-        ])
-        assert code == 1
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.list_metrics
 def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -165,6 +93,7 @@ def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
 
             # Test output
             output = capsys.readouterr().out
+            assert "--list-available-metrics is deprecated" in output
             assert "0 -> Top Stats" in output
             assert "1 -> System Info" in output
         finally:
@@ -685,66 +614,15 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
         common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.col
-def test_col_1(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--cols",
-            "0",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.col
-def test_col_2(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--cols",
-            "2",
-            "--include-cols",
-            "Description",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.col
-def test_col_3(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--cols",
-            "0",
-            "2",
-        ])
-        assert code == 0
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-
-
 @pytest.mark.misc
-def test_g(binary_handler_analyze_rocprof_compute):
+def test_debug_metric_expression(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
             workload_dir,
-            "-g",
+            "--debug-metric-expression",
         ])
         assert code == 0
 
@@ -874,11 +752,12 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
 
 
 def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute, capsys):
-    """Test --list-torch-operators fails gracefully without --path"""
+    """Test --list-operators torch fails gracefully without --path"""
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
-        "--list-torch-operators",
+        "--list-operators",
+        "torch",
     ])
     assert code == 1
 
@@ -890,22 +769,23 @@ def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute, ca
 def test_list_torch_operators_no_trace_data(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    """Test graceful handling when workload was profiled with --torch-trace but
+    """Test graceful handling when workload was profiled with --trace-ml-api torch but
     contains no torch operator data (e.g. a non-PyTorch workload like vcopy).
     """
     workload_dir = integration_common.setup_workload_dir(indirs[0])
 
-    # Simulate a workload profiled with --torch-trace so the sanitize guard
+    # Simulate a workload profiled with --trace-ml-api torch so the sanitize guard
     # passes, but no torch marker/counter files exist (non-torch workload).
     config_path = Path(workload_dir) / "profiling_config.yaml"
-    config_path.write_text("torch_trace: true\n")
+    config_path.write_text("trace_ml_api:\n- torch\n")
 
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
         "--path",
         workload_dir,
-        "--list-torch-operators",
+        "--list-operators",
+        "torch",
     ])
     # Should show warning but exit successfully
     assert code == 0
@@ -973,12 +853,20 @@ def test_analyze_per_kernel_export_output_format(
         return
 
     # Every exported file sits under the absolute path the CSV records for
-    # it, so the paths below are the fixture's own capture-host paths.
-    assert set(common.read_binary_file_tree(workload_export_path / "source")) == {
+    # it, so the paths below are the fixture's own capture-host paths. Each
+    # copy has its per-source-line file beside it.
+    exported_sources = {
         Path("app/projects/rocprofiler-compute/sample/vcopy.cpp"),
         Path(
             "rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel"
             "/include/hip/amd_detail/amd_hip_runtime.h"
+        ),
+    }
+    assert set(common.read_binary_file_tree(workload_export_path / "source")) == {
+        *exported_sources,
+        *(
+            source.with_name(f"{source.name}{SOURCE_LINE_FILE_SUFFIX}")
+            for source in exported_sources
         ),
     }
 

@@ -12,14 +12,7 @@
 Panel Config:
   id: 900
   title: GL0 Cache and LDS
-  description: |-
-    GL0 Cache and LDS metrics for gfx1250. The GL0 cache (VMW) is integrated with
-    each WGP and handles both L0 cache operations and LDS accesses. This panel
-    covers cache utilization, hit rates, stall analysis, LDS performance,
-    GL0-GL1 interface metrics, and address translation (UTCL0) statistics.
-
   data source:
-
   - metric_table:
       id: 901
       title: WGP Cache Utilization (LDS + GL0)

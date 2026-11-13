@@ -6,14 +6,14 @@
       "prompt": "which PyTorch operator is launching the slow GPU kernels in my model?\n\nThe application is ./simple_net.py.",
       "workspace": "evals/samples",
       "expected_behavior": [
-        "collects with --experimental --torch-trace",
-        "lists the captured operators to find the slow ones",
+        "collects with --experimental --trace-ml-api torch",
+        "lists the captured operators with --experimental --list-operators torch",
         "checks the documented PyTorch version requirement"
       ],
       "unexpected_behavior": [
         "guesses an operator pattern without listing the captured operators first"
       ],
-      "logs_contain": ["--torch-trace", "--list-torch-operators"]
+      "logs_contain": ["--trace-ml-api torch", "--list-operators torch"]
     },
     {
       "id": "tt-map-kernels-to-model-code",
@@ -21,10 +21,22 @@
       "prompt": "profile my training script and tell me which layer the GPU time belongs to\n\nThe application is ./simple_net.py.",
       "workspace": "evals/samples",
       "expected_behavior": [
-        "profiles the Python script with torch tracing enabled",
+        "profiles the Python script with --experimental --trace-ml-api torch",
         "advises profiling a few steady-state iterations rather than a full run"
       ],
-      "logs_contain": ["--torch-trace"]
+      "logs_contain": ["--trace-ml-api torch"]
+    },
+    {
+      "id": "tt-list-user-operators",
+      "skill_should_trigger": true,
+      "prompt": "I added my own ROCTx range to my Python script. Profile it and show the GPU work inside that range.\n\nThe application is ./simple_net.py. Run it with --user-range.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "profiles the Python script with --experimental --trace-ml-api",
+        "lists the user region with --experimental --list-operators user",
+        "shows the operator call tree under that region, including nested ML API operators and the GPU kernels they launched"
+      ],
+      "logs_contain": ["--trace-ml-api", "--list-operators user"]
     }
   ]
 }

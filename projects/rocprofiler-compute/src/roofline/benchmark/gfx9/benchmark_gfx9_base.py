@@ -19,7 +19,6 @@ class Bench_gfx9(benchmark_base.Bench_base):
         super().__init__(device_id, cache_sizes)
 
         self.WAVEFRONT_SIZE = 64
-        self.MATRIX_OPS_TYPE = "MFMA"
 
         self.matrix_kernel_selector = {
             "F4": "mfma_f8f6f4<FP4_E2M1>",
@@ -56,30 +55,6 @@ class Bench_gfx9(benchmark_base.Bench_base):
             "MFMA-F32": super().matrix_f32_bench,
             "MFMA-F64": super().matrix_f64_bench,
             "MFMA-I8": super().matrix_i8_bench,
-        }
-
-        self.csv_cols_map = {
-            "HBM": "HBMBw",
-            "MALL": "MALLBw",
-            "L2": "L2Bw",
-            "L1": "L1Bw",
-            "LDS": "LDSBw",
-            "F16": "FP16Flops",
-            "F32": "FP32Flops",
-            "F64": "FP64Flops",
-            "I8": "I8Ops",
-            "I32": "I32Ops",
-            "I64": "I64Ops",
-            "MFMA-F4": "MFMAF4Flops",
-            "MFMA-F6": "MFMAF6Flops",
-            "MFMA-F6F4": "MFMAF6F4Flops",
-            "MFMA-MXF8": "MFMAMXF8Flops",
-            "MFMA-F8": "MFMAF8Flops",
-            "MFMA-F16": "MFMAF16Flops",
-            "MFMA-BF16": "MFMABF16Flops",
-            "MFMA-F32": "MFMAF32Flops",
-            "MFMA-F64": "MFMAF64Flops",
-            "MFMA-I8": "MFMAI8Ops",
         }
 
     # -----------------------------------------------------------------------------

@@ -8,7 +8,7 @@ Imported by both the main runtime code and lightweight tooling such as
 """
 
 import re
-from typing import Any
+from typing import Any, Dict, List, Set, Tuple
 
 from utils.logger import console_error
 
@@ -40,7 +40,7 @@ AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
 # SUM($denom) == N and Avg is the mean per dispatch.
 UNIT_COUNTER = "Dispatch_Unit"
 
-SUPPORTED_DENOM: dict[str, str] = {
+SUPPORTED_DENOM: Dict[str, str] = {
     "per_wave": "SQ_WAVES",
     "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
     "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
@@ -49,7 +49,7 @@ SUPPORTED_DENOM: dict[str, str] = {
 }
 
 
-def get_build_in_vars(gpu_series: str) -> dict[str, str]:
+def get_build_in_vars(gpu_series: str) -> Dict[str, str]:
     """Return the architecture-specific built-in variables for *gpu_series*.
 
     Args:
@@ -112,7 +112,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
 # Block remapping: SQC and SP counters belong to the SQ IP block
 # ---------------------------------------------------------------------------
 
-BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
+BLOCK_REMAP: Dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
 
 
 # ---------------------------------------------------------------------------
@@ -120,13 +120,13 @@ BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
 # ---------------------------------------------------------------------------
 
 
-def metric_value_keys(table: dict[str, Any]) -> set[str]:
+def metric_value_keys(table: Dict[str, Any]) -> Set[str]:
     """Metric keys whose values are columns of a metric_table: the header's
     keys except metric and expr."""
     return set(table["header"]) - {"metric", "expr"}
 
 
-def metric_expressions(table: dict[str, Any], metric: dict[str, Any]) -> list[str]:
+def metric_expressions(table: Dict[str, Any], metric: Dict[str, Any]) -> List[str]:
     """Return the expressions of one metric of a metric_table.
 
     simple_box tables keep their one expression in expr; other tables use
@@ -143,7 +143,7 @@ def metric_expressions(table: dict[str, Any], metric: dict[str, Any]) -> list[st
     ]
 
 
-def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
+def parse_counters_text(text: str) -> Tuple[Set[str], Set[str]]:
     """Extract HW counter names and $variable names from formula text.
 
     Returns (hw_counters, variables) where variables are the names without
@@ -159,7 +159,7 @@ def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
 
 def extract_counters_and_variables(
     text: str, gpu_series: str, include_supported_denom: bool = True
-) -> tuple[set[str], set[str]]:
+) -> Tuple[Set[str], Set[str]]:
     """Return (hw_counters, builtin_vars) referenced by text, with transitive
     resolution. Recognizes both $var and ammolite__var forms.
 

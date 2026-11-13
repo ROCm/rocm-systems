@@ -229,6 +229,15 @@ TEST_F(TestSdkCallbacks, ProvidedCodeObjectLoadWithPcSamplingEnabled_ForwardsToC
     EXPECT_EQ(collector->load_count, 1);
 }
 
+TEST_F(TestSdkCallbacks, SymbolRegistration_StoresCodeObjectIdAndStrippedMangledName)
+{
+    invoke_tool_tracing_callback(10, "_Z3fooi.kd", 42);
+    const auto& symbol = m_tool_data->kernel_symbols.at(10);
+    EXPECT_EQ(symbol.code_object_id, 42);
+    EXPECT_EQ(symbol.mangled_name, "_Z3fooi");
+    EXPECT_EQ(symbol.kernel_name, "foo(int)");
+}
+
 TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKernelIdsOnlyForMathing)
 {
     constexpr uint64_t kernel_id_0           = 10;
@@ -329,7 +338,9 @@ void TestSdkCallbacks::invoke_kernel_dispatch_callback(rocprofiler_tracing_opera
     m_sdk_callbacks->kernel_dispatch_callback(record, &m_tool_data);
 }
 
-void TestSdkCallbacks::invoke_tool_tracing_callback(uint64_t kernel_id, const std::string& kernel_name)
+void TestSdkCallbacks::invoke_tool_tracing_callback(uint64_t           kernel_id,
+                                                    const std::string& kernel_name,
+                                                    uint64_t           code_object_id)
 {
     rocprofiler_callback_tracing_record_t                                  record  = {};
     rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
@@ -338,8 +349,9 @@ void TestSdkCallbacks::invoke_tool_tracing_callback(uint64_t kernel_id, const st
     record.operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
     record.payload   = &payload;
 
-    payload.kernel_id   = kernel_id;
-    payload.kernel_name = kernel_name.c_str();
+    payload.code_object_id = code_object_id;
+    payload.kernel_id      = kernel_id;
+    payload.kernel_name    = kernel_name.c_str();
     m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
 }
 

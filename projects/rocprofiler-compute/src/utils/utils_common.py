@@ -3,7 +3,6 @@
 
 import argparse
 import csv
-import ctypes
 import errno
 import io
 import os
@@ -15,13 +14,21 @@ import sys
 import tempfile
 import textwrap
 import threading
-import time
 import uuid
-from collections import OrderedDict
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import (
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Match,
+    Optional,
+    OrderedDict,
+    Set,
+    Tuple,
+    Union,
+)
 
 import config
 from utils.logger import (
@@ -35,6 +42,8 @@ from vendored import yaml
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
+# Block 4 and its alias; ids such as 4.1 are roofline metrics
+ROOFLINE_BLOCK_IDS = ("4", "roof")
 PROFILE_OUTPUT_FORMAT = "rocpd"
 # Profile names the native tool's per-pid CSVs <prefix>_<fbase>_<pid>.csv.gz
 # in the workload directory, and analyze reads them back by these prefixes.
@@ -44,10 +53,16 @@ NATIVE_KERNEL_SYMBOLS_PREFIX = "kernel_symbols"
 NATIVE_AGENTS_PREFIX = "agents"
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
+# Panel id of block 4, Roofline
+ROOFLINE_PANEL_ID: int = 400
+# --list-metrics value that lists every metric
+LIST_ALL_METRICS = "all"
+# Narrowest the --list-metrics Description column gets on a narrow terminal
+DESCRIPTION_WIDTH_MIN = 40
 
-# Shared suffix for the invalid --block error in the profile and analyze paths.
+# Shared suffix for invalid --block errors.
 INVALID_BLOCK_HINT = (
-    "\n\tRun rocprof-compute --list-blocks <arch> to see all block ids/aliases."
+    "\n\tRun rocprof-compute --list-metrics to see all block ids/aliases."
 )
 
 
@@ -76,7 +91,7 @@ def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
 
 
 # Supported expression field names for metric tables
-SUPPORTED_FIELD: list[str] = [
+SUPPORTED_FIELD: List[str] = [
     "Value",
     "Minimum",
     "Maximum",
@@ -138,7 +153,7 @@ def set_rocprof_cmd(cmd: str) -> None:
     _rocprof_cmd = cmd
 
 
-def version_to_numeric(version_parts: list[int], max_len: int) -> int:
+def version_to_numeric(version_parts: List[int], max_len: int) -> int:
     """Convert version tuple to numeric value using base-1000 positional system."""
     version_numeric = 0
     for i, part in enumerate(version_parts):
@@ -209,13 +224,13 @@ def is_tcc_channel_counter(counter: str) -> bool:
 
 
 def add_counter_extra_config_input_yaml(
-    data: dict[str, Any],
+    data: Dict[str, Any],
     counter_name: str,
     description: str,
     expression: str,
-    architectures: list[str],
-    properties: Optional[list[str]] = None,
-) -> dict[str, Any]:
+    architectures: List[str],
+    properties: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
     Add a new counter to the rocprofiler-sdk dictionary.
     Initialize missing parts if data is empty or incomplete.
@@ -284,7 +299,7 @@ def add_counter_extra_config_input_yaml(
     return data
 
 
-def get_version(rocprof_compute_home: Path) -> dict[str, str]:
+def get_version(rocprof_compute_home: Path) -> Dict[str, str]:
     """Return ROCm Compute Profiler versioning info"""
 
     # semantic version info - note that version file(s) can reside in
@@ -370,113 +385,11 @@ def detect_rocprof(args: argparse.Namespace) -> str:
     return get_rocprof_cmd()
 
 
-def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> None:
-    @contextmanager
-    def temporary_env(env_vars: dict[str, str]) -> Generator[None, None, None]:
-        """
-        Temporarily change the environment variable of this application.
-        """
-        original_env = os.environ.copy()
-        os.environ.update({k: str(v) for k, v in env_vars.items()})
-        try:
-            yield
-        finally:
-            os.environ.clear()
-            os.environ.update(original_env)
-
-    with temporary_env(new_env):
-        libname = options["ROCPROF_ATTACH_LIBRARY"]
-
-        try:
-            c_lib = ctypes.CDLL(libname)
-            if c_lib is None:
-                console_error(f"Error opening {libname}")
-        except Exception as e:
-            console_error(f"Error loading {libname}: {e}")
-
-        # Set argument and return types for live attach functions
-        try:
-            # new live attach API
-            c_lib.rocattach_attach.restype = ctypes.c_int
-            c_lib.rocattach_attach.argtypes = [ctypes.c_int]
-            c_lib.rocattach_detach.restype = ctypes.c_int
-            c_lib.rocattach_detach.argtypes = [ctypes.c_int]
-        except Exception as e:
-            console_debug(
-                "Error setting new live attach API argument "
-                f"types: {e}, trying legacy live attach API"
-            )
-            try:
-                # old live attach API
-                c_lib.attach.restype = ctypes.c_int
-                c_lib.attach.argtypes = [ctypes.c_uint]
-                c_lib.detach.restype = ctypes.c_int
-                c_lib.detach.argtypes = [ctypes.c_uint]
-            except Exception as e:
-                console_error(f"Error setting live attach function argument types: {e}")
-
-        pid = options["ROCPROF_ATTACH_PID"]
-        if pid is None:
-            console_error("Live attach mode requires a process ID (ROCPROF_ATTACH_PID)")
-
-        try:
-            # new live attach API
-            attach_status = c_lib.rocattach_attach(int(pid))
-            if attach_status != 0:
-                console_error(
-                    f"Error attaching to process {pid}, "
-                    f"rocattach_attach returned {attach_status}"
-                )
-        except Exception as e:
-            console_debug(
-                "Error attaching with latest live attach "
-                f"API: {e}, trying legacy live attach API"
-            )
-            try:
-                # old live attach API
-                c_lib.attach(int(pid))
-            except Exception as e:
-                console_error(f"Error attaching to process {pid}: {e}")
-
-        duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
-        if duration is None:
-            console_log(
-                f"\033[93mAttach to process with ID {pid} is successful, "
-                "Press Enter to detach...\033[0m"
-            )
-            input()
-        else:
-            console_log(
-                f"\033[93mAttach to process with ID {pid} is successful, "
-                f"detach will happen in {duration} milliseconds...\033[0m"
-            )
-            time.sleep(int(duration) / 1000)
-
-        try:
-            # new live attach API
-            detach_status = c_lib.rocattach_detach(int(pid))
-            if detach_status != 0:
-                console_error(
-                    f"Error detaching from process {pid}, "
-                    f"rocattach_detach returned {detach_status}"
-                )
-        except Exception as e:
-            console_debug(
-                f"Error detaching with latest live attach API: {e}, "
-                "trying detach with legacy live attach API"
-            )
-            try:
-                # old live attach API
-                c_lib.detach(int(pid))
-            except Exception as e:
-                console_error(f"Error detaching from process {pid}: {e}")
-
-
 def capture_subprocess_output(
-    subprocess_args: list[str],
-    new_env: Optional[dict[str, str]] = None,
+    subprocess_args: List[str],
+    new_env: Optional[Dict[str, str]] = None,
     profileMode: bool = False,
-) -> tuple[bool, str]:
+) -> Tuple[bool, str]:
     sanitized_env = (
         None
         if new_env is None
@@ -594,7 +507,7 @@ def capture_subprocess_output(
     return success, output
 
 
-def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
+def parse_pmc_perf(pmc_perf_file: str) -> List[str]:
     """
     Parse the YAML file to get the pmc counters.
     Assumes only one job per file.
@@ -607,7 +520,15 @@ def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
     return jobs[0].get("pmc") or []
 
 
-def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
+def selects_roofline(filter_blocks: Optional[List[str]]) -> bool:
+    """Return True if nothing is selected (everything) or a block is 4, 4.x or roof."""
+    return not filter_blocks or any(
+        str(block) in ROOFLINE_BLOCK_IDS or str(block).startswith("4.")
+        for block in filter_blocks
+    )
+
+
+def is_only_pc_sampling(filter_blocks: List[str]) -> bool:
     """Return True if all requested blocks are PC sampling (block 21 or the
     ``pc_sampling`` alias)."""
     return bool(filter_blocks) and all(
@@ -639,7 +560,7 @@ def strip_ansi(text: str) -> str:
     return re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", text)
 
 
-def parse_sets_yaml(arch: str) -> dict[str, Any]:
+def parse_sets_yaml(arch: str) -> Dict[str, Any]:
     config_arch = canonical_config_arch(arch) or arch
     filename = (
         config.rocprof_compute_home
@@ -663,8 +584,8 @@ def parse_sets_yaml(arch: str) -> dict[str, Any]:
 
 
 def load_panel_configs(
-    dirs: list[str],
-) -> OrderedDict[int, dict[str, Any]]:
+    dirs: List[str],
+) -> OrderedDict[int, Dict[str, Any]]:
     """
     Load all panel configs from yaml file.
     """
@@ -689,9 +610,9 @@ def load_panel_configs(
 
 
 def expand_placeholder_ranges(
-    panel_configs: OrderedDict[int, dict[str, Any]],
-    sys_info: Optional[dict[str, Any]],
-) -> OrderedDict[int, dict[str, Any]]:
+    panel_configs: OrderedDict[int, Dict[str, Any]],
+    sys_info: Optional[Dict[str, Any]],
+) -> OrderedDict[int, Dict[str, Any]]:
     """
     Expand placeholder_range entries in metric_table data configs in-place.
 
@@ -753,42 +674,109 @@ def _metric_has_valid_expr(entries: dict, data_config: dict) -> bool:
     return False
 
 
-def build_metric_list(
-    panel_configs: OrderedDict[int, dict[str, Any]],
-    sys_info: Optional[dict[str, Any]],
-) -> dict[str, str]:
-    """
-    Build metric_list from the panel configs.
-
-    Returns a mapping of (panel/table/metric IDs -> display names)
-    without constructing DataFrames. Use this directly when
-    only the metric listing is needed (e.g. --list-metrics, --list-blocks).
-    """
-    metric_list: dict[str, str] = {}
-
+def build_metric_details(
+    panel_configs: Mapping[int, Dict[str, Any]],
+    sys_info: Optional[Dict[str, Any]],
+) -> Dict[str, Tuple[str, str, str]]:
+    """Map panel, table and metric ids to (name, unit, description). Without
+    sys_info, per-channel tables have no metrics."""
     expanded_configs = expand_placeholder_ranges(panel_configs, sys_info)
+    return dict(_iter_metric_list_rows(expanded_configs))
 
-    for panel_id, panel in expanded_configs.items():
-        for data_source in panel["data source"]:
-            for type_key, data_config in data_source.items():
-                if type_key == "metric_table":
-                    data_source_idx = str(data_config["id"] // 100)
-                    if data_source_idx != "0":
-                        metric_list[data_source_idx] = panel["title"]
 
-                    table_idx = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
-                    metric_list[table_idx] = data_config["title"]
+def format_table_id(config_id: int) -> str:
+    """Return the "block.table" id of a table config id, e.g. 1802 -> "18.2"."""
+    return f"{config_id // 100}.{config_id % 100}"
 
-                    for i, (key, entries) in enumerate(data_config["metric"].items()):
-                        metric_idx = f"{table_idx}.{i}"
-                        if _metric_has_valid_expr(entries, data_config):
-                            metric_list[metric_idx] = key
 
-                elif type_key in ("raw_csv_table", "pc_sampling_table"):
-                    data_source_idx = str(data_config["id"] // 100)
-                    metric_list[data_source_idx] = panel["title"]
+def metric_ids_by_name(data_config: Dict[str, Any]) -> Dict[str, str]:
+    """Map each metric name of a metric_table config to its "block.table.index" id."""
+    table_id = format_table_id(data_config["id"])
+    metrics = data_config.get("metric") or {}
+    return {name: f"{table_id}.{index}" for index, name in enumerate(metrics)}
 
-    return metric_list
+
+def resolve_block_token(token: str, alias_map: Dict[str, str]) -> Optional[str]:
+    """Return the metric id for a block or metric id or alias, or None if unknown."""
+    if METRIC_ID_RE.match(token):
+        return token
+    return alias_map.get(token)
+
+
+def select_listed_ids(
+    metric_ids: List[str],
+    selection: List[str],
+    alias_to_block_id: Dict[str, str],
+    listable_block_ids: Optional[Set[str]] = None,
+) -> List[str]:
+    """Return the ids to list: the blocks when nothing is selected, every id for
+    "all", else each selected id with its parents and children. listable_block_ids
+    limits the result to those blocks."""
+    if listable_block_ids is not None:
+        metric_ids = [
+            metric_id
+            for metric_id in metric_ids
+            if metric_id.split(".")[0] in listable_block_ids
+        ]
+    if not selection:
+        return [metric_id for metric_id in metric_ids if "." not in metric_id]
+    if selection == [LIST_ALL_METRICS]:
+        return metric_ids
+    if LIST_ALL_METRICS in selection:
+        console_error(
+            f'"{LIST_ALL_METRICS}" lists every metric; pass it without other ids.'
+        )
+
+    selected_ids = []
+    for token in selection:
+        selected_id = resolve_block_token(token, alias_to_block_id)
+        if selected_id not in metric_ids:
+            console_error(f"Unknown block or metric id {token!r}.{INVALID_BLOCK_HINT}")
+        selected_ids.append(selected_id)
+    return [
+        metric_id
+        for metric_id in metric_ids
+        if any(_is_same_id_branch(metric_id, selected) for selected in selected_ids)
+    ]
+
+
+def format_block_table(
+    metric_details: Dict[str, Tuple[str, str, str]],
+    block_ids: List[str],
+    block_aliases: Dict[str, str],
+) -> str:
+    """Format the Block_ID, Alias and Block table of --list-metrics."""
+    rows = [
+        {
+            "Block_ID": block_id,
+            "Alias": block_aliases.get(block_id, ""),
+            "Block": metric_details[block_id][0],
+        }
+        for block_id in block_ids
+    ]
+    return format_table_ascii(rows, ["Block_ID", "Alias", "Block"], show_index=False)
+
+
+def format_metric_tables(
+    metric_details: Dict[str, Tuple[str, str, str]],
+    listed_ids: List[str],
+    block_aliases: Dict[str, str],
+    terminal_width: int,
+) -> str:
+    """Format a heading per listed block and a table per listed table."""
+    lines: List[str] = []
+    for block_id in [metric_id for metric_id in listed_ids if "." not in metric_id]:
+        heading = f"{block_id}. {metric_details[block_id][0]}"
+        if block_aliases.get(block_id):
+            heading += f" (alias: {block_aliases[block_id]})"
+        block_tables = [
+            _format_listed_table(table_id, metric_details, listed_ids, terminal_width)
+            for table_id in listed_ids
+            if table_id.count(".") == 1 and table_id.split(".")[0] == block_id
+        ]
+        block_tables = [table for table in block_tables if table]
+        lines.extend([heading, *(block_tables or ["No metrics to list."]), ""])
+    return "\n".join(lines)
 
 
 def get_uuid() -> str:
@@ -796,8 +784,8 @@ def get_uuid() -> str:
 
 
 def convert_filter_blocks_to_panel_ids(
-    filter_blocks: list[str], arch: Optional[str] = None
-) -> set[int]:
+    filter_blocks: List[str], arch: Optional[str] = None
+) -> Set[int]:
     """Inverse of convert_metric_id_to_panel_info: map metric ids like
     "2" or "11.1" to the set of file_id integers (e.g. {200, 1100}).
     Tokens that are not metric ids are looked up as panel aliases (e.g.
@@ -810,18 +798,16 @@ def convert_filter_blocks_to_panel_ids(
     )
     resolved: set[int] = set()
     for bid in filter_blocks:
-        token = str(bid)
-        if not METRIC_ID_RE.match(token):
-            if token not in alias_map:
-                console_error(f"Invalid --block value {token!r}.{INVALID_BLOCK_HINT}")
-            token = alias_map[token]
-        resolved.add(int(convert_metric_id_to_panel_info(token)[0]))
+        metric_id = resolve_block_token(str(bid), alias_map)
+        if metric_id is None:
+            console_error(f"Invalid --block value {str(bid)!r}.{INVALID_BLOCK_HINT}")
+        resolved.add(int(convert_metric_id_to_panel_info(metric_id)[0]))
     return resolved
 
 
 def convert_metric_id_to_panel_info(
     metric_id: str,
-) -> tuple[str, Optional[int], Optional[int]]:
+) -> Tuple[str, Optional[int], Optional[int]]:
     """
     Convert metric id into panel information.
     Output is a tuples of the form (file_id, panel_id, metric_id).
@@ -867,13 +853,13 @@ def convert_metric_id_to_panel_info(
     return (file_id, panel_id, metric_id_int)
 
 
-def load_yaml(filepath: Union[str, os.PathLike]) -> dict[str, Any]:
+def load_yaml(filepath: Union[str, os.PathLike]) -> Dict[str, Any]:
     """Load YAML file and return as dictionary."""
     with open(filepath, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
+def get_arch_panel_id_to_alias(arch: str) -> Dict[str, str]:
     """Return panel_id_str -> alias from the *_config_template.yaml whose
     filename prefix matches arch. Empty/None aliases stay as "".
     Returns {} when no template matches the arch."""
@@ -886,7 +872,7 @@ def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
     return {}
 
 
-def get_arch_alias_to_panel_id(arch: str) -> dict[str, str]:
+def get_arch_alias_to_panel_id(arch: str) -> Dict[str, str]:
     """Inverse of get_arch_panel_id_to_alias for resolving --block
     <alias> tokens: alias -> panel_id_str. Skips panels with empty or
     None aliases so unknown aliases naturally raise KeyError on lookup."""
@@ -895,7 +881,7 @@ def get_arch_alias_to_panel_id(arch: str) -> dict[str, str]:
     }
 
 
-def get_job_rank_and_size() -> tuple[Optional[str], Optional[int]]:
+def get_job_rank_and_size() -> Tuple[Optional[str], Optional[int]]:
     """Detect job rank and total ranks from runtime environment variables.
 
     Returns a (rank, total_ranks) tuple, ensuring both values come from the same
@@ -956,7 +942,7 @@ def get_job_rank_and_size() -> tuple[Optional[str], Optional[int]]:
 
 
 def replace_rank(name: str) -> str:
-    def rank(match: re.Match[str]) -> str:
+    def rank(match: Match[str]) -> str:
         value, _ = get_job_rank_and_size()
         if value is not None:
             return value + match.group(1)  # preserve trailing slash
@@ -970,7 +956,7 @@ def replace_rank(name: str) -> str:
 
 
 def replace_env(name: str) -> str:
-    def env(match: re.Match[str]) -> str:
+    def env(match: Match[str]) -> str:
         var_name = match.group(1)
         return os.environ.get(var_name, "")  # Default to empty string if not found
 
@@ -980,7 +966,7 @@ def replace_env(name: str) -> str:
     return pattern.sub(env, name)
 
 
-def normalize_filter_to_str_list(value: Any) -> list[str]:  # noqa: ANN401
+def normalize_filter_to_str_list(value: Any) -> List[str]:  # noqa: ANN401
     """Normalize a filter value (scalar or list) to a list of strings."""
     if isinstance(value, (list, tuple)):
         return [str(v) for v in value]
@@ -997,22 +983,17 @@ def print_status(msg: str) -> None:
     console_log("")
 
 
-def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
-    """
-    Create temporary directory with rocprofiler metrics config files.
+def create_temp_rocprofiler_metrics_path(
+    sdk_config: Dict[str, Any], parent_dir: Path = Path("/tmp")
+) -> str:
+    """Create a temporary directory with the rocprofiler-sdk counter definitions.
 
-    Writes two config files:
-    - counter_defs.yaml: For backward compatibility (excludes firmware restrictions)
-    - config.yaml: Current version with full config
-
-    Args:
-        sdk_config: The rocprofiler-sdk configuration dictionary.
-
-    Returns:
-        Path to the temporary directory (for ROCPROFILER_METRICS_PATH env var).
+    The directory is created in parent_dir. It holds config.yaml with the full
+    config, and counter_defs.yaml without firmware restrictions for older
+    rocprofiler-sdk versions. Return the path of the directory.
     """
     tmpfile_parent = Path(
-        tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir="/tmp")
+        tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir=parent_dir)
     )
 
     # counter_defs.yaml is for backward compatibility with previous versions of sdk
@@ -1061,7 +1042,7 @@ def _workload_base_dir(workload_dir: Union[str, list, None]) -> Optional[str]:
     return workload_dir
 
 
-def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
+def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> Tuple[bool, str]:
     """
     Validate roofline.csv exists and has consistent structure.
 
@@ -1121,10 +1102,11 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
 
 
 def format_table_ascii(
-    data: list[dict[str, Any]],
-    columns: list[str],
+    data: List[Dict[str, Any]],
+    columns: List[str],
     description_wrap_width: int = 40,
     decimal: int = 2,
+    show_index: bool = True,
 ) -> str:
     """
     Format a list of dicts as an ASCII table string using only stdlib.
@@ -1134,6 +1116,7 @@ def format_table_ascii(
         columns: List of column names to display (in order)
         description_wrap_width: Width to wrap Description column (default 40)
         decimal: Number of decimal places for floats (default 2)
+        show_index: Whether to add an index column numbering the rows (default True)
 
     Returns:
         Formatted ASCII table string
@@ -1190,8 +1173,8 @@ def format_table_ascii(
     # Create separator line
     def make_separator() -> str:
         parts = ["+"]
-        # Index column
-        parts.append("-" * (idx_width + 2) + "+")
+        if show_index:
+            parts.append("-" * (idx_width + 2) + "+")
         for col in columns:
             parts.append("-" * (col_widths[col] + 2) + "+")
         return "".join(parts)
@@ -1199,13 +1182,14 @@ def format_table_ascii(
     # Create header
     def make_header() -> str:
         parts = ["|"]
-        parts.append(f" {'index':^{idx_width}} |")
+        if show_index:
+            parts.append(f" {'index':^{idx_width}} |")
         for col in columns:
             parts.append(f" {col:<{col_widths[col]}} |")
         return "".join(parts)
 
     # Create data row (handles multi-line cells)
-    def make_row(row_idx: int, wrapped_row: dict[str, list[str]]) -> list[str]:
+    def make_row(row_idx: int, wrapped_row: Dict[str, List[str]]) -> List[str]:
         # Find max lines in this row
         max_lines = max(len(lines) for lines in wrapped_row.values())
 
@@ -1213,9 +1197,9 @@ def format_table_ascii(
         for line_idx in range(max_lines):
             parts = ["|"]
             # Index column - only show on first line
-            if line_idx == 0:
+            if show_index and line_idx == 0:
                 parts.append(f" {row_idx:>{idx_width}} |")
-            else:
+            elif show_index:
                 parts.append(" " * (idx_width + 1) + " |")
 
             for col in columns:
@@ -1241,3 +1225,77 @@ def format_table_ascii(
         result.append(separator)
 
     return "\n".join(result)
+
+
+def _iter_metric_list_rows(
+    panel_configs: Mapping[int, Dict[str, Any]],
+) -> Iterator[Tuple[str, Tuple[str, str, str]]]:
+    """Yield (id, (name, unit, description)) for each block, table and metric."""
+    for panel in panel_configs.values():
+        for data_source in panel["data source"]:
+            for type_key, data_config in data_source.items():
+                if type_key == "metric_table":
+                    yield from _iter_metric_table_rows(panel, data_config)
+                elif type_key in ("raw_csv_table", "pc_sampling_table"):
+                    yield str(data_config["id"] // 100), (panel["title"], "", "")
+
+
+def _iter_metric_table_rows(
+    panel: Dict[str, Any], data_config: Dict[str, Any]
+) -> Iterator[Tuple[str, Tuple[str, str, str]]]:
+    """Yield the block, table and metric rows of one metric_table."""
+    block_id = str(data_config["id"] // 100)
+    if block_id != "0":
+        yield block_id, (panel["title"], "", "")
+
+    yield format_table_id(data_config["id"]), (data_config["title"], "", "")
+
+    descriptions = panel.get("metrics_description") or {}
+    metric_ids = metric_ids_by_name(data_config)
+    for name, entries in data_config["metric"].items():
+        if not _metric_has_valid_expr(entries, data_config):
+            continue
+        unit = entries.get("unit")
+        description = " ".join(str(descriptions.get(name) or "").split())
+        yield metric_ids[name], (name, str(unit or ""), description)
+
+
+def _is_same_id_branch(metric_id: str, selected_id: str) -> bool:
+    """Return True if metric_id is selected_id, or above or below it."""
+    return (
+        metric_id == selected_id
+        or metric_id.startswith(f"{selected_id}.")
+        or selected_id.startswith(f"{metric_id}.")
+    )
+
+
+def _format_listed_table(
+    table_id: str,
+    metric_details: Dict[str, Tuple[str, str, str]],
+    listed_ids: List[str],
+    terminal_width: int,
+) -> str:
+    """Format one table with its heading, or "" if it lists no metrics."""
+    columns = ["Metric_ID", "Metric", "Unit", "Description"]
+    rows = [
+        dict(zip(columns, [metric_id, *metric_details[metric_id]]))
+        for metric_id in listed_ids
+        if metric_id.count(".") == 2 and metric_id.rsplit(".", 1)[0] == table_id
+    ]
+    if not rows:
+        return ""
+    # Description fills the terminal width left by the other columns and the
+    # borders (3 characters per column, plus 1), down to DESCRIPTION_WIDTH_MIN.
+    other_widths = sum(
+        max(len(column), *(len(row[column]) for row in rows)) for column in columns[:-1]
+    )
+    description_width = max(
+        DESCRIPTION_WIDTH_MIN, terminal_width - other_widths - (3 * len(columns) + 1)
+    )
+    table = format_table_ascii(
+        rows,
+        columns,
+        description_wrap_width=description_width,
+        show_index=False,
+    )
+    return f"{table_id} {metric_details[table_id][0]}\n{table}"

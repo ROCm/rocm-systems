@@ -3,6 +3,7 @@
 
 """Unit tests for utils/specs.py."""
 
+import sys
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
@@ -13,6 +14,7 @@ from utils.specs import (
     MachineSpecs,
     MachineSpecsCDNA,
     MachineSpecsRDNA35,
+    _detect_arch,
     generate_machine_specs,
     spec_family_for_arch,
 )
@@ -266,6 +268,31 @@ def test_reconstruct_specs_from_sysinfo_missing_version_raises():
     """A sysinfo dict without a version key aborts via console_error/KeyError."""
     with pytest.raises((KeyError, SystemExit)):
         generate_machine_specs(None, {"gpu_arch": "gfx1151"})
+
+
+@pytest.mark.misc
+def test_reconstruct_specs_from_sysinfo_unsupported_arch_exits(monkeypatch):
+    """A workload from an arch without a spec entry stops with an error naming
+    the arch, not a traceback."""
+    monkeypatch.setattr(specs, "console_error", sys.exit)
+    monkeypatch.setattr(specs, "get_version", lambda _home: {"version": "3.0.0"})
+    with pytest.raises(SystemExit, match="profiled on gfx1030, which is not supported"):
+        generate_machine_specs(None, {"version": "3", "gpu_arch": "gfx1030"})
+
+
+@pytest.mark.misc
+def test_detect_arch_dash_variant_maps_to_base():
+    """A Name line with a dash-suffixed variant (e.g. gfx1250-strict) should
+    resolve to the base arch (gfx1250) because the regex stops at `-`."""
+    rocminfo_lines = ["  Name:  gfx1250-strict"]
+    with patch.object(
+        specs.mi_gpu_specs,
+        "get_gpu_series_dict",
+        return_value={"gfx1250": "gfx1250_series"},
+    ):
+        result = _detect_arch(rocminfo_lines)
+    assert result is not None
+    assert result[0] == "gfx1250"
 
 
 @pytest.mark.misc

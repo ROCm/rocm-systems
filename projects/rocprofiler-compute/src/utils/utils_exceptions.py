@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import shlex
+from typing import List
 
 
 class WorkloadCommandError(Exception):
@@ -27,7 +28,7 @@ class PythonScriptNotFoundError(WorkloadCommandError, FileNotFoundError):
 class NoScriptInCommandError(WorkloadCommandError, ValueError):
     """A Python interpreter was invoked without a script argument."""
 
-    def __init__(self, argv: list[str]) -> None:
+    def __init__(self, argv: List[str]) -> None:
         self.argv = argv
         super().__init__(
             f"No Python script found in the workload command: {shlex.join(argv)}"

@@ -45,6 +45,13 @@ Total metric rows loaded: **2,862** across 824 unique metric names.
 | `comparable` | 462 | Marks table as non-comparable across runs |
 | `style` | 12 | Variant of `cli_style` — rare |
 
+> **Update (2026-10-14):** `tui_style`, `comparable` and `style` no longer exist in the
+> analysis configs. `tui_style` was removed earlier. `comparable` (always `false`) and
+> `style` were removed in AIPROFCOMP-820 because no code read them: baseline comparison
+> picks its columns in `parser.build_comparable_columns()`, and only `cli_style` selects
+> a renderer. The panel-level `description` key (14 gfx1250 panels and the gfx115x memory
+> chart) was also unread and was removed; it held developer notes, not user-facing text.
+
 ---
 
 ## Step 2 — Consistency matrix
@@ -196,7 +203,7 @@ These fields (~70 rows each) belong to specific table types and do not belong in
 | — of which gfx115x-only | 152 |
 | Partial CDNA subset (2–5 CDNA archs) | 50 |
 
-**Partial CDNA subset examples** (latency metrics not present on gfx940–gfx942):
+**Partial CDNA subset examples** (latency metrics not present on gfx942):
 - `VL1 Lat`: gfx908, gfx90a, gfx950
 - `L2 Rd Lat`: gfx908, gfx90a, gfx950
 - `L2 Wr Lat`: gfx908, gfx90a, gfx950

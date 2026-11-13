@@ -338,9 +338,11 @@ void MockPcSamplingCollector::on_code_object_load(
     ++load_count;
 }
 
-void MockPcSamplingCollector::finalize(rocprofiler_compute_tool::code_object_writer_t& writer)
+void MockPcSamplingCollector::finalize(rocprofiler_compute_tool::code_object_writer_t& writer,
+                                       const std::set<std::pair<uint64_t, std::string>>& dispatched_symbols)
 {
     ++finalize_count;
+    last_dispatched_symbols = dispatched_symbols;
     if (!m_has_code_objects)
         return;
 

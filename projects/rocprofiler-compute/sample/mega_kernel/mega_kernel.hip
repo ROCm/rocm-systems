@@ -1975,7 +1975,7 @@ __device__ void test_mfma_operations([[maybe_unused]] TestResults* results,
         atomicMin(&results->mfma_f8_passed, -1);  // FP8 not on MI250
     }
 
-#elif defined(__gfx942__) || defined(__gfx940__) || defined(__gfx941__)
+#elif defined(__gfx942__)
     // ========================================================================
     // MI300 (gfx942/CDNA3) MFMA Tests - Enhanced with FP8 support
     // mfma_mode: 0=both, 1=asm only, 2=builtin only

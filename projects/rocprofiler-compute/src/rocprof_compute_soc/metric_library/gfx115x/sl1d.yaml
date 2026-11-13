@@ -1,0 +1,23 @@
+sl1d.gl1_rd_bw:
+  name: sL1D-GL1 Read Bandwidth
+  formula: 128 * SUM(SQC_TC_DATA_READ_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Bandwidth of scalar data cache requests to the GL1 cache. Scalar operations load
+    uniform data shared across all threads in a wavefront, making efficient caching
+    critical for performance.
+  peak: $sqc_per_gpu * 64 * $max_sclk / 1000
+sl1d.hit_rate_excl_dup:
+  name: sL1D Hit Rate (Excluding Duplicate Misses)
+  formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
+  unit: Percent
+  description: >-
+    Percentage of scalar data cache accesses that hit in cache. The scalar cache stores
+    uniform data accessed by scalar instructions. High hit rates indicate efficient
+    reuse of constant and uniform data across wavefronts.
+  peak: 100
+sl1d.req:
+  name: sL1D Requests
+  formula: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''

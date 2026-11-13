@@ -40,7 +40,7 @@ Pipeline overview (models in CAPS, stages in brackets)::
 from dataclasses import dataclass
 from typing import Callable, Literal, Optional
 
-MEMBW_TABLE_IDS: tuple[int, ...] = (3001, 3012, 3018)
+MEMBW_TABLE_IDS: tuple[int, ...] = (3001, 3002, 3003)
 
 # Memory hierarchy levels a bottleneck node can belong to
 BOTTLENECK_LEVELS = frozenset({"GL1", "GL2", "EA"})

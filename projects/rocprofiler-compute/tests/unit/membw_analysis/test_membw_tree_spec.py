@@ -39,7 +39,7 @@ class TestCollectMetricKeys:
         assert len(keys) == 17
 
     def test_keys_span_all_three_tables(self):
-        """Metric keys should reference L1 (3001), L2 (3012), EA (3018)."""
+        """Metric keys should reference L1 (3001), L2 (3002), EA (3003)."""
         spec = load_tree_spec("gfx950")
         keys = collect_metric_keys(spec)
         assert any(k.startswith("L1") for k in keys)

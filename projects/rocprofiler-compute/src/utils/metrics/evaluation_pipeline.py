@@ -29,53 +29,18 @@ from utils.utils_counter_defs import extract_counters_and_variables, get_build_i
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
     """Create empirical peaks dictionary."""
-    empirical_peaks = {}
+    if empirical_peaks_df.empty:
+        # Without roofline.csv, every ceiling is NaN.
+        return {
+            f"ammolite__{name}_empirical_peak": np.nan
+            for name in mi_gpu_specs.get_all_roofline_columns()
+        }
 
-    if not empirical_peaks_df.empty:
-        peak_data_row = empirical_peaks_df.iloc[0]
-        for col in empirical_peaks_df.columns:
-            empirical_peaks[f"ammolite__{col}_empirical_peak"] = peak_data_row[col]
-    else:
-        peak_names = [
-            "FP16Flops",
-            "BF16Flops",
-            "FP32Flops",
-            "FP64Flops",
-            "I8Ops",
-            "I32Ops",
-            "I64Ops",
-            "MFMAF4Flops",
-            "MFMAF6Flops",
-            "MFMAF6F4Flops",
-            "MFMAF64Flops",
-            "MFMAF32Flops",
-            "MFMAF16Flops",
-            "MFMABF16Flops",
-            "MFMAMXF8Flops",
-            "MFMAF8Flops",
-            "MFMAI8Ops",
-            "WMMAF4Flops",
-            "WMMAF6Flops",
-            "WMMAF6F4Flops",
-            "WMMAF64Flops",
-            "WMMAF32Flops",
-            "WMMAF16Flops",
-            "WMMABF16Flops",
-            "WMMAMXF8Flops",
-            "WMMAF8Flops",
-            "WMMAI8Ops",
-            "HBMBw",
-            "MALLBw",
-            "L2Bw",
-            "L1Bw",
-            "L0Bw",
-            "LDSBw",
-        ]
-        # initialize peaks to NaN
-        for peak_name in peak_names:
-            empirical_peaks[f"ammolite__{peak_name}_empirical_peak"] = np.nan
-
-    return empirical_peaks
+    peak_data_row = empirical_peaks_df.iloc[0]
+    return {
+        f"ammolite__{col}_empirical_peak": peak_data_row[col]
+        for col in empirical_peaks_df.columns
+    }
 
 
 def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
@@ -198,8 +163,7 @@ def eval_metric(
     debug: bool,
 ) -> None:
     """Execute the expr string for each metric in the df."""
-    # confirm no illogical counter values (only consider non-roofline runs)
-    roof_only_run = sys_info.ip_blocks == "roofline"
+    # confirm no illogical counter values
     gui_active_counter = next(
         (
             counter
@@ -208,11 +172,7 @@ def eval_metric(
         ),
         None,
     )
-    if (
-        (not roof_only_run)
-        and gui_active_counter is not None
-        and (raw_pmc_df[gui_active_counter] == 0).any()
-    ):
+    if gui_active_counter is not None and (raw_pmc_df[gui_active_counter] == 0).any():
         console_warning(f"Detected {gui_active_counter} == 0")
         console_error("Halting execution for warning above.")
 

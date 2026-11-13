@@ -32,20 +32,6 @@ architectures:
       "17.2.5":
         name: "HBM Write and Atomic Traffic"
 
-  gfx940:
-    same_bucket_priority_metric_ids:
-      "17.2.1":
-        name: "HBM Read Traffic"
-      "17.2.5":
-        name: "HBM Write and Atomic Traffic"
-
-  gfx941:
-    same_bucket_priority_metric_ids:
-      "17.2.1":
-        name: "HBM Read Traffic"
-      "17.2.5":
-        name: "HBM Write and Atomic Traffic"
-
   gfx942:
     same_bucket_priority_metric_ids:
       "17.2.1":

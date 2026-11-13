@@ -5,15 +5,16 @@ import ast
 import json
 import re
 import warnings
+from collections import defaultdict
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, DefaultDict, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
-from memory_chart.loader import Layouts
+from memory_chart.loader import LAYOUT_VERSION, Layouts
 from pc_sampling.code_object_analysis import (
     CodeObjectSymbol,
     InstructionPipelines,
@@ -22,11 +23,17 @@ from pc_sampling.code_object_analysis import (
 from pc_sampling.pc_sampling_analysis import (
     SOURCE_LINE_MISSING,
     InstructionLineRecord,
+    SampleCountsRecord,
+    aggregate_instruction_lines,
     load_aggregated_pc_sampling,
 )
 from pc_sampling.per_kernel_isa_export import (
     WorkloadIsaExport,
     export_per_kernel_isa_files,
+)
+from pc_sampling.per_source_line_export import (
+    WorkloadSourceLineExport,
+    export_per_source_line_files,
 )
 from pc_sampling.source_snapshot_analysis import (
     SourceFrame,
@@ -39,7 +46,7 @@ from pc_sampling.source_snapshot_analysis import (
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
-from utils import file_io, schema, utils_analysis
+from utils import file_io, schema
 from utils.analysis_orm import Database
 from utils.file_io import (
     load_kernel_short_names,
@@ -75,7 +82,7 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
     to_noise_clamp,
 )
-from utils.mi_gpu_spec import mi_gpu_specs
+from utils.mi_gpu_spec import mi_gpu_specs, roofline_column
 from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
     OpsSupport,
@@ -300,14 +307,17 @@ class SourceFrameCollector:
 
 
 def memory_chart_layout_extdata(gpu_arch: str) -> Optional[dict[str, Any]]:
-    """The memory chart layout file of *gpu_arch*, unchanged; None if it has none.
+    """The memory chart layout file of *gpu_arch* with the format version added;
+    None if it has none.
 
     src/memory_chart/README.md documents the format.
     """
     layout = Layouts.for_arch(gpu_arch)
     if layout is None:
         return None
-    return json.loads(layout.path.read_text(encoding="utf-8"))
+    layout_json = json.loads(layout.path.read_text(encoding="utf-8"))
+    layout_json["version"] = LAYOUT_VERSION
+    return layout_json
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -477,14 +487,21 @@ class db_analysis(OmniAnalyze_Base):
             Database.commit()
             csv_result_folder = Path(db_name).with_suffix("")
             # Before write_csv_dir, which closes the session these rows stream from.
-            per_kernel_folder = export_per_kernel_isa_files(
+            per_kernel_isa_files = export_per_kernel_isa_files(
                 csv_result_directory=csv_result_folder,
                 workload_isa_exports=self._build_workload_isa_exports(workload_objs),
+            )
+            export_per_source_line_files(
+                export_directory=per_kernel_isa_files.directory,
+                isa_line_locations=per_kernel_isa_files.isa_line_locations,
+                workload_source_line_exports=(
+                    self._build_workload_source_line_exports(workload_objs)
+                ),
             )
             Database.write_csv_dir(csv_result_folder)
             export_source_snapshot_files(
                 workload_source_snapshots=workload_source_snapshots,
-                export_directory=per_kernel_folder,
+                export_directory=per_kernel_isa_files.directory,
             )
         else:
             Database.create_views()
@@ -510,6 +527,26 @@ class db_analysis(OmniAnalyze_Base):
                 )
             )
         return workload_isa_exports
+
+    @staticmethod
+    def _build_workload_source_line_exports(
+        workload_objs: List[orm.Workload],
+    ) -> List[WorkloadSourceLineExport]:
+        """Pair each workload's stall reasons with its source line rows."""
+        stall_reasons_by_workload = Database.get_stall_reasons_by_workload()
+        workload_source_line_exports = []
+        for workload_obj in workload_objs:
+            stall_reasons = stall_reasons_by_workload.get(workload_obj.workload_id, [])
+            workload_source_line_exports.append(
+                WorkloadSourceLineExport(
+                    workload_id=workload_obj.workload_id,
+                    stall_reasons=stall_reasons,
+                    source_line_rows=Database.stream_per_source_line_rows(
+                        workload_obj.workload_id, stall_reasons
+                    ),
+                )
+            )
+        return workload_source_line_exports
 
     def run_analysis_metrics(
         self,
@@ -634,23 +671,15 @@ class db_analysis(OmniAnalyze_Base):
             )
             keys: list[str] = []
 
-            matrix_ops_type = utils_analysis.get_matrix_ops_type(sys_row["gpu_series"])
+            matrix_ops_type = mi_gpu_specs.get_roofline_matrix_type(gpu_arch)
 
-            for mem_level in mi_gpu_specs.get_memory_levels(sys_row["gpu_model"]):
-                keys.append(f"{mem_level}Bw")
-            for dtype in SUPPORTED_DATATYPES[gpu_arch].keys():
-                if OpsSupport.VALU in SUPPORTED_DATATYPES[gpu_arch][dtype]:
-                    if dtype.startswith("F") or dtype.startswith("B"):
-                        keys.append(f"{dtype}Flops")
-                    elif dtype.startswith("I"):
-                        keys.append(f"{dtype}Ops")
-                if OpsSupport.MATRIX in SUPPORTED_DATATYPES[gpu_arch][dtype]:
-                    if dtype.startswith(("F", "B", "MX")):
-                        # FP16 -> F16, MXFP8 -> MXF8
-                        matrix_dtype = dtype.replace("FP", "F")
-                        keys.append(f"{matrix_ops_type}{matrix_dtype}Flops")
-                    elif dtype.startswith("I"):
-                        keys.append(f"{matrix_ops_type}{dtype}Ops")
+            for mem_level in mi_gpu_specs.get_roofline_bandwidth(gpu_arch):
+                keys.append(roofline_column(mem_level, "bandwidth"))
+            for dtype, support in SUPPORTED_DATATYPES[gpu_arch].items():
+                if OpsSupport.VALU in support:
+                    keys.append(roofline_column(dtype, "valu"))
+                if OpsSupport.MATRIX in support:
+                    keys.append(roofline_column(dtype, matrix_ops_type))
             roofline_ceilings_per_workload[workload_path] = {
                 key: roofline_dict[key] for key in keys if key in roofline_dict
             }
@@ -675,6 +704,9 @@ class db_analysis(OmniAnalyze_Base):
         row with nothing under it.
         """
         code_object_stores: dict[CodeObjectKey, orm.CodeObjectStore] = {}
+        sampled_instructions: List[
+            Tuple[orm.InstructionLine, InstructionLineRecord]
+        ] = []
         tool_data_records = self._pc_sampling_tool_data_per_workload.get(
             workload_path, []
         )
@@ -683,14 +715,15 @@ class db_analysis(OmniAnalyze_Base):
             pid: int = tool_data["metadata"]["pid"]
 
             for code_object in load_aggregated_pc_sampling(tool_data, sys_info):
-                for line in code_object.instruction_lines:
-                    kernel = kernel_objs.get(line.kernel_name)
+                for instruction_record in code_object.instruction_lines:
+                    kernel = kernel_objs.get(instruction_record.kernel_name)
                     if kernel is None:
-                        # Drop lines whose kernel was filtered out or never mapped.
+                        # Drop instructions whose kernel was filtered out or never
+                        # mapped.
                         continue
 
-                    self._add_instruction_line(
-                        line,
+                    instruction_row = self._add_instruction_line(
+                        instruction_record,
                         self._get_or_create_code_object_store(
                             code_object_stores,
                             (pid, code_object.code_object_id),
@@ -702,7 +735,11 @@ class db_analysis(OmniAnalyze_Base):
                         source_frames,
                         sys_info.get("gpu_arch"),
                     )
+                    sampled_instructions.append((instruction_row, instruction_record))
 
+        # Source lines aggregate the instructions of all processes, so their
+        # states are added once every process is loaded.
+        self._add_source_line_sample_states(sampled_instructions)
         return code_object_stores
 
     @staticmethod
@@ -761,48 +798,34 @@ class db_analysis(OmniAnalyze_Base):
 
     @staticmethod
     def _add_instruction_line(
-        line: InstructionLineRecord,
+        instruction_record: InstructionLineRecord,
         code_object_store: orm.CodeObjectStore,
         kernel: orm.Kernel,
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
         source_frames: SourceFrameCollector,
         gpu_arch: Optional[str] = None,
-    ) -> None:
-        """Insert one instruction line, its sample state, and child counts."""
-        instruction_line = orm.InstructionLine(
-            code_object_offset=line.code_object_offset,
-            instruction=line.instruction,
+    ) -> orm.InstructionLine:
+        """Insert one instruction line with its sample state.
+
+        Returns the inserted instruction line row.
+        """
+        instruction_row = orm.InstructionLine(
+            code_object_offset=instruction_record.code_object_offset,
+            instruction=instruction_record.instruction,
             instruction_type_lookup=db_analysis._get_instruction_type(
-                line.instruction, gpu_arch
+                instruction_record.instruction, gpu_arch
             ),
             kernel_symbol=db_analysis._get_or_create_kernel_symbol(
                 code_object_store, kernel, kernel_symbols
             ),
         )
-        Database.get_session().add(instruction_line)
-        source_frames.add_instruction(instruction_line, line.source)
+        Database.get_session().add(instruction_row)
+        source_frames.add_instruction(instruction_row, instruction_record.source)
 
-        sample_state = orm.PCSampleState(
-            total_count=line.total_count,
-            issue_count=line.issue_count,
-            stall_count=line.stall_count,
-            active_thread_percent=line.active_thread_percent,
-            wave_occupancy_percent=line.wave_occupancy_percent,
-            instruction_line=instruction_line,
+        sample_state = db_analysis._add_pc_sample_state(
+            instruction_record, instruction_row=instruction_row
         )
-        Database.get_session().add(sample_state)
-
-        for text, count in line.stall_reasons.items():
-            Database.get_session().add(
-                orm.PCSampleStallReason(
-                    pc_sample_state=sample_state,
-                    stall_reason_lookup=Database.get_or_create_type(
-                        orm.PCSampleStallReasonLookup, text
-                    ),
-                    count=count,
-                )
-            )
-        for text, count in line.inst_types.items():
+        for text, count in instruction_record.inst_types.items():
             Database.get_session().add(
                 orm.InstructionSample(
                     pc_sample_state=sample_state,
@@ -812,6 +835,71 @@ class db_analysis(OmniAnalyze_Base):
                     count=count,
                 )
             )
+        return instruction_row
+
+    @staticmethod
+    def _add_source_line_sample_states(
+        sampled_instructions: List[Tuple[orm.InstructionLine, InstructionLineRecord]],
+    ) -> None:
+        """Insert one sample state for each source line of the sampled instructions.
+
+        An instruction counts once toward each distinct source line of its inline
+        stack.
+        """
+        # The dict keyed by instruction row counts each instruction once per
+        # source line, even if a one-line lambda puts that source line twice in
+        # the inline stack.
+        instruction_records_by_source_line: DefaultDict[
+            orm.SourceLine, Dict[orm.InstructionLine, InstructionLineRecord]
+        ] = defaultdict(dict)
+        for instruction_row, instruction_record in sampled_instructions:
+            for frame in instruction_row.source_lines:
+                instruction_records_by_source_line[frame.source_line][
+                    instruction_row
+                ] = instruction_record
+
+        for (
+            source_line_row,
+            instruction_records,
+        ) in instruction_records_by_source_line.items():
+            db_analysis._add_pc_sample_state(
+                aggregate_instruction_lines(list(instruction_records.values())),
+                source_line_row=source_line_row,
+            )
+
+    @staticmethod
+    def _add_pc_sample_state(
+        sample_counts: Union[InstructionLineRecord, SampleCountsRecord],
+        *,
+        instruction_row: Optional[orm.InstructionLine] = None,
+        source_line_row: Optional[orm.SourceLine] = None,
+    ) -> orm.PCSampleState:
+        """Insert the sample state of one instruction line or one source line.
+
+        Also inserts the stall-reason counts of the sample state.
+        """
+        sample_state = orm.PCSampleState(
+            total_count=sample_counts.total_count,
+            issue_count=sample_counts.issue_count,
+            stall_count=sample_counts.stall_count,
+            active_thread_percent=sample_counts.active_thread_percent,
+            wave_occupancy_percent=sample_counts.wave_occupancy_percent,
+            instruction_line=instruction_row,
+            source_line=source_line_row,
+        )
+        Database.get_session().add(sample_state)
+
+        for text, count in sample_counts.stall_reasons.items():
+            Database.get_session().add(
+                orm.PCSampleStallReason(
+                    pc_sample_state=sample_state,
+                    stall_reason_lookup=Database.get_or_create_type(
+                        orm.PCSampleStallReasonLookup, text
+                    ),
+                    count=count,
+                )
+            )
+        return sample_state
 
     def add_code_object_isa(
         self,
@@ -1259,7 +1347,6 @@ class db_analysis(OmniAnalyze_Base):
         non_expression_columns = {
             "Metric",
             "Unit",
-            "Description",
             "Type",
             "Xfer",
             "Coherency",
@@ -1274,18 +1361,24 @@ class db_analysis(OmniAnalyze_Base):
             # Build table_id -> title map
             # (e.g. 700 -> "Wavefront", 701 -> "Wavefront Launch Stats").
             table_names_map: dict[int, str] = {}
+            descriptions_map: dict[int, dict[str, str]] = {}
             for panel_config in arch_config.panel_configs.values():
                 table_names_map[panel_config["id"]] = panel_config["title"]
                 for source in panel_config["data source"]:
                     for table in source.values():
                         table_names_map[table["id"]] = table["title"]
+                        descriptions_map[table["id"]] = panel_config.get(
+                            "metrics_description", {}
+                        )
 
             # Collect metric tables with table-level fields (table_name,
-            # sub_table_name, value_columns) and rows computed once per table.
+            # sub_table_name, descriptions, value_columns) and rows computed once
+            # per table.
             metric_tables = [
                 (
                     table_names_map[table_id // 100 * 100],
                     table_names_map[table_id],
+                    descriptions_map[table_id],
                     [c for c in metric_df.columns if c not in non_expression_columns],
                     list(metric_df.iterrows()),
                 )
@@ -1298,13 +1391,19 @@ class db_analysis(OmniAnalyze_Base):
                 MetricInfoRow(
                     name=row["Metric"],
                     metric_id=metric_id,
-                    description=row.get("Description"),
+                    description=descriptions.get(row["Metric"]),
                     unit=row.get("Unit"),
                     pct_of_peak=row.get("Percent of Peak") is True,
                     table_name=table_name,
                     sub_table_name=sub_table_name,
                 )
-                for table_name, sub_table_name, _value_columns, rows in metric_tables
+                for (
+                    table_name,
+                    sub_table_name,
+                    descriptions,
+                    _value_columns,
+                    rows,
+                ) in metric_tables
                 for metric_id, row in rows
             ]
             expression_rows = [
@@ -1313,7 +1412,13 @@ class db_analysis(OmniAnalyze_Base):
                     value_name=value_name,
                     value=row[value_name].strip(),
                 )
-                for _table_name, _sub_table_name, value_columns, rows in metric_tables
+                for (
+                    _table_name,
+                    _sub_table_name,
+                    _descriptions,
+                    value_columns,
+                    rows,
+                ) in metric_tables
                 for metric_id, row in rows
                 for value_name in value_columns
             ]

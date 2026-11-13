@@ -64,4 +64,6 @@ class Workload:
     ml_api_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     # Nested utils_analysis.CallTreeNode roots keyed by Thread_Id.
     ml_api_call_trees: dict[str, list[Any]] = field(default_factory=dict)
+    # --operator patterns keyed by the backend they match in this workload.
+    operator_patterns: dict[str, list[str]] = field(default_factory=dict)
     membw_result: Optional[MemBwAnalysisResult] = None

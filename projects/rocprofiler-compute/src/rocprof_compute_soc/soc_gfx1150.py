@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-from typing import Optional
+from typing import List, Optional
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import demarcate
@@ -25,7 +25,7 @@ class gfx1150_soc(OmniSoC_Base):
     # Required child methods
     # -----------------------
     @demarcate
-    def profiling_setup(self) -> Optional[list[str]]:
+    def profiling_setup(self) -> Optional[List[str]]:
         """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
         # Performance counter filtering

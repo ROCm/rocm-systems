@@ -4,7 +4,7 @@
 # -----------------------------------------------------------------------------
 # benchmark_gfx942.py
 #
-# Benchmarking class for all gfx942 product (also supports gfx940 and gfx941)
+# Benchmarking class for all gfx942 product
 # MI300A, MI300X, MI308, MI325X
 #
 # -----------------------------------------------------------------------------
@@ -16,10 +16,10 @@ from . import benchmark_gfx9_base
 # Bench_gfx942 Class
 # =============================================================================
 class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
-    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+    def __init__(self, device_id: int, cache_sizes: dict, gpu_arch: str) -> None:
         super().__init__(device_id, cache_sizes)
 
-        self.unsupported_data_types = ["MFMA-F4", "MFMA-F6", "MFMA-F6F4", "MFMA-MXF8"]
+        self.apply_roofline_spec(gpu_arch)
 
         self.matrix_ops = {
             "F4": 0,
@@ -53,7 +53,7 @@ class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
             + """
         extern "C" __global__ void mfma_f8(int iter, float *dummy)
         {
-            // MI300 series only - note gfx940/gfx941/gfx942 only uses fnuz f8
+            // MI300 series only - note gfx942 only uses fnuz f8
             long a =  threadIdx.x;
 
             vec16<float> result = {0};

@@ -5,7 +5,7 @@ import argparse
 import os
 import shlex
 from pathlib import Path
-from typing import Optional, Union
+from typing import Dict, List, Optional, Union
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
@@ -14,7 +14,7 @@ from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
     resolve_rocm_library_path,
 )
-from utils.utils_profile import pc_sampling_unit
+from utils.utils_profile import find_attach_tool_library, pc_sampling_unit
 
 
 def _resolve_sdk_roctx_library(rocprofiler_sdk_tool_path: str) -> Optional[str]:
@@ -42,7 +42,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
     def get_profiler_options(
         self, native_tool_path: Optional[str] = None
-    ) -> dict[str, Union[str, list[str]]]:
+    ) -> Dict[str, Union[str, List[str]]]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
 
@@ -53,7 +53,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             args.rocprofiler_sdk_tool_path,  # Our rocprofiler-sdk tool
             native_tool_path,  # Native tool (if provided)
         ]
-        if getattr(self, "_selected_frameworks", set()):
+        if args.trace_ml_api is not None:
             # Without this the marker tier's ROCTX calls bind to legacy
             # libroctx64, which rocprofiler-sdk does not trace.
             ld_preload_parts.append(
@@ -78,7 +78,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_OUTPUT_PATH": f"{args.output_directory}/out/pmc_1",
         })
 
-        if getattr(self, "_selected_frameworks", set()):
+        if args.trace_ml_api is not None:
             options["ROCPROF_MARKER_API_TRACE"] = "1"
 
         if args.iteration_multiplexing:
@@ -90,7 +90,13 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             # In attach mode, tools are provided using ROCPROF_ATTACH_TOOL_LIBRARY
             # instead of LD_PRELOAD.
             # Build attach tool list (only our tools, not user's LD_PRELOAD)
-            attach_tools = [args.rocprofiler_sdk_tool_path]
+            sdk_attach_tool = find_attach_tool_library(args.attach_pid)
+            if sdk_attach_tool is None:
+                console_error(
+                    "Cannot find librocprofiler-sdk-tool.so in the ROCm "
+                    f"installation of process {args.attach_pid}."
+                )
+            attach_tools = [sdk_attach_tool]
             if native_tool_path:
                 attach_tools.append(native_tool_path)
             options.update({
@@ -157,7 +163,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
     def get_pc_sampling_profiler_options(
         self, native_tool_path: Optional[str] = None
-    ) -> dict[str, Union[str, list[str]]]:
+    ) -> Dict[str, Union[str, List[str]]]:
         args = self.get_args()
         method = args.pc_sampling_method
 
@@ -188,9 +194,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
     @demarcate
     def run_profiling(self, version: str, prog: str) -> None:
         """Run profiling."""
-        if self.get_args().roof_only:
-            console_log("roofline", "Profiling roofline counters only.")
-
         # Log profiling options and setup filtering
         super().run_profiling(version, prog)
 

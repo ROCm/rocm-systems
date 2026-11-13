@@ -10,7 +10,6 @@
 
 import csv
 from abc import ABC
-from collections.abc import Generator
 from contextlib import contextmanager
 from ctypes import (
     POINTER,
@@ -27,11 +26,12 @@ from ctypes import (
     sizeof,
 )
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Generator, List, Tuple
 
 import utils.hip_interface as hip
 import utils.hiprtc_interface as hiprtc
 from utils import utils_profile
+from utils.mi_gpu_spec import mi_gpu_specs
 
 # =============================================================================
 # GLOBAL VARIABLES
@@ -55,7 +55,7 @@ class Bench_base(ABC):
 
         # Arch or hardware-specific variables must be set in child classes
         # self.lds_sizes: dict[str, int]
-        self.unsupported_data_types: list[str]
+        self.unsupported_data_types: Tuple[str, ...]
         self.cache_kernel_selector: dict[str, str]
         self.matrix_kernel_selector: dict[str, str]
         self.matrix_ops: dict[str, int]
@@ -163,7 +163,7 @@ class Bench_base(ABC):
     class Program:
         """Helper class for loading and compiling kernels."""
 
-        def __init__(self, src: str, templates: list[str] = []) -> None:
+        def __init__(self, src: str, templates: List[str] = []) -> None:
             self.prog = hiprtc.hiprtcCreateProgram(src, "prog")
 
             for t in templates:
@@ -188,11 +188,11 @@ class Bench_base(ABC):
     def launch_kernel(
         self,
         func: POINTER,
-        grid_size: list[int],
-        block_size: list[int],
+        grid_size: List[int],
+        block_size: List[int],
         shared_mem_size: int,
         stream: POINTER,
-        args: list[Any] = [],
+        args: List[Any] = [],
     ) -> None:
         """Helper method for launching kernel."""
         # Convert to native types
@@ -223,12 +223,17 @@ class Bench_base(ABC):
             args_ptr,
         )
 
-    def get_gfx_arch(self, device: int) -> str:
-        """Retrieve the gfx architecture."""
-        arch_str = hip.hipGetDeviceProperties(device).gcnArchName
-
-        # Parse out only gfx
-        return arch_str.split(":", 1)[0]
+    def apply_roofline_spec(self, gpu_arch: str) -> None:
+        """Set the matrix type, each test's roofline.csv column, and the tests whose
+        column mi_gpu_spec.yaml does not list for gpu_arch, written as 0."""
+        self.MATRIX_OPS_TYPE = mi_gpu_specs.get_roofline_matrix_type(gpu_arch)
+        self.csv_cols_map = {
+            test: mi_gpu_specs.get_roofline_test_column(test) for test in self.tests
+        }
+        measured = mi_gpu_specs.get_roofline_columns(gpu_arch)
+        self.unsupported_data_types = tuple(
+            test for test, column in self.csv_cols_map.items() if column not in measured
+        )
 
     def set_cache_kernel_selector(self) -> None:
         self.cache_kernel_selector = {}
@@ -244,12 +249,12 @@ class Bench_base(ABC):
         count: int,
         work_per_kernel: int,
         func: POINTER,
-        grid_size: list[int],
-        block_size: list[int],
+        grid_size: List[int],
+        block_size: List[int],
         shared_mem_size: int,
         stream: POINTER,
-        args: list[Any] = [],
-    ) -> list[float]:
+        args: List[Any] = [],
+    ) -> List[float]:
         """Helper method to run a kernel and collect samples."""
         event_start = hip.hipEventCreate()
         event_stop = hip.hipEventCreate()
@@ -750,7 +755,7 @@ class Bench_base(ABC):
     def int64_benchmark(self, device: int) -> float:
         return self.flops_bench(device, "INT64", "IOP", "GOPS")
 
-    def run_benchmark(self, device: int) -> dict[str, float]:
+    def run_benchmark(self, device: int, gpu_arch: str) -> Dict[str, float]:
         """
         Run the roofline tests on the specified device.
         Returns a dictionary mapping test name to its peak performance.
@@ -758,10 +763,9 @@ class Bench_base(ABC):
         with self.gpu_benchmark_lock(device):
             metrics_dict = {}
 
-            arch = self.get_gfx_arch(device)
             cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-            print(f"GPU Device {device} ({arch}) with {cus} CUs: Profiling...")
+            print(f"GPU Device {device} ({gpu_arch}) with {cus} CUs: Profiling...")
 
             for name, func in self.tests.items():
                 if name in self.unsupported_data_types:
@@ -775,7 +779,7 @@ class Bench_base(ABC):
             print("GPU Benchmarking completed")
             return metrics_dict
 
-    def dump_csv(self, metrics: dict[str, float], file_path: str) -> None:
+    def dump_csv(self, metrics: Dict[str, float], file_path: str) -> None:
         """Generate a csv file containing the collected benchmark metrics."""
         # TODO: Better way to map CSV column names?
         with open(file_path, "w", newline="", encoding="utf-8") as f:
