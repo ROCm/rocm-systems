@@ -25,10 +25,7 @@ from utils.metrics.pass_provenance import (
     build_pass_layout,
     natural_pass_sort_key,
 )
-from utils.utils_common import (
-    canonical_config_arch,
-    normalize_filter_to_str_list,
-)
+from utils.utils_common import normalize_filter_to_str_list
 
 KERNEL_SYMBOLS_CSV_GLOB = f"rocpd_kernel_symbols_*.csv{csv_compression.GZIP_SUFFIX}"
 
@@ -617,30 +614,6 @@ def _aggregate_csv_in_chunks(
         .groupby(group_by, sort=False, as_index=False)
         .agg(combine)
     )
-
-
-def is_single_panel_config(
-    root_dir: str, supported_archs: dict[str, str]
-) -> Optional[bool]:
-    """
-    Check the root configs dir structure to decide using one config set for all
-    archs, or one for each arch.
-    """
-    # If not single config, verify all supported archs have defined configs
-    arch_names = {
-        canonical_config_arch(arch) or arch for arch in supported_archs.keys()
-    }
-    root_path = Path(root_dir)
-    arch_count = sum(1 for arch in arch_names if (root_path / arch).exists())
-
-    if arch_count == 0:
-        return True
-    elif arch_count == len(arch_names):
-        return False
-    else:
-        console_warning(
-            "Found multiple panel config sets but incomplete for all archs."
-        )
 
 
 def _renumber_dispatch_ids_across_processes(

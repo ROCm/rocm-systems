@@ -59,6 +59,7 @@ from utils.utils_common import (
     is_only_pc_sampling,
     is_tcc_channel_counter,
     parse_sets_yaml,
+    selects_roofline,
     validate_roofline_csv,
 )
 from utils.utils_counter_defs import (
@@ -503,7 +504,7 @@ class OmniSoC_Base:
 
         # File id dict
         config_arch = canonical_config_arch(self.__arch) or self.__arch
-        config_root_dir = f"{args.config_dir}/{config_arch}"
+        config_root_dir = str(config.analysis_configs_dir / config_arch)
         config_filename_dict = {
             filename.name.split("_")[0]: str(filename)
             for filename in Path(config_root_dir).glob("*.yaml")
@@ -512,17 +513,15 @@ class OmniSoC_Base:
         filter_blocks = args.filter_blocks
         if args.set_selected and self.__arch:
             sets_info = parse_sets_yaml(self.__arch)
-            if args.set_selected not in set(sets_info.keys()):
+            if args.set_selected not in sets_info:
                 console_error(
                     f'argument --set: invalid choice: "{args.set_selected}" '
-                    f"(choose from {sets_info.keys()})"
+                    f"(choose from {', '.join(sets_info)})"
                 )
             filter_blocks = [
                 next(iter(metric.keys()))
                 for metric in sets_info[args.set_selected]["metric"]
             ]
-        elif args.roof_only:
-            filter_blocks = ["4"]
 
         expressions: List[str] = []
         if not filter_blocks:
@@ -661,7 +660,7 @@ class OmniSoC_Base:
         if not args.membw_analysis:
             exclude.add(str(MEMBW_ANALYSIS_PANEL_ID))
         yield from iter_analysis_config_metrics(
-            Path(args.config_dir) / (canonical_config_arch(arch) or arch), exclude
+            config.analysis_configs_dir / (canonical_config_arch(arch) or arch), exclude
         )
 
     def get_rocprof_supported_counters(self) -> Set[str]:
@@ -790,17 +789,13 @@ class OmniSoC_Base:
     def post_profiling(self) -> None:
         """Perform any SoC-specific post profiling activities."""
         console_debug("profiling", f"perform SoC post processing for {self.__arch}")
-        # Roofline can be skipped via --no-roof
+        # Roofline can be skipped via the deprecated --no-roof
         # Roofline not supported on MI 100
-        # If --filter-blocks is provided, roofline block (block 4) should be mentioned
+        # If -b or --set selected blocks, roofline (block 4) must be one of them
         if (
             self.get_args().no_roof
             or self.__arch not in BENCHMARKING_SUPPORTED
-            or (
-                self.get_args().filter_blocks
-                and "4" not in self.get_args().filter_blocks
-                and "roof" not in self.get_args().filter_blocks
-            )
+            or not selects_roofline(self.get_args().filter_blocks)
         ):
             console_log("roofline", "Skipping roofline")
         else:

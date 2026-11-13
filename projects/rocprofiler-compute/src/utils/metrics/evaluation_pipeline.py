@@ -227,9 +227,8 @@ def eval_metric(
     pass_layout: Optional[PassLayout] = None,
 ) -> None:
     """Execute the expr string for each metric in the df."""
-    # confirm no illogical counter values (only consider non-roofline runs)
-    roof_only_run = sys_info.ip_blocks == "roofline"
-    zero_gui = None if roof_only_run else _gui_active_zero_detected(raw_pmc_df)
+    # confirm no illogical counter values
+    zero_gui = _gui_active_zero_detected(raw_pmc_df)
     if zero_gui is not None:
         console_warning(f"Detected {zero_gui} == 0")
         console_error("Halting execution for warning above.")

@@ -270,7 +270,9 @@ def test_load_table_data_forwards_pmc_pass_layout(monkeypatch):
         sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
         roofline_peaks=pd.DataFrame(),
     )
-    load_table_data(workload, "/tmp/test", SimpleNamespace(debug=False), {})
+    load_table_data(
+        workload, "/tmp/test", SimpleNamespace(debug_metric_expression=False), {}
+    )
     assert captured["pass_layout"] is layout
 
 
