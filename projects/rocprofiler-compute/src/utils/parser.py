@@ -33,7 +33,11 @@ from utils.utils_common import (
     metric_ids_by_name,
     normalize_filter_to_str_list,
 )
-from utils.utils_counter_defs import metric_expressions, metric_value_keys
+from utils.utils_counter_defs import (
+    is_simple_box_table,
+    metric_expressions,
+    metric_value_keys,
+)
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -199,15 +203,12 @@ def _build_metric_table_df(
     """
     table_id = data_config["id"]
     table_data_source_idx = format_table_id(table_id)
-    is_simple_box = data_config.get("cli_style") == "simple_box"
+    is_simple_box = is_simple_box_table(data_config)
 
     headers: list[str] = ["Metric_ID", data_config["header"]["metric"]]
     value_keys = metric_value_keys(data_config)
     if is_simple_box:
         headers.extend(simple_box)
-        for key, tile in data_config["header"].items():
-            if key != "metric" and key != "expr":
-                headers.append(tile)
     else:
         for key, tile in data_config["header"].items():
             if key != "metric":

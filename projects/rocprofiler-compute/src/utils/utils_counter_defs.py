@@ -126,13 +126,19 @@ def metric_value_keys(table: Dict[str, Any]) -> Set[str]:
     return set(table["header"]) - {"metric", "expr"}
 
 
+def is_simple_box_table(table: Dict[str, Any]) -> bool:
+    """True when a metric_table is drawn as a simple box: its header holds only
+    metric and expr, and each expr expands into Min, Q1, Median, Q3 and Max."""
+    return set(table["header"]) == {"metric", "expr"}
+
+
 def metric_expressions(table: Dict[str, Any], metric: Dict[str, Any]) -> List[str]:
     """Return the expressions of one metric of a metric_table.
 
     simple_box tables keep their one expression in expr; other tables use
     metric_value_keys. Empty and "None" values are left out.
     """
-    if table.get("cli_style") == "simple_box":
+    if is_simple_box_table(table):
         keys = {"expr"}
     else:
         keys = metric_value_keys(table)
