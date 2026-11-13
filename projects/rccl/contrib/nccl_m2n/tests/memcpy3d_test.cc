@@ -6,19 +6,32 @@
 
 #include <gtest/gtest.h>
 #include <cstdint>
+#include <cstring>
+#include <string>
 #include <vector>
 
 #include "cuda_runtime.h"
 #include "m2n_checks.h"
 
+/* basic_api_test_local's --filter; the multi-GiB cases run only without one or when it matches kLargeName. */
+const char* basicApiLocalFilter();
+
 namespace {
 
 constexpr size_t kGiB = (size_t)1 << 30;
+constexpr const char* kLargeName = "memcpy3d_large";
+
+/* haveFree() is only a hint: another process or a parallel CTest entry can take the memory first. */
+#define ALLOC_OR_SKIP(var, bytes, value)                                                     \
+  char* var = alloc((bytes), (value));                                                       \
+  if (var == nullptr && oom) GTEST_SKIP() << "out of device memory for " << (bytes) << " B"; \
+  ASSERT_NE(var, nullptr)
 
 class Memcpy3DTest : public ::testing::Test {
 protected:
   cudaStream_t stream = nullptr;
   std::vector<void*> buffers;
+  bool oom = false;
 
   void SetUp() override {
     ASSERT_EQ(cudaSuccess, cudaSetDevice(0));
@@ -26,8 +39,8 @@ protected:
   }
 
   void TearDown() override {
-    for (void* b : buffers) cudaFree(b);
-    if (stream != nullptr) cudaStreamDestroy(stream);
+    for (void* b : buffers) (void)cudaFree(b);
+    if (stream != nullptr) (void)cudaStreamDestroy(stream);
   }
 
   bool haveFree(size_t bytes) {
@@ -35,10 +48,24 @@ protected:
     return cudaMemGetInfo(&freeBytes, &total) == cudaSuccess && freeBytes > bytes + kGiB;
   }
 
+  /* Empty when the large case should run, else why it is skipped. */
+  std::string largeSkipReason(size_t bytes) {
+    const char* f = basicApiLocalFilter();
+    if (f != nullptr && f[0] != '\0' && strstr(kLargeName, f) == nullptr)
+      return std::string("--filter does not match ") + kLargeName;
+    if (!haveFree(bytes)) return "needs " + std::to_string(bytes) + " B of free device memory";
+    return "";
+  }
+
   /* The setup writes go to the default stream, which a non-blocking stream does not wait for. */
   char* alloc(size_t bytes, int value) {
     void* p = nullptr;
-    if (cudaMalloc(&p, bytes) != cudaSuccess) return nullptr;
+    const cudaError_t err = cudaMalloc(&p, bytes);
+    if (err != cudaSuccess) {
+      oom = err == cudaErrorMemoryAllocation;
+      (void)cudaGetLastError();
+      return nullptr;
+    }
     buffers.push_back(p);
     if (cudaMemset(p, value, bytes) != cudaSuccess || cudaDeviceSynchronize() != cudaSuccess) return nullptr;
     return (char*)p;
@@ -59,11 +86,9 @@ protected:
 /* A fully contiguous span past 2 GiB is one row whose pitch is its width, past cudaDevAttrMaxPitch. */
 TEST_F(Memcpy3DTest, ContiguousRowAbove2GiB) {
   const size_t width = 2 * kGiB + 4096;
-  if (!haveFree(2 * width)) GTEST_SKIP() << "needs " << 2 * width << " B of free device memory";
-  char* src = alloc(width, 0x5a);
-  char* dst = alloc(width, 0);
-  ASSERT_NE(src, nullptr);
-  ASSERT_NE(dst, nullptr);
+  if (auto why = largeSkipReason(2 * width); !why.empty()) GTEST_SKIP() << why;
+  ALLOC_OR_SKIP(src, width, 0x5a);
+  ALLOC_OR_SKIP(dst, width, 0);
   const size_t probes[] = {0, kGiB, 2 * kGiB - 8, 2 * kGiB, width - 8};
   for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); i++) put(src, probes[i], 0x1000 + i);
 
@@ -82,11 +107,9 @@ TEST_F(Memcpy3DTest, ContiguousRowAbove2GiB) {
 /* A row of exactly INT32_MAX bytes: CUDA documents pitch > max as the error, HIP also rejects pitch == max. */
 TEST_F(Memcpy3DTest, ContiguousRowAtMaxPitch) {
   const size_t width = 0x7fffffff;
-  if (!haveFree(2 * width)) GTEST_SKIP() << "needs " << 2 * width << " B of free device memory";
-  char* src = alloc(width, 0x77);
-  char* dst = alloc(width, 0);
-  ASSERT_NE(src, nullptr);
-  ASSERT_NE(dst, nullptr);
+  if (auto why = largeSkipReason(2 * width); !why.empty()) GTEST_SKIP() << why;
+  ALLOC_OR_SKIP(src, width, 0x77);
+  ALLOC_OR_SKIP(dst, width, 0);
   put(src, 0, 0x1234);
   put(src, width - 8, 0x5678);
 
@@ -107,11 +130,9 @@ TEST_F(Memcpy3DTest, ContiguousRowAtMaxPitch) {
 TEST_F(Memcpy3DTest, ContiguousRowsAbove2GiB) {
   const size_t width = 2 * kGiB + 256;
   const size_t rows = 2;
-  if (!haveFree(2 * rows * width)) GTEST_SKIP() << "needs " << 2 * rows * width << " B of free device memory";
-  char* src = alloc(rows * width, 0x44);
-  char* dst = alloc(rows * width, 0);
-  ASSERT_NE(src, nullptr);
-  ASSERT_NE(dst, nullptr);
+  if (auto why = largeSkipReason(2 * rows * width); !why.empty()) GTEST_SKIP() << why;
+  ALLOC_OR_SKIP(src, rows * width, 0x44);
+  ALLOC_OR_SKIP(dst, rows * width, 0);
   for (size_t r = 0; r < rows; r++) {
     put(src, r * width, 0xf0 + r);
     put(src, r * width + width - 8, 0xf8 + r);
@@ -135,11 +156,9 @@ TEST_F(Memcpy3DTest, ContiguousRowsAbove2GiB) {
 /* A captured copy past the pitch limit must land in the graph: the 3D copy would be rejected at capture. */
 TEST_F(Memcpy3DTest, CapturedContiguousRowAbove2GiB) {
   const size_t width = 2 * kGiB + 4096;
-  if (!haveFree(2 * width)) GTEST_SKIP() << "needs " << 2 * width << " B of free device memory";
-  char* src = alloc(width, 0x66);
-  char* dst = alloc(width, 0);
-  ASSERT_NE(src, nullptr);
-  ASSERT_NE(dst, nullptr);
+  if (auto why = largeSkipReason(2 * width); !why.empty()) GTEST_SKIP() << why;
+  ALLOC_OR_SKIP(src, width, 0x66);
+  ALLOC_OR_SKIP(dst, width, 0);
   put(src, width - 8, 0xabcdef);
 
   cudaMemcpy3DParms cp = {};
@@ -156,8 +175,8 @@ TEST_F(Memcpy3DTest, CapturedContiguousRowAbove2GiB) {
   ASSERT_EQ(cudaSuccess, cudaGraphInstantiateWithFlags(&exec, graph, 0));
   ASSERT_EQ(cudaSuccess, cudaGraphLaunch(exec, stream));
   ASSERT_EQ(cudaSuccess, cudaStreamSynchronize(stream));
-  cudaGraphExecDestroy(exec);
-  cudaGraphDestroy(graph);
+  (void)cudaGraphExecDestroy(exec);
+  (void)cudaGraphDestroy(graph);
 
   EXPECT_EQ(0xabcdefull, get(dst, width - 8));
   EXPECT_EQ(0x6666666666666666ull, get(dst, kGiB));
@@ -169,11 +188,9 @@ TEST_F(Memcpy3DTest, PitchedRowsAbove2GiB) {
   const size_t dstPitch = width + 4096;
   const size_t rows = 2;
   const size_t dstX = 512;
-  if (!haveFree(rows * width + (rows + 1) * dstPitch)) GTEST_SKIP() << "not enough free device memory";
-  char* src = alloc(rows * width, 0x11);
-  char* dst = alloc((rows + 1) * dstPitch, 0);
-  ASSERT_NE(src, nullptr);
-  ASSERT_NE(dst, nullptr);
+  if (auto why = largeSkipReason(rows * width + (rows + 1) * dstPitch); !why.empty()) GTEST_SKIP() << why;
+  ALLOC_OR_SKIP(src, rows * width, 0x11);
+  ALLOC_OR_SKIP(dst, (rows + 1) * dstPitch, 0);
   for (size_t r = 0; r < rows; r++) {
     put(src, r * width, 0xa0 + r);
     put(src, r * width + width - 8, 0xb0 + r);
@@ -204,11 +221,9 @@ TEST_F(Memcpy3DTest, NarrowRowsWithPitchAbove2GiB) {
   const size_t srcPitch = 2 * kGiB + 256;
   const size_t srcX = 128;
   const size_t srcBytes = (height * depth - 1) * srcPitch + srcX + width;
-  if (!haveFree(srcBytes)) GTEST_SKIP() << "needs " << srcBytes << " B of free device memory";
-  char* src = alloc(srcBytes, 0x33);
-  char* dst = alloc(width * height * depth, 0);
-  ASSERT_NE(src, nullptr);
-  ASSERT_NE(dst, nullptr);
+  if (auto why = largeSkipReason(srcBytes); !why.empty()) GTEST_SKIP() << why;
+  ALLOC_OR_SKIP(src, srcBytes, 0x33);
+  ALLOC_OR_SKIP(dst, width * height * depth, 0);
   for (size_t r = 0; r < height * depth; r++) {
     put(src, r * srcPitch + srcX, 0xd0 + r);
     put(src, r * srcPitch + srcX + width - 8, 0xe0 + r);

@@ -116,12 +116,28 @@ static inline bool m2nSameTensorTopology(const ncclDistTensor_t& a, const ncclDi
  * HIP also rejects a pitch equal to it). A >= 2 GiB contiguous pack/unpack span or a >= 2 GiB outer stride
  * produces one. Such a copy is issued as one flat cudaMemcpyAsync when it is contiguous on both sides, else row by
  * row: rows are then >= 2 GiB apart, so there are few of them. */
-inline cudaError_t m2nMemcpy3DAsync(const cudaMemcpy3DParms* p, cudaStream_t stream) {
+inline size_t m2nMaxPitch() {
+  /* Cached per thread and device: on HIP the attribute query rebuilds the whole device-properties struct, and
+   * this runs for every copy in the PACK and PIPE submission loops. */
+  static thread_local int cachedDev = -1;
+  static thread_local size_t cachedPitch = 0;
   int dev = 0, attr = 0;
-  size_t maxPitch = 0x7fffffff;
-  if (cudaGetDevice(&dev) == cudaSuccess && cudaDeviceGetAttribute(&attr, cudaDevAttrMaxPitch, dev) == cudaSuccess &&
-      attr > 0)
-    maxPitch = (size_t)attr;
+  if (cudaGetDevice(&dev) != cudaSuccess) {
+    (void)cudaGetLastError();
+    return 0x7fffffff;
+  }
+  if (dev == cachedDev) return cachedPitch;
+  if (cudaDeviceGetAttribute(&attr, cudaDevAttrMaxPitch, dev) != cudaSuccess || attr <= 0) {
+    (void)cudaGetLastError();
+    return 0x7fffffff;
+  }
+  cachedDev = dev;
+  cachedPitch = (size_t)attr;
+  return cachedPitch;
+}
+
+inline cudaError_t m2nMemcpy3DAsync(const cudaMemcpy3DParms* p, cudaStream_t stream) {
+  const size_t maxPitch = m2nMaxPitch();
   const cudaPitchedPtr& s = p->srcPtr;
   const cudaPitchedPtr& d = p->dstPtr;
   if (s.pitch < maxPitch && d.pitch < maxPitch) return cudaMemcpy3DAsync(p, stream);

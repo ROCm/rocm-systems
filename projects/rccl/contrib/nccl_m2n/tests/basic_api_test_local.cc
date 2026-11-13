@@ -686,6 +686,8 @@ static void shutdownLocalRuntime() {
 
 } // namespace
 
+const char* basicApiLocalFilter() { return gCli.filter; }
+
 int main(int argc, char** argv) {
   gCli = basicApiParseCli(argc, argv, "%s [options] [--gtest_* flags]", true, false);
   gCases = buildAllTestCases();
