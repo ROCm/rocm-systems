@@ -300,24 +300,6 @@ static ncclResult_t DefaultGinConnectOnce(struct ncclComm*) { return ncclSuccess
 std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce = DefaultGinConnectOnce;
 
 ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) { return g_devrGinConnectOnce(comm); }
-// Seam: reached only for a devComm that requests a GIN connection.
-// ncclDevrCommCreateInternal calls this after swapping the thread into relaxed
-// stream-capture mode. The default succeeds; a test that needs GIN setup to fail
-// installs its own so the capture-mode restore can be observed.
-static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
-                                           struct ncclDevComm*, uint32_t) {
-  return ncclSuccess;
-}
-std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
-    g_devrGinDevCommSetup = DefaultGinDevCommSetup;
-ASSERT_HOOK_MATCHES_PROD(g_devrGinDevCommSetup, ncclGinDevCommSetup);
-
-ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
-                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
-  return g_devrGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
-}
-ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
-void ncclGinDevCommClearFields(struct ncclDevComm*) {}
 #ifdef ENABLE_ROCSHMEM_GIN
 // Only referenced from ncclDevrCommCreateInternal's SDMA signal-binding block,
 // which is itself behind ENABLE_ROCSHMEM_GIN. Copied from develop's
@@ -506,6 +488,39 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 // this binary, so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
 
+// The real ncclGinDevCommSetup records a non-zero ginContextCount and a valid
+// ginHandles[0] on success. The create-failure path frees GIN only once setup has
+// succeeded (ginDevCommSetupDone); ginContextCount stays non-zero so the
+// ncclGinDevCommClearFields check has something to clear. The default mirrors
+// that contract so a test driving the create path past the GIN gate can observe
+// the leak-release.
+static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
+                                           struct ncclDevComm* devComm, uint32_t) {
+  devComm->ginContextCount = 1;
+  devComm->ginHandles[0] = reinterpret_cast<void*>(0xACE);
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
+    g_devrGinDevCommSetup = DefaultGinDevCommSetup;
+ASSERT_HOOK_MATCHES_PROD(g_devrGinDevCommSetup, ncclGinDevCommSetup);
+ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
+  return g_devrGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
+}
+
+static ncclResult_t DefaultGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevComm const*)> g_devrGinDevCommFree = DefaultGinDevCommFree;
+ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const* devComm) {
+  return g_devrGinDevCommFree(comm, devComm);
+}
+// The create-failure path clears the devComm's GIN fields after a successful
+// free. dev-runtime-test.cc #includes the real dev_runtime.cc, so this symbol
+// must resolve; zero the fields the real one does.
+void ncclGinDevCommClearFields(struct ncclDevComm* devComm) {
+  devComm->ginContextCount = 0;
+  for (auto& handle : devComm->ginHandles) handle = nullptr;
+}
+
 // The enqueue-rearch job path: collective_stubs.cc reads ncclParamEnqueueRearchEnable
 // through g_loadParam (default 0), so it is reached only when a test sets
 // ENQUEUE_REARCH_ENABLE. The default accepts the job without running or freeing it.
@@ -548,6 +563,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapRecv                           = DefaultBootstrapRecv;
   g_devrGinConnectOnce                          = DefaultGinConnectOnce;
   g_devrGinDevCommSetup                         = DefaultGinDevCommSetup;
+  g_devrGinDevCommFree                          = DefaultGinDevCommFree;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;

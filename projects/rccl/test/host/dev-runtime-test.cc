@@ -7103,9 +7103,11 @@ TEST(DevrGinContextsTotal, ZeroConnectionBackend_TreatedAsOne) {
 // that asks for no resources has no window to create, so its build completes.
 //
 // The rest of the devcomm build -- GIN activation, symmetric-memory window
-// creation, GIN window registration, barriers -- is not covered here beyond a
-// failed GIN activation. The capture-mode test below is the one exception: it
-// reaches ncclGinDevCommSetup and stops there.
+// creation, GIN window registration, barriers -- is covered here only where a
+// late-stage failure must unwind it: LateStageFailureFreesGinDevComm drives GIN
+// setup through to ncclGinDevCommSetup before failing the stream, and
+// GinSetupFails_RestoresStreamCaptureMode reaches ncclGinDevCommSetup and stops
+// there.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
@@ -7212,6 +7214,77 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
 
   EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// ncclGinDevCommSetup allocates GIN contexts/signals and links an
+// ncclGinStateDevComm onto the devComm list. If a later stage of the create
+// fails, the fail path must release them via ncclGinDevCommFree, otherwise they
+// leak. Force the first fallible step after setup -- cudaStreamCreateWithFlags --
+// to fail and assert the free fired exactly once. ncclGinDevCommSetup succeeding
+// sets ginDevCommSetupDone, which is the guard the fail path keys on.
+TEST_F(DevrCommCreateInternalTest, LateStageFailureFreesGinDevComm) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+  ScopedHook streamCreate(g_hipStreamCreateWithFlags,
+                          [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  // Pin that the free gets the devComm setup filled in (the 0xACE handle the
+  // setup default records), not just that the free was called. This fixture
+  // zeroes the compat struct, so it runs on &outDevComm and does not exercise
+  // the compat temporary-buffer path.
+  ScopedHook ginFree(g_devrGinDevCommFree,
+                     [](struct ncclComm*, struct ncclDevComm const* dc) {
+                       EXPECT_EQ(dc->ginHandles[0], reinterpret_cast<void*>(0xACE));
+                       return ncclSuccess;
+                     });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(ginFree.calls, 1);
+  // The free must be followed by ncclGinDevCommClearFields, so the devComm does
+  // not keep a non-zero ginContextCount and a stale handle. Without the clear, a
+  // later ncclDevCommDestroy sees ginContextCount == 1 and frees the already-freed
+  // contexts a second time (dev_runtime.cc ncclDevCommDestroy guard).
+  EXPECT_EQ(outDevComm.ginContextCount, 0u);
+  EXPECT_EQ(outDevComm.ginHandles[0], nullptr);
+}
+
+// Control: GIN not requested, so ncclGinDevCommSetup never runs and
+// ginDevCommSetupDone stays false. The same late-stage failure must NOT call
+// ncclGinDevCommFree -- the ginDevCommSetupDone guard holds it off.
+TEST_F(DevrCommCreateInternalTest, LateStageFailureWithoutGinDoesNotFree) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+
+  ScopedHook streamCreate(g_hipStreamCreateWithFlags,
+                          [](hipStream_t*, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook ginFree(g_devrGinDevCommFree,
+                     [](struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(streamCreate.calls, 1);  // reached the same late-stage failure as the positive test
+  EXPECT_EQ(ginFree.calls, 0);
+}
+
+// The fail-path guard keys on ginDevCommSetupDone, not on ginContextCount. A
+// ncclGinDevCommSetup that records a non-zero ginContextCount and then fails (as
+// gin_host.cc can on an allocation or unsupported-type exit) jumps to fail with
+// the flag still false, so the free must NOT fire. A guard that read
+// ginContextCount instead would wrongly free here -- this is what pins the flag.
+TEST_F(DevrCommCreateInternalTest, GinSetupFailsAfterRecordingContexts_DoesNotFree) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+  ScopedHook ginSetup(g_devrGinDevCommSetup,
+                      [](struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm* devComm,
+                         uint32_t) {
+                        devComm->ginContextCount = 1;  // recorded before the failure, mirroring gin_host.cc
+                        devComm->ginHandles[0] = reinterpret_cast<void*>(0xACE);
+                        return ncclSystemError;
+                      });
+  ScopedHook ginFree(g_devrGinDevCommFree,
+                     [](struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(ginFree.calls, 0);
 }
 
 // ginSignalCount stays at its initializer value of 0. The barrier fakes also
