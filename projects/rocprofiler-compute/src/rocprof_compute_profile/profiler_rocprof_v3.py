@@ -23,7 +23,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
 
     def _live_attach_options(self) -> List[str]:
         args = self.get_args()
-        options = ["--pid", args.attach_pid, "--attach-sync-output"]
+        options = ["--pid", str(args.attach_pid), "--attach-sync-output"]
         if args.attach_duration_msec:
             options += ["--attach-duration-msec", args.attach_duration_msec]
         return options
