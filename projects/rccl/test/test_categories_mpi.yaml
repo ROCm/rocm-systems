@@ -253,6 +253,15 @@ test_categories:
       - "NCCL_P2P_DISABLE=1"
       - "NCCL_SHM_DISABLE=1"
       - "RCCL_DDA_ENABLE=0"
+  quick_env_net_ll128:
+    description: "LL128 Ring AllReduce with every ring hop on the network transport, a regression test for the LL128 post-send fence. P2P and SHM are disabled so one node is enough; both are cached for the process lifetime, so they are set before launch. The test skips without an RDMA NIC with GPU Direct RDMA."
+    test_patterns:
+      - "NetLl128MPITest.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_P2P_DISABLE=1"
+      - "NCCL_SHM_DISABLE=1"
   quick_env_profiler_kernelch_sym:
     description: "KernelPhase events from the symmetric kernels, which are the only ones that stamp phase boundaries. A communicator only gets symmetric support with cuMem on, and NCCL_CUMEM_ENABLE is cached for the process lifetime, so it is set before launch. DDA is disabled as in quick_env_profiler_kernelch."
     test_patterns:
@@ -367,6 +376,8 @@ test_categories:
       - "DtypeSizeCases/PersistentCommunicatorMPITest.*"
       - "BootstrapStrayPeerMPITest.*"
       - "DdaFabricSimple.*"
+      - "DdaAlltoAllInPlaceMPI.*"
+      - "DdaAlltoAllPeerColumnsMPI.*"
       - "DdaFabricBlockCap.*"
       - "DdaFabricBarrierStress.*"
       # Skips under comprehensive: NCCL_LAUNCH_ORDER_IMPLICIT=1 disables DDA, so standard is where it runs.
@@ -532,6 +543,17 @@ test_categories:
       - "NCCL_DEBUG=INFO"
       - "RCCL_DDA_THRESHOLD=67108864"
       - "RCCL_DDA_A2A_PUSH=0"
+  # Broadcast DDA is opt-in and its caps are cached per process; the suite sizes its cases against these values.
+  standard_env_dda_bc:
+    description: "DDA fabric Broadcast one-shot data checks (LL)."
+    test_patterns:
+      - "DdaMPI_BroadcastLL.*"
+      - "AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "RCCL_DDA_BC=1"
+      - "RCCL_DDA_LL_THRESHOLD=262144"
   comprehensive:
     description: "MPI exhaustive — same suites as standard; env enables implicit launch, CE memcpy paths, and verbose rank logs."
     test_patterns: *mpi_all_patterns
@@ -763,6 +785,7 @@ execution_settings:
     quick_env_profiler_kernelch: 1200
     quick_env_profiler_kernelch_shm: 1200
     quick_env_profiler_kernelch_net: 1200
+    quick_env_net_ll128: 1200
     quick_env_profiler_kernelch_sym: 1200
     quick_env_qpshare_ngroups1: 1200
     quick_env_qpshare_ngroups2: 1200
@@ -784,6 +807,7 @@ execution_settings:
     standard_env_dda_a2a_push_vector: 1200
     standard_env_dda_a2a_push_all_peer: 1200
     standard_env_dda_a2a_pull: 1200
+    standard_env_dda_bc: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200
     full_base: 1200

@@ -336,11 +336,6 @@ class ProxyResponseQueueMicrotest : public ProxyFixture {
     for (auto* e = state_.expectedResponses; e; e = e->next) ids.push_back(e->opId);
     return ids;
   }
-  static void* Heap(int v) {
-    int* p = (int*)std::malloc(sizeof(int));
-    *p = v;
-    return p;
-  }
   ncclProxyState state_ = {};
   char a_, b_, c_;
 };
@@ -368,13 +363,17 @@ TEST_F(ProxyResponseQueueMicrotest, Enqueue_AllocationFailures) {
   EXPECT_EQ(Ids(), (std::vector<void*>{&a_}));
 }
 
-TEST_F(ProxyResponseQueueMicrotest, Store_CopiesAndFreesTheBufferAndMarksDone) {
+// Store only copies: the caller keeps (and frees) its buffer, so a stack value works.
+TEST_F(ProxyResponseQueueMicrotest, Store_CopiesTheBufferAndMarksDone) {
   ASSERT_EQ(expectedProxyResponseEnqueue(&state_, &a_, 0), ncclSuccess);
   ASSERT_EQ(expectedProxyResponseEnqueue(&state_, &b_, sizeof(int)), ncclSuccess);
-  ASSERT_EQ(expectedProxyResponseStore(&state_, &b_, Heap(42), sizeof(int), ncclRemoteError), ncclSuccess);
+  int value = 42;
+  ASSERT_EQ(expectedProxyResponseStore(&state_, &b_, &value, sizeof(int), ncclRemoteError), ncclSuccess);
+  value = 0;
   auto* e = state_.expectedResponses->next;
   EXPECT_TRUE(e->done);
   EXPECT_EQ(e->res, ncclRemoteError);
+  EXPECT_NE(e->respBuff, (void*)&value);
   EXPECT_EQ(*(int*)e->respBuff, 42);
   ASSERT_EQ(expectedProxyResponseStore(&state_, &a_, nullptr, 0, ncclSuccess), ncclSuccess);
   EXPECT_TRUE(state_.expectedResponses->done);
@@ -382,17 +381,17 @@ TEST_F(ProxyResponseQueueMicrotest, Store_CopiesAndFreesTheBufferAndMarksDone) {
 
 TEST_F(ProxyResponseQueueMicrotest, Store_RejectsSizeMismatchRepeatsAndUnknownIds) {
   ASSERT_EQ(expectedProxyResponseEnqueue(&state_, &a_, sizeof(int)), ncclSuccess);
-  void* buf = Heap(1);
-  EXPECT_EQ(expectedProxyResponseStore(&state_, &a_, buf, 2, ncclSuccess), ncclInternalError);
+  int buf = 1;
+  EXPECT_EQ(expectedProxyResponseStore(&state_, &a_, &buf, 2, ncclSuccess), ncclInternalError);
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "got 2, expected 4"));
   EXPECT_FALSE(state_.expectedResponses->done);
-  ASSERT_EQ(expectedProxyResponseStore(&state_, &a_, buf, sizeof(int), ncclSuccess), ncclSuccess);
-  buf = Heap(2);
-  EXPECT_EQ(expectedProxyResponseStore(&state_, &a_, buf, sizeof(int), ncclSuccess), ncclInternalError);
+  ASSERT_EQ(expectedProxyResponseStore(&state_, &a_, &buf, sizeof(int), ncclSuccess), ncclSuccess);
+  buf = 2;
+  EXPECT_EQ(expectedProxyResponseStore(&state_, &a_, &buf, sizeof(int), ncclSuccess), ncclInternalError);
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "already completed"));
-  EXPECT_EQ(expectedProxyResponseStore(&state_, &b_, buf, sizeof(int), ncclSuccess), ncclInternalError);
+  EXPECT_EQ(*(int*)state_.expectedResponses->respBuff, 1);
+  EXPECT_EQ(expectedProxyResponseStore(&state_, &b_, &buf, sizeof(int), ncclSuccess), ncclInternalError);
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "doesn't match any expected response"));
-  free(buf);
 }
 
 TEST_F(ProxyResponseQueueMicrotest, Dequeue_ReturnsOnlyCompletedResponsesAndUnlinksThem) {
@@ -401,8 +400,9 @@ TEST_F(ProxyResponseQueueMicrotest, Dequeue_ReturnsOnlyCompletedResponsesAndUnli
   int out = 0, found = 7;
   EXPECT_EQ(expectedProxyResponseDequeue(&state_, &b_, &out, &found), ncclSuccess);
   EXPECT_EQ(found, 0);
-  ASSERT_EQ(expectedProxyResponseStore(&state_, &b_, Heap(5), sizeof(int), ncclRemoteError), ncclSuccess);
-  ASSERT_EQ(expectedProxyResponseStore(&state_, &a_, Heap(6), sizeof(int), ncclSuccess), ncclSuccess);
+  int five = 5, six = 6;
+  ASSERT_EQ(expectedProxyResponseStore(&state_, &b_, &five, sizeof(int), ncclRemoteError), ncclSuccess);
+  ASSERT_EQ(expectedProxyResponseStore(&state_, &a_, &six, sizeof(int), ncclSuccess), ncclSuccess);
   EXPECT_EQ(expectedProxyResponseDequeue(&state_, &b_, &out, &found), ncclRemoteError);
   EXPECT_EQ(found, 1);
   EXPECT_EQ(out, 5);
@@ -1854,6 +1854,7 @@ TEST_F(ProxyCallMicrotest, Poll_BuffersOtherResponsesAndServesThemFromTheQueue) 
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, &other), ncclSuccess);
   EXPECT_EQ(out, 7);
   EXPECT_EQ(ps_.expectedResponses, nullptr);
+  EXPECT_EQ(LeftoverCount(), 0u);  // including the buffer the stored response was received into
 }
 
 TEST_F(ProxyCallMicrotest, Poll_SocketFailuresBeforeOrInsideTheHeader) {
@@ -1886,16 +1887,25 @@ TEST_F(ProxyCallMicrotest, Poll_OtherResponseAllocationOrRecvFailures) {
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Could not allocate proxy response buffer"));
 }
 
-// The failed recv returns without freeing the response buffer it allocated. Pins a leak; a fix flips this pin.
-TEST_F(ProxyCallMicrotest, Poll_KnownBug_RecvFailureLeaksTheResponseBuffer) {
+TEST_F(ProxyCallMicrotest, Poll_RecvFailureFreesTheBufferForAnotherOpsResponse) {
   int theirs = Peer(1);
   char other;
   int value = 1, out;
   Reply(theirs, &other, ncclSuccess, &value, sizeof(value));
   g_sock.recvFailAt = 0;
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclRemoteError);
-  EXPECT_EQ(LeftoverCount(), 1u);
-  FreeUnitLeftovers();
+  EXPECT_EQ(LeftoverCount(), 0u);
+}
+
+// A response for an opId nobody expects cannot be stored, so its buffer is freed rather than kept.
+TEST_F(ProxyCallMicrotest, Poll_UnstorableResponseFreesItsBuffer) {
+  int theirs = Peer(1);
+  char other;
+  int value = 1, out;
+  Reply(theirs, &other, ncclSuccess, &value, sizeof(value));
+  EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclInternalError);
+  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "doesn't match any expected response"));
+  EXPECT_EQ(LeftoverCount(), 0u);
 }
 
 TEST_F(ProxyCallMicrotest, Poll_UnexpectedOpIdsFail) {
@@ -2514,11 +2524,11 @@ TEST_F(ProxyServiceLoopMicrotest, Service_ClosedOrFailingPeersAreDroppedWhileOth
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Connection closed by localRank"));
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Failed to execute operation Setup"));
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Force closing peer=0"));
-  FreeUnitLeftovers();  // the queued setup, see Service_KnownBug_StopLeaksAForceClosedPeersQueuedSetup
+  EXPECT_EQ(LeftoverCount(), 0u);
 }
 
-// Force-closing a peer at stop does not drain its queued setup. Pins a leak; a fix flips this pin.
-TEST_F(ProxyServiceLoopMicrotest, Service_KnownBug_StopLeaksAForceClosedPeersQueuedSetup) {
+// Force-closing a peer at stop drains its queued setup like any other close.
+TEST_F(ProxyServiceLoopMicrotest, Service_StopDrainsAForceClosedPeersQueuedSetup) {
   int pending = Connect();
   int stopper = Connect();
   Init(pending, {0, 1, 0, 0, 0}, &op1_);
@@ -2529,8 +2539,8 @@ TEST_F(ProxyServiceLoopMicrotest, Service_KnownBug_StopLeaksAForceClosedPeersQue
   });
   ncclProxyService(&ps_);
   EXPECT_EQ(Response<ncclProxyInitResp>(pending, &op1_).connId, 0);
-  EXPECT_EQ(LeftoverCount(), 1u);
-  FreeUnitLeftovers();
+  EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Force closing peer=0"));
+  EXPECT_EQ(LeftoverCount(), 0u);
 }
 
 TEST_F(ProxyServiceLoopMicrotest, Service_ClosingAPeerDrainsAllItsPendingOps) {

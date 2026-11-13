@@ -18,8 +18,12 @@ extern "C" {
 // fma(A[Q+1],B[L],C[Q]); P2 computes fma(A[Q+2],B[L],C[L]). Source lanes are
 // read even if inactive in EXEC. Each operand uses one VGPR; whole VGPRs may
 // alias. Supports NEG_A/B/C, CLAMP, with no ABS or OMOD.
-// Loose semantics only. Requires host nearest-even rounding and denormals
-// enabled; host exception flags may change. NaN payloads are unspecified.
+// Compatibility resolves to Loose. Bit-exact semantics evaluate every lane on
+// the guest path and report no FP status. All semantics require the default
+// host FP environment (nearest-even rounding, denormals enabled); host
+// exception flags may change. A selected NaN keeps its sign and payload.
+// IEEE_MODE quiets FP32 results; DX10_CLAMP_OFF preserves NaNs under CLAMP.
+// For RDNA4, set IEEE_MODE and leave DX10_CLAMP_OFF clear.
 // Guest rounding and precision-specific input/output denormal controls are honored.
 // WAIT_EXP belongs to the scheduler and is not an arithmetic modifier.
 // Both architectures specify that interpolation reports no GPU exceptions.
@@ -30,8 +34,8 @@ int rj_arith_v_interp_p2_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c);
 
-// Wave64 retains the same quad broadcasts, modifiers and loose numerical
-// semantics. Source reads include inactive lanes within each quad.
+// Wave64 retains the quad broadcasts, modifiers and semantics of the Wave32
+// forms above. Source reads include inactive lanes within each quad.
 int rj_arith_v_interp_p10_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, const uint32_t *const *c);
@@ -46,9 +50,10 @@ int rj_arith_v_interp_p2_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
 // RTZ forms override guest rounding toward zero; other forms use guest rounding.
 // Guest denormal controls apply to both forms. RJ_ARITH_FP16_OVFL
 // saturates finite P2 overflow; RTZ P2 already saturates finite overflow.
-// Input infinities remain infinite unless clamped. Loose semantics only;
-// host nearest-even rounding and enabled denormals are required. Host rounding
-// mode is preserved; host exception flags may change. NaN payloads are unspecified.
+// Input infinities remain infinite unless clamped. Semantics, including the
+// default host FP environment requirement, follow the FP32 forms. Host rounding
+// mode is preserved; host exception flags may change. P10 uses the FP32 NaN
+// controls above. P2 always quiets a NaN when narrowing to FP16 and honors DX10_CLAMP_OFF.
 // Guest rounding and precision-specific input/output denormal controls are honored.
 // WAIT_EXP belongs to the scheduler and is not an arithmetic modifier.
 // Both architectures specify that interpolation reports no GPU exceptions.
@@ -68,8 +73,8 @@ int rj_arith_v_interp_p2_rtz_f16_f32_w32(uint64_t flags, uint32_t exec_mask,
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          const uint32_t *const *c);
 
-// Wave64 retains the same quad broadcasts, modifiers and loose numerical
-// semantics. Source reads include inactive lanes within each quad.
+// Wave64 retains the quad broadcasts, modifiers and semantics of the Wave32
+// forms above. Source reads include inactive lanes within each quad.
 int rj_arith_v_interp_p10_f16_f32_w64(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, const uint32_t *const *b,

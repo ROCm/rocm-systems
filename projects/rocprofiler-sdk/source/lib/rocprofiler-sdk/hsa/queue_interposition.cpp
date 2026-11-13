@@ -869,7 +869,11 @@ is_dispatch_packet(const rocprofiler_packet& pkt)
     if(_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) return true;
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
     if(_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
-        return pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH;
+        return pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+               || pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD
+#    endif
+            ;
 #endif
     return false;
 }
@@ -1062,8 +1066,9 @@ completion_monitor_loop(completion_monitor& mon)
 
         if(mon.active.empty())
         {
-            // Nothing to watch; block on the wake signal alone until a producer registers work or
-            // requests shutdown. Both bump that signal, so no timeout is needed to notice either.
+            // Nothing to watch; wait on the wake signal alone until a producer registers work or
+            // requests shutdown. Both bump it with a host-side store that raises its event without
+            // a GPU interrupt, so unlike the wait below this one can sleep.
             get_core_table()->hsa_signal_wait_relaxed_fn(mon.wake_signal,
                                                          HSA_SIGNAL_CONDITION_NE,
                                                          0,
@@ -1095,18 +1100,16 @@ completion_monitor_loop(completion_monitor& mon)
         ROCP_TRACE << fmt::format("[queue-interposition] waiting on {} completion signal(s) + wake",
                                   mon.active.size());
 
-        // Waits indefinitely on purpose. Every event that can change the answer already returns
-        // this call: a completion satisfies its own LT condition, and both
-        // register_pending_completion and stop_completion_monitor bump wake_signal. The satisfying
-        // index and value are discarded -- wait_any names at most one signal, and the active set is
-        // rescanned below because several may have dropped at once.
+        // Polls rather than sleeps: a sleeping wait needs a GPU interrupt that may never arrive,
+        // parking here forever. Costs a busy core while any batch is in flight. The timeout must
+        // stay indefinite -- older runtimes index their own array with the expiry sentinel.
         [[maybe_unused]] auto satisfying_value = hsa_signal_value_t{0};
         get_amd_ext_table()->hsa_amd_signal_wait_any_fn(static_cast<uint32_t>(signals.size() - 1),
                                                         signals.data(),
                                                         conds.data(),
                                                         values.data(),
                                                         std::numeric_limits<uint64_t>::max(),
-                                                        HSA_WAIT_STATE_BLOCKED,
+                                                        HSA_WAIT_STATE_ACTIVE,
                                                         &satisfying_value);
 
         // Regardless of which signal woke us, scan the active set for completed waits:
@@ -1215,7 +1218,11 @@ write_interceptor(Queue*                                queue,
         else if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
         {
             const auto& ext_packet = packets_arr[i].ext_kernel_dispatch;
-            if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+            if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+               || ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD
+#    endif
+            )
             {
                 ++num_dispatch_packets;
             }
@@ -1361,7 +1368,11 @@ write_interceptor(Queue*                                queue,
             if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
             {
                 const auto& ext_packet = _packets[i].ext_kernel_dispatch;
-                if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+                if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+                   || ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD
+#    endif
+                )
                     is_ext_kernel_dispatch = true;
             }
 #endif

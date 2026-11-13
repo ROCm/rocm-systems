@@ -11,6 +11,7 @@ from each instruction's mnemonic name and its encoding format name.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import IntEnum
 from typing import TYPE_CHECKING
 
 import re
@@ -485,9 +486,7 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     # code is only visible to the fetcher once this instruction retires.
     if name == 'S_ICACHE_INV':
         return InstructionSemantics(name, 'icache_inv')
-    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_INCPERFLEVEL,
-    # S_DECPERFLEVEL — all are either no-ops or system/debug instructions that
-    # don't affect compute simulation correctness.
+    # Remaining scalar control instructions use target-specific execution hooks.
     return InstructionSemantics(name, 'true_nop')
 
 
@@ -702,6 +701,10 @@ def _derive_sop2(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SOP2 (Scalar ALU Two-operand) instruction."""
     if name == 'S_CBRANCH_G_FORK':
         return InstructionSemantics(name, 'cbranch_fork', operation='indirect')
+    # The legacy trap return. The MR ISA gives it no pseudocode; the generator
+    # emits the S_RFE_B64 body for it (see _TRAP_RETURN_NAMES).
+    if name == 'S_RFE_RESTORE_B64':
+        return InstructionSemantics(name, 'true_nop')
 
     # CSELECT
     if name.startswith('S_CSELECT_'):
@@ -765,7 +768,7 @@ def _derive_sop2(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'scalar_binop', operation=op, data_type=dtype, sets_scc=scc
         )
-    # Unrecognized SOP2 instructions (S_RFE_RESTORE, …)
+    # Unrecognized SOP2 instructions
     return InstructionSemantics(name, 'nop')
 
 
@@ -1612,7 +1615,7 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     # 64-bit shift/add (VOP3-only)
     if name == 'V_LSHL_ADD_U64':
         return InstructionSemantics(
-            name, 'vector_ternary', operation='lshl_add', data_type='u64'
+            name, 'vector_ternary', operation='lshl_add_u64', data_type='u64'
         )
     if name == 'V_LSHLREV_B64':
         return InstructionSemantics(
@@ -2015,29 +2018,38 @@ _FLAT_DATA_MAP: dict[str, tuple[int, int, bool]] = {
 }
 
 
-_TRANSPOSE_LOAD_MAP: dict[str, tuple[str, int, int, int]] = {
-    # suffix -> (semantic suffix, elem_size, num_elems, transpose kind)
-    # elem_size/num_elems describe the raw VGPR result size in dwords.
-    # transpose kind is amdgpu::TransposeKind: TR_B4=1, TR_B6=2,
-    # B64_TR_B8=3 (CDNA4 MFMA default), TR16_B128=4, B64_TR_B16=5,
-    # WMMA_TR_B8=6 (RDNA4 16x16 matrix layout), and
-    # CDNA5_DS_TR_B8=7 (gfx1250 DS matrix layout). All textual aliases use the
-    # same default here; instruction-family and ISA-profile overrides below
-    # select the architecture's routing.
-    'B64_TR_B4': ('b4', 4, 2, 1),
-    'B96_TR_B6': ('b6', 4, 3, 2),
-    'B64_TR_B8': ('b8', 4, 2, 3),
-    'B64_TR_B16': ('b16', 4, 2, 5),
-    'TR4_B64': ('b4', 4, 2, 1),
-    'TR6_B96': ('b6', 4, 3, 2),
-    'TR8_B64': ('b8', 4, 2, 3),
-    'TR16_B128': ('b16', 4, 4, 4),
-    'TR_B64': ('b8', 4, 2, 3),
-    'TR_B128': ('b16', 4, 4, 4),
+class TransposeKind(IntEnum):
+    """Cross-lane layouts shared with amdgpu::TransposeKind in vm/amdgpu/mem_state.h."""
+
+    TR_B4 = 1
+    TR_B6 = 2
+    B64_TR_B8 = 3
+    TR16_B128 = 4
+    B64_TR_B16 = 5
+    WMMA_TR_B8 = 6
+    CDNA5_DS_TR_B8 = 7
+    CDNA4_TR_B4 = 8
+    CDNA4_TR_B6 = 9
+
+
+_TRANSPOSE_LOAD_MAP: dict[str, tuple[str, int, int, TransposeKind]] = {
+    # Suffix, dword result shape, and default layout before ISA-specific overrides.
+    'B64_TR_B4': ('b4', 4, 2, TransposeKind.TR_B4),
+    'B96_TR_B6': ('b6', 4, 3, TransposeKind.TR_B6),
+    'B64_TR_B8': ('b8', 4, 2, TransposeKind.B64_TR_B8),
+    'B64_TR_B16': ('b16', 4, 2, TransposeKind.B64_TR_B16),
+    'TR4_B64': ('b4', 4, 2, TransposeKind.TR_B4),
+    'TR6_B96': ('b6', 4, 3, TransposeKind.TR_B6),
+    'TR8_B64': ('b8', 4, 2, TransposeKind.B64_TR_B8),
+    'TR16_B128': ('b16', 4, 4, TransposeKind.TR16_B128),
+    'TR_B64': ('b8', 4, 2, TransposeKind.B64_TR_B8),
+    'TR_B128': ('b16', 4, 4, TransposeKind.TR16_B128),
 }
 
 
-def _derive_transpose_load_info(upper: str) -> tuple[str, int, int, int] | None:
+def _derive_transpose_load_info(
+    upper: str,
+) -> tuple[str, int, int, TransposeKind] | None:
     for suffix, info in _TRANSPOSE_LOAD_MAP.items():
         if upper.endswith(suffix):
             return info
@@ -2079,7 +2091,7 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'MIN_NUM_F64': ('fmin', 2),
     'MAX_NUM_F64': ('fmax', 2),
     'COND_SUB': ('cond_sub', 1),
-    'ORDERED_ADD': ('add', 2),
+    'ORDERED_ADD': ('ordered_add', 2),
     # RDNA3+ typed MIN/MAX (suffix stripped from the full instruction name).
     'MIN_I32': ('smin', 1),
     'MIN_U32': ('umin', 1),
@@ -2149,11 +2161,17 @@ def _derive_flat_atomic_info(suffix: str, is_x2: bool) -> tuple[str, int, int] |
 def _derive_flat(name: str) -> InstructionSemantics | None:
     """Derive semantics for a FLAT (Flat/Global/Scratch memory) instruction."""
     upper = name.upper()
-    if upper in ('GLOBAL_LOAD_LDS_DWORDX3', 'GLOBAL_LOAD_LDS_DWORDX4'):
-        size, count, _ = _FLAT_DATA_MAP[upper.removeprefix('GLOBAL_LOAD_LDS_')]
-        return InstructionSemantics(
-            name, 'global_load_lds', elem_size=size, num_elems=count
-        )
+    if upper.startswith('GLOBAL_LOAD_LDS_'):
+        suffix = upper.removeprefix('GLOBAL_LOAD_LDS_')
+        if suffix in ('DWORDX3', 'DWORDX4'):
+            size, count, signed = _FLAT_DATA_MAP[suffix]
+            return InstructionSemantics(
+                name,
+                'global_load_lds',
+                elem_size=size,
+                num_elems=count,
+                sign_extend=signed,
+            )
     if upper.startswith('SCRATCH_LOAD_LDS_'):
         suffix = upper.removeprefix('SCRATCH_LOAD_LDS_')
         info = _FLAT_DATA_MAP.get(suffix)
@@ -2278,7 +2296,7 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                 if transpose_info:
                     kind, esz, ne, transpose_kind = transpose_info
                     if kind == 'b8':
-                        transpose_kind = 6
+                        transpose_kind = TransposeKind.WMMA_TR_B8
                     return InstructionSemantics(
                         name,
                         'flat_load',

@@ -3313,6 +3313,8 @@ DecodeResult decodeGlobalAtomicAddF32Flat(const MachineInst *opcode,
       "global_atomic_add_f32", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->glc) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_ATOMIC_ADD_F32 cannot return its result on CDNA1";
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds) [[unlikely]]
     return emit_error.emit() << "GLOBAL_ATOMIC_ADD_F32 has an invalid LDS destination";
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
@@ -3380,6 +3382,8 @@ DecodeResult decodeGlobalAtomicPkAddF16Flat(const MachineInst *opcode,
       "global_atomic_pk_add_f16", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->glc) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_ATOMIC_PK_ADD_F16 cannot return its result on CDNA1";
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds) [[unlikely]]
     return emit_error.emit() << "GLOBAL_ATOMIC_PK_ADD_F16 has an invalid LDS destination";
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
