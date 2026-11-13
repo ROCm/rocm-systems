@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <variant>
 #include <vector>
 
 namespace rocprofsys::parser
@@ -59,12 +60,14 @@ struct config_slot
  * vector<string> for an enumeration_list. An integer value is not returned as a
  * double.
  *
- * set() parses the value, then locks to store it. Do not call reset() at the same
- * time as set(), get(), or on_change(). Callbacks run in registration order after
- * the value is stored and the lock is released. A callback receives the canonical
- * text and may call set(). A callback that throws leaves the new value stored and
- * skips later callbacks for that change. clear() drops stored values and does not
- * run callbacks.
+ * Thread safety: reads may run concurrently with each other and with set() and
+ * set_value(). Callbacks run in registration order after the value is stored and the
+ * lock is released, so if several threads set the same parameter at the same time,
+ * the order in which their callbacks run is not specified. Make all writes to a
+ * parameter from one thread when callbacks must see its values in order. A callback
+ * receives the canonical text and may call set(). A callback that throws leaves the
+ * new value stored and skips later callbacks for that change. clear() drops stored
+ * values and does not run callbacks.
  */
 class config_store
 {
@@ -72,9 +75,6 @@ public:
     using change_callback_t = std::function<void(std::string_view, std::string_view)>;
 
     explicit config_store(schema config_schema);
-
-    /// Replace the schema and drop stored values and callbacks.
-    void reset(schema config_schema);
 
     /**
      * Store a textual value for a known parameter.
@@ -125,15 +125,27 @@ private:
         config_source  source = config_source::default_value;
     };
 
-    [[nodiscard]] std::shared_ptr<const schema> locked_schema() const;
-    [[nodiscard]] std::optional<stored_value>   lookup(std::string_view param_id) const;
+    [[nodiscard]] std::optional<stored_value> lookup(std::string_view param_id) const;
     void store_parsed(std::string_view param_id, config_value_t value,
                       config_source source);
 
-    std::shared_ptr<const schema>                                      m_schema;
+    const std::shared_ptr<const schema>                                m_schema;
     mutable std::shared_mutex                                          m_mutex;
     std::map<std::string, stored_value, std::less<>>                   m_values;
     std::map<std::string, std::vector<change_callback_t>, std::less<>> m_callbacks;
 };
+
+template <config_value ValueT>
+std::optional<ValueT>
+config_store::get_as(std::string_view param_id) const
+{
+    const auto stored = lookup(param_id);
+    if(!stored)
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<ValueT>(&stored->value);
+    return value == nullptr ? std::nullopt : std::optional<ValueT>{ *value };
+}
 
 }  // namespace rocprofsys::parser
