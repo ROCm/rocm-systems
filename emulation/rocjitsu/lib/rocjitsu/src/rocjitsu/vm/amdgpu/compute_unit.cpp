@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
+#include "rocjitsu/vm/amdgpu/compute_unit_isa.h"
 
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
@@ -393,38 +394,6 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
   }
   return std::make_unique<Base>(std::move(name), config, memory, l2);
 }
-
-namespace {
-template <typename F>
-util::Result with_compute_unit_isa(rj_code_arch_t arch, F &&fn,
-                                   util::DiagnosticEmitter emit_error) {
-  switch (arch) {
-    // \NPI new ISA family: add its architecture-to-ISA mapping here.
-  case ROCJITSU_CODE_ARCH_CDNA1:
-    return fn.template operator()<cdna1::Isa>();
-  case ROCJITSU_CODE_ARCH_CDNA2:
-    return fn.template operator()<cdna2::Isa>();
-  case ROCJITSU_CODE_ARCH_CDNA3:
-    return fn.template operator()<cdna3::Isa>();
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    return fn.template operator()<cdna4::Isa>();
-  case ROCJITSU_CODE_ARCH_RDNA1:
-    return fn.template operator()<rdna1::Isa>();
-  case ROCJITSU_CODE_ARCH_RDNA2:
-    return fn.template operator()<rdna2::Isa>();
-  case ROCJITSU_CODE_ARCH_RDNA3:
-    return fn.template operator()<rdna3::Isa>();
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return fn.template operator()<rdna3_5::Isa>();
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return fn.template operator()<rdna4::Isa>();
-  case ROCJITSU_CODE_ARCH_CDNA5:
-    return fn.template operator()<cdna5::Isa>();
-  default:
-    return emit_error.emit() << "Unsupported architecture for ComputeUnit";
-  }
-}
-} // namespace
 
 util::Result ComputeUnitCore::validate(const Config &config, util::DiagnosticEmitter emit_error) {
   if (config.target != ROCJITSU_CODE_TARGET_INVALID) {
