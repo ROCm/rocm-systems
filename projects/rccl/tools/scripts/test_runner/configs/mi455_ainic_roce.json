@@ -1474,6 +1474,11 @@
           "test_filter": "TransportTest.*"
         },
         {
+          "name": "P2pCeChannelCap",
+          "description": "Copy Engine P2P channel, connection, step-size, and shared-stream policies",
+          "test_filter": "P2pCeChannelCapTests.*"
+        },
+        {
           "name": "XmlTest",
           "description": "XML topology parsing tests",
           "test_filter": "XmlTest.*"
@@ -6942,6 +6947,11 @@
           "name": "DDA_Fabric_AllReduce_LL_TwoShot",
           "description": "DDA fabric AllReduce LL two-shot tier past the one-shot threshold: analytic sum and the two-shot COLL log line",
           "test_filter": "DdaMPI_AllReduce.LLTwoShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL_SpreadTwoShot",
+          "description": "DDA fabric AllReduce LL spread two-shot on the one-shot grid at 1 MiB from 5 ranks: analytic sum and the spread COLL log line",
+          "test_filter": "DdaMPI_AllReduce.LLSpreadTwoShotMultiRank"
         },
         {
           "name": "DDA_Fabric_AllReduce_LL128_OneShot",

@@ -7,7 +7,8 @@
 #pragma once
 
 #include "rocjitsu/isa/instruction.h"
-#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -17,7 +18,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <queue>
+#include <span>
 #include <utility>
 
 namespace rocjitsu {
@@ -27,6 +30,10 @@ class L1ScalarCache;
 class L1VectorCache;
 class L2Cache;
 class Lds;
+
+/// An unaligned native GFX12 LDS atomic faults before any active lane accesses bytes.
+bool native_ds_atomic_misaligned(const VectorMemState &state, rj_code_arch_t arch,
+                                 uint64_t request_lanes);
 
 enum class [[nodiscard]] MemoryAccessCompletion {
   Complete,
@@ -49,6 +56,18 @@ using MemoryAccessDeferredCompletion = std::function<void()>;
 class MemoryPipeline {
 public:
   using FaultHandler = std::function<void(Wavefront &, VmAccessOutcome, uint64_t issue_pc)>;
+  /// @brief Admit local memory effects for one process and VM snapshot.
+  /// @details The spans identify the virtual addresses and access kinds this
+  /// issue attempt may touch. A non-Complete outcome prevents the local effect;
+  /// a returned permit keeps admitted ingress live until the effect ends.
+  using IngressHandler = std::function<MemoryIngressAdmission(uint32_t, const GpuVmAccess &,
+                                                              std::span<const MemoryIngressSpan>)>;
+  /// Optional cache-only translated System read. A null completion probes
+  /// resident bytes; a completion carries returned bytes' stamp and origin.
+  /// The handler must independently prove current alias, translation, and
+  /// writer authority before returning a hit or installing a line.
+  using PeerCacheReadHandler = std::function<bool(uint32_t, const GpuVmAccess &, uint64_t,
+                                                  std::span<std::byte>, const VmCompletedRead *)>;
   static constexpr std::size_t MAX_WAIT_COUNTER_TOKENS =
       MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS * MemoryCounterObligation::MAX_COUNTER_INCREMENT;
 
@@ -94,6 +113,14 @@ public:
 
   WaitCounterType counter_type() const { return counter_type_; }
   void set_fault_handler(FaultHandler handler) { fault_handler_ = std::move(handler); }
+  /// @brief Install local-effect admission for this pipeline.
+  /// @details With no handler, local access is admitted without a permit.
+  /// The handler receives the issuing process ID, its VM snapshot, and the
+  /// spans to check; any returned permit protects the ensuing local effect.
+  void set_ingress_handler(IngressHandler handler) { ingress_handler_ = std::move(handler); }
+  void set_peer_cache_read_handler(PeerCacheReadHandler handler) {
+    peer_cache_read_handler_ = std::move(handler);
+  }
 
   /// @brief Retain an operation whose first access attempt already returned Unavailable.
   void defer_unavailable(Instruction *inst, Wavefront &wf);
@@ -128,17 +155,37 @@ protected:
       delete inst;
       return;
     }
+    const auto *state = inst->data();
+    if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        inst->data_as<VectorMemState>()->address_range_violation_lanes)
+      wf.record_rdna2_memory_violation();
     release_wait_counters(wf, counters);
+    if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        inst->data_as<VectorMemState>()->flat_memory_violation)
+      wf.complete_flat_memory_violation();
     if (wf.state() == WfState::VM_RETRY)
       wf.set_state(WfState::RUNNING);
     delete inst;
   }
 
+  [[nodiscard]] MemoryIngressAdmission
+  admit_ingress(uint32_t process_id, const GpuVmAccess &access,
+                std::span<const MemoryIngressSpan> spans) const {
+    return ingress_handler_ ? ingress_handler_(process_id, access, spans)
+                            : MemoryIngressAdmission{};
+  }
+  [[nodiscard]] bool has_ingress_handler() const { return static_cast<bool>(ingress_handler_); }
+
   WaitCounterType counter_type_;
   std::queue<PipelineEntry> issued_;
   std::queue<PipelineEntry> returned_;
   FaultHandler fault_handler_;
+  IngressHandler ingress_handler_;
+  PeerCacheReadHandler peer_cache_read_handler_;
 };
+
+/// Suppress only buffer TFE elements inside published nonresident PRT ranges.
+void qualify_buffer_residency(VectorMemState &state, const GpuVmAccess &vm);
 
 /// @brief Scalar memory pipeline for SMEM instructions.
 ///
@@ -162,10 +209,19 @@ private:
 /// @brief Global memory pipeline (V$ → L2 → HBM).
 class GlobalMemPipeline : public MemoryPipeline {
 public:
+  using PreparedAtomicBoundaryHandler =
+      std::function<std::optional<DeviceCacheMaintenanceLease>(uint32_t vmid)>;
+
   GlobalMemPipeline(L1VectorCache *l1, L2Cache *l2)
       : MemoryPipeline(WaitCounterType::VMCNT), l1_(l1), l2_(l2) {}
 
   void set_l2(L2Cache *l2) { l2_ = l2; }
+  /// @brief Use KFD's owning-GPU prepared boundary for local vector atomics.
+  /// @details A retired frontend may decline VMID-zero work so the standalone
+  /// boundary remains usable after KFD teardown.
+  void set_prepared_atomic_boundary_handler(PreparedAtomicBoundaryHandler handler) {
+    prepared_atomic_boundary_handler_ = std::move(handler);
+  }
 
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;
@@ -183,6 +239,7 @@ private:
                                         uint64_t request_lanes);
   L1VectorCache *l1_;
   L2Cache *l2_;
+  PreparedAtomicBoundaryHandler prepared_atomic_boundary_handler_;
 };
 
 /// @brief Local memory pipeline (LDS).
