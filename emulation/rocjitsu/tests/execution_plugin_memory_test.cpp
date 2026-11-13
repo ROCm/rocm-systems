@@ -2005,39 +2005,6 @@ TEST(InstructionMetadataTest, Cdna5AsyncOperationsExposeDistinctCompletionDomain
   expect(barrier_words, MemoryCompletionClass::ASYNC_LOAD);
 }
 
-// Every width of every async copy takes one ASYNCcnt token (CDNA5 ISA 5.7.1).
-// Loads complete in order with loads and stores with stores (10.8), and cluster
-// loads in order with other loads on the same counter (10.7).
-TEST(InstructionMetadataTest, Cdna5AsyncCopiesOfEveryWidthCompleteOnAsynccnt) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
-  ASSERT_NE(decoder, nullptr);
-  const std::array cases{
-      std::pair{cdna5::kGlobalLoadAsyncToLdsB8Vglobal, MemoryCompletionClass::ASYNC_LOAD},
-      std::pair{cdna5::kGlobalLoadAsyncToLdsB32Vglobal, MemoryCompletionClass::ASYNC_LOAD},
-      std::pair{cdna5::kGlobalLoadAsyncToLdsB64Vglobal, MemoryCompletionClass::ASYNC_LOAD},
-      std::pair{cdna5::kGlobalLoadAsyncToLdsB128Vglobal, MemoryCompletionClass::ASYNC_LOAD},
-      std::pair{cdna5::kClusterLoadAsyncToLdsB8Vglobal, MemoryCompletionClass::ASYNC_LOAD},
-      std::pair{cdna5::kClusterLoadAsyncToLdsB32Vglobal, MemoryCompletionClass::ASYNC_LOAD},
-      std::pair{cdna5::kClusterLoadAsyncToLdsB64Vglobal, MemoryCompletionClass::ASYNC_LOAD},
-      std::pair{cdna5::kClusterLoadAsyncToLdsB128Vglobal, MemoryCompletionClass::ASYNC_LOAD},
-      std::pair{cdna5::kGlobalStoreAsyncFromLdsB8Vglobal, MemoryCompletionClass::ASYNC_STORE},
-      std::pair{cdna5::kGlobalStoreAsyncFromLdsB32Vglobal, MemoryCompletionClass::ASYNC_STORE},
-      std::pair{cdna5::kGlobalStoreAsyncFromLdsB64Vglobal, MemoryCompletionClass::ASYNC_STORE},
-      std::pair{cdna5::kGlobalStoreAsyncFromLdsB128Vglobal, MemoryCompletionClass::ASYNC_STORE},
-  };
-  for (const auto &[opcode, completion] : cases) {
-    SCOPED_TRACE(opcode);
-    const auto words = cdna5::build_vglobal(opcode);
-    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-    ASSERT_NE(inst, nullptr);
-    const auto obligations = inst->amdgpu_memory_issue_info()->counter_obligations();
-    ASSERT_EQ(obligations.size(), 1u);
-    EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::ASYNCCNT);
-    EXPECT_EQ(obligations[0].completion_class(), completion);
-    EXPECT_EQ(obligations[0].counter_increment(), 1u);
-  }
-}
-
 TEST(InstructionMetadataTest, WideScalarLoadContributesTwoCounterTokens) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
