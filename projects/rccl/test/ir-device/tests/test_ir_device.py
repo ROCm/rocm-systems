@@ -133,9 +133,11 @@ def test_reduce_copy_typed_exports(ir_bitcode, paths):
 
     The op and type matrix is read from where the thunks are defined (util.h
     type lists, expanded for HIP by the preprocessor, and the
-    NCCL_IR_DEFINE_API_* lines of nccl_device_wrapper__impl.h), so a thunk the
-    Makefile/CMake public-API lists miss is reported as missing, and an
-    exported thunk outside that matrix as unexpected.
+    NCCL_IR_DEFINE_API_* lines of nccl_device_wrapper__impl.h). The bitcode
+    checked here comes from the bindings/ir Makefile, so its public-API list
+    is covered by what the bitcode exports; the -DEMIT_LLVM_IR=ON bitcode is
+    covered by comparing the thunk list bindings/ir/CMakeLists.txt builds
+    with the same matrix.
     """
     ir_dir = os.path.join(paths.RCCL_DIR, "bindings", "ir")
     types = subprocess.run(
@@ -157,12 +159,36 @@ def test_reduce_copy_typed_exports(ir_bitcode, paths):
                         stdout=subprocess.PIPE, universal_newlines=True, check=True).stdout
     exported = set(re.findall(r"^define (?!internal |private )[^@\n]*@(\w+)\(", ir, re.M))
     thunk = re.compile(r"(?:%s)_[A-Z][A-Z0-9]*$" % "|".join(op for _, op in ops))
-    missing = sorted(expected - exported)
-    unexpected = sorted(s for s in exported - expected if thunk.match(s))
-    assert not missing and not unexpected, (
-        f"typed ReduceCopy thunks in {ir_bitcode}: {len(missing)} of {len(expected)} "
-        f"not exported ({', '.join(missing[:6])}); {len(unexpected)} exported but not "
-        f"defined in util.h ({', '.join(unexpected[:6])})")
+    problems = []
+
+    def compare(where, have, only_thunks):
+        missing = sorted(expected - have)
+        unexpected = sorted(s for s in have - expected if not only_thunks or thunk.match(s))
+        if missing:
+            problems.append(f"{where}: {len(missing)} of {len(expected)} missing "
+                            f"({', '.join(missing[:6])})")
+        if unexpected:
+            problems.append(f"{where}: {len(unexpected)} not in the util.h / nccl_device_wrapper__impl.h matrix "
+                            f"({', '.join(unexpected[:6])})")
+
+    compare(f"exported from {ir_bitcode}", exported, only_thunks=True)
+
+    # CMake builds its own public-API list (foreach(_op ...) x foreach(_ty
+    # ${<types var>})); expand it the same way from the set() type lists.
+    with open(os.path.join(ir_dir, "CMakeLists.txt")) as fh:
+        cmake = fh.read()
+    cmake_types = {name: vals.split() for name, vals in
+                   re.findall(r"^\s*set\((RCCL_IR_\w+_TYPES)\s+([^)]*)\)", cmake, re.M)}
+    loops = re.findall(r"foreach\(_op\s+([^)]*)\)\s*foreach\(_ty\s+\$\{(\w+)\}\)", cmake)
+    assert loops and all(var in cmake_types for _, var in loops), (
+        f"could not read the ReduceCopy thunk list from bindings/ir/CMakeLists.txt: "
+        f"loops={loops} types={cmake_types}")
+    compare("bindings/ir/CMakeLists.txt public API",
+            {f"{op}_{t}" for op_list, var in loops
+             for op in op_list.split() for t in cmake_types[var]},
+            only_thunks=False)
+
+    assert not problems, "typed ReduceCopy thunks: " + "; ".join(problems)
 
 
 @pytest.mark.ir_device
