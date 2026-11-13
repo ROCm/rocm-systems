@@ -23,7 +23,7 @@
 #   GIN_PYTEST_HW_CASES  mpirun cases under -k GinSdma (default: 9). Offline
 #                  parser/tier guards do not launch and are not counted.
 #   GIN_PYTEST_REDUCE_HW_CASES  mpirun cases rccl-gin-reduce-pytest selects
-#                  (default: 17)
+#                  (default: 18)
 #   RCCL_TESTS_BCAST_GIN_TYPE  NCCL_GIN_TYPE for Broadcast pytest (default: 7)
 #   RCCL_TESTS_{BCAST,REDUCE}_TIMEOUT_S / RCCL_TESTS_{BCAST,REDUCE}_CONN_RETRIES
 #                  Inner pytest launch budget. Unset → derived so
@@ -43,9 +43,9 @@ GIN_PYTEST_TIMEOUT="${GIN_PYTEST_TIMEOUT:-1800s}"
 # Hardware launches selected by rccl-gin-bcast-pytest (-k GinSdma): 6 segmented
 # (2 sizes x 3 dtypes) + scatter-allgather + 2 hang guards.
 GIN_PYTEST_HW_CASES="${GIN_PYTEST_HW_CASES:-9}"
-# rccl-gin-reduce-pytest: default LL cap (2) + -t 2 (2) + mulsum reject (1) +
+# rccl-gin-reduce-pytest: default LL cap (2) + -t 2 (2) + rejects (2) +
 # SDMA threshold (2) + default SDMA threshold (2) + SDMA tier on two ranks (8).
-GIN_PYTEST_REDUCE_HW_CASES="${GIN_PYTEST_REDUCE_HW_CASES:-17}"
+GIN_PYTEST_REDUCE_HW_CASES="${GIN_PYTEST_REDUCE_HW_CASES:-18}"
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 WORKDIR="$(cd "${script_dir}/../../../.." && pwd)"

@@ -474,7 +474,9 @@ def test_ReduceGinSdmaDefaultThreshold(request, where, tier):
         pytest.skip("no default SDMA tier at {} CTAs with {} ranks".format(ctas, REDUCE_NP))
     if threshold > 64 * MiB:
         pytest.skip("default SDMA threshold {} at {} CTAs is too large for a quick test".format(threshold, ctas))
-    total_bytes = threshold - REDUCE_NP * 16 if where == "below" else threshold
+    # reduce_perf rounds down to whole N*16-byte parts, so round "at" up to one.
+    step = REDUCE_NP * 16
+    total_bytes = threshold - step if where == "below" else -(-threshold // step) * step
     rc, out = _run_reduce_gin_sdma(request, total_bytes, "float", "sum", 0, oop_only=True)
     _assert_reduce_ok(rc, out, "-D 3 default SDMA threshold, {} ({} bytes)".format(where, total_bytes),
                       total_bytes, REDUCE_NP, expect_tier=tier,
@@ -483,6 +485,19 @@ def test_ReduceGinSdmaDefaultThreshold(request, where, tier):
     assert printed and int(printed.group(1)) == threshold, (
         "Reduce -D 3 printed SDMA threshold {}, expected the default {}".format(
             printed.group(1) if printed else "nothing", threshold))
+
+
+# Below 2N CTAs the SDMA tier is off by default, so a size above every default
+# threshold still runs tiled.
+@_reduce_gin_skip
+def test_ReduceGinSdmaDefaultOffBelow2N(request):
+    total_bytes = 32 * MiB
+    rc, out = _run_reduce_gin_sdma(request, total_bytes, "float", "sum", 0,
+                                   ctas=2 * REDUCE_NP - 1, oop_only=True)
+    _assert_reduce_ok(rc, out, "-D 3 at {} CTAs with no SDMA threshold".format(2 * REDUCE_NP - 1),
+                      total_bytes, REDUCE_NP, expect_tier="tiled", in_place=False)
+    assert "SDMA tier off by default below" in (out or ""), (
+        "Reduce -D 3 did not report the SDMA tier off:\n{}".format((out or "")[-2000:]))
 
 
 # The SDMA tier (GinSdmaReduceKernel), forced with a threshold of 0 and run

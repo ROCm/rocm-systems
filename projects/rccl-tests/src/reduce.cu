@@ -41,14 +41,19 @@ static constexpr int kReduceFlagMaxCtas = 128;
 __host__ __device__ inline size_t sdmaReduceTailOffset(int nRanks) {
   return ((size_t)(2 * nRanks + kReduceFlagMaxCtas) * sizeof(uint32_t) + 15) & ~(size_t)15;
 }
+// With at least 2N CTAs, dedicated CTAs issue the puts and owners stage their
+// results for an SDMA copy to the root; ReduceInitData must agree with the kernel.
+__host__ __device__ inline bool sdmaReduceStaged(int ctas, int nRanks) {
+  return ctas >= 2 * nRanks;
+}
 
 // The resolved LL cap, whether the SDMA tier is on, and the handles
 // ncclDevCommCreate fills in. With -p 1 every host thread builds its own
-// requirements and devComms, so each thread
-// keeps its own copy. Otherwise the main thread builds them for every thread
-// before starting the others, so all threads must read that one copy: a
-// thread_local alone leaves threads 1..N-1 with a zero cap and zero handles,
-// and their ranks then launch a different kernel than thread 0's and hang.
+// requirements and devComms, so each thread keeps its own copy. Otherwise the
+// main thread builds them for every thread before starting the others, so all
+// threads must read that one copy: a thread_local alone leaves threads 1..N-1
+// with a zero cap and zero handles, and their ranks then launch a different
+// kernel than thread 0's and hang.
 struct ReduceDevState {
   size_t llMaxBytes;
   bool sdma;
@@ -98,7 +103,7 @@ static size_t reduceSdmaThreshold(int ctas, int nRanks) {
       gin_sdma::parseSize(getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD_REDUCE")),
       gin_sdma::parseSize(getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD")), gin_sdma::kThresholdUnset);
   if (envThreshold != gin_sdma::kThresholdUnset) return envThreshold;
-  if (ctas < 2 * nRanks) return gin_sdma::kThresholdUnset;
+  if (!sdmaReduceStaged(ctas, nRanks)) return gin_sdma::kThresholdUnset;
   if (ctas <= 16) return (size_t)24 << 20;
   if (ctas <= 32) return (size_t)48 << 20;
   if (ctas <= 64) return (size_t)768 << 20;
@@ -225,7 +230,7 @@ testResult_t ReduceInitData(struct threadArgs* args, ncclDataType_t type, ncclRe
       const size_t part = sdmaReducePartPacks(recvcount / pack, nranks) * pack;
       const int owner = sdmaReduceOwnedPart(rank, root, nranks);
       // With issuer CTAs, the root's slot holds the reduced partition instead.
-      const bool staged = deviceCtaCount >= 2 * nranks;
+      const bool staged = sdmaReduceStaged(deviceCtaCount, nranks);
       for (int sender = 0; sender < nranks; sender++) {
         if (sender == rank) continue;
         const int slot = sdmaReduceSlot(sender, rank);
@@ -334,8 +339,7 @@ testResult_t ReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirement
     }
     default:
       if (is_main_proc && is_main_thread)
-        fprintf(stderr, "Reduce has no -D %d; -D 3 picks the LL tier, the tiled kernel or the SDMA tier by message size.
-", deviceImpl);
+        fprintf(stderr, "Reduce has no -D %d; -D 3 picks the LL tier, the tiled kernel or the SDMA tier by message size.\n", deviceImpl);
       return testNotImplemented;
   }
 }
@@ -722,7 +726,7 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
   // CTA that is still busy draining queues. With fewer, CTA b issues for peers
   // q = b (mod G) and then reduces alongside the rest. Each issuing thread
   // waits for its own peer's ready before its first put.
-  const int nIssue = (G >= 2 * nRanks) ? nRanks : 0;
+  const int nIssue = sdmaReduceStaged(G, nRanks) ? nRanks : 0;
   const int nReducers = G - nIssue;
   // With issuer CTAs, owners stage each reduced chunk in the root's slot (just
   // consumed by that reduce) and SDMA it to the root. Storing to the root from
@@ -894,6 +898,8 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
       }
     }
   }
+  // Every wave has read ctaSeq at the top before thread 0 advances it.
+  __syncthreads();
   if (threadIdx.x == 0) ctaSeq[blockIdx.x] = seq;
 }
 
@@ -918,7 +924,7 @@ static int sdmaReduceDmaChunks(size_t partBytes, int ctas, int nRanks) {
     return (end != e && *end == '\0' && v >= 1) ? v : 0L;
   }();
   long k = envChunks;
-  if (k == 0 && ctas >= 2 * nRanks) {
+  if (k == 0 && sdmaReduceStaged(ctas, nRanks)) {
     const size_t units = partBytes >> 21;
     while (k < 16 && (size_t)(k + 1) * (size_t)(k + 1) <= units) k++;
   }
@@ -972,7 +978,7 @@ testResult_t ReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
         const bool inPlace = sendbuff == recvbuff && sendoffset == recvoffset;
         if (reduceUseSdma(bytes, nRanks, inPlace)) {
           const size_t partBytes = sdmaReducePartPacks(bytes / 16, nRanks) * 16;
-          reduceReportTier(deviceCtaCount >= 2 * nRanks ? ReduceLaunchTier::SdmaStaged : ReduceLaunchTier::SdmaCu);
+          reduceReportTier(sdmaReduceStaged(deviceCtaCount, nRanks) ? ReduceLaunchTier::SdmaStaged : ReduceLaunchTier::SdmaCu);
           TESTCHECK(ReduceLaunchDeviceKernel(SPECIALIZE_REDUCE_KERNEL(GinSdmaReduceKernel, type, op), deviceCtaCount, sendbuff, sendoffset, recvbuff, recvoffset, count, op, root, comm, stream,
                                              sdmaReduceDmaChunks(partBytes, deviceCtaCount, nRanks), reduceState().flagHandle));
           return testSuccess;

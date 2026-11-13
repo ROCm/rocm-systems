@@ -99,12 +99,12 @@
       "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3"
     },
     {
-      "_comment": "-D 3 with every out-of-place size on the SDMA tier. -V 16 is at least 2 * NP for NP <= 8, so owners stage results and SDMA them to the root.",
+      "_comment": "-D 3 with every out-of-place size on the SDMA tier, in bfloat16 avg to cover its pre/post ops and narrow packs (the sweep above runs float sum). -V 16 is at least 2 * NP for NP <= 8, so owners stage results and SDMA them to the root.",
       "name": "rccl-gin-reduce-d3-sdma",
       "kind": "rccl-tests",
       "bin": "reduce_perf",
       "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7", "NCCL_GIN_ANVIL_SDMA_THRESHOLD_REDUCE=0"],
-      "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -O 1 -V 16"
+      "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -O 1 -V 16 -d bfloat16 -o avg"
     },
     {
       "_comment": "-m gin_ci selects the tests marked for CI. Keep GIN_PYTEST_REDUCE_HW_CASES in run-gin-ci.sh equal to their case count. No NCCL_GIN_* here: the tests set GIN per case.",
