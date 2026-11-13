@@ -28,6 +28,22 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
   # strips it, and in any case target options are appended last, so /W4 wins.
   target_compile_options(clr_warnings INTERFACE /W4 /WX)
 
+  # ---------------------------------------------------------------------------
+  # TEMPORARY. Unlike every other suppression below, this one is scaffolding and
+  # is meant to be deleted.
+  #
+  # C4100 ("unreferenced formal parameter") is the last outstanding /W4 code in
+  # CLR: 641 diagnostics over 445 lines in 67 files. It has no GCC/Clang
+  # equivalent under -Wall -- it lives in -Wextra -- so no Linux build catches
+  # it and there is no existing cleanup to copy.
+  #
+  # Clearing it is a long sequence of mechanical commits. Suppressing it here
+  # lets /WX be enforced *now*, so that the codes already fixed cannot silently
+  # regress while that work is in flight. Remove this line, not the others, once
+  # the C4100 cleanup lands.
+  # ---------------------------------------------------------------------------
+  target_compile_options(clr_warnings INTERFACE /wd4100)
+
   # C4714: "function marked as __forceinline not inlined". Whether the compiler
   # honours __forceinline is its own decision and not something the source can
   # act on, so this reports a non-defect. It also dominates the Windows warning
