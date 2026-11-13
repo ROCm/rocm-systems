@@ -23,13 +23,13 @@ import pytest
 import roofline.benchmark.benchmark_base as benchmark_base
 import utils.utils_profile as utils_profile
 from roofline import run_benchmark
-from roofline.benchmark.gfx12.benchmark_gfx1201 import (
+from roofline.benchmark.gfx120.benchmark_gfx120_base import percent_of_ceiling
+from roofline.benchmark.gfx120.benchmark_gfx1201 import (
     DRAM_BUS_BITS,
     DRAM_GBPS_PER_PIN,
     INFINITY_CACHE_BYTES,
     L2_ROOF,
     MALL_WORKING_SET_DIVISOR,
-    percent_of_ceiling,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 

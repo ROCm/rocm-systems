@@ -8,13 +8,13 @@
 #
 # -----------------------------------------------------------------------------
 
-from . import benchmark_gfx12_base
+from . import benchmark_gfx125_base
 
 
 # =============================================================================
 # Bench_gfx1250 Class
 # =============================================================================
-class Bench_gfx1250(benchmark_gfx12_base.Bench_gfx12):
+class Bench_gfx1250(benchmark_gfx125_base.Bench_gfx125):
     def __init__(self, device_id: int, cache_sizes: dict, gpu_arch: str) -> None:
         super().__init__(device_id, cache_sizes)
 

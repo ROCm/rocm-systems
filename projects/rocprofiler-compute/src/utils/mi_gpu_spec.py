@@ -453,7 +453,13 @@ class MIGPUSpecs:
 
     @classmethod
     def get_roofline_family(cls, gpu_arch: str) -> str:
-        """Return the roofline/benchmark/ package of gpu_arch, e.g. "gfx9"."""
+        """Return the roofline/benchmark/ package of gpu_arch, e.g. "gfx9".
+
+        gfx12 splits by product line: gfx1201 is in "gfx120" (RDNA4) and gfx1250
+        is in "gfx125".
+        """
+        if gpu_arch.startswith("gfx12"):
+            return gpu_arch[:6]
         return gpu_arch[:-2]
 
     @classmethod
