@@ -488,7 +488,14 @@ __device__ void IPCContext::broadcastmem_linear_thread_puts_wg(
     team_obj->bcast_sequence_number++;
   }
 
-  __syncthreads();
+  // A plain __syncthreads() only releases this workgroup once its own
+  // poll is satisfied, but the shared counter is not tagged by root or
+  // call: a later root's signal to a peer can satisfy an earlier call's
+  // wait before that earlier root's own puts have landed. sync_wg(team)
+  // is a real team-wide barrier (like the wave variant's sync_wave), so
+  // no PE can start a second broadcast until every PE has observed this
+  // one's completion.
+  sync_wg(team);
 }
 
 __device__ void IPCContext::broadcastmem_wg(rocshmem_team_t team,
