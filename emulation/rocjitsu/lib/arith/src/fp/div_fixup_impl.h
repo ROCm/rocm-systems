@@ -11,7 +11,7 @@
 
 #include "common/bits.h"
 #include "fp/float_output.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 
@@ -44,7 +44,9 @@ fixup_value(typename IeeeFormat<Width>::Bits p, typename IeeeFormat<Width>::Bits
   c = inputs[2];
   T bm = b & (F::sign - 1), cm = c & (F::sign - 1), pm = p & (F::sign - 1),
     sign = (b ^ c) & F::sign, result;
-  T overflow = Width == 16 ? F::infinity - saturate : division_overflow<Width>(sign != 0, rounding);
+  // An OMOD overflow follows the guest rounding mode unless FP16_OVFL saturates it, as on gfx1201.
+  T overflow =
+      Width == 16 && saturate ? F::infinity - 1 : division_overflow<Width>(sign != 0, rounding);
   // gfx1100 preserves selected sNaNs with IEEE clear. FP16 active OMOD
   // retains the inherited promoted-half behavior; it is not hardware-qualified.
   const T quiet =

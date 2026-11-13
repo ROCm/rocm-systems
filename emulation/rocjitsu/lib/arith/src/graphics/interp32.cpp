@@ -7,10 +7,10 @@
 // Quad broadcasts follow both RDNA3 and RDNA4 ISA guides, section 12.3.
 
 #include "common/alu.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "graphics/interp.h"
 #include "graphics/interp_guest.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_graphics.h"
 
 #include <stdint.h>
 
@@ -27,25 +27,24 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
           rocjitsu::arith::validate(flags, mode & ~known, rocjitsu::arith::interp_fp_flags)) {
     return error;
   }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
-  if (flags & rocjitsu::arith::interp_fp_flags) {
-    return rocjitsu::arith::interp_guest<P2, false>(flags, exec_mask, mode, d, a, b, c);
+  const auto guest = [&](uint32_t lanes) {
+    return lanes ? rocjitsu::arith::interp_guest<P2, false>(flags, lanes, mode, d, a, b, c)
+                 : RJ_ARITH_SUCCESS;
+  };
+  if (rocjitsu::arith::is_exact(flags) || (flags & rocjitsu::arith::interp_round_denorm_flags)) {
+    return guest(exec_mask);
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::interp32_x86_64_v4<P2>(exec_mask, mode, d[0], a[0], b[0], c[0]);
-    return RJ_ARITH_SUCCESS;
+    return guest(rocjitsu::arith::interp32_x86_64_v4<P2>(exec_mask, mode, d[0], a[0], b[0], c[0]));
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::interp32_x86_64_v3<P2>(exec_mask, mode, d[0], a[0], b[0], c[0]);
-    return RJ_ARITH_SUCCESS;
+    return guest(rocjitsu::arith::interp32_x86_64_v3<P2>(exec_mask, mode, d[0], a[0], b[0], c[0]));
   }
 #endif
   uint32_t result[32];
@@ -54,8 +53,11 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     float x = rocjitsu::arith::alu_input(a[0][quad + (P2 ? 2 : 1)], mode);
     float y = rocjitsu::arith::alu_input(b[0][lane], mode >> 1);
     float z = rocjitsu::arith::alu_input(c[0][P2 ? lane : quad], mode >> 2);
-    result[lane] =
-        rocjitsu::arith::as_bits(rocjitsu::arith::alu_output(__builtin_fmaf(x, y, z), mode));
+    const float value = __builtin_fmaf(x, y, z);
+    if (((exec_mask >> lane) & 1u) && __builtin_isnan(value)) {
+      return guest(exec_mask);
+    }
+    result[lane] = rocjitsu::arith::as_bits(rocjitsu::arith::alu_output(value, mode));
   }
   for (int lane = 0; lane < 32; ++lane) {
     if ((exec_mask >> lane) & 1) {

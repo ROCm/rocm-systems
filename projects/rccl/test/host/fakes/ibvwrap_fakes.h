@@ -29,6 +29,9 @@ extern std::function<struct ibv_mr*(struct ibv_pd* /*pd*/, void* /*addr*/, size_
 extern std::function<struct ibv_mr*(struct ibv_pd* /*pd*/, void* /*addr*/, size_t /*length*/, uint64_t /*iova*/,
                                     int /*access*/)>
     g_ibvDirectRegMrIova2;
+extern std::function<ncclResult_t(struct ibv_mr** /*ret*/, struct ibv_pd* /*pd*/, uint64_t /*offset*/,
+                                  size_t /*length*/, uint64_t /*iova*/, int /*fd*/, int /*access*/)>
+    g_ibvRegDmabufMr;
 extern std::function<ncclResult_t(struct ibv_mr* /*mr*/)> g_ibvDeregMr;
 extern std::function<ncclResult_t(struct ibv_mr** /*ret*/, struct ibv_pd* /*pd*/, void* /*addr*/, size_t /*length*/,
                                   int /*access*/)>

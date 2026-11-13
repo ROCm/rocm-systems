@@ -18,9 +18,8 @@ namespace dda::common {
 // Same cadence as NCCL_SPINS_BEFORE_CHECK_ABORT in src/device/primitives.h.
 constexpr int kDdaSpinsBeforeCheckAbort = 10000;
 
-// Communicator state a DDA kernel needs at run time, currently its abort flag.
-// Passed by value as a kernel argument and held by FabricGpuBarrier /
-// IpcGpuBarrier; new per-launch values go here rather than as extra arguments.
+// Abort flag a DDA kernel takes by value. Keep it one pointer: gfx1250 preloads that into SGPRs,
+// but a larger struct is read from memory and ends the preload of every later kernel argument.
 struct DdaKernelParams {
   const uint32_t* flag; // comm->abortFlagDev; null never reports an abort
 
@@ -36,5 +35,6 @@ struct DdaKernelParams {
     return aborted();
   }
 };
+static_assert(sizeof(DdaKernelParams) == sizeof(void*), "DdaKernelParams must stay one pointer (kernarg preload)");
 
 } // namespace dda::common

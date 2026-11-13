@@ -8,6 +8,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -946,10 +948,6 @@ void VPermlaneBcastB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Bcast, lane,
                                                         selector, lane_group_width, wf.wf_size());
-    if (src_lane >= wf.wf_size()) {
-      amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
-      continue;
-    }
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
                                                                snap[src_lane]);
   }
@@ -970,10 +968,6 @@ void VPermlaneUpB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Up, lane, selector,
                                                         lane_group_width, wf.wf_size());
-    if (src_lane >= wf.wf_size()) {
-      amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
-      continue;
-    }
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
                                                                snap[src_lane]);
   }
@@ -994,10 +988,6 @@ void VPermlaneDownB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Down, lane,
                                                         selector, lane_group_width, wf.wf_size());
-    if (src_lane >= wf.wf_size()) {
-      amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
-      continue;
-    }
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
                                                                snap[src_lane]);
   }
@@ -1018,10 +1008,6 @@ void VPermlaneXorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Xor, lane,
                                                         selector, lane_group_width, wf.wf_size());
-    if (src_lane >= wf.wf_size()) {
-      amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
-      continue;
-    }
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
                                                                snap[src_lane]);
   }
@@ -1081,13 +1067,18 @@ void VPermlanex16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 
 void VPermlaneIdxGenB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint32_t selector = amdgpu::RegisterAccess(wf).read_scalar(src1);
+  uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar(src1);
+  if (exec && inst_.src1 < 256 &&
+      (!lane_group_width || (lane_group_width & (lane_group_width - 1))))
+    wf.report_undefined_behavior("permlane group width is not a power of two");
+  const uint32_t group_mask = lane_group_width - 1u;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t value = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t index = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t src_lane = (lane & ~group_mask) | (index & 63u & group_mask);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
-                                                               value ^ selector);
+                                                               src_lane << 2);
   }
 }
 

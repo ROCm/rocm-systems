@@ -202,7 +202,8 @@ class ExecutionCampaignTest(unittest.TestCase):
                     launches = output / 'launches.txt'
                     previous = launches.read_text() if launches.exists() else ''
                     launch = len(previous.splitlines()) + 1
-                    launches.write_text(previous + f'{threads} {seed} {count}\\n')
+                    with launches.open('a') as launch_log:
+                        launch_log.write(f'{threads} {seed} {count}\\n')
 
                     if launch == 1:
                         for thread in range(threads):

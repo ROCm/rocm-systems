@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/isa_operand_simd_inl.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -25,9 +26,9 @@ namespace {
 constexpr int kM0EncodingValue = 124;
 
 bool is_vgpr_only_type(OperandType t) {
-  return t == OperandType::OPR_VGPR || t == OperandType::OPR_VGPR_OR_LDS ||
-         t == OperandType::OPR_SRC_VGPR || t == OperandType::OPR_ACCVGPR ||
-         t == OperandType::OPR_SRC_ACCVGPR || t == OperandType::OPR_SRC_VGPR_OR_ACCVGPR;
+  return t == OperandType::OPR_VGPR || t == OperandType::OPR_SRC_VGPR ||
+         t == OperandType::OPR_ACCVGPR || t == OperandType::OPR_SRC_ACCVGPR ||
+         t == OperandType::OPR_SRC_VGPR_OR_ACCVGPR;
 }
 
 uint32_t vgpr_index(OperandType opr_type, int ev) {
@@ -78,7 +79,7 @@ std::optional<uint32_t> Isa::resolved_vgpr_offset(OperandType opr_type, int ev) 
 
 bool Isa::simd_capable_value(OperandType opr_type, int ev) {
   return resolved_vgpr_offset(opr_type, ev).has_value() || is_immediate_type(opr_type) ||
-         amdgpu::can_resolve_src_scalar(ev, kM0EncodingValue);
+         amdgpu::can_resolve_src_scalar(ev, ROCJITSU_CODE_ARCH_CDNA1);
 }
 
 bool Operand::simd_capable_exec() const {
@@ -155,6 +156,10 @@ uint32_t Operand::read_scalar_exec(const amdgpu::Wavefront &wf) const {
   // via apply_fieldless_caps() (see fieldless_policy.py).
   if (!reads_value())
     return 0u;
+  if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_LDS_DIRECT &&
+      (opr_type_ == OperandType::OPR_SRC || opr_type_ == OperandType::OPR_SRC_NOLIT ||
+       opr_type_ == OperandType::OPR_VGPR_OR_LDS))
+    return amdgpu::read_lds_direct_src0(wf, 0);
   if (has_literal64_)
     return static_cast<uint32_t>(literal64_value_);
   if (is_immediate_type(opr_type_))
@@ -172,6 +177,10 @@ uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) con
   // via apply_fieldless_caps() (see fieldless_policy.py).
   if (!reads_value())
     return 0u;
+  if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_LDS_DIRECT &&
+      (opr_type_ == OperandType::OPR_SRC || opr_type_ == OperandType::OPR_SRC_NOLIT ||
+       opr_type_ == OperandType::OPR_VGPR_OR_LDS))
+    return amdgpu::read_lds_direct_src0(wf, lane);
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
@@ -220,6 +229,10 @@ uint64_t Operand::read_lane64_exec(const amdgpu::Wavefront &wf, uint32_t lane) c
   // via apply_fieldless_caps() (see fieldless_policy.py).
   if (!reads_value())
     return 0;
+  if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_LDS_DIRECT &&
+      (opr_type_ == OperandType::OPR_SRC || opr_type_ == OperandType::OPR_SRC_NOLIT ||
+       opr_type_ == OperandType::OPR_VGPR_OR_LDS))
+    return amdgpu::read_lds_direct_src0(wf, lane);
   int ev = encoding_value_;
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
@@ -260,6 +273,10 @@ uint64_t Operand::read_scalar64_exec(const amdgpu::Wavefront &wf) const {
   // via apply_fieldless_caps() (see fieldless_policy.py).
   if (!reads_value())
     return 0;
+  if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_LDS_DIRECT &&
+      (opr_type_ == OperandType::OPR_SRC || opr_type_ == OperandType::OPR_SRC_NOLIT ||
+       opr_type_ == OperandType::OPR_VGPR_OR_LDS))
+    return amdgpu::read_lds_direct_src0(wf, 0);
   if (literal32_widening_)
     return widened_literal32_value();
   if (has_literal64_)
