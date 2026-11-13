@@ -18,7 +18,12 @@ from amdisa.codegen.execute.conversion import (
     pk_u8_expr,
     to_fp8_expr,
 )
-from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_shared_fp8
+from amdisa.codegen.execute.fp8_formats import (
+    fp8_helper_name,
+    uses_shared_fp8_narrowing,
+    uses_shared_fp8_widening,
+)
+from amdisa.codegen.execute.required_vgpr import append_required_vgpr_offset
 from amdisa.codegen.execute.vop3_modifiers import (
     apply_output,
     output_policy_decl,
@@ -144,6 +149,30 @@ def _resolved_vgpr_offset_call(opnd: str, uses_vgpr_msb_indexing: bool) -> str:
     return f'Isa::resolved_vgpr_offset({opnd}.opr_type_, {opnd}.encoding_value_)'
 
 
+def _move_lanes(dst: str, src: str, use_rj_arith: bool, is_vop3: bool = False) -> str:
+    if use_rj_arith:
+        # Addressing and DPP source staging have already selected the operands.
+        modifiers = (
+            '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)'
+            if is_vop3
+            else '0u'
+        )
+        return (
+            '  amdgpu::arith::execute_unary32(wf, rj_arith_v_mov_b32_w32, rj_arith_v_mov_b32_w64,\n'
+            f'      wf.cu().arithmetic_flags(), {modifiers},\n'
+            f'      {dst}, {src});'
+        )
+    return '\n'.join(
+        [
+            '  uint64_t exec = wf.exec();',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst}, lane, amdgpu::RegisterAccess(wf).read_lane({src}, lane));',
+            '  }',
+        ]
+    )
+
+
 def gen_vector_movrel(
     dst: list[str],
     src: list[str],
@@ -153,6 +182,10 @@ def gen_vector_movrel(
     supports_dpp8: bool = False,
     supports_sdwa: bool = False,
     inactive_uses_bound_ctrl: bool = False,
+    use_rj_arith: bool = False,
+    is_vop3: bool = False,
+    stage_after_destination: bool = False,
+    apply_dpp_source_modifiers: bool = True,
 ) -> str:
     """Generate M0-relative VGPR move bodies."""
     if op not in ('src', 'dst', 'srcdst', 'srcdst2'):
@@ -168,22 +201,21 @@ def gen_vector_movrel(
         )
         L.append(
             f'  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), '
-            f'{src[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
+            f'{src[0]}.vgpr_count(), wf.vgpr_alloc().count, wf.cu().arch()).has_value();'
         )
         L.append(
             f'  Operand rel_src({src[0]}.size_bits(), OperandType::OPR_VGPR, '
             f'static_cast<int>(rel_src_valid ? rel_src_index : 0u));'
         )
         _stage_movrel_source(
-            L, supports_dpp, supports_dpp8, supports_sdwa, inactive_uses_bound_ctrl
+            L,
+            supports_dpp,
+            supports_dpp8,
+            supports_sdwa,
+            inactive_uses_bound_ctrl,
+            use_rj_arith and not is_vop3 and apply_dpp_source_modifiers,
         )
-        L.append('  uint64_t exec = wf.exec();')
-        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));'
-        )
-        L.append('  }')
+        L.append(_move_lanes(dst[0], 'rel_src', use_rj_arith, is_vop3))
         return '\n'.join(L)
 
     if op in ('srcdst', 'srcdst2'):
@@ -207,11 +239,11 @@ def gen_vector_movrel(
         )
         L.append(
             f'  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, '
-            f'{src[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
+            f'{src[0]}.vgpr_count(), wf.vgpr_alloc().count, wf.cu().arch()).has_value();'
         )
         L.append(
             f'  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, '
-            f'{dst[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
+            f'{dst[0]}.vgpr_count(), wf.vgpr_alloc().count, wf.cu().arch()).has_value();'
         )
         L.append('  if (!rel_dst_valid) return;')
         L.append(
@@ -222,16 +254,14 @@ def gen_vector_movrel(
             f'  Operand rel_dst({dst[0]}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));'
         )
         _stage_movrel_source(
-            L, supports_dpp, supports_dpp8, supports_sdwa, inactive_uses_bound_ctrl
+            L,
+            supports_dpp,
+            supports_dpp8,
+            supports_sdwa,
+            inactive_uses_bound_ctrl,
+            use_rj_arith and not is_vop3 and apply_dpp_source_modifiers,
         )
-        L.append('  uint64_t exec = wf.exec();')
-        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append(
-            '    amdgpu::RegisterAccess(wf).write_lane(rel_dst, lane, '
-            'amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));'
-        )
-        L.append('  }')
+        L.append(_move_lanes('rel_dst', 'rel_src', use_rj_arith, is_vop3))
         return '\n'.join(L)
 
     rel_dst_call = _resolved_vgpr_offset_call(dst[0], uses_vgpr_msb_indexing)
@@ -242,19 +272,25 @@ def gen_vector_movrel(
     )
     L.append(
         f'  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), '
-        f'{dst[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
+        f'{dst[0]}.vgpr_count(), wf.vgpr_alloc().count, wf.cu().arch()).has_value();'
     )
     L.append('  if (!rel_dst_valid) return;')
     L.append(
         f'  Operand rel_dst({dst[0]}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));'
     )
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane(rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
-    )
-    L.append('  }')
+    source = src[0]
+    if stage_after_destination and (supports_dpp or supports_dpp8 or supports_sdwa):
+        L.append(f'  Operand &rel_src = {source};')
+        _stage_movrel_source(
+            L,
+            supports_dpp,
+            supports_dpp8,
+            supports_sdwa,
+            inactive_uses_bound_ctrl,
+            use_rj_arith and not is_vop3,
+        )
+        source = 'rel_src'
+    L.append(_move_lanes('rel_dst', source, use_rj_arith, is_vop3))
     return '\n'.join(L)
 
 
@@ -264,6 +300,7 @@ def _stage_movrel_source(
     supports_dpp8: bool,
     supports_sdwa: bool,
     inactive_uses_bound_ctrl: bool,
+    use_rj_arith: bool,
 ) -> None:
     """Stage modifiers from the M0-adjusted source VGPR, not its encoded base."""
     if not (supports_dpp or supports_dpp8 or supports_sdwa):
@@ -301,6 +338,11 @@ def _stage_movrel_source(
                 '                               rel_staged_src, wf);',
             ]
         )
+    if supports_dpp and use_rj_arith:
+        lines.append(
+            '  amdgpu::dpp::apply_source_modifiers(rel_src, rel_staged_src, wf, '
+            '1ULL << 31, dpp_modifiers_, 0);'
+        )
     lines.append(
         '  ScopedOperandDelegate rel_staged_src_binding('
         'rel_src, rel_staged_src ? &*rel_staged_src : nullptr);'
@@ -308,7 +350,10 @@ def _stage_movrel_source(
 
 
 def gen_vector_swaprel(
-    dst: list[str], src: list[str], uses_vgpr_msb_indexing: bool = False
+    dst: list[str],
+    src: list[str],
+    uses_vgpr_msb_indexing: bool = False,
+    use_rj_arith: bool = False,
 ) -> str:
     """Generate V_SWAPREL_B32 using the two unsigned M0 index fields."""
     d, s = dst[0], src[0]
@@ -321,10 +366,17 @@ def gen_vector_swaprel(
         '  uint32_t rel_dst_offset = (wf.m0() >> 16) & 0x3ffu;',
         '  uint64_t rel_src_index = rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;',
         '  uint64_t rel_dst_index = rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;',
-        f'  if (!amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, {s}.vgpr_count(), wf.vgpr_alloc().count)) return;',
-        f'  if (!amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, {d}.vgpr_count(), wf.vgpr_alloc().count)) return;',
+        f'  if (!amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, {s}.vgpr_count(), wf.vgpr_alloc().count, wf.cu().arch())) return;',
+        f'  if (!amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, {d}.vgpr_count(), wf.vgpr_alloc().count, wf.cu().arch())) return;',
         f'  Operand rel_src({s}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_src_index));',
         f'  Operand rel_dst({d}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));',
+    ]
+    if use_rj_arith:
+        L += [
+            '  amdgpu::arith::execute_swap<false>(wf, wf.cu().arithmetic_flags(), rel_dst, rel_src);',
+        ]
+        return '\n'.join(L)
+    L += [
         '  uint64_t exec = wf.exec();',
         '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
         '    if (!(exec & (1ULL << lane))) continue;',
@@ -522,6 +574,7 @@ def gen_vector_qsad(
     op: str | None,
     uses_vgpr_msb_indexing: bool,
     integer_clamp: bool = False,
+    whole_valu_source: bool = False,
 ) -> str:
     """Generate QSAD/MQSAD four-window sum-of-absolute-difference ops."""
     is_packed = op in ('sad_pk_u16', 'msad_pk_u16')
@@ -551,6 +604,15 @@ def gen_vector_qsad(
                 '      accum[1] = static_cast<uint32_t>(*constant >> 32);',
                 '      accum[2] = 0;',
                 '      accum[3] = 0;',
+                *(
+                    [
+                        f'    }} else if (auto region = amdgpu::RegisterAccess(wf).read_operand_region({src[2]}, uint64_t{{1}} << lane, 4)) {{',
+                        '      for (uint32_t word = 0; word < 4; ++word)',
+                        '        accum[word] = region->lane(word, lane);',
+                    ]
+                    if whole_valu_source
+                    else []
+                ),
                 '    } else {',
                 f'      Operand accum_word = {src[2]};',
                 '      accum_word.size_bits_ = 32;',
@@ -1328,6 +1390,15 @@ def gen_vector_permlane64(dst: list[str], src: list[str]) -> str:
     return '\n'.join(L)
 
 
+def _permlane_group_width(src: list[str], operand: int) -> list[str]:
+    return [
+        f'  uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar({src[operand]});',
+        f'  if (exec && inst_.src{operand} < 256 && '
+        '(!lane_group_width || (lane_group_width & (lane_group_width - 1))))',
+        '    wf.report_undefined_behavior("permlane group width is not a power of two");',
+    ]
+
+
 def gen_vector_permlane_family(dst: list[str], src: list[str], op: str | None) -> str:
     """Generate gfx1250 V_PERMLANE_{BCAST,DOWN,UP,XOR}_B32."""
     if op not in ('bcast', 'down', 'up', 'xor'):
@@ -1338,25 +1409,12 @@ def gen_vector_permlane_family(dst: list[str], src: list[str], op: str | None) -
     L.append('  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
     L.append(f'    snap[i] = amdgpu::RegisterAccess(wf).read_lane({src[0]}, i);')
     L.append(f'  uint32_t selector = amdgpu::RegisterAccess(wf).read_scalar({src[1]});')
-    L.append(
-        f'  uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar({src[2]});'
-    )
-    L.append(
-        '  if (exec && inst_.src2 < 256 && '
-        '(!lane_group_width || (lane_group_width & (lane_group_width - 1))))'
-    )
-    L.append(
-        '    wf.report_undefined_behavior("permlane group width is not a power of two");'
-    )
+    L.extend(_permlane_group_width(src, 2))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     L.append(
         f'    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::{op.title()}, lane, selector, lane_group_width, wf.wf_size());'
     )
-    L.append('    if (src_lane >= wf.wf_size()) {')
-    L.append(f'      amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, 0);')
-    L.append('      continue;')
-    L.append('    }')
     L.append(
         f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, snap[src_lane]);'
     )
@@ -1368,14 +1426,18 @@ def gen_vector_permlane_idx_gen(dst: list[str], src: list[str]) -> str:
     """Generate V_PERMLANE_IDX_GEN_B32."""
     L = []
     L.append('  uint64_t exec = wf.exec();')
-    L.append(f'  uint32_t selector = amdgpu::RegisterAccess(wf).read_scalar({src[1]});')
+    L.extend(_permlane_group_width(src, 1))
+    L.append('  const uint32_t group_mask = lane_group_width - 1u;')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     L.append(
-        f'    uint32_t value = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
+        f'    const uint32_t index = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
     )
     L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, value ^ selector);'
+        '    const uint32_t src_lane = (lane & ~group_mask) | (index & 63u & group_mask);'
+    )
+    L.append(
+        f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, src_lane << 2);'
     )
     L.append('  }')
     return '\n'.join(L)
@@ -1390,6 +1452,7 @@ def _gen_ocp_pk_fp8(
     *,
     is_vop3: bool,
     has_abs: bool,
+    e5m3_select: str | None = None,
 ) -> None:
     """Pack two F32 sources as OCP FP8/BF8 into the OPSEL[3] word, keeping the other."""
     L.insert(
@@ -1397,7 +1460,22 @@ def _gen_ocp_pk_fp8(
     )
     L.append(f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);')
     L.append(f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);')
-    L.append('    uint32_t packed = conversion(s0, s1);')
+    if e5m3_select:
+        # CDNA5 alone interprets CLAMP as a format selector on this opcode.
+        L.append('    uint32_t packed;')
+        L.append(f'    if ({e5m3_select}) {{')
+        L.append(
+            '      uint32_t lo = util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>(s0), wf.fp16_ovfl());'
+        )
+        L.append(
+            '      uint32_t hi = util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>(s1), wf.fp16_ovfl());'
+        )
+        L.append('      packed = lo | (hi << 8);')
+        L.append('    } else {')
+        L.append('      packed = conversion(s0, s1);')
+        L.append('    }')
+    else:
+        L.append('    uint32_t packed = conversion(s0, s1);')
     L.append(
         f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed, true);'
     )
@@ -1544,7 +1622,7 @@ def gen_vector_cvt_pk(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, conversion(s0, s1));'
         )
     elif cls == 'vector_cvt_pk':
-        if op in ('fp8_f32', 'bf8_f32') and uses_shared_fp8(arch_name):
+        if op in ('fp8_f32', 'bf8_f32') and uses_shared_fp8_narrowing(arch_name):
             _gen_ocp_pk_fp8(
                 L,
                 dst,
@@ -1553,8 +1631,9 @@ def gen_vector_cvt_pk(
                 opsel,
                 is_vop3=is_vop3,
                 has_abs=has_abs,
+                e5m3_select=fp8_format_select if op == 'fp8_f32' else None,
             )
-        elif op in ('f32_fp8', 'f32_bf8') and uses_shared_fp8(arch_name):
+        elif op in ('f32_fp8', 'f32_bf8') and uses_shared_fp8_widening(arch_name):
             _gen_ocp_pk_f32_fp8(L, dst, src, op[4:], opsel)
         elif op in ('fp8_f32', 'bf8_f32', 'fp8_f16', 'bf8_f16'):
             # RDNA4 data-conversion prose scopes FP16_OVFL for FP8/BF8
@@ -1595,6 +1674,13 @@ def gen_vector_cvt_pk(
                 L.append(
                     '    float s1 = util::f16_to_f32(static_cast<uint16_t>(raw >> 16));'
                 )
+            if is_vop3 and op.endswith('_f32'):
+                L.extend(vop3_src_mod('s0', 0, has_abs))
+                L.extend(vop3_src_mod('s1', 1, has_abs))
+            elif is_vop3 and arch_name == 'cdna5' and op.endswith('_f16'):
+                # Both packed F16 channels belong to SRC0 (CDNA5 opcodes 882/883).
+                L.extend(vop3_src_mod('s0', 0, has_abs))
+                L.extend(vop3_src_mod('s1', 0, has_abs))
             if conv_e5m3 is not None:
                 L.append(
                     f"    uint32_t lo = ({fp8_format_select}) ? {_fp8_rne_encode_call(conv_e5m3, 's0', use_fp16_ovfl)} : {_fp8_rne_encode_call(conv, 's0', use_fp16_ovfl)};"
@@ -1613,7 +1699,7 @@ def gen_vector_cvt_pk(
                 '    uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);'
             )
             L.append(
-                f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed, true);'
+                f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed);'
             )
         elif op in ('f32_fp8', 'f32_bf8', 'f16_fp8', 'f16_bf8'):
             conv = fp8_helper_name(
@@ -1701,6 +1787,9 @@ def gen_vector_cvt_pk(
         L.append(
             f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
+        if is_vop3 and arch_name == 'cdna4':
+            L.extend(vop3_src_mod('s0', 0, has_abs))
+            L.extend(vop3_src_mod('s1', 1, has_abs))
         L.append(f'    uint32_t lo = util::f32_to_f16_mode(s0, wf.fp16_ovfl());')
         L.append(f'    uint32_t hi = util::f32_to_f16_mode(s1, wf.fp16_ovfl());')
         L.append(
@@ -1713,47 +1802,30 @@ def gen_vector_cvt_pk(
         L.append(
             f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
+        if is_vop3 and arch_name == 'cdna4':
+            L.extend(vop3_src_mod('s0', 0, has_abs))
+            L.extend(vop3_src_mod('s1', 1, has_abs))
         L.append(f'    uint32_t lo = util::f32_to_bf16_rne_mode(s0, wf.fp16_ovfl());')
         L.append(f'    uint32_t hi = util::f32_to_bf16_rne_mode(s1, wf.fp16_ovfl());')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
         )
-    elif cls == 'vector_cvt_sr_pk_f16_f32':
+    elif cls in ('vector_cvt_sr_pk_f16_f32', 'vector_cvt_sr_pk_bf16_f32'):
+        helper = f'amdgpu::fp_mode::{cls.removeprefix("vector_")}'
         L.append(
-            f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
+            f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
         )
         L.append(
-            f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
+            f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
         )
         L.append(
-            f'    uint32_t seed_lo = amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane);'
-        )
-        L.append('    uint32_t seed_hi = util::prng_advance(seed_lo);')
-        L.append(
-            '    uint32_t lo = util::f32_to_f16_sr_mode(s0, seed_lo, wf.fp16_ovfl());'
+            f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane);'
         )
         L.append(
-            '    uint32_t hi = util::f32_to_f16_sr_mode(s1, seed_hi, wf.fp16_ovfl());'
+            f'    uint32_t lo = {helper}(s0, static_cast<uint16_t>(seed), wf.fp16_ovfl());'
         )
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
-        )
-    elif cls == 'vector_cvt_sr_pk_bf16_f32':
-        L.append(
-            f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
-        )
-        L.append(
-            f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
-        )
-        L.append(
-            f'    uint32_t seed_lo = amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane);'
-        )
-        L.append('    uint32_t seed_hi = util::prng_advance(seed_lo);')
-        L.append(
-            '    uint32_t lo = util::f32_to_bf16_sr_mode(s0, seed_lo, wf.fp16_ovfl());'
-        )
-        L.append(
-            '    uint32_t hi = util::f32_to_bf16_sr_mode(s1, seed_hi, wf.fp16_ovfl());'
+            f'    uint32_t hi = {helper}(s1, static_cast<uint16_t>(seed >> 16), wf.fp16_ovfl());'
         )
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo | (hi << 16));'
@@ -1782,6 +1854,8 @@ def gen_vector_cvt_pk(
         L.append(
             f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
         )
+        if is_vop3:
+            L.extend(vop3_src_mod('s0', 0, has_abs))
         L.append(
             f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
         )
@@ -1795,6 +1869,8 @@ def gen_vector_cvt_pk(
         L.append(
             f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
         )
+        if is_vop3:
+            L.extend(vop3_src_mod('s0', 0, has_abs))
         L.append(
             f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
         )
@@ -2180,36 +2256,21 @@ def gen_cvt_fp8(ctx) -> str:
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
-    if uses_shared_fp8(ctx.arch_name) and op in (
-        'pk_fp8_f32',
-        'pk_bf8_f32',
-        'sr_fp8_f32',
-        'sr_bf8_f32',
-        'pk_f32_fp8',
-        'pk_f32_bf8',
-    ):
-        if op.startswith('pk_f32_'):
-            _gen_ocp_pk_f32_fp8(L, dst, src, op[-3:], opsel)
-        elif op.startswith('pk_'):
-            _gen_ocp_pk_fp8(
-                L,
-                dst,
-                src,
-                op[3:6],
-                opsel,
-                is_vop3=is_vop3,
-                has_abs=ctx.has_abs,
-            )
-        else:
-            _gen_ocp_sr_fp8(
-                L,
-                dst,
-                src,
-                op[3:6],
-                opsel,
-                is_vop3=is_vop3,
-                has_abs=ctx.has_abs,
-            )
+    shared_narrow = uses_shared_fp8_narrowing(ctx.arch_name)
+    if shared_narrow and op in ('pk_fp8_f32', 'pk_bf8_f32', 'sr_fp8_f32', 'sr_bf8_f32'):
+        gen = _gen_ocp_pk_fp8 if op.startswith('pk_') else _gen_ocp_sr_fp8
+        gen(
+            L,
+            dst,
+            src,
+            op[3:6],
+            opsel,
+            is_vop3=is_vop3,
+            has_abs=ctx.has_abs,
+            e5m3_select=fp8_format_select if op[3:6] == 'fp8' else None,
+        )
+    elif uses_shared_fp8_widening(ctx.arch_name) and op in ('pk_f32_fp8', 'pk_f32_bf8'):
+        _gen_ocp_pk_f32_fp8(L, dst, src, op[-3:], opsel)
     elif op == 'pk_fp8_f32':
         _gen_pk_narrow_fp8(
             L,
@@ -2217,8 +2278,7 @@ def gen_cvt_fp8(ctx) -> str:
             src,
             _fp8_mode_rne_helper_name(ctx.arch_name, 'util::f32_to_fp8_e4m3_rne'),
             opsel,
-            fp8_format_select=fp8_format_select,
-            fp8_format_fn='util::f32_to_fp8_e5m3_rne_mode',
+            apply_src_mod=is_vop3,
         )
     elif op == 'pk_bf8_f32':
         _gen_pk_narrow_fp8(
@@ -2227,6 +2287,7 @@ def gen_cvt_fp8(ctx) -> str:
             src,
             _fp8_mode_rne_helper_name(ctx.arch_name, 'util::f32_to_bf8_e5m2_rne'),
             opsel,
+            apply_src_mod=is_vop3,
         )
     elif op == 'sr_fp8_f32':
         _gen_sr_narrow_fp8(
@@ -2235,8 +2296,7 @@ def gen_cvt_fp8(ctx) -> str:
             src,
             _fp8_mode_sr_helper_name(ctx.arch_name, 'util::f32_to_fp8_e4m3_sr'),
             opsel,
-            fp8_format_select=fp8_format_select,
-            fp8_format_fn='util::f32_to_fp8_e5m3_sr_mode',
+            apply_src_mod=is_vop3,
         )
     elif op == 'sr_bf8_f32':
         _gen_sr_narrow_fp8(
@@ -2245,6 +2305,7 @@ def gen_cvt_fp8(ctx) -> str:
             src,
             _fp8_mode_sr_helper_name(ctx.arch_name, 'util::f32_to_bf8_e5m2_sr'),
             opsel,
+            apply_src_mod=is_vop3,
         )
     elif op == 'pk_f32_fp8':
         _gen_pk_widen_fp8(
@@ -2274,8 +2335,7 @@ def _gen_pk_narrow_fp8(
     cvt_fn: str,
     opsel: str = '0u',
     *,
-    fp8_format_select: str | None = None,
-    fp8_format_fn: str | None = None,
+    apply_src_mod: bool,
 ) -> None:
     """Pack 2×F32 → 2×FP8/BF8 with OPSEL[3] half selection, R-M-W."""
     L.append(
@@ -2284,21 +2344,16 @@ def _gen_pk_narrow_fp8(
     L.append(
         f'    float s1 = std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)));'
     )
-    if fp8_format_select is not None and fp8_format_fn is not None:
-        L.append(
-            f'    uint8_t r0 = ({fp8_format_select}) ? {fp8_format_fn}(s0, wf.fp16_ovfl()) : {cvt_fn}(s0, wf.fp16_ovfl());'
-        )
-        L.append(
-            f'    uint8_t r1 = ({fp8_format_select}) ? {fp8_format_fn}(s1, wf.fp16_ovfl()) : {cvt_fn}(s1, wf.fp16_ovfl());'
-        )
-    else:
-        L.append(f'    uint8_t r0 = {cvt_fn}(s0, wf.fp16_ovfl());')
-        L.append(f'    uint8_t r1 = {cvt_fn}(s1, wf.fp16_ovfl());')
+    if apply_src_mod:
+        L.extend(vop3_src_mod('s0', 0, True))
+        L.extend(vop3_src_mod('s1', 1, True))
+    L.append(f'    uint8_t r0 = {cvt_fn}(s0, wf.fp16_ovfl());')
+    L.append(f'    uint8_t r1 = {cvt_fn}(s1, wf.fp16_ovfl());')
     L.append(
         '    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);'
     )
     L.append(
-        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed, true);'
+        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed);'
     )
 
 
@@ -2309,8 +2364,7 @@ def _gen_sr_narrow_fp8(
     cvt_fn: str,
     opsel: str = '0u',
     *,
-    fp8_format_select: str | None = None,
-    fp8_format_fn: str | None = None,
+    apply_src_mod: bool,
 ) -> None:
     """Single F32 → FP8/BF8 with stochastic rounding, OPSEL[3:2] byte sel, R-M-W."""
     L.append(
@@ -2319,12 +2373,9 @@ def _gen_sr_narrow_fp8(
     L.append(
         f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
     )
-    if fp8_format_select is not None and fp8_format_fn is not None:
-        L.append(
-            f'    uint8_t result = ({fp8_format_select}) ? {fp8_format_fn}(s0, seed, wf.fp16_ovfl()) : {cvt_fn}(s0, seed, wf.fp16_ovfl());'
-        )
-    else:
-        L.append(f'    uint8_t result = {cvt_fn}(s0, seed, wf.fp16_ovfl());')
+    if apply_src_mod:
+        L.extend(vop3_src_mod('s0', 0, True))
+    L.append(f'    uint8_t result = {cvt_fn}(s0, seed, wf.fp16_ovfl());')
     L.append(f'    uint32_t dst_byte = ({opsel} >> 2) & 0x3;')
     L.append(
         f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({dst[0]}, lane);'
@@ -2344,6 +2395,7 @@ def _gen_ocp_sr_fp8(
     *,
     is_vop3: bool,
     has_abs: bool,
+    e5m3_select: str | None = None,
 ) -> None:
     """One F32 source to OCP FP8/BF8 with stochastic rounding, into the OPSEL[3:2] byte."""
     L.insert(
@@ -2353,7 +2405,12 @@ def _gen_ocp_sr_fp8(
     L.append(
         f'    uint32_t seed = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
     )
-    L.append('    uint32_t result = conversion.stochastic(s0, seed);')
+    if e5m3_select:
+        L.append(
+            f'    uint32_t result = ({e5m3_select}) ? util::f32_to_fp8_e5m3_sr_mode(std::bit_cast<float>(s0), seed, wf.fp16_ovfl()) : conversion.stochastic(s0, seed);'
+        )
+    else:
+        L.append('    uint32_t result = conversion.stochastic(s0, seed);')
     L.append(f'    uint32_t shift = (({opsel} >> 2) & 0x3u) * 8u;')
     L.append(
         f'    uint32_t old = amdgpu::RegisterAccess(wf).read_lane({dst[0]}, lane);'
@@ -2557,10 +2614,10 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
             '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
         )
         L.append(
-            f'    float s0 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)))) / scale);'
+            f'    float s0 = static_cast<float>(amdgpu::widen_scalef32_source(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane), wf.fp_denorm_mode_f32()) / scale);'
         )
         L.append(
-            f'    float s1 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)))) / scale);'
+            f'    float s1 = static_cast<float>(amdgpu::widen_scalef32_source(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane), wf.fp_denorm_mode_f32()) / scale);'
         )
         L.append(f"    uint8_t r0 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's0')};")
         L.append(f"    uint8_t r1 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's1')};")
@@ -2647,10 +2704,10 @@ def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
             '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
         )
         L.append(
-            f'    float s0 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)))) / scale);'
+            f'    float s0 = static_cast<float>(amdgpu::widen_scalef32_source(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane), wf.fp_denorm_mode_f32()) / scale);'
         )
         L.append(
-            f'    float s1 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)))) / scale);'
+            f'    float s1 = static_cast<float>(amdgpu::widen_scalef32_source(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane), wf.fp_denorm_mode_f32()) / scale);'
         )
         L.append(f"    uint8_t r0 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's0')};")
         L.append(f"    uint8_t r1 = {_narrow_rne_encode_call(dst_fmt, cvt_fn, 's1')};")
@@ -2682,12 +2739,9 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     if is_sr_pk_fp4_f32:
         L.append('  auto &cu = wf.cu();')
         L.append('  uint32_t vb = wf.vgpr_alloc().base;')
-        L.append(
-            f'  auto data_src_off = Isa::resolved_vgpr_offset({src[0]}.opr_type_, '
-            f'{src[0]}.encoding_value_);'
+        append_required_vgpr_offset(
+            L, 'data_src_off', src[0], uses_vgpr_msb_indexing=False
         )
-        L.append('  if (!data_src_off)')
-        L.append('    throw util::UnimplementedInst(mnemonic());')
         L.append(
             f'  uint32_t data_src_base = vb + amdgpu::apply_gpr_idx('
             f'wf, *data_src_off, {src[0]}.vgpr_msb_role());'
@@ -2710,11 +2764,11 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
                 f'    uint32_t seed_lo = static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({random_src}, lane));'
             )
             L.append(
-                f'    float val0 = std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({data_src}, lane)));'
+                f'    double val0 = amdgpu::widen_scalef32_source(amdgpu::RegisterAccess(wf).read_lane({data_src}, lane), wf.fp_denorm_mode_f32());'
             )
             L.append(
-                '    float val1 = std::bit_cast<float>('
-                'amdgpu::RegisterAccess(cu).read_vgpr(data_src_base + 1, lane));'
+                '    double val1 = amdgpu::widen_scalef32_source('
+                'amdgpu::RegisterAccess(cu).read_vgpr(data_src_base + 1, lane), wf.fp_denorm_mode_f32());'
             )
         else:
             L.append(
@@ -2724,12 +2778,8 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
                 f'    uint32_t seed_lo = amdgpu::RegisterAccess(wf).read_lane({random_src}, lane);'
             )
         if is_sr_pk_fp4_f32:
-            L.append(
-                '    float s0 = static_cast<float>(static_cast<double>(val0) / scale);'
-            )
-            L.append(
-                '    float s1 = static_cast<float>(static_cast<double>(val1) / scale);'
-            )
+            L.append('    float s0 = static_cast<float>(val0 / scale);')
+            L.append('    float s1 = static_cast<float>(val1 / scale);')
             L.append(
                 f"    uint8_t r0 = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 's0', 'seed_lo')};"
             )
@@ -2788,7 +2838,7 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
         )
         if src_fmt == 'f32':
             L.append(
-                f'    float val = std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({data_src}, lane)));'
+                f'    double val = amdgpu::widen_scalef32_source(amdgpu::RegisterAccess(wf).read_lane({data_src}, lane), wf.fp_denorm_mode_f32());'
             )
         elif src_fmt == 'f16':
             L.append(
@@ -2999,12 +3049,9 @@ def _gen_wide_scalef32(
     if direction == 'narrow' and mode == '2xpk16':
         direct_ops.append(src[1])
     for direct_op in dict.fromkeys(direct_ops):
-        L.append(
-            f'  auto {direct_op}_off = Isa::resolved_vgpr_offset('
-            f'{direct_op}.opr_type_, {direct_op}.encoding_value_);'
+        append_required_vgpr_offset(
+            L, f'{direct_op}_off', direct_op, uses_vgpr_msb_indexing=False
         )
-        L.append(f'  if (!{direct_op}_off)')
-        L.append('    throw util::UnimplementedInst(mnemonic());')
         L.append(
             f'  uint32_t {direct_op}_base = vb + amdgpu::apply_gpr_idx('
             f'wf, *{direct_op}_off, {direct_op}.vgpr_msb_role());'
@@ -3058,11 +3105,9 @@ def _gen_wide_scalef32(
                     idx = j * 2 + half
                     L.append(f'    {{')
                     L.append(
-                        f'      float v = std::bit_cast<float>(rd({s}_base, lane, {j}));'
+                        f'      double v = amdgpu::widen_scalef32_source(rd({s}_base, lane, {j}), wf.fp_denorm_mode_f32());'
                     )
-                    L.append(
-                        f'      float sv = static_cast<float>(static_cast<double>(v) / scale);'
-                    )
+                    L.append(f'      float sv = static_cast<float>(v / scale);')
                     if stochastic:
                         L.append(
                             f"      vals[{idx}] = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 'sv', 'seed')};"
@@ -3078,11 +3123,9 @@ def _gen_wide_scalef32(
             for j in range(32):
                 L.append(f'    {{')
                 L.append(
-                    f'      float v = std::bit_cast<float>(rd({src[0]}_base, lane, {j}));'
+                    f'      double v = amdgpu::widen_scalef32_source(rd({src[0]}_base, lane, {j}), wf.fp_denorm_mode_f32());'
                 )
-                L.append(
-                    f'      float sv = static_cast<float>(static_cast<double>(v) / scale);'
-                )
+                L.append(f'      float sv = static_cast<float>(v / scale);')
                 if stochastic:
                     L.append(
                         f"      vals[{j}] = {_narrow_sr_encode_call(dst_fmt, cvt_fn, 'sv', 'seed')};"

@@ -77,10 +77,7 @@ static ncclResult_t expectedProxyResponseStore(struct ncclProxyState* state, voi
         return ncclInternalError;
       }
 
-      if (respSize > 0) {
-        memcpy(elem->respBuff, respBuff, respSize);
-        free(respBuff);
-      }
+      if (respSize > 0) memcpy(elem->respBuff, respBuff, respSize);
       elem->done = true;
       elem->res = res;
       return ncclSuccess;
@@ -204,6 +201,13 @@ static ncclResult_t asyncProxyOpDequeue(struct ncclProxyLocalPeer* peer, ncclPro
     WARN("Attempting to dequeue null operation");
   }
   return ncclInternalError;
+}
+
+static void asyncProxyOpDrain(struct ncclProxyLocalPeer* peer, int* asyncOpCount) {
+  while (peer->asyncOps != nullptr) {
+    asyncProxyOpDequeue(peer, peer->asyncOps);
+    (*asyncOpCount)--;
+  }
 }
 
 static ncclResult_t allocateArgs(struct ncclProxyProgressState* state, struct ncclProxyArgs** argsptr) {
@@ -1286,8 +1290,8 @@ ncclResult_t ncclProxyConnect(struct ncclComm* comm, int transport, int send, in
 #endif
     struct ncclProxyOps* proxyOps = sharedProxyState->proxyOps + proxyConn->tpLocalRank;
     if (proxyOps->pool == NULL) {
-      NCCLCHECK(ncclShmOpen(poolPath, sizeof(poolPath), sizeof(struct ncclProxyOpsPool), (void**)(&proxyOps->pool),
-                            NULL, -1, &proxyOps->handle));
+      NCCLCHECK(ncclShmOpen(poolPath, sizeof(poolPath), ncclProxyOpsPoolSize(sharedProxyState->tpLocalnRanks),
+                            (void**)(&proxyOps->pool), NULL, -1, &proxyOps->handle));
       proxyOps->nextOps = proxyOps->nextOpsEnd = proxyOps->freeOp = -1;
     }
   }
@@ -1455,6 +1459,7 @@ error:
 ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, void* respBuff,
                                    void* opId) {
   struct ncclProxyState* sharedProxyState = comm->proxyState;
+  void* otherRespBuff = NULL; // Holds another op's response; always freed at exit.
   // Receive the connection pointer from the Proxy
   if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire)) {
     WARN("Comm %p is in abort state", comm);
@@ -1488,35 +1493,40 @@ ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnec
     if (resp.respSize > 0) {
       if (resp.opId != opId) {
         // Unexpected response, need to buffer the socket data
-        respBuff = malloc(resp.respSize);
+        respBuff = otherRespBuff = malloc(resp.respSize);
         if (respBuff == NULL) {
           WARN("Could not allocate proxy response buffer for response opId=%p expected opId=%p response size %d",
                resp.opId, opId, resp.respSize);
-          return ncclSystemError;
+          res = ncclSystemError;
+          goto exit;
         }
       }
       if (respBuff == NULL) {
         WARN("Proxy response buffer is NULL for response opId=%p expected opId=%p response size %d", resp.opId, opId,
              resp.respSize);
-        return ncclInternalError;
+        res = ncclInternalError;
+        goto exit;
       }
-      NCCLCHECK(ncclSocketRecv(sock, respBuff, resp.respSize));
+      NCCLCHECKGOTO(ncclSocketRecv(sock, respBuff, resp.respSize), res, exit);
     }
 
     if (resp.opId == opId) {
       INFO(NCCL_PROXY, "resp.opId=%p matches expected opId=%p", resp.opId, opId);
-      NCCLCHECK(expectedProxyResponseRemove(sharedProxyState, resp.opId));
-      return resp.res;
+      NCCLCHECKGOTO(expectedProxyResponseRemove(sharedProxyState, resp.opId), res, exit);
+      res = resp.res;
     } else {
       INFO(NCCL_PROXY, "Queuing opId=%p respBuff=%p respSize=%d", resp.opId, respBuff, resp.respSize);
-      // Store the result and mark response as completed
-      NCCLCHECK(expectedProxyResponseStore(sharedProxyState, resp.opId, respBuff, resp.respSize, resp.res));
-      return ncclInProgress;
+      // Store the result and mark response as completed. Store copies the payload.
+      NCCLCHECKGOTO(expectedProxyResponseStore(sharedProxyState, resp.opId, respBuff, resp.respSize, resp.res), res,
+                    exit);
+      res = ncclInProgress;
     }
   } else {
     INFO(NCCL_PROXY, "ncclPollProxyResponse Dequeued cached opId=%p", opId);
   }
 
+exit:
+  free(otherRespBuff);
   return res;
 }
 
@@ -1546,7 +1556,7 @@ fail:
 static ncclResult_t proxyProgressInit(struct ncclProxyState* proxyState) {
   struct ncclProxyProgressState* state = &proxyState->progressState;
   if (state->opsPool == NULL) {
-    int size = sizeof(struct ncclProxyOpsPool);
+    size_t size = ncclProxyOpsPoolSize(proxyState->tpLocalnRanks);
     struct ncclProxyOpsPool* pool = NULL;
 
 #if defined(NCCL_OS_LINUX)
@@ -2078,10 +2088,7 @@ void* ncclProxyService(void* _args) {
         (void)ncclSocketClose(sock);
 
         // Drain every op still queued for this peer, not just the failed one.
-        while (peer->asyncOps != nullptr) {
-          asyncProxyOpDequeue(peer, peer->asyncOps);
-          asyncOpCount--;
-        }
+        asyncProxyOpDrain(peer, &asyncOpCount);
         pollfds[s].fd = NCCL_INVALID_SOCKET;
         pollfds[s].events = 0; // Clear events for invalid socket descriptors on Windows
         npeers--;
@@ -2091,6 +2098,7 @@ void* ncclProxyService(void* _args) {
       if (stop != PROXY_RUNNING && pollfds[s].fd != -1) {
         INFO(NCCL_PROXY, "[Proxy Service %d] Force closing peer=%d fd: %d", proxyState->tpRank, s, pollfds[s].fd);
         (void)ncclSocketClose(sock);
+        asyncProxyOpDrain(peer, &asyncOpCount);
         pollfds[s].fd = -1;
         npeers--;
       }
@@ -2267,6 +2275,9 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
     // [RCCL] Host side mirrors of device side NCCL_LL128_LINEELEMS & NCCL_LL128_DATAELEMS
     proxyState->ll128LineElems = comm->ll128LineElems;
     proxyState->ll128DataElems = comm->ll128DataElems;
+    proxyState->cudaArch = comm->cudaArch;
+    proxyState->p2pCeStream = nullptr;
+    proxyState->p2pCeStreamRefs = 0;
 
     comm->proxyState->thread = std::thread(ncclProxyService, comm->proxyState);
     ncclSetThreadName(comm->proxyState->thread, "NCCL Service %2d", comm->cudaDev);

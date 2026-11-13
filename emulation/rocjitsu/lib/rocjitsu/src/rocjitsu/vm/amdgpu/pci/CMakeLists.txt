@@ -23,6 +23,7 @@ set(RJ_PCI_SOURCES
     interrupt_block_model.cpp
     mes_block_model.cpp
     memory_hub_block_model.cpp
+    nbif_hdp_block_model.cpp
     physical_memory_access.cpp
     sdma_block_model.cpp
 )

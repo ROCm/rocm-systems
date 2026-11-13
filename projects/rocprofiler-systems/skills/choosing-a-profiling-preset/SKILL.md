@@ -14,6 +14,21 @@ None to make a first recommendation from the table below. To confirm what a pres
 sets (see "Confirm with `--explain`"), and to run the command, `rocprof-sys-run` or
 `rocprof-sys-sample` must be installed or built.
 
+## Version check
+
+Presets need ROCm Systems Profiler **1.6.0 or newer** (ROCm 7.13.0). Check with
+`rocprof-sys-run --version`, whose first line reads `rocprof-sys-run v<major>.<minor>.<patch> ...`.
+
+| Installed version | What to tell the user |
+| --- | --- |
+| 1.6.0 or newer | `--preset=<name>`, `--list-presets` and `--explain=<name>` all work. |
+| 1.5.x (ROCm 7.12.0) | Presets exist only as `--<name>` flags (for example `--balanced`), with no `--preset=`, `--list-presets` or `--explain`. Give that form and suggest upgrading. |
+| Older than 1.5.0 | No presets. Suggest upgrading, or configure settings by hand. |
+
+A newer preset name may be missing from an older build, so `--list-presets` is the list
+of what the installed version supports. If the version cannot be checked, give the
+`--preset=` command and say it needs 1.6.0 or newer.
+
 ## Terminology
 
 "Trace" and "tracing" mean two different things here. Keep them apart in every answer.

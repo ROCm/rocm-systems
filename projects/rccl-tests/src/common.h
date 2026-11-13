@@ -9,6 +9,8 @@
 #define __COMMON_H__
 
 #define NCCL_TESTS_VERSION "2.19.6"
+// Socket encryption pre-shared key; util.cu redacts it from the JSON report by this name.
+#define NCCL_TESTS_TLS_PSK_ENV "NCCL_TESTS_TLS_PSK"
 
 #include "rccl/rccl.h"
 // nccl_device.h provides the device-API public types referenced below
@@ -112,18 +114,18 @@ typedef enum {
 } while(0)
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) && defined(NCCL_GIN_BACKEND_MASK_ALL)
-// NCCL_GIN_BACKEND_MASK_ALL depends on per-target defines (ENABLE_ROCSHMEM_GIN),
-// so it must expand in the translation unit that compiles the GIN kernels: keep
-// this static. A backend missing from the mask is not caught on the device; its
-// context is dispatched as another backend's and faults.
+// NCCL_GIN_BACKEND_MASK_ALL is computed from the GIN device headers that the
+// rccl install shipped (the rocshmem GDA/SDMA backends self-detect via
+// __has_include), so it must expand in the translation unit that compiles the
+// GIN kernels: keep this static. A backend missing from the mask is not caught on
+// the device; its context is dispatched as another backend's and faults.
 static inline testResult_t testCheckGinBackendCompiled(ncclGinType_t ginType) {
   if (ginType == NCCL_GIN_TYPE_NONE) return testSuccess;
   if ((NCCL_GIN_BACKEND_MASK_ALL >> (unsigned)ginType) & 1u) return testSuccess;
   fprintf(stderr, "The communicator uses GIN type %d (NCCL_GIN_TYPE), but this binary's device code "
                   "was built without that backend (compiled-in backend mask 0x%x). "
-                  "NCCL_GIN_TYPE_ROCSHMEM_GDA (%d) and NCCL_GIN_TYPE_ANVIL_SDMA (%d) need the CMake "
-                  "build with -DENABLE_ROCSHMEM_GIN=ON; the Makefile build (install.sh) does not "
-                  "support them.\n",
+                  "NCCL_GIN_TYPE_ROCSHMEM_GDA (%d) and NCCL_GIN_TYPE_ANVIL_SDMA (%d) need an rccl "
+                  "built with the CMake option ENABLE_ROCSHMEM_GIN=ON (install.sh --rocshmem-gin).\n",
           (int)ginType, (unsigned)(NCCL_GIN_BACKEND_MASK_ALL),
           (int)NCCL_GIN_TYPE_ROCSHMEM_GDA, (int)NCCL_GIN_TYPE_ANVIL_SDMA);
   return testInvalidUsage;
@@ -161,6 +163,15 @@ struct testColl {
   // Other collectives leave it nullptr via aggregate initialization, so no other
   // struct needs to change.
   testResult_t (*deviceTime)(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec);
+  // Optional: for -D != 0 runs, report which device-kernel tier actually serves a
+  // message of `count` elements, given the env-resolved thresholds the kernel uses.
+  // Writes both columns (each <=8 chars, fitting the fixed layout): algo names the
+  // movement pattern with a "T-" prefix marking a rccl-Test device kernel (e.g.
+  // T-DIRECT / T-SAG / T-RING), proto names the transport (GIN / LSA / LL /
+  // LSA/GIN). NULL for collectives without a tiered device kernel. deviceImpl is
+  // the -D value.
+  testResult_t (*getDeviceImplInfo)(int deviceImpl, size_t count, ncclDataType_t type,
+      int nRanks, int lsaSize, char* algoOut, char* protoOut);
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;
@@ -203,10 +214,17 @@ struct testEngine {
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
   testResult_t (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm);
+  /* Optional: fills up to testMaxDevComms reqs (preset to NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER) for
+   * one communicator; *nReqs == 0 skips, testNotImplemented falls back to getDevCommRequirements. */
+  testResult_t (*getMultiDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, int* nReqs, ncclComm_t comm);
 #elif defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   bool (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs);
 #endif
 };
+
+// DevComm slots per GPU: threadArgs::devComms holds gpu i's DevComms at
+// [i*testMaxDevComms, i*testMaxDevComms + nDevComms).
+constexpr int testMaxDevComms = 2;
 
 extern struct testEngine ncclTestEngine;
 
@@ -238,6 +256,7 @@ struct threadArgs {
   ncclComm_t* comms;
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   ncclDevComm* devComms;
+  int nDevComms;  // DevComms created per GPU; 0 when the device implementation skipped
 #endif
   cudaStream_t* streams;
   void** bias;
@@ -271,6 +290,12 @@ struct threadArgs {
   char devtimeAugmentLine[512];
 #endif
 };
+
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+static inline ncclDevComm* testDevComms(struct threadArgs* args, int gpu) {
+  return args->devComms + gpu * testMaxDevComms;
+}
+#endif
 
 typedef testResult_t (*threadFunc_t)(struct threadArgs* args);
 struct testThread {
@@ -394,6 +419,12 @@ extern int devtimeLoopLarge;  // --devtime_loop_large: loop at per-peer >= 64 Mi
 extern int devtimeSkipMid;    // --devtime_skip_mid (-1: min(base skip, 2))
 extern int devtimeSkipLarge;  // --devtime_skip_large (-1: min(base skip, 1))
 extern int devtimeCheck;      // --devtime_check: validate timed-kernel output
+// --gin_resource_sharing: resource-sharing mode the GIN device testers pass to the
+// ncclGin constructor. 0=thread (default; exclusive QP, drops the SQ lock on the
+// rocshmem-GDA bnxt/mlx5 post path), 1=CTA, 2=device (GPU-shared, keeps the lock).
+// Note the CLI numbering is NOT the enum numbering (enum GPU=0, CTA=1, THREAD=2);
+// gin_devtime::ginResourceSharingModeFromCli() maps CLI -> enum.
+extern int ginResourceSharingMode;
 constexpr int test_opNumMax = (int)ncclNumOps + (NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0) ? 1 : 0);
 extern int test_opnum;
 extern int test_typenum;

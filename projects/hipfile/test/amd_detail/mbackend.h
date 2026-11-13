@@ -35,6 +35,7 @@ struct MBackend : Backend {
                 (hipFile::IoType type, std::shared_ptr<IFile>, std::shared_ptr<IBuffer>, size_t, hoff_t,
                  hoff_t),
                 (override));
+    MOCK_METHOD(void, driver_state_teardown, (), (override));
 };
 
 struct MBackendWithFallback : BackendWithFallback {

@@ -913,6 +913,8 @@ void GpuMemory::DropPeer(GpuMemory* peer) {
   if (peer->IsPhysicalCreated()) {
     if (peer->UnmapGpuVirtualAddress(peer->GpuAddress(), peer->Size()) != ErrorCode::Success)
       pr_err("peer unmap failed\n");
+    else if (!peer->GetDevice()->WaitOnPagingFenceFromCpu())
+      pr_err("peer unmap fence wait failed\n");
     peer->Evict();
   }
   delete peer;
@@ -926,9 +928,15 @@ void GpuMemory::ReleasePeers() {
 ErrorCode GpuMemory::MapFromPeer(GpuMemory* owner) {
   if (owner->GetDevice() == device_ || (!owner->IsSystem() && !owner->IsUserMemory()))
     return ErrorCode::UnSupported;
+  // An opened resource's pages are not behind the owner's cpu_addr.
+  if (owner->desc_.flags.is_imported_vram_vmem || owner->desc_.flags.is_imported_vram_ipc)
+    return ErrorCode::UnSupported;
 
   owner_ = owner;
   desc_ = owner->desc_;
+  // The owner holds the share and the Lock2 pin; the peer only wraps the same pages.
+  desc_.flags.is_shared = 0;
+  desc_.flags.is_locked = 0;
   num_allocations_ = owner->NumChunks();
   if (num_allocations_ > 1)
     alloc_handles_ptr_ = new WinAllocationHandle[num_allocations_];

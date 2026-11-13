@@ -74,11 +74,11 @@ enum MemcpyType {
   hipCopyBufferP2P,   //!< Memcpy from device A to device B
 };
 
-struct Graph;
-struct GraphNode;
+class Graph;
+class GraphNode;
 class GraphExecBase;
 class GraphExecSegmented;
-struct UserObject;
+class UserObject;
 class Stream;
 
 #define IHIP_IPC_EVENT_HANDLE_SIZE 32
@@ -628,6 +628,21 @@ namespace hip {
     int deviceId() const { return deviceId_; }
     void retain() const { context_->retain(); }
     void release() const { context_->release(); }
+
+    void IncrementCtxCreateCount() {
+      std::scoped_lock lock(lock_);
+      ++ctxCreateCount_;
+    }
+
+    bool DecrementCtxCreateCount() {
+      std::scoped_lock lock(lock_);
+      if (ctxCreateCount_ == 0) {
+        return false;
+      }
+      --ctxCreateCount_;
+      return true;
+    }
+
     const std::vector<amd::Device*>& devices() const { return context_->devices(); }
     unsigned int getFlags() const { return flags_; }
     void setFlags(unsigned int flags) { flags_ = flags; }
@@ -724,6 +739,7 @@ namespace hip {
     int deviceId_;                             //!< Cached device ID (avoids linear scan)
     Stream* null_stream_ = nullptr;            //!< Default (null/legacy) stream
     unsigned int flags_;                       //!< Device flags (e.g. hipDeviceScheduleSpin)
+    uint32_t ctxCreateCount_ = 0;              //!< Outstanding hipCtxCreate calls
     std::vector<int> userEnabledPeers_;        //!< Peer device IDs enabled via hipEnablePeerAccess
     std::atomic<bool> isActive_{false};        //!< True once any work has been submitted
 
@@ -816,6 +832,17 @@ namespace hip {
   extern int ihipGetDevice();
 
   extern hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
+
+  //! Owner of the storage behind a managed allocation, which determines its lifetime.
+  enum class ManagedMemOwner {
+    kApplication,     //!< Released by the application, or by a device reset
+    kModuleVariable,  //!< Released with the module declaring the __managed__ variable
+  };
+
+  extern hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0,
+                                       bool use_host_ptr = false,
+                                       ManagedMemOwner owner = ManagedMemOwner::kApplication);
+
   extern hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
   extern amd::Memory* getMemoryObject(hip::Device* device, const void* ptr, size_t& offset,

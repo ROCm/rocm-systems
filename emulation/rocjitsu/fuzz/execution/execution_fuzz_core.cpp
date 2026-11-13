@@ -4,6 +4,7 @@
 #include "execution_fuzz_core.h"
 
 #include "embedded_schema.h"
+#include "generated_kernel.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
@@ -45,7 +46,10 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/gws_device.h"
+#include "rocjitsu/vm/amdgpu/instruction_cache.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
+#include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/soc.h"
@@ -82,7 +86,7 @@ constexpr std::array<TargetInfo, static_cast<size_t>(FuzzTarget::Count)> kTarget
     {"gfx950", ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950},
     {"gfx1010", ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_TARGET_INVALID},
     {"gfx1030", ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_TARGET_INVALID},
-    {"gfx1100", ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_INVALID},
+    {"gfx1100", ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_GFX1100},
     {"gfx1151", ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_TARGET_INVALID},
     {"gfx1200", ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1200},
     {"gfx1201", ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201},
@@ -137,13 +141,20 @@ uint64_t next_random(uint64_t &state) {
   return mixed ^ (mixed >> 31);
 }
 
+uint8_t cache_mode_for_seed(uint64_t seed) {
+  // Give the cache choice its own stream so it does not reuse the first instruction draw.
+  constexpr uint64_t kCacheModeSalt = 0x3c79ac492ba7b653ULL;
+  seed ^= kCacheModeSalt;
+  return (next_random(seed) & 1) ? kCacheMemoryBit : 0;
+}
+
 uint32_t initial_value(uint64_t &seed) {
   constexpr uint32_t edges[] = {0, 1, UINT32_MAX, 0x80000000, 0x7fffffff, 31, 32, 63};
   const uint64_t bits = next_random(seed);
   return (bits & 1) ? static_cast<uint32_t>(bits >> 32) : edges[(bits >> 1) % std::size(edges)];
 }
 
-std::string fuzz_config(FuzzTarget target) {
+std::string fuzz_config(FuzzTarget target, bool check_waits) {
   const TargetInfo &info = target_info(target);
   std::string json = R"({"num_threads":1,"async_helper_threads":0,"vm":{"arch":")";
   json += config::arch_to_string(info.arch);
@@ -153,8 +164,10 @@ std::string fuzz_config(FuzzTarget target) {
     json += info.name;
     json += '"';
   }
+  json += R"(},"wait_checking":")";
+  json += check_waits ? "all" : "off";
   json +=
-      R"(},"wait_checking":"off","topology":{"root":{"name":"soc","type":"soc","children":[{"name":"vram","type":"gpu_memory"},{"name":"xcd0","type":"xcd","children":[{"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},{"name":"se0","type":"shader_engine","children":[{"name":"cu0","type":"compute_unit","config":[{"key":"num_wf_slots","value":"1"},{"key":"sgprs_per_wf","value":"128"},{"key":"vgprs_per_wf","value":")";
+      R"(","topology":{"root":{"name":"soc","type":"soc","children":[{"name":"vram","type":"gpu_memory"},{"name":"xcd0","type":"xcd","children":[{"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},{"name":"se0","type":"shader_engine","children":[{"name":"cu0","type":"compute_unit","config":[{"key":"num_wf_slots","value":"1"},{"key":"sgprs_per_wf","value":"128"},{"key":"vgprs_per_wf","value":")";
   json += std::to_string(isa_properties(info.arch).max_addressable_vgprs_per_wf);
   json += R"("},{"key":"lds_size_kb","value":")";
   json += std::to_string(arch_lds_bytes(info.arch) / 1024);
@@ -244,6 +257,8 @@ const std::vector<std::vector<uint8_t>> &instruction_seeds(FuzzTarget target) {
   return seeds[static_cast<size_t>(target)];
 }
 
+} // namespace
+
 uint32_t terminating_instruction(FuzzTarget target) {
   switch (target_info(target).arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
@@ -271,8 +286,6 @@ uint32_t terminating_instruction(FuzzTarget target) {
   }
 }
 
-} // namespace
-
 std::optional<FuzzTarget> parse_target(std::string_view name) {
   for (size_t index = 0; index < kTargets.size(); ++index)
     if (kTargets[index].name == name)
@@ -281,6 +294,10 @@ std::optional<FuzzTarget> parse_target(std::string_view name) {
 }
 
 std::string_view target_name(FuzzTarget target) { return target_info(target).name; }
+
+rj_code_arch_t target_arch(FuzzTarget target) { return target_info(target).arch; }
+
+rj_code_target_id_t target_id(FuzzTarget target) { return target_info(target).id; }
 
 bool targets_cover_amdgpu_execution_registry() {
   for (const IsaTargetDescriptor &descriptor : default_isa_target_registry().targets()) {
@@ -315,46 +332,69 @@ std::optional<FuzzTarget> indexed_target(uint8_t index) {
   return static_cast<FuzzTarget>(index);
 }
 
+std::vector<uint8_t> terminated_program(std::span<const uint8_t> instructions, FuzzTarget target) {
+  const std::unique_ptr<Decoder> decoder = Decoder::create(target_arch(target));
+  if (!decoder)
+    throw std::logic_error("execution fuzz target has no decoder");
+  const std::size_t max_words = decoder->max_instruction_words();
+  std::vector<uint8_t> code(instructions.begin(), instructions.end());
+  while (code.size() % sizeof(uint32_t) != 0)
+    code.push_back(0);
+  // A trailing partial instruction can consume up to max_words - 1 words
+  // before reaching the next instruction boundary.
+  const uint32_t end = terminating_instruction(target);
+  for (std::size_t word = 0; word < max_words; ++word)
+    for (unsigned byte = 0; byte < sizeof(end); ++byte)
+      code.push_back(static_cast<uint8_t>(end >> (8 * byte)));
+  // The last terminator still needs a full CU instruction fetch.
+  const std::size_t padding_bytes =
+      std::max(max_words * sizeof(uint32_t), amdgpu::InstructionCache::kFetchBytes - sizeof(end));
+  code.resize(code.size() + padding_bytes);
+  return code;
+}
+
 namespace {
 RunStats run_input_once(
     std::span<const uint8_t> input, std::span<const uint8_t> instructions,
     FuzzTarget resolved_target,
     const std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> &async_resources) {
-  std::vector<uint8_t> code(instructions.begin(), instructions.end());
-  while (code.size() % sizeof(uint32_t) != 0)
-    code.push_back(0);
-  const uint32_t end = terminating_instruction(resolved_target);
-  for (unsigned byte = 0; byte < 4; ++byte)
-    code.push_back(static_cast<uint8_t>(end >> (8 * byte)));
-  code.resize(code.size() + 16);
+  const std::vector<uint8_t> code = terminated_program(instructions, resolved_target);
 
   // Keep a mapped data island near the program. Address-bearing initial state
   // points into this region while other registers retain high-entropy values.
   std::array<uint8_t, 64 * 1024> data{};
+  const uint8_t control = input.size() >= kHeaderSize ? input[1] : 0;
+  const bool check_waits = (control & kWaitCheckingBit) != 0;
   uint64_t seed = 0x4f1bbcdc6762c73bULL;
-  for (uint8_t byte : input)
+  for (size_t byte_index = 0; byte_index < input.size(); ++byte_index) {
+    // These harness settings leave the initial guest state unchanged.
+    const uint8_t byte = byte_index == 1 ? input[byte_index] & ~(kWaitCheckingBit | kCacheMemoryBit)
+                                         : input[byte_index];
     seed = std::rotl(seed ^ byte, 11) * 0x9e3779b97f4a7c15ULL;
+  }
   seed ^= static_cast<uint64_t>(resolved_target) * 0xd6e8feb86659fd93ULL;
   for (auto &byte : data)
     byte = static_cast<uint8_t>(next_random(seed));
 
   util::StringDiagnostic diagnostic;
-  auto maybe_loaded = config::load_config_from_string(fuzz_config(resolved_target), kEmbeddedSchema,
-                                                      diagnostic.emitter(), 1, async_resources);
+  auto maybe_loaded =
+      config::load_config_from_string(fuzz_config(resolved_target, check_waits), kEmbeddedSchema,
+                                      diagnostic.emitter(), 1, async_resources);
   if (maybe_loaded.failed())
     throw std::runtime_error("execution fuzz config failed: " + diagnostic.message());
   auto loaded = std::move(maybe_loaded).value();
   auto *memory = loaded.memory();
   auto *soc = loaded.soc();
-  auto *cu = soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  amdgpu::Xcd *xcd = soc->xcd(0);
+  auto *cu = xcd->shader_engine(0)->compute_unit(0);
   memory->load_image(code.data(), code.size(), kCodeBase);
   memory->load_image(data.data(), data.size(), kDataBase);
-  amdgpu::GpuVm gpu_vm;
+  amdgpu::GpuVm &gpu_vm = soc->gpu_vm();
   auto translator =
       std::make_shared<BoundedFuzzAddressSpace>(code.size(), static_cast<uint64_t>(data.size()));
   auto physical_memory = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*memory);
-  const auto address_space =
-      gpu_vm.register_address_space(1, translator, physical_memory, [](uint64_t, auto) {});
+  const auto address_space = gpu_vm.register_address_space(
+      1, translator, physical_memory, [](uint64_t, auto) {}, (control & kCacheMemoryBit) != 0);
   if (!address_space)
     throw std::runtime_error("execution fuzz address-space registration failed");
   cu->set_gpu_vm(&gpu_vm);
@@ -381,23 +421,27 @@ RunStats run_input_once(
   wf->set_address_space(address_space);
   wf->set_lds_size(arch_lds_bytes(info.arch));
   const uint64_t initial_exec = next_random(seed) | 1;
-  const uint8_t control = input.size() >= kHeaderSize ? input[1] : 0;
   const bool full_exec = control & (kAsyncSelectBit | kFullExecMaskBit);
   wf->set_exec_raw(full_exec ? (wf->wf_size() == 64 ? ~uint64_t{0} : 0xffffffffu) : initial_exec);
   wf->set_vcc_raw(next_random(seed));
   wf->write_scc(next_random(seed) & 1);
-  // Seed eight complete 64-bit address pairs; each high half is zero.
+  // Seed the generator's 64-bit address pairs with zero high halves.
   for (uint32_t reg = 0; reg < 128; ++reg) {
     const uint32_t value =
-        reg < 16 ? (reg % 2 == 0 ? static_cast<uint32_t>(kDataBase + (reg / 2) * 256) : 0)
-                 : initial_value(seed);
+        reg < kAddressPairRegisterCount
+            ? (reg % 2 == 0 ? static_cast<uint32_t>(kDataBase + (reg / 2) * kAddressPairStrideBytes)
+                            : 0)
+            : initial_value(seed);
     wf->debug_write_sgpr(reg, value);
   }
   for (uint32_t reg = 0; reg < vgprs_per_wf; ++reg) {
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       const uint32_t value =
-          reg < 16
-              ? (reg % 2 == 0 ? static_cast<uint32_t>(kDataBase + (reg / 2) * 256 + lane * 4) : 0)
+          reg < kAddressPairRegisterCount
+              ? (reg % 2 == 0
+                     ? static_cast<uint32_t>(kDataBase + (reg / 2) * kAddressPairStrideBytes +
+                                             lane * sizeof(uint32_t))
+                     : 0)
               : initial_value(seed);
       wf->debug_write_vgpr(reg, lane, value);
     }
@@ -413,6 +457,7 @@ RunStats run_input_once(
     ++stats.inputs_halted;
   else
     ++stats.inputs_stopped;
+  stats.l2_backing_reads = xcd->l2_cache()->backing_read_transactions();
   return stats;
 }
 } // namespace
@@ -474,6 +519,7 @@ RunStats run_input(std::span<const uint8_t> input, std::optional<FuzzTarget> tar
     total.async_executed += result.async_executed;
     total.waves_halted += result.waves_halted;
     total.budget_exhausted += result.budget_exhausted;
+    total.l2_backing_reads += result.l2_backing_reads;
     halted |= result.inputs_halted != 0;
     stopped |= result.inputs_stopped != 0;
   }
@@ -499,26 +545,46 @@ make_async_execution_resources(unsigned helpers) {
   return std::make_shared<amdgpu::matrix_coexecution::ExecutionResources>(helpers);
 }
 
+std::vector<uint8_t> generated_kernel_input(uint64_t seed, size_t size, FuzzTarget target) {
+  if (size < kHeaderSize + kMinGeneratedKernelBytes || size > kMaxInputSize)
+    throw std::invalid_argument("invalid generated kernel input size");
+  std::vector<uint8_t> result(size);
+  result[0] = static_cast<uint8_t>(target);
+  const uint64_t seed_round = seed / kTargets.size();
+  result[1] =
+      kWaitCheckingBit | cache_mode_for_seed(seed) | ((seed_round & 4) ? kFullExecMaskBit : 0);
+  write_generated_kernel(std::span(result).subspan(kHeaderSize), target_info(target).arch, seed);
+  return result;
+}
+
 std::vector<uint8_t> random_input(uint64_t seed, size_t size, std::optional<FuzzTarget> target) {
   if (size == 0 || size > kMaxInputSize)
     throw std::invalid_argument("execution fuzz input size must be 1..1024");
-  // The final size is known. Fill in place to avoid GCC 14/15's -O3 false
-  // positive -Wfree-nonheap-object in vector's reserve/push_back reallocation path.
-  std::vector<uint8_t> result(size);
   size_t cursor = std::min(size, kHeaderSize);
   const uint64_t mode_seed = seed;
   const FuzzTarget resolved_target =
       target.value_or(static_cast<FuzzTarget>(static_cast<uint8_t>(seed) % kTargets.size()));
-  result[0] = static_cast<uint8_t>(resolved_target);
-  constexpr std::array first_wmma =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
-  constexpr std::array second_wmma =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-                         {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
+  // Alternate migrated issuer-only FP8 and still helper-eligible FP4 pairs.
+  const auto opcode =
+      (seed & 16) ? cdna5::kVWmmaF3232x16x128F4Vop3p : cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p;
+  const std::array first_wmma = cdna5::build_vop3p(
+      opcode, {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+  const std::array second_wmma = cdna5::build_vop3p(
+      opcode, {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
   constexpr size_t wmma_prefix_size = (first_wmma.size() + second_wmma.size()) * sizeof(uint32_t);
   const bool async_wmma_bias = target_info(resolved_target).arch == ROCJITSU_CODE_ARCH_CDNA5 &&
                                (seed & 15) == 1 && size - cursor >= wmma_prefix_size;
+  // Vary the generator and EXEC mode across seed rounds. Auto target selection
+  // shares seed bits with the raw-byte predicate, and the WMMA prefix requires
+  // a pinned CDNA5 target.
+  if (size >= kHeaderSize + kMinGeneratedKernelBytes && !async_wmma_bias && (seed & 7) != 0 &&
+      (seed / kTargets.size()) % 4 == 2)
+    return generated_kernel_input(seed, size, resolved_target);
+
+  // The final size is known. Fill in place to avoid GCC 14/15's -O3 false
+  // positive -Wfree-nonheap-object in vector's reserve/push_back reallocation path.
+  std::vector<uint8_t> result(size);
+  result[0] = static_cast<uint8_t>(resolved_target);
   size_t protected_prefix = cursor;
   if (async_wmma_bias) {
     auto append = [&](const auto &words) {
@@ -544,15 +610,18 @@ std::vector<uint8_t> random_input(uint64_t seed, size_t size, std::optional<Fuzz
       std::copy_n(instruction.begin(), count, result.begin() + cursor);
       cursor += count;
     }
-    // One sparse mutation per input explores operand and opcode neighborhoods
-    // without turning every first instruction into a decode rejection.
+    // Bias some mutations toward instructions the wave is likely to reach.
+    // Keep whole-stream mutations as well, and leave the WMMA prefix intact.
     if (protected_prefix < result.size()) {
-      const size_t byte = protected_prefix + next_random(seed) % (result.size() - protected_prefix);
+      const size_t tail_size = result.size() - protected_prefix;
+      const size_t window = (mode_seed & 0x100) ? std::min<size_t>(32, tail_size) : tail_size;
+      const size_t byte = protected_prefix + next_random(seed) % window;
       result[byte] ^= static_cast<uint8_t>(uint8_t{1} << (next_random(seed) & 7));
     }
   }
   if (result.size() >= kHeaderSize) {
-    uint8_t mode = static_cast<uint8_t>((mode_seed >> 4) & kAsyncSelectBit);
+    uint8_t mode =
+        cache_mode_for_seed(mode_seed) | static_cast<uint8_t>((mode_seed >> 4) & kAsyncSelectBit);
     if (async_wmma_bias)
       mode |= kFullExecMaskBit;
     if (((mode_seed >> 5) & 3) == 3)

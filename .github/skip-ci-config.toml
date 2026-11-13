@@ -87,6 +87,17 @@ common = [
     # Test drivers invoked only by those therock-rccl-* workflows; nothing in
     # the build consumes them.
     "projects/rccl/ci/scripts/*",
+    # RCCL's CPU-only host microtests. rccl-host-unit-tests.yml builds and runs
+    # them on every RCCL PR, and TheRock's RCCL GPU tests never run them. Must
+    # match the "host-only unit tests" rule in .github/scripts/rccl_change_sets.py
+    # (rccl_change_sets_test.py enforces it).
+    "projects/rccl/test/host/*",
+    "projects/rccl/test/test_categories_micro.yaml",
+    "projects/rccl/test/test_categories_micro_*.yaml",
+    # amdsmi's ABI checks: Python scripts and their data, run only by the
+    # abi-compliance-check and amdsmi-abi-gate workflows; CMake never reads them.
+    "projects/amdsmi/abi/*",
+    "projects/amdsmi/tests/abi_check/*",
 
     "*/.markdownlint-ci2.yaml",
     "tools/systems_pr_bot/*",
