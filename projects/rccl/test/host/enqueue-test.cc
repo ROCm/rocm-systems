@@ -5438,6 +5438,80 @@ struct ScopedP2pCeEnv {
     else unsetenv("NCCL_P2P_USE_CUDA_MEMCPY");
   }
 };
+
+// Single-node all-XGMI gfx942/gfx950 legacy-LL gate. cudaArch is 100*major+10*minor,
+// so gfx942 is 940; BatchPlanComm's default 942 does not enter the branch.
+// p2pChunkSize is the single-node default (512 KiB), so the SIMPLE estimate is 1
+// channel at or below 64 KiB/peer. nChannelsMax is 1 on purpose: the bug is the
+// protocol choice, not how many channels the LL recompute would then stripe.
+struct Gfx94P2pLlOpts {
+  int cudaArch = 940;
+  int nNodes = 1;
+  int isAllNvlink = 1;
+  bool ll128OptIn = false;
+  int p2pChunkSize = 1 << 19;
+};
+
+struct Gfx94P2pLlScene {
+  BatchPlanComm bp;
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclChannelPeer> peers;
+  std::vector<ncclChannelPeer*> peerSlots;
+  char llBuf[8]{};
+  char ll128Buf[8]{};
+  char sendMem[8]{};
+  char recvMem[8]{};
+  int planTotalTasks[2]{1, 1};
+
+  explicit Gfx94P2pLlScene(Gfx94P2pLlOpts opts) : bp(opts.nNodes, opts.cudaArch) {
+    InstallSendRecvDevFuncIds();
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = 2;
+    c->nNodes = opts.nNodes;
+    c->maxLocalRanks = 2;  // nNodes > 1 divides the P2P channel base by this
+    c->cudaArch = opts.cudaArch;
+    c->isAllNvlink = opts.isAllNvlink;
+    c->allocP2pNetLLBuffers = opts.ll128OptIn;
+    c->ll128LineElems = 8;
+    c->ll128DataElems = 7;
+    c->p2pnChannels = 1;
+    c->p2pnChannelsPerPeer = 1;
+    c->p2pChannelShiftSize = 0;
+    c->p2pChunkSize = opts.p2pChunkSize;
+    c->buffSizes[NCCL_PROTO_LL] = 1 << 20;
+    c->buffSizes[NCCL_PROTO_LL128] = 1 << 20;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
+    SetSingleGpuArch(topo.get(), opts.cudaArch == 950 ? "gfx950" : "gfx942");
+    topo->ll128Enabled = opts.ll128OptIn;
+    c->topo = topo.get();
+
+    peers.resize(2);
+    peerSlots.resize(2);
+    for (int i = 0; i < 2; ++i) {
+      peerSlots[i] = &peers[i];
+      for (int ci = 0; ci < NCCL_MAX_CONNS; ++ci) {
+        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL] = peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
+        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL128] = peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+      }
+    }
+    c->channels[0].peers = peerSlots.data();
+  }
+
+  ncclResult_t add(ssize_t bytes) {
+    struct ncclTaskP2p* tasks[2] = {nullptr, nullptr};
+    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/1, /*nChannelsMax=*/1, /*p2pRound=*/0,
+                        /*sendRank=*/1, sendMem, bytes, /*recvRank=*/1, recvMem, bytes,
+                        /*sendOpCount=*/0, /*recvOpCount=*/0, planTotalTasks, tasks);
+  }
+
+  ncclDevWorkP2p* p2pWork() {
+    for (auto* node = bp.p()->workQueue.head; node != nullptr; node = node->next) {
+      if (node->workType == ncclDevWorkTypeP2p) return reinterpret_cast<ncclDevWorkP2p*>(node + 1);
+    }
+    return nullptr;
+  }
+};
 }  // namespace
 
 TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1Mixed2KiB8KiB_OneLl128WorkItem) {
@@ -5764,6 +5838,98 @@ TEST_F(EnqueueMicrotest, AddPersistentPlanRef_DropsNonLiveRefsAndKeepsLiveOnes) 
   ncclPersistentPlanRefDrop(live);
   ncclPersistentPlanRefDrop(registered);
   ncclPersistentPlanRefDrop(registered);
+}
+
+// Pin the numeric cutoff through the redirected ncclParamP2pLLThreshold (g_loadParam,
+// no cache). Whether the user set NCCL_P2P_LL_THRESHOLD is a separate ncclGetEnv
+// read: the widen applies when that name is absent or empty, so an explicit 4096
+// stays on the stock per-channel rule even though the number matches the default.
+void PinP2pLlThreshold(bool userSet) {
+  if (userSet) SetMicroEnv("NCCL_P2P_LL_THRESHOLD", "4096");
+  else SetMicroEnvAbsent("NCCL_P2P_LL_THRESHOLD");
+  SetParam("P2P_LL_THRESHOLD", 4096);
+}
+
+void ExpectGfx94RecvProtoLL(Gfx94P2pLlOpts opts, ssize_t bytes, int protoLL) {
+  Gfx94P2pLlScene sc(opts);
+  ASSERT_EQ(ncclSuccess, sc.add(bytes)) << "arch=" << opts.cudaArch << " bytes=" << bytes;
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work) << "arch=" << opts.cudaArch << " bytes=" << bytes;
+  EXPECT_EQ(protoLL, int(work->recvProtoLL)) << "arch=" << opts.cudaArch << " bytes=" << bytes;
+  EXPECT_EQ(protoLL, int(work->sendProtoLL)) << "arch=" << opts.cudaArch << " bytes=" << bytes;
+}
+
+void ExpectGfx94RecvProtoLL(int cudaArch, ssize_t bytes, int protoLL) {
+  Gfx94P2pLlOpts opts;
+  opts.cudaArch = cudaArch;
+  ExpectGfx94RecvProtoLL(opts, bytes, protoLL);
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94UnsetLlThreshold_WidensLlThrough64KiB) {
+  PinP2pLlThreshold(/*userSet=*/false);
+  const struct {
+    ssize_t bytes;
+    int protoLL;
+  } cases[] = {
+      {16 << 10, 1}, {32 << 10, 1}, {64 << 10, 1}, {(64 << 10) + 1, 0},
+      {128 << 10, 0}, {256 << 10, 0}, {512 << 10, 0},
+  };
+  for (const auto& c : cases) ExpectGfx94RecvProtoLL(940, c.bytes, c.protoLL);
+  // gfx950 shares the gate. 942 is not 100*9+10*4, so the default BatchPlanComm
+  // arch must stay SIMPLE at 16 KiB.
+  ExpectGfx94RecvProtoLL(950, 16 << 10, 1);
+  ExpectGfx94RecvProtoLL(942, 16 << 10, 0);
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94UserLlThreshold_KeepsPerChannelRule) {
+  PinP2pLlThreshold(/*userSet=*/true);
+  ExpectGfx94RecvProtoLL(940, 16 << 10, 0);
+  ExpectGfx94RecvProtoLL(950, 16 << 10, 0);
+}
+
+// NCCL_P2P_LL_THRESHOLD= is present but empty. ncclLoadParam uses the default, so
+// the widen still applies. A nullptr-only check would treat this as user-set.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94EmptyLlThreshold_Widens) {
+  SetMicroEnv("NCCL_P2P_LL_THRESHOLD", "");
+  SetParam("P2P_LL_THRESHOLD", 4096);
+  ExpectGfx94RecvProtoLL(940, 16 << 10, 1);
+}
+
+// 32 KiB is inside the widen (stock cutoff is 4 KiB). Each gate that is off must
+// stay SIMPLE; dropping nNodes, isAllNvlink, or !useLL128OptIn would pick LL.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94WidenGates_StaySimple) {
+  PinP2pLlThreshold(/*userSet=*/false);
+  // nNodes > 1 takes the channel base through rcclParamPxnOptQpUsage, which the
+  // host fake aborts on. PXN disabled is the production default and skips that
+  // call. The widen still requires a single node.
+  {
+    ScopedHook pxnDisable(g_pxnDisable, [](struct ncclComm*) { return 1; });
+    Gfx94P2pLlOpts multiNode;
+    multiNode.nNodes = 2;
+    ExpectGfx94RecvProtoLL(multiNode, 32 << 10, 0);
+  }
+  Gfx94P2pLlOpts pcie;
+  pcie.isAllNvlink = 0;
+  ExpectGfx94RecvProtoLL(pcie, 32 << 10, 0);
+  Gfx94P2pLlOpts ll128;
+  ll128.ll128OptIn = true;
+  ExpectGfx94RecvProtoLL(ll128, 32 << 10, 0);
+}
+
+// The default 512 KiB chunk makes p2pChunkSize/8 equal the 64 KiB cap, so either
+// operand of the min would pass. A smaller chunk stops at chunk/8. A larger one
+// stays at the cap.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94ChunkSize_BoundsTheWiden) {
+  PinP2pLlThreshold(/*userSet=*/false);
+  Gfx94P2pLlOpts small;
+  small.p2pChunkSize = 256 << 10;
+  ExpectGfx94RecvProtoLL(small, 32 << 10, 1);
+  ExpectGfx94RecvProtoLL(small, (32 << 10) + 1, 0);
+  Gfx94P2pLlOpts large;
+  large.p2pChunkSize = 1 << 20;
+  ExpectGfx94RecvProtoLL(large, 64 << 10, 1);
+  ExpectGfx94RecvProtoLL(large, (64 << 10) + 1, 0);
+  ExpectGfx94RecvProtoLL(large, 128 << 10, 0);
 }
 
 // ===========================================================================

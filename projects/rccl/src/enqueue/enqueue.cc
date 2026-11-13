@@ -1321,6 +1321,12 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
 // relatively early -- internode alltoall sweeps show it regressing past ~16-32 KiB/channel. Default
 // 4 KiB: the largest cutoff that avoids the legacy-LL mid-size regressions while keeping its win.
 NCCL_PARAM(P2pLLThreshold, "P2P_LL_THRESHOLD", 4096);
+// Non-empty only. ncclLoadParam treats "" as the default, so an empty value is not a user set.
+// Read on each call: this is not the parameter's cached load, and a later set or unset must show.
+static bool p2pLLThresholdUserSet() {
+  const char* str = ncclGetEnv("NCCL_P2P_LL_THRESHOLD");
+  return str && str[0] != '\0';
+}
 // Separate, independent threshold for the LL128 latency path (used on gfx942/gfx950 with
 // NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 and comm LL128 enabled, and on gfx1250 when
 // NCCL_P2P_LL128_ENABLE=1). Default 16 KiB: internode alltoall/scatter/gather sweeps (1-16 nodes)
@@ -1586,7 +1592,16 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     } else {
       bool lat = useLL128OptIn ? hasLL128[dir] : hasLL[dir];
       ssize_t latencyThreshold = useLL128OptIn ? ncclParamP2pLL128Threshold() : ncclParamP2pLLThreshold();
-      if (!(useLL128OptIn && latencyThreshold == 0)) lat &= bytes[dir] <= nChannels[dir] * latencyThreshold;
+      ssize_t latencyBytesMax = nChannels[dir] * latencyThreshold;
+      // SIMPLE's channel count is 1 here, so the per-channel LL threshold never selects LL on
+      // single-node gfx942/gfx950. Allow LL up to p2pChunkSize/8, capped at 64 KiB/peer. A
+      // non-empty NCCL_P2P_LL_THRESHOLD, and the LL128 path, keep the stock rule.
+      bool const userSetP2pLLThreshold = p2pLLThresholdUserSet();
+      if (comm->nNodes <= 1 && comm->isAllNvlink && !useLL128OptIn &&
+          (comm->cudaArch == 940 || comm->cudaArch == 950) && !userSetP2pLLThreshold) {
+        latencyBytesMax = std::max<ssize_t>(latencyBytesMax, std::min<ssize_t>(comm->p2pChunkSize / 8, 65536));
+      }
+      if (!(useLL128OptIn && latencyThreshold == 0)) lat &= bytes[dir] <= latencyBytesMax;
       protocol[dir] = lat ? (useLL128OptIn ? NCCL_PROTO_LL128 : NCCL_PROTO_LL) : NCCL_PROTO_SIMPLE;
     }
   }
