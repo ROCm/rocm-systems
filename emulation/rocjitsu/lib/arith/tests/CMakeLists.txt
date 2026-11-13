@@ -203,7 +203,19 @@ endforeach()
 foreach(
     family
     IN
-    ITEMS round root_reciprocal log_exp decompose trig rcp_iflag preop
+    ITEMS
+        cdna_preop
+        bf16_gfx1250
+        tanh_gfx1250
+        round
+        root_reciprocal
+        log_exp
+        decompose
+        trig
+        rcp_iflag
+        preop
+        cdna_half
+        cdna_unary
 )
     set(target "rj_arith_math_${family}_test")
     rj_arith_add_test(${target} math/${family}_test.cpp)

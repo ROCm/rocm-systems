@@ -16,10 +16,11 @@ namespace {
 
 // Evaluate all source lanes before masked stores, including overlapping VGPRs.
 template <int Width>
-[[gnu::noinline]] void
-scalar(uint32_t exec_mask, uint32_t mode, uint32_t *const *d, const uint32_t *const *a,
-       const uint32_t *const *b, const uint32_t *const *c, uint32_t condition, uint32_t *exceptions,
-       bool flush_output, unsigned rounding, bool dx10_clamp_off, bool quiet_nan) {
+[[gnu::noinline]] void scalar(uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
+                              const uint32_t *const *a, const uint32_t *const *b,
+                              const uint32_t *const *c, uint32_t condition, uint32_t *exceptions,
+                              bool flush_output, unsigned rounding, bool dx10_clamp_off,
+                              bool quiet_nan, bool gradual_before_omod) {
   using T = typename rocjitsu::arith::IeeeFormat<Width>::Bits;
   T result[32];
   for (int lane = 0; lane < 32; ++lane) {
@@ -31,7 +32,7 @@ scalar(uint32_t exec_mask, uint32_t mode, uint32_t *const *d, const uint32_t *co
     }
     result[lane] = rocjitsu::arith::division_fmas<Width>(
         av, bv, cv, (condition >> lane) & 1, mode, ((exec_mask >> lane) & 1) ? exceptions : nullptr,
-        rounding, dx10_clamp_off, quiet_nan, flush_output);
+        rounding, dx10_clamp_off, quiet_nan, flush_output, gradual_before_omod);
   }
   if (flush_output) {
     for (auto &value : result) {
@@ -51,7 +52,7 @@ scalar(uint32_t exec_mask, uint32_t mode, uint32_t *const *d, const uint32_t *co
 
 // Evaluate division FMA with conditional scaling for the selected lanes. Reject invalid
 // controls before changing outputs.
-template <int Width, bool Rdna3>
+template <int Width, bool Rdna3, bool Cdna = false>
 int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
         const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
         uint32_t condition, uint32_t *fp_status) {
@@ -78,7 +79,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
   if (int error = rocjitsu::arith::validate(flags, mode & ~instruction_controls, fp_flags)) {
     return error;
   }
-  if (Rdna3 && (mode & RJ_ARITH_ALU_OMOD_MASK) &&
+  if (Rdna3 && !Cdna && (mode & RJ_ARITH_ALU_OMOD_MASK) &&
       (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
@@ -88,9 +89,9 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
   bool report = rocjitsu::arith::reports_fp_status(flags);
   uint32_t exceptions = 0;
   bool flush_output = flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
-  const bool quiet_nan = !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE);
+  const bool quiet_nan = Cdna || !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if constexpr (Width == 32) {
+  if constexpr (Width == 32 && !Cdna) {
     if (rocjitsu::arith::is_exact(flags) && !condition &&
         rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4) &&
         rocjitsu::arith::div_fmas_exact_x86_64_v4(flags, exec_mask, d[0], a[0], b[0], c[0],
@@ -98,24 +99,22 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
       return RJ_ARITH_SUCCESS;
     }
   }
-  if (!(flags & RJ_ARITH_FP_ROUND_MASK) &&
-      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     rocjitsu::arith::div_fmas_x86_64_v4<Width>(exec_mask, mode, d, a, b, c, condition, flags,
-                                               report ? fp_status : nullptr, quiet_nan);
+                                               report ? fp_status : nullptr, quiet_nan, Cdna);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (!(flags & RJ_ARITH_FP_ROUND_MASK) &&
-      rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::div_fmas_x86_64_v3<Width>(exec_mask, mode, d, a, b, c, condition, flags,
-                                               report ? fp_status : nullptr, quiet_nan);
+                                               report ? fp_status : nullptr, quiet_nan, Cdna);
     return RJ_ARITH_SUCCESS;
   }
 #endif
   scalar<Width>(exec_mask, mode, d, a, b, c, condition, report ? &exceptions : nullptr,
                 flush_output, unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24),
-                flags & RJ_ARITH_FP_DX10_CLAMP_OFF, quiet_nan);
+                flags & RJ_ARITH_FP_DX10_CLAMP_OFF, quiet_nan, Cdna);
   if (report) {
     *fp_status |= exceptions;
   }
@@ -124,12 +123,12 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
 
 // Evaluate division FMA with conditional scaling for Wave64. Reject invalid controls before
 // changing outputs.
-template <int Width, bool Rdna3>
+template <int Width, bool Rdna3, bool Cdna = false>
 int run_wave64(uint64_t flags, uint64_t exec_mask, uint32_t mode, uint32_t *const *d,
                const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
                uint64_t condition, uint32_t *fp_status) {
-  if (int error =
-          run<Width, Rdna3>(flags, 0, mode, nullptr, nullptr, nullptr, nullptr, 0, fp_status)) {
+  if (int error = run<Width, Rdna3, Cdna>(flags, 0, mode, nullptr, nullptr, nullptr, nullptr, 0,
+                                          fp_status)) {
     return error;
   }
   if (!exec_mask) {
@@ -148,9 +147,9 @@ int run_wave64(uint64_t flags, uint64_t exec_mask, uint32_t mode, uint32_t *cons
       bv[reg] = b[reg] + half * 32;
       cv[reg] = c[reg] + half * 32;
     }
-    if (int error =
-            run<Width, Rdna3>(flags, uint32_t(exec_mask >> (half * 32)), mode, dest, av, bv, cv,
-                              uint32_t(condition >> (half * 32)), report ? &exceptions : nullptr)) {
+    if (int error = run<Width, Rdna3, Cdna>(flags, uint32_t(exec_mask >> (half * 32)), mode, dest,
+                                            av, bv, cv, uint32_t(condition >> (half * 32)),
+                                            report ? &exceptions : nullptr)) {
       return error;
     }
   }
@@ -322,4 +321,122 @@ int rj_arith_v_div_fmas_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
   }
   return run_wave64<64, false>(flags, exec_mask, instruction_flags, d, a, b, c, condition,
                                excp_flag_user);
+}
+
+// Evaluate inherited CDNA fused division scaling; FP status is unused.
+int rj_arith_v_div_fmas_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint32_t condition,
+                                       uint32_t *fp_status) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run<32, true, true>(flags, exec_mask, instruction_flags, d, a, b, c, condition, fp_status);
+}
+
+// Evaluate inherited CDNA fused division scaling; FP status is unused.
+int rj_arith_v_div_fmas_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint64_t condition,
+                                       uint32_t *fp_status) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run_wave64<32, true, true>(flags, exec_mask, instruction_flags, d, a, b, c, condition,
+                                    fp_status);
+}
+
+// Evaluate inherited CDNA fused division scaling; FP status is unused.
+int rj_arith_v_div_fmas_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t condition,
+                                        uint32_t *fp_status) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run<32, false, true>(flags, exec_mask, instruction_flags, d, a, b, c, condition,
+                              fp_status);
+}
+
+// Evaluate inherited CDNA fused division scaling; FP status is unused.
+int rj_arith_v_div_fmas_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint32_t condition,
+                                       uint32_t *fp_status) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run<64, true, true>(flags, exec_mask, instruction_flags, d, a, b, c, condition, fp_status);
+}
+
+// Evaluate inherited CDNA fused division scaling; FP status is unused.
+int rj_arith_v_div_fmas_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint64_t condition,
+                                       uint32_t *fp_status) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run_wave64<64, true, true>(flags, exec_mask, instruction_flags, d, a, b, c, condition,
+                                    fp_status);
+}
+
+// Evaluate inherited CDNA fused division scaling; FP status is unused.
+int rj_arith_v_div_fmas_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t condition,
+                                        uint32_t *fp_status) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run<64, false, true>(flags, exec_mask, instruction_flags, d, a, b, c, condition,
+                              fp_status);
 }

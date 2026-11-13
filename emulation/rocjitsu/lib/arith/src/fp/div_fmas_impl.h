@@ -154,12 +154,13 @@ division_round(Uint128 significand, int exponent, bool negative, bool omod,
 // exponent exceeds its bias, and -64/-128 otherwise. Applies ABS/NEG and OMOD/
 // CLAMP, preserves host FP state, and returns the resulting IEEE bits.
 // quiet_nan controls whether a propagated signaling NaN is quieted.
+// Legacy CDNA rounds gradually before OMOD; RDNA uses its captured normal-precision policy.
 template <int Width>
 inline typename IeeeFormat<Width>::Bits
 division_fmas(typename IeeeFormat<Width>::Bits a, typename IeeeFormat<Width>::Bits b,
               typename IeeeFormat<Width>::Bits c, bool post_scale, uint32_t mode,
               uint32_t *exceptions = nullptr, unsigned rounding = 0, bool dx10_clamp_off = false,
-              bool quiet_nan = true, bool flush_output = false) {
+              bool quiet_nan = true, bool flush_output = false, bool gradual_before_omod = false) {
   using F = IeeeFormat<Width>;
   using T = typename F::Bits;
 
@@ -205,15 +206,15 @@ division_fmas(typename IeeeFormat<Width>::Bits a, typename IeeeFormat<Width>::Bi
     int pe = (ae ? ae : 1) + (be ? be : 1) - 2 * (F::bias + F::fraction),
         se = (ce ? ce : 1) - F::bias - F::fraction;
     int adjustment = post_scale ? (ce > F::bias ? 1 : -1) * (Width == 32 ? 64 : 128) : 0;
-    bool omod = (mode & RJ_ARITH_ALU_OMOD_MASK) != 0;
+    bool omod = (mode & RJ_ARITH_ALU_OMOD_MASK) != 0 && !gradual_before_omod;
     if (product == 0 && addend == 0) {
       result = (pn == cn ? pn : rounding == 2) ? F::sign : 0;
     } else if (product == 0) {
       result = division_round<Width>(addend, se + adjustment, cn, omod, exceptions, rounding,
-                                     flush_output);
+                                     flush_output && !gradual_before_omod);
     } else if (addend == 0) {
       result = division_round<Width>(product, pe + adjustment, pn, omod, exceptions, rounding,
-                                     flush_output);
+                                     flush_output && !gradual_before_omod);
     } else {
       int pt = division_top_bit(product), ct = division_top_bit(addend);
       int exponent = pe + pt > se + ct ? pe + pt : se + ct;
@@ -224,7 +225,7 @@ division_fmas(typename IeeeFormat<Width>::Bits a, typename IeeeFormat<Width>::Bi
                     : product > addend ? product - addend
                                        : addend - product;
       result = division_round<Width>(sum, exponent - 126 + adjustment, negative, omod, exceptions,
-                                     rounding, flush_output);
+                                     rounding, flush_output && !gradual_before_omod);
     }
   }
   unsigned omod = (mode >> 6) & 3;

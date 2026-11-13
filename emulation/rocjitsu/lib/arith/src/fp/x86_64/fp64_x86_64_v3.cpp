@@ -79,7 +79,7 @@ constexpr bool is_arithmetic(Fp64 op) {
 // Evaluate all lanes into result with already-validated controls. NanPriority applies
 // nan_priority to ADD/MUL/FMA; otherwise host NaNs are kept, and a false return value proves
 // that no ADD/MUL/FMA lane produced one.
-template <Fp64 Op, bool NanPriority>
+template <Fp64 Op, bool NanPriority, bool NativeMath>
 bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uint32_t *const *b,
               const uint32_t *const *c, uint32_t (&result)[2][32], bool quiet_snan, bool cdna) {
   // MUL/FMA results at the smallest normal need rechecking only when output flushing or OMOD
@@ -200,29 +200,44 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
         value = _mm256_blendv_pd(value, x, _mm256_cmp_pd(x, x, _CMP_UNORD_Q));
       }
     }
-    if (cdna && Op == Fp64::Fma && (mode & RJ_ARITH_ALU_OMOD_MASK)) {
-      // FMA flushes its rounded core before scaling, then canonicalizes tiny OMOD results.
-      if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
-        value = flush_denorm_f64(value);
-      }
-      auto scaled = _mm256_mul_pd(value, scale);
-      value = _mm256_blendv_pd(scaled, value, _mm256_cmp_pd(value, value, _CMP_UNORD_Q));
-      value = flush_denorm_f64(value);
-      value = _mm256_blendv_pd(value, _mm256_setzero_pd(),
-                               _mm256_cmp_pd(value, _mm256_setzero_pd(), _CMP_EQ_OQ));
-    } else if (mode & RJ_ARITH_ALU_OMOD_MASK) {
-      value = prepare_omod_f64(value, mode);
-      if constexpr (rocjitsu::arith::is_selection(Op) || Op == Fp64::Trunc || Op == Fp64::Ceil ||
-                    Op == Fp64::Rndne || Op == Fp64::Floor || Op == Fp64::Fract ||
-                    Op == Fp64::FrexpMant || Op == Fp64::Rcp || Op == Fp64::Rsq ||
-                    Op == Fp64::Sqrt) {
-        value = selection_omod_round(value, _mm256_mul_pd(value, scale), flags);
-      } else {
+    if constexpr (NativeMath) {
+      // Match the scalar core's generation-specific NaN quieting before OMOD.
+      auto selected =
+          quiet_snan
+              ? _mm256_or_pd(x, _mm256_castsi256_pd(_mm256_set1_epi64x(0x0008000000000000ULL)))
+              : x;
+      value = _mm256_blendv_pd(value, selected, _mm256_cmp_pd(x, x, _CMP_UNORD_Q));
+    }
+    if (mode & RJ_ARITH_ALU_OMOD_MASK) {
+      if constexpr (NativeMath) {
+        // Legacy CDNA math scales before flushing, so a subnormal may become normal.
+        value = flush_denorm_f64(_mm256_mul_pd(value, scale));
+        value = _mm256_blendv_pd(value, _mm256_setzero_pd(),
+                                 _mm256_cmp_pd(value, _mm256_setzero_pd(), _CMP_EQ_OQ));
+      } else if (cdna && Op == Fp64::Fma) {
+        // FMA guest-flushes the core, then canonicalizes tiny scaled results.
+        if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
+          value = flush_denorm_f64(value);
+        }
         auto scaled = _mm256_mul_pd(value, scale);
-        // Scaling keeps the selected NaN encoding, as in the scalar path.
-        value = NanPriority
-                    ? _mm256_blendv_pd(scaled, value, _mm256_cmp_pd(value, value, _CMP_UNORD_Q))
-                    : scaled;
+        value = _mm256_blendv_pd(scaled, value, _mm256_cmp_pd(value, value, _CMP_UNORD_Q));
+        value = flush_denorm_f64(value);
+        value = _mm256_blendv_pd(value, _mm256_setzero_pd(),
+                                 _mm256_cmp_pd(value, _mm256_setzero_pd(), _CMP_EQ_OQ));
+      } else {
+        value = prepare_omod_f64(value, mode);
+        if constexpr (rocjitsu::arith::is_selection(Op) || Op == Fp64::Trunc || Op == Fp64::Ceil ||
+                      Op == Fp64::Rndne || Op == Fp64::Floor || Op == Fp64::Fract ||
+                      Op == Fp64::FrexpMant || Op == Fp64::Rcp || Op == Fp64::Rsq ||
+                      Op == Fp64::Sqrt) {
+          value = selection_omod_round(value, _mm256_mul_pd(value, scale), flags);
+        } else {
+          auto scaled = _mm256_mul_pd(value, scale);
+          // Scaling keeps the selected NaN encoding, as in the scalar path.
+          value = NanPriority
+                      ? _mm256_blendv_pd(scaled, value, _mm256_cmp_pd(value, value, _CMP_UNORD_Q))
+                      : scaled;
+        }
       }
     }
     if (mode & RJ_ARITH_ALU_CLAMP) {
@@ -249,16 +264,16 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
 }
 
 // Execute with already-validated controls, preserving inactive destination lanes.
-template <Fp64 Op>
+template <Fp64 Op, bool NativeMath = false>
 void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
          const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
          bool quiet_snan, bool cdna) {
   uint32_t result[2][32];
   // A NaN source or an invalid operation always yields a NaN. Such results are rare, so
   // ADD/MUL/FMA re-evaluate with NaN priority only when the host produced one.
-  if (evaluate<Op, false>(flags, mode, a, b, c, result, quiet_snan, cdna)) {
+  if (evaluate<Op, false, NativeMath>(flags, mode, a, b, c, result, quiet_snan, cdna)) {
     if constexpr (is_arithmetic(Op)) {
-      evaluate<Op, true>(flags, mode, a, b, c, result, quiet_snan, cdna);
+      evaluate<Op, true, NativeMath>(flags, mode, a, b, c, result, quiet_snan, cdna);
     }
   }
   // Source halves can alias either output half, so delay all masked writes.
@@ -279,7 +294,7 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
 // Requires the named CPU features and validated instruction controls.
 void fp64_x86_64_v3(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
                     const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
-                    bool quiet_snan, bool cdna) {
+                    bool quiet_snan, bool native_math, bool cdna) {
   switch (op) {
   case Fp64::FrexpMant:
     return run<Fp64::FrexpMant>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
@@ -294,10 +309,19 @@ void fp64_x86_64_v3(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, 
   case Fp64::Fract:
     return run<Fp64::Fract>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Sqrt:
+    if (native_math) {
+      return run<Fp64::Sqrt, true>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
+    }
     return run<Fp64::Sqrt>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Rcp:
+    if (native_math) {
+      return run<Fp64::Rcp, true>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
+    }
     return run<Fp64::Rcp>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Rsq:
+    if (native_math) {
+      return run<Fp64::Rsq, true>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
+    }
     return run<Fp64::Rsq>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::MinLegacy:
     return run<Fp64::MinLegacy>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);

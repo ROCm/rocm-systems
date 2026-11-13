@@ -3,8 +3,13 @@
 
 // Tests for floating-point logarithm and exponential entry points.
 
+#include "common/cpu.h"
 #include "math/unary_test.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_math.h"
+#include <gtest/gtest.h>
+#include <random>
+#include <stdint.h>
 
 // Check unary math results and semantics/status support across CPU levels.
 TEST(MathExpF32W32Gfx11, Arithmetic) {
@@ -111,6 +116,53 @@ TEST(MathTrans, OutputOverflowIgnoresGuestRounding) {
                             r.v + 1, r.v, &status),
                   RJ_ARITH_SUCCESS);
         EXPECT_EQ(r.v[1][0], test.expected);
+      }
+    }
+  }
+}
+
+TEST(MathExpF32, VectorModelParity) {
+  using namespace rocjitsu::arith::test;
+  const uint32_t boundaries[] = {0,           1,           0x33800000U, 0x337fffffU, 0x42fc0000U,
+                                 0x42fc0001U, 0x43000000U, 0x7f800000U, 0x7f800123U};
+  const uint64_t modes[] = {0, RJ_ARITH_ALU_NEG_A, RJ_ARITH_ALU_OMOD_2,
+                            RJ_ARITH_ALU_OMOD_HALF | RJ_ARITH_ALU_CLAMP};
+  for (bool gfx12 : {false, true}) {
+    auto call = gfx12 ? rj_arith_v_exp_f32_w32_gfx12 : rj_arith_v_exp_f32_w32;
+    for (uint64_t cpu : supported_cpu_levels()) {
+      if (cpu == RJ_ARITH_CPU_BASELINE) {
+        continue;
+      }
+      std::minstd_rand rng;
+      for (int sample = 0; sample < 1024; ++sample) {
+        uint32_t expected[32], actual[32];
+        for (int lane = 0; lane < 32; ++lane) {
+          uint32_t bits = (uint32_t(rng() >> 15) << 16) | uint32_t(rng() >> 15);
+          if (lane & 1) {
+            bits = (bits & 0x807fffffU) | (uint32_t(103 + sample % 32) << 23);
+          }
+          if (lane < 9) {
+            bits = boundaries[lane] | (sample & 1 ? 0x80000000U : 0);
+          }
+          expected[lane] = actual[lane] = bits;
+        }
+        uint64_t flags = RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+        if (sample & 2) {
+          flags |= RJ_ARITH_FP_IEEE_MODE;
+        }
+        if (!gfx12 && (sample & 4)) {
+          flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+        }
+        const uint32_t exec_mask = sample & 8 ? 0xaaaaaaaaU : 0xffffffffU;
+        uint32_t *expected_d = expected, *actual_d = actual;
+        const uint32_t *expected_a = expected, *actual_a = actual;
+        ASSERT_EQ(call(flags, exec_mask, modes[sample % 4], &expected_d, &expected_a, nullptr),
+                  RJ_ARITH_SUCCESS);
+        ASSERT_EQ(call(flags | cpu, exec_mask, modes[sample % 4], &actual_d, &actual_a, nullptr),
+                  RJ_ARITH_SUCCESS);
+        for (int lane = 0; lane < 32; ++lane) {
+          ASSERT_EQ(actual[lane], expected[lane]) << cpu << ':' << sample << ':' << lane;
+        }
       }
     }
   }
