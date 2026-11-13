@@ -90,6 +90,9 @@ build_pack_from_array(parameter_pack&                             pack,
             case ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL:
                 pack.no_detail_simd = param.value != 0;
                 break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_EXEC_MASK_TRACE:
+                pack.exec_mask_trace = param.value != 0;
+                break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE:
             {
                 switch(param.value)
@@ -127,6 +130,10 @@ build_pack_from_array(parameter_pack&                             pack,
                 return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
     }
+    if(pack.exec_mask_trace && agent->gfx_target_version / 10000 < 12)
+        return ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED;
+    if(pack.exec_mask_trace && pack.no_detail_simd)
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     if(!pack.are_params_valid()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     return ROCPROFILER_STATUS_SUCCESS;

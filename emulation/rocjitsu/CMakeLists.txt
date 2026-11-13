@@ -73,6 +73,22 @@ option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(RJ_ENABLE_MSAN "Enable MemorySanitizer" OFF)
+# UBSan's vptr check caches verified type pairs in a small direct-mapped table
+# shared by all threads. When hot simulator types share a slot, every member
+# access repeats the full RTTI check and threads keep rewriting that slot, which
+# can slow multi-threaded emulation several-fold. GCC UBSan builds omit the
+# check by default; Clang UBSan builds enable it explicitly.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(_rj_ubsan_vptr_default OFF)
+else()
+    set(_rj_ubsan_vptr_default ON)
+endif()
+option(
+    RJ_UBSAN_VPTR
+    "Enable UBSan's dynamic-type (vptr) check when RJ_ENABLE_UBSAN is ON"
+    ${_rj_ubsan_vptr_default}
+)
+unset(_rj_ubsan_vptr_default)
 set(RJ_SANITIZER_RUNTIME
     "AUTO"
     CACHE STRING
@@ -245,6 +261,16 @@ if(_rj_sanitizer_count GREATER 0)
             -fsanitize=${_rj_sanitizer_arg}
         )
         list(APPEND RJ_SANITIZER_LINK_OPTIONS -fsanitize=${_rj_sanitizer_arg})
+        if(undefined IN_LIST _rj_sanitizer_kinds)
+            message(STATUS "UBSan vptr checks: ${RJ_UBSAN_VPTR}")
+            if(RJ_UBSAN_VPTR)
+                # Clang does not include vptr in -fsanitize=undefined.
+                list(APPEND RJ_SANITIZER_COMPILE_OPTIONS -fsanitize=vptr)
+                list(APPEND RJ_SANITIZER_LINK_OPTIONS -fsanitize=vptr)
+            else()
+                list(APPEND RJ_SANITIZER_COMPILE_OPTIONS -fno-sanitize=vptr)
+            endif()
+        endif()
         if(
             address IN_LIST _rj_sanitizer_kinds
             OR undefined IN_LIST _rj_sanitizer_kinds
@@ -363,72 +389,97 @@ if(ROCJITSU_ENABLE_VFIO)
     include(rj_libvfio_user)
 endif()
 
+if(BUILD_TESTING)
+    include(rj_test_registration)
+endif()
+
+# rj-arith selects its own baseline and runtime-dispatched SIMD implementations.
+# Configure it before rj_host_cpu so neither library nor tests inherit its -march policy.
+add_subdirectory(lib/arith)
+
 # Apply the host CPU policy to rocjitsu targets, after configuring dependencies.
 include(rj_host_cpu)
 
 # Libraries
 add_subdirectory(lib/util)
+add_subdirectory(lib/cli)
 add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
 add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 
-# Main shared library - assembles all object libraries.
-add_library(rocjitsu_shared SHARED)
-target_sources(
-    rocjitsu_shared
-    PRIVATE $<TARGET_OBJECTS:rocjitsu_version_objects>
-)
-set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
-target_link_libraries(
-    rocjitsu_shared
-    PRIVATE
-        rocjitsu_analysis
-        rocjitsu_code
-        rocjitsu_code_object
-        rocjitsu_isa
-        rocjitsu_isa_registry
-        simdojo
-        rocjitsu_kmd
-        rocjitsu_vm
-        rocjitsu_vm_amdgpu
-        # Host-side plugin loader. The logging/race plugins are no longer
-        # linked in statically; they are separate librocjitsu_plugin_<name>.so
-        # modules discovered and dlopen()ed at runtime.
-        rocjitsu_plugin_loader
-        rocjitsu_vm_risc_v
-        rocjitsu_config
-        rocjitsu_dbt_config
-        rocjitsu_ip_discovery
-        rocm_runtime::runtime_headers
-        util
-        flatbuffers
-        Threads::Threads
-)
-target_include_directories(
-    rocjitsu_shared
-    PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
-)
-
-# Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_sources(
-        rocjitsu_shared
-        PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
+# Main shared library and the non-installed test interposer assemble the same
+# simulator objects. Only the latter compiles the interposer's test hooks.
+function(rj_configure_shared_interposer target)
+    target_sources(${target} PRIVATE $<TARGET_OBJECTS:rocjitsu_version_objects>)
+    target_link_libraries(
+        ${target}
+        PRIVATE
+            rocjitsu_analysis
+            rocjitsu_code
+            rocjitsu_code_object
+            rocjitsu_executable
+            rocjitsu_isa
+            rocjitsu_isa_registry
+            simdojo
+            rocjitsu_kmd
+            rocjitsu_vm
+            rocjitsu_vm_amdgpu
+            # Host-side plugin loader. The logging/race plugins are no longer
+            # linked in statically; they are separate librocjitsu_plugin_<name>.so
+            # modules discovered and dlopen()ed at runtime.
+            rocjitsu_plugin_loader
+            rocjitsu_vm_risc_v
+            rocjitsu_config
+            rocjitsu_dbt_config
+            rocjitsu_ip_discovery
+            rocm_runtime::runtime_headers
+            util
+            flatbuffers
+            Threads::Threads
     )
-    target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
-    target_link_libraries(rocjitsu_shared PRIVATE dl)
-endif()
+    target_include_directories(
+        ${target}
+        PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
+    )
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
-endif()
+    # Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_sources(
+            ${target}
+            PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
+        )
+        target_compile_definitions(${target} PRIVATE _GNU_SOURCE)
+        target_link_libraries(${target} PRIVATE dl)
+    endif()
 
-add_dependencies(rocjitsu_shared flatbuffers_schemas)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(${target} PRIVATE "LINKER:--exclude-libs,ALL")
+    endif()
+
+    add_dependencies(${target} flatbuffers_schemas)
+endfunction()
+
+add_library(rocjitsu_shared SHARED)
+set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
+rj_configure_shared_interposer(rocjitsu_shared)
+
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(rocjitsu_test_interposer SHARED)
+    rj_configure_shared_interposer(rocjitsu_test_interposer)
+    target_compile_definitions(
+        rocjitsu_test_interposer
+        PRIVATE RJ_INTERPOSER_TEST_HOOKS
+    )
+endif()
 
 # Developer and test workflow tools.
 add_subdirectory(tools)
 add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
+add_subdirectory(fuzz/code_object)
+add_subdirectory(fuzz/execution)
+add_subdirectory(fuzz/concurrent_dispatch)
+add_subdirectory(fuzz/multiplexer)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)
@@ -479,6 +530,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(
         PROGRAMS scripts/rocjitsu-pretranslate.py
         DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+
+    # Wheel builders explicitly install this staging component. Ordinary native
+    # installs do not create an unimportable second copy of the Python package.
+    install(
+        DIRECTORY python/rocjitsu
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/python3/site-packages
+        COMPONENT rocjitsu-python
+        EXCLUDE_FROM_ALL
+        FILES_MATCHING
+        PATTERN "*.py"
+        PATTERN "__pycache__" EXCLUDE
+    )
+    # Wheel builders consume the same metadata as the standalone Python package.
+    install(
+        FILES python/pyproject.toml python/README.md
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/python
+        COMPONENT rocjitsu-python
+        EXCLUDE_FROM_ALL
     )
 endif()
 

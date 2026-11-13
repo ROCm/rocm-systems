@@ -410,6 +410,9 @@ struct ncclKernelPlan {
   bool isSymColl;
   bool isCeColl;
   bool isRma;
+#ifdef ENABLE_WARP_SPEED
+  bool warpSpeedPlan;
+#endif
   enum ncclDevWorkStorageType workStorageType;
   bool kernelSpecialized;
   int kernelDynSmem; // only for symmetric kernels
@@ -532,6 +535,7 @@ struct ncclKernelPlanner {
 
   struct Peer {
     bool sendSeen, recvSeen;
+    bool sendCeSeen, recvCeSeen;
     struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> sendQueue;
     struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> recvQueue;
     struct ncclIntruQueue<struct ncclTaskBcast, &ncclTaskBcast::next> bcastQueue;
@@ -647,8 +651,15 @@ struct ncclPeerInfo {
   bool gpuCftCountedSupport;
   uint32_t gitVersionHash;
   // [RCCL] The rcclTuningPartition this rank asks for (RCCL_TUNING_PARTITION_MODE). The comm
-  // uses DPX only when every rank asks for it. Append later fields after this one.
+  // uses DPX only when every rank asks for it.
   int tuningPartition;
+  // [RCCL] This rank can use RCCL_IB_GDR_FLUSH_FLAG, and so can the parent it shares resources with, if any; the
+  // comm uses it only when every rank can.
+  bool ibGdrFlushFlag;
+  // [RCCL] Collective and send/recv LL128 buffer sizes of the proxy this rank shares with its parent, 0 if it shares
+  // none. Every rank of the comm adopts them (computeBuffSizes). Append later fields after these.
+  int sharedLl128BuffSize;
+  int sharedP2pLl128BuffSize;
 };
 
 typedef enum ncclGroupTaskType {
@@ -768,6 +779,10 @@ struct ncclComm {
   int cheapPostSendFenceOff; // RCCL: true if cheap post-send fence is disabled
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+  int tdmSimpleReduceEnable; // RCCL: route reduction-shaped SIMPLE slices through the TDM mover
+#endif
+#if ENABLE_TDM_PRIM_LL128
+  int tdmLl128Enable; // RCCL: route LL128 user-buffer legs through the async-to-LDS engine
 #endif
   int localRank;
   int localRanks;
@@ -839,6 +854,8 @@ struct ncclComm {
 
   // Buffer sizes
   int buffSizes[NCCL_NUM_PROTOCOLS];
+  // LL128 buffer for send/recv; smaller than buffSizes[NCCL_PROTO_LL128] when collectives use a scaled-up one.
+  int p2pLl128BuffSize;
   int p2pChunkSize;
   int nvlsChunkSize;
 
@@ -862,6 +879,8 @@ struct ncclComm {
   // Per-arch DDA/CE dispatch thresholds -- populated at comm init from rcclGetArchThresholds().
   // NULL on architectures without a dedicated threshold table (falls back to env-var params).
   const struct rcclArchThresholds* archThresholds;
+  // Every rank can use RCCL_IB_GDR_FLUSH_FLAG, so net receives use it and tuning may assume it.
+  bool ibGdrFlushFlag;
 
   /* This attribute can indicate the states of communicators and return code of
    * asynchronous NCCL operations. */
@@ -939,12 +958,9 @@ struct ncclComm {
   struct ncclComm* groupNext[ncclGroupTaskTypeNum];
   // Subset of those in groupNext list. Holds 0x1 if not needing preconnect.
   struct ncclComm* preconnectNext;
-  // Number of persistent plan-lists (graph captures) referencing this comm.
-  // Incremented synchronously on plan creation; decremented asynchronously by
-  // a per-rank host callback on plan reclaim (no cross-rank sync). No
-  // internal lock: relies on the same single-writer-per-comm contract as the
-  // rest of ncclComm (serialized via the group/enqueue API).
   int localPersistentRefs;
+  int persistentPlanRefsLock;
+  struct ncclPersistentPlanRef* persistentPlanRefs;
   struct P2pSchedulePair {
     int sendRank;
     int recvRank;
@@ -1050,6 +1066,7 @@ struct ncclComm {
   bool isAllDirectP2p; // Subject to NCCL_P2P_LEVEL (for local ranks only).
   bool isAllCudaP2p; // Raw CUDA capability (for local ranks only).
   bool isAllDirectNvlink; // All GPUs are directly connected to each other through NVLink.
+  bool spansTrays;        // [RCCL] Across UALink trays, table has an AllGather TDM window: AG symk runs only in it.
   int symmetricSupport;
   int gpuCftSupport;
   bool gpuCftMulticastSupport;
@@ -1154,6 +1171,58 @@ inline ncclResult_t ncclCommPollCallbacks(struct ncclComm* comm, bool waitSome) 
   }
   NCCLCHECK(result);
   return ncclSuccess;
+}
+
+enum ncclPersistentPlanRefState {
+  ncclPersistentPlanRefLive = 0,
+  ncclPersistentPlanRefReleased = 1,
+  ncclPersistentPlanRefOrphaned = 2,
+};
+
+struct ncclPersistentPlanRef {
+  struct ncclPersistentPlanRef* next;
+  struct ncclComm* comm;
+  struct ncclKernelPlan* planHead;
+  int state;
+  int refCount;
+};
+
+inline void ncclPersistentPlanRefDrop(struct ncclPersistentPlanRef* ref) {
+  if (ncclAtomicRefCountDecrement(&ref->refCount) == 0) free(ref);
+}
+
+inline void ncclPersistentPlanRefsLock(struct ncclComm* comm) {
+  while (COMPILER_ATOMIC_EXCHANGE(&comm->persistentPlanRefsLock, 1, std::memory_order_acquire) != 0) {}
+}
+
+inline void ncclPersistentPlanRefsUnlock(struct ncclComm* comm) {
+  COMPILER_ATOMIC_STORE(&comm->persistentPlanRefsLock, 0, std::memory_order_release);
+}
+
+inline ncclResult_t ncclCommOrphanPersistentPlans(struct ncclComm* comm) {
+  ncclPersistentPlanRefsLock(comm);
+  for (struct ncclPersistentPlanRef* ref = comm->persistentPlanRefs; ref != nullptr; ref = ref->next) {
+    int expected;
+    do {
+      expected = ncclPersistentPlanRefLive;
+    } while (!COMPILER_ATOMIC_COMPARE_EXCHANGE(&ref->state, &expected, (int)ncclPersistentPlanRefOrphaned,
+                                               std::memory_order_acq_rel, std::memory_order_acquire) &&
+             expected == ncclPersistentPlanRefLive);
+  }
+  ncclPersistentPlanRefsUnlock(comm);
+  return ncclSuccess;
+}
+
+inline void ncclCommDropPersistentPlanRefs(struct ncclComm* comm) {
+  ncclPersistentPlanRefsLock(comm);
+  struct ncclPersistentPlanRef* ref = comm->persistentPlanRefs;
+  comm->persistentPlanRefs = nullptr;
+  ncclPersistentPlanRefsUnlock(comm);
+  while (ref != nullptr) {
+    struct ncclPersistentPlanRef* next = ref->next;
+    ncclPersistentPlanRefDrop(ref);
+    ref = next;
+  }
 }
 
 inline ncclResult_t ncclCommPollEventCallbacks(struct ncclComm* comm, bool waitSome) {

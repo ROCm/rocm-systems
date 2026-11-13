@@ -1,14 +1,13 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! GFX12 fixed queue scratch geometry shared by GPU frontends.
+//! Fixed queue scratch geometry shared by GPU frontends.
 
-use crate::topology::GpuInfo;
+use crate::topology::{GpuInfo, GpuScratchEncoding};
 use crate::{Error, ErrorKind};
 
 /// Largest private segment accepted by the qualified GFX12 queue path.
 pub const MAX_PRIVATE_SEGMENT_BYTES: u32 = 262_128;
-const SCRATCH_ALIGNMENT: u64 = 256;
 const GPU_PAGE_BYTES: u64 = 4096;
 
 /// Validated allocation extent and wave limits for one queue request.
@@ -27,11 +26,11 @@ pub struct ScratchPlan {
 fn invalid_scratch() -> Error {
     Error::Operation {
         kind: ErrorKind::ResourceExhausted,
-        detail: "queue scratch request exceeds qualified GFX12 geometry",
+        detail: "queue scratch request exceeds target geometry",
     }
 }
 
-/// Plans a fixed scratch allocation for a qualified GFX12 AQL queue.
+/// Plans a fixed scratch allocation for a qualified AQL queue.
 ///
 /// `lanes_per_wave` is the execution width requested by the packet. A wave64
 /// packet on a wave32 GPU consumes twice the per-wave storage.
@@ -47,16 +46,19 @@ pub fn plan_scratch(
     if private_segment_size == 0 || private_segment_size > MAX_PRIVATE_SEGMENT_BYTES {
         return Err(invalid_scratch());
     }
-    if !matches!(
-        (gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping),
-        (12, 0, 0 | 1) | (12, 5, 0)
-    ) || gpu.wavefront_size != 32
-        || gpu.xcc_count == 0
+    let (alignment, maximum_wave_units) =
+        match gpu.target_profile.scratch_encoding(gpu.wavefront_size) {
+            Some(GpuScratchEncoding::Gfx9) => (1024_u64, 0x1fff),
+            Some(GpuScratchEncoding::Gfx12) => (256_u64, 0x3_ffff),
+            None => return Err(invalid_scratch()),
+        };
+    if gpu.xcc_count == 0
         || !matches!(lanes_per_wave, 32 | 64)
+        || (gpu.target_profile == crate::topology::GpuTargetProfile::Gfx9 && lanes_per_wave != 64)
     {
         return Err(invalid_scratch());
     }
-    let lane_alignment = u32::try_from(SCRATCH_ALIGNMENT)
+    let lane_alignment = u32::try_from(alignment)
         .ok()
         .and_then(|alignment| alignment.checked_div(lanes_per_wave))
         .filter(|alignment| *alignment != 0)
@@ -77,6 +79,9 @@ pub fn plan_scratch(
     let wave_bytes = u64::from(aligned_private)
         .checked_mul(u64::from(lanes_per_wave))
         .ok_or_else(invalid_scratch)?;
+    if wave_bytes / alignment > maximum_wave_units {
+        return Err(invalid_scratch());
+    }
     let representable_bytes = u64::from(u32::MAX) / GPU_PAGE_BYTES * GPU_PAGE_BYTES;
     let representable_waves = u32::try_from(representable_bytes / wave_bytes)
         .unwrap_or(u32::MAX)
@@ -110,6 +115,7 @@ mod tests {
             gfx_major: 12,
             gfx_minor: 0,
             gfx_stepping: 1,
+            target_profile: crate::topology::GpuTargetProfile::Gfx1201,
             wavefront_size: 32,
             compute_unit_count: 64,
             maximum_wave_count_per_compute_unit: 32,
@@ -147,6 +153,7 @@ mod tests {
 
         let mut unsupported = gfx1201();
         unsupported.gfx_stepping = 2;
+        unsupported.target_profile = crate::topology::GpuTargetProfile::Other;
         assert!(plan_scratch(unsupported, 1024, 32).is_err());
         assert!(plan_scratch(gfx1201(), 0, 32).is_err());
         assert!(plan_scratch(gfx1201(), MAX_PRIVATE_SEGMENT_BYTES + 1, 32).is_err());

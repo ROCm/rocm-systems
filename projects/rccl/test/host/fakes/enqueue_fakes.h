@@ -53,7 +53,19 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)>
 extern std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable;
 
 // enqueue.cc's rcclP2pTaskParts: default p2pnChannelsPerPeer; install the multi-node AINIC Scatter limit per test.
-extern std::function<int(struct ncclComm*, ncclFunc_t)> g_rcclP2pTaskParts;
+extern std::function<int(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskParts;
+extern std::function<bool(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskUsesCe;
+extern std::function<int(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskConnIndex;
+
+// enqueue.cc's collective entry, COLL log line and addon-launch bracket. Fail loud until a test installs them.
+struct ncclInfo;
+struct rcclAddonLaunchState;
+extern std::function<ncclResult_t(struct ncclInfo*)> g_enqueueCheck;
+extern std::function<void(const struct ncclInfo&)> g_rcclLogCollInfo;
+extern std::function<ncclResult_t(struct ncclComm*, hipStream_t, struct rcclAddonLaunchState*)>
+    g_rcclAddonLaunchBegin;
+extern std::function<ncclResult_t(struct ncclComm*, hipStream_t, const struct rcclAddonLaunchState&, ncclResult_t)>
+    g_rcclAddonLaunchEnd;
 
 void ResetEnqueueFakes();
 

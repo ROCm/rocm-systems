@@ -13,6 +13,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
 import signal
 import socket
 import stat
@@ -27,6 +28,7 @@ SCRIPT = Path(__file__).parents[2] / "scripts" / "run-vfio-guest.py"
 SPEC = importlib.util.spec_from_file_location("run_vfio_guest", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 RUNNER = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = RUNNER
 SPEC.loader.exec_module(RUNNER)
 
 
@@ -41,12 +43,14 @@ def fake_qemu(
     returncode: int = 0,
     output: str = "workload: PASS",
     supports_vfio: bool = True,
+    supports_atomic_ports: bool = False,
     notify_server: bool = True,
 ) -> None:
     write_file(
         path,
         (
             "#!/usr/bin/env python3\n"
+            "import json\n"
             "import os\n"
             "from pathlib import Path\n"
             "import signal\n"
@@ -56,8 +60,17 @@ def fake_qemu(
             "    print('tcg')\n"
             "elif sys.argv[1:3] == ['-device', 'help']:\n"
             f"    print('name \\\"vfio-user-pci\\\"') if {supports_vfio!r} else None\n"
+            "elif len(sys.argv) > 2 and sys.argv[1] == '-device' and "
+            "sys.argv[2] in {'pcie-root-port,help', 'x3130-upstream,help', "
+            "'xio3130-downstream,help'}:\n"
+            f"    print('x-atomic-comp32= x-atomic-comp64= x-atomic-route=') if {supports_atomic_ports!r} else None\n"
             "else:\n"
-            "    Path(__file__).with_suffix('.pid').write_text(str(os.getpid()))\n"
+            # The SIGTERM test treats qemu.pid appearing as a readiness notification.
+            "    pending_pid = Path(__file__).with_suffix('.pid.tmp')\n"
+            "    pending_pid.write_text(str(os.getpid()))\n"
+            "    pending_pid.replace(Path(__file__).with_suffix('.pid'))\n"
+            "    Path(__file__).with_suffix('.argv.json').write_text("
+            "json.dumps(sys.argv[1:]))\n"
             f"    print({output!r}, flush=True)\n"
             f"    if {wait_for_signal!r}:\n"
             f"        if {notify_server!r}:\n"
@@ -72,14 +85,36 @@ def fake_qemu(
 
 def fake_server(path: Path, behavior: str, supports_vfio: bool = True) -> None:
     actions = {
-        "clean": "signal.sigwait({signal.SIGTERM})\n",
+        "clean": (
+            "signal.sigwait({signal.SIGTERM})\n"
+            "Path(__file__).with_suffix('.stop').write_text('stopped')\n"
+        ),
         "fail": "signal.sigwait({signal.SIGUSR1})\nraise SystemExit(23)\n",
         "exit_clean": "signal.sigwait({signal.SIGUSR1})\n",
         "fail_on_stop": ("signal.sigwait({signal.SIGTERM})\n" "raise SystemExit(23)\n"),
     }
+    socket_startup = (
+        "socket_paths = [sys.argv[index + 1] for index, value in "
+        "enumerate(sys.argv) if value == '--vfio-socket']\n"
+        "ready_fd = int(sys.argv[sys.argv.index('--vfio-ready-fd') + 1])\n"
+        "listeners = []\n"
+        + (
+            "socket_paths = socket_paths[:1]\n"
+            if behavior in {"partial_ready", "partial_exit"}
+            else ""
+        )
+        + "for socket_path in socket_paths:\n"
+        "    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+        "    listener.bind(socket_path)\n"
+        "    listener.listen()\n"
+        "    listeners.append(listener)\n"
+    )
     if behavior == "startup_fail":
         startup = "raise SystemExit(23)\n"
         action = ""
+    elif behavior == "partial_exit":
+        startup = socket_startup
+        action = "raise SystemExit(23)\n"
     elif behavior in {"ignore_sigterm", "stall"}:
         startup = (
             (
@@ -87,12 +122,8 @@ def fake_server(path: Path, behavior: str, supports_vfio: bool = True) -> None:
                 if behavior == "ignore_sigterm"
                 else "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})\n"
             )
-            + "socket_path = sys.argv[sys.argv.index('--vfio-socket') + 1]\n"
-            "ready_fd = int(sys.argv[sys.argv.index('--vfio-ready-fd') + 1])\n"
-            "listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
-            "listener.bind(socket_path)\n"
-            "listener.listen()\n"
-            "Path(__file__).with_suffix('.bound').write_text('bound')\n"
+            + socket_startup
+            + "Path(__file__).with_suffix('.bound').write_text('bound')\n"
         )
         action = (
             "while True:\n    signal.pause()\n"
@@ -101,24 +132,16 @@ def fake_server(path: Path, behavior: str, supports_vfio: bool = True) -> None:
         )
     else:
         startup = (
-            (
-                "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})\n"
-                if behavior in {"fail", "exit_clean"}
-                else "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})\n"
-            )
-            + "socket_path = sys.argv[sys.argv.index('--vfio-socket') + 1]\n"
-            "ready_fd = int(sys.argv[sys.argv.index('--vfio-ready-fd') + 1])\n"
-            "listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
-            "listener.bind(socket_path)\n"
-            "listener.listen()\n"
-            "os.write(ready_fd, b'\\x01')\n"
-            "os.close(ready_fd)\n"
-        )
-        action = actions[behavior]
+            "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})\n"
+            if behavior in {"fail", "exit_clean"}
+            else "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})\n"
+        ) + socket_startup + "os.write(ready_fd, b'\\x01')\n" "os.close(ready_fd)\n"
+        action = actions["clean" if behavior == "partial_ready" else behavior]
     write_file(
         path,
         (
             "#!/usr/bin/env python3\n"
+            "import json\n"
             "import os\n"
             "from pathlib import Path\n"
             "import signal\n"
@@ -131,8 +154,8 @@ def fake_server(path: Path, behavior: str, supports_vfio: bool = True) -> None:
             "    print('this build has no vfio-user support', file=sys.stderr)\n"
             "    raise SystemExit(1)\n"
             "Path(__file__).with_suffix('.pid').write_text(str(os.getpid()))\n"
-            + startup
-            + action
+            "Path(__file__).with_suffix('.argv.json').write_text("
+            "json.dumps(sys.argv[1:]))\n" + startup + action
         ).encode(),
         0o755,
     )
@@ -148,6 +171,10 @@ class RunVfioGuestTest(unittest.TestCase):
         qemu_returncode: int = 0,
         qemu_output: str = "workload: PASS",
         startup_timeout: float | None = None,
+        socket_names: list[str] | None = None,
+        node: str | None = None,
+        network_options: list[str] | None = None,
+        smp: int | None = None,
     ) -> tuple[int, str]:
         kernel = root / "vmlinuz"
         initramfs = root / "initramfs.gz"
@@ -182,6 +209,15 @@ class RunVfioGuestTest(unittest.TestCase):
             ]
             if startup_timeout is not None:
                 arguments.extend(["--startup-timeout", str(startup_timeout)])
+            if socket_names is not None:
+                for name in socket_names:
+                    arguments.extend(["--socket", str(root / "run" / name)])
+            if node is not None:
+                arguments.extend(["--node", node])
+            if network_options is not None:
+                arguments.extend(network_options)
+            if smp is not None:
+                arguments.extend(["--smp", str(smp)])
             status = RUNNER.main(arguments)
         return status, diagnostics.getvalue()
 
@@ -428,6 +464,15 @@ class RunVfioGuestTest(unittest.TestCase):
             "tcg",
         )
 
+    def test_guest_cpu_count_reaches_qemu(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            status, diagnostics = self.run_fake_guest(root, "clean", smp=4)
+            self.assertEqual(status, 0, diagnostics)
+            qemu_arguments = json.loads((root / "qemu.argv.json").read_text())
+            self.assertEqual(qemu_arguments[qemu_arguments.index("-smp") + 1], "4")
+            self.assert_fake_processes_reaped(root)
+
     def test_timeout_options_are_not_supported(self) -> None:
         required = [
             "--kernel",
@@ -487,6 +532,139 @@ class RunVfioGuestTest(unittest.TestCase):
             with self.subTest(value=value), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit):
                     RUNNER.parse_arguments([*required, "--probe-timeout", value])
+
+    def test_network_options_require_a_pair_and_one_socket_mode(self) -> None:
+        required = [
+            "--kernel",
+            "kernel",
+            "--initramfs",
+            "initramfs",
+            "--qemu",
+            "qemu",
+            "--rocjitsu",
+            "rocjitsu",
+            "--config",
+            "config",
+            "--output",
+            "output",
+        ]
+        invalid = (
+            ["--net-mac", "02:00:00:00:00:01"],
+            ["--net-socket-listen", "127.0.0.1:17000"],
+            ["--net-socket-connect", "127.0.0.1:17000"],
+            ["--net-socket-mcast", "239.192.0.1:17000"],
+            [
+                "--net-socket-listen",
+                "127.0.0.1:17000",
+                "--net-socket-connect",
+                "127.0.0.1:17001",
+                "--net-mac",
+                "02:00:00:00:00:01",
+            ],
+        )
+        for options in invalid:
+            with self.subTest(options=options), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                with self.assertRaises(SystemExit) as caught:
+                    RUNNER.parse_arguments([*required, *options])
+                self.assertEqual(caught.exception.code, 2)
+
+    def test_network_endpoint_and_mac_validation(self) -> None:
+        network = RUNNER.SocketNetwork("listen", "127.0.0.1:00080", "02:AB:00:00:00:01")
+        self.assertEqual(network.endpoint, "127.0.0.1:80")
+        self.assertEqual(network.mac, "02:ab:00:00:00:01")
+        multicast = RUNNER.SocketNetwork(
+            "mcast", "239.192.0.1:00080", "02:00:00:00:00:02"
+        )
+        self.assertEqual(multicast.endpoint, "239.192.0.1:80")
+        with self.assertRaisesRegex(RUNNER.GuestRunError, "must be multicast"):
+            RUNNER.SocketNetwork("mcast", "127.0.0.1:80", "02:00:00:00:00:02")
+        self.assertEqual(RUNNER.validate_network_endpoint("127.0.0.1:1"), "127.0.0.1:1")
+        self.assertEqual(
+            RUNNER.validate_network_endpoint("127.0.0.1:65535"),
+            "127.0.0.1:65535",
+        )
+
+        bad_endpoints = (
+            "localhost:80",
+            "127.0.0.256:80",
+            "[::1]:80",
+            "127.0.0.1",
+            "127.0.0.1:0",
+            "127.0.0.1:65536",
+            "127.0.0.1:１２",
+            "127.0.0.1:80,server=on",
+            "127.0.0.1,foo=bar:80",
+            "127.0.0.1:80\n",
+            "127.0.0.1:" + "9" * 5000,
+        )
+        for endpoint in bad_endpoints:
+            with self.subTest(endpoint=endpoint[:40]), self.assertRaises(
+                RUNNER.GuestRunError
+            ):
+                RUNNER.SocketNetwork("listen", endpoint, "02:00:00:00:00:01")
+
+        bad_macs = (
+            "01:00:00:00:00:01",
+            "ff:ff:ff:ff:ff:ff",
+            "02:00:00:00:00",
+            "02-00-00-00-00-01",
+            "02:00:00:00:00:gg",
+            "02:00:00:00:00:01,netdev=other",
+            "02:00:00:00:00:01\n",
+        )
+        for mac in bad_macs:
+            with self.subTest(mac=mac), self.assertRaises(RUNNER.GuestRunError):
+                RUNNER.SocketNetwork("connect", "127.0.0.1:17000", mac)
+
+        with self.assertRaisesRegex(
+            RUNNER.GuestRunError, "unknown network socket mode"
+        ):
+            RUNNER.SocketNetwork("bridge", "127.0.0.1:17000", "02:00:00:00:00:01")
+
+    def test_invalid_network_value_fails_before_file_checks_or_spawning(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "run"
+            required = [
+                "--kernel",
+                "missing-kernel",
+                "--initramfs",
+                "missing-initramfs",
+                "--qemu",
+                "missing-qemu",
+                "--rocjitsu",
+                "missing-rocjitsu",
+                "--config",
+                "missing-config",
+                "--output",
+                str(output),
+            ]
+            for options in (
+                [
+                    "--net-socket-listen",
+                    "127.0.0.1:80,foo=bar",
+                    "--net-mac",
+                    "02:00:00:00:00:01",
+                ],
+                [
+                    "--net-socket-connect",
+                    "127.0.0.1:17000",
+                    "--net-mac",
+                    "01:00:00:00:00:01",
+                ],
+            ):
+                with self.subTest(options=options), mock.patch.object(
+                    RUNNER, "require_file", side_effect=AssertionError("file checked")
+                ), mock.patch.object(
+                    RUNNER.subprocess, "Popen", side_effect=AssertionError("spawned")
+                ):
+                    diagnostics = io.StringIO()
+                    with contextlib.redirect_stderr(diagnostics):
+                        status = RUNNER.main([*required, *options])
+                    self.assertEqual(status, 1)
+                    self.assertIn("network", diagnostics.getvalue())
+                    self.assertFalse(output.exists())
 
     def test_capability_probe_timeout_kills_and_reaps_child(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -550,7 +728,7 @@ class RunVfioGuestTest(unittest.TestCase):
             Path("/qemu"),
             Path("/guest/vmlinuz"),
             Path("/guest/initramfs.gz"),
-            Path("/tmp/device.sock"),
+            [Path("/tmp/device.sock")],
             "tcg",
             "3G",
             "console=ttyS0 rdinit=/init workload=gemm",
@@ -567,6 +745,266 @@ class RunVfioGuestTest(unittest.TestCase):
         self.assertEqual(device["driver"], "vfio-user-pci")
         self.assertEqual(device["rombar"], 0)
         self.assertEqual(device["socket"], {"type": "unix", "path": "/tmp/device.sock"})
+        self.assertNotIn("bus", device)
+        self.assertNotIn("addr", device)
+        self.assertNotIn("id", device)
+        self.assertEqual(
+            arguments,
+            [
+                "/qemu",
+                "-accel",
+                "tcg",
+                "-cpu",
+                "qemu64,+hypervisor",
+                "-m",
+                "3G",
+                "-object",
+                "memory-backend-memfd,id=mem,size=3G,share=on",
+                "-machine",
+                "q35,memory-backend=mem",
+                "-kernel",
+                "/guest/vmlinuz",
+                "-initrd",
+                "/guest/initramfs.gz",
+                "-append",
+                "console=ttyS0 rdinit=/init workload=gemm",
+                "-device",
+                (
+                    '{"driver":"vfio-user-pci","rombar":0,'
+                    '"socket":{"path":"/tmp/device.sock","type":"unix"}}'
+                ),
+                "-nodefaults",
+                "-no-user-config",
+                "-display",
+                "none",
+                "-monitor",
+                "none",
+                "-serial",
+                "stdio",
+                "-no-reboot",
+            ],
+        )
+
+    def test_socket_network_assigns_single_gpu_to_slot_four(self) -> None:
+        arguments = RUNNER.build_qemu_arguments(
+            Path("/qemu"),
+            Path("/vmlinuz"),
+            Path("/initramfs"),
+            [Path("/tmp/gpu0.sock")],
+            "tcg",
+            "4G",
+            "console=ttyS0",
+            RUNNER.SocketNetwork("listen", "127.0.0.1:17000", "02:00:00:00:00:01"),
+        )
+        gpu = json.loads(arguments[arguments.index("-device") + 1])
+        self.assertEqual(gpu["bus"], "pcie.0")
+        self.assertEqual(gpu["addr"], "0x4")
+        self.assertEqual(gpu["id"], "rocjitsu-gpu-0")
+
+    def test_qemu_arguments_add_socket_network_nic_after_four_gpu_slots(self) -> None:
+        paths = [Path(f"/tmp/gpu{ordinal}.sock") for ordinal in range(4)]
+        baseline = RUNNER.build_qemu_arguments(
+            Path("/qemu"),
+            Path("/vmlinuz"),
+            Path("/initramfs"),
+            paths,
+            "tcg",
+            "4G",
+            "console=ttyS0",
+        )
+        insertion = baseline.index("-nodefaults")
+        self.assertNotIn("-netdev", baseline)
+
+        for mode in ("listen", "connect", "mcast"):
+            with self.subTest(mode=mode):
+                endpoint = "239.192.0.1:17000" if mode == "mcast" else "127.0.0.1:17000"
+                arguments = RUNNER.build_qemu_arguments(
+                    Path("/qemu"),
+                    Path("/vmlinuz"),
+                    Path("/initramfs"),
+                    paths,
+                    "tcg",
+                    "4G",
+                    "console=ttyS0",
+                    RUNNER.SocketNetwork(mode, endpoint, "02:AA:00:00:00:01"),
+                )
+                self.assertEqual(arguments[:insertion], baseline[:insertion])
+                self.assertEqual(arguments[insertion], "-netdev")
+                self.assertEqual(
+                    arguments[insertion + 1],
+                    f"socket,id=rocjitsu-net0,{mode}={endpoint}"
+                    + (",localaddr=127.0.0.1" if mode == "mcast" else ""),
+                )
+                self.assertEqual(arguments[insertion + 2], "-device")
+                self.assertEqual(arguments[insertion + 4 :], baseline[insertion:])
+                nic = json.loads(arguments[insertion + 3])
+                self.assertEqual(
+                    nic,
+                    {
+                        "driver": "virtio-net-pci",
+                        "netdev": "rocjitsu-net0",
+                        "mac": "02:aa:00:00:00:01",
+                        "bus": "pcie.0",
+                        "addr": "0x8",
+                        "id": "rocjitsu-nic0",
+                    },
+                )
+
+    def test_socket_network_rejects_fifth_gpu_slot(self) -> None:
+        paths = [Path(f"/tmp/gpu{ordinal}.sock") for ordinal in range(5)]
+        with self.assertRaisesRegex(
+            RUNNER.GuestRunError, "at most four VFIO-user devices"
+        ):
+            RUNNER.build_qemu_arguments(
+                Path("/qemu"),
+                Path("/vmlinuz"),
+                Path("/initramfs"),
+                paths,
+                "tcg",
+                "4G",
+                "console=ttyS0",
+                RUNNER.SocketNetwork("listen", "127.0.0.1:17000", "02:00:00:00:00:01"),
+            )
+
+    def test_multi_gpu_qemu_arguments_assign_stable_root_bus_slots(self) -> None:
+        for count in (2, 4):
+            with self.subTest(count=count):
+                paths = [Path(f"/tmp/gpu{ordinal}.sock") for ordinal in range(count)]
+                arguments = RUNNER.build_qemu_arguments(
+                    Path("/qemu"),
+                    Path("/guest/vmlinuz"),
+                    Path("/guest/initramfs.gz"),
+                    paths,
+                    "tcg",
+                    "4G",
+                    "console=ttyS0",
+                )
+                devices = [
+                    json.loads(arguments[index + 1])
+                    for index, value in enumerate(arguments)
+                    if value == "-device"
+                ]
+                self.assertEqual(len(devices), count)
+                for ordinal, device in enumerate(devices):
+                    self.assertEqual(
+                        device["socket"], {"type": "unix", "path": str(paths[ordinal])}
+                    )
+                    self.assertEqual(device["bus"], "pcie.0")
+                    self.assertEqual(device["addr"], f"0x{ordinal + 4:x}")
+                    self.assertEqual(device["id"], f"rocjitsu-gpu-{ordinal}")
+
+    def test_atomic_port_probe_requires_explicit_properties(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            qemu = Path(temporary) / "qemu"
+            fake_qemu(qemu)
+            with self.assertRaisesRegex(
+                RUNNER.GuestRunError, "lacks opt-in AtomicOp properties"
+            ):
+                RUNNER.require_qemu_atomic_ports(qemu, 5)
+            fake_qemu(qemu, supports_atomic_ports=True)
+            RUNNER.require_qemu_atomic_ports(qemu, 5)
+
+    def test_peer_probe_switch_preserves_socket_identity(self) -> None:
+        bridges = [
+            "pcie-root-port,id=p2v-rp,bus=pcie.0,addr=0x4,chassis=1,slot=4,x-speed=2_5,x-width=1",
+            "x3130-upstream,id=p2v-up,bus=p2v-rp,addr=0x0",
+            "xio3130-downstream,id=p2v-down-0,bus=p2v-up,addr=0x0,chassis=2,slot=0",
+            "xio3130-downstream,id=p2v-down-1,bus=p2v-up,addr=0x1,chassis=3,slot=1",
+            "xio3130-downstream,id=p2v-down-2,bus=p2v-up,addr=0x2,chassis=4,slot=2",
+            "xio3130-downstream,id=p2v-down-3,bus=p2v-up,addr=0x3,chassis=5,slot=3",
+        ]
+        for count in (2, 4):
+            with self.subTest(count=count):
+                paths = [Path(f"/tmp/gpu{ordinal}.sock") for ordinal in range(count)]
+                arguments = RUNNER.build_qemu_arguments(
+                    Path("/qemu"),
+                    Path("/vmlinuz"),
+                    Path("/initramfs"),
+                    paths,
+                    "tcg",
+                    "4G",
+                    "console=ttyS0",
+                    p2v_switch_topology=True,
+                )
+                devices = [
+                    arguments[index + 1]
+                    for index, value in enumerate(arguments)
+                    if value == "-device"
+                ]
+                self.assertEqual(devices[: count + 2], bridges[: count + 2])
+                gpus = [json.loads(device) for device in devices[count + 2 :]]
+                self.assertEqual(len(gpus), count)
+                for ordinal, gpu in enumerate(gpus):
+                    self.assertEqual(gpu["bus"], f"p2v-down-{ordinal}")
+                    self.assertEqual(gpu["addr"], "0x0")
+                    self.assertEqual(gpu["id"], f"rocjitsu-gpu-{ordinal}")
+                    self.assertEqual(gpu["socket"]["path"], str(paths[ordinal]))
+
+        for count in (1, 3, 5):
+            with self.subTest(unsupported_count=count):
+                paths = [Path(f"/tmp/gpu{ordinal}.sock") for ordinal in range(count)]
+                with self.assertRaisesRegex(RUNNER.GuestRunError, "two or four"):
+                    RUNNER.build_qemu_arguments(
+                        Path("/qemu"),
+                        Path("/vmlinuz"),
+                        Path("/initramfs"),
+                        paths,
+                        "tcg",
+                        "4G",
+                        "console=ttyS0",
+                        p2v_switch_topology=True,
+                    )
+
+    def test_atomic_root_sets_only_selected_bridge_capabilities(self) -> None:
+        paths = [Path("/tmp/gpu0.sock"), Path("/tmp/gpu1.sock")]
+        arguments = RUNNER.build_qemu_arguments(
+            Path("/qemu"),
+            Path("/vmlinuz"),
+            Path("/initramfs"),
+            paths,
+            "tcg",
+            "4G",
+            "console=ttyS0",
+            p2v_switch_topology=True,
+            p2v_atomic_root=True,
+        )
+        bridges = [
+            arguments[index + 1]
+            for index, value in enumerate(arguments)
+            if value == "-device"
+        ][:4]
+        self.assertIn("x-atomic-comp32=on,x-atomic-comp64=on", bridges[0])
+        self.assertIn("x-atomic-route=on", bridges[1])
+        self.assertIn("x-atomic-route=on", bridges[2])
+        self.assertIn("x-atomic-route=on", bridges[3])
+        with self.assertRaisesRegex(
+            RUNNER.GuestRunError, "requires the switch topology"
+        ):
+            RUNNER.build_qemu_arguments(
+                Path("/qemu"),
+                Path("/vmlinuz"),
+                Path("/initramfs"),
+                paths,
+                "tcg",
+                "4G",
+                "console=ttyS0",
+                p2v_atomic_root=True,
+            )
+
+    def test_multi_gpu_qemu_arguments_stop_before_q35_chipset_slots(self) -> None:
+        paths = [Path(f"/tmp/gpu{ordinal}.sock") for ordinal in range(25)]
+        with self.assertRaisesRegex(
+            RUNNER.GuestRunError, "too many VFIO-user devices for Q35 PCI slots"
+        ):
+            RUNNER.build_qemu_arguments(
+                Path("/qemu"),
+                Path("/guest/vmlinuz"),
+                Path("/guest/initramfs.gz"),
+                paths,
+                "tcg",
+                "4G",
+                "console=ttyS0",
+            )
 
     def test_log_checks_are_generic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -612,16 +1050,86 @@ class RunVfioGuestTest(unittest.TestCase):
                         str(output),
                         "--append",
                         "console=ttyS0 test=1",
+                        "--fabric-effect-trace",
                         "--dry-run",
                     ]
                 )
 
             self.assertEqual(status, 0, diagnostics.getvalue())
             self.assertIn("--vfio-socket", commands.getvalue())
+            self.assertIn("--fabric-effect-trace", commands.getvalue())
             self.assertNotIn("--vfio-ready-fd", commands.getvalue())
             self.assertIn("console=ttyS0 test=1", commands.getvalue())
             self.assertFalse((output / "run-manifest.json").exists())
             self.assertFalse(output.exists())
+
+    def test_dry_run_prints_socket_network_argv_without_creating_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            kernel = root / "vmlinuz"
+            initramfs = root / "initramfs.gz"
+            config = root / "config.json"
+            qemu = root / "qemu"
+            rocjitsu = root / "rocjitsu"
+            output = root / "run"
+            write_file(kernel, b"kernel")
+            write_file(initramfs, b"initramfs")
+            write_file(config, b"{}\n")
+            fake_qemu(qemu)
+            fake_server(rocjitsu, "clean")
+
+            commands = io.StringIO()
+            diagnostics = io.StringIO()
+            with contextlib.redirect_stdout(commands), contextlib.redirect_stderr(
+                diagnostics
+            ):
+                status = RUNNER.main(
+                    [
+                        "--kernel",
+                        str(kernel),
+                        "--initramfs",
+                        str(initramfs),
+                        "--qemu",
+                        str(qemu),
+                        "--rocjitsu",
+                        str(rocjitsu),
+                        "--config",
+                        str(config),
+                        "--output",
+                        str(output),
+                        "--accel",
+                        "tcg",
+                        "--net-socket-connect",
+                        "127.0.0.1:17001",
+                        "--net-mac",
+                        "02:00:00:00:00:02",
+                        "--dry-run",
+                    ]
+                )
+
+            self.assertEqual(status, 0, diagnostics.getvalue())
+            server_command, qemu_command = map(
+                shlex.split, commands.getvalue().splitlines()
+            )
+            self.assertEqual(
+                server_command,
+                [
+                    str(rocjitsu),
+                    "--config",
+                    str(config),
+                    "--vfio-socket",
+                    str(output / "vfio-user.sock"),
+                ],
+            )
+            self.assertEqual(
+                qemu_command[qemu_command.index("-netdev") + 1],
+                "socket,id=rocjitsu-net0,connect=127.0.0.1:17001",
+            )
+            nic = json.loads(qemu_command[qemu_command.index("-netdev") + 3])
+            self.assertEqual(nic["driver"], "virtio-net-pci")
+            self.assertEqual(nic["addr"], "0x8")
+            self.assertFalse(output.exists())
+            self.assertFalse((root / "qemu.argv.json").exists())
 
     def test_dry_run_rejects_a_non_executable_server(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -816,6 +1324,39 @@ class RunVfioGuestTest(unittest.TestCase):
                 "owned by another service",
             )
 
+    def test_socket_paths_reject_aliases_existing_files_and_long_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "run"
+            alias = root / "alias"
+            alias.symlink_to(root, target_is_directory=True)
+            first = output / "gpu0.sock"
+            with self.assertRaisesRegex(RUNNER.GuestRunError, "duplicate"):
+                RUNNER.validate_socket_paths(
+                    output, [first, alias / "run" / "gpu0.sock"]
+                )
+            with self.assertRaisesRegex(RUNNER.GuestRunError, "directly inside"):
+                RUNNER.validate_socket_paths(output, [output / ".." / "other.sock"])
+            with self.assertRaisesRegex(RUNNER.GuestRunError, "too long"):
+                RUNNER.validate_socket_paths(output, [output / ("s" * 100)])
+
+            output.mkdir()
+            first.write_text("occupied", encoding="utf-8")
+            with self.assertRaisesRegex(RUNNER.GuestRunError, "already exists"):
+                RUNNER.validate_socket_paths(output, [first])
+
+    def test_duplicate_socket_is_rejected_before_spawning(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            status, diagnostics = self.run_fake_guest(
+                root, "clean", socket_names=["gpu0.sock", "gpu0.sock"]
+            )
+            self.assertEqual(status, 1)
+            self.assertIn("duplicate vfio-user socket path", diagnostics)
+            self.assertFalse((root / "rocjitsu.pid").exists())
+            self.assertFalse((root / "qemu.pid").exists())
+            self.assertFalse((root / "run").exists())
+
     def test_readiness_signal_observes_a_real_unix_socket(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             socket_path = Path(temporary) / "vfio-user.sock"
@@ -826,7 +1367,7 @@ class RunVfioGuestTest(unittest.TestCase):
                 try:
                     os.write(ready_write, b"\x01")
                     identity = RUNNER.wait_for_server_ready(
-                        socket_path,
+                        [socket_path],
                         mock.Mock(poll=mock.Mock(return_value=None)),
                         ready_read,
                     )
@@ -835,7 +1376,9 @@ class RunVfioGuestTest(unittest.TestCase):
                     os.close(ready_read)
 
             socket_stat = socket_path.lstat()
-            self.assertEqual(identity, (socket_stat.st_dev, socket_stat.st_ino))
+            self.assertEqual(
+                identity[socket_path], (socket_stat.st_dev, socket_stat.st_ino)
+            )
 
     def test_readiness_pipe_eof_reports_startup_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -847,12 +1390,36 @@ class RunVfioGuestTest(unittest.TestCase):
                     RUNNER.GuestRunError, "closed its readiness channel"
                 ):
                     RUNNER.wait_for_server_ready(
-                        socket_path,
+                        [socket_path],
                         mock.Mock(poll=mock.Mock(return_value=23)),
                         ready_read,
                     )
             finally:
                 os.close(ready_read)
+
+    def test_readiness_rejects_a_non_socket_in_the_multi_gpu_list(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = root / "gpu0.sock"
+            second = root / "gpu1.sock"
+            second.write_text("not a socket", encoding="utf-8")
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                listener.bind(str(first))
+                listener.listen()
+                ready_read, ready_write = os.pipe()
+                try:
+                    os.write(ready_write, b"\x01")
+                    with self.assertRaisesRegex(
+                        RUNNER.GuestRunError, "socket path is not a socket"
+                    ):
+                        RUNNER.wait_for_server_ready(
+                            [first, second],
+                            mock.Mock(poll=mock.Mock(return_value=None)),
+                            ready_read,
+                        )
+                finally:
+                    os.close(ready_write)
+                    os.close(ready_read)
 
     def test_cleanup_removes_only_the_observed_real_socket(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -905,6 +1472,25 @@ class RunVfioGuestTest(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("closed its readiness channel", diagnostics)
 
+    def test_partial_multi_gpu_readiness_cleans_socket_before_qemu(self) -> None:
+        for behavior, message in (
+            ("partial_ready", "reported readiness without creating"),
+            ("partial_exit", "closed its readiness channel"),
+        ):
+            with self.subTest(
+                behavior=behavior
+            ), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                status, diagnostics = self.run_fake_guest(
+                    root, behavior, socket_names=["gpu0.sock", "gpu1.sock"]
+                )
+                self.assertEqual(status, 1)
+                self.assertIn(message, diagnostics)
+                self.assert_fake_process_reaped(root, "rocjitsu")
+                self.assertFalse((root / "qemu.pid").exists())
+                self.assertFalse((root / "run/gpu0.sock").exists())
+                self.assertFalse((root / "run/gpu1.sock").exists())
+
     def test_server_startup_timeout_stops_server_without_starting_qemu(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -912,11 +1498,11 @@ class RunVfioGuestTest(unittest.TestCase):
             real_wait_for_server_ready = RUNNER.wait_for_server_ready
 
             def wait_after_server_bound(
-                path: Path,
+                paths: list[Path],
                 process: subprocess.Popen[bytes],
                 ready_fd: int,
                 timeout: float,
-            ) -> tuple[int, int]:
+            ) -> dict[Path, tuple[int, int]]:
                 deadline = time.monotonic() + 5
                 while not bound_marker.is_file():
                     self.assertIsNone(
@@ -925,7 +1511,7 @@ class RunVfioGuestTest(unittest.TestCase):
                     if time.monotonic() >= deadline:
                         self.fail("fake rocjitsu did not bind within 5 seconds")
                     time.sleep(0.01)
-                return real_wait_for_server_ready(path, process, ready_fd, timeout)
+                return real_wait_for_server_ready(paths, process, ready_fd, timeout)
 
             with mock.patch.object(
                 RUNNER,
@@ -1022,6 +1608,145 @@ class RunVfioGuestTest(unittest.TestCase):
             self.assertFalse((root / "run/vfio-user.sock").exists())
 
         self.assertEqual(status, 0, diagnostics)
+
+    def test_multi_gpu_requests_shutdown_before_guest_log_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original_check = RUNNER.check_guest_log
+
+            def check_after_shutdown(
+                path: Path, expected: list[str], rejected: list[str]
+            ) -> None:
+                stopped = root / "rocjitsu.stop"
+                deadline = time.monotonic() + 2
+                while not stopped.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(
+                    stopped.exists(), "server stop waited for guest log validation"
+                )
+                original_check(path, expected, rejected)
+
+            with mock.patch.object(
+                RUNNER, "check_guest_log", side_effect=check_after_shutdown
+            ):
+                status, diagnostics = self.run_fake_guest(
+                    root, "clean", socket_names=["gpu0.sock", "gpu1.sock"]
+                )
+            self.assertEqual(status, 0, diagnostics)
+            self.assert_fake_processes_reaped(root)
+
+    def test_two_and_four_gpu_runs_preserve_socket_order_and_cleanup(self) -> None:
+        for count in (2, 4):
+            with self.subTest(count=count), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                names = [f"gpu{ordinal}.sock" for ordinal in range(count)]
+                status, diagnostics = self.run_fake_guest(
+                    root, "clean", socket_names=names, node="node-0"
+                )
+                self.assertEqual(status, 0, diagnostics)
+                self.assert_fake_processes_reaped(root)
+                server_arguments = json.loads((root / "rocjitsu.argv.json").read_text())
+                self.assertEqual(
+                    server_arguments[:-2],
+                    [
+                        "--config",
+                        str(root / "config.json"),
+                        "--node",
+                        "node-0",
+                        *(
+                            argument
+                            for name in names
+                            for argument in ("--vfio-socket", str(root / "run" / name))
+                        ),
+                    ],
+                )
+                self.assertEqual(server_arguments[-2], "--vfio-ready-fd")
+                self.assertTrue(server_arguments[-1].isdigit())
+                qemu_arguments = json.loads((root / "qemu.argv.json").read_text())
+                devices = [
+                    json.loads(qemu_arguments[index + 1])
+                    for index, value in enumerate(qemu_arguments)
+                    if value == "-device"
+                ]
+                self.assertEqual(len(devices), count)
+                self.assertEqual(
+                    [device["socket"]["path"] for device in devices],
+                    [str(root / "run" / name) for name in names],
+                )
+                self.assertEqual(
+                    [device["addr"] for device in devices],
+                    [f"0x{ordinal + 4:x}" for ordinal in range(count)],
+                )
+                for name in names:
+                    self.assertFalse((root / "run" / name).exists())
+
+    def test_fake_qemu_receives_only_opted_in_socket_network_arguments(self) -> None:
+        for mode in ("listen", "connect"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                status, diagnostics = self.run_fake_guest(
+                    root,
+                    "clean",
+                    network_options=[
+                        f"--net-socket-{mode}",
+                        "127.0.0.1:17000",
+                        "--net-mac",
+                        "02:00:00:00:00:01",
+                    ],
+                )
+                self.assertEqual(status, 0, diagnostics)
+                self.assert_fake_processes_reaped(root)
+                qemu_arguments = json.loads((root / "qemu.argv.json").read_text())
+                gpu = json.loads(qemu_arguments[qemu_arguments.index("-device") + 1])
+                self.assertEqual(gpu["addr"], "0x4")
+                self.assertEqual(gpu["id"], "rocjitsu-gpu-0")
+                netdev_index = qemu_arguments.index("-netdev")
+                self.assertEqual(
+                    qemu_arguments[netdev_index + 1],
+                    f"socket,id=rocjitsu-net0,{mode}=127.0.0.1:17000",
+                )
+                self.assertEqual(qemu_arguments[netdev_index + 2], "-device")
+                nic = json.loads(qemu_arguments[netdev_index + 3])
+                self.assertEqual(nic["driver"], "virtio-net-pci")
+                self.assertEqual(nic["netdev"], "rocjitsu-net0")
+                self.assertEqual(nic["mac"], "02:00:00:00:00:01")
+                self.assertEqual(nic["bus"], "pcie.0")
+                self.assertEqual(nic["addr"], "0x8")
+                server_arguments = json.loads((root / "rocjitsu.argv.json").read_text())
+                self.assertEqual(
+                    server_arguments[:-2],
+                    [
+                        "--config",
+                        str(root / "config.json"),
+                        "--vfio-socket",
+                        str(root / "run/vfio-user.sock"),
+                    ],
+                )
+                self.assertEqual(server_arguments[-2], "--vfio-ready-fd")
+                self.assertFalse((root / "run/vfio-user.sock").exists())
+
+    def test_fifth_gpu_with_socket_network_fails_before_probes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with mock.patch.object(
+                RUNNER, "available_accelerators", side_effect=AssertionError("probed")
+            ):
+                status, diagnostics = self.run_fake_guest(
+                    root,
+                    "clean",
+                    socket_names=[f"gpu{ordinal}.sock" for ordinal in range(5)],
+                    network_options=[
+                        "--net-socket-listen",
+                        "127.0.0.1:17000",
+                        "--net-mac",
+                        "02:00:00:00:00:01",
+                    ],
+                )
+            self.assertEqual(status, 1)
+            self.assertIn("at most four VFIO-user devices", diagnostics)
+            self.assertFalse((root / "run").exists())
+            self.assertFalse((root / "qemu.pid").exists())
+            self.assertFalse((root / "rocjitsu.pid").exists())
 
     def test_sigterm_cleans_up_blocked_children_and_owned_socket(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -41,7 +41,6 @@ struct Isa : amdgpu::CdnaIsaBase {
   // operand.cpp; bodies forward to the anonymous-namespace helpers.
   static std::optional<uint32_t> resolved_vgpr_offset(OperandType opr_type, int ev);
   static bool simd_capable_value(OperandType opr_type, int ev);
-  static uint32_t simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev);
 };
 
 } // namespace cdna1

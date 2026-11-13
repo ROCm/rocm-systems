@@ -1,8 +1,6 @@
-#!/usr/bin/env python@_VERSION@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-from __future__ import absolute_import
 
 __author__ = "AMD ROCm"
 __copyright__ = "Copyright 2024, Advanced Micro Devices, Inc."
@@ -15,18 +13,17 @@ import os
 import sys
 
 from . import libpyrocprofsys
-from .libpyrocprofsys.profiler import profiler_init as _profiler_init
 from .libpyrocprofsys.profiler import profiler_finalize as _profiler_fini
 
-__all__ = ["exec_", "_file", "_get_argv", "_initialize", "_finalize"]
+__all__ = ["_file", "_finalize", "_get_argv", "_initialize", "exec_"]
 
-PY3 = sys.version_info[0] == 3
+PY3 = sys.version_info[0] >= 3
 
 # exec (from https://bitbucket.org/gutworth/six/):
 if PY3:
     import builtins
 
-    exec_ = getattr(builtins, "exec")
+    exec_ = builtins.exec
     del builtins
 else:
 
@@ -40,7 +37,7 @@ else:
             del frame
         elif _locs_ is None:
             _locs_ = _globs_
-        exec("""exec _code_ in _globs_, _locs_""")
+        exec("""exec _code_ in _globs_, _locs_""")  # noqa: S102
 
 
 def _file(back=2, only_basename=True, use_dirname=False, noquotes=True):
@@ -48,7 +45,7 @@ def _file(back=2, only_basename=True, use_dirname=False, noquotes=True):
     Returns the file name
     """
 
-    from os.path import basename, dirname
+    from os.path import basename, dirname, join
 
     def get_fcode(back):
         fname = "<module>"
@@ -69,12 +66,12 @@ def _file(back=2, only_basename=True, use_dirname=False, noquotes=True):
                 )
             )
         else:
-            result = "{}".format(basename(get_fcode(back)))
+            result = f"{basename(get_fcode(back))}"
     else:
-        result = "{}".format(get_fcode(back))
+        result = f"{get_fcode(back)}"
 
     if noquotes is False:
-        result = "'{}'".format(result)
+        result = f"'{result}'"
 
     return result
 

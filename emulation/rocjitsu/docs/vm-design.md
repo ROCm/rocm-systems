@@ -47,6 +47,7 @@ SimulationEngine                           (simdojo - owns topology)
 └── Topology
     └── VirtualMachine                     (CompositeComponent - topology root)
         ├── SimulatedKfd driver_            (owned member, not a child component)
+        ├── FabricEndpoint ("fabric")        (VM-owned local peer transport)
         └── gpu[0..G] ("gpu0"..)           (CompositeComponent, one per GPU)
             ├── SoC ("soc")                 (owned, but its children were adopted
             │                                by the gpuN wrapper above, so it is
@@ -68,6 +69,14 @@ The `VirtualMachine` is a `simdojo::CompositeComponent` set as the topology root
 and it owns the simulated KFD alongside its SoCs. The simulation infrastructure
 (engine, topology, partitioning) is managed by `SimulationEngine`; the SoC
 represents the hardware being modeled.
+
+For unambiguous local ScaleUp or Infinity Fabric routes, the VM owns a
+`FabricEndpoint` child that carries admitted peer effects through Simdojo
+endpoints. Both link classes currently use unit-latency functional transport;
+this does not model hardware-specific Infinity Fabric timing. Executing those
+routes does not grant native XGMI discovery: explicit manifests still suppress
+KFD hive and XGMI metadata while the stock driver uses UC PCIe peer BAR
+mappings.
 
 ## Address spaces, translation, and backing
 
@@ -129,25 +138,28 @@ translation, TLB/MMU policy, CP, MES, SDMA, or memory-backing behavior.
 
 ### Translated PCI cache boundary
 
-The existing scalar, vector, and L2 caches are keyed by numeric VMID and virtual
-address, and L2 writeback targets `GpuMemory`. They are therefore valid only for
-the legacy compatibility binding today. Translated PCI/VFIO scalar and vector
-loads, stores, and atomics intentionally bypass those caches and operate through
-one `GpuVmAccess` snapshot per instruction. Contiguous lanes are still grouped
-into block accesses, and atomics use the backing's indivisible load and
-compare/exchange operations rather than synthesized read/write pairs.
+The legacy scalar, vector, and L2 cache entries use numeric VMIDs and virtual
+addresses. Translated PCI/VFIO vector loads can instead fill local cacheable
+lines through V$ and L2 when `query_translated_local_line()` confirms the
+backing, page-table policy, and line epoch. Their tags include the translated
+address-space identity and physical backing information, so an old binding or
+peer alias cannot reuse a local line. Translated scalar loads and atomics use
+the `GpuVmAccess` path; contiguous lanes are grouped into block accesses and
+atomics use the backing's indivisible operations. Translated stores also use
+`GpuVmAccess::write()` and advance the local line epoch rather than allocating
+a cache line. UC peer BAR traffic stays on the system/fabric path and does not
+fill this translated-local cache.
 
 The instruction cache is clean-only, so translated instruction fetch can use it
 safely: its tag includes the full address-space handle generation and
 translation epoch. Root replacement or slot reuse consequently misses without
 allowing stale code from the prior namespace to alias.
 
-This bypass is a safe intermediate state, not the final physical-cache model. A
-future translated data-cache implementation must key lines by physical
-backing/domain identity plus translated line address and retain the backing
-snapshot needed for eviction. Until that contract exists, routing translated
-data through the legacy caches would permit dirty lines from an old binding to
-write into a replacement backing and is prohibited.
+Translated-local lines are clean fills. Their backing identity and epoch checks
+prevent reuse after a mapping or coherence change; they do not turn a
+translated store into a dirty cache line that could write back to a replacement
+backing. Unsupported or uncacheable translations continue through
+`GpuVmAccess` without a translated-local fill.
 
 ### SDMA queue execution
 
@@ -172,6 +184,20 @@ decision without re-evaluating it, but does not advance beyond the producer-visi
 ring extent. An unavailable access retains the snapshot and exact progress for a
 later retry; faulted or malformed work becomes terminal after any required cursor
 publication.
+
+`COPY_LINEAR_SWAP` supports disjoint, adjacent, and identical operand ranges.
+Partially overlapping ranges are unsupported: the processor rejects them before
+writing either operand and logs the packet operands `address_a` and `address_b`
+and the byte count. ROCr places the API destination in A and source in B. The
+queue becomes terminal and subsequent completion packets remain
+unexecuted. ROCr may accept such submissions, but that acceptance does not
+establish hardware overlap semantics. This conservative restriction is a
+simulator limitation.
+
+Malformed packet warnings label the root packet's starting byte cursor as
+`root_cursor`; the reported header can belong to that root packet or an indirect
+packet within it. A cursor-publication failure preserves this packet diagnostic,
+including when the cursor store faults after an unavailable retry.
 
 KFD and PCI/MES only adapt queue creation, producer notifications, interrupts,
 and reset into `GpuQueueRegistry`. MES may supply the initial device cursor captured
@@ -222,7 +248,7 @@ uses bounded queue turns for event-loop fairness and retains CP queue
 serialization.
 
 Graceful AQL removal is a publication barrier. The CP retains the registration
-while a consumed ring cursor, dispatch completion, or queue-idle signal still
+while a consumed ring cursor, dispatch completion, or queue-idle notification still
 needs retry, and reports a terminal publication failure instead of silently
 dropping it. Reset and rollback use a distinct force-cancel operation.
 
@@ -481,7 +507,10 @@ wavefronts it stops scheduling and fires its `on_idle` callback. When all
 CUs are idle and no packets remain, the CP signals completion via
 `engine()->primary_release()`.
 
-Completion-signal and queue-inactive writes are durable per-queue journals.
+Each queue journals its completion-signal updates and idle notifications.
+An idle notification writes the event ID to the queue event's mailbox when
+present, delivers the targeted interrupt for a nonzero event ID, then delivers
+the generic interrupt.
 An unavailable translated backing pauses admission and advancement only for
 the queue whose journal is incomplete; the CP continues fetching, dispatching,
 and retiring independent queues. A later retry resumes at the first uncommitted
@@ -549,18 +578,91 @@ SC0/GLC is set. The L1 line is invalidated after the atomic to prevent
 stale reads. Supported integer atomics: swap, cmpswap, add, sub,
 smin/umin, smax/umax, and, or, xor, inc, dec.
 
-**Scalar atomics** (`s_atomic_*` and `s_atomic_*_x2`, CDNA1–4) bypass the
-L1 scalar cache and perform read-modify-write at L2; the atomic boundary's
-coherence epoch makes stale K$ lines refetch. The old value is returned to
-SDATA when GLC is set. Supported: swap, cmpswap, add, sub, smin/umin,
-smax/umax, and, or, xor, inc, dec. Compare-swap reads the source and then
-the compare value from SDATA and returns only the old value, to the low half.
-`s_buffer_atomic_*` are not yet implemented.
+**Scalar atomics** (`s_atomic_*`, `s_buffer_atomic_*` and their `_x2` forms,
+CDNA1–4) bypass the L1 scalar cache and perform read-modify-write at L2; the
+atomic boundary's coherence epoch makes stale K$ lines refetch. The old value
+is returned to SDATA when GLC is set. Supported: swap, cmpswap, add, sub,
+smin/umin, smax/umax, and, or, xor, inc, dec. Compare-swap reads the source
+and then the compare value from SDATA and returns only the old value, to the
+low half. A buffer atomic's address is the V# base plus the offset; stride
+only scales the bound. A buffer atomic whose element is not wholly in range
+performs no access and returns zero when GLC is set. A misaligned `_x2` buffer
+atomic faults even when out of range. The CDNA ISA manuals do not describe
+these bounds and fault-order rules. They are observed on gfx90a with
+`s_buffer_atomic_inc[_x2]`, and the fault order also with
+`s_buffer_atomic_dec_x2`. The other operations and CDNA targets are modeled
+the same way by extrapolation, including `s_buffer_atomic_cmpswap_x2`, whose
+bound covers its 8-byte memory element although SDATA holds 16 bytes.
 
 **Cache management instructions:**
 
 - `s_dcache_inv` / `s_dcache_inv_vol` — invalidate the L1 scalar cache
 - `s_gl1_inv` — invalidate the L1 vector cache
+
+### Cache tag storage and measured cost
+
+`CacheTag` is 96 bytes with translated-local backing and publication metadata,
+compared with 40 bytes before that policy was added. A 64-set, four-way L1
+therefore stores 24 KiB of tags instead of 10 KiB, including when it does not
+use the extra fields. The inline metadata avoids a side-table lookup and
+allocation on fills, hits, and eviction.
+
+On 2026-11-09, a Release `-O3` build with amdclang++ 23 ran the existing
+`L2CacheBenchmark.ScalarL1Hit` and `L2CacheBenchmark.VectorL1Hit` tests on one
+pinned CPU of a Ryzen Threadripper PRO 9985WX. Five alternating runs after a
+warmup gave median times of 6.518 and 8.726 ns/access on the pre-PR base
+`b4b55168e84`, versus 18.285 and 22.680 ns/access on the parent branch.
+These end-to-end hit tests include the PR's new admission and coherence paths;
+their difference cannot be attributed to tag size alone. They establish a
+cache-heavy regression to profile before claiming that the shared layout has
+no throughput cost. Reproduce the check with the two GTest filters above in
+matching Release builds, running each binary serially on the same CPU.
+
+### Transaction observation boundaries
+
+Cache geometry does not establish transfer atomicity. `MemoryTransactionPolicy`
+selects an observation boundary independently of the 128-byte L1 vector and L2
+cache lines. A 256-byte wave access consists of multiple transactions and may
+observe different publication epochs in different transactions.
+
+| Target | Modeled boundary | Basis |
+|--------|------------------|-------|
+| gfx1250 | 128 bytes | RCCL communication protocol evidence |
+| Other or unknown targets, including gfx1251 | 128 bytes | Preserve existing compatibility behavior pending hardware qualification |
+| Internal `unqualified_64()` profile | 64 bytes | Boundary tests; no production target selects it |
+
+[RCCL's target selection](https://github.com/ROCm/rocm-systems/blob/9c35798820670b1a2301730c9b4ee90200731160/projects/rccl/src/include/archinfo.h#L40-L56)
+uses 128-byte LL records for gfx1250 and 64-byte records for other targets.
+Its [gfx1250 FIFO accesses](https://github.com/ROCm/rocm-systems/blob/9c35798820670b1a2301730c9b4ee90200731160/projects/rccl/src/device/prims_ll128.h#L15-L69)
+use system-scope `b128` operations (16 bytes per lane). That evidence supports
+a protocol model under the required access and buffer-ownership conditions;
+it does not establish an arbitrary concurrent snapshot guarantee, a fabric
+packet size, or the same behavior on every gfx12 target. Changing older target
+defaults to 64 bytes requires qualification of the relevant physical access
+paths. A cache-line size or fabric transfer width alone is insufficient.
+
+The backing memory owns the policy; each CU inherits it. No per-target override
+is enabled until qualification justifies changing a default. The policy bounds
+coalesced vector transfers and legacy mapped-memory copies. Permuted non-overlapping lanes gather/scatter
+through contiguous transactions; overlapping operands retain lane order.
+Lanes crossing a boundary contribute byte fragments to each neighboring
+transaction. Legacy mapped accesses synchronize on shared host-storage lock stripes, so
+aliases and independent XCD cache objects coordinate. Stripe hashing remains
+identical across policies: a shared stripe can serialize two adjacent 64-byte
+transfers without making their combined 128 bytes one observation. Failed host
+accesses release the stripes, and translated retries preserve completed requests.
+
+Translated backends retain one request per lane-ordered run at the default
+policy, avoiding extra transport/DMA round trips. Reordered runs are transaction
+bounded; the internal 64-byte profile also splits ordered requests for testing.
+
+Cache hits and fills may observe more bytes together than the selected boundary;
+the model does not force every permitted interleaving. External physical-memory
+backends still own their snapshot/publication contract, including translation
+span boundaries. Tests demonstrate 64/128-byte request boundaries with unchanged
+cache geometry, separate 64-byte publications, split 256-byte records, lane
+permutations, aliases, and retry progress. These are simulator regressions, not
+physical-hardware qualification results.
 
 ---
 
@@ -682,23 +784,24 @@ ROCm application
 | `GET_VERSION` | `get_version_ioctl` | Returns the implemented KFD UAPI version 1.18; the shared header describes 1.19, whose metadata-ring queue creation is unsupported |
 | `GET_PROCESS_APERTURES_NEW` | `get_process_apertures_ioctl` | Returns `gpu_apertures(ordinal)` — LDS/scratch shifted by `kApertureStride` per GPU, with per-instance `gpu_id` |
 | `ACQUIRE_VM` | `acquire_vm_ioctl` | No-op (VM is always acquired) |
-| `ALLOC_MEMORY_OF_GPU` | `alloc_memory_ioctl` | Allocates host memory, assigns GPU VA from a linear bump allocator |
-| `FREE_MEMORY_OF_GPU` | `free_memory_ioctl` | Frees host memory, removes VA mapping |
-| `MAP_MEMORY_TO_GPU` / `UNMAP` | map/unmap ioctls | No-op (host pointers serve as GPU VAs) |
+| `ALLOC_MEMORY_OF_GPU` | `alloc_memory_ioctl` | Allocates fixed-size backing and assigns a GPU VA, with owner and backing lifetime tracked separately |
+| `FREE_MEMORY_OF_GPU` | `free_memory_ioctl` | Retires the allocation's grants and mappings, then releases its backing after outstanding users finish |
+| `MAP_MEMORY_TO_GPU` / `UNMAP` | map/unmap ioctls | Publish or retire counted per-device grants consulted by the GPU VM and fabric; peer VRAM maps also require a reachable owner route, so a GPU VA alone does not admit peer access |
 | `CREATE_QUEUE` | `create_queue_ioctl` | Registers an AQL ring with the CP; deferred until doorbell page is mapped |
 | `DESTROY_QUEUE` | `destroy_queue_ioctl` | Unregisters the ring from the CP |
-| `CREATE_EVENT` | `create_event_ioctl` | Allocates a slot in the memfd-backed signal page |
+| `CREATE_EVENT` | `create_event_ioctl` | Allocates a slot in the shared signal page |
 | `DESTROY_EVENT` | `destroy_event_ioctl` | Removes event slot; wakes any WAIT_EVENTS callers |
 | `SET_EVENT` | `set_event_ioctl` | Marks slot non-zero with `memory_order_release`; notifies waiters |
 | `WAIT_EVENTS` | `wait_events_ioctl` | Waits up to 100ms then returns; simulates `wake_up_interruptible` |
 
 ### Signal event page
 
-libhsakmt expects a memfd-backed page at the KFD mmap offset
+libhsakmt expects a shared backing page at the KFD mmap offset
 `KFD_MMAP_TYPE_EVENTS | gpu_id`. Each 64-bit slot corresponds to one
 `event_id`. libhsakmt polls `signal_page[event_id]` directly; non-zero means
 the event is pending. `close()` sets all slots to 1 to unblock any polling
-threads during shutdown.
+threads during shutdown. The backing is a memfd when file sizing and xattrs
+are available, or a keeper token otherwise.
 
 ---
 
@@ -728,7 +831,7 @@ convenience wrapper that releases the last reference and tears down the VM.
 #include <rocjitsu/rocjitsu.h>
 
 rj_vm_t *vm = NULL;
-rj_vm_create("configs/gfx950_mi355x.json", &vm);
+rj_vm_create("configs/gfx950_mi350x.json", &vm);
 
 uint64_t ticks = 0;
 rj_vm_run(vm, &ticks);

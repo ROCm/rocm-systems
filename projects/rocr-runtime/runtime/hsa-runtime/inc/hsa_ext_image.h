@@ -1450,6 +1450,40 @@ typedef struct hsa_ext_sampler_descriptor_v2_s {
 } hsa_ext_sampler_descriptor_v2_t;
 
 /**
+ * @brief Implementation independent sampler descriptor v3 which adds a maximum
+ *  anisotropy ratio on top of v2.
+ */
+typedef struct hsa_ext_sampler_descriptor_v3_s {
+  /**
+   * Sampler coordinate mode describes the normalization of image coordinates.
+   */
+  hsa_ext_sampler_coordinate_mode32_t coordinate_mode;
+
+  /**
+   * Sampler filter type describes the type of sampling performed on regular image.
+   */
+  hsa_ext_sampler_filter_mode32_t filter_mode;
+
+  /**
+   * Sampler filter type describes the type of sampling performed on mipmap image.
+  */
+  hsa_ext_sampler_filter_mode32_t mipmap_filter_mode;
+
+  /**
+   * Sampler address mode describes the processing of out-of-range image
+   * coordinates.
+   */
+  hsa_ext_sampler_addressing_mode32_t address_modes[3]; // in X, Y and Z axises
+
+  /**
+   * Maximum anisotropy ratio used when filtering. Must be one of 0, 1, 2, 4, 8
+   * or 16; other values are rounded down to the next supported ratio and values
+   * above 16 are clamped to 16. 0 and 1 both disable anisotropic filtering.
+   */
+  uint32_t max_anisotropy;
+} hsa_ext_sampler_descriptor_v3_t;
+
+/**
  * @brief Create an agent specific sampler handle for a given agent
  * independent sampler descriptor and agent.
  *
@@ -1515,6 +1549,42 @@ hsa_status_t HSA_API hsa_ext_sampler_create(
 hsa_status_t HSA_API hsa_ext_sampler_create_v2(
     hsa_agent_t agent,
     const hsa_ext_sampler_descriptor_v2_t *sampler_descriptor,
+    hsa_ext_sampler_t *sampler);
+
+/**
+ * @brief Create an agent specific sampler handle for a given agent
+ * independent sampler descriptor v3 and agent. Identical to
+ * ::hsa_ext_sampler_create_v2 except that the descriptor also carries a
+ * maximum anisotropy ratio.
+ *
+ * @param[in] agent Agent to be associated with the sampler handle created.
+ *
+ * @param[in] sampler_descriptor v3 Pointer to a sampler descriptor. Must not be
+ * NULL.
+ *
+ * @param[out] sampler Memory location where the HSA runtime stores the newly
+ * created sampler handle. Must not be NULL.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid.
+ *
+ * @retval ::HSA_EXT_STATUS_ERROR_SAMPLER_DESCRIPTOR_UNSUPPORTED The
+ * @p agent does not have the capability to support the properties
+ * specified by @p sampler_descriptor or it is invalid.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to allocate
+ * the required resources.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p sampler_descriptor is NULL, or
+ * @p sampler is NULL.
+ */
+hsa_status_t HSA_API hsa_ext_sampler_create_v3(
+    hsa_agent_t agent,
+    const hsa_ext_sampler_descriptor_v3_t *sampler_descriptor,
     hsa_ext_sampler_t *sampler);
 
 /**
@@ -1710,6 +1780,11 @@ typedef struct hsa_ext_images_1_pfn_s {
   hsa_status_t (*hsa_ext_sampler_create_v2)(
     hsa_agent_t agent,
     const hsa_ext_sampler_descriptor_v2_t *sampler_descriptor,
+    hsa_ext_sampler_t *sampler);
+
+  hsa_status_t (*hsa_ext_sampler_create_v3)(
+    hsa_agent_t agent,
+    const hsa_ext_sampler_descriptor_v3_t *sampler_descriptor,
     hsa_ext_sampler_t *sampler);
 
 } hsa_ext_images_1_pfn_t;

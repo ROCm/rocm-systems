@@ -8,15 +8,17 @@
 //! current native identity before publication and again before activation.
 //! Parsers reject incomplete, duplicate, overflowing, or internally inconsistent
 //! properties rather than filling important device facts with defaults.
+use super::target::KfdTargetProfile;
 use super::{errno, error, native_error, sys};
 use crate::driver::{DriverInstanceId, KfdAccessTarget};
 use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
 use crate::memory::{DeviceAccess, HostCacheability};
 use crate::topology::{
-    CacheInfo, CacheKind, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities, MemoryLinkInfo,
-    MemoryLinkType, MemoryLocation, MemoryLocationKind, NativeNodeId, NodeKind, PciInfo,
-    SourceKind, TopologyCache, TopologySnapshot,
+    CacheAssociations, CacheInfo, CacheKind, CpuNodeInfo, Endpoint, EndpointKind, GpuInfo,
+    GpuQueueCapabilities, GpuSdmaDialect, GpuTargetProfile, MemoryBank, MemoryBankKind,
+    MemoryLinkInfo, MemoryLinkType, MemoryLocation, MemoryLocationKind, NativeNodeId, NodeKind,
+    PciInfo, SourceKind, TopologyCache, TopologyGraphSnapshot,
 };
 use crate::{Error, ErrorKind};
 use std::fmt::{self, Write as _};
@@ -50,6 +52,8 @@ pub(crate) struct KfdNode {
 pub(crate) struct KfdQueueProperties {
     /// Encoded GFX target reported by KFD.
     pub gfx_target: u32,
+    /// Packet and scratch dialect resolved from the target at discovery.
+    pub target_profile: crate::topology::GpuTargetProfile,
     /// Enabled compute-unit count.
     pub compute_units: u32,
     /// Maximum resident waves per compute unit.
@@ -205,6 +209,16 @@ impl<'a> Properties<'a> {
     }
 }
 
+fn cpu_node_info(properties: &Properties<'_>) -> Result<Option<CpuNodeInfo>, Error> {
+    let count = properties.optional_u32("cpu_cores_count")?.unwrap_or(0);
+    let base = properties.optional_u32("cpu_core_id_base")?;
+    Ok((count != 0).then_some(CpuNodeInfo {
+        core_count: count,
+        core_id_base: base,
+        maximum_clock_mhz: properties.optional_u32("max_engine_clk_ccompute")?,
+    }))
+}
+
 fn cache_properties(text: &str) -> Result<(CacheInfo, u32), Error> {
     let mut sibling_map = false;
     for (index, line) in text.lines().enumerate() {
@@ -256,6 +270,13 @@ fn cache_properties(text: &str) -> Result<(CacheInfo, u32), Error> {
         (false, true) => CacheKind::Instruction,
         (false, false) => CacheKind::Other,
     };
+    let mut associations = CacheAssociations::NONE;
+    if native_kind & (1 << 2) != 0 {
+        associations |= CacheAssociations::CPU;
+    }
+    if native_kind & (1 << 3) != 0 {
+        associations |= CacheAssociations::GPU_COMPUTE_UNIT;
+    }
     // KFD reports cache capacity in KiB; driver facts use bytes.
     Ok((
         CacheInfo {
@@ -263,7 +284,7 @@ fn cache_properties(text: &str) -> Result<(CacheInfo, u32), Error> {
             size_bytes: u64::from(properties.u32("size")?) * 1024,
             line_size_bytes: (line_size_bytes != 0).then_some(line_size_bytes),
             kind,
-            compute_unit_cache: native_kind & (1 << 3) != 0,
+            associations,
         },
         properties
             .optional_u32("persisting_cache_size_max")?
@@ -337,22 +358,45 @@ fn caches(root: &str, node: u32, count: u32) -> Result<DiscoveredCaches, Error> 
         .map_err(Into::into)
 }
 
-fn memory_bank_properties(text: &str) -> Result<Option<(u32, u32)>, Error> {
+/// One KFD bank report before it is associated with a source-qualified node.
+#[derive(Clone, Copy)]
+struct DiscoveredBank {
+    ordinal: u32,
+    kind: MemoryBankKind,
+    size: u64,
+    flags: u32,
+    width: u32,
+    clock: u32,
+}
+
+fn memory_bank_properties(text: &str, ordinal: u32) -> Result<DiscoveredBank, Error> {
     let properties = Properties::new(text)?;
     let heap = properties.u32("heap_type")?;
     let size = properties.required("size_in_bytes")?;
-    if size == 0 || !matches!(heap, 1 | 2) {
-        return Ok(None);
-    }
-    Ok(Some((
-        properties.optional_u32("width")?.unwrap_or(0),
-        properties.optional_u32("mem_clk_max")?.unwrap_or(0),
-    )))
+    let kind = match heap {
+        0 => MemoryBankKind::System,
+        1 => MemoryBankKind::FrameBufferPublic,
+        2 => MemoryBankKind::FrameBufferPrivate,
+        3 => MemoryBankKind::Gds,
+        4 => MemoryBankKind::Lds,
+        5 => MemoryBankKind::Scratch,
+        6 => MemoryBankKind::DeviceSvm,
+        7 => MemoryBankKind::Mmio,
+        other => MemoryBankKind::Other(other),
+    };
+    Ok(DiscoveredBank {
+        ordinal,
+        kind,
+        size,
+        flags: properties.optional_u32("flags")?.unwrap_or(0),
+        width: properties.optional_u32("width")?.unwrap_or(0),
+        clock: properties.optional_u32("mem_clk_max")?.unwrap_or(0),
+    })
 }
 
-fn memory_bus(root: &str, node: u32, count: u32) -> Result<(u32, u32), Error> {
+fn memory_banks(root: &str, node: u32, count: u32) -> Result<Vec<DiscoveredBank>, Error> {
     if count == 0 {
-        return Ok((0, 0));
+        return Ok(Vec::new());
     }
     let capacity = usize::try_from(count).map_err(|_| {
         error(
@@ -375,7 +419,7 @@ fn memory_bus(root: &str, node: u32, count: u32) -> Result<(u32, u32), Error> {
         let mut bytes = [0; 4096];
         records.try_push((
             ordinal,
-            memory_bank_properties(read(path.path(), &mut bytes)?)?,
+            memory_bank_properties(read(path.path(), &mut bytes)?, ordinal)?,
         ))?;
         Ok(())
     })?;
@@ -386,7 +430,6 @@ fn memory_bus(root: &str, node: u32, count: u32) -> Result<(u32, u32), Error> {
         ));
     }
     records.sort_unstable_by_key(|(ordinal, _)| *ordinal);
-    let mut selected = (0, 0);
     for (expected, (ordinal, bank)) in records.iter().enumerate() {
         if usize::try_from(*ordinal) != Ok(expected) {
             return Err(error(
@@ -394,17 +437,30 @@ fn memory_bus(root: &str, node: u32, count: u32) -> Result<(u32, u32), Error> {
                 "native memory-bank ordinals are not contiguous",
             ));
         }
-        if let Some(bank) = bank {
-            selected = *bank;
-        }
+        debug_assert_eq!(*ordinal, bank.ordinal);
     }
-    Ok(selected)
+    Ok(records.into_iter().map(|(_, bank)| bank).collect())
+}
+
+fn memory_bus(banks: &[DiscoveredBank]) -> (u32, u32) {
+    banks
+        .iter()
+        .rfind(|bank| {
+            bank.size != 0
+                && matches!(
+                    bank.kind,
+                    MemoryBankKind::FrameBufferPublic | MemoryBankKind::FrameBufferPrivate
+                )
+        })
+        .map_or((0, 0), |bank| (bank.width, bank.clock))
 }
 
 struct DiscoveredEndpoint {
     endpoint: Endpoint,
     caches: Option<Shared<Vec<CacheInfo>>>,
     links: Option<Shared<Vec<KfdReportedLink>>>,
+    cpu: Option<CpuNodeInfo>,
+    banks: Vec<DiscoveredBank>,
 }
 
 /// One directed KFD node report, before resolution into snapshot node IDs.
@@ -424,6 +480,8 @@ struct DiscoveredNode {
     endpoint: Option<Endpoint>,
     caches: Option<Shared<Vec<CacheInfo>>>,
     links: Option<Shared<Vec<KfdReportedLink>>>,
+    cpu: Option<CpuNodeInfo>,
+    banks: Vec<DiscoveredBank>,
 }
 
 struct DiscoveredTopology {
@@ -440,7 +498,10 @@ fn read_all(
     for _ in 0..3 {
         let before = match scalar(format_args!("{root}/generation_id")) {
             Ok(value) => value,
-            Err(e) if e.native_error_code() == Some(errno::ENOENT) => {
+            Err(e)
+                if e.native_status().and_then(crate::NativeStatus::errno_code)
+                    == Some(errno::ENOENT) =>
+            {
                 return Ok(DiscoveredTopology {
                     generation: None,
                     nodes: Vec::new(),
@@ -462,6 +523,8 @@ fn read_all(
                     endpoint: None,
                     caches: None,
                     links: None,
+                    cpu: None,
+                    banks: Vec::new(),
                 }
             } else {
                 let endpoint = read_node(root, drm, driver_instance, node)?.ok_or_else(|| {
@@ -473,6 +536,8 @@ fn read_all(
                     endpoint: Some(endpoint.endpoint),
                     caches: endpoint.caches,
                     links: endpoint.links,
+                    cpu: endpoint.cpu,
+                    banks: endpoint.banks,
                 }
             };
             records.try_push(record)?;
@@ -510,11 +575,11 @@ pub(super) fn enumerate(
     Ok(())
 }
 
-pub(super) fn contribute_topology(
+pub(super) fn contribute_topology_graph(
     root: &str,
     drm: &str,
     driver_instance: DriverInstanceId,
-    snapshot: &mut TopologySnapshot,
+    snapshot: &mut TopologyGraphSnapshot,
 ) -> Result<(), Error> {
     let discovered = read_all(root, drm, driver_instance, true)?;
     let source = snapshot.add_source(
@@ -529,9 +594,9 @@ pub(super) fn contribute_topology(
             source,
             NativeNodeId::LinuxKfd(record.node),
             if record.gpu_id == 0 {
-                NodeKind::KfdHost
+                NodeKind::Host
             } else {
-                NodeKind::KfdGpu
+                NodeKind::Gpu
             },
         )?;
         nodes.try_push((record.node, record.gpu_id, id))?;
@@ -542,6 +607,20 @@ pub(super) fn contribute_topology(
             .find(|(native, _, _)| *native == record.node)
             .map(|(_, _, id)| *id)
             .ok_or_else(|| error(ErrorKind::InvalidData, "KFD endpoint has no topology node"))?;
+        if let Some(cpu) = record.cpu {
+            snapshot.set_cpu_node(node, cpu)?;
+        }
+        for bank in &record.banks {
+            snapshot.add_memory_bank(MemoryBank {
+                node,
+                native_ordinal: bank.ordinal,
+                kind: bank.kind,
+                capacity_bytes: bank.size,
+                native_flags: bank.flags,
+                width_bits: (bank.width != 0).then_some(bank.width),
+                maximum_clock_mhz: (bank.clock != 0).then_some(bank.clock),
+            })?;
+        }
         if let Some(caches) = &record.caches {
             for cache in caches.iter() {
                 snapshot
@@ -625,7 +704,14 @@ pub(super) fn probe_endpoint(
     })?);
     let before = match scalar(format_args!("{root}/generation_id")) {
         Ok(generation) => generation,
-        Err(error) if error.native_error_code() == Some(errno::ENOENT) => return Ok(None),
+        Err(error)
+            if error
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code)
+                == Some(errno::ENOENT) =>
+        {
+            return Ok(None);
+        }
         Err(error) => return Err(error),
     };
     let path = StackPath::new(format_args!("{root}/nodes/{node}"))?;
@@ -703,6 +789,12 @@ fn read_host_node(root: &str, node: u32) -> Result<DiscoveredNode, Error> {
     let path = StackPath::new(format_args!("{root}/nodes/{node}/properties"))?;
     let mut bytes = [0; 16384];
     let properties = Properties::new(read(path.path(), &mut bytes)?)?;
+    let cpu = cpu_node_info(&properties)?;
+    let banks = memory_banks(
+        root,
+        node,
+        properties.optional_u32("mem_banks_count")?.unwrap_or(0),
+    )?;
     let caches = caches(
         root,
         node,
@@ -722,6 +814,8 @@ fn read_host_node(root: &str, node: u32) -> Result<DiscoveredNode, Error> {
         endpoint: None,
         caches,
         links,
+        cpu,
+        banks,
     })
 }
 
@@ -905,8 +999,9 @@ fn read_node(
     let hive_id = p.optional("hive_id")?.unwrap_or(0);
     let family_id = p.optional_u32("family_id")?.unwrap_or(0);
     let maximum_engine_clock_mhz = p.optional_u32("max_engine_clk_fcompute")?.unwrap_or(0);
-    let (memory_bus_width_bits, maximum_memory_clock_mhz) =
-        memory_bus(root, node, p.optional_u32("mem_banks_count")?.unwrap_or(0))?;
+    let banks = memory_banks(root, node, p.optional_u32("mem_banks_count")?.unwrap_or(0))?;
+    let (memory_bus_width_bits, maximum_memory_clock_mhz) = memory_bus(&banks);
+    let cpu = cpu_node_info(&p)?;
     let sdma_xgmi_engines = p.optional_u32("num_sdma_xgmi_engines")?.unwrap_or(0);
     let gws_count = p.optional_u32("num_gws")?.unwrap_or(0);
     let io_link_count = p.optional_u32("io_links_count")?.unwrap_or(0);
@@ -965,10 +1060,22 @@ fn read_node(
     }
     let sdma_ip = sdma_version(drm, render)?;
     // This transport publishes monotonic 64-bit byte indices and 64-bit
-    // doorbells across the supported GFX10.1–GFX12 native targets.
+    // doorbells across the supported GFX9–GFX12 native targets. GFX9 uses
+    // ROCr's SDMA v4 packet path, so its IP version must match that dialect.
     // Commands remain target-specific and caller-owned; a discovered SDMA IP
     // does not change any frontend's advertised transport revision.
-    let sdma_qualified = ((100_100..=120_001).contains(&gfx) || gfx == 120_500)
+    let target_profile = GpuTargetProfile::from_kfd_target(gfx);
+    let gfx9_sdma =
+        target_profile == GpuTargetProfile::Gfx9 && sdma_ip.is_some_and(|(major, _, _)| major == 4);
+    let sdma_qualified = (gfx9_sdma
+        || matches!(
+            target_profile,
+            GpuTargetProfile::Gfx10
+                | GpuTargetProfile::Gfx11
+                | GpuTargetProfile::Gfx1200
+                | GpuTargetProfile::Gfx1201
+                | GpuTargetProfile::Gfx1250
+        ))
         && sdma.unwrap_or(0) != 0
         && sdma_queues.unwrap_or(0) != 0;
 
@@ -988,6 +1095,7 @@ fn read_node(
     let public = if integrated { 0 } else { visible };
     let queues = KfdQueueProperties {
         gfx_target: gfx,
+        target_profile,
         compute_units: simds / per_cu,
         maximum_wave_count_per_compute_unit: waves,
         maximum_scratch_wave_count_per_compute_unit: scratch,
@@ -1055,14 +1163,13 @@ fn read_node(
         pci: Some(pci),
         kind: EndpointKind::Gpu {
             info: GpuInfo {
-                native_gpu_id: gpu_id,
                 gfx_major: gfx / 10000,
                 gfx_minor: (gfx / 100) % 100,
                 gfx_stepping: gfx % 100,
+                target_profile: queues.target_profile,
                 unique_id,
                 hive_id,
                 asic_family_id: family_id,
-                drm_asic_family_id: None,
                 counter_frequency_hz: None,
                 asic_revision: (capability & 0x03c0_0000) >> 22,
                 maximum_engine_clock_mhz,
@@ -1082,6 +1189,7 @@ fn read_node(
                 gws_count,
                 iommu_v2_supported: capability & (1 << 1) != 0,
                 coherent_host_access: capability & (1 << 28) != 0,
+                sram_ecc_enabled: capability & 0x0400_0000 != 0,
                 packet_processor_firmware_version: p.optional_u32("fw_version")?.unwrap_or(0)
                     & 0x3ff,
                 sdma_firmware_version: p.optional_u32("sdma_fw_version")?.unwrap_or(0) & 0x3ff,
@@ -1091,25 +1199,67 @@ fn read_node(
                 ))
                 .is_ok_and(|path| File::open(path.path()).is_ok()),
                 queues: GpuQueueCapabilities {
-                    aql: supports_aql,
+                    copy: if !cfg!(target_arch = "x86_64") || !sdma_qualified {
+                        None
+                    } else {
+                        match (target_profile.sdma_dialect(), sdma_ip) {
+                            (Some(GpuSdmaDialect::Gfx9), _) => {
+                                Some(crate::topology::GpuCopyTransport::User)
+                            }
+                            (Some(GpuSdmaDialect::Gfx1200), Some((7, 0, 1)))
+                            | (Some(GpuSdmaDialect::Gfx1250), Some((7, 1, 0))) => {
+                                Some(crate::topology::GpuCopyTransport::Kernel)
+                            }
+                            _ => None,
+                        }
+                    },
+                    aql: supports_aql.then_some(crate::topology::GpuUserQueueCapabilities {
+                        device_producer: true,
+                        multiple_producers: true,
+                        low_priority: true,
+                        high_priority: true,
+                        cooperative: gws_count != 0,
+                        dispatch_scratch: target_profile.scratch_encoding(wave_size).is_some(),
+                        minimum_ring_bytes: 1024,
+                        maximum_ring_bytes: 1 << 31,
+                        ring_alignment: 1024,
+                    }),
                     // GFX12 shares the AQL system-scope cache protocol.
                     aql_system_cache_control: cfg!(target_arch = "x86_64")
                         && supports_aql
-                        && matches!(gfx, 120_000 | 120_001 | 120_500),
-                    pm4: supports_pm4,
+                        && target_profile.supports_kernel_submission(),
+                    pm4: supports_pm4.then_some(crate::topology::GpuUserQueueCapabilities {
+                        dispatch_scratch: target_profile.supports_pm4_dispatch_scratch(),
+                        minimum_ring_bytes: 4096,
+                        maximum_ring_bytes: 4096,
+                        ring_alignment: 4096,
+                        ..crate::topology::GpuUserQueueCapabilities::default()
+                    }),
                     kernel_pm4: supports_pm4,
                     // PM4 uses the GFX12 ACQUIRE_MEM GCR encoding.
                     pm4_system_cache_control: supports_pm4,
-                    sdma: sdma_qualified,
+                    sdma: sdma_qualified.then_some(crate::topology::GpuUserQueueCapabilities {
+                        device_producer: true,
+                        minimum_ring_bytes: 1024,
+                        maximum_ring_bytes: 1 << 31,
+                        ring_alignment: 1024,
+                        ..crate::topology::GpuUserQueueCapabilities::default()
+                    }),
                     kernel_sdma: cfg!(target_arch = "x86_64")
                         && sdma_qualified
-                        && ((matches!(gfx, 120_000 | 120_001) && sdma_ip == Some((7, 0, 1)))
-                            || (gfx == 120_500 && sdma_ip == Some((7, 1, 0)))),
+                        && matches!(
+                            (target_profile.sdma_dialect(), sdma_ip),
+                            (Some(GpuSdmaDialect::Gfx1200), Some((7, 0, 1)))
+                                | (Some(GpuSdmaDialect::Gfx1250), Some((7, 1, 0)))
+                        ),
                     // USER_GCR requires the matching target-specific SDMA packet format.
                     sdma_system_cache_control: cfg!(target_arch = "x86_64")
                         && sdma_qualified
-                        && ((matches!(gfx, 120_000 | 120_001) && sdma_ip == Some((7, 0, 1)))
-                            || (gfx == 120_500 && sdma_ip == Some((7, 1, 0)))),
+                        && matches!(
+                            (target_profile.sdma_dialect(), sdma_ip),
+                            (Some(GpuSdmaDialect::Gfx1200), Some((7, 0, 1)))
+                                | (Some(GpuSdmaDialect::Gfx1250), Some((7, 1, 0)))
+                        ),
                     sdma_engine_count: if sdma_qualified { sdma.unwrap_or(0) } else { 0 },
                 },
             },
@@ -1118,8 +1268,15 @@ fn read_node(
         host_visible_local_memory_bytes: public,
         host_local_cacheability: (cfg!(target_arch = "x86_64")
             && public != 0
-            && ((100_100..=120_001).contains(&gfx) || gfx == 120_500))
-            .then_some(HostCacheability::WriteCombined),
+            && matches!(
+                target_profile,
+                GpuTargetProfile::Gfx10
+                    | GpuTargetProfile::Gfx11
+                    | GpuTargetProfile::Gfx1200
+                    | GpuTargetProfile::Gfx1201
+                    | GpuTargetProfile::Gfx1250
+            ))
+        .then_some(HostCacheability::WriteCombined),
         allocation_granularity: 4096,
         address_bit_count: bits,
         minimum_address: 65536,
@@ -1135,6 +1292,8 @@ fn read_node(
         endpoint,
         caches,
         links: memory_links,
+        cpu,
+        banks,
     }))
 }
 
@@ -1252,9 +1411,10 @@ mod tests {
         super::probe_endpoint(root, drm, DriverInstanceId::TEST, id)
     }
 
-    fn topology(root: &str, drm: &str) -> TopologySnapshot {
-        let mut snapshot = TopologySnapshot::new(crate::topology::host::snapshot()).unwrap();
-        super::contribute_topology(root, drm, DriverInstanceId::TEST, &mut snapshot).unwrap();
+    fn topology_graph_snapshot(root: &str, drm: &str) -> TopologyGraphSnapshot {
+        let mut snapshot =
+            TopologyGraphSnapshot::new(crate::topology::host::graph_snapshot()).unwrap();
+        super::contribute_topology_graph(root, drm, DriverInstanceId::TEST, &mut snapshot).unwrap();
         snapshot
     }
 
@@ -1317,6 +1477,77 @@ mod tests {
     }
 
     #[test]
+    fn peer_memory_capabilities_keep_owner_capacity_and_unknown_cache_policy() -> Result<(), Error>
+    {
+        use crate::driver::{AllocationOperations, Driver};
+        use crate::memory::device::{MemoryCapabilityRequest, MemoryKind};
+        let fixture = Fixture::new();
+        let (root, drm) = fixture.roots();
+        let driver = super::super::LinuxKfdDriver::new();
+        let mut owner = open_endpoint(
+            &root,
+            &drm,
+            [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
+        )
+        .unwrap();
+        owner.driver_instance = driver.driver_instance();
+        owner.local_memory_bytes = 32 << 30;
+        owner.host_visible_local_memory_bytes = 16 << 30;
+        owner.host_local_cacheability = None;
+        let mut consumer = owner.clone();
+        consumer.id[0] = 2;
+        let crate::driver::EndpointSelector::LinuxKfd { mut native, .. } =
+            consumer.selector.clone()
+        else {
+            return Err(error(
+                ErrorKind::InvalidData,
+                "test fixture did not create a Linux selector",
+            ));
+        };
+        let target = KfdAccessTarget {
+            node: native.node,
+            gpu_id: native.gpu_id,
+        };
+        native.node += 1;
+        native.gpu_id += 1;
+        consumer.selector = crate::driver::EndpointSelector::LinuxKfd {
+            native,
+            access_targets: Some(Shared::new(vec![target]).unwrap()),
+        };
+        consumer.local_memory_bytes = 8 << 30;
+        consumer.host_visible_local_memory_bytes = 0;
+        let kind = MemoryKind::DeviceLocal {
+            host_visible: true,
+            coherent: false,
+            extended_coherent: false,
+            uncached: false,
+            contiguous: false,
+        };
+        for endpoint in [&owner, &consumer, &consumer, &owner] {
+            let cap = driver
+                .memory_capabilities(
+                    endpoint,
+                    MemoryCapabilityRequest::Access {
+                        owner: &owner,
+                        kind,
+                    },
+                )
+                .unwrap();
+            assert_eq!(cap.native.maximum_size, 16 << 30);
+            assert!(cap.host_visible && cap.host_writable);
+            assert_eq!(cap.host_cacheability, None);
+        }
+        let system = driver
+            .memory_capabilities(
+                &owner,
+                MemoryCapabilityRequest::Allocation(MemoryKind::System),
+            )
+            .unwrap();
+        assert_eq!(system.native.maximum_size, isize::MAX as u64);
+        Ok(())
+    }
+
+    #[test]
     fn memory_bus_facts_come_from_nonempty_vram_banks() {
         let fixture = Fixture::new();
         let properties = fixture.0.join("topology/nodes/1/properties");
@@ -1350,6 +1581,19 @@ mod tests {
         let gpu = endpoint.gpu().unwrap();
         assert_eq!(gpu.memory_bus_width_bits, 384);
         assert_eq!(gpu.maximum_memory_clock_mhz, 1400);
+        let snapshot = topology_graph_snapshot(&root, &drm);
+        let gpu_node = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.native_id == NativeNodeId::LinuxKfd(1))
+            .unwrap();
+        let banks = snapshot.banks_for_node(gpu_node.id).collect::<Vec<_>>();
+        assert_eq!(banks.len(), 3);
+        assert_eq!(banks[1].native_ordinal, 1);
+        assert_eq!(banks[1].kind, MemoryBankKind::FrameBufferPrivate);
+        assert_eq!(banks[1].capacity_bytes, 1_048_576);
+        assert_eq!(banks[1].width_bits, Some(384));
+        assert_eq!(banks[1].maximum_clock_mhz, Some(1400));
     }
 
     #[test]
@@ -1397,8 +1641,8 @@ mod tests {
             endpoint.host_local_cacheability,
             Some(HostCacheability::WriteCombined)
         );
-        assert!(gpu.queues.aql && gpu.queues.sdma);
-        assert_eq!(gpu.queues.pm4, cfg!(target_arch = "x86_64"));
+        assert!(gpu.queues.aql.is_some() && gpu.queues.sdma.is_some());
+        assert_eq!(gpu.queues.pm4.is_some(), cfg!(target_arch = "x86_64"));
         assert_eq!(
             gpu.queues.aql_system_cache_control,
             cfg!(target_arch = "x86_64")
@@ -1457,7 +1701,8 @@ mod tests {
         assert_eq!(
             probe_endpoint(&root, &drm, ID)
                 .unwrap_err()
-                .native_error_code(),
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code),
             Some(errno::ENOENT)
         );
     }
@@ -1585,7 +1830,16 @@ mod tests {
         std::fs::write(fixture.0.join("topology/nodes/0/gpu_id"), "0\n").unwrap();
         std::fs::write(
             fixture.0.join("topology/nodes/0/properties"),
-            "io_links_count 1\np2p_links_count 0\n",
+            "cpu_cores_count 8\ncpu_core_id_base 16\nmax_engine_clk_ccompute 4200\n\
+             mem_banks_count 1\n\
+             io_links_count 1\np2p_links_count 0\n",
+        )
+        .unwrap();
+        let bank = fixture.0.join("topology/nodes/0/mem_banks/0");
+        std::fs::create_dir_all(&bank).unwrap();
+        std::fs::write(
+            bank.join("properties"),
+            "heap_type 0\nsize_in_bytes 1073741824\nflags 3\n",
         )
         .unwrap();
         std::fs::create_dir_all(fixture.0.join("topology/nodes/1/io_links/0")).unwrap();
@@ -1609,12 +1863,28 @@ mod tests {
         .unwrap();
 
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let endpoint = &snapshot.endpoints[0];
         assert_eq!(snapshot.sources.last().unwrap().generation, Some(1));
         assert!(snapshot.nodes.iter().any(|node| {
-            node.native_id == NativeNodeId::LinuxKfd(0) && node.kind == NodeKind::KfdHost
+            node.native_id == NativeNodeId::LinuxKfd(0)
+                && node.kind == NodeKind::Host
+                && node.cpu
+                    == Some(CpuNodeInfo {
+                        core_count: 8,
+                        core_id_base: Some(16),
+                        maximum_clock_mhz: Some(4200),
+                    })
         }));
+        let cpu_node = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.native_id == NativeNodeId::LinuxKfd(0))
+            .unwrap();
+        let bank = snapshot.banks_for_node(cpu_node.id).next().unwrap();
+        assert_eq!(bank.kind, MemoryBankKind::System);
+        assert_eq!(bank.capacity_bytes, 1_073_741_824);
+        assert_eq!(bank.native_flags, 3);
         let to_host = snapshot.route_to_host(endpoint).unwrap();
         assert_eq!(to_host.kind, MemoryLinkType::Pcie);
         assert_eq!(to_host.minimum_latency, 1);
@@ -1664,7 +1934,7 @@ mod tests {
             concat!(
                 "processor_id_low 0\nlevel 3\nsize 512\ncache_line_size 64\n",
                 "cache_lines_per_tag 1\nassociation 16\nlatency 1\n",
-                "type 3\nsibling_map 1,0,0,0\n"
+                "type 5\nsibling_map 1,0,0,0\n"
             ),
         )
         .unwrap();
@@ -1680,7 +1950,7 @@ mod tests {
             .unwrap();
         }
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let host = snapshot
             .nodes
             .iter()
@@ -1692,7 +1962,10 @@ mod tests {
             .find(|node| node.native_id == NativeNodeId::LinuxKfd(2))
             .unwrap();
         assert!(snapshot.caches.iter().any(|cache| {
-            cache.node == host.id && cache.info.level == 3 && cache.info.size_bytes == 512 * 1024
+            cache.node == host.id
+                && cache.info.associations.contains(CacheAssociations::CPU)
+                && cache.info.level == 3
+                && cache.info.size_bytes == 512 * 1024
         }));
         assert!(
             snapshot
@@ -1732,7 +2005,7 @@ mod tests {
         )
         .unwrap();
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let first = snapshot
             .endpoints
             .iter()
@@ -1757,7 +2030,7 @@ mod tests {
         let contents = std::fs::read_to_string(&properties).unwrap();
         std::fs::write(
             &properties,
-            contents.replace("caches_count 0", "caches_count 4"),
+            contents.replace("caches_count 0", "caches_count 5"),
         )
         .unwrap();
         for (ordinal, level, size, kind) in [
@@ -1765,6 +2038,7 @@ mod tests {
             (1, 1, 32, 10),
             (0, 1, 32, 9),
             (2, 3, 8192, 5),
+            (4, 2, 128, 13),
         ] {
             let directory = fixture.0.join(format!("topology/nodes/1/caches/{ordinal}"));
             std::fs::create_dir_all(&directory).unwrap();
@@ -1777,7 +2051,7 @@ mod tests {
             .unwrap();
         }
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let endpoint = &snapshot.endpoints[0];
         assert!(snapshot.memory_locations.iter().any(|location| {
             location.kind == MemoryLocationKind::DeviceLocal
@@ -1788,13 +2062,19 @@ mod tests {
             .caches_for_endpoint(endpoint)
             .copied()
             .collect::<Vec<_>>();
-        assert_eq!(caches.len(), 4);
+        assert_eq!(caches.len(), 5);
         assert_eq!(caches[0].level, 1);
         assert_eq!(caches[0].size_bytes, 32_768);
         assert!(crate::device::gpu::is_compute_data_cache(&caches[0]));
         assert!(!crate::device::gpu::is_compute_data_cache(&caches[1]));
         assert!(!crate::device::gpu::is_compute_data_cache(&caches[2]));
         assert!(crate::device::gpu::is_compute_data_cache(&caches[3]));
+        assert_eq!(caches[2].associations, CacheAssociations::CPU);
+        assert_eq!(
+            caches[4].associations,
+            CacheAssociations::CPU | CacheAssociations::GPU_COMPUTE_UNIT
+        );
+        assert!(crate::device::gpu::is_compute_data_cache(&caches[4]));
         assert_eq!(caches[3].level, 2);
         assert_eq!(caches[3].size_bytes, 262_144);
         assert_eq!(caches[3].line_size_bytes, Some(64));
@@ -1894,7 +2174,7 @@ mod tests {
             let endpoint = found.unwrap();
             let queues = endpoint.gpu().unwrap().queues;
             let supported = matches!(gfx, 120_000 | 120_001 | 120_500);
-            assert!(queues.aql);
+            assert!(queues.aql.is_some());
             assert_eq!(
                 queues.aql_system_cache_control,
                 cfg!(target_arch = "x86_64") && supported
@@ -1903,7 +2183,10 @@ mod tests {
                 queues.pm4_system_cache_control,
                 cfg!(target_arch = "x86_64") && supported
             );
-            assert_eq!(queues.pm4, cfg!(target_arch = "x86_64") && supported);
+            assert_eq!(
+                queues.pm4.is_some(),
+                cfg!(target_arch = "x86_64") && supported
+            );
         }
     }
 
@@ -1986,36 +2269,38 @@ mod tests {
         let (root, drm) = fixture.roots();
         let callbacks = crate::test_support::allocator::State::default();
         // SAFETY: Test state outlives the scoped metadata fault hook.
-        let _scope = unsafe { callbacks.allocator() }.scope();
-        let mut endpoint = None;
-        enumerate(&root, &drm, &mut |e| {
-            endpoint = Some(e);
-            Ok(())
-        })
-        .unwrap();
-        assert!(callbacks.allocations.load(Ordering::Relaxed) >= 1);
-        assert_eq!(
-            callbacks.allocations.load(Ordering::Relaxed),
-            callbacks.frees.load(Ordering::Relaxed)
-        );
-        let session =
-            crate::session::Session::new(crate::session::DriverContextLifetime::Session).unwrap();
-        assert_eq!(
-            session.activate(&endpoint.unwrap()).err().unwrap().kind(),
-            ErrorKind::InvalidArgument
-        );
-        callbacks.fail.store(true, Ordering::Relaxed);
-        let mut visited = false;
-        assert_eq!(
-            enumerate(&root, &drm, &mut |_| {
-                visited = true;
+        unsafe { callbacks.allocator() }.with_scope(|| {
+            let mut endpoint = None;
+            enumerate(&root, &drm, &mut |e| {
+                endpoint = Some(e);
                 Ok(())
             })
-            .unwrap_err()
-            .kind(),
-            ErrorKind::ResourceExhausted
-        );
-        assert!(!visited);
+            .unwrap();
+            assert!(callbacks.allocations.load(Ordering::Relaxed) >= 1);
+            assert_eq!(
+                callbacks.allocations.load(Ordering::Relaxed),
+                callbacks.frees.load(Ordering::Relaxed)
+            );
+            let session =
+                crate::session::Session::new(crate::session::DriverContextLifetime::Session)
+                    .unwrap();
+            assert_eq!(
+                session.activate(&endpoint.unwrap()).err().unwrap().kind(),
+                ErrorKind::InvalidArgument
+            );
+            callbacks.fail.store(true, Ordering::Relaxed);
+            let mut visited = false;
+            assert_eq!(
+                enumerate(&root, &drm, &mut |_| {
+                    visited = true;
+                    Ok(())
+                })
+                .unwrap_err()
+                .kind(),
+                ErrorKind::ResourceExhausted
+            );
+            assert!(!visited);
+        });
     }
 
     #[test]

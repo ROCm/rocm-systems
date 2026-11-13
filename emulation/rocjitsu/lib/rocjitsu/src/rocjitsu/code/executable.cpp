@@ -62,13 +62,24 @@ using detail::read_value;
 } // namespace
 
 Executable::Executable(const std::string &path) {
-  try {
-    image_ = detail::read_file_bytes(path);
-  } catch (const std::exception &) {
+  util::FailureOr<std::vector<char>> maybeImage = detail::read_file_bytes(path);
+  if (maybeImage.failed()) {
     is_valid_ = false;
     return;
   }
+  image_ = std::move(maybeImage.value());
 
+  parse_image();
+}
+
+Executable::Executable(std::span<const uint8_t> image) {
+  if (!image.empty())
+    image_.assign(reinterpret_cast<const char *>(image.data()),
+                  reinterpret_cast<const char *>(image.data()) + image.size());
+  parse_image();
+}
+
+void Executable::parse_image() {
   if (image_.size() < sizeof(Elf64_Ehdr)) {
     is_valid_ = false;
     return;

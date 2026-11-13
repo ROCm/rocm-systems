@@ -6,17 +6,24 @@ Unit tests for GPU-specific test counter selection.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+
 import getpass
 import os
-from pathlib import Path
 import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from conftest import RocprofsysTest, _validate_rocpd_candidates
-from rocprofsys import GPUInfo, TestResult as RocprofsysTestResult, ValidationResult
-from rocprofsys import cache
+from conftest import (
+    RocprofsysTest,
+    _validate_rocpd_candidates,
+    cpu_frequency_available,
+    host_counters_expected,
+)
+from rocprofsys import GPUInfo, ValidationResult, cache
+from rocprofsys import TestResult as RocprofsysTestResult
+from rocprofsys.gpu import GFX_XXXX_PATTERN, ROCMINFO_NAME_GFX_PATTERN
 from rocprofsys.runners import (
     BinaryRewriteRunner,
     CausalRunner,
@@ -92,10 +99,11 @@ def cache_store(tmp_path, monkeypatch):
 
 @pytest.mark.class_name("gpu-info")
 class TestGPUInfo(RocprofsysTest):
-    def test_gfx1250_uses_gfx1250_counter_set(self):
+    @pytest.mark.parametrize("arch", ["gfx1250", "gfx1250-strict"])
+    def test_gfx1250_uses_gfx1250_counter_set(self, arch):
         gpu_info = GPUInfo(
             available=True,
-            architectures=["gfx1250"],
+            architectures=[arch],
             device_count=1,
             categories={"instinct"},
         )
@@ -146,6 +154,42 @@ class TestGPUInfo(RocprofsysTest):
 
         assert gpu_info.rocm_events_for_test == "SQ_WAVES"
         assert gpu_info.counter_names == ["SQ_WAVES"]
+
+    def test_rocminfo_name_pattern_keeps_target_suffix(self):
+        rocminfo_stdout = (
+            "  Name:                    AMD EPYC 9575F\n"
+            "  Name:                    gfx000\n"
+            "  Name:                    gfx1250-strict\n"
+            "  Marketing Name:          AMD Instinct MI455X\n"
+            "  Name:                    gfx942\n"
+            "      Name:                    amdgcn-amd-amdhsa--gfx1250-strict\n"
+            "      Name:                    amdgcn-amd-amdhsa--gfx9-4-generic:xnack-\n"
+        )
+
+        assert ROCMINFO_NAME_GFX_PATTERN.findall(rocminfo_stdout) == [
+            "gfx000",
+            "gfx1250-strict",
+            "gfx942",
+        ]
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            (
+                "Extracting offload bundle: ./a.0.hip-amdgcn-amd-amdhsa--gfx1250",
+                "gfx1250",
+            ),
+            (
+                "Extracting offload bundle: ./a.0.hip-amdgcn-amd-amdhsa--gfx1250-strict",
+                "gfx1250-strict",
+            ),
+            ("hipv4-amdgcn-amd-amdhsa--gfx90a:sramecc+:xnack-", "gfx90a"),
+        ],
+    )
+    def test_offload_bundle_pattern_keeps_target_suffix(self, line, expected):
+        match = GFX_XXXX_PATTERN.search(line)
+        assert match is not None
+        assert match.group(1) == expected
 
 
 @pytest.mark.class_name("test-result")
@@ -441,7 +485,7 @@ class TestCache(RocprofsysTest):
                 return object()
 
         with pytest.raises(cache.SerializationError):
-            BadProp().value
+            _ = BadProp().value
 
     def test_dataclass_round_trips(self, cache_store) -> None:
         """Dataclasses (de)serialize automatically, with no to_cache/from_cache.
@@ -527,7 +571,7 @@ def _make_runner(runner_class, output_dir, extra_kwargs=None):
     config.get_target_executable.return_value = Path("/usr/bin/true")
     config.get_library_path.return_value = ""
     config.get_preload_path.return_value = None
-    kwargs = dict(config=config, target="/usr/bin/true", output_dir=output_dir)
+    kwargs = {"config": config, "target": "/usr/bin/true", "output_dir": output_dir}
     if extra_kwargs:
         kwargs.update(extra_kwargs)
     return runner_class(**kwargs)
@@ -586,3 +630,46 @@ class TestRunnerTmpdirIsolation:
                 f"{tmpdir} exists but is owned by uid {st_uid}, "
                 f"not the current user (uid {os.getuid()})"
             )
+
+
+# ---------------------------------------------------------------------------
+# cpufreq availability (host Frequency counter validation)
+# ---------------------------------------------------------------------------
+class TestCpuFrequencyAvailable:
+    def test_false_when_no_cpufreq_dir(self, tmp_path):
+        (tmp_path / "cpu0").mkdir()
+        assert not cpu_frequency_available(tmp_path)
+
+    def test_false_when_root_missing(self, tmp_path):
+        assert not cpu_frequency_available(tmp_path / "absent")
+
+    def test_true_when_scaling_cur_freq_readable(self, tmp_path):
+        freq_dir = tmp_path / "cpu3" / "cpufreq"
+        freq_dir.mkdir(parents=True)
+        (freq_dir / "scaling_cur_freq").write_text("2400000\n")
+        assert cpu_frequency_available(tmp_path)
+
+    def test_ignores_non_cpu_entries(self, tmp_path):
+        freq_dir = tmp_path / "cpufreq" / "cpufreq"
+        freq_dir.mkdir(parents=True)
+        (freq_dir / "scaling_cur_freq").write_text("1\n")
+        assert not cpu_frequency_available(tmp_path)
+
+
+class TestHostCountersExpected:
+    def test_keeps_frequency_when_available(self, monkeypatch):
+        monkeypatch.setattr("conftest.cpu_frequency_available", lambda: True)
+        assert host_counters_expected(["Frequency (S)", "Load (S)"]) == [
+            "Frequency (S)",
+            "Load (S)",
+        ]
+
+    def test_drops_frequency_and_warns_when_unavailable(self, monkeypatch):
+        monkeypatch.setattr("conftest.cpu_frequency_available", lambda: False)
+        with pytest.warns(UserWarning, match="Frequency"):
+            result = host_counters_expected(["Frequency (S)", "Load (S)"])
+        assert result == ["Load (S)"]
+
+    def test_passthrough_without_frequency(self, monkeypatch):
+        monkeypatch.setattr("conftest.cpu_frequency_available", lambda: False)
+        assert host_counters_expected(["Load (S)"]) == ["Load (S)"]

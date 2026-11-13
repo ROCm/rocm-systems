@@ -56,8 +56,8 @@ public:
   auto HALT() const { return member<13, 13>(); }
   auto TRAP() { return member<14, 14>(); }
   auto TRAP() const { return member<14, 14>(); }
-  auto SKIP_EXPORT() { return member<15, 15>(); }
-  auto SKIP_EXPORT() const { return member<15, 15>(); }
+  auto SKIP_EXPORT() { return member<18, 18>(); }
+  auto SKIP_EXPORT() const { return member<18, 18>(); }
   auto VALID() { return member<16, 16>(); }
   auto VALID() const { return member<16, 16>(); }
   auto ECC_ERR() { return member<17, 17>(); }
@@ -88,7 +88,6 @@ struct Isa : amdgpu::RdnaIsaBase {
   // operand.cpp; bodies forward to the anonymous-namespace helpers.
   static std::optional<uint32_t> resolved_vgpr_offset(OperandType opr_type, int ev);
   static bool simd_capable_value(OperandType opr_type, int ev);
-  static uint32_t simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev);
 };
 
 } // namespace rdna2

@@ -38,6 +38,7 @@
 
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "common/SocketTestUtils.hpp"
 #include "gtest/gtest.h"
 
 #include <atomic>
@@ -60,26 +61,6 @@ constexpr int kSenderIdleMs = 1000;
 // Payload is intentionally tiny so a single TCP segment / read completes the
 // transfer once the data is finally sent.
 constexpr int kPayloadBytes = 4096;
-
-// Fraction of the wait spent burning CPU. A polling receiver stays far below
-// this; a busy-looping receiver sits near 1.0. 0.5 leaves a wide margin for
-// scheduler noise on loaded CI machines.
-constexpr double kCpuBusyThreshold = 0.5;
-
-double timespecDiffMs(const struct timespec &start, const struct timespec &end) {
-  return (end.tv_sec - start.tv_sec) * 1e3 +
-         (end.tv_nsec - start.tv_nsec) / 1e6;
-}
-
-// Loopback (127.0.0.1) address with an ephemeral port for ncclSocketListen().
-union ncclSocketAddress LoopbackAddr() {
-  union ncclSocketAddress addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sin.sin_family = AF_INET;
-  addr.sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin.sin_port = 0; // kernel assigns a free port
-  return addr;
-}
 
 // Outcome of a single slow-transfer measurement, run entirely inside an
 // isolated child process so NCCL_SOCKET_POLL_TIMEOUT_MSEC is read fresh.
@@ -105,7 +86,7 @@ TransferMeasurement RunSlowTransfer() {
   volatile uint32_t abortFlag = 0;
 
   struct ncclSocket listenSock;
-  union ncclSocketAddress listenAddr = LoopbackAddr();
+  union ncclSocketAddress listenAddr = SocketTestUtils::LoopbackAddr();
   if (ncclSocketInit(&listenSock, &listenAddr, magic, type, &abortFlag) != ncclSuccess) {
     TEST_INFO("ncclSocketInit(listen) failed");
     return m;
@@ -183,8 +164,8 @@ TransferMeasurement RunSlowTransfer() {
     clock_gettime(CLOCK_MONOTONIC, &wall1);
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu1);
 
-    m.wallMs = timespecDiffMs(wall0, wall1);
-    m.cpuMs = timespecDiffMs(cpu0, cpu1);
+    m.wallMs = SocketTestUtils::timespecDiffMs(wall0, wall1);
+    m.cpuMs = SocketTestUtils::timespecDiffMs(cpu0, cpu1);
     m.dataValid = (r == ncclSuccess);
   });
 
@@ -241,13 +222,13 @@ void CheckSlowTransfer(bool expectBusy) {
 
   if (expectBusy) {
     // Control: NCCL_SOCKET_POLL_TIMEOUT_MSEC=0 reproduces the pre-fix busy loop.
-    EXPECT_GT(ratio, kCpuBusyThreshold)
+    EXPECT_GT(ratio, SocketTestUtils::kCpuBusyThreshold)
         << "Expected the receiver to busy-spin when polling is disabled, but it "
         << "consumed little CPU (cpu=" << m.cpuMs << "ms / wall=" << m.wallMs
         << "ms). ratio=" << ratio;
   } else {
     // Fix: with polling enabled the receiver must sleep, not spin.
-    EXPECT_LT(ratio, kCpuBusyThreshold)
+    EXPECT_LT(ratio, SocketTestUtils::kCpuBusyThreshold)
         << "Receiver busy-spun while waiting for a slow peer even though "
         << "NCCL_SOCKET_POLL_TIMEOUT_MSEC is set. This indicates the bootstrap "
         << "socket poll fix is missing or ineffective. cpu="

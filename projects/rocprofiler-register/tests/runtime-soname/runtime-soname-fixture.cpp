@@ -62,10 +62,14 @@ rocprofiler_attach_set_api_table(const char*,
                                  uint64_t,
                                  void**,
                                  uint64_t,
-                                 register_api_table_func_t)
+                                 register_api_table_func_t register_api_table)
 {
     std::puts("runtime SONAME attach fixture loaded");
-    return 0;
+
+    // register like the real attach library so rocprofiler_register_attach can proceed
+    static void* api_table = nullptr;
+    auto         lib_id    = rocprofiler_register_library_indentifier_t{};
+    return register_api_table("rocattach", nullptr, 1, &api_table, 1, &lib_id);
 }
 }
 

@@ -10,6 +10,9 @@ and the ROCpd database.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
+
 import pytest
 from conftest import RocprofsysTest
 
@@ -67,23 +70,22 @@ class TestKFD(RocprofsysTest):
       - Unmap-from-GPU events (MMU notify, migrate, unmap from CPU)
     """
 
-    UM_DEFAULT_TEST_PASS_REGEX = ["9 tests completed"]
-    UM_ALL_TEST_PASS_REGEX = ["19 tests completed"]
-
-    run_args = ["-s", "32", "-p", "256", "-i", "4"]
+    UM_DEFAULT_TEST_PASS_REGEX = ("9 tests completed",)
+    UM_ALL_TEST_PASS_REGEX = ("19 tests completed",)
 
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("kfd_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
     def test_events(self, mode, kfd_environment, kfd_rules, gpu_info):
         """Run unified-memory and validate KFD events in Perfetto + ROCpd."""
+        run_args = ["-s", "32", "-p", "256", "-i", "4"]
         is_apu = "apu" in gpu_info.categories
 
         result = self.run_test(
             mode,
             target="unified-memory",
             env=kfd_environment,
-            run_args=self.run_args,
+            run_args=run_args,
             check_target_arch=True,
         )
 

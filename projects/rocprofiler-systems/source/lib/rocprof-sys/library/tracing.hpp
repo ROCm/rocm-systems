@@ -3,11 +3,11 @@
 
 #pragma once
 
+#include "common/clocks.hpp"
 #include "common/defines.h"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -22,7 +22,6 @@
 #include <timemory/components/network/types.hpp>
 #include <timemory/components/papi/types.hpp>
 #include <timemory/components/rusage/components.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/components/timing/components.hpp>
 #include <timemory/enum.h>
 #include <timemory/hash/types.hpp>
@@ -70,11 +69,10 @@ template <typename CategoryT>
 auto&
 get_category_stack();
 
-template <typename Tp = std::uint64_t>
 ROCPROFSYS_INLINE auto
 now()
 {
-    return control::clocks::timeline_ns<Tp>();
+    return clocks::timeline::now_ns();
 }
 
 inline auto&

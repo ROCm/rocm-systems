@@ -47,6 +47,23 @@ const bool SQTT_LOGGING = std::getenv("SQTT_LOGGING") ? (*std::getenv("SQTT_LOGG
 #define empty_wave_check(waveslot_size)                                                                                \
     if (waveslot_size == 0) { continue; }
 
+void RDNASQTParser::send_exec_popcount(int wid, uint64_t count, bool va)
+{
+    if (count == 127) return;
+    if (wid < 0 || static_cast<uint64_t>(wid) >= SIMD.size() || SIMD[wid].empty()) return;
+
+    auto& wave = SIMD[wid].back();
+
+    auto& deque = va ? wave.popcnt_va : wave.popcnt_sa;
+    if (deque.empty()) return;
+
+    auto popcnt = deque.front();
+    deque.pop_front();
+
+    popcnt.count = count;
+    wave.popcnt.emplace_back(popcnt);
+}
+
 void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen, Stitcher& stitch)
 {
     auto& generator = static_cast<NaviTokenGenerator&>(_gen);
@@ -54,6 +71,18 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
     std::vector<att_shader_data_t> shaderdata{};
     std::vector<rocprofiler_thread_trace_decoder_inst_other_simd_t> other_simd{};
     std::vector<occupancy_info_t> occupancy{};
+    bool bIsTrackingExec = false;
+
+    PipeArray<int> active_waves_per_pipe{};
+    PipeArray<uint64_t> current_dispatch_id{};
+    PipeArray<uint64_t> dispatch_id_end{};
+
+    // Occupancy records keep the low 10 bits of the dispatch ID, where 0 means unknown,
+    // so IDs that are multiples of 1024 are skipped.
+    auto next_dispatch_id = [](uint64_t& id)
+    {
+        if ((++id & 0x3FF) == 0) ++id;
+    };
 
     auto send_occupancy = [&]()
     {
@@ -65,6 +94,16 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             }
 
         stitch.sendOccupancy(occupancy);
+    };
+
+    auto send_dispatch_end = [&](int me, int pipe, uint64_t dispatch_id, int64_t time)
+    {
+        auto dispatch_id_start = current_dispatch_id.at(me & 1).at(pipe);
+
+        if (dispatch_id == 0 || dispatch_id > dispatch_id_start) return; // TODO: Add debug info
+
+        send_occupancy();
+        stitch.sendEvent(ROCPROF_TRACE_DECODER_EVENT_DISPATCH_END, time, me, pipe, dispatch_id, false, true);
     };
 
     auto consume_launch_cluster = [&]() -> uint8_t
@@ -150,8 +189,6 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 tt_version = header_type{.raw = token.contents}.version;
                 csregister.tt_version = tt_version;
 
-                if (tt_version >= 4) double_buffer = (token.contents >> 43) & 1;
-
                 if (tt_version >= 5)
                 {
                     mi400::header_type header{.raw = token.contents};
@@ -159,6 +196,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     target_sa_wgp = get_sa_wgp(header.DSA, header.DWGP);
                     target_simd = header.DSIMD;
                     derate = header.trans2;
+                    bIsTrackingExec = header.exec;
+                    double_buffer = header.dbl;
                 }
                 else
                 {
@@ -171,7 +210,12 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     int dpr = header.DPRate & mask;
                     dprate = dpr ? (1 << (dpr - 1)) : 1;
                     derate = 1 << (header.dp_derate);
-                    if (tt_version == 4) exclude_barrier_wait = (token.contents >> 59) & 1;
+                    if (tt_version == 4)
+                    {
+                        exclude_barrier_wait = header.exbarw;
+                        bIsTrackingExec = header.exec;
+                        double_buffer = header.dbl;
+                    }
                 }
                 break;
             }
@@ -186,6 +230,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 DEBUGPRINT(start);
 
                 pcinfo_t wave_addr = csregister.get_wave_start(start);
+                uint64_t dispatch_id = current_dispatch_id.at_reg(start);
+
                 bool bIsTarget = start.SACU() == target_sa_wgp && start.simd == target_simd;
 
                 constexpr uint64_t CTX_BEGIN = 66;
@@ -193,6 +239,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                 if (start.count >= CTX_BEGIN && start.count < CTX_END)
                 {
+                    start.isExt = false;
+
                     // We are in context save or restore
                     constexpr uint64_t ctx_save_array = 0b0000110011;
                     constexpr uint64_t ctx_resr_array = 0b1111001100;
@@ -225,7 +273,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                                     exclude_barrier_wait,
                                     (uint8_t) start.me,
                                     (uint8_t) start.pipe,
-                                    (uint8_t) start.wgid
+                                    (uint8_t) start.wgid,
+                                    0
                                 ));
 
                             auto& wave = slot.back();
@@ -248,7 +297,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         if (it != running_waves.end())
                         {
                             occupancy.push_back(
-                                {it->second,
+                                {it->second.pc,
                                  token.time,
                                  start.SACU(),
                                  start.simd,
@@ -257,7 +306,9 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                                  (uint64_t) start.me,
                                  (uint64_t) start.pipe,
                                  start.isExt,
-                                 (uint64_t) start.wgid}
+                                 (uint64_t) start.wgid,
+                                 0,
+                                 0}
                             );
                             saved_waves[start.getGPULocation()] = it->second;
                         }
@@ -266,10 +317,13 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     {
                         pcinfo_t addr{0, 0};
                         if (auto it = saved_waves.find(start.getGPULocation()); it != saved_waves.end())
-                            addr = it->second;
+                            addr = it->second.pc;
 
                         saved_waves.erase(start.getGPULocation());
-                        running_waves[start.getGPULocation()] = addr;
+                        running_waves[start.getGPULocation()] = {
+                            addr, dispatch_id, static_cast<uint32_t>(start.me), static_cast<uint32_t>(start.pipe)
+                        };
+
                         occupancy.push_back(
                             {addr,
                              token.time,
@@ -280,7 +334,9 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                              (uint64_t) start.me,
                              (uint64_t) start.pipe,
                              start.isExt,
-                             (uint64_t) start.wgid}
+                             (uint64_t) start.wgid,
+                             0,
+                             0}
                         );
                     }
 
@@ -291,25 +347,30 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 {
                     occupancy.push_back({
                         {0, 0},
-                        token.time - 1, start.SACU(), start.simd, start.wid, 0, 0, 0, 0, 0
+                        token.time - 1, start.SACU(), start.simd, start.wid, 0, 0, 0, 0, 0, 0, 0
                     });
                 }
                 auto cluster_id = consume_launch_cluster();
-                running_waves[start.getGPULocation()] = wave_addr;
+                running_waves[start.getGPULocation()] = {
+                    wave_addr, dispatch_id, static_cast<uint32_t>(start.me & 1u), static_cast<uint32_t>(start.pipe)
+                };
 
-                occupancy.push_back(
-                    {wave_addr,
-                     token.time,
-                     start.SACU(),
-                     start.simd,
-                     start.wid,
-                     1,
-                     (uint64_t) start.me,
-                     (uint64_t) start.pipe,
-                     start.isExt,
-                     (uint64_t) start.wgid,
-                     cluster_id}
-                );
+                if (dispatch_id > 0) active_waves_per_pipe.at_reg(start)++;
+
+                occupancy.push_back({
+                    wave_addr,
+                    token.time,
+                    start.SACU(),
+                    start.simd,
+                    start.wid,
+                    1,
+                    (uint64_t) start.me,
+                    (uint64_t) start.pipe,
+                    start.isExt,
+                    (uint64_t) start.wgid,
+                    cluster_id,
+                    current_dispatch_id.at_reg(start),
+                });
                 if (double_buffer && occupancy.size() >= MAX_ACCUM_RECORDS) send_occupancy();
 
                 if (bIsTarget)
@@ -351,17 +412,41 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 if (end.SACU() == target_sa_wgp && end.simd == target_simd && SIMD[end.wid].size())
                     SIMD[end.wid].back().complete_wave(token);
 
-                pcinfo_t startpc{};
-                if (running_waves.find(end.getGPULocation()) != running_waves.end())
+                wavepipe_t pipe{};
+                auto it = running_waves.find(end.getGPULocation());
+                if (it != running_waves.end())
                 {
                     num_waves_completed += 1;
-                    startpc = running_waves[end.getGPULocation()];
+                    pipe = it->second;
                     running_waves.erase(end.getGPULocation());
                 }
                 else
-                    occupancy.insert(occupancy.begin(), {startpc, 0, end.SACU(), end.simd, end.wid, 1, 0, 0, 0, 0});
+                    occupancy.insert(
+                        occupancy.begin(), {pipe.pc, 0, end.SACU(), end.simd, end.wid, 1, 0, 0, 0, 0, 0, 0}
+                    );
 
-                occupancy.push_back({startpc, token.time, end.SACU(), end.simd, end.wid, 0, 0, 0, 0, 0});
+                occupancy.push_back(
+                    {pipe.pc,
+                     token.time,
+                     end.SACU(),
+                     end.simd,
+                     end.wid,
+                     0,
+                     pipe.me,
+                     pipe.pipe,
+                     0,
+                     0,
+                     0,
+                     pipe.dispatch_id}
+                );
+
+                if (pipe.dispatch_id > 0)
+                {
+                    int& sub = --active_waves_per_pipe.at_reg(pipe);
+                    if (sub == 0 && pipe.dispatch_id <= dispatch_id_end.at_reg(pipe))
+                        send_dispatch_end(pipe.me, pipe.pipe, pipe.dispatch_id, token.time);
+                    if (sub < 0) sub = 0; // We overcounted
+                }
                 break;
             }
             case RdnaType::INST:
@@ -429,6 +514,21 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         mapped.cycles++;
                     }
 
+                    // TODO: Move to arch specific
+                    constexpr uint64_t WR_EXEC_SALU = 114;
+                    constexpr uint64_t WR_EXEC_END = 117;
+                    if (bIsTrackingExec && inst.inst >= WR_EXEC_SALU && inst.inst <= WR_EXEC_END)
+                    {
+                        auto popcnt = rocprofiler_thread_trace_decoder_exec_popcnt_t{};
+                        popcnt.time = token.time;
+                        popcnt.index = wave.instructions.size();
+            
+                        if (inst.inst == WR_EXEC_SALU)
+                            wave.popcnt_sa.push_back(popcnt);
+                        else
+                            wave.popcnt_va.push_back(popcnt);
+                    }
+
                     wave.apply_inst(inst_time, inst.inst, mapped, tt_version);
                 }
                 break;
@@ -490,7 +590,19 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 gfx10::reg_write_type reg{.raw = token.contents};
                 DEBUGPRINT(reg);
 
-                if (reg.CS) csregister.UpdateRegCS(reg);
+                if (reg.CS)
+                {
+                    csregister.UpdateRegCS(reg);
+                    if (reg.regaddr == COMPUTE_DISPATCH_END && current_dispatch_id.at_reg(reg))
+                    {
+                        next_dispatch_id(dispatch_id_end.at_reg(reg));
+                        // Handle the case we started in the middle of a dispatch
+                        if (current_dispatch_id.at_reg(reg) < dispatch_id_end.at_reg(reg))
+                            current_dispatch_id.at_reg(reg) = dispatch_id_end.at_reg(reg);
+                        else if (active_waves_per_pipe.at_reg(reg) == 0)
+                            send_dispatch_end(reg.me, reg.pipe, dispatch_id_end.at_reg(reg), token.time);
+                    }
+                }
 
                 // gfx10 gets userdata in reg.cs
                 if (!reg.CS || tt_version <= 2)
@@ -531,7 +643,9 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             {
                 gfx10::reg_init_type reg{.raw = token.contents};
                 DEBUGPRINT(reg);
-                if (reg.type == 2 && (reg.data & 1) == 1) stitch.sendDispatch(csregister, token.time, reg.me, reg.pipe);
+                if (reg.type != 2 || (reg.data & 1) == 0) break;
+                next_dispatch_id(current_dispatch_id.at_reg(reg));
+                stitch.sendDispatch(csregister, token.time, reg.me, reg.pipe, current_dispatch_id.at_reg(reg));
                 break;
             }
             case RdnaType::EVENT:
@@ -600,6 +714,22 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 shaderdata.emplace_back(shader);
                 if (shaderdata.size() >= MAX_ACCUM_RECORDS) stitch.sendShaderdata(shaderdata);
 
+                break;
+            }
+            case RdnaType::EXEC_POPCOUNT1:
+            {
+                auto execpop = gfx12::execpopcnt1_type{.raw = token.contents};
+                DEBUGPRINT(execpop);
+                send_exec_popcount(execpop.wid, execpop.cnt, execpop.va);
+                break;
+            }
+            case RdnaType::EXEC_POPCOUNT3:
+            {
+                auto execpop = gfx12::execpopcnt3_type{.raw = token.contents};
+                DEBUGPRINT(execpop);
+                send_exec_popcount(execpop.wid1, execpop.cnt1, execpop.va1);
+                send_exec_popcount(execpop.wid2, execpop.cnt2, execpop.va2);
+                send_exec_popcount(execpop.wid3, execpop.cnt3, execpop.va3);
                 break;
             }
             default:

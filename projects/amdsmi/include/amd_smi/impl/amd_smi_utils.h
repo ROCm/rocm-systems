@@ -59,9 +59,7 @@ std::string smi_amdgpu_split_string(std::string str, char delim);
 std::vector<std::string> split_string(const std::string& line, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name);
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name);
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data);
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name);
 
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len, std::string newString);
 
@@ -314,12 +312,6 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
  */
 void init_asic_info_defaults(amdsmi_asic_info_t* info);
 
-inline constexpr auto kAmdgpuDkmsRoot = std::string_view{"/var/lib/dkms/amdgpu"};
-
-auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
-                                      std::string_view package_version, amdsmi_driver_info_t* info)
-    -> amdsmi_status_t;
-
 /**
  *  @brief Format a DRM driver date such as ``20150101`` as ``2015/01/01 00:00``.
  *
@@ -327,23 +319,5 @@ auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
  *  date report.
  */
 auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string;
-
-/**
- *  @brief Select the DKMS package built for a running kernel.
- *
- *  @details Reads ``kernel-<release>-<machine>`` under @p dkms_root, then
- *  validates only that PACKAGE_VERSION directory through the dkms.conf behind
- *  its source symlink. Does not scan sibling packages.
- *
- *  @param[in] dkms_root Directory that contains kernel-* symlinks (for example
- *             /var/lib/dkms/amdgpu).
- *  @param[in] release Kernel release from uname, such as 6.8.0-124-generic.
- *  @param[in] machine Hardware name from uname, such as x86_64.
- *  @param[out] active_version Cleared on entry. Set to PACKAGE_VERSION when
- *              the kernel symlink points at a validated package.
- */
-auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_view release,
-                                        std::string_view machine, std::string* active_version)
-    -> amdsmi_status_t;
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

@@ -37,6 +37,8 @@ fastpathFallbackEligibleErrno(int err)
 }
 
 /* The fastpath backend is used when:
+ *  - Configuration::fastpath() is true. Among other things, this is false when
+ *    ROCr is running on WSL2 (/dev/dxg), where AIS is not implemented
  *  - The file has been opened with the O_DIRECT flag
  *  - if statx contains direct io information
  *      - statx indicates the file descriptor supports direct IO (see statx (2))
@@ -152,9 +154,10 @@ Fastpath::score(const shared_ptr<IFile> &file, const shared_ptr<IBuffer> &buffer
     bool is_block_device{file->isBlockDevice()};
     bool on_ext4_ordered{file->onExt4Ordered()};
     bool on_xfs{file->onXfs()};
+    bool on_nfs_rdma{file->onNfsRdma()};
     bool unsupported_file_systems{Context<Configuration>::get()->unsupportedFileSystems()};
-    accept_io &=
-        is_block_device || (is_regular_file && (unsupported_file_systems || on_ext4_ordered || on_xfs));
+    accept_io &= is_block_device ||
+                 (is_regular_file && (unsupported_file_systems || on_ext4_ordered || on_xfs || on_nfs_rdma));
 
     const uint32_t dio_offset_align{file->dioOffsetAlign()};
     accept_io &= dio_offset_align && !(file_offset & (dio_offset_align - 1));

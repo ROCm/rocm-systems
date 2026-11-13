@@ -257,7 +257,7 @@ The supported options are:
 
 - __``-h``, ``--help``__
 
-  Displays a usage message and aborts the process.
+  Displays a usage message and exits.
 
 For options supporting `%` format tokens expansions, the following tokens are
 supported:

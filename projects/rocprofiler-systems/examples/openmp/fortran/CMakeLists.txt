@@ -86,17 +86,19 @@ enable_language(Fortran)
 # Compile examples
 # ---------------------------------------------------------------------------------------#
 
+# TODO: Another example that tests task constructs with use of detach clause should be added
+# However, this cannot be done until local CI's use most recent SDK version
+# For TheRock, it will fail as the SDK promotes a warning to an error
+
 set(HOST_EXAMPLE_NAME "openmp-fortran-host")
 set(HOST_EXAMPLE_FLAGS "-fopenmp")
 
-# host.f90 uses task detach/omp_fulfill_event (OpenMP 5.0). Request it explicitly
-# rather than relying on the compiler default, which varies by flang build.
+# Request OpenMP 5.0 explicitly rather than relying on the compiler default, which
+# varies by flang build.
 # amdflang 20+ supports OpenMP 5.0.
 set(OPENMP_PINNED_VERSION "-fopenmp-version=50")
 
 add_executable(${HOST_EXAMPLE_NAME})
-# TODO: Once SDK issue is fixed (early_fulfill arriving after task_complete causes failure),
-# uncomment the call to run_task_detach_phase in host.f90
 target_sources(${HOST_EXAMPLE_NAME} PRIVATE host.f90)
 target_compile_options(
     ${HOST_EXAMPLE_NAME}

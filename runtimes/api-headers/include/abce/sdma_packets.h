@@ -237,7 +237,7 @@ extern "C" {
  // linear copy (swap) packet (SDMA5.2+)
  // Atomically swaps data between Address A and Address B.
  // Addresses must be 64-byte aligned for gfx94/gfx95X.
-#define SDMA_PKT_COPY_LINEAR_SWAP_MAX_SIZE 0x3fffffe0
+#define SDMA_PKT_COPY_LINEAR_SWAP_MAX_SIZE 0x3fffffc0
 #define SDMA_PKT_COPY_LINEAR_SWAP_ALIGNMENT 64
  typedef struct SDMA_PKT_COPY_LINEAR_SWAP_TAG {
    union {
@@ -1978,6 +1978,16 @@ ABCE_STATIC_ASSERT(sizeof(SDMA_PKT_COPY_LINEAR_BROADCAST) == 36,
                    "SDMA_PKT_COPY_LINEAR_BROADCAST size is fixed by the SDMA packet format");
 ABCE_STATIC_ASSERT(sizeof(SDMA_PKT_COPY_LINEAR_SWAP) == 28,
                    "SDMA_PKT_COPY_LINEAR_SWAP size is fixed by the SDMA packet format");
+ABCE_STATIC_ASSERT(SDMA_PKT_COPY_LINEAR_SWAP_MAX_SIZE % SDMA_PKT_COPY_LINEAR_SWAP_ALIGNMENT == 0,
+                   "Swap chunks must preserve operand alignment");
+ABCE_STATIC_ASSERT(
+    SDMA_PKT_COPY_LINEAR_SWAP_GFX125PLUS_MAX_SIZE %
+            SDMA_PKT_COPY_LINEAR_SWAP_GFX125PLUS_ALIGNMENT == 0,
+    "Swap chunks must preserve operand alignment");
+ABCE_STATIC_ASSERT(
+    SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX125PLUS_MAX_SIZE %
+            SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX125PLUS_ALIGNMENT == 0,
+    "Swap chunks must preserve operand alignment");
 ABCE_STATIC_ASSERT(sizeof(SDMA_PKT_COPY_LINEAR_RECT) == 52,
                    "SDMA_PKT_COPY_LINEAR_RECT size is fixed by the SDMA packet format");
 ABCE_STATIC_ASSERT(sizeof(SDMA_PKT_COPY_LINEAR_RECT_GFX12) == 52,

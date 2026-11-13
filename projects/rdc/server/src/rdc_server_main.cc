@@ -666,12 +666,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // Detach the thread, sys will recycle the resource
-  thr_ret = pthread_detach(sig_listen_thread);
-  // Don't fail if detach is not successful
-  if (thr_ret != 0) {
-    std::cerr << "Failed to detach ProcessSignalLoop. pthread_detach() returned " << thr_ret;
-  }
+  // The thread is not detached: after a shutdown signal, main joins it below.
 
   // TODO(cfreehil): Eventually, set these by reading a config file
   rdc_server.set_start_rdc_admin_service(true);
@@ -680,6 +675,12 @@ int main(int argc, char** argv) {
   rdc_server.Run();
 
   if (sShutDownServer) {
+    // Run() returns as soon as the gRPC server is shut down, but the signal
+    // thread is still deleting the services and joining the metrics updater's
+    // threads. Returning now starts the process exit under that thread, and
+    // the exit can crash in the dynamic loader. The thread ends after
+    // ShutDown(), so this join returns.
+    pthread_join(sig_listen_thread, nullptr);
     std::cout << "RDC server successfully shut down." << std::endl;
     return 0;
   } else {

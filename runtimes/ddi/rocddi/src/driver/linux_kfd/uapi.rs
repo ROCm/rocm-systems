@@ -37,6 +37,7 @@ pub(super) const SET_TRAP_HANDLER: u64 = request(1, 0x13, 24);
 pub(super) const GET_APERTURES: u64 = request(3, 0x14, 16);
 pub(super) const ACQUIRE_VM: u64 = request(1, 0x15, 8);
 pub(super) const RUNTIME_ENABLE: u64 = request(3, 0x25, 16);
+pub(super) const SET_XNACK_MODE: u64 = request(3, 0x21, 4);
 pub(super) const CREATE_PROCESS: u64 = request(3, 0x27, 8);
 pub(super) const ALLOC_MEMORY: u64 = request(3, 0x16, 40);
 pub(super) const FREE_MEMORY: u64 = request(1, 0x17, 8);
@@ -121,15 +122,6 @@ pub(super) const SVM_FLAG_GPU_READ_ONLY: u32 = 0x08;
 pub(super) const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
 pub(super) const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
 pub(super) const SVM_FLAG_GPU_ALWAYS_MAPPED: u32 = 0x40;
-pub(super) const SVM_FLAG_EXT_COHERENT: u32 = 0x80;
-pub(super) const SVM_FLAGS: u32 = SVM_FLAG_HOST_ACCESS
-    | SVM_FLAG_COHERENT
-    | SVM_FLAG_HIVE_LOCAL
-    | SVM_FLAG_GPU_READ_ONLY
-    | SVM_FLAG_GPU_EXECUTE
-    | SVM_FLAG_GPU_READ_MOSTLY
-    | SVM_FLAG_GPU_ALWAYS_MAPPED
-    | SVM_FLAG_EXT_COHERENT;
 
 /// KFD UAPI version returned by `GET_VERSION`.
 #[repr(C)]
@@ -158,6 +150,14 @@ pub(super) struct AvailableMemory {
     pub available: u64,
     pub gpu_id: u32,
     pub pad: u32,
+}
+
+/// Query or change the KFD process-wide recoverable page-fault mode.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub(super) struct XnackMode {
+    /// Negative queries without changing the mode; KFD returns zero or one.
+    pub xnack_enabled: i32,
 }
 
 /// Native tile and address configuration for one GPU.

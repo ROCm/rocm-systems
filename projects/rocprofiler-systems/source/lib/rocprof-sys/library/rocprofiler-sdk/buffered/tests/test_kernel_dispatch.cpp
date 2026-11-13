@@ -136,9 +136,9 @@ TEST(kernel_dispatch_test, on_kernel_dispatch_forwards_record_fields_to_dependen
         .stream_handle           = k_mock_stream_id
     };
 
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(Eq(expected_thread_info)))
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(Eq(expected_thread_info)))
         .Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, add_track(Eq(expected_track))).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_track(Eq(expected_track))).Times(1);
     EXPECT_CALL(*g_metadata_registry_mock,
                 add_queue(Eq(record.dispatch_info.queue_id.handle)))
         .Times(1);
@@ -169,8 +169,8 @@ TEST(kernel_dispatch_test, on_kernel_dispatch_writes_timemory_bundle_when_enable
     const std::uint64_t        expected_elapsed_ns =
         record.end_timestamp - record.start_timestamp;
 
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info).Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, add_track).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_track).Times(1);
     EXPECT_CALL(*g_metadata_registry_mock, add_queue).Times(1);
     EXPECT_CALL(*g_metadata_registry_mock, add_stream).Times(1);
     EXPECT_CALL(*g_buffer_storage_mock, store).Times(1);
@@ -209,8 +209,8 @@ TEST(kernel_dispatch_test, on_kernel_dispatch_skips_timemory_bundle_for_unknown_
     mock_sdk::kernel_dispatch_record_t record{};
     record.thread_id = externals::k_unknown_tid;
 
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info).Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, add_track).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_track).Times(1);
     EXPECT_CALL(*g_metadata_registry_mock, add_queue).Times(1);
     EXPECT_CALL(*g_metadata_registry_mock, add_stream).Times(1);
     EXPECT_CALL(*g_buffer_storage_mock, store).Times(1);

@@ -84,21 +84,21 @@ HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceGetSharedMemConfig_Default_ReturnsE
   REQUIRE(IsKnownSharedMemConfig(config));
 }
 
-// @asserts: hipDeviceGetLimit - stack and heap limits resolve or report unsupported, and an out-of-range limit is not accepted
+// @asserts: hipDeviceGetLimit - stack, heap, and persisting L2 limits resolve or report unsupported, and an out-of-range limit is not accepted
 HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceGetLimit_Default_ReportsStackAndHeapAndRejectsInvalid) {
   RequireDevice();
 
-  // Stack size and malloc heap size are the two portably queryable limits; each
-  // either resolves to a well-defined size_t or is reported unsupported.
-  for (const hipLimit_t limit : {hipLimitStackSize, hipLimitMallocHeapSize}) {
+  // Stack size, malloc heap size, and persisting L2 cache size are the three
+  // portably queryable limits; each either resolves to a well-defined size_t
+  // or is reported unsupported.
+  for (const hipLimit_t limit :
+       {hipLimitStackSize, hipLimitMallocHeapSize, hipLimitPersistingL2CacheSize}) {
     size_t value = 0;
     const hipError_t status = hipDeviceGetLimit(&value, limit);
     if (status == hipErrorUnsupportedLimit) {
       continue;
     }
     HIP_CHECK(status);
-    // value is a well-defined size_t; its magnitude is device-dependent and is
-    // therefore not asserted against any specific bound.
     (void)value;
   }
 
@@ -138,6 +138,46 @@ HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsu
     return;
   }
   HIP_CHECK(set_status);
+}
+
+// @asserts: hipDeviceSetLimit - persisting L2 cache set/get round-trips, and exceeding the max is rejected
+HIP_TEST_CASE(Contract_DeviceConfig_HipDeviceSetLimit_PersistingL2_RoundTripsAndRejectsOverMax) {
+  RequireDevice();
+
+  hipDeviceProp_t props;
+  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+
+  if (props.persistingL2CacheMaxSize <= 0) {
+    HIP_SKIP_TEST("Device does not support persisting L2 cache");
+    return;
+  }
+
+  size_t original = 0;
+  const hipError_t get_status =
+      hipDeviceGetLimit(&original, hipLimitPersistingL2CacheSize);
+  if (get_status == hipErrorUnsupportedLimit) {
+    return;
+  }
+  HIP_CHECK(get_status);
+
+  // Round-trip: set to half the max, read back, assert equality.
+  const size_t target = static_cast<size_t>(props.persistingL2CacheMaxSize) / 2;
+  HIP_CHECK(hipDeviceSetLimit(hipLimitPersistingL2CacheSize, target));
+
+  size_t readback = 0;
+  HIP_CHECK(hipDeviceGetLimit(&readback, hipLimitPersistingL2CacheSize));
+  REQUIRE(readback == target);
+
+  // Over-max rejection: a value above the maximum must not succeed.
+  const size_t over_max =
+      static_cast<size_t>(props.persistingL2CacheMaxSize) + 1024;
+  const hipError_t over_status =
+      hipDeviceSetLimit(hipLimitPersistingL2CacheSize, over_max);
+  REQUIRE(over_status != hipSuccess);
+  (void)hipGetLastError();
+
+  // Restore original value.
+  HIP_CHECK(hipDeviceSetLimit(hipLimitPersistingL2CacheSize, original));
 }
 
 // @asserts: hipGetDeviceFlags - the schedule subfield is a documented mode and greatest stream priority <= least

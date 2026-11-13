@@ -91,12 +91,12 @@ AmdGpuCodeObject::AmdGpuCodeObject(AmdGpuCodeObject &&other) noexcept
 }
 
 AmdGpuCodeObject::AmdGpuCodeObject(const std::string &elf_path) {
-  try {
-    image_ = detail::read_file_bytes(elf_path);
-  } catch (const std::exception &) {
+  util::FailureOr<std::vector<char>> maybeImage = detail::read_file_bytes(elf_path);
+  if (maybeImage.failed()) {
     is_valid_ = false;
     return;
   }
+  image_ = std::move(maybeImage.value());
 
   if (image_.size() < sizeof(Elf64_Ehdr)) {
     is_valid_ = false;
