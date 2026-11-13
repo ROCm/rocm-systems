@@ -8034,6 +8034,50 @@ static hipError_t capture_hipExtMemcpyBatchAsync(void** dsts, void** srcs, size_
 }
 
 // Generated shim
+static hipError_t capture_hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size, hipMemcpyAttributes* attr, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemcpyWithAttributesAsync_fn(dst, src, size, attr, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipMemcpyWithAttributesAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.dst = reinterpret_cast<uint64_t>(dst);
+    a.src = reinterpret_cast<uint64_t>(src);
+    a.size = static_cast<decltype(a.size)>(size);
+    a.attr = reinterpret_cast<uint64_t>(attr);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYWITHATTRIBUTESASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipMemcpy3DWithAttributesAsync(struct hipMemcpy3DBatchOp* op, unsigned long long flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemcpy3DWithAttributesAsync_fn(op, flags, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipMemcpy3DWithAttributesAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.op = reinterpret_cast<uint64_t>(op);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY3DWITHATTRIBUTESASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx) {
+  hipError_t r = g_real_table.hipArrayGetPlane_fn(pPlaneArray, hArray, planeIdx);
+  if (r == hipSuccess) {
+    hrr_args_hipArrayGetPlane a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.hArray = reinterpret_cast<uint64_t>(hArray);
+    a.planeIdx = static_cast<decltype(a.planeIdx)>(planeIdx);
+    if (pPlaneArray) a.pPlaneArray = reinterpret_cast<uint64_t>(*pPlaneArray);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPARRAYGETPLANE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8773,6 +8817,9 @@ void hip_capture_build_table() {
   g_cap_table.hipKernelSetAttributeForDevice_fn = capture_hipKernelSetAttributeForDevice;
   g_cap_table.hipKernelSetCacheConfig_fn = capture_hipKernelSetCacheConfig;
   g_cap_table.hipExtMemcpyBatchAsync_fn = capture_hipExtMemcpyBatchAsync;
+  g_cap_table.hipMemcpyWithAttributesAsync_fn = capture_hipMemcpyWithAttributesAsync;
+  g_cap_table.hipMemcpy3DWithAttributesAsync_fn = capture_hipMemcpy3DWithAttributesAsync;
+  g_cap_table.hipArrayGetPlane_fn = capture_hipArrayGetPlane;
 }
 
 void hip_capture_build_compiler_table() {

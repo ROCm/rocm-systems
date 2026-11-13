@@ -851,6 +851,8 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipArray3DGetDescriptor",
     "hipArrayGetInfo",
     "hipArrayDestroy",
+    # Returns a parent-owned plane handle; the recorded handle is stale on replay.
+    "hipArrayGetPlane",
     "hipGetChannelDesc",
     "hipCreateTextureObject",
     "hipDestroyTextureObject",

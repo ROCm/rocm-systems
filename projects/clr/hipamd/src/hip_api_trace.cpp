@@ -55,6 +55,7 @@ hipError_t hipArrayDestroy(hipArray_t array);
 hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
 hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent, unsigned int* flags,
                            hipArray_t array);
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx);
 hipError_t hipBindTexture(size_t* offset, const textureReference* tex, const void* devPtr,
                           const hipChannelFormatDesc* desc, size_t size);
 hipError_t hipBindTexture2D(size_t* offset, const textureReference* tex, const void* devPtr,
@@ -991,6 +992,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipArrayDestroy_fn = hip::hipArrayDestroy;
   ptrDispatchTable->hipArrayGetDescriptor_fn = hip::hipArrayGetDescriptor;
   ptrDispatchTable->hipArrayGetInfo_fn = hip::hipArrayGetInfo;
+  ptrDispatchTable->hipArrayGetPlane_fn = hip::hipArrayGetPlane;
   ptrDispatchTable->hipBindTexture_fn = hip::hipBindTexture;
   ptrDispatchTable->hipBindTexture2D_fn = hip::hipBindTexture2D;
   ptrDispatchTable->hipBindTextureToArray_fn = hip::hipBindTextureToArray;
@@ -2322,6 +2324,8 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipExtMemcpyBatchAsync_fn, 549);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 40
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemcpyWithAttributesAsync_fn, 550);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemcpy3DWithAttributesAsync_fn, 551);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 41
+HIP_ENFORCE_ABI(HipDispatchTable, hipArrayGetPlane_fn, 552);
 
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
@@ -2329,9 +2333,9 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipMemcpy3DWithAttributesAsync_fn, 551);
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 552)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 553)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 40,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 41,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

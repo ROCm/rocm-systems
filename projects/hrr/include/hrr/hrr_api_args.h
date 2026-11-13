@@ -5941,6 +5941,35 @@ static_assert(sizeof(hipExtMemcpyAttributes) <= 56, "hrr_args_hipExtMemcpyBatchA
 static_assert(sizeof(size_t) <= 8, "hrr_args_hipExtMemcpyBatchAsync::attrsIdxs_bytes too small for size_t");
 #endif
 
+/* hipError_t hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size, hipMemcpyAttributes* attr, hipStream_t stream) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dst;
+    uint64_t src;
+    uint64_t size;
+    uint64_t attr;
+    uint64_t stream;
+} hrr_args_hipMemcpyWithAttributesAsync;
+
+/* hipError_t hipMemcpy3DWithAttributesAsync(struct hipMemcpy3DBatchOp* op, unsigned long long flags, hipStream_t stream) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t op;
+    uint64_t flags;
+    uint64_t stream;
+} hrr_args_hipMemcpy3DWithAttributesAsync;
+
+/* hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t pPlaneArray;
+    uint64_t hArray;
+    uint32_t planeIdx;
+} hrr_args_hipArrayGetPlane;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6493,16 +6522,19 @@ typedef enum hrr_api_id {
     HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE = 547,
     HRR_API_HIPKERNELSETCACHECONFIG = 548,
     HRR_API_HIPEXTMEMCPYBATCHASYNC = 549,
-    HRR_API_HIPPOPCALLCONFIGURATION = 550,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 551,
-    HRR_API_HIPREGISTERFATBINARY = 552,
-    HRR_API_HIPREGISTERFUNCTION = 553,
-    HRR_API_HIPREGISTERMANAGEDVAR = 554,
-    HRR_API_HIPREGISTERSURFACE = 555,
-    HRR_API_HIPREGISTERTEXTURE = 556,
-    HRR_API_HIPREGISTERVAR = 557,
-    HRR_API_HIPUNREGISTERFATBINARY = 558,
-    HRR_API_COUNT = 559
+    HRR_API_HIPMEMCPYWITHATTRIBUTESASYNC = 550,
+    HRR_API_HIPMEMCPY3DWITHATTRIBUTESASYNC = 551,
+    HRR_API_HIPARRAYGETPLANE = 552,
+    HRR_API_HIPPOPCALLCONFIGURATION = 553,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 554,
+    HRR_API_HIPREGISTERFATBINARY = 555,
+    HRR_API_HIPREGISTERFUNCTION = 556,
+    HRR_API_HIPREGISTERMANAGEDVAR = 557,
+    HRR_API_HIPREGISTERSURFACE = 558,
+    HRR_API_HIPREGISTERTEXTURE = 559,
+    HRR_API_HIPREGISTERVAR = 560,
+    HRR_API_HIPUNREGISTERFATBINARY = 561,
+    HRR_API_COUNT = 562
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -7058,6 +7090,9 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipKernelSetAttributeForDevice",
     "hipKernelSetCacheConfig",
     "hipExtMemcpyBatchAsync",
+    "hipMemcpyWithAttributesAsync",
+    "hipMemcpy3DWithAttributesAsync",
+    "hipArrayGetPlane",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",
