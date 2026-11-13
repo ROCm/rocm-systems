@@ -36,7 +36,7 @@ Single-interpreter local build::
 
 Multi-interpreter manylinux build inside the manylinux_2_28 container::
 
-    /opt/python/cp38-cp38/bin/python3 build_wheel.py \
+    /opt/python/cp310-cp310/bin/python3 build_wheel.py \
         --project-dir /src/amdsmi \
         --output-dir /src/amdsmi/wheels \
         --os-variant AlmaLinux8 \
@@ -44,7 +44,8 @@ Multi-interpreter manylinux build inside the manylinux_2_28 container::
 
 Compatibility
 -------------
-* Python >= 3.6
+* Python >= 3.9 to build (PEP 639 license metadata needs setuptools >= 77);
+  the wheel itself installs on Python >= 3.6
 * Tested on Ubuntu 20.04/22.04/24.04, RHEL 8/9/10, AlmaLinux 8, SLES 15,
   AzureLinux 3, and manylinux_2_28 containers.
 """
