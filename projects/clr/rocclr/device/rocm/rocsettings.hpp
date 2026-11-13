@@ -69,11 +69,8 @@ class Settings : public device::Settings {
   Settings();
 
   //! Creates settings
-  //! aqlExtDispatch: whether ROCr reports HSA_AMD_AQL_PROPERTY_EXT_DISPATCH for the agent
-  //! (HSA_AMD_AGENT_INFO_AQL_EXTENSIONS); -1 if unknown (an offline device, or a runtime without
-  //! the query), when the ISA decides
   bool create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups = false,
-              bool isXgmi = false, bool isAPU = false, int aqlExtDispatch = -1);
+              bool isXgmi = false, bool isAPU = false);
 
  private:
   //! Disable copy constructor

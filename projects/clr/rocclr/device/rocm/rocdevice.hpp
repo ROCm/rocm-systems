@@ -634,8 +634,11 @@ class Device : public NullDevice {
   //! reports that stores to device memory come over PCIe, re-store the last one and read it back.
   //! last_stored must be in device memory, or the readback does not drain HDP.
   void FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const;
-  //! AQL completion signal handles carry hints the CP firmware decodes
-  bool SignalHints() const { return signal_hints_; }
+  //! AQL completion signal handles carry hints the CP firmware decodes. Known once the device has
+  //! a VirtualGPU (ResolveCpFirmwareCaps); a signal created before that carries no hints. The pooled
+  //! signals rely on one existing first: graph instantiate captures its packets on a VirtualGPU
+  //! before it prepopulates the HW event pool, and gate signals are taken by a VirtualGPU.
+  bool SignalHints() const { return signal_hints_.load(std::memory_order_relaxed); }
   //! AQL queue ring buffers are placed in device memory. A profiler tool scans and rewrites the
   //! packets from the host, so its queues keep system-memory rings.
   bool AqlRingsInDeviceMemory() const {
@@ -881,7 +884,14 @@ class Device : public NullDevice {
   mutable std::vector<void*> graph_hw_events_;
   mutable std::mutex graph_hw_events_lock_;
   bool pcie_stores_need_flush_ = true;  //!< Stores to device memory come over PCIe through HDP
-  bool signal_hints_ = false;           //!< AQL completion signal handles carry hints
+  //! AQL completion signal handles carry hints; set by ResolveCpFirmwareCaps while other threads
+  //! may create signals
+  std::atomic<bool> signal_hints_{false};
+  std::once_flag cpCapsOnce_;  //!< Guards ResolveCpFirmwareCaps
+
+  //! Asks ROCr for the CP firmware capabilities (ext dispatch packet, signal hints) once, before
+  //! the device's first VirtualGPU
+  void ResolveCpFirmwareCaps();
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem
 
