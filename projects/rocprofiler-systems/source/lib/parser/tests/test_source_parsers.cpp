@@ -335,6 +335,34 @@ make_event_schema()
     return value;
 }
 
+/// A list row like the rocsys --traces option: no token counts, so the option
+/// reads every token up to the next option or "--".
+schema_param
+make_traces()
+{
+    auto traces    = make_param("traces", param_type::enumeration_list);
+    traces.env     = "ROCPROFSYS_TRACES";
+    traces.arg     = "--traces";
+    traces.choices = { "hip", "mpi" };
+    return traces;
+}
+
+schema
+make_traces_schema()
+{
+    schema value{};
+    add_trace(value);
+    add_param(value, make_traces());
+    return value;
+}
+
+parse_result
+parse_traces(std::vector<std::string> args)
+{
+    return cli_parser{ std::move(args), unknown_option::report }.parse(
+        make_traces_schema());
+}
+
 TEST(parser_cli, joins_tokens_until_the_next_option)
 {
     const auto parsed =
@@ -469,10 +497,64 @@ TEST(parser_cli, list_stops_at_the_separator_and_rejects_a_bare_command)
     const auto bare =
         cli_parser{ { "--events", "ins", "cycles", "./app" }, unknown_option::report }
             .parse(make_event_schema());
-    expect_stored(bare.values, "events", std::vector<std::string>{ "ins", "cycles" });
+    EXPECT_EQ(bare.values.find("events"), bare.values.end());
     EXPECT_TRUE(bare.command.empty());
     ASSERT_EQ(bare.errors.size(), 1U);
-    EXPECT_NE(bare.errors.front().find("unexpected argument './app'"), std::string::npos);
+    EXPECT_EQ(bare.errors.front(), "invalid value './app' for parameter 'events'");
+}
+
+TEST(parser_cli, list_reads_every_token_to_the_next_option)
+{
+    const auto parsed = parse_traces({ "--traces", "hip", "mpi", "--trace" });
+    EXPECT_TRUE(parsed.errors.empty());
+    expect_stored(parsed.values, "traces", std::vector<std::string>{ "hip", "mpi" });
+    expect_stored(parsed.values, "trace", true);
+}
+
+TEST(parser_cli, list_names_an_unknown_element)
+{
+    const auto parsed = parse_traces({ "--traces", "hip", "bogus" });
+    ASSERT_EQ(parsed.errors.size(), 1U);
+    EXPECT_EQ(parsed.errors.front(), "invalid value 'bogus' for parameter 'traces'");
+    EXPECT_EQ(parsed.values.find("traces"), parsed.values.end());
+}
+
+TEST(parser_cli, repeated_list_adds_elements)
+{
+    const auto separate = parse_traces({ "--traces", "hip", "--traces", "mpi" });
+    const auto equals   = parse_traces({ "--traces=hip", "--traces=mpi" });
+    EXPECT_TRUE(separate.errors.empty());
+    EXPECT_TRUE(equals.errors.empty());
+    expect_stored(separate.values, "traces", std::vector<std::string>{ "hip", "mpi" });
+    expect_stored(equals.values, "traces", std::vector<std::string>{ "hip", "mpi" });
+}
+
+TEST(parser_cli, list_ignores_separators_at_token_ends)
+{
+    for(const auto& args : { std::vector<std::string>{ "--traces", "hip,", "mpi" },
+                             std::vector<std::string>{ "--traces", "hip", ",mpi" },
+                             std::vector<std::string>{ "--traces", "hip", ",", "mpi" } })
+    {
+        const auto parsed = parse_traces(args);
+        EXPECT_TRUE(parsed.errors.empty());
+        expect_stored(parsed.values, "traces", std::vector<std::string>{ "hip", "mpi" });
+    }
+}
+
+TEST(parser_cli, list_refuses_a_value_with_no_name_or_an_empty_element)
+{
+    const auto expect_refused = [](std::vector<std::string> args,
+                                   std::string_view         named) {
+        const auto parsed = parse_traces(std::move(args));
+        ASSERT_EQ(parsed.errors.size(), 1U);
+        EXPECT_EQ(parsed.errors.front(),
+                  "invalid value '" + std::string{ named } + "' for parameter 'traces'");
+        EXPECT_EQ(parsed.values.find("traces"), parsed.values.end());
+    };
+    expect_refused({ "--traces", "," }, ",");
+    expect_refused({ "--traces=," }, ",");
+    expect_refused({ "--traces", "hip", ",", ",", "mpi" }, "hip,,mpi");
+    expect_refused({ "--traces", "hip,,mpi" }, "hip,,mpi");
 }
 
 TEST(parser_cli, optional_value_does_not_override_the_default)
