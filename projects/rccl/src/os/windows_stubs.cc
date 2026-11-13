@@ -432,6 +432,19 @@ void ncclProfilerReserveSymCounters(struct ncclComm* comm, struct ncclKernelPlan
   (void)plan;
 }
 
+/* Addon Collective profiler stubs */
+ncclResult_t ncclProfilerStartAddonCollEvent(struct ncclInfo* info, bool isGraphCaptured, void** eHandle) {
+  (void)info;
+  (void)isGraphCaptured;
+  (void)eHandle;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclProfilerStopAddonCollEvent(void* eHandle) {
+  (void)eHandle;
+  return ncclSuccess;
+}
+
 /* CE profiler stubs (ncclCeCollArgs / ncclCeBatchOpsParams forward-declared in profiler.h) */
 ncclResult_t ncclProfilerStartCeCollEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
   (void)comm;
