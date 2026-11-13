@@ -683,6 +683,8 @@ typedef enum ncclCheckMode {
   ncclCheckModeDebugGlobal = 2,
 } ncclCheckMode_t;
 
+struct rcclHostHier;
+
 struct ncclComm {
   uint64_t startMagic;
   struct ncclMemoryStack memPermanent, memScoped;
@@ -809,6 +811,11 @@ struct ncclComm {
   // Both hierarchical AG and RS use the same temp buffer,
   // so running them concurrently on same communicator across two streams is unsafe
   void* hierarchicalTempBuffer;
+
+  // Host-hierarchical collectives (hier_host.h). hostHier is allocated when the
+  // host layout is first probed and holds the child comms once they are built.
+  struct rcclHostHier* hostHier;
+  int hostHierState; // rcclHostHierState
 
   // Force PAT algorithm for this communicator
   bool forcePatEnable;
