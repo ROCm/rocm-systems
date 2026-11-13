@@ -565,6 +565,13 @@ add_test(
 )
 
 add_test(
+    NAME test_gpu_identity
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_gpu_identity.xml
+        ${COV_OPTION} tests/unit/utils/test_gpu_identity.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_noise_clamper
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_noise_clamper.xml
@@ -1165,6 +1172,7 @@ if(${ENABLE_COVERAGE})
         test_utils_profile
         test_common
         test_amdsmi_interface
+        test_gpu_identity
         test_noise_clamper
         test_benchmark_base
         test_analysis_cli

@@ -246,8 +246,9 @@ class OmniSoC_Base:
                 )
             )
 
-        with amdsmi_interface.amdsmi_ctx():
-            self._mspec.max_mclk = str(amdsmi_interface.get_mem_max_clock())
+        if self._mspec.max_mclk is None:
+            with amdsmi_interface.amdsmi_ctx():
+                self._mspec.max_mclk = str(amdsmi_interface.get_mem_max_clock())
 
         # These are just max values now, because the parsing was broken and this was
         # inconsistent with how we use the clocks elsewhere (all max, all the time)
@@ -270,13 +271,14 @@ class OmniSoC_Base:
         Detects the GPU model using various identifiers from 'amd-smi static'.
         Falls back through multiple methods if the primary method fails.
         """
-        with amdsmi_interface.amdsmi_ctx():
-            gpu_model = "N/A"
-            for model in mi_gpu_specs.get_all_gpu_models():
-                for amdsmi_gpu_model in amdsmi_interface.get_gpu_model():
-                    if model.lower() in amdsmi_gpu_model.lower():
-                        gpu_model = model
-                        break
+        model_names = getattr(self._mspec, "gpu_model_names", None)
+        if model_names is None:
+            with amdsmi_interface.amdsmi_ctx():
+                model_names = amdsmi_interface.get_gpu_model()
+        gpu_model = "N/A"
+        for model in mi_gpu_specs.get_all_gpu_models():
+            if any(model.lower() in name.lower() for name in model_names):
+                gpu_model = model
 
         gpu_model = self._adjust_mi300_model(gpu_model.lower(), gpu_arch.lower())
 
@@ -621,9 +623,9 @@ class OmniSoC_Base:
             config.analysis_configs_dir / (canonical_config_arch(arch) or arch), exclude
         )
 
-    def get_rocprof_supported_counters(self) -> Set[str]:
+    def get_rocprof_supported_counters(self) -> Optional[Set[str]]:  # noqa: UP006
+        """Return the selected GPU's counter names, or None when support is unknown."""
         args = self.get_args()
-        rocprof_counters: Set[str] = set()
 
         # Point to counter definition
         old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
@@ -635,28 +637,35 @@ class OmniSoC_Base:
             encoding="utf-8",
         ) as filename:
             sdk_config = yaml.safe_load(filename)
-        os.environ["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
-            sdk_config
-        )
-
-        counters = rocprofv3_avail_interface.get_counters(
-            args.rocprofiler_sdk_tool_path
-        )
-        rocprof_counters = {
-            counter.name
-            for counter in counters[list(counters.keys())[0]]
-            if hasattr(counter, "block") or hasattr(counter, "expression")
-        }
-        # Delete counter definition temporary directory
-        if os.environ.get("ROCPROFILER_METRICS_PATH"):
-            shutil.rmtree(os.environ["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
-        # Reset env. var.
-        if old_rocprofiler_metrics_path is None:
-            del os.environ["ROCPROFILER_METRICS_PATH"]
-        else:
-            os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
-
-        return rocprof_counters
+        metrics_path = create_temp_rocprofiler_metrics_path(sdk_config)
+        os.environ["ROCPROFILER_METRICS_PATH"] = metrics_path
+        try:
+            chip_id = self._mspec.gpu_chip_id
+            node_id = getattr(self._mspec, "gpu_node_id", None)
+            bdf_id = getattr(self._mspec, "gpu_bdf_id", None)
+            supported_names = rocprofv3_avail_interface.query_supported_counter_names(
+                args.rocprofiler_sdk_tool_path,
+                self.get_arch(),
+                chip_id,
+                gpu_node_id=node_id,
+                gpu_bdf_id=bdf_id,
+                gpu_uuid=getattr(self._mspec, "gpu_uuid", None),
+            )
+            if supported_names is None:
+                console_warning(
+                    "No rocprof counter listing matches GPU architecture "
+                    f"{self.get_arch()}, chip ID {chip_id}, "
+                    f"node ID {node_id} and BDF ID {bdf_id}; "
+                    "counter support is unknown."
+                )
+                return None
+            return supported_names
+        finally:
+            shutil.rmtree(metrics_path, ignore_errors=True)
+            if old_rocprofiler_metrics_path is None:
+                os.environ.pop("ROCPROFILER_METRICS_PATH", None)
+            else:
+                os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
 
     @demarcate
     def perfmon_coalesce(self, counters: Set[str]) -> None:
@@ -670,10 +679,12 @@ class OmniSoC_Base:
         rocprof_counters = self.get_rocprof_supported_counters()
         # rocprof does not support TCC channel counters in the avail output,
         # so remove channel suffix for comparison
-        not_supported_counters = {
-            counter.split("[")[0] if is_tcc_channel_counter(counter) else counter
-            for counter in counters
-        } - rocprof_counters
+        not_supported_counters = set()
+        if rocprof_counters is not None:
+            not_supported_counters = {
+                counter.split("[")[0] if is_tcc_channel_counter(counter) else counter
+                for counter in counters
+            } - rocprof_counters
 
         if not_supported_counters:
             console_warning(

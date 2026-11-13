@@ -8,10 +8,11 @@ Tests LimitedSet, CounterFile, and the bin-packing helpers used by
 perfmon_coalesce. No GPU hardware required.
 """
 
-from contextlib import ExitStack
+import os
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, List, Optional
+from typing import Any, List, NoReturn, Optional, Tuple
 from unittest.mock import MagicMock, patch
 
 import common
@@ -19,6 +20,7 @@ import pytest
 import yaml
 
 import config
+from rocprof_compute_soc import soc_base as soc_base_module
 from rocprof_compute_soc.soc_base import (
     AnalysisConfigMetric,
     CounterFile,
@@ -29,6 +31,7 @@ from rocprof_compute_soc.soc_base import (
     flat_counters_in_perfmon_file,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.specs import MachineSpecs
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     canonical_config_arch,
@@ -264,6 +267,323 @@ def _resolve_metric_name(config_dir: Path, arch: str, metric_id: str) -> str | N
                 if idx == metric_idx:
                     return name
     return None
+
+
+# Supported-counter discovery
+
+
+def fail_unexpected_device_query() -> NoReturn:
+    raise AssertionError("SoC queried a device after selected metadata was supplied")
+
+
+def fail_counter_enumeration() -> dict:
+    raise RuntimeError("SDK enumeration failed")
+
+
+@pytest.fixture
+def counter_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> SimpleNamespace:
+    """Counter discovery with SDK boundaries replaced and real temporary files."""
+    source_root = tmp_path / "src"
+    sdk_config = source_root / "rocprof_compute_soc/profile_configs/sdk_config.yaml"
+    sdk_config.parent.mkdir(parents=True)
+    sdk_config.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(config, "rocprof_compute_home", source_root)
+
+    metrics_path = tmp_path / "counter-definitions"
+    metrics_path.mkdir()
+    monkeypatch.setattr(
+        soc_base_module,
+        "create_temp_rocprofiler_metrics_path",
+        lambda _config: str(metrics_path),
+    )
+    availability = SimpleNamespace(counters={}, agents={})
+    avail_module = SimpleNamespace(
+        get_counters=lambda: availability.counters,
+        get_agent_info_map=lambda: availability.agents,
+    )
+    monkeypatch.setattr(
+        soc_base_module.rocprofv3_avail_interface,
+        "_load_avail_module",
+        lambda _tool_path: avail_module,
+    )
+    warnings = []
+    monkeypatch.setattr(soc_base_module, "console_warning", warnings.append)
+    args = SimpleNamespace(
+        rocprofiler_sdk_tool_path="sdk-tool.so",
+        device=7,
+        config_dir=str(tmp_path / "analysis-configs"),
+        membw_analysis=False,
+    )
+    machine_specs = SimpleNamespace(rocminfo_lines=None, gpu_chip_id="5510")
+    soc = OmniSoC_Base(args, machine_specs)
+    soc.set_arch("gfx1151")
+    monkeypatch.setenv("ROCPROFILER_METRICS_PATH", "original-metrics")
+    return SimpleNamespace(
+        soc=soc,
+        availability=availability,
+        avail_module=avail_module,
+        metrics_path=metrics_path,
+        warnings=warnings,
+    )
+
+
+def test_populate_mspec_preserves_selected_device_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    machine_specs = MachineSpecs(
+        gpu_arch="gfx1151",
+        gpu_chip_id="5510",
+        rocminfo_lines=["  Max Clock Freq. (MHz): 2520"],
+        max_mclk="2500",
+        gpu_model_names=("Radeon 8060S", "Strix Halo", ""),
+    )
+    monkeypatch.setattr(
+        soc_base_module.amdsmi_interface, "amdsmi_ctx", fail_unexpected_device_query
+    )
+
+    OmniSoC_Base(SimpleNamespace(), machine_specs)
+
+    assert machine_specs.max_mclk == "2500"
+    assert machine_specs.cur_mclk == "2500"
+    assert machine_specs.max_sclk == "2520"
+    assert machine_specs.gpu_model == "RDNA35_HALO"
+
+
+@pytest.mark.parametrize(
+    "gpu_arch, model_names, expected_model",
+    [
+        ("gfx908", ("AMD Instinct MI100", "", ""), "MI100"),
+        ("gfx90a", ("AMD Instinct MI210", "", ""), "MI210"),
+        ("gfx1151", ("", "", ""), None),
+    ],
+)
+def test_populate_mspec_uses_selected_device_model_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    gpu_arch: str,
+    model_names: Tuple[str, str, str],
+    expected_model: Optional[str],
+) -> None:
+    machine_specs = MachineSpecs(
+        gpu_arch=gpu_arch,
+        gpu_chip_id="unknown",
+        rocminfo_lines=[],
+        max_mclk="1000",
+        gpu_model_names=model_names,
+    )
+    monkeypatch.setattr(mi_gpu_specs, "get_gpu_model", lambda *_: None)
+    monkeypatch.setattr(
+        soc_base_module.amdsmi_interface, "amdsmi_ctx", fail_unexpected_device_query
+    )
+
+    OmniSoC_Base(SimpleNamespace(), machine_specs)
+
+    assert machine_specs.gpu_model == expected_model
+    assert machine_specs.cur_mclk == "1000"
+
+
+def test_populate_mspec_queries_missing_legacy_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    machine_specs = MachineSpecs(
+        gpu_arch="gfx908", gpu_chip_id="unknown", rocminfo_lines=[]
+    )
+    monkeypatch.setattr(mi_gpu_specs, "get_gpu_model", lambda *_: None)
+    monkeypatch.setattr(soc_base_module.amdsmi_interface, "amdsmi_ctx", nullcontext)
+    monkeypatch.setattr(
+        soc_base_module.amdsmi_interface, "get_mem_max_clock", lambda: 1000
+    )
+    monkeypatch.setattr(
+        soc_base_module.amdsmi_interface,
+        "get_gpu_model",
+        lambda: ("AMD Instinct MI100", "", ""),
+    )
+
+    OmniSoC_Base(SimpleNamespace(), machine_specs)
+
+    assert machine_specs.gpu_model == "MI100"
+    assert machine_specs.max_mclk == "1000"
+    assert machine_specs.cur_mclk == "1000"
+
+
+@pytest.mark.parametrize(
+    "counter_names, agent_info, chip_id, expected, unknown_support",
+    [
+        pytest.param(
+            {31134: [], 31133: ["SQ_WAVES"]},
+            {
+                31134: {"name": "gfx1036", "device_id": 5056, "gpu_index": 1},
+                31133: {"name": "gfx1151", "device_id": 5510, "gpu_index": 0},
+            },
+            "5510",
+            {"SQ_WAVES"},
+            False,
+            id="unsupported-gpu-first",
+        ),
+        pytest.param(
+            {42: ["OTHER_ARCH_COUNTER"], 91: ["SQ_WAVES"]},
+            {
+                42: {"name": "gfx950", "device_id": 30112},
+                91: {"name": "gfx1151", "device_id": 5510},
+            },
+            "5510",
+            {"SQ_WAVES"},
+            False,
+            id="heterogeneous-gpus",
+        ),
+        pytest.param(
+            {42: ["OTHER_CHIP_COUNTER"], 91: ["SQ_WAVES"]},
+            {
+                42: {"name": "gfx1151", "device_id": 5511},
+                91: {"name": "gfx1151", "device_id": 5510},
+            },
+            "5510",
+            {"SQ_WAVES"},
+            False,
+            id="match-chip-within-architecture",
+        ),
+        pytest.param(
+            {42: ["SQ_WAVES", "ONE_GPU_ONLY"], 91: ["SQ_WAVES"]},
+            {
+                42: {"name": "gfx1151", "device_id": 5510},
+                91: {"name": "gfx1151", "device_id": 5510},
+            },
+            "5510",
+            {"SQ_WAVES"},
+            False,
+            id="duplicate-matches-intersect",
+        ),
+        pytest.param(
+            {42: ["SQ_WAVES"], 91: []},
+            {
+                42: {"name": "gfx1151", "device_id": 5510},
+                91: {"name": "gfx1151", "device_id": 5510},
+            },
+            "5510",
+            set(),
+            False,
+            id="empty-duplicate-is-not-ignored",
+        ),
+        pytest.param(
+            {42: ["SQ_WAVES", "ONE_CHIP_ONLY"], 91: ["SQ_WAVES"]},
+            {
+                42: {"name": "gfx1151", "device_id": 5511},
+                91: {"name": "gfx1151", "device_id": 5510},
+            },
+            None,
+            {"SQ_WAVES"},
+            False,
+            id="unknown-chip-intersects-architecture",
+        ),
+        pytest.param({}, {}, "5510", None, True, id="no-agent-listings"),
+        pytest.param(
+            {91: ["SQ_WAVES"]},
+            {},
+            "5510",
+            None,
+            True,
+            id="missing-metadata",
+        ),
+        pytest.param(
+            {91: ["SQ_WAVES"]},
+            {91: {"name": "gfx1151"}},
+            "5510",
+            None,
+            True,
+            id="missing-chip-metadata",
+        ),
+    ],
+)
+def test_supported_counters_match_gpu_identity(
+    counter_discovery, counter_names, agent_info, chip_id, expected, unknown_support
+) -> None:
+    counter_discovery.soc._mspec.gpu_chip_id = chip_id
+    counter_discovery.availability.counters = {
+        handle: [SimpleNamespace(name=name, block="SQ") for name in names]
+        for handle, names in counter_names.items()
+    }
+    counter_discovery.availability.agents = agent_info
+
+    assert counter_discovery.soc.get_rocprof_supported_counters() == expected
+    assert bool(counter_discovery.warnings) is unknown_support
+    if unknown_support:
+        assert "counter support is unknown" in counter_discovery.warnings[0]
+    assert os.environ["ROCPROFILER_METRICS_PATH"] == "original-metrics"
+    assert not counter_discovery.metrics_path.exists()
+
+
+def test_supported_counters_include_raw_and_derived_but_exclude_constants(
+    counter_discovery,
+) -> None:
+    counter_discovery.availability.counters = {
+        91: [
+            SimpleNamespace(name="SQ_WAVES", block="SQ"),
+            SimpleNamespace(name="CUSTOM_SUM", expression="reduce(SQ_WAVES,sum)"),
+            SimpleNamespace(name="CU_COUNT"),
+        ]
+    }
+    counter_discovery.availability.agents = {91: {"name": "gfx1151", "device_id": 5510}}
+
+    assert counter_discovery.soc.get_rocprof_supported_counters() == {
+        "SQ_WAVES",
+        "CUSTOM_SUM",
+    }
+
+
+def test_supported_counter_discovery_uses_selected_machine_node(counter_discovery):
+    counter_discovery.soc._mspec.gpu_node_id = 2
+    counter_discovery.availability.counters = {
+        91: [SimpleNamespace(name="OTHER_GPU_ONLY", block="SQ")],
+        42: [SimpleNamespace(name="SQ_WAVES", block="SQ")],
+    }
+    counter_discovery.availability.agents = {
+        91: {"name": "gfx1151", "device_id": 5510, "node_id": 1},
+        42: {"name": "gfx1151", "device_id": 5510, "node_id": 2},
+    }
+    assert counter_discovery.soc.get_rocprof_supported_counters() == {"SQ_WAVES"}
+    assert not counter_discovery.warnings
+    assert os.environ["ROCPROFILER_METRICS_PATH"] == "original-metrics"
+    assert not counter_discovery.metrics_path.exists()
+
+
+@pytest.mark.parametrize(
+    "supported, should_warn",
+    [
+        pytest.param(None, False, id="support-unknown"),
+        pytest.param(set(), True, id="known-empty-support"),
+        pytest.param({"SQ_WAVES"}, False, id="requested-counter-supported"),
+    ],
+)
+def test_perfmon_coalesce_reports_missing_counters_only_when_support_is_known(
+    counter_discovery, monkeypatch, tmp_path, supported, should_warn
+):
+    soc = counter_discovery.soc
+    soc.get_args().output_directory = str(tmp_path)
+    soc.set_perfmon_config(PERFMON_CONFIG)
+    monkeypatch.setattr(soc, "get_rocprof_supported_counters", lambda: supported)
+    soc.perfmon_coalesce({"SQ_WAVES"})
+    assert bool(counter_discovery.warnings) is should_warn
+    if should_warn:
+        assert "SQ_WAVES" in counter_discovery.warnings[0]
+
+
+@pytest.mark.parametrize("query", ["get_counters", "get_agent_info_map"])
+@pytest.mark.parametrize("original_path", [None, "original-metrics", ""])
+def test_supported_counter_query_failure_restores_metrics_environment(
+    counter_discovery, monkeypatch, query, original_path
+) -> None:
+    if original_path is None:
+        monkeypatch.delenv("ROCPROFILER_METRICS_PATH")
+    else:
+        monkeypatch.setenv("ROCPROFILER_METRICS_PATH", original_path)
+    monkeypatch.setattr(counter_discovery.avail_module, query, fail_counter_enumeration)
+
+    with pytest.raises(RuntimeError, match="SDK enumeration failed"):
+        counter_discovery.soc.get_rocprof_supported_counters()
+
+    assert os.environ.get("ROCPROFILER_METRICS_PATH") == original_path
+    assert not counter_discovery.metrics_path.exists()
 
 
 # =============================================================================

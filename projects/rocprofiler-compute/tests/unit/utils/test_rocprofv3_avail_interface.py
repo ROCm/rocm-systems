@@ -3,6 +3,7 @@
 
 import ctypes
 import os
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -82,6 +83,16 @@ def patch_library_load(monkeypatch, library):
 
     monkeypatch.setattr(ctypes, "CDLL", load)
     return loaded_paths
+
+
+def agent_metadata(node_id, location_id):
+    """Model SDK metadata for two GPUs with the same architecture and chip."""
+    return {
+        "name": "gfx1151",
+        "device_id": 5510,
+        "node_id": node_id,
+        "location_id": location_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -247,3 +258,219 @@ def test_get_counters_errors_without_library(rocm_tree):
     """A missing library is fatal here, unlike the PC sampling query."""
     with pytest.raises(SystemExit):
         avail_interface.get_counters(rocm_tree.tool_path)
+
+
+def test_query_agent_info_map_uses_the_counter_listing_library(monkeypatch, rocm_tree):
+    """Metadata handles come from the same SDK library as counter handles."""
+    rocm_tree.lib_layout.touch()
+    patch_library_load(monkeypatch, fake_avail_library({}))
+    agent_info = {31133: {"name": "gfx1151", "device_id": 5510}}
+    avail_module = SimpleNamespace(
+        loadLibrary=SimpleNamespace(libname=None),
+        get_agent_info_map=lambda: agent_info,
+    )
+    monkeypatch.setattr(
+        avail_interface, "_import_avail_module", lambda _path: avail_module
+    )
+
+    assert avail_interface.query_agent_info_map(rocm_tree.tool_path) == agent_info
+    assert avail_module.loadLibrary.libname == str(rocm_tree.lib_layout)
+
+
+def test_query_agent_info_map_errors_without_library(rocm_tree):
+    with pytest.raises(SystemExit):
+        avail_interface.query_agent_info_map(rocm_tree.tool_path)
+
+
+@pytest.mark.parametrize(
+    "node_id, bdf_id, agents, expected",
+    [
+        pytest.param(
+            2,
+            256,
+            {91: agent_metadata(1, 256), 42: agent_metadata(2, 512)},
+            None,
+            id="node-match-cannot-hide-conflicting-bdf",
+        ),
+        pytest.param(
+            9,
+            512,
+            {91: agent_metadata(1, 256), 42: agent_metadata(2, 512)},
+            None,
+            id="node-mismatch-does-not-fall-back-to-bdf",
+        ),
+        pytest.param(
+            2,
+            512,
+            {91: agent_metadata(None, 256), 42: agent_metadata(None, 512)},
+            {"COMMON", "SELECTED_GPU_ONLY"},
+            id="missing-node-metadata-permits-unique-bdf-fallback",
+        ),
+        pytest.param(
+            None,
+            512,
+            {91: agent_metadata(1, 256), 42: agent_metadata(2, 512)},
+            {"COMMON", "SELECTED_GPU_ONLY"},
+            id="bdf-fallback-without-selected-node",
+        ),
+        pytest.param(
+            None,
+            512,
+            {91: agent_metadata(1, 512), 42: agent_metadata(2, 512)},
+            None,
+            id="ambiguous-bdf-is-unknown",
+        ),
+        pytest.param(
+            None,
+            None,
+            {91: agent_metadata(1, 256), 42: agent_metadata(2, 512)},
+            {"COMMON"},
+            id="legacy-specs-intersect-matching-gpus",
+        ),
+    ],
+)
+def test_supported_counter_names_select_physical_gpu(node_id, bdf_id, agents, expected):
+    counters = {
+        91: [SimpleNamespace(name=name, block="SQ") for name in ("COMMON", "OTHER")],
+        42: [
+            SimpleNamespace(name=name, block="SQ")
+            for name in ("COMMON", "SELECTED_GPU_ONLY")
+        ],
+    }
+    assert (
+        avail_interface.supported_counter_names_for_gpu(
+            counters, agents, "gfx1151", "5510", node_id, bdf_id
+        )
+        == expected
+    )
+
+
+def test_supported_counter_names_normalize_raw_derived_and_constant_records():
+    counters = {
+        91: [
+            SimpleNamespace(name="SQ_WAVES", block="SQ"),
+            SimpleNamespace(name="CUSTOM_SUM", expression="reduce(SQ_WAVES,sum)"),
+            SimpleNamespace(name="CU_COUNT"),
+        ]
+    }
+    assert avail_interface.supported_counter_names_for_gpu(
+        counters, {91: agent_metadata(1, 256)}, "gfx1151", "5510", 1
+    ) == {"SQ_WAVES", "CUSTOM_SUM"}
+
+
+def test_supported_counter_names_preserve_empty_selected_gpu_listing():
+    assert (
+        avail_interface.supported_counter_names_for_gpu(
+            {91: [], 42: [SimpleNamespace(name="SQ_WAVES", block="SQ")]},
+            {91: agent_metadata(1, 256), 42: agent_metadata(2, 512)},
+            "gfx1151",
+            "5510",
+            1,
+        )
+        == set()
+    )
+
+
+def test_query_supported_counter_names_uses_selected_agent(monkeypatch, rocm_tree):
+    rocm_tree.lib_layout.touch()
+    patch_library_load(monkeypatch, fake_avail_library({}))
+    avail_module = SimpleNamespace(
+        loadLibrary=SimpleNamespace(libname=None),
+        get_counters=lambda: {
+            91: [SimpleNamespace(name="OTHER", block="SQ")],
+            42: [SimpleNamespace(name="SQ_WAVES", block="SQ")],
+        },
+        get_agent_info_map=lambda: {
+            91: agent_metadata(1, 256),
+            42: agent_metadata(2, 512),
+        },
+    )
+    monkeypatch.setattr(avail_interface, "_import_avail_module", lambda _: avail_module)
+    assert avail_interface.query_supported_counter_names(
+        rocm_tree.tool_path, "gfx1151", "5510", gpu_node_id=2
+    ) == {"SQ_WAVES"}
+    assert avail_module.loadLibrary.libname == str(rocm_tree.lib_layout)
+
+
+def test_older_sdk_without_agent_metadata_keeps_counter_listing(monkeypatch, rocm_tree):
+    rocm_tree.lib_layout.touch()
+    patch_library_load(monkeypatch, fake_avail_library({}))
+    counters = {91: [SimpleNamespace(name="SQ_WAVES", block="SQ")]}
+    avail_module = SimpleNamespace(
+        loadLibrary=SimpleNamespace(libname=None),
+        get_counters=lambda: counters,
+    )
+    monkeypatch.setattr(avail_interface, "_import_avail_module", lambda _: avail_module)
+
+    assert avail_interface.get_counters(rocm_tree.tool_path) == counters
+    assert avail_interface.query_agent_info_map(rocm_tree.tool_path) == {}
+    assert (
+        avail_interface.query_supported_counter_names(
+            rocm_tree.tool_path, "gfx1151", "5510", gpu_node_id=2
+        )
+        is None
+    )
+
+
+def test_support_query_imports_avail_module_once(monkeypatch, rocm_tree):
+    rocm_tree.lib_layout.touch()
+    patch_library_load(monkeypatch, fake_avail_library({}))
+    imports = []
+    avail_module = SimpleNamespace(
+        loadLibrary=SimpleNamespace(libname=None),
+        get_counters=lambda: {},
+        get_agent_info_map=lambda: {},
+    )
+
+    def import_avail_module(sdk_path):
+        imports.append(sdk_path)
+        return avail_module
+
+    monkeypatch.setattr(avail_interface, "_import_avail_module", import_avail_module)
+
+    assert (
+        avail_interface.query_supported_counter_names(
+            rocm_tree.tool_path, "gfx1151", "5510"
+        )
+        is None
+    )
+    assert imports == [rocm_tree.tool_path]
+
+
+def test_repeated_avail_import_does_not_duplicate_search_path(monkeypatch, rocm_tree):
+    avail_module = SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "rocprofv3", SimpleNamespace(avail=avail_module))
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    new_path = str(rocm_tree.lib_layout.parents[1] / "python3/site-packages")
+
+    assert avail_interface._import_avail_module(rocm_tree.tool_path) is avail_module
+    assert avail_interface._import_avail_module(rocm_tree.tool_path) is avail_module
+    assert sys.path.count(new_path) == 1
+
+
+def test_legacy_avail_import_preserves_existing_search_paths(monkeypatch, rocm_tree):
+    avail_module = SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "rocprofv3", None)
+    monkeypatch.setitem(
+        sys.modules, "rocprofv3_avail_module", SimpleNamespace(avail=avail_module)
+    )
+    new_path = str(rocm_tree.lib_layout.parents[1] / "python3/site-packages")
+    old_path = str(rocm_tree.lib_layout.parents[2] / "bin")
+    monkeypatch.setattr(sys, "path", [*sys.path, new_path, old_path])
+
+    assert avail_interface._import_avail_module(rocm_tree.tool_path) is avail_module
+    assert avail_interface._import_avail_module(rocm_tree.tool_path) is avail_module
+    assert sys.path.count(new_path) == 1
+    assert sys.path.count(old_path) == 1
+
+
+def test_supported_counter_names_use_uuid_when_topology_metadata_unavailable():
+    assert avail_interface.supported_counter_names_for_gpu(
+        {91: [SimpleNamespace(name="SQ_WAVES", block="SQ")]},
+        {91: {**agent_metadata("N/A", "N/A"), "uuid": "gpu-ABCDEF0123456789"}},
+        "gfx1151",
+        "5510",
+        3,
+        512,
+        "GPU-abcdef0123456789",
+    ) == {"SQ_WAVES"}

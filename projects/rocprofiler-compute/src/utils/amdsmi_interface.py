@@ -5,8 +5,10 @@ import functools
 import os
 import sys
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
+from utils.gpu_identity import identity_from_specs
 from utils.logger import (
     console_debug,
     console_error,
@@ -26,7 +28,9 @@ def import_amdsmi_module() -> "amdsmi":  # noqa: F821
     global _amdsmi_module
 
     if not _amdsmi_module:
-        sys.path.insert(0, os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi")
+        module_path = str(Path(os.getenv("ROCM_PATH", "/opt/rocm")) / "share/amd_smi")
+        if module_path not in sys.path:
+            sys.path.insert(0, module_path)
         try:
             import amdsmi
 
@@ -42,15 +46,13 @@ def import_amdsmi_module() -> "amdsmi":  # noqa: F821
 def amdsmi_ctx() -> Iterator[None]:
     """Context manager to initialize and shutdown amdsmi."""
     amdsmi = import_amdsmi_module()
+    amdsmi.amdsmi_init()
     try:
-        amdsmi.amdsmi_init()
         yield
-    except Exception as e:
-        console_warning(f"amd-smi init failed: {e}")
     finally:
         try:
             amdsmi.amdsmi_shut_down()
-        except Exception as e:
+        except amdsmi.AmdSmiException as e:
             console_warning(f"amd-smi shutdown failed: {e}")
 
 
@@ -74,6 +76,27 @@ def get_device_handles() -> "list[amdsmi.ProcessorHandle]":  # noqa: F821
         return []
 
 
+def get_device_identity(device: Any) -> Dict[str, Any]:  # noqa: ANN401
+    """Read the KFD topology identity used by rocminfo and rocprofiler-sdk."""
+    amdsmi = import_amdsmi_module()
+    identity: Dict[str, Any] = {}
+    try:
+        identity["gpu_node_id"] = amdsmi.amdsmi_get_gpu_kfd_info(device).get("node_id")
+    except (AttributeError, amdsmi.AmdSmiException) as error:
+        console_debug(f"AMD-SMI KFD identity unavailable: {error}")
+    try:
+        identity["gpu_bdf_id"] = amdsmi.amdsmi_get_gpu_bdf_id(device)
+    except (AttributeError, amdsmi.AmdSmiException) as error:
+        console_debug(f"AMD-SMI BDF identity unavailable: {error}")
+    try:
+        identity["gpu_uuid"] = amdsmi.amdsmi_get_gpu_enumeration_info(device).get(
+            "hip_uuid"
+        )
+    except (AttributeError, amdsmi.AmdSmiException) as error:
+        console_debug(f"AMD-SMI HIP identity unavailable: {error}")
+    return identity_from_specs(identity).spec_fields()
+
+
 def _per_device_query(
     fn: Callable,
     *,
@@ -81,17 +104,18 @@ def _per_device_query(
     warning_label: str,
 ) -> Callable:
     """
-    Try fn(device, amdsmi) on each device; return first success.
+    Query the explicit device, or try each device when none was selected.
     On all-failure, warn with warning_label and return default_return.
     """
 
     @functools.wraps(fn)
-    def wrapper() -> object:
+    def wrapper(*, device: Any = None) -> object:  # noqa: ANN401
         amdsmi = import_amdsmi_module()
         error = None
-        for device in get_device_handles():
+        devices = get_device_handles() if device is None else [device]
+        for queried_device in devices:
             try:
-                return fn(device, amdsmi)
+                return fn(queried_device, amdsmi)
             except Exception as e:
                 error = e
         console_warning(f"Error getting {warning_label}: {error}")
