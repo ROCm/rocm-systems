@@ -16,7 +16,7 @@
 #   2. lib/build-ompi.sh      build OpenMPI (--with-rocm) -> ompi.env
 #   3. projects/rccl  install.sh  build RCCL (GIN), then build
 #      rccl-UnitTestsFixtures, the ConnCheck host/device tests, and
-#      rccl-UnitTestsGinSdmaBroadcastPolicy -> rccl.env
+#      rccl-UnitTestsGinSdmaBroadcastPolicy, rccl-UnitTestsGinSdmaAllGatherPolicy -> rccl.env
 #   4. projects/rccl-tests        build rccl-tests (DEVICE_API + GIN)
 #   5. rccl-UnitTestsGinAnvilSdmaFactory  SDMA factory gtest (single-node)
 #   6. run-gin-ci.sh              run the GIN tests (non-gating)
@@ -116,6 +116,7 @@ rccl_fixtures_bin="${rccl_build}/test/rccl-UnitTestsFixtures"
 rccl_conn_plugin_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilPlugin"
 rccl_conn_device_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilConnCheckDevice"
 rccl_bcast_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaBroadcastPolicy"
+rccl_ag_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaAllGatherPolicy"
 rccl_mpi_ut_bin="${rccl_build}/test/rccl-UnitTestsMPI"
 rm -rf "${rccl_prefix}"
 (
@@ -199,7 +200,7 @@ assert_conn_check_kernels_in_fatbin() {
 assert_conn_check_kernels_in_fatbin "${librccl}"
 echo "    conn-check kernels present in ${librccl} .hip_fatbin"
 
-echo "==> [3/6] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaFactory, and UnitTestsMPI"
+echo "==> [3/6] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinSdmaAllGatherPolicy, GinAnvilSdmaFactory, and UnitTestsMPI"
 (
   cd "${rccl_build}"
   # ENABLE_MPI_TESTS is what creates the rccl-UnitTestsMPI target (test/
@@ -220,6 +221,7 @@ echo "==> [3/6] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, GinAnvilSdmaF
     rccl-UnitTestsGinRocshmemGdaPlugin \
     rccl-UnitTestsGinAnvilConnCheckDevice \
     rccl-UnitTestsGinSdmaBroadcastPolicy \
+    rccl-UnitTestsGinSdmaAllGatherPolicy \
     rccl-UnitTestsGinAnvilSdmaFactory \
     rccl-UnitTestsMPI
 )
@@ -231,6 +233,11 @@ fi
 if [[ ! -x "${rccl_bcast_policy_ut_bin}" ]]; then
   echo "ERROR: rccl-UnitTestsGinSdmaBroadcastPolicy not built at ${rccl_bcast_policy_ut_bin}" >&2
   ls -la "$(dirname "${rccl_bcast_policy_ut_bin}")" 2>/dev/null >&2 || true
+  exit 1
+fi
+if [[ ! -x "${rccl_ag_policy_ut_bin}" ]]; then
+  echo "ERROR: rccl-UnitTestsGinSdmaAllGatherPolicy not built at ${rccl_ag_policy_ut_bin}" >&2
+  ls -la "$(dirname "${rccl_ag_policy_ut_bin}")" 2>/dev/null >&2 || true
   exit 1
 fi
 if [[ ! -x "${rccl_conn_plugin_bin}" || ! -x "${rccl_conn_device_bin}" ]]; then
@@ -245,6 +252,7 @@ if [[ ! -x "${rccl_mpi_ut_bin}" ]]; then
 fi
 echo "    rccl-UnitTestsFixtures: ${rccl_fixtures_bin}"
 echo "    rccl-UnitTestsGinSdmaBroadcastPolicy: ${rccl_bcast_policy_ut_bin}"
+echo "    rccl-UnitTestsGinSdmaAllGatherPolicy: ${rccl_ag_policy_ut_bin}"
 echo "    rccl-UnitTestsGinAnvilPlugin: ${rccl_conn_plugin_bin}"
 echo "    rccl-UnitTestsGinAnvilConnCheckDevice: ${rccl_conn_device_bin}"
 echo "    rccl-UnitTestsMPI: ${rccl_mpi_ut_bin}"
@@ -292,6 +300,11 @@ if [[ ! -x "${rccl_tests_build}/broadcast_perf" ]]; then
 fi
 if [[ ! -x "${rccl_tests_build}/all_gather_perf" ]]; then
   echo "ERROR: all_gather_perf not built under ${rccl_tests_build}" >&2
+  ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
+  exit 1
+fi
+if [[ ! -x "${rccl_tests_build}/gather_perf" ]]; then
+  echo "ERROR: gather_perf not built under ${rccl_tests_build}" >&2
   ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
   exit 1
 fi
