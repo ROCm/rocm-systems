@@ -6,6 +6,11 @@ name: RCCL coco PR
 # Draft PRs skip the cluster queue. The RCCL PR gate passes until the PR is
 # marked ready for review, which starts the cluster jobs.
 #
+# Setting the repository variable RCCL_PR_FREEZE to a reason freezes RCCL
+# PRs: the gate fails and cluster jobs do not start. The label
+# rccl-pr-freeze-exempt lets a PR through; it must be on the PR before the
+# push that should run.
+#
 # One job per cluster: `needs` on a matrix waits for every leg, so sharing a
 # job would let a slow cluster hold up the others.
 #
@@ -90,7 +95,9 @@ jobs:
       && (github.event_name != 'pull_request'
           || (!github.event.pull_request.head.repo.fork
               && !github.event.pull_request.draft
-              && github.actor != 'dependabot[bot]'))
+              && github.actor != 'dependabot[bot]'
+              && (vars.RCCL_PR_FREEZE == ''
+                  || contains(github.event.pull_request.labels.*.name, 'rccl-pr-freeze-exempt'))))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -221,6 +228,8 @@ jobs:
           IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
           IS_DRAFT: ${{ github.event.pull_request.draft }}
           IS_DEPENDABOT: ${{ github.actor == 'dependabot[bot]' }}
+          FREEZE: ${{ vars.RCCL_PR_FREEZE }}
+          FREEZE_EXEMPT: ${{ contains(github.event.pull_request.labels.*.name, 'rccl-pr-freeze-exempt') }}
           GATE_RESULT: ${{ needs.gate.result }}
         run: |
           set -euo pipefail
@@ -235,6 +244,10 @@ jobs:
           if [[ "${IS_DRAFT}" == "true" ]]; then
             echo "Draft PR; cluster coco runs when this PR is marked ready for review."
             exit 0
+          fi
+          if [[ -n "${FREEZE}" && "${FREEZE_EXEMPT}" != "true" ]]; then
+            echo "::error::RCCL PRs are frozen: ${FREEZE} To merge anyway, add the rccl-pr-freeze-exempt label and push."
+            exit 1
           fi
           if [[ "${IS_FORK}" == "true" ]]; then
             echo "::error::Fork PRs do not run coco smoke automatically. A maintainer must dispatch the 'RCCL coco PR' workflow with this PR's pr_number and pr_sha, confirm it passes, then override this check."
