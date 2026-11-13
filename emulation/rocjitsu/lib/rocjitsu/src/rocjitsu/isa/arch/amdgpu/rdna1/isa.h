@@ -56,8 +56,8 @@ public:
   auto HALT() const { return member<13, 13>(); }
   auto TRAP() { return member<14, 14>(); }
   auto TRAP() const { return member<14, 14>(); }
-  auto SKIP_EXPORT() { return member<15, 15>(); }
-  auto SKIP_EXPORT() const { return member<15, 15>(); }
+  auto SKIP_EXPORT() { return member<18, 18>(); }
+  auto SKIP_EXPORT() const { return member<18, 18>(); }
   auto VALID() { return member<16, 16>(); }
   auto VALID() const { return member<16, 16>(); }
   auto ECC_ERR() { return member<17, 17>(); }

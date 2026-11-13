@@ -401,12 +401,12 @@ TEST_P(IsaDiagnosticsTest, Cdna5LdsTransposeDoesNotInheritCdna4Restrictions) {
   }
 }
 
-TEST_P(IsaDiagnosticsTest, AsyncMfmaReportsItsIssuingPc) {
+TEST_P(IsaDiagnosticsTest, MigratedMfmaReportsItsIssuingPc) {
   if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
     GTEST_SKIP();
   ASSERT_NO_FATAL_FAILURE(create(64, 2));
   const uint64_t pc = wf->pc;
-  // Independent, helper-eligible MFMAs followed by a branch that drains work.
+  // Migrated MFMAs stay on the issuer, preserving each diagnostic PC.
   for (unsigned i = 0; i < 2; ++i) {
     const auto words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF3216x16x32F16Vop3pMfma,
                                                {.vdst = static_cast<uint8_t>(64 + i * 16),
@@ -424,7 +424,7 @@ TEST_P(IsaDiagnosticsTest, AsyncMfmaReportsItsIssuingPc) {
     cu->step();
   cu->step(); // Drain at the branch before inspecting the result.
   const std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_GT(async_execution::stats.mma, submitted);
+  EXPECT_EQ(async_execution::stats.mma, submitted);
   EXPECT_EQ(cu->isa_diagnostic_count(), 2u);
   EXPECT_NE(output.find("pc=0x100000:"), std::string::npos) << output;
   EXPECT_NE(output.find("pc=0x100008:"), std::string::npos) << output;
@@ -506,9 +506,17 @@ TEST_P(IsaDiagnosticsTest, ScalarLoadTupleAndBufferDescriptorAlignment) {
 TEST_P(IsaDiagnosticsTest, PermlaneGroupWidthUsesScalarValueOnce) {
   if (GetParam() != ROCJITSU_CODE_ARCH_CDNA5)
     GTEST_SKIP();
-  for (uint16_t op : {cdna5::kVPermlaneBcastB32Vop3, cdna5::kVPermlaneUpB32Vop3,
-                      cdna5::kVPermlaneDownB32Vop3, cdna5::kVPermlaneXorB32Vop3}) {
-    const auto words = cdna5::build_vop3(op, {.vdst = 16, .src0 = 256, .src1 = 128, .src2 = 4});
+  const auto idx_gen = [](uint16_t width_src) {
+    return cdna5::build_vop3(cdna5::kVPermlaneIdxGenB32Vop3,
+                             {.vdst = 16, .src0 = 256, .src1 = width_src});
+  };
+  for (uint16_t op :
+       {cdna5::kVPermlaneBcastB32Vop3, cdna5::kVPermlaneUpB32Vop3, cdna5::kVPermlaneDownB32Vop3,
+        cdna5::kVPermlaneXorB32Vop3, cdna5::kVPermlaneIdxGenB32Vop3}) {
+    const auto words =
+        op == cdna5::kVPermlaneIdxGenB32Vop3
+            ? idx_gen(4)
+            : cdna5::build_vop3(op, {.vdst = 16, .src0 = 256, .src1 = 128, .src2 = 4});
     for (uint32_t width : {1u, 2u, 16u, 32u, 64u, 0x80000000u}) {
       wf->debug_write_sgpr(4, width);
       execute(words, 0, "v_permlane_");
@@ -521,6 +529,11 @@ TEST_P(IsaDiagnosticsTest, PermlaneGroupWidthUsesScalarValueOnce) {
     execute(words, 0, "v_permlane_");
     wf->set_exec(~uint64_t{0});
   }
+  execute(idx_gen(128 + 24), 1, "v_permlane_idx_gen"); // Inline width.
+  const auto literal = idx_gen(255);
+  execute(std::array{literal[0], literal[1], 128u}, 0, "v_permlane_idx_gen");
+  const auto vgpr_width = idx_gen(256);
+  EXPECT_TRUE(decoder->decode(vgpr_width.data()).failed()); // SRC1 requires a scalar source.
 }
 
 std::array<uint32_t, 3> vopd_pair(uint8_t x, uint8_t y, uint16_t x0, uint8_t x1, uint16_t y0,

@@ -24,7 +24,7 @@ if(ROCM_SMI_DISABLE)
     message(
         WARNING
         "rocm-smi-lib is deprecated and ROCM_SMI_DISABLE is set; skipping build. "
-        "Use AMD SMI instead: https://github.com/ROCm/amdsmi"
+        "Use AMD SMI instead: https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi"
     )
     return()
 endif()

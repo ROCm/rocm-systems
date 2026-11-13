@@ -368,21 +368,25 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
     return false;
   const uint32_t word3 = read_scalar_selector(wf, resource + 3);
   const auto arch = wf.cu().arch();
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+       arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
+      (word3 >> 30) != 0) {
+    d.exec_mask = 0;
+    return false;
+  }
   d.buffer_format_encoding = arch_is_cdna_4_or_lower(arch)      ? BufferFormatEncoding::Gfx9
                              : arch == ROCJITSU_CODE_ARCH_RDNA1 ? BufferFormatEncoding::Rdna1
                              : arch == ROCJITSU_CODE_ARCH_RDNA2 ? BufferFormatEncoding::Rdna2
                                                                 : BufferFormatEncoding::Gfx11;
-  d.buffer_format = format < 0
-                        ? (word3 >> 12) & (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 0x3f : 0x7f)
-                        : static_cast<uint32_t>(format);
+  d.buffer_format = format < 0 ? addr_calc::rdna_buffer_resource_format(arch, word3)
+                               : static_cast<uint32_t>(format);
   if (format < 0 && d.buffer_format_encoding == BufferFormatEncoding::Gfx9)
     d.buffer_format = ((word3 >> 15) & 15) | (((word3 >> 12) & 7) << 4);
   d.buffer_selectors = format < 0 ? word3 & 0xfff : 4 | (5 << 3) | (6 << 6) | (7 << 9);
   // An explicit typed format cannot bind an INVALID resource descriptor.
-  const uint32_t resource_format =
-      d.buffer_format_encoding == BufferFormatEncoding::Gfx9
-          ? (word3 >> 15) & 15
-          : (word3 >> 12) & (arch == ROCJITSU_CODE_ARCH_RDNA4 ? 63 : 127);
+  const uint32_t resource_format = d.buffer_format_encoding == BufferFormatEncoding::Gfx9
+                                       ? (word3 >> 15) & 15
+                                       : addr_calc::rdna_buffer_resource_format(arch, word3);
   if (resource_format == 0)
     return false;
   const auto prepared = prepare_buffer_format_state(d);
@@ -423,7 +427,15 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
                            : BufferStoreMissingChannel::Zero;
   RegisterAccess regs(wf);
   const uint32_t registers = d.buffer_d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
-  auto data = regs.read_vgpr_region(data_base, registers, d.lane_mask);
+  const bool half_tail = d.buffer_d16 && (d.buffer_components & 1u);
+  const uint8_t tail_mask = d.d16_hi ? 0xc : 0x3;
+  // A tuple crossing the wave's VGPR block must read as zero without observing its prefix.
+  const bool split = half_tail && registers > 1 && regs.owns_vgpr_range(data_base, registers);
+  auto data = regs.read_vgpr_region(data_base, registers - split, d.lane_mask,
+                                    half_tail && registers == 1 ? tail_mask : 0xf);
+  std::optional<RegisterAccess::VgprReadRegion> tail;
+  if (split)
+    tail.emplace(regs.read_vgpr_region(data_base + registers - 1, 1, d.lane_mask, tail_mask));
   const auto &format = d.decoded_buffer_format;
   const fp_mode::detail::ScopedFenv environment(0);
   d.store_data.resize(d.wf_size * d.elem_size);
@@ -443,7 +455,9 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
         continue;
       }
       const uint32_t shift = d.d16_hi ? 16 : (i % 2) * 16;
-      const uint16_t half = data.lane(i / 2, lane) >> shift;
+      const uint32_t word =
+          tail && i / 2 == registers - 1 ? tail->lane(0, lane) : data.lane(i / 2, lane);
+      const uint16_t half = word >> shift;
       components[shader_component] =
           integer(format.number)
               ? format.number == Number::Sint

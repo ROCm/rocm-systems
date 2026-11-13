@@ -115,6 +115,12 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     if (task->func == ncclFuncAllGather && comm->spansTrays && task->symkExtract == RCCL_SYMK_EXTRACT_NONE) {
       symAvailable = false;
     }
+    // The symmetric kernels never read the bias buffer, so taking this path for
+    // ncclAllReduceWithBias would silently drop the bias from the result.
+    // ncclAllReduceWithBias_impl bypasses rcclSelectAllReduce and goes straight to
+    // taskAppend, so symkExtract is left at RCCL_SYMK_EXTRACT_NONE and cannot gate
+    // this. Mirrors the equivalent guard in rcclUseCeAr2Shot().
+    if (task->acc != nullptr) symAvailable = false;
     // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
     // algSelection for any function it forced.
     uint64_t effAlgMask = comm->tuningContext.forced[task->func] ? 0 : task->algMask;
@@ -380,6 +386,11 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
   plan->kernelArgsSize = ncclSymkDevWorkArgs::calcArgsSize(nMaxChannels, workCount, profilerEnabled);
   plan->kernelArgsSize = max(plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
   argsBuf = (struct ncclSymkDevWorkArgs*)calloc(1, plan->kernelArgsSize);
+  if (argsBuf == NULL) {
+    WARN("Failed to allocate %zu bytes of symmetric kernel args", plan->kernelArgsSize);
+    ret = ncclSystemError;
+    goto fail;
+  }
 
   argsBuf->nMaxChannels = nMaxChannels;
   argsBuf->maxDynamicSmem = maxDynamicSmem;
@@ -462,6 +473,7 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
     if (curChannel == nMaxChannels) {
       WARN("ncclSymmetricTaskScheduler ran out of channel space (nMaxChannels=%d, workCount=%d, workIndex=%d)",
            nMaxChannels, workCount, workIndex);
+      ret = ncclInternalError;
       goto fail;
     }
   }
@@ -484,6 +496,8 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
 exit:
   return ret;
 fail:
+  // argsBuf is published to plan->kernelSymArgs only on success; every jump here still owns it.
+  free(argsBuf);
   goto exit;
 }
 #endif // NCCL_SYMMETRIC_SCHED_H_

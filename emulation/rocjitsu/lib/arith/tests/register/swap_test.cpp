@@ -4,6 +4,7 @@
 // Tests for whole-word, halfword, and relative-register swaps.
 
 #include "register/helpers.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 // Check register routing and preservation of unselected destination data.
 TEST(RegisterVSwapB32W32, Arithmetic) {
