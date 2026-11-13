@@ -1191,7 +1191,7 @@ class db_analysis(OmniAnalyze_Base):
                 continue
             for metric_id, row in df.iterrows():
                 metric_name = row.get("Metric", "")
-                if metric_name in ValuDualIssueDetector.candidate_metrics:
+                if detector.is_candidate(metric_name):
                     candidates.append((metric_id, metric_name, peak_col))
         if not candidates:
             return
