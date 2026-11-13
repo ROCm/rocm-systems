@@ -7,6 +7,7 @@
 import re
 import signal
 import sys
+import threading
 import traceback
 import warnings
 from pathlib import Path
@@ -175,7 +176,9 @@ def main() -> None:
     """Main function for rocprofiler-compute"""
 
     # Exit normally on SIGTERM, so that finally blocks still delete temporary folders.
-    signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
+    # Python accepts signal handlers only from the main thread.
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
 
     # Baseline Python floor for any mode (profile is 3.8+); analyze adds its own
     check_python_version()
