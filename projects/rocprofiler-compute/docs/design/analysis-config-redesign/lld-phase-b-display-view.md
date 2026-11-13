@@ -7,154 +7,79 @@ Stage dependencies: [Stage dependencies and parallelism](lld-index.md#stage-depe
 
 ## Stage 5 -- Layer 3 schema
 
-New module `src/utils/layer3_schema.py`.
+Module `src/utils/analysis_views.py` (schema checks, reader and adapter in one module).
+A view is one panel of one arch; it holds metric ids and how each row is shown, never a
+formula, unit, peak or description.
 
-`ViewDefinition` fields:
+View fields:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `view` | str | yes | View title, e.g. `"Compute Units - Compute Pipeline"` |
-| `render` | str | yes | Render type (see mapping below) |
-| `archs` | list[str] | no | View-level arch filter -- entire view skipped for unlisted archs |
-| `tables` | list[ViewTableGroup] | yes | Sub-table groupings within the view |
-| `legacy_panel_id` | int | no | Numeric panel ID for transition |
+| `legacy_panel_id` | int | yes | Numeric panel ID for transition |
+| `alias` | str | no | The panel's `-b` alias, e.g. `cu_pipe` |
+| `tables` | list | yes | The panel's tables, in order |
 
-`ViewTableGroup` fields:
+Table fields: `id`, `title`, `header` (ordered column names), and optionally `render`
+(`metric_table` by default, `raw_csv_table`, `pc_sampling_table`), `cli_style`
+(`simple_box`, `simple_bar`, `simple_multiple_bar`, `mem_chart`, `Roofline`),
+`placeholder_range`, `source`, `columnwise`, and `metrics` (the rows of a metric table).
 
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `title` | str | yes | Table title, e.g. `"Compute Speed-of-Light"` |
-| `header` | dict[str, str] | yes | Column name mapping |
-| `cli_style` | str | no | Render hint: `simple_bar`, `mem_chart`, `simple_box` |
-| `metrics` | list[ViewMetricRef] | yes | Ordered list of metric references |
-
-`ViewMetricRef` fields:
+Row fields:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `id` | str | yes | Layer 2 metric id |
-| `archs` | list[str] | no | Metric-level arch filter |
-| `label` | str | no | Display name override for this view |
-| `unit` | str | no | Display unit for this view, e.g. `Bytes/s` for a metric defined in `GB/s` |
-| `description_note` | str | no | Sentence appended to the metric's description in this view, saying how the view shows it, e.g. "This is also presented as a percent of the peak theoretical bandwidth." |
-
-**Render type mapping to current table types:**
-
-| `render` value | Current equivalent |
-|---|---|
-| `metric_table` | standard metric table |
-| `raw_csv_table` | raw CSV pass-through |
-| `pc_sampling_table` | PC sampling data |
-| `simple_box` | box-plot style (current `cli_style: simple_box`) |
+| `metric` | str | one of `metric`, `metrics` | Metric library id |
+| `metrics` | dict[str, str] | one of `metric`, `metrics` | Column -> metric id, for per-channel rows |
+| `label` | str | with `metrics` | Display name where it differs from the metric's `name` |
+| `round` | int | no | Decimal places the main column rounds to |
+| `peak` | `empirical` | no | Show the metric's `peak_empirical` instead of its `peak` |
+| `pct_of_peak` | bool | no | `false` to show no percent of peak |
+| `values` | dict[str, str] | no | Literal values of typed columns such as `xfer` and `coherency` |
+| `legacy_id` | str | no | The row's numeric id in the panel file; one row per metric has it |
 
 ### Validation
 
-Schema validation function checks: all referenced metric ids exist in a provided
-`MetricLibrary`, arch names are known architectures, render type is from the allowed
-set.
-
-### Tests
-
-Valid view passes validation; missing metric id fails; invalid arch name fails;
-label override preserved in output.
+Schema checks: known fields at each level, render types and CLI styles, one of `metric`
+and `metrics` per row. Every referenced metric id exists in the arch's `MetricLibrary`,
+and a row asking for the measured peak has one.
 
 
 ## Stage 6 -- Layer 3 reader
 
-New module `src/utils/layer3_reader.py`.
+`load_views(arch)` reads `views/<arch>/*.yaml` (the arch's metric library arch, e.g.
+`gfx115x` for gfx1151) in file name order. `views_to_panel_configs(views, metrics)`
+translates them into the `OrderedDict[int, dict]` that `build_dfs()` consumes:
 
-`load_views(view_dirs: list[Path], arch: str, library: MetricLibrary) -> list[ViewDefinition]`:
-
-1. Discover `*.yaml` files in each directory in `view_dirs`.
-2. Load each via `yaml.safe_load` (view files do not inherit -- they are flat by
-   design).
-3. Validate against `layer3_schema.py`.
-4. Filter: skip views where `archs` is set and the current arch is not in the list.
-   Within each view, skip metric refs where `archs` is set and the arch is not listed.
-5. Resolve each metric `id` against `library.metrics` -- error if not found.
-6. For each `ViewMetricRef`: if `label` is present, use it as display name; otherwise
-   use `name` from the Layer 2 `MetricDefinition`.
-7. For each `ViewMetricRef` with a `unit` different from the metric's Layer 2 `unit`,
-   convert the value in code with one table of known unit conversions (e.g. `GB/s` ->
-   `Bytes/s`, factor 1e9). An unknown pair is a validation error. The metric definition
-   itself stays uniform; only the view's display changes.
-
-Display adjustments such as unit scaling, rounding and aggregation wrappers belong in code,
-not in static YAML. The metric library keeps only each row's main column
-([Phase A](lld-phase-a-metric-library.md#layer-2-metric-schema)). A view's `header`
-declares every column of the table (`min`, `max`, `std dev`, ...), and the code generates
-each column's wrapped form from a per-kernel expression, as the `simple_box` tables
-already do for `MIN/Q1/MEDIAN/Q3/MAX`.
-
-`views_to_panel_configs(views: list[ViewDefinition], library: MetricLibrary) -> OrderedDict[int, dict]`:
-
-Translates view objects into the same `OrderedDict[int, dict]` consumed by
-`build_dfs()`. It is the translation from the new format to the existing pipeline; Phase
-A ships no adapter (see [Stage 3](lld-phase-a-metric-library.md#stage-3----equivalence-with-the-analysis-configs)).
-
-- Panel IDs: from `legacy_panel_id` during transition, or from view ordering when
-  legacy IDs are removed.
-- Table IDs: synthesized from panel ID + table sequence number.
-- Header dicts: generated from the view's `header` field.
-- Metric OrderedDicts: built from `ViewMetricRef` ids, resolving formulas and units
-  from `MetricLibrary`.
-
-### Tests
-
-- Load test view files, resolve against test `MetricLibrary`, verify resulting
-  `panel_configs` structure matches expected shape.
-- Arch filtering: views and metric refs correctly included/excluded per arch.
-- Label override: display name comes from view label when present, metric name
-  otherwise.
+- Panel and table IDs from `legacy_panel_id` and each table's `id`; a row's numeric id
+  is its position.
+- Row name: the `label`, else the metric's `name`.
+- Main column: the metric's `formula`, wrapped in `ROUND()` when the row asks; `min`,
+  `max` and `std dev`: `MIN`/`MAX`/`STD` of the formula per kernel (each `SUM(x)` and
+  `AVG(x)` becomes `(x)`).
+- `unit`, `peak` (or `peak_empirical`) and the panel's descriptions from the metric.
 
 
 ## Stage 7 -- View file authoring
 
-### New directory
+### Directory
 
 ```
-analysis_configs/
-  views/
+src/rocprof_compute_soc/views/
+  gfx908/  gfx90a/  gfx942/  gfx950/  gfx115x/  gfx1250/
     0000_top_stats.yaml
-    0200_system_speed_of_light.yaml
-    0400_roofline.yaml
-    0600_command_processor.yaml
-    0800_shader_processor_input.yaml
-    1000_ta_td.yaml
-    1200_local_data_share_lds.yaml
-    1400_l1_address_processing.yaml
-    cdna/
-      0500_command_processor_cpc_cpf.yaml
-      0700_wavefront.yaml
-      1100_compute_units_compute_pipeline.yaml
-      1500_l1_data_cache.yaml
-      1600_l1_cache.yaml
-      1700_l2_cache.yaml
-      1800_l2_cache_per_channel.yaml
-      1900_l2_fabric_interface.yaml
-      2100_fabric_stall.yaml
-      2200_fabric_stall_2.yaml
-    rdna/
-      0500_command_processor_cpc.yaml
-      0700_workgroup_processor.yaml
-      0900_l0_cache.yaml
-      1100_compute_units.yaml
-      1300_l2_cache.yaml
-      1500_l1_data_cache.yaml
-    gfx950/
-      3000_mem_bw.yaml
+    0100_system_info.yaml
+    ...                       # one file per panel file of the arch
 ```
 
-The `views/` top level contains views shared across all architectures. `views/cdna/`
-and `views/rdna/` contain family-specific views. `views/gfx950/` contains arch-specific
-views (e.g., memory bandwidth analysis, present only on gfx950).
+Each metric library arch has its own directory with one view per panel file.
 
 ### Constraint: preserve current panel structure in Stage 7
 
-Per reviewer feedback: the Stage 7 migration must preserve the current panel structure,
-grouping, and ordering exactly. No user-facing changes to views during this
-refactoring. This establishes a verified 1:1 mapping between old and new config
-formats before any consolidation begins.
+Per reviewer feedback: the Stage 7 migration preserves the current panel structure,
+grouping, and ordering: the same panels, tables, headers and rows in order. Rows that
+show no equation are left out. Values, units, peaks and descriptions come from the
+metric library, so they can differ from the panel files' own texts.
 
 ### View consolidation (post Stage 7, requires customer approval)
 
@@ -176,38 +101,35 @@ more purposeful views -- not a 1:1 carry-forward of legacy structure.
 ### Example view file
 
 ```yaml
-# views/cdna/1100_compute_units_compute_pipeline.yaml
-view: "Compute Units - Compute Pipeline"
+# views/gfx942/1100_compute_units_compute_pipeline.yaml
+view: Compute Units - Compute Pipeline
 legacy_panel_id: 1100
+alias: cu_pipe
 tables:
-  - title: "Compute Speed-of-Light"
-    header:
-      metric: Metric
-      value: Avg
-      unit: Unit
-      peak: Peak
-      pct_of_peak: Percent of Peak
-    metrics:
-      - id: compute.valu_flops
-      - id: compute.mfma_flops_f8
-        archs: [gfx942, gfx950]
-      - id: compute.mfma_flops_bf16
-      - id: compute.mfma_flops_f16
-      - id: compute.mfma_flops_f32
-      - id: compute.mfma_flops_f64
-      - id: compute.mfma_iops_int8
-  - title: "Pipeline Statistics"
-    header:
-      metric: Metric
-      avg: Avg
-      min: Min
-      max: Max
-      unit: Unit
-    metrics:
-      - id: compute.ipc
-      - id: compute.ipc_issued
-      - id: compute.salu_util
-      - id: compute.valu_util
+- id: 1101
+  title: Compute Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - metric: compute.valu_flops
+  - metric: compute.mfma_flops_f8
+  - metric: compute.mfma_flops_bf16
+- id: 1102
+  title: Pipeline Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.ipc
+  - metric: compute.ipc_issued
+    legacy_id: 11.2.1
 ```
 
 View files contain no formulas, units, peaks, or descriptions -- those live in Layer 2.
@@ -215,26 +137,20 @@ The view declares which metrics to show, in what order, and how to render them.
 
 ### Migration tooling
 
-One-time script `tools/generate_views_from_panels.py`:
-
-1. Read each current panel config YAML.
-2. Extract grouping and display information (table titles, headers, metric ordering,
-   `cli_style`).
-3. Generate the corresponding view file, replacing metric definitions with `id`
-   references (using the mapping established in Stage 4).
-4. Preserve `label` overrides where the current display name differs from the
-   canonical `name` -- the 234 cases of intentional name variation identified in the
-   HLD's static analysis.
-5. Preserve, as `description_note`, each sentence a panel adds to a metric's description
-   about how the panel shows it (the library descriptions leave these out; Phase A
-   lists them in the PR #13522 description review).
+The view files are generated once from the panel files by a local script, which links
+each row to its metric id with the Phase A row links, keeps a `label` where the panel
+name differs from the metric's name, and keeps the display fields above.
 
 ### Validation
 
-- Golden-file test: load views -> produce `panel_configs` via `views_to_panel_configs()`
-  -> compare to old `panel_configs` for each architecture.
-- All metrics referenced by views exist in `MetricLibrary`.
-- Label overrides are correct (checked against the 234 known cases).
+`tools/validate_views.py` (pre-commit) checks the view files: their fields, render types
+and CLI styles, and that every metric they show is in the arch's metric library.
+`test_analysis_views_sync.py`, next to the metric library sync test, checks every arch's
+views against the panel files until they are removed: the same panels, tables, headers
+and table settings in order, the same rows in order apart from rows that show no
+equation, the `-b` aliases of the config templates, and one `legacy_id` per metric,
+its row's numeric id in the panel file. It skips the panels the metric library sync test skips (the roofline panel of
+an arch without a roofline benchmark, gfx908).
 
 
 ## Stage 8 -- Cutover

@@ -6,7 +6,7 @@ description: Reads the rocprof-compute System Speed-of-Light panel to show how c
 # Read System Speed-of-Light
 
 Speed-of-Light is the first panel to read after profiling. It puts every
-headline metric next to the hardware peak for the current GPU, so one table
+headline metric next to the hardware peak for the current GPU, so one panel
 says whether a kernel is near any limit at all.
 
 Run `rocprof-compute analyze --help` before choosing flags.
@@ -54,7 +54,7 @@ also runs the roofline benchmarks.
 
 ## 2. Read it
 
-The table has `Metric`, `Avg`, `Unit`, `Peak`, and `Percent of Peak` columns.
+The panel has three tables, each with `Metric`, `Avg`, `Unit`, `Peak`, and `Percent of Peak` columns.
 The peak is already computed for the detected architecture. Compare `Avg`
 against the `Peak` in the same row and never calculate a peak yourself.
 

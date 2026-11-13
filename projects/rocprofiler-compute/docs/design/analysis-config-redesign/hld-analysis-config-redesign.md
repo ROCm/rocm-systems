@@ -308,9 +308,9 @@ flowchart LR
     end
 
     subgraph L3["Layer 3 — Display / View"]
-        cdna_view["views/cdna/memory_chart.yaml"]
-        rdna_view["views/rdna/memory_chart.yaml"]
-        membw_view["views/mem_bw.yaml\narchs: gfx950"]
+        cdna_view["views/gfx942/0300_memory_chart.yaml"]
+        rdna_view["views/gfx115x/0300_memory_chart.yaml"]
+        membw_view["views/gfx950/3000_mem_bw.yaml"]
     end
 
     TCC --> impl_cdna
@@ -406,44 +406,42 @@ In the target state, the metric defines a single base formula without aggregatio
 
 #### Layer 3 — Display / View
 
-Each view declares which metrics to show and how to render them. The metric definition is not repeated — only its id is referenced. No metric definition in Layer 2 knows which view will reference it, or how it will be rendered.
+Each view declares which metrics to show and how to render them. The metric definition is not repeated — only its id is referenced. No metric definition in Layer 2 knows which view will reference it, or how it will be rendered. Each arch has its own directory of views, `views/<arch>/`, one view per panel.
 
 ```yaml
-# views/roofline.yaml  — loads for all architectures
+# views/gfx950/0400_roofline.yaml
 view: Roofline
-render: roofline_chart
-metrics:
-  - fabric.hbm_bw                        # available on all archs in scope
-  - l2.bw
-  - compute.mfma_flops_f8    archs: [gfx942, gfx950]                  # metric-level: not on gfx908/gfx90a
-  - compute.mfma_flops_f6f4  archs: [gfx950]                           # metric-level: gfx950 only
+legacy_panel_id: 400
+alias: roof
+tables:
+- id: 401
+  title: Roofline Performance Rates
+  cli_style: Roofline
+  header: {metric: Metric, value: Value, unit: Unit, peak: Peak (Empirical)}
+  metrics:
+  - metric: fabric.hbm_bw
+    peak: empirical                  # show the measured ceiling
+  - metric: compute.mfma_flops_f6f4  # only gfx950's views list it
   - ...
 
-# views/cdna/memory_chart.yaml  — loads for CDNA only
+# views/gfx942/0300_memory_chart.yaml
 view: Memory Chart
-render: mem_chart
-metrics:
-  - id: l2.hit_rate                  # Case A: same id, formula resolved at runtime per arch
-    label: "L2 Hit"                      # label overrides canonical name for compact display
-  - id: fabric.hbm_rd                     # Case B: CDNA-specific metric
+legacy_panel_id: 300
+alias: memchart
+tables:
+- id: 301
+  title: Memory Chart
+  cli_style: mem_chart
+  header: {metric: Metric, value: Value, unit: Unit}
+  metrics:
+  - metric: l2.hit_rate              # Case A: same id, formula resolved per arch
+    label: L2 Hit                    # label overrides the canonical name
+    round: 0
+  - metric: fabric.hbm_rd_bw_est     # Case B: CDNA-specific metric
   - ...
 
-# views/rdna/memory_chart.yaml  — loads for RDNA only
-view: Memory Chart
-render: mem_chart
-metrics:
-  - l2.hit_rate         # Case A: same id, different formula selected at runtime
-  - fabric.dram_rd           # Case B: RDNA-specific metric
-  - ...
-
-# views/mem_bw.yaml  — view-level: entire view is gfx950-only
-view: Memory Bandwidth Analysis
-archs: [gfx950]
-render: mem_bw_chart
-metrics:
-  - fabric.hbm_rd_bw
-  - fabric.hbm_wr_bw
-  - ...
+# views/gfx115x/0300_memory_chart.yaml: the same ids where they exist (l2.hit_rate),
+# and the RDNA-specific ones
 ```
 
 #### What changes when something needs to be updated
@@ -452,14 +450,14 @@ Each change touches only the layer that owns the concern — satisfying the [[FR
 
 | Change | Files touched | Files not touched |
 |---|---|---|
-| Fix HBM Bandwidth formula | `metrics/memory/hbm_bandwidth.yaml` | `views/roofline.yaml`, `views/cdna/memory_chart.yaml`, `metrics/memory/l2_cache.yaml` |
-| Rename "HBM Bandwidth" to "HBM BW" | `metrics/memory/hbm_bandwidth.yaml` (`name` field only) | `views/roofline.yaml`, `views/cdna/memory_chart.yaml` (reference `id`, not `name`) |
-| Show "HBM BW" in roofline but "HBM Bandwidth" in memory chart | `views/roofline.yaml` (`label: "HBM BW"` on `fabric.hbm_bw`) | `metrics/memory/hbm_bandwidth.yaml`, `views/cdna/memory_chart.yaml` |
-| Change how roofline is rendered | `views/roofline.yaml` | `metrics/memory/hbm_bandwidth.yaml`, `metrics/memory/l2_cache.yaml` |
-| Fix L2 Hit formula for CDNA (Case A) | `metrics/memory/l2_cache.yaml` (CDNA family base definition only) | `views/cdna/memory_chart.yaml`, `views/rdna/memory_chart.yaml` |
-| Add a new RDNA-only metric (Case B) | `metrics/memory/l2_cache.yaml` (new entry), `views/rdna/memory_chart.yaml` | `views/cdna/memory_chart.yaml`, `metrics/memory/hbm_bandwidth.yaml` |
-| Add a gfx950-only metric to roofline | `metrics/memory/hbm_bandwidth.yaml` (new entry), `views/roofline.yaml` (new id + `archs: [gfx950]`) | `views/cdna/memory_chart.yaml`, `views/rdna/memory_chart.yaml` |
-| Add a new gfx950-only view | new `metrics/memory/mem_bw.yaml`, new `views/mem_bw.yaml` with `archs: [gfx950]` | `views/roofline.yaml`, `views/cdna/memory_chart.yaml`, `views/rdna/memory_chart.yaml` |
+| Fix HBM Bandwidth formula | `metrics/memory/hbm_bandwidth.yaml` | `views/<arch>/0400_roofline.yaml`, `views/<arch>/0300_memory_chart.yaml`, `metrics/memory/l2_cache.yaml` |
+| Rename "HBM Bandwidth" to "HBM BW" | `metrics/memory/hbm_bandwidth.yaml` (`name` field only) | `views/<arch>/0400_roofline.yaml`, `views/<arch>/0300_memory_chart.yaml` (reference `id`, not `name`) |
+| Show "HBM BW" in roofline but "HBM Bandwidth" in memory chart | `views/<arch>/0400_roofline.yaml` (`label: "HBM BW"` on `fabric.hbm_bw`) | `metrics/memory/hbm_bandwidth.yaml`, `views/<arch>/0300_memory_chart.yaml` |
+| Change how roofline is rendered | `views/<arch>/0400_roofline.yaml` | `metrics/memory/hbm_bandwidth.yaml`, `metrics/memory/l2_cache.yaml` |
+| Fix L2 Hit formula for CDNA (Case A) | `metrics/memory/l2_cache.yaml` (CDNA family base definition only) | `views/<arch>/0300_memory_chart.yaml` |
+| Add a new RDNA-only metric (Case B) | `metrics/memory/l2_cache.yaml` (new entry), `views/gfx115x/0300_memory_chart.yaml` | `views/gfx942/0300_memory_chart.yaml`, `metrics/memory/hbm_bandwidth.yaml` |
+| Add a gfx950-only metric to roofline | `metrics/memory/hbm_bandwidth.yaml` (new entry), `views/gfx950/0400_roofline.yaml` (new id) | `views/gfx942/0400_roofline.yaml`, `views/<arch>/0300_memory_chart.yaml` |
+| Add a new gfx950-only view | new `metrics/memory/mem_bw.yaml`, new `views/gfx950/<file>.yaml` | `views/<arch>/0400_roofline.yaml`, `views/<arch>/0300_memory_chart.yaml` |
 
 
 ## Implementation phases

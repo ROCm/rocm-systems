@@ -426,8 +426,10 @@ Filtering options
 -----------------
 
 ``-b``, ``--block``
-   Allows system profiling on one or more selected analysis report blocks to speed
-   up the profiling process. See :ref:`profiling-hw-component-filtering`.
+   Allows system profiling on one or more selected analysis report blocks or
+   metrics to speed up the profiling process. A metric id names a metric, for
+   example ``compute.salu_util``; numeric metric ids such as ``11.2.2`` are
+   deprecated. See :ref:`profiling-hw-component-filtering`.
 
 ``--speed-of-light``, ``--memory-chart``, ``--roofline``
    Aliases of ``-b 2``, ``-b 3``, and ``-b 4``. They profile the
@@ -478,27 +480,30 @@ for ``Compute Unit - Instruction Mix`` (block 10) and ``Wavefront Launch Statist
    |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                   |_|                                           |_|
 
-   INFO Rocprofiler-Compute version: 3.5.0
-   INFO Profiler choice: rocprofiler-sdk
-   INFO Path: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X
-   INFO Target: MI325X
-   INFO Command: ./vcopy -n 1048576 -b 256
-   INFO Kernel Selection: None
-   INFO Kernel Iteration Range: None
-   INFO Filtered sections: ['10', '7']
-   INFO
-   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   INFO Collecting Performance Counters
-   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   WARNING Compute partition: SPX. Analysis mode will calculate metrics based on the number of logical XCDs and L2 channels derived for this partition mode.
+   WARNING Memory partition: NPS1. Analysis mode will calculate metrics based on the number of HBM channels derived for this partition mode.
+      INFO Rocprofiler-Compute version: 3.11.0
+      INFO Profiler choice: rocprofiler-sdk
+      INFO Output directory: /tmp/docs_vcopy/workloads/vcopy/MI350
+      INFO Target: MI350
+      INFO Command: ./vcopy -n 1048576 -b 256
+      INFO Kernel Selection: None
+      INFO Kernel Iteration Range: None
+      INFO Filtered sections: ['10', '7']
+      INFO
+      INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      INFO Collecting Performance Counters
+      INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
 
-It is also possible to collect individual metrics from the analysis report by providing metric ids.
-The following example only collects the counters required to calculate ``Total VALU FLOPs`` (metric id 11.1.0) and ``LDS Utilization`` (metric id 12.1.0).
+It is also possible to collect individual metrics from the analysis report by providing metric ids,
+which ``--list-metrics`` shows. The following example only collects the counters required to calculate
+``VALU FLOPs`` (metric id ``compute.valu_flops``) and ``LDS Utilization`` (metric id ``lds.util``).
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name vcopy -b 11.1.1 12.1.1 -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy -b compute.valu_flops lds.util -- ./vcopy -n 1048576 -b 256
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -507,18 +512,20 @@ The following example only collects the counters required to calculate ``Total V
    |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                   |_|                                           |_|
 
-   INFO Rocprofiler-Compute version: 3.5.0
-   INFO Profiler choice: rocprofiler-sdk
-   INFO Path: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X
-   INFO Target: MI325X
-   INFO Command: ./vcopy -n 1048576 -b 256
-   INFO Kernel Selection: None
-   INFO Kernel Iteration Range: None
-   INFO Filtered sections: ['11.1.1', '12.1.1']
-   INFO
-   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   INFO Collecting Performance Counters
-   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   WARNING Compute partition: SPX. Analysis mode will calculate metrics based on the number of logical XCDs and L2 channels derived for this partition mode.
+   WARNING Memory partition: NPS1. Analysis mode will calculate metrics based on the number of HBM channels derived for this partition mode.
+      INFO Rocprofiler-Compute version: 3.11.0
+      INFO Profiler choice: rocprofiler-sdk
+      INFO Output directory: /tmp/docs_vcopy/workloads/vcopy/MI350
+      INFO Target: MI350
+      INFO Command: ./vcopy -n 1048576 -b 256
+      INFO Kernel Selection: None
+      INFO Kernel Iteration Range: None
+      INFO Filtered sections: ['compute.valu_flops', 'lds.util']
+      INFO
+      INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      INFO Collecting Performance Counters
+      INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
 
@@ -630,6 +637,7 @@ Metric sets filtering
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 A metrics set contains a subset of metrics that can be collected in a single pass. This filtering option minimizes profiling overhead by only collecting counters of interest.
+Each set lists metric ids, and analyze shows only the rows of those metrics.
 The `--set` filter option provides a convenient way to group related metrics for common profiling scenarios, eliminating the need to manually specify individual metrics for typical analysis workflows.
 See :ref:`profile-selection-options` for the options it can be combined with.
 ``--set`` can't be used with ``--pc-sampling``.
@@ -652,7 +660,7 @@ See :ref:`profile-selection-options` for the options it can be combined with.
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: None
    INFO Kernel Iteration Range: None
-   INFO Filtered sections: ['11.2.2', '11.2.3', '11.2.4', '11.2.5']
+   INFO Filtered sections: ['compute.salu_util', 'compute.valu_util', 'compute.vmem_util', 'compute.branch_util']
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    INFO Collecting Performance Counters
@@ -677,21 +685,21 @@ To see a list of available sets, use the ``--list-sets`` option.
    ===================================================================================================================
    Set Option                          Set Title                           Metric Name                    Metric ID
    -------------------------------------------------------------------------------------------------------------------
-   compute_thruput_util                Compute Throughput Utilization      SALU Utilization               11.2.3
-                                                                           VALU Utilization               11.2.4
-                                                                           VMEM Utilization               11.2.6
-                                                                           Branch Utilization             11.2.7
+   compute_thruput_util                Compute Throughput Utilization      SALU Utilization               compute.salu_util
+                                                                           VALU Utilization               compute.valu_util
+                                                                           VMEM Utilization               compute.vmem_util
+                                                                           Branch Utilization             compute.branch_util
 
    ...
 
-   launch_stats                        Launch Stats                        Grid Size                      7.1.0
-                                                                           Workgroup Size                 7.1.1
-                                                                           Total Wavefronts               7.1.2
-                                                                           VGPRs                          7.1.5
-                                                                           AGPRs                          7.1.6
-                                                                           SGPRs                          7.1.7
-                                                                           LDS Allocation                 7.1.8
-                                                                           Scratch Allocation             7.1.9
+   launch_stats                        Launch Stats                        Grid Size                      dispatch.grid_size
+                                                                           Workgroup Size                 dispatch.workgroup_size
+                                                                           Dispatched Wavefronts          spi.dispatched_wavefronts
+                                                                           VGPRs                          dispatch.vgprs
+                                                                           AGPRs                          dispatch.agprs
+                                                                           SGPRs                          dispatch.sgprs
+                                                                           LDS Allocation                 dispatch.lds_allocation
+                                                                           Scratch Allocation             dispatch.scratch_allocation
 
    Usage Examples:
    rocprof-compute profile --set compute_thruput_util  # Profile this set

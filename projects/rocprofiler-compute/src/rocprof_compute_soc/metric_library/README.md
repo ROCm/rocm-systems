@@ -4,9 +4,10 @@ Each directory here defines one GPU architecture's metrics, once each, keyed by 
 id such as `compute.salu_util`. The files hold what a metric is (its formula, unit and
 peaks), not how a panel shows it. `loader.py` loads them.
 
-Production does not read these files yet: `analyze` and `profile` still use
-[`analysis_configs/`](../analysis_configs/). Until production reads the library, a metric
-change goes into both trees.
+`analyze` shows these metrics through the views in [`views/`](../views/); `profile` still
+collects counters from [`analysis_configs/`](../analysis_configs/). Until profile switches
+too, a metric change goes into both trees, and a row added, moved or renamed in a panel
+also goes into the arch's views.
 
 ## Layout
 

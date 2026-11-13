@@ -37,6 +37,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `analyze --debug-table-view`: print every block as plain tables.
   * `analyze --debug-verify-deps`: check that the Python dependencies of analyze mode are installed, then exit.
 
+* Added metric IDs to `--block` and `--list-metrics`, for example `--block compute.salu_util`, which selects every row that shows the metric. Numeric metric IDs such as `11.2.2` still work, but print a deprecation warning.
+
 ### Changed
 
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
@@ -93,6 +95,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Roofline metric ids such as `-b 4.1` now count as selecting roofline, like `-b 4` and `-b roof`. In profile mode they run the roofline benchmark, and in analyze mode they show the roofline section.
 
+* Analyze shows each metric's formula, unit, peak and description from the metric library, so some panels change, for example `Gbps` is shown as `GB/s` and bandwidths shown in `Bytes/s` are now in `GB/s`. Rows that never showed a value are gone, so later gfx908 Speed-of-Light IDs such as `2.1.11` are renumbered, and the gfx1250 roofline `WMMA FLOPs (FP64)` row shows its theoretical peak. `-b membw_analysis` fails on gfx908, gfx90a, and gfx942, which have no Memory Bandwidth Analysis block, like any unknown block alias.
+
+* `--set` selects metric IDs, which `--list-sets` lists, for example `compute.salu_util` instead of `11.2.2`. After `--set`, analyze shows only the set's metrics, wherever they appear.
+
+* The System Speed-of-Light panel (`-b 2`, `-b sol`) shows three tables on every architecture: GPU Speed-of-Light, Compute Throughput, and Memory Throughput. Metric IDs in block 2 are renumbered, for example SALU Utilization is `2.2.7` on gfx942, and a numeric ID you type means the ID analyze shows; workloads saved by earlier versions show the same panels.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -126,6 +134,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the `-g`, `--view table`, and `--verify-deps` analyze options. Use `--debug-metric-expression`, `--debug-table-view`, and `--debug-verify-deps` instead.
 
+* Removed the gfx908 `compute_thruput_flops` set, whose metrics MI100 has no counters for; `--set compute_thruput_flops` now fails on gfx908.
+
+* Removed rows that the new tables don't include from the System Speed-of-Light panel, such as Wavefront Occupancy and the L2-Fabric latencies; their own panels still show them, for example Wavefront Occupancy as `7.2.7` on gfx942. On gfx115x, Wavefront Occupancy and Wave Issue Wait, and on gfx1250, Wavefront Occupancy, the GL2-to-DRAM latencies, instruction fetch latency, and LDS bank conflicts per access, are no longer shown.
+
 ### Optimized
 
 * Profile mode collects only the counters that metric equations use, which can reduce the number of profiling passes.
@@ -156,6 +168,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * The old roofline option names (`--roof-only`, `--bench-only`, and `--device`) will be removed in a future release. Use the new `--roofline-*` names instead.
 
 * `--no-roof` is deprecated and will be removed in a future release. To skip roofline, select blocks with `-b` or `--set` that do not include block 4.
+
+* Numeric metric IDs in `--block`, such as `11.2.2`, will be removed in a future release. Use metric IDs such as `compute.salu_util` instead.
 
 ### Known issues
 
