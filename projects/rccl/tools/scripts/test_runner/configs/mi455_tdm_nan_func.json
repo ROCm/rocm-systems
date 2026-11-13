@@ -13,7 +13,8 @@
     "RCCL_USE_AMD_SMI_LIB": "0",
     "HSA_NO_SCRATCH_RECLAIM": "1",
     "RCCL_TDM_NAN_ENABLE": "1",
-    "RCCL_TDM_NAN_MIN_BYTES": "0"
+    "RCCL_TDM_NAN_MIN_BYTES": "0",
+    "RCCL_TEST_EXPECT_TDM_NAN": "1"
   },
   "mpi_args": [
     "--mca pml ob1",
@@ -137,6 +138,23 @@
         }
       ]
     },
+    "tdm_nan_build_flag": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicro",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {},
+      "tests": [
+        {
+          "name": "TDM_NaN_BuildFlag",
+          "description": "Fails when --enable-tdm-nan did not reach the build, which would leave every suite below on the register path",
+          "test_filter": "WrapMicrotest.NanTdmBuildFlagMatchesExpectation"
+        }
+      ]
+    },
     "tdm_nan_micro": {
       "extends": "default",
       "is_gtest": true,
@@ -160,6 +178,12 @@
       "name": "TDM NaN - Toolchain capability",
       "description": "Guards the suites below: a build without tensor-data-mover support makes them vacuous",
       "config": "tdm_capability",
+      "enabled": true
+    },
+    {
+      "name": "TDM NaN - Build flag",
+      "description": "Guards the suites below: a build without --enable-tdm-nan makes them vacuous",
+      "config": "tdm_nan_build_flag",
       "enabled": true
     },
     {
