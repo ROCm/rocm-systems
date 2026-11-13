@@ -10028,6 +10028,11 @@ class CodeGenerator:
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = false;')
         self._append_wait_counter_type(L, sem, 'global_store_async_from_lds')
+        # Record each lane's LDS source so observers can see what the store reads.
+        L.append('  d->lds_src = true;')
+        L.append('  d->lds_per_lane_addr = true;')
+        L.append('  d->per_lane_lds_addr.fill(amdgpu::kInvalidLdsAddress);')
+        L.append('  d->per_lane_lds_src_bytes.fill(0);')
         L.append(f'  {self._memory_cache_policy()}')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
@@ -10045,12 +10050,16 @@ class CodeGenerator:
             '    uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);'
         )
         L.append(
-            f'    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, {stride});'
+            f'    const auto source = async_lds_lane_source(inst_, wf, lane_lds_addr, {stride});'
+        )
+        L.append('    d->per_lane_lds_addr[lane] = source.address;')
+        L.append('    d->per_lane_lds_src_bytes[lane] = source.bytes;')
+        L.append(
+            '    // LDS bytes past the allocation read zero; the global store still issues.'
         )
         L.append(
-            '    // Out-of-range LDS reads return zero; the global store still issues.'
+            f'    lds.read(source.address, &d->store_data[lane * {stride}], source.bytes);'
         )
-        L.append(f'    lds.read(lds_addr, &d->store_data[lane * {stride}], {stride});')
         L.append('  }')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
