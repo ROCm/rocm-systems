@@ -17,6 +17,7 @@ from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
 )
+from rocprof_compute_soc.metric_library import loader
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils.analysis_views import (
@@ -50,7 +51,6 @@ from utils.utils_common import (
     get_job_rank_and_size,
     get_version,
     get_version_display,
-    parse_sets_yaml,
     reconfigure_stdio_utf8,
     replace_env,
     replace_rank,
@@ -404,7 +404,10 @@ class RocProfCompute:
 
     @demarcate
     def list_sets(self) -> None:
-        sets_info = parse_sets_yaml(self.__mspec.gpu_arch)
+        library = loader.MetricLibrary.load(
+            loader.default_metric_library_dir(), self.__mspec.gpu_arch
+        )
+        sets_info = library.sets
 
         if not sets_info:
             console_error("No sets configuration found.")
@@ -422,23 +425,20 @@ class RocProfCompute:
         # Print data grouped by set
         for set_option, set_data in sets_info.items():
             title = set_data.get("title", set_option)
-            metrics = set_data.get("metric", [])
 
             first_row = True
-            for metric in metrics:
-                if isinstance(metric, dict) and metric:
-                    metric_id = next(iter(metric.keys()))
-                    metric_name = next(iter(metric.values()))
+            for metric_id in set_data["metrics"]:
+                metric_name = library.metrics[metric_id]["name"]
 
-                    # Only show set info on first row of each set
-                    set_display = set_option if first_row else ""
-                    title_display = title if first_row else ""
+                # Only show set info on first row of each set
+                set_display = set_option if first_row else ""
+                title_display = title if first_row else ""
 
-                    print(
-                        f"{set_display:<35} {title_display:<35}"
-                        f" {metric_name:<30} {metric_id:<10}"
-                    )
-                    first_row = False
+                print(
+                    f"{set_display:<35} {title_display:<35}"
+                    f" {metric_name:<30} {metric_id:<10}"
+                )
+                first_row = False
             # Empty line between sets
             print()
 
