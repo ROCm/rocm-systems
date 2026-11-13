@@ -392,8 +392,8 @@ int half_binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, 
           rocjitsu::arith::validate(flags, instruction_flags & ~known, fp_flags | mode_flags)) {
     return error;
   }
-  // RDNA3 packed ADD/MUL are exact through the guest-mode model below.
-  constexpr bool exact_capable = Packed && Rdna3;
+  // Packed ADD/MUL are exact through the guest-mode model below.
+  constexpr bool exact_capable = Packed;
   if (arithmetic && !exact_capable &&
       (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;

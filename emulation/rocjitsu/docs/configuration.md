@@ -430,11 +430,11 @@ outside the contract in every semantics mode. `RJ_FORCE_SCALAR`
 selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
 It does not change semantics.
 
-Scalar FP arithmetic currently retains a guest-rounding limitation from the legacy
-handlers: Compatibility uses nearest-even for scalar F16/F32 add, subtract,
-multiply, and integer-to-F32 conversion. For example, `S_CVT_F32_I32 0x01000001`
-produces `0x4b800000` even with guest rounding toward +infinity; gfx1201 produces
-`0x4b800001`. The corresponding library entry points reject nonzero rounding flags.
+Scalar F16/F32 add, subtract, multiply, FMAC and the rounding conversions follow the
+MODE rounding field of their destination format (MODE[1:0] for FP32, MODE[3:2] for FP16).
+For example, under guest rounding toward +infinity `S_CVT_F32_I32 0x01000001` produces
+`0x4b800001`, as on gfx1201, both in decoded RDNA4 Compatibility, which also records FP
+causes, and through the rj-arith entry points in the configured semantics.
 
 
 ### Memory wait diagnostics
