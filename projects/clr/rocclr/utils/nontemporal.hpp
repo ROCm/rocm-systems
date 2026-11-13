@@ -243,7 +243,12 @@ namespace amd {
 
 // ================================================================================================
 #if IS_LINUX
-__attribute__((optimize("unroll-all-loops"), always_inline)) static inline void nontemporalMemcpy(
+#if defined(__has_attribute) && __has_attribute(optimize)
+__attribute__((optimize("unroll-all-loops"), always_inline))
+#else
+__attribute__((always_inline))
+#endif
+static inline void nontemporalMemcpy(
     void* __restrict dst, const void* __restrict src, size_t size) {
 #if defined(ATI_ARCH_X86)
   // Drain unaligned head with scalar NT stores to reach 4-byte then 16-byte
@@ -374,6 +379,36 @@ static inline void ringDoorbell(volatile uint64_t* doorbell, uint64_t index,
   *doorbell = index;
 }
 
+// ---- Streaming loads from device memory -------------------------------------------
+//
+// A load from WC-mapped device memory stalls for a bus round trip. MOVNTDQA fills a
+// streaming-load buffer with the 64-byte line instead, and loads of different lines overlap,
+// so reading n lines costs about one round trip rather than n. Streaming loads are weakly
+// ordered: the caller fences them after the loads that proved the data final.
+
+// Copies the 16 bytes at src, which must be 16-byte aligned, to dst with a streaming load.
+#if IS_LINUX && defined(ATI_ARCH_X86)
+__attribute__((target("sse4.1"))) static inline void streamingLoad16(void* __restrict dst,
+                                                                     const void* __restrict src) {
+  const __m128i value =
+      _mm_stream_load_si128(const_cast<__m128i*>(reinterpret_cast<const __m128i*>(src)));
+  _mm_storeu_si128(reinterpret_cast<__m128i*>(dst), value);
+}
+#else
+static inline void streamingLoad16(void* __restrict dst, const void* __restrict src) {
+  std::memcpy(dst, src, 16);
+}
+#endif
+
+// Orders later streaming loads after earlier loads.
+static inline void streamingLoadFence() {
+#if IS_LINUX && defined(ATI_ARCH_X86)
+  _mm_mfence();
+#else
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+#endif
+}
+
 // ---- MOVDIR64B support ----------------------------------------------------------
 //
 // MOVDIR64B atomically writes 64 bytes and closes the WC buffer after
@@ -431,7 +466,8 @@ static inline void nontemporalWriteAQL(AqlPacket* __restrict dst,
   static_assert(sizeof(AqlPacket) == 64, "AQL packets must be 64 bytes");
   alignas(64) AqlPacket staging;
   std::memcpy(&staging, src, sizeof(AqlPacket));
-  *reinterpret_cast<uint32_t*>(&staging) = header | (static_cast<uint32_t>(rest) << 16);
+  const uint32_t merged = header | (static_cast<uint32_t>(rest) << 16);
+  std::memcpy(&staging, &merged, sizeof(merged));
   movdir64b_copy64(dst, &staging);
 }
 

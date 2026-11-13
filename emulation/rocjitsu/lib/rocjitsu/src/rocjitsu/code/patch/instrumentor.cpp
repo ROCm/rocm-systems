@@ -4,12 +4,17 @@
 #include "rocjitsu/code/patch/instrumentor.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/kernel_scope.h"
+#include "rocjitsu/code/patch/checked_text_edits.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/patch/error_report.h"
@@ -20,18 +25,24 @@
 #include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/target_registry.h"
-#include "util/except.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 #include <algorithm>
 #include <array>
+#include <bit>
+#include <cassert>
 #include <cstring>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -68,26 +79,13 @@ constexpr std::string_view kRfePrefix = "s_rfe_";
 
 [[nodiscard]] bool is_s_clause(const Instruction &inst) { return inst.mnemonic() == "s_clause"; }
 
-[[nodiscard]] uint32_t s_clause_following_instruction_count(const Instruction &inst) {
-  if (!is_s_clause(inst) || inst.size() != sizeof(uint32_t) || inst.num_src_operands() != 1)
-    return 0;
-
-  const Operand *clause = inst.src_operand(0);
-  if (clause == nullptr)
-    return 0;
-
-  // The decoded OPR_CLAUSE retains the packed SIMM16 value. SIMM16[5:0]
-  // encodes one less than the number of following instructions; bits 8:11 are
-  // BREAK_SPAN and are not part of the count.
-  return (static_cast<uint32_t>(clause->encoding_value()) & 0x3fu) + 1u;
-}
-
 // Per-site result of Instrumentor::patch's preflight: the chosen trampoline
 // offset and the concrete bytes we'll splice in once all preflights succeed.
 struct AppliedSite {
   const ResolvedInstrumentationSite *site;
   uint64_t trampoline_offset;
   TrampolineBytes bytes;
+  std::optional<uint64_t> return_target = std::nullopt;
 
   // Probe-call facts for the patch record; defaulted for the inline-nop site.
   bool is_probe_call = false;
@@ -179,9 +177,13 @@ bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA4:
   case ROCJITSU_CODE_ARCH_CDNA5:
     return false;
-  default:
-    throw util::UnimplementedInst("unified VGPR allocation for target architecture");
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_INVALID:
+    break;
   }
+  assert(false && "unified VGPR allocation for an unadmitted architecture");
+  return false;
 }
 
 // How one kernel's VGPR allocation divides into an ordinary prefix and an
@@ -223,14 +225,34 @@ KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
   };
 }
 
+// The wave size every kernel in @p kernels runs at, or nullopt when there are
+// none or they disagree.
+std::optional<uint8_t> common_wavefront_size(rj_code_arch_t arch,
+                                             std::span<const KernelDescriptorInfo> kernels) {
+  std::optional<uint8_t> common;
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    const uint8_t wave_size = kernel_wavefront_size(arch, kernel.descriptor);
+    if (common && *common != wave_size)
+      return std::nullopt;
+    common = wave_size;
+  }
+  return common;
+}
+
 // Special machine state preserved across a probe call: SCC (via the trampoline
 // envelope), EXEC/VCC/M0 (saved to a dead SGPR temp; the orchestrator sets the
 // plan.preserve_* flags below), and ordinary GPRs (via the spill policy).
 // FLAT_SCRATCH stays rejected: the spill store/load depend on it, so a probe
 // that clobbers it entangles with the spill mechanism. Fail closed there rather
 // than let it silently corrupt the host kernel's state.
-bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *error_out) {
-  if (summary.touches_flat_scratch) {
+bool check_probe_special_state(const ProbeClobberSummary &summary, rj_code_arch_t arch,
+                               std::span<const uint32_t> allocations, std::string *error_out) {
+  const bool writes_backing =
+      arch == ROCJITSU_CODE_ARCH_CDNA3 && std::ranges::any_of(allocations, [&](uint32_t count) {
+        const auto base = cdna3::flat_scratch_base(cdna3::sgpr_alias_end(count));
+        return summary.ordinary_clobbers.intersects(RegisterRef{RegClass::SGPR, base, 2});
+      });
+  if (summary.touches_flat_scratch || writes_backing) {
     report(error_out, "probe body writes FLAT_SCRATCH, which the spill store/load depend on; "
                       "not preservable across a probe call");
     return false;
@@ -256,9 +278,10 @@ bool check_probe_link_pair(const ProbeClobberSummary &summary, const ProbeAbi &a
 
 } // namespace
 
-bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
-                           std::span<const uint8_t> text_bytes,
-                           [[maybe_unused]] rj_code_arch_t arch, std::string *error_out) {
+namespace {
+bool validate_anchor_bytes(const Instruction &anchor, uint64_t anchor_offset,
+                           std::span<const uint8_t> text_bytes, std::string *error_out,
+                           bool relocated = true) {
   if (anchor_offset % sizeof(uint32_t) != 0) {
     report(error_out, "anchor_offset must be dword aligned");
     return false;
@@ -266,8 +289,9 @@ bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
   // Instruction::size() returns int by convention; the `!= 4 && != 8` check
   // also rejects negative values (which decoders never produce in practice).
   const int size = anchor.size();
-  if (size != 4 && size != 8) {
-    report(error_out, "anchor instruction size must be 4 or 8 bytes");
+  if (size <= 0 || size % 4 != 0 || (relocated && size != 4 && size != 8)) {
+    report(error_out, relocated ? "anchor instruction size must be 4 or 8 bytes"
+                                : "anchor instruction size must contain complete dwords");
     return false;
   }
   // Subtraction-based bounds check: a huge anchor_offset would otherwise wrap
@@ -281,6 +305,15 @@ bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
     report(error_out, "anchor instruction has no raw encoding bytes");
     return false;
   }
+  return true;
+}
+} // namespace
+
+bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
+                           std::span<const uint8_t> text_bytes,
+                           [[maybe_unused]] rj_code_arch_t arch, std::string *error_out) {
+  if (!validate_anchor_bytes(anchor, anchor_offset, text_bytes, error_out))
+    return false;
   constexpr uint64_t kControlFlowFlags =
       BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
   if (anchor.flags() & kControlFlowFlags) {
@@ -315,8 +348,9 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     return std::nullopt;
   }
   // TODO: support AfterInst / BlockEntry / BlockExit.
-  if (pt.kind != InstrumentationKind::BeforeInst) {
-    fail("InstrumentationPoint::kind must be BeforeInst temporarily");
+  if (pt.kind != InstrumentationKind::BeforeInst && pt.kind != InstrumentationKind::KernelEntry &&
+      pt.kind != InstrumentationKind::KernelExit) {
+    fail("InstrumentationPoint::kind must be BeforeInst, KernelEntry, or KernelExit");
     return std::nullopt;
   }
   // A probe call needs both halves of the request: the object to resolve the
@@ -338,8 +372,21 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     return std::nullopt;
   }
 
-  if (!is_relocatable_anchor(anchor, anchor_offset, text_bytes, arch, error_out))
-    return std::nullopt;
+  if (pt.kind == InstrumentationKind::BeforeInst) {
+    if (!is_relocatable_anchor(anchor, anchor_offset, text_bytes, arch, error_out))
+      return std::nullopt;
+  } else {
+    if (pt.probe_obj == nullptr ||
+        !validate_anchor_bytes(anchor, anchor_offset, text_bytes, error_out,
+                               pt.kind != InstrumentationKind::KernelEntry)) {
+      fail("kernel boundary instrumentation requires a callable probe and valid anchor bytes");
+      return std::nullopt;
+    }
+    if (pt.kind == InstrumentationKind::KernelExit && anchor.mnemonic() != "s_endpgm") {
+      fail("KernelExit must name s_endpgm");
+      return std::nullopt;
+    }
+  }
 
   const auto size = static_cast<uint32_t>(anchor.size());
   ResolvedInstrumentationSite site;
@@ -361,8 +408,13 @@ bool validate_inline_nop_plan(const TrampolinePlan &plan, std::string *error_out
     report(error_out, "trampoline plan: after_items must be empty for the inline nop");
     return false;
   }
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> nop = build_s_nop(0, plan.arch, &error);
+  if (nop.failed())
+    return false;
   if (plan.before_items.size() != 1 || plan.before_items[0].words.size() != 1 ||
-      plan.before_items[0].words[0] != build_s_nop(0, plan.arch)) {
+      plan.before_items[0].words[0] != nop.value()) {
     report(error_out, "trampoline plan: before_items must be exactly { { s_nop 0 } } "
                       "for the inlined nop");
     return false;
@@ -675,10 +727,16 @@ bool append_dbi_kernarg_record(CodeObjectPatcher &patcher, const AmdGpuCodeObjec
 
 } // namespace
 
-TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
-                                    uint64_t trampoline_offset) {
+std::optional<TrampolinePlan> make_trampoline_plan(const ResolvedInstrumentationSite &site,
+                                                   rj_code_arch_t arch, uint64_t trampoline_offset,
+                                                   std::string *error_out) {
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> nop = build_s_nop(0, arch, &error);
+  if (nop.failed())
+    return std::nullopt;
   TrampolinePlan plan = make_base_plan(site, arch, trampoline_offset);
-  plan.before_items = {InlineAsmItem{{build_s_nop(0, arch)}}};
+  plan.before_items = {InlineAsmItem{{nop.value()}}};
   plan.after_items = {};
   plan.emit_original = true;
   return plan;
@@ -693,6 +751,120 @@ namespace {
   return std::any_of(probes.begin(), probes.end(), [](const ProbeCallable &probe) {
     return std::any_of(probe.arg_sources.begin(), probe.arg_sources.end(), reads_entry_storage);
   });
+}
+
+// A direct call initializes its even SGPR pair to one of this kernel's decoded
+// continuations. A SETPC is bounded only if every path still carries such a link.
+bool cdna3_kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
+                                     const BlockOffsetIndex &offsets,
+                                     const std::unordered_set<BasicBlock *> &reachable,
+                                     uint32_t sgpr_count) {
+  if (std::ranges::none_of(reachable, [](const BasicBlock *block) {
+        return block->successor_issue() != BasicBlock::SuccessorIssue::None;
+      }))
+    return false;
+
+  std::unordered_map<BasicBlock *, uint64_t> incoming;
+  std::vector<BasicBlock *> worklist;
+  auto merge = [&](BasicBlock *block, uint64_t links) {
+    if (!reachable.contains(block))
+      return;
+    auto [it, inserted] = incoming.emplace(block, links);
+    if (!inserted) {
+      links &= it->second;
+      if (it->second == links)
+        return;
+      it->second = links;
+    }
+    worklist.push_back(block);
+  };
+  merge(&entry, 0);
+  for (uint64_t offset : spec.own_entries)
+    merge(block_for_offset(offsets, offset), 0);
+  const auto pair_bit = [sgpr_count](unsigned reg) -> uint64_t {
+    // Firmware's aliased scalar tail can also be written by implicit operands.
+    if ((reg & 1u) || reg >= 128 ||
+        reg + 1 >= cdna3::flat_scratch_base(cdna3::sgpr_alias_end(sgpr_count)))
+      return 0;
+    return uint64_t{1} << (reg / 2);
+  };
+  while (!worklist.empty()) {
+    BasicBlock *block = worklist.back();
+    worklist.pop_back();
+    uint64_t links = incoming.at(block);
+    for (const Instruction &inst : block->instructions()) {
+      if (!links)
+        break;
+      if (inst.mnemonic().starts_with("s_movrel")) {
+        links = 0;
+        break;
+      }
+      const InstDefUse effects(inst, 64);
+      for (uint64_t pairs = links; pairs; pairs &= pairs - 1) {
+        const uint16_t first = 2 * std::countr_zero(pairs);
+        if (effects.defs.intersects(RegisterRef{RegClass::SGPR, first, 2}))
+          links &= ~pair_bit(first);
+      }
+    }
+    if (block->successor_issue() != BasicBlock::SuccessorIssue::None) {
+      const Instruction *term = block->terminator();
+      if (block->successor_issue() != BasicBlock::SuccessorIssue::IndirectControlFlow || !term ||
+          term->mnemonic() != "s_setpc_b64" || !term->num_src_operands())
+        return true;
+      const auto src = term->src_operand(0)->to_register_ref();
+      if (!src || src->cls != RegClass::SGPR || src->width != 2 || !(links & pair_bit(src->index)))
+        return true;
+    }
+
+    const auto &calls = block->call_edges();
+    for (BasicBlock *next : block->successors())
+      merge(next, calls.empty() ? links : 0);
+    for (const BasicBlock::CallEdge &call : calls) {
+      // The callee may clobber any older saved link before it returns.
+      merge(call.continuation, 0);
+      const bool local = call.kind == BasicBlock::CallEdgeKind::DirectCall &&
+                         reachable.contains(call.continuation);
+      merge(call.callee, links | (local ? pair_bit(call.return_sreg) : 0));
+    }
+  }
+  return false;
+}
+
+// Shared code must satisfy every kernel that can execute a probe. Keep an
+// unresolved caller among the possible owners of every site.
+std::unordered_map<uint64_t, std::vector<uint32_t>>
+cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                        std::span<const KernelDescriptorInfo> kernels,
+                        std::span<const ResolvedInstrumentationSite> sites) {
+  std::unordered_map<uint64_t, std::vector<uint32_t>> owners;
+  const auto offsets = build_block_offset_index(blocks);
+  const auto positions = build_block_position_index(blocks);
+  std::vector<uint32_t> all_counts;
+  for (const auto &kernel : kernels) {
+    const uint32_t count =
+        *AmdGpuCodeObject::min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA3, std::span(&kernel, 1));
+    all_counts.push_back(count);
+    auto *entry = block_for_offset(offsets, kernel.entry_text_offset);
+    KernelScopeSpec spec;
+    // On gfx942 firmware can start 256 bytes beyond a kernarg-preload entry.
+    if (kernarg_preload_length(kernel.descriptor))
+      spec.own_entries.insert(kernel.entry_text_offset + 256);
+    std::vector<BasicBlock *> reached;
+    if (entry)
+      reached = reachable_kernel_blocks(blocks, offsets, positions, *entry, spec);
+    const std::unordered_set<BasicBlock *> reachable(reached.begin(), reached.end());
+    const bool incomplete =
+        !entry || cdna3_kernel_has_unknown_target(*entry, spec, offsets, reachable, count);
+    for (const auto &site : sites) {
+      if (site.is_probe_call() &&
+          (incomplete || reachable.contains(block_for_offset(offsets, site.anchor_offset))))
+        owners[site.anchor_offset].push_back(count);
+    }
+  }
+  for (const auto &site : sites)
+    if (site.is_probe_call() && !owners.contains(site.anchor_offset))
+      owners.emplace(site.anchor_offset, all_counts);
+  return owners;
 }
 
 // The probes whose arguments made a prologue necessary, named so a rejection
@@ -746,10 +918,15 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   RegisterSet reserved;
   if (!compute_probe_reserved_registers(probes, summaries, reserved, error_out))
     return std::nullopt;
+  if (options_.register_growth)
+    for (uint16_t reg = 0; reg < options_.register_growth->sgprs; ++reg)
+      reserved.expand(RegisterRef{RegClass::SGPR, reg, 1});
 
-  const std::optional<DbiEntryProloguePlan> planned = plan_dbi_entry_prologue(
-      KernelBlockScope(scope), kernel.descriptor, arch_, *kernel_sgpr_count, reserved, &err);
-  if (!planned) {
+  std::optional<DbiEntryProloguePlan> planned;
+  if (probes_read_entry_storage(probes))
+    planned = plan_dbi_entry_prologue(KernelBlockScope(scope), kernel.descriptor, arch_,
+                                      *kernel_sgpr_count, reserved, &err);
+  if (probes_read_entry_storage(probes) && !planned) {
     // Every rejection the planner reports is a property of the kernel, so its
     // message alone does not say why this kernel was asked to carry a prologue
     // at all. Naming the readers is what makes the failure actionable, and it
@@ -768,8 +945,39 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   patch.padding_bytes =
       padding_for_residue(cave_offset, entry_offset % kKernelEntryAlignment, kKernelEntryAlignment);
   patch.stub_offset = cave_offset + patch.padding_bytes;
-  patch.storage_base = planned->storage.persistent_base;
-  patch.words = planned->prologue.words;
+  if (planned) {
+    patch.storage_base = planned->storage.persistent_base;
+    patch.words = planned->prologue.words;
+    const uint32_t bound = kernel_vgpr_bounds(arch_, kernel.descriptor).ordinary_bound;
+    std::vector<uint16_t> sources;
+    for (const InstrumentationPoint &point : points_)
+      for (const ProbeArgValue &arg : point.probe_args)
+        if (arg.source == ProbeArgSource::EntryVgprLane0 &&
+            std::ranges::find(sources, arg.register_index) == sources.end())
+          sources.push_back(arg.register_index);
+    if (sources.size() > 2) {
+      report(error_out, "the entry snapshot has room for at most two lane-zero VGPR values");
+      return std::nullopt;
+    }
+    for (size_t index = 0; index < sources.size(); ++index) {
+      if (sources[index] >= std::min(bound, 256u)) {
+        report(error_out, "entry VGPR capture exceeds the kernel's ordinary VGPR allocation");
+        return std::nullopt;
+      }
+      const uint16_t destination = planned->storage.entry_temp_base + index;
+      util::StringDiagnostic lane_error;
+      const util::DiagnosticEmitter emit_lane_error = lane_error.emitter();
+      const util::FailureOr<std::array<uint32_t, 2>> maybe_words =
+          build_v_readlane_b32(destination, sources[index], 0, arch_, &emit_lane_error);
+      if (maybe_words.failed()) {
+        report(error_out, lane_error.message().c_str());
+        return std::nullopt;
+      }
+      const std::array<uint32_t, 2> &words = maybe_words.value();
+      patch.words.insert(patch.words.end(), words.begin(), words.end());
+      patch.captured_vgprs.push_back({sources[index], destination});
+    }
+  }
   const uint64_t branch_pc = patch.stub_offset + patch.words.size() * sizeof(uint32_t);
   const auto simm16 = compute_sopp_branch_simm16(branch_pc, entry_offset);
   if (!simm16) {
@@ -779,12 +987,18 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
                           .c_str());
     return std::nullopt;
   }
-  patch.words.push_back(build_s_branch(*simm16, arch_));
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> branch = build_s_branch(*simm16, arch_, &error);
+  if (branch.failed())
+    return std::nullopt;
+  patch.words.push_back(branch.value());
   return patch;
 }
 
-Instrumentor::Instrumentor(const AmdGpuCodeObject &obj, rj_code_arch_t arch)
-    : obj_(obj), arch_(arch) {}
+Instrumentor::Instrumentor(const AmdGpuCodeObject &obj, rj_code_arch_t arch,
+                           InstrumentationOptions options)
+    : obj_(obj), arch_(arch), options_(options) {}
 
 Instrumentor::~Instrumentor() = default;
 
@@ -816,6 +1030,14 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
       report(error_out, "code-object target does not match the requested architecture");
       return false;
     }
+  } else if (obj_.image_size() >= sizeof(Elf64_Ehdr)) {
+    Elf64_Ehdr header = {};
+    std::memcpy(&header, obj_.image_data(), sizeof(header));
+    const rj_code_arch_t source_arch = arch_for_elf_mach(header.e_flags);
+    if (source_arch != ROCJITSU_CODE_ARCH_INVALID && source_arch != arch_) {
+      report(error_out, "code-object ELF architecture does not match the requested architecture");
+      return false;
+    }
   }
   auto decoder = target == ROCJITSU_CODE_TARGET_INVALID ? Decoder::create(arch_)
                                                         : Decoder::create(registry, target);
@@ -831,21 +1053,10 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   blocks_ = std::move(blocks).value();
-  // BasicBlock::build returns blocks in .text order. Keep clause state across
-  // block boundaries because a branch target may split the linear instruction
-  // stream in the middle of a clause.
-  uint32_t clause_remaining = 0;
   for (const auto &block : blocks_) {
-    uint64_t cur = block->start_offset();
     for (const Instruction &inst : block->instructions()) {
-      if (clause_remaining > 0) {
-        clause_blocked_offsets_.insert(cur);
-        --clause_remaining;
-      }
-      offset_to_inst_.emplace(cur, &inst);
-      if (is_s_clause(inst))
-        clause_remaining = std::max(clause_remaining, s_clause_following_instruction_count(inst));
-      cur += static_cast<uint64_t>(inst.size());
+      offset_to_inst_.emplace(inst.src_loc(), &inst);
+      instruction_boundaries_.record(inst, obj_.text_sections().front()->vaddr());
     }
   }
   blocks_built_ = true;
@@ -855,6 +1066,32 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
 const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offset) const {
   auto it = offset_to_inst_.find(anchor_offset);
   return it == offset_to_inst_.end() ? nullptr : it->second;
+}
+
+bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
+                                         std::span<const KernelDescriptorInfo> kernels,
+                                         std::string *error_out) {
+  if (liveness_)
+    return true;
+  if (!ensure_blocks_built(error_out) || obj_.text_sections().size() != 1) {
+    report(error_out, "liveness requires one decodable text section");
+    return false;
+  }
+  const Section *text = obj_.text_sections().front();
+  std::vector<BasicBlock *> scope;
+  LivenessAnalysisOptions options;
+  if (arch_ == ROCJITSU_CODE_ARCH_CDNA5) {
+    options.arch = arch_;
+    options.text = {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
+  }
+  for (const std::unique_ptr<BasicBlock> &block : blocks_) {
+    scope.push_back(block.get());
+    if (kernels.size() == 1 && block->start_offset() == kernels.front().entry_text_offset)
+      options.entry_block = block.get();
+  }
+  liveness_ =
+      std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size, nullptr, options);
+  return true;
 }
 
 Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
@@ -889,9 +1126,29 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       }
     }
   }
+  // M0 can displace SGPR reads and writes, which ordinary liveness does not
+  // model. Callable probes allocate envelope registers from those facts.
+  if (std::ranges::any_of(
+          points_, [](const InstrumentationPoint &point) { return point.probe_obj != nullptr; })) {
+    std::vector<BasicBlock *> probe_scope;
+    probe_scope.reserve(blocks_.size());
+    for (const std::unique_ptr<BasicBlock> &block : blocks_)
+      probe_scope.push_back(block.get());
+    if (accesses_sgprs_indirectly_via_movrel(KernelBlockScope(probe_scope))) {
+      out.errors.emplace_back("probe calls do not support relative SGPR access (s_movrel*)");
+      return out;
+    }
+  }
   const Section *text = obj_.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());
+  // A probe call is analyzed and planned at the wave size the object's kernels
+  // share, with temps bounded by their SGPR allocation. The point loop refuses a
+  // probe call before any of that when either is missing.
+  const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
+                                       obj_.image_size());
+  out.kernels = scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+  out.wave_size = common_wavefront_size(arch_, out.kernels);
 
   const auto &registry = default_isa_target_registry();
   const IsaTargetDescriptor *arch_descriptor = registry.find(arch_);
@@ -904,6 +1161,46 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     return gpu_target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : gpu_target->public_id;
   };
   const rj_code_target_id_t destination_target = effective_target(obj_);
+  ProbeEntryState probe_entry_state = ProbeEntryState::Unknown;
+  if (arch_ == ROCJITSU_CODE_ARCH_CDNA5 && out.wave_size) {
+    if (!ensure_liveness_built(*out.wave_size, out.kernels, &err)) {
+      out.errors.push_back(err);
+      return out;
+    }
+    if (out.kernels.size() == 1) {
+      bool has_call = false;
+      for (const std::unique_ptr<BasicBlock> &block : blocks_) {
+        for (const Instruction &instruction : block->instructions())
+          has_call |= (instruction.flags() & INDIRECT_CALL) != 0;
+      }
+      if (!has_call) {
+        bool bank_analysis_failed = false;
+        const bool zero = std::ranges::all_of(points_, [&](const auto &point) {
+          const Instruction *anchor = find_instruction_at_offset(point.anchor_offset);
+          if (!anchor)
+            return false;
+          for (amdgpu::VgprMsbRole role : {amdgpu::VgprMsbRole::Src0, amdgpu::VgprMsbRole::Src1,
+                                           amdgpu::VgprMsbRole::Src2, amdgpu::VgprMsbRole::Dst}) {
+            const util::FailureOr<std::optional<uint8_t>> bank =
+                liveness_->vgpr_msb_bank_before(*anchor, role);
+            if (bank.failed()) {
+              bank_analysis_failed = true;
+              return false;
+            }
+            if (bank.value() != 0)
+              return false;
+          }
+          return true;
+        });
+        if (bank_analysis_failed) {
+          out.errors.emplace_back("probe entry VGPR bank liveness is unavailable");
+          return out;
+        }
+        if (zero)
+          probe_entry_state = ProbeEntryState::ZeroVgprBanks;
+      }
+    }
+  }
 
   // A probe is identified by the object it came from and the symbol inside it,
   // and its body is copied into the cave once per identity. The rest of the call
@@ -911,8 +1208,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   // body runs on) describes that one body, so it is recorded on the
   // ProbeCallable rather than keyed here. Two points naming one probe and
   // declaring it differently are not two probes; they are one probe declared
-  // twice, and the second declaration is rejected. Only the immediate *values*
-  // are genuinely per-site.
+  // twice, and the second declaration is rejected. Immediate values and guest
+  // register indices may vary per site.
   //
   // Whichever point resolves first supplies the declaration. Nothing here can do
   // better: a body reveals neither its arity nor its mask policy, so the two
@@ -986,7 +1283,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // which a trampoline at an arbitrary site cannot reproduce, so the probe
     // would read whatever the instrumented kernel left behind. An ordinary
     // uninitialized read lands here too, and is equally unusable.
-    auto live_ins = analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->abi, &perr);
+    std::optional<RegisterSet> live_ins = analyze_probe_live_ins(
+        *pt.probe_obj, *sym, arch_, callable->abi, *out.wave_size, &perr, probe_entry_state);
     if (!live_ins)
       return std::nullopt;
     if (!live_ins->none()) {
@@ -1005,6 +1303,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   // All-or-nothing: per-point errors accumulate
   std::vector<ResolvedInstrumentationSite> sites;
   std::unordered_set<uint64_t> site_offsets;
+  std::unordered_set<uint64_t> entry_offsets;
   sites.reserve(points_.size());
   for (const auto &pt : points_) {
     const Instruction *anchor = find_instruction_at_offset(pt.anchor_offset);
@@ -1014,7 +1313,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       continue;
     }
 
-    if (site_offsets.find(pt.anchor_offset) != site_offsets.end()) {
+    std::unordered_set<uint64_t> &offsets =
+        pt.kind == InstrumentationKind::KernelEntry ? entry_offsets : site_offsets;
+    if (offsets.contains(pt.anchor_offset)) {
       out.errors.emplace_back("multiple points requested the same anchor_offset = " +
                               std::to_string(pt.anchor_offset));
       continue;
@@ -1027,7 +1328,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       continue;
     }
 
-    if (clause_blocked_offsets_.contains(pt.anchor_offset)) {
+    const InstructionBoundaries::Entry *boundary = instruction_boundaries_.find(pt.anchor_offset);
+    if (boundary && boundary->clause_member) {
       out.errors.emplace_back("anchor is inside an s_clause run, anchor_offset = " +
                               std::to_string(pt.anchor_offset));
       continue;
@@ -1036,6 +1338,22 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // Resolve the probe request. An unresolvable or non-relocatable probe is
     // a fatal, all-or-nothing validation error.
     if (pt.probe_obj != nullptr) {
+      // A temp past the kernel's .sgpr_count would be unallocated, so probe
+      // calls always require a kernel descriptor to bound both SGPR selection
+      // and register growth.
+      if (out.kernels.empty()) {
+        out.errors.push_back("probe call at anchor_offset " + std::to_string(pt.anchor_offset) +
+                             " requires a discovered kernel descriptor to bound SGPR "
+                             "selection, but none was found");
+        continue;
+      }
+      if (!out.wave_size) {
+        out.errors.push_back("probe call at anchor_offset " + std::to_string(pt.anchor_offset) +
+                             " is in a code object whose kernels mix Wave32 and Wave64; "
+                             "DBI currently analyzes kernels and probes at one wave size "
+                             "per code object");
+        continue;
+      }
       auto index = resolve_probe_index(pt, perr);
       if (!index) {
         out.errors.push_back(std::move(perr));
@@ -1046,7 +1364,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     }
 
     sites.push_back(std::move(*site));
-    site_offsets.insert(site->anchor_offset);
+    offsets.insert(pt.anchor_offset);
   }
 
   if (out.errors.empty())
@@ -1065,32 +1383,6 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
 }
 
 InstrumentedCodeObject Instrumentor::patch() {
-  // The entry prologue loads through a kernarg wrapper that only a dispatch-time
-  // runtime can build, and no runtime builds one for DBI. Without it both loads
-  // read past the kernarg allocation and the guest's kernarg pointer is
-  // overwritten, so patch() refuses any point that would need the prologue.
-  // patch_with_debug_summaries() still plans it, for callers that supply the
-  // wrapper themselves.
-  std::string readers;
-  for (const InstrumentationPoint &pt : points_) {
-    if (std::none_of(pt.probe_args.begin(), pt.probe_args.end(),
-                     [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); }))
-      continue;
-    if (readers.find("'" + pt.probe_symbol + "'") != std::string::npos)
-      continue;
-    if (!readers.empty())
-      readers += ", ";
-    readers += "'" + pt.probe_symbol + "'";
-  }
-  if (!patched_ && !readers.empty()) {
-    patched_ = true;
-    InstrumentedCodeObject result;
-    result.errors.emplace_back("a probe reads the framework's entry storage, which needs a kernarg "
-                               "wrapper that no runtime builds yet; requested by " +
-                               readers);
-    return result;
-  }
-
   // Slice off the debug summaries; move the base subobject into the return.
   auto debug = patch_with_debug_summaries();
   return std::move(static_cast<InstrumentedCodeObject &>(debug));
@@ -1106,9 +1398,39 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   }
   patched_ = true;
 
+  if (options_.preservation == GuestStatePreservation::DeclaredRegisters &&
+      !options_.register_growth) {
+    result.errors.emplace_back("declared-register preservation requires original metadata counts");
+    return result;
+  }
+
   if (points_.empty()) {
     result.errors.emplace_back("Instrumentor::patch requires at least one queued point; got zero");
     return result;
+  }
+
+  // Entry storage needs a runtime-owned kernarg wrapper. Both patch entry points
+  // require the caller to bind it explicitly. Tests may skip this gate to inspect
+  // or dispatch a wrapper themselves; the prologue planner's checks still run.
+  if (!skip_patch_gates_ && options_.kernarg_binding == DbiKernargBinding::None) {
+    std::string readers;
+    for (const InstrumentationPoint &pt : points_) {
+      if (std::none_of(pt.probe_args.begin(), pt.probe_args.end(),
+                       [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); }))
+        continue;
+      if (readers.find("'" + pt.probe_symbol + "'") != std::string::npos)
+        continue;
+      if (!readers.empty())
+        readers += ", ";
+      readers += "'" + pt.probe_symbol + "'";
+    }
+    if (!readers.empty()) {
+      result.errors.emplace_back(
+          "a probe reads the framework's entry storage, which needs a "
+          "kernarg wrapper and CallerSuppliedWrapper binding; requested by " +
+          readers);
+      return result;
+    }
   }
 
   ResolvedPoints resolved = resolve_points();
@@ -1122,10 +1444,13 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // local code cave (as in the current DBT design).
   CodeObjectPatcher patcher(obj_);
   const uint64_t cave_start = patcher.text_size();
+  const std::vector<KernelDescriptorInfo> &kernels = resolved.kernels;
 
-  // Liveness over the decoded blocks, built once and reused by every probe-call
-  // site. validate_points() already built blocks_, and obj_ owns the
-  // Instructions live_before() is keyed on.
+  // Reuse the bank proof from resolution when present, and otherwise build
+  // liveness only for probe calls or register growth.
+  // resolve_points() built blocks_ and resolved those probes only because the
+  // kernels share a wave size. obj_ owns the Instructions live_before() is keyed
+  // on.
   // TODO: scope this to the kernel containing each anchor, like the DBT path,
   // rather than treating every decoded block as one CFG. Safe here: kernels end
   // in s_endpgm, so there are no false cross-kernel fallthrough edges.
@@ -1133,7 +1458,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   liveness_scope.reserve(blocks_.size());
   for (const auto &block : blocks_)
     liveness_scope.push_back(block.get());
-  const LivenessAnalysis liveness{KernelBlockScope(liveness_scope)};
+  if (options_.register_growth && kernels.size() != 1) {
+    result.errors.emplace_back("register growth needs one kernel with enumerable register uses");
+    return result;
+  }
+  if (!resolved.probes.empty() || options_.register_growth) {
+    std::string analysis_error;
+    if (!ensure_liveness_built(*resolved.wave_size, kernels, &analysis_error)) {
+      result.errors.push_back(std::move(analysis_error));
+      return result;
+    }
+  }
 
   // Lay out the appended region as [probe bodies][s_nop padding][entry stub]
   // [trampolines], the padding and stub only when the kernel has an entry
@@ -1150,17 +1485,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     cave_cursor += probe.body_words.size() * sizeof(uint32_t);
   }
 
-  // Register spilling targets a single-kernel code object for now: any site that
-  // must spill grows that one kernel's per-lane scratch. The SpillManager is
-  // created lazily on the first spilling site and shared by the rest; its final
-  // size is written back to the descriptor after all sites succeed.
-  const std::vector<KernelDescriptorInfo> kernels =
-      scan_kernel_descriptors(patcher.image_bytes(), patcher.text_offset(), patcher.text_size());
-
   // Temporary SGPR-allocation bound. The probe-call return-link pair is fixed
   // by the calling convention, so the kernel must allocate up to it. Derived from
   // the descriptors already scanned above.
-  const std::optional<uint32_t> kernel_sgpr_count =
+  std::optional<uint32_t> kernel_sgpr_count =
       AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels);
 
   // The kernel's VGPR allocation, decoded once: it depends only on the
@@ -1170,16 +1498,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // fails closed rather than silently widening a bound: `ordinary_bound == 0`
   // leaves the SGPR bridge scan with nothing to pick, and `acc_count == 0`
   // rejects every AccVGPR index.
-  const KernelVgprBounds vgpr_bounds = kernels.size() == 1
-                                           ? kernel_vgpr_bounds(arch_, kernels.front().descriptor)
-                                           : KernelVgprBounds{};
+  KernelVgprBounds vgpr_bounds = kernels.size() == 1
+                                     ? kernel_vgpr_bounds(arch_, kernels.front().descriptor)
+                                     : KernelVgprBounds{};
   // What each probe body overwrites. Keyed on the probe, not the site, so it is
   // decoded once per distinct body and indexed alongside resolved.probes.
   std::vector<ProbeClobberSummary> probe_summaries;
   probe_summaries.reserve(resolved.probes.size());
   for (const ProbeCallable &probe : resolved.probes) {
     std::string probe_err;
-    auto summary = build_probe_clobber_summary(probe, &probe_err);
+    std::optional<ProbeClobberSummary> summary =
+        build_probe_clobber_summary(probe, *resolved.wave_size, &probe_err);
     if (!summary) {
       result.errors.push_back(std::move(probe_err));
       continue;
@@ -1191,13 +1520,88 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   if (!result.errors.empty())
     return result;
 
-  // The kernel-entry prologue, planned only for kernels whose probes ask for the
-  // framework's entry storage. It runs before every site because dispatch
-  // enters at it. The prologue needs a kernarg wrapper that no runtime
-  // builds yet, which patch() enforces by refusing these probes.
+  uint32_t sgpr_save_base = 0;
+  uint32_t vgpr_save_base = 0;
+  auto include_registers = [&](const RegisterSet &registers) {
+    registers.for_each_ordinary([&](RegisterRef reg) {
+      const uint32_t end = uint32_t{reg.index} + reg.width;
+      if (reg.cls == RegClass::SGPR)
+        result.resources.sgprs = std::max(result.resources.sgprs, end);
+      if (reg.cls == RegClass::VGPR)
+        result.resources.vgprs = std::max(result.resources.vgprs, end);
+    });
+  };
+  RegisterSet guest_registers;
+  if (options_.register_growth) {
+    const util::FailureOr<bool> complete = liveness_->global_vgpr_usage_is_complete();
+    if (complete.failed()) {
+      result.errors.emplace_back("register growth's liveness is unavailable");
+      return result;
+    }
+    if (!complete.value() || accesses_sgprs_indirectly_via_movrel(liveness_scope)) {
+      result.errors.emplace_back("register growth needs one kernel with enumerable register uses");
+      return result;
+    }
+    result.resources = {.sgprs = options_.register_growth->sgprs,
+                        .vgprs = options_.register_growth->vgprs};
+    for (const std::unique_ptr<BasicBlock> &block : blocks_)
+      for (const Instruction &instruction : block->instructions()) {
+        const InstDefUse effects(instruction, *resolved.wave_size, liveness_->gfx1250_vgpr_msb(),
+                                 UnknownVgprDefPolicy::ExpandAll);
+        guest_registers |= effects.uses | effects.defs;
+      }
+    bool invalid = false;
+    guest_registers.for_each_ordinary([&](RegisterRef reg) {
+      const uint32_t end = uint32_t{reg.index} + reg.width;
+      invalid |= reg.cls == RegClass::ACC_VGPR ||
+                 (reg.cls == RegClass::SGPR && end > result.resources.sgprs) ||
+                 (reg.cls == RegClass::VGPR && end > result.resources.vgprs);
+    });
+    const uint32_t granule = descriptor_vgpr_granularity_for_wavefront(
+        arch_, kernel_wavefront_size(arch_, kernels.front().descriptor));
+    invalid |= result.resources.sgprs == 0 ||
+               result.resources.sgprs > REGISTER_SET_ALLOCATABLE_SGPRS ||
+               result.resources.vgprs == 0 || result.resources.vgprs > 256 ||
+               (result.resources.vgprs + granule - 1) / granule !=
+                   (kernels.front().descriptor.compute_pgm_rsrc1 & 63) + 1;
+    if (invalid) {
+      result.errors.emplace_back("register growth's original allocation disagrees with the guest");
+      return result;
+    }
+    // Entry inputs may include ABI padding beyond the registers the kernel uses
+    // (notably gfx1100 wave32). Growth must retain that physical allocation;
+    // metadata's used-register count need not include the padding.
+    result.resources.sgprs =
+        std::max(result.resources.sgprs,
+                 kernel_descriptor_initial_sgpr_count(arch_, kernels.front().descriptor));
+    for (size_t index = 0; index < resolved.probes.size(); ++index) {
+      include_registers(probe_summaries[index].ordinary_clobbers);
+      include_registers(arg_registers(resolved.probes[index].abi));
+      RegisterSet link;
+      link.expand(probe_link_pair(resolved.probes[index].abi));
+      include_registers(link);
+    }
+    sgpr_save_base = result.resources.sgprs + kDbiEntryStorageRegisters;
+    vgpr_save_base = result.resources.vgprs;
+    kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS +
+                        (arch_is_cdna_4_or_lower(arch_) ? kCdnaSpecialSgprTailReserve : 0);
+    vgpr_bounds = {.ordinary_bound = 256, .acc_count = 0};
+  }
+
+  // Dispatch-only storage/bootstrap or boundary callback. A production client
+  // using entry storage must explicitly accept the runtime wrapper obligation.
   std::optional<EntryProloguePatch> entry_patch;
   std::optional<uint16_t> entry_storage_base;
-  if (probes_read_entry_storage(resolved.probes)) {
+  const bool has_entry_callback = std::ranges::any_of(
+      sites, [](const auto &site) { return site.kind == InstrumentationKind::KernelEntry; });
+  for (const ResolvedInstrumentationSite &site : sites) {
+    if (site.kind == InstrumentationKind::KernelEntry &&
+        (kernels.size() != 1 || site.anchor_offset != kernels.front().entry_text_offset)) {
+      result.errors.emplace_back("KernelEntry must name the sole kernel's descriptor entry");
+      return result;
+    }
+  }
+  if (probes_read_entry_storage(resolved.probes) || has_entry_callback) {
     std::string err;
     entry_patch = plan_entry_prologue(kernels, kernel_sgpr_count, liveness_scope, resolved.probes,
                                       probe_summaries, cave_cursor, &err);
@@ -1206,11 +1610,26 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       return result;
     }
     entry_storage_base = entry_patch->storage_base;
+    if (entry_storage_base && options_.register_growth) {
+      result.resources.sgprs = std::max(result.resources.sgprs,
+                                        uint32_t{*entry_storage_base} + kDbiEntryStorageRegisters);
+      // Aligning entry storage can advance its snapshots past the initial
+      // backup base when the original SGPR count is odd.
+      for (const EntryVgprCapture &capture : entry_patch->captured_vgprs)
+        sgpr_save_base = std::max(sgpr_save_base, uint32_t{capture.sgpr} + 1);
+    }
     cave_cursor = entry_patch->stub_offset + entry_patch->words.size() * sizeof(uint32_t);
   }
 
+  // Register spilling targets a single-kernel code object for now: any site that
+  // must spill grows that one kernel's per-lane scratch. The SpillManager is
+  // created lazily on the first spilling site and shared by the rest; its final
+  // size is written back to the descriptor after all sites succeed.
   std::optional<SpillManager> spills;
-  uint64_t spill_descriptor_file_offset = 0;
+
+  std::unordered_map<uint64_t, std::vector<uint32_t>> cdna3_owners;
+  if (arch_ == ROCJITSU_CODE_ARCH_CDNA3 && kernels.size() > 1 && !resolved.probes.empty())
+    cdna3_owners = cdna3_probe_sgpr_counts(blocks_, kernels, sites);
 
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
@@ -1228,29 +1647,34 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     if (site.is_probe_call()) {
       const ProbeCallable &probe = resolved.probes[*site.probe_index];
 
-      // A probe call selects temp SGPRs (link/target/SCC/special-state) bounded by
-      // the kernel's own allocation. Without a discovered descriptor that bound is
-      // unknown, so a temp could land past the kernel's .sgpr_count; fail closed
-      // rather than fall back to the device-wide default (growing the allocation is
-      // deferred).
-      if (!kernel_sgpr_count) {
-        result.errors.push_back("probe call at anchor_offset " +
-                                std::to_string(site.anchor_offset) +
-                                " requires a discovered kernel descriptor to bound SGPR "
-                                "selection, but none was found");
-        continue;
-      }
-
-      // The kernel must own the fixed return-link pair.
-      if (const uint16_t link_base = probe.abi.link_pair_base;
-          is_valid_probe_abi(probe.abi) &&
-          !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, link_base)) {
-        result.errors.push_back(
-            "probe call needs the return-link pair s[" + std::to_string(link_base) + ":" +
-            std::to_string(link_base + 1) + "] but the kernel allocates only " +
-            std::to_string(*kernel_sgpr_count) + " SGPRs; rebuild the kernel with at least " +
-            std::to_string(link_base + 2) + " SGPRs");
-        continue;
+      const uint32_t default_count = kernel_sgpr_count.value_or(0);
+      std::span<const uint32_t> allocations(&default_count, 1);
+      if (!cdna3_owners.empty())
+        allocations = cdna3_owners.at(site.anchor_offset);
+      const uint32_t site_sgpr_count = std::ranges::min(allocations);
+      // The kernel must own an ordinary pair throughout the call. On gfx942 an
+      // in-bounds pair can still be the physical backing of VCC or FLAT_SCRATCH.
+      if (is_valid_probe_abi(probe.abi)) {
+        const uint16_t link_base = probe.abi.link_pair_base;
+        if (!probe_link_pair_fits_in_kernel(site_sgpr_count, link_base)) {
+          result.errors.push_back(
+              "probe call needs the return-link pair s[" + std::to_string(link_base) + ":" +
+              std::to_string(link_base + 1) + "] but the kernel allocates only " +
+              std::to_string(site_sgpr_count) + " SGPRs; rebuild the kernel with at least " +
+              std::to_string(link_base + 2) + " SGPRs");
+          continue;
+        }
+        const auto alias = std::ranges::find_if(allocations, [&](uint32_t count) {
+          return arch_ == ROCJITSU_CODE_ARCH_CDNA3 &&
+                 cdna3::sgpr_pair_overlaps_vcc_or_flat_scratch(count, link_base);
+        });
+        if (alias != allocations.end()) {
+          result.errors.push_back("probe return-link pair s[" + std::to_string(link_base) + ":" +
+                                  std::to_string(link_base + 1) +
+                                  "] overlaps VCC or FLAT_SCRATCH in the kernel's " +
+                                  std::to_string(*alias) + "-SGPR allocation");
+          continue;
+        }
       }
 
       // The kernel must likewise own the argument VGPRs. Only asked of a call
@@ -1302,7 +1726,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       const ProbeClobberSummary *summary = &probe_summaries[*site.probe_index];
 
       // Check for special machine state that has no save/restore path yet
-      if (!check_probe_special_state(*summary, &err)) {
+      if (!check_probe_special_state(*summary, arch_, allocations, &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }
@@ -1319,16 +1743,30 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.emplace_back("internal: anchor instruction vanished after validation");
         continue;
       }
-      auto maybe_live = liveness.live_before(*anchor);
+      const util::FailureOr<const RegisterSet *> maybe_live = liveness_->live_before(*anchor);
       if (maybe_live.failed()) {
         result.errors.emplace_back("internal: anchor liveness is unavailable");
         continue;
       }
-      const RegisterSet &live = *maybe_live.value();
+      RegisterSet live = *maybe_live.value() | probe_argument_registers(site.probe_args);
+      if (options_.register_growth &&
+          options_.preservation == GuestStatePreservation::DeclaredRegisters) {
+        for (uint16_t reg = 0; reg < options_.register_growth->sgprs; ++reg)
+          live.expand(RegisterRef{RegClass::SGPR, reg, 1});
+        for (uint16_t reg = 0; reg < options_.register_growth->vgprs; ++reg)
+          live.expand(RegisterRef{RegClass::VGPR, reg, 1});
+      }
 
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);
       plan.probe_target_offset = probe.output_text_offset;
+      if (site.kind == InstrumentationKind::KernelEntry) {
+        plan.emit_original = false;
+        plan.patch_anchor = false;
+        plan.return_target = site.anchor_offset;
+      }
+      if (site.kind == InstrumentationKind::KernelExit)
+        plan.returns_to_kernel = false;
       // Orchestrator policy: save EXEC/VCC unconditionally so correctness does
       // not depend on complete per-opcode implicit-def coverage. The summary
       // sees decoder-exposed operands; M0 follows touches_m0, which includes
@@ -1338,13 +1776,43 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       plan.preserve_m0 = summary->touches_m0;
       // Cap envelope/temp SGPR selection at the kernel's own allocation so a temp
       // never lands past its .sgpr_count
-      plan.kernel_sgpr_count = *kernel_sgpr_count;
+      plan.kernel_sgpr_count = site_sgpr_count;
+      plan.kernel_vgpr_count = vgpr_bounds.ordinary_bound;
       plan.probe_args = site.probe_args;
       plan.force_full_exec = probe.force_full_exec;
       // Set on every site of a kernel that has a prologue, not only the ones
       // passing the pointer on: the pair has to reach them all, so the envelope
       // has to stay off it everywhere.
       plan.entry_storage_base = entry_storage_base;
+      if (entry_patch)
+        plan.entry_vgpr_captures = entry_patch->captured_vgprs;
+      if (options_.register_growth) {
+        const RegisterSet overwritten =
+            (summary->ordinary_clobbers | arg_registers(probe.abi)) & live;
+        RegisterSet fixed_link;
+        fixed_link.expand(probe_link_pair(probe.abi));
+        const RegisterSet saved = overwritten | (fixed_link & live);
+        uint32_t next_sgpr = sgpr_save_base;
+        uint32_t next_vgpr = vgpr_save_base;
+        bool unavailable = false;
+        saved.for_each_ordinary([&](RegisterRef reg) {
+          for (uint32_t lane = 0; lane < reg.width; ++lane) {
+            uint32_t &destination = reg.cls == RegClass::SGPR ? next_sgpr : next_vgpr;
+            if ((reg.cls != RegClass::SGPR && reg.cls != RegClass::VGPR) ||
+                destination >=
+                    (reg.cls == RegClass::SGPR ? REGISTER_SET_ALLOCATABLE_SGPRS : 256u)) {
+              unavailable = true;
+              continue;
+            }
+            plan.register_saves.push_back({reg.cls, static_cast<uint16_t>(reg.index + lane),
+                                           static_cast<uint16_t>(destination++)});
+          }
+        });
+        if (unavailable) {
+          result.errors.emplace_back("register preservation exceeds the bounded register file");
+          continue;
+        }
+      }
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
       if (!TrampolineBuilder::plan_probe_call(plan, probe.abi, live, summary->ordinary_clobbers,
@@ -1360,7 +1828,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       const RegisterSet clobbers =
           compute_instrumentation_clobbers(*summary, plan.builder_clobbers);
       const RegisterSet spill = compute_spill_set(live, clobbers);
-      if (!spill.none()) {
+      if (options_.register_growth) {
+        include_registers(plan.builder_clobbers);
+      } else if (!spill.none()) {
         // Single-kernel assumption: spilling needs exactly one kernel descriptor
         // with non-zero fixed scratch to grow. That is the same condition under
         // which vgpr_bounds was decoded, so testing it here is what licenses the
@@ -1379,7 +1849,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
           // guards in the planners agree.
           const uint32_t scratch_limit = max_scratch_offset_bytes(arch_) + SpillManager::kSlotBytes;
           spills.emplace(kernel.descriptor.private_segment_fixed_size, scratch_limit);
-          spill_descriptor_file_offset = kernel.descriptor_file_offset;
         }
         // Split by class: VGPRs go straight to scratch; SGPRs bridge through a dead
         // VGPR; AccVGPRs go straight to scratch via the CDNA `acc` bit (no bridge).
@@ -1418,6 +1887,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
       // Get trampoline from TrampolineBuilder
       bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+      if (plan.returns_to_kernel)
+        record.return_target = plan.return_target;
       record.is_probe_call = true;
       record.probe_target_offset = probe.output_text_offset;
       record.link_pair_base = plan.link_pair_base;
@@ -1426,13 +1897,21 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Currently, this means that the plan is to put a nop which means we do
       // not need to mess with spills
     } else {
-      TrampolinePlan plan = make_trampoline_plan(site, arch_, trampoline_offset);
+      std::optional<TrampolinePlan> maybe_plan =
+          make_trampoline_plan(site, arch_, trampoline_offset, &err);
+      if (!maybe_plan) {
+        result.errors.push_back(std::move(err));
+        continue;
+      }
+      const TrampolinePlan &plan = *maybe_plan;
       // The only assembly we currently allow is an inlined nop
       if (!validate_inline_nop_plan(plan, &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }
       bytes = TrampolineBuilder::build(plan, &err);
+      if (plan.returns_to_kernel)
+        record.return_target = plan.return_target;
     }
 
     if (!bytes) {
@@ -1450,20 +1929,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   if (!result.errors.empty())
     return result;
 
-  // Grow the spilled kernel's per-lane scratch to cover its DBI spill zone. Done
-  // before replace_text so the edit lands at the descriptor's original file offset;
-  // replace_text then relocates the descriptor with the rest of the ELF.
-  if (spills) {
-    if (!patcher.set_private_segment_fixed_size(spill_descriptor_file_offset,
-                                                spills->total_private_bytes())) {
-      result.errors.emplace_back(
-          "failed to grow private_segment_fixed_size for the spilled kernel descriptor");
-      return result;
-    }
-  }
-
-  // Like the scratch growth above, written at the descriptor's original file
-  // offset; replace_text then shifts the entry field with everything else.
+  // Redirect at the original descriptor offset; replace_text then shifts the
+  // entry field with everything else. Resource sizes are committed together
+  // with their metadata after text replacement.
   if (entry_patch &&
       !patcher.redirect_kernel_entry(kernels.front().descriptor_file_offset,
                                      kernels.front().entry_text_offset, entry_patch->stub_offset)) {
@@ -1471,24 +1939,82 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     return result;
   }
 
-  // Every per-site validation, branch-range check, and trampoline-byte
-  // construction has succeeded up to this point. Assemble the new .text in one
-  // buffer: the original bytes with each anchor spliced to its forward branch,
-  // followed by the local cave. replace_text() grows .text in place and fixes
-  // up the surrounding ELF (section/segment sizes, moved symbols, descriptor
-  // entries).
-  const auto text_span = patcher.text_bytes();
-  std::vector<uint8_t> new_text(text_span.begin(), text_span.end());
-  for (const auto &a : applied) {
-    std::memcpy(new_text.data() + a.site->anchor_offset, a.bytes.patched_anchor_bytes.data(),
-                a.site->original_size);
+  // Per-site plans and trampoline bytes are ready. Collect original-text
+  // anchor replacements for one checked-edit transaction; KernelEntry callbacks
+  // retarget only the entry-stub branch. Apply checked edits before appending
+  // the local cave, then let replace_text() grow .text and fix up the surrounding
+  // ELF (section/segment sizes, moved symbols, descriptor entries).
+  std::vector<CheckedTextEdit> anchor_edits;
+  anchor_edits.reserve(applied.size());
+  for (const AppliedSite &applied_site : applied) {
+    if (applied_site.site->kind == InstrumentationKind::KernelEntry) {
+      const uint64_t branch_pc =
+          entry_patch->stub_offset + (entry_patch->words.size() - 1) * sizeof(uint32_t);
+      const std::optional<int16_t> target =
+          compute_sopp_branch_simm16(branch_pc, applied_site.trampoline_offset);
+      if (!target) {
+        result.errors.emplace_back("kernel-entry callback is outside the stub's branch range");
+        return result;
+      }
+      auto record_error = [&](std::string_view message) { result.errors.emplace_back(message); };
+      const util::DiagnosticEmitter error(record_error);
+      const util::FailureOr<uint32_t> branch = build_s_branch(*target, arch_, &error);
+      if (branch.failed())
+        return result;
+      entry_patch->words.back() = branch.value();
+    } else {
+      anchor_edits.push_back({.offset = applied_site.site->anchor_offset,
+                              .expected = applied_site.site->original_bytes,
+                              .replacement = {applied_site.bytes.patched_anchor_bytes.begin(),
+                                              applied_site.bytes.patched_anchor_bytes.begin() +
+                                                  applied_site.site->original_size}});
+    }
+  }
+  // Entry-only callbacks patch the appended stub, leaving original text intact.
+  const std::span<const uint8_t> original_text = patcher.text_bytes();
+  std::vector<uint8_t> new_text(original_text.begin(), original_text.end());
+  if (!anchor_edits.empty()) {
+    // Conditional-debug branches and subvector loops do not yet expose their
+    // destination metadata. Missing displacement does not prove an anchor has
+    // no incoming reference. Keep this admission guard out of generic analysis.
+    for (const std::unique_ptr<BasicBlock> &block : blocks_) {
+      for (const Instruction &instruction : block->instructions()) {
+        const std::string_view mnemonic = instruction.mnemonic();
+        if ((mnemonic.starts_with("s_cbranch_cdbg") || mnemonic == "s_subvector_loop_begin" ||
+             mnemonic == "s_subvector_loop_end") &&
+            !instruction.branch_offset_bytes()) {
+          result.edit_error = TextEditError{
+              .code = TextEditErrorCode::UnsupportedReferences,
+              .offset = instruction.src_loc(),
+              .message = "branch destination metadata is unavailable for " + std::string(mnemonic)};
+          result.errors.push_back("anchor edit transaction: " + result.edit_error->message);
+          return result;
+        }
+      }
+    }
+    std::vector<uint64_t> kernel_entries;
+    kernel_entries.reserve(kernels.size());
+    for (const KernelDescriptorInfo &kernel : kernels)
+      kernel_entries.push_back(kernel.entry_text_offset);
+    const CheckedTextEdits transaction(obj_, arch_, *decoder_, instruction_boundaries_, patcher,
+                                       kernel_entries);
+    TextEditError edit_error;
+    if (transaction.apply(anchor_edits, new_text, edit_error).failed()) {
+      result.errors.emplace_back("anchor edit transaction: " + edit_error.message);
+      result.edit_error = std::move(edit_error);
+      return result;
+    }
   }
   // Append in the laid-out order: probe bodies first (one per distinct probe),
   // then the padding and the entry stub, then the per-site trampolines.
   for (const ProbeCallable &probe : resolved.probes)
     append_words(new_text, probe.body_words);
   if (entry_patch) {
-    append_nop_padding(new_text, entry_patch->padding_bytes, arch_);
+    auto record_error = [&](std::string_view message) { result.errors.emplace_back(message); };
+    const util::DiagnosticEmitter error(record_error);
+    if (append_nop_padding(new_text, entry_patch->padding_bytes, arch_, &error).failed()) {
+      return result;
+    }
     append_words(new_text, entry_patch->words);
   }
   for (const auto &a : applied)
@@ -1498,7 +2024,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     return result;
   }
 
-  if (entry_patch) {
+  if (entry_patch && entry_patch->storage_base) {
     std::string err;
     if (!append_dbi_kernarg_record(patcher, obj_, kernels.front(), &err)) {
       result.errors.push_back(std::move(err));
@@ -1507,13 +2033,96 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   }
 
   // Emit and build patch summaries.
-  result.elf_bytes = patcher.emit();
+  std::vector<uint8_t> image = patcher.emit();
+  if (spills || options_.register_growth ||
+      options_.kernarg_binding == DbiKernargBinding::CallerSuppliedWrapper) {
+    AmdGpuCodeObject updated(image.data(), image.size());
+    if (!updated.is_valid() || updated.text_sections().size() != 1) {
+      result.errors.emplace_back("resource update cannot reparse the instrumented image");
+      return result;
+    }
+    const Section *updated_text = updated.text_sections().front();
+    const std::vector<KernelDescriptorInfo> updated_kernels =
+        scan_kernel_descriptors(image, updated_text->sectionOffset(), updated_text->size());
+    if (updated_kernels.size() != 1) {
+      result.errors.emplace_back("resource update requires the instrumented kernel descriptor");
+      return result;
+    }
+    const KernelDescriptorInfo &kernel = updated_kernels.front();
+    amdhsa::kernel_descriptor_t descriptor = kernel.descriptor;
+    if (spills)
+      descriptor.private_segment_fixed_size = spills->total_private_bytes();
+    result.resources.kernarg_bytes = descriptor.kernarg_size;
+    // A binding authorizes the wrapper needed by entry-storage readers. Calls
+    // without that prologue must retain the guest's original kernarg ABI.
+    if (entry_storage_base &&
+        options_.kernarg_binding == DbiKernargBinding::CallerSuppliedWrapper) {
+      const std::array payloads{kDbiEntryPayloadLayout};
+      const std::optional<KernargExtensionLayout> wrapper =
+          make_kernarg_extension_layout(descriptor.kernarg_size, payloads);
+      if (!wrapper) {
+        result.errors.emplace_back("runtime kernarg wrapper size overflows");
+        return result;
+      }
+      result.resources.kernarg_bytes = wrapper->wrapper_size;
+      descriptor.kernarg_size = wrapper->wrapper_size;
+    }
+    if (options_.register_growth) {
+      const uint32_t granule = descriptor_vgpr_granularity_for_wavefront(
+          arch_, kernel_wavefront_size(arch_, descriptor));
+      result.resources.vgprs = (result.resources.vgprs + granule - 1) / granule * granule;
+      if (result.resources.sgprs > REGISTER_SET_ALLOCATABLE_SGPRS || result.resources.vgprs > 256) {
+        result.errors.emplace_back("instrumentation exceeds the bounded register allocation");
+        return result;
+      }
+      if (arch_ == ROCJITSU_CODE_ARCH_CDNA3) {
+        const uint32_t old_end =
+            cdna3::sgpr_alias_end(*AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels));
+        const uint32_t new_end =
+            cdna3::sgpr_alias_end(result.resources.sgprs + kCdnaSpecialSgprTailReserve);
+        const auto uses_numeric_alias = [&](uint32_t end) {
+          return guest_registers.intersects({RegClass::SGPR, cdna3::flat_scratch_base(end), 2}) ||
+                 guest_registers.intersects({RegClass::SGPR, cdna3::vcc_base(end), 2});
+        };
+        if (old_end != new_end && (uses_numeric_alias(old_end) || uses_numeric_alias(new_end))) {
+          result.errors.emplace_back(
+              "register growth would change a guest numeric SGPR alias for VCC or FLAT_SCRATCH");
+          return result;
+        }
+      }
+      RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                         amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                         result.resources.vgprs / granule - 1);
+      if (arch_ == ROCJITSU_CODE_ARCH_CDNA3 || arch_ == ROCJITSU_CODE_ARCH_CDNA4) {
+        RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                           amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                           (result.resources.sgprs + kCdnaSpecialSgprTailReserve + 7) / 8 - 1);
+        RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3,
+                           amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                           result.resources.vgprs / 4 - 1);
+      }
+    }
+    if (spills || options_.register_growth || entry_storage_base) {
+      CodeObjectPatcher resource_patcher{AmdGpuCodeObject(image.data(), image.size())};
+      std::string error;
+      const std::optional<uint32_t> sgprs =
+          options_.register_growth ? std::optional<uint32_t>{result.resources.sgprs} : std::nullopt;
+      const std::optional<uint32_t> vgprs =
+          options_.register_growth ? std::optional<uint32_t>{result.resources.vgprs} : std::nullopt;
+      if (!resource_patcher.patch_kernel_resources(kernel, descriptor, sgprs, vgprs, &error)) {
+        result.errors.push_back("resource metadata/descriptor update failed: " + error);
+        return result;
+      }
+      image = resource_patcher.emit();
+    }
+  }
+  result.elf_bytes = std::move(image);
   for (const auto &a : applied) {
     InstrumentationPatch patch;
     patch.anchor_offset = a.site->anchor_offset;
     patch.original_size = a.site->original_size;
     patch.trampoline_offset = a.trampoline_offset;
-    patch.return_target = a.site->anchor_offset + a.site->original_size;
+    patch.return_target = a.return_target;
     patch.original_bytes = a.site->original_bytes;
     patch.patched_anchor_bytes = a.bytes.patched_anchor_bytes;
     patch.is_probe_call = a.is_probe_call;
@@ -1523,6 +2132,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       patch.link_pair_base = a.link_pair_base;
       patch.target_pair_base = a.target_pair_base;
     }
+    // The builder owns the layout, including the call envelope's attribution.
+    result.sites.push_back(
+        {.kind = a.site->kind,
+         .original_offset = a.site->anchor_offset,
+         .guest_offset = a.trampoline_offset + a.bytes.original_byte_offset,
+         .guest_size =
+             a.site->kind == InstrumentationKind::KernelEntry ? 0u : a.site->original_size,
+         .instrumentation_offset =
+             a.trampoline_offset + (a.is_probe_call ? a.bytes.call_envelope_byte_offset : 0),
+         .instrumentation_size =
+             a.is_probe_call ? a.bytes.call_envelope_byte_size : a.bytes.original_byte_offset});
     result.patches.push_back(std::move(patch));
   }
   return result;

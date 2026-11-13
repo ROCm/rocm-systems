@@ -800,8 +800,7 @@ __host__ int rocshmem_team_split_strided(
                                stride_in_world, size);
 
   MPI_Comm team_comm{MPI_COMM_NULL};
-  if (parent_team_obj->mpi_comm != MPI_COMM_NULL &&
-      parent_team_obj->mpi_comm != static_cast<MPI_Comm>(0)) {
+  if (parent_team_obj->mpi_comm != MPI_COMM_NULL) {
     /* Create a new MPI communicator for this team */
     int color;
     if (my_pe_in_new_team < 0) {
@@ -830,7 +829,7 @@ __host__ int rocshmem_team_split_strided(
     backend->team_tracker.track(*new_team);
   }
 
-  if (team_comm != MPI_COMM_NULL && team_comm != static_cast<MPI_Comm>(0)) {
+  if (team_comm != MPI_COMM_NULL) {
     mpilib_ftable_.Comm_free (&team_comm);
   }
   return 0;
@@ -1366,6 +1365,18 @@ __host__ void rocshmem_putmem_signal_on_stream(void *dest, const void *source,
                                                int pe, hipStream_t stream) {
   RocshmemGetFunctionTable()->putmem_signal_on_stream_fn(dest, source, nelems, sig_addr, signal, sig_op,
                                 pe, stream);
+}
+
+__host__ void rocshmem_signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                            int pe, hipStream_t stream) {
+  RocshmemGetFunctionTable()->signal_add_on_stream_fn(sig_addr, signal, pe,
+                                                      stream);
+}
+
+__host__ void rocshmem_signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                            int pe, hipStream_t stream) {
+  RocshmemGetFunctionTable()->signal_set_on_stream_fn(sig_addr, signal, pe,
+                                                      stream);
 }
 
 __host__ void rocshmem_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,

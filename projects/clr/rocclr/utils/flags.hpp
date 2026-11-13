@@ -196,6 +196,8 @@ release(bool, DEBUG_HIP_MEM_POOL_VMHEAP, true,                                \
         "Enables virtual memory for memory pools")                            \
 release(bool, PAL_HIP_IPC_FLAG, true,                                         \
         "Enable interprocess flag for device allocation in PAL HIP")          \
+release(bool, OMNICACHE_ENABLE, true,                                         \
+        "Opt the process into OmniCache VRAM<->DRAM tiering.")                \
 release(uint, PAL_FORCE_ASIC_REVISION, 0,                                     \
         "Force a specific asic revision for all devices")                     \
 release(bool, PAL_EMBED_KERNEL_MD, false,                                     \
@@ -246,6 +248,11 @@ release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
 release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 0,                          \
         "Segment scheduling mode (segmented path only): "                      \
         "0=Hybrid/auto, 1=Round-robin, 2=DFS")                                \
+release(uint, DEBUG_HIP_GRAPH_COLLAPSE_RULE, 1,                               \
+        "When a segmented graph collapses to one stream: 1 = C1, a cross-stream "\
+        "edge touching a node that isn't AQL-captured collapses it, and the "  \
+        "slack rule applies only if DEBUG_HIP_GRAPH_MIN_OVERLAP is set; 0 = the "\
+        "slack rule (DEBUG_HIP_GRAPH_MIN_OVERLAP) alone, as before")          \
 release(uint, DEBUG_HIP_GRAPH_MIN_OVERLAP, 2,                                 \
         "Min overlappable work (in occupancy passes) per unit of cross-stream "\
         "sync (barrier packets + completion signals) to keep a graph "         \
@@ -294,6 +301,13 @@ release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
         "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
 release(bool, DEBUG_CLR_GRAPH_DEV_SIGNALS, true,                              \
         "Place graph signals in device memory (large BAR only)")              \
+release(bool, DEBUG_CLR_DEV_SIGNALS, false,                                   \
+        "Place queue signals in device memory (large BAR only)")              \
+release(bool, DEBUG_CLR_GRAPH_FAST_LAUNCH, true,                             \
+        "Graph launches on several streams: one-packet end markers with a "  \
+        "gate for the other queues, fork waits without marker commands, "     \
+        "empty nodes carrying their waits, no host read-backs of device "     \
+        "memory on the launch path (0 = the previous launch path)")           \
 
 namespace amd {
 

@@ -6,11 +6,11 @@
 
 #pragma once
 
-#include <bit>
+#include "common/bits.h"
 
 #include <stdint.h>
 
-namespace rocjitsu::arith {
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 // Shift right, retaining a sticky low bit for all discarded nonzero bits.
 inline uint64_t fma_shift_jam(uint64_t value, int shift) {
@@ -50,7 +50,7 @@ inline uint64_t fma_finite_round_odd(uint32_t a, uint32_t b, uint32_t c) {
   auto normalize = [](uint64_t &value, int &exponent) {
     if (value) {
       // Inputs are below 2^62; the sum's carry is removed before normalization.
-      const int shift = std::countl_zero(value) - 2;
+      const int shift = rocjitsu::arith::countl_zero(value) - 2;
       value <<= shift;
       exponent -= shift;
     }
@@ -86,4 +86,4 @@ inline uint64_t fma_finite_round_odd(uint32_t a, uint32_t b, uint32_t c) {
          (significand & 0xfffffffffffffULL);
 }
 
-} // namespace rocjitsu::arith
+} // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

@@ -17,12 +17,11 @@
 namespace amd::roc {
 DmaBlitManager::DmaBlitManager(VirtualGPU& gpu, Setup setup)
     : HostBlitManager(gpu, setup),
-      MinSizeForPinnedXfer(dev().settings().pinnedMinXferSize_),
       PinXferSize(dev().settings().pinnedXferSize_),
+      MinSizeForPinnedXfer(dev().settings().pinnedMinXferSize_),
       StagingXferSize(dev().settings().stagedXferSize_),
       completeOperation_(false),
-      context_(nullptr) {
-}
+      context_(nullptr) {}
 
 inline void DmaBlitManager::synchronize() const {
   if (syncOperation_) {
@@ -339,6 +338,9 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
                                      (reinterpret_cast<const_address>(src) + srcOffset), srcAgent,
                                      size[0], wait_events.size(), wait_events.data(), active);
           if (status != HSA_STATUS_SUCCESS) {
+            // The rows already issued still decrement the signal; resetting the slot before they
+            // finish would let them complete its next use early
+            WaitForIssuedOps(active, kInitVal - (z * size[1] + y));
             gpu().Barriers().ResetCurrentSignal();
             LogPrintfError("DMA buffer failed with code %d", status);
             return false;
@@ -588,7 +590,6 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   hsa_status_t status = HSA_STATUS_SUCCESS;
   uint32_t copyMask = 0;
   bool kUseRegularCopyApi = false;
-  constexpr size_t kRetainCountThreshold = 8;
   const bool requireSDMA =
       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA);
   bool forceSDMA = requireSDMA;
@@ -793,7 +794,7 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
     case amd::CopyMetadata::kCopyOpSwap:
       hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
       hsaOp.src_size = op.size;
-      hsaOp.dst_size = op.size;
+      hsaOp.dst_size = (op.sizeB > 0) ? op.sizeB : op.size;
       break;
     case amd::CopyMetadata::kCopyOpIndirectSrc:
       hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC;
@@ -886,6 +887,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       std::vector<void*> dsts;
       std::vector<hsa_agent_t> dst_agents;
       std::vector<size_t> sizes;
+      std::vector<size_t> dst_sizes;
     };
 
     MultiArrays swapPending;
@@ -916,12 +918,12 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     for (const auto& op : ops) {
       if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
-        assert(op.src_size == op.dst_size && "Asymmetric swap not yet supported");
         if (swapPending.srcs.empty()) swapSrcAgent = op.src_agent;
         swapPending.srcs.push_back(op.src);
         swapPending.dsts.push_back(op.dst);
         swapPending.dst_agents.push_back(op.dst_agent);
         swapPending.sizes.push_back(op.src_size);
+        swapPending.dst_sizes.push_back(op.dst_size);
         continue;
       }
       const auto opType = static_cast<hsa_amd_memory_copy_op_type_t>(op.type);
@@ -963,19 +965,39 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     // --- Emit SWAP batch ---
     if (!swapPending.srcs.empty()) {
-      multiStore.push_back(std::move(swapPending));
-      auto& stored = multiStore.back();
+      const bool has_asymmetric = swapPending.sizes != swapPending.dst_sizes;
 
-      hsa_amd_memory_copy_op_t swap = {};
-      swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-      swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
-      swap.src_agent = swapSrcAgent;
-      swap.src_list = stored.srcs.data();
-      swap.dst_list = stored.dsts.data();
-      swap.dst_agent_list = stored.dst_agents.data();
-      swap.size_list = stored.sizes.data();
-      swap.num_entries = static_cast<uint16_t>(stored.srcs.size());
-      finalOps.push_back(swap);
+      if (has_asymmetric) {
+        // Asymmetric: one scalar op per entry.
+        for (size_t i = 0; i < swapPending.srcs.size(); ++i) {
+          hsa_amd_memory_copy_op_t swap = {};
+          swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+          swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
+          swap.src_agent = swapSrcAgent;
+          swap.src = swapPending.srcs[i];
+          swap.dst = swapPending.dsts[i];
+          swap.dst_agent = swapPending.dst_agents[i];
+          swap.src_size = swapPending.sizes[i];
+          swap.dst_size = swapPending.dst_sizes[i];
+          swap.num_entries = 0;
+          finalOps.push_back(swap);
+        }
+      } else {
+        // Symmetric: one multi-entry op.
+        multiStore.push_back(std::move(swapPending));
+        auto& stored = multiStore.back();
+
+        hsa_amd_memory_copy_op_t swap = {};
+        swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+        swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
+        swap.src_agent = swapSrcAgent;
+        swap.src_list = stored.srcs.data();
+        swap.dst_list = stored.dsts.data();
+        swap.dst_agent_list = stored.dst_agents.data();
+        swap.size_list = stored.sizes.data();
+        swap.num_entries = static_cast<uint16_t>(stored.srcs.size());
+        finalOps.push_back(swap);
+      }
     }
 
     // --- Emit LINEAR / BROADCAST batches ---
@@ -1191,16 +1213,19 @@ void DmaBlitManager::releaseBuffer(BufferState& buffer) const {
 bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDst, size_t size,
                                            bool hostToDev, amd::CopyMetadata& copyMetadata,
                                            bool enablePin) const {
-  // Do not skip wait here for D2H. Resolving dependent signals for SDMA engine is slow
-  gpu().releaseGpuMemoryFence(hostToDev || !dev().settings().blocking_blit_);
+  // D2H: wait when blocking_blit_ is set — resolving dependent signals for SDMA is slow.
+  // H2D: the staging path's CPU memcpy races with pending host callbacks (e.g.
+  // hipLaunchHostFunc writing to hostSrc).  The pinned/SDMA path is ordered by signal
+  // dependencies and does not need a CPU wait, so the fence is deferred to the staging
+  // path below.
+  const bool skip_wait = hostToDev || !dev().settings().blocking_blit_;
+  gpu().releaseGpuMemoryFence(skip_wait);
   // If Pinning is enabled, Pin host Memory for copy size > MinSizeForPinnedTransfer
   // For 16KB < size <= MinSizeForPinnedTransfer Use staging buffer without pinning
   bool status = true;
   size_t copyOffset = 0;
   size_t totalSize = size;
 
-  // Staging Buffer or Pinned Host Memory
-  address stagingBuffer = 0;
   // src and dst agent for rocr
   hsa_agent_t srcAgent = hostToDev ? dev().getCpuAgent() : dev().getBackendDevice();
   hsa_agent_t dstAgent = hostToDev ? dev().getBackendDevice() : dev().getCpuAgent();
@@ -1220,6 +1245,11 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
     }
     if (hostToDev) {                          // H2D Path
       if (outBuffer.pinnedMem_ == nullptr) {  // Copy to Staging Buffer
+        // Wait for prior GPU work before the CPU reads hostSrc — a host-function
+        // callback (e.g. hipLaunchHostFunc) may still be writing to it.
+        if (firstTx) {
+          gpu().releaseGpuMemoryFence(false);
+        }
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "memcpy stg buf=%p, host src=%p, size=%zu",
                 stagingBuffer, hostSrc + copyOffset, copysize);
         memcpy(stagingBuffer, hostSrc + copyOffset, copysize);
@@ -1460,7 +1490,6 @@ bool KernelBlitManager::copyBufferToImageKernel(
   Memory* dstView = &gpuMem(dstMemory);
   bool result = false;
   amd::Image* dstImage = static_cast<amd::Image*>(dstMemory.owner());
-  amd::Image* srcImage = static_cast<amd::Image*>(srcMemory.owner());
   amd::Image::Format newFormat(dstImage->getImageFormat());
   bool swapLayer =
       (dstImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().isa().versionMajor() >= 10);
@@ -2080,7 +2109,6 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
                                        bool entire, amd::CopyMetadata copyMetadata) const {
   std::scoped_lock k(lockXferOps_);
   bool result = false;
-  bool rejected = false;
 
   // hsa_amd_memory_async_copy_rect requires dword-aligned row/slice pitches.
   // When they are not aligned, DmaBlitManager::copyBufferRect falls back to one
@@ -2426,6 +2454,9 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
       amd::Coord3D srcOrigin(0, 0, 0);
       size_t copySize = 0;
       size_t stagedCopyOffset = 0;
+
+      // Wait for prior GPU work (e.g. hipLaunchHostFunc callback) before the CPU reads srcAddr.
+      gpu().releaseGpuMemoryFence(false);
 
       while (totalSize > 0) {
         BufferState outBuffer = {0};
@@ -3899,11 +3930,6 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
   size_t localWorkSize[1] = {1};
 
   amd::NDRangeContainer ndrange(1, globalWorkOffset, globalWorkSize, localWorkSize);
-
-  device::Kernel* devKernel =
-      const_cast<device::Kernel*>(kernels_[Scheduler]->getDeviceKernel(dev()));
-
-  Kernel& gpuKernel = static_cast<Kernel&>(*devKernel);
 
   auto* sp =
       reinterpret_cast<SchedulerParam*>(gpu().allocKernArg(sizeof(SchedulerParam), kCBAlignment));

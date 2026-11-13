@@ -2,24 +2,77 @@
   box-sizing: border-box;
 }
 
-html {
+html,
+body {
   min-width: 320px;
-  background: #f5f7fb;
 }
 
 body {
   margin: 0;
-  min-width: 320px;
+  font-family: var(--font-family-text);
+  /* System fonts' digits are proportional by default. Keep numbers aligned. */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
+code,
+pre {
+  font-family: var(--font-family-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
 #root {
-  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Keep chart tooltip text on the normal paint path, not a scaled GPU bitmap.
+   Important overrides ECharts' inline translate3d/left/top positioning. */
+.dashboard-chart-tooltip {
+  transform: none !important;
+  will-change: auto !important;
+  backdrop-filter: none !important;
+  left: var(--chart-tooltip-x, 0px) !important;
+  top: var(--chart-tooltip-y, 0px) !important;
+  line-height: 1.5;
+}
+
+/* The trend compares several configurations; size to the longest summary row.
+   The chart-width cap makes a long row wrap instead of being clipped by the card. */
+.performance-trend-tooltip {
+  --chart-tooltip-max-width: min(760px, 100%);
+  width: max-content;
+}
+
+.dashboard-chart-tooltip b, .dashboard-chart-tooltip strong {
+  font-weight: var(--font-weight-emphasized);
+}
+
+.chart-tooltip-swatch {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+@keyframes dashboard-skeleton-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+.MuiSkeleton-root.MuiSkeleton-wave::after {
+  transform: none;
+  background-size: 200% 100%;
+  animation: dashboard-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .MuiSkeleton-root.MuiSkeleton-wave::after { animation: none; }
 }
 
 ::-webkit-scrollbar {
@@ -30,6 +83,6 @@ select {
 ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 999px;
-  background: rgba(100, 116, 139, 0.35);
+  background: var(--dashboard-scrollbar-thumb);
   background-clip: padding-box;
 }

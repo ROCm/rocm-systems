@@ -1,0 +1,15 @@
+{
+    "_comment": "Validation rules for gfx1250. The test runs videodecode with -t 1 on 2 videos, which produces 3 threads on gfx1250.",
+    "required_tables": [
+        {
+            "min_rows": 3,
+            "name": "threads",
+            "required_columns": [
+                "tid",
+                "start",
+                "end",
+                "name"
+            ]
+        }
+    ]
+}

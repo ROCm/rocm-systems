@@ -27,6 +27,10 @@
  * as the archive grows on disk. Two one-shot holds park the next statvfs or
  * fsync, so a test can line up the races the writer has to survive.
  *
+ * The size limits the user sets, HIP_HRR_CAPTURE_MAX_MB and
+ * HIP_HRR_CAPTURE_MAX_BLOB_MB, are tested here too, with free space left at its
+ * default so only the limit can stop the capture.
+ *
  * POSIX only: Windows reads free space through GetDiskFreeSpaceExA, which this
  * file does not fake.
  */
@@ -359,6 +363,11 @@ constexpr int      kTinyCount = 1500;
 constexpr int      kMemsetCount = 200;
 // Events still buffered when the capture stops are flushed into events.bin.
 constexpr uint64_t kEventSlack = 64u << 10;
+// HIP_HRR_CAPTURE_MAX_MB for Unit_HRR_CaptureLimit_StopsAtSize, with room for
+// the fat binaries the capture records at start, and the copies that pass it.
+constexpr uint64_t kLimitMiB    = 64;
+constexpr size_t   kLimitCopy   = 1u << 20;
+constexpr int      kLimitCopies = static_cast<int>(2 * kLimitMiB);
 
 struct HrrDiskSpaceBig {
   unsigned char bytes[3000];
@@ -371,6 +380,9 @@ struct HrrDiskSpaceMid {
 };
 
 }  // namespace
+
+// Written by the to-symbol graph copies of Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct.
+__device__ unsigned char hrr_limit_symbol[kBigCopy];
 
 __global__ void hrr_disk_space_big_arg(HrrDiskSpaceBig big, int* out) {
   if (threadIdx.x == 0) out[0] = big.bytes[0] + big.bytes[sizeof(big.bytes) - 1];
@@ -694,6 +706,82 @@ TEST_CASE("Unit_HRR_DiskSpace_StopsAfterRename_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
+// Run with HIP_HRR_CAPTURE_MAX_MB set to kLimitMiB: twice that in distinct
+// copies, then one read back after the capture has stopped.
+TEST_CASE("Unit_HRR_CaptureLimit_StopsAtSize_Direct", "[.][hrr-direct]") {
+  if (getenv("HIP_HRR_CAPTURE_MAX_MB") == nullptr)
+    HRR_SKIP("started by Unit_HRR_CaptureLimit_StopsAtSize");
+  begin_workload();
+  void* dev = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dev, kLimitCopy));
+  for (int i = 0; i < kLimitCopies; ++i) copy_to_device(dev, 1600 + i, kLimitCopy);
+  std::vector<unsigned char> out(kLimitCopy);
+  HRR_HIP_CHECK(hipMemcpy(out.data(), dev, kLimitCopy, hipMemcpyDeviceToHost));
+  REQUIRE(out == pattern(kLimitCopy, 1600 + kLimitCopies - 1));
+  HRR_HIP_CHECK(hipFree(dev));
+}
+
+// Run with HIP_HRR_CAPTURE_MAX_MB set to kLimitMiB: the parent reaches it, then
+// forks a child that records once.
+TEST_CASE("Unit_HRR_CaptureLimit_ForkAfterStop_Direct", "[.][hrr-direct]") {
+  if (getenv("HIP_HRR_CAPTURE_MAX_MB") == nullptr)
+    HRR_SKIP("started by Unit_HRR_CaptureLimit_ForkAfterStop");
+  begin_workload();
+  void* dev = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dev, kLimitCopy));
+  for (int i = 0; i < kLimitCopies; ++i) copy_to_device(dev, 1800 + i, kLimitCopy);
+
+  fflush(stdout);
+  fflush(stderr);
+  const pid_t child = fork();
+  if (child == 0) {
+    g_quick_exit_pid.store(getpid());
+    record_in_child();
+    std::exit(0);
+  }
+  REQUIRE(child > 0);
+  const int status = wait_child(child);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
+  HRR_HIP_CHECK(hipFree(dev));
+}
+
+// Run with HIP_HRR_CAPTURE_MAX_BLOB_MB set to 1: two copies, a 2D copy, a
+// registration and two to-symbol graph copies from pinned memory over it, then
+// one copy under it and its read back.
+TEST_CASE("Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct", "[.][hrr-direct]") {
+  if (getenv("HIP_HRR_CAPTURE_MAX_BLOB_MB") == nullptr)
+    HRR_SKIP("started by Unit_HRR_CaptureLimit_SkipsLargeBlob");
+  begin_workload();
+  void* dev = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dev, kBigCopy));
+  copy_to_device(dev, 1700, kBigCopy);
+  copy_to_device(dev, 1701, kBigCopy);
+  std::vector<unsigned char> rows = pattern(kBigCopy, 1703);
+  HRR_HIP_CHECK(hipMemcpy2D(dev, kStepCopy, rows.data(), kStepCopy, kStepCopy,
+                            kBigCopy / kStepCopy, hipMemcpyHostToDevice));
+  HRR_HIP_CHECK(hipHostRegister(rows.data(), kBigCopy, hipHostRegisterDefault));
+  HRR_HIP_CHECK(hipHostUnregister(rows.data()));
+  void* pinned = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(&pinned, kBigCopy));
+  std::memcpy(pinned, rows.data(), kBigCopy);
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphNode_t node = nullptr;
+  for (const hipMemcpyKind kind : {hipMemcpyHostToDevice, hipMemcpyDefault})
+    HRR_HIP_CHECK(hipGraphAddMemcpyNodeToSymbol(&node, graph, nullptr, 0,
+                                                HIP_SYMBOL(hrr_limit_symbol), pinned,
+                                                kBigCopy, 0, kind));
+  HRR_HIP_CHECK(hipGraphDestroy(graph));
+  HRR_HIP_CHECK(hipHostFree(pinned));
+  copy_to_device(dev, 1702, kStepCopy);
+  std::vector<unsigned char> out(kStepCopy);
+  HRR_HIP_CHECK(hipMemcpy(out.data(), dev, kStepCopy, hipMemcpyDeviceToHost));
+  REQUIRE(out == pattern(kStepCopy, 1702));
+  HRR_HIP_CHECK(hipFree(dev));
+}
+
 // ===========================================================================
 // Drivers.
 // ===========================================================================
@@ -706,9 +794,11 @@ struct WorkloadRun {
 };
 
 WorkloadRun run_workload(const std::string& name, const fs::path& cap, uint64_t total,
-                         uint64_t avail = 0) {
+                         uint64_t avail = 0,
+                         const std::vector<std::pair<std::string, std::string>>& env = {}) {
   hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.string());
+  for (const auto& [key, value] : env) proc.setEnv(key, value);
   proc.setEnv("HRR_TEST_FAKE_FS_TOTAL", std::to_string(total));
   if (avail != 0) proc.setEnv("HRR_TEST_FAKE_FS_AVAIL", std::to_string(avail));
   set_proc_search_path(proc);
@@ -766,7 +856,7 @@ size_t count_processes(const fs::path& cap) {
 }
 
 fs::path cap_dir(const char* name) {
-  return fs::temp_directory_path() / (std::string("hrr_disk_space_") + name + ".hrr");
+  return hrr_temp_dir(std::string("hrr_disk_space_") + name);
 }
 
 }  // namespace
@@ -989,6 +1079,103 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_StopsAfterRename) {
   CHECK(count_of(run.out, kStopped) == 1);
   CHECK(read_text_file(cap.path / "moved" / "manifest.json").find(kIncomplete) !=
         std::string::npos);
+}
+
+namespace {
+
+// Bytes HIP_HRR_CAPTURE_MAX_MB holds a process archive to: everything in it but
+// the manifests and the active marker.
+uint64_t capped_bytes(const fs::path& proc_dir) {
+  uint64_t sum = 0;
+  for (const auto& ent : fs::recursive_directory_iterator(proc_dir)) {
+    const std::string name = ent.path().filename().string();
+    if (ent.is_regular_file() && name != "manifest.json" && name != "active")
+      sum += ent.file_size();
+  }
+  return sum;
+}
+
+}  // namespace
+
+// The archive stops growing at the user's limit: the write that would pass it is
+// not made, capture stops as it does for space, and the program runs on.
+HRR_TEST_CASE(Unit_HRR_CaptureLimit_StopsAtSize) {
+  ScopedDir cap(cap_dir("limit_size"));
+  const WorkloadRun run =
+      run_workload("Unit_HRR_CaptureLimit_StopsAtSize_Direct", cap.path, kTotal64M, 0,
+                   {{"HIP_HRR_CAPTURE_MAX_MB", std::to_string(kLimitMiB)}});
+  INFO("Capture output:\n" << run.out);
+  REQUIRE(run.rc == 0);
+  CHECK(count_of(run.out, "HIP_HRR_CAPTURE_MAX_MB limit of " + std::to_string(kLimitMiB) +
+                              " MiB") == 1);
+  hrr::Archive arc;
+  load_stopped_archive(cap.path, run, arc);
+  CHECK(count_h2d(arc, kLimitCopy) < static_cast<size_t>(kLimitCopies));
+  // Stopped by the copy that would have passed the limit, not before.
+  const uint64_t held = capped_bytes(hrr_single_process_archive(cap.path));
+  INFO("archive holds " << held << " bytes");
+  CHECK(held <= kLimitMiB << 20);
+  CHECK(held > (kLimitMiB << 20) - 2 * kLimitCopy);
+}
+
+// Unlike a stop for space, a stop at the limit is the parent archive's alone: a
+// child forked after it still captures, into an archive of its own.
+HRR_TEST_CASE(Unit_HRR_CaptureLimit_ForkAfterStop) {
+  ScopedDir cap(cap_dir("limit_fork"));
+  const WorkloadRun run =
+      run_workload("Unit_HRR_CaptureLimit_ForkAfterStop_Direct", cap.path, kTotal64M, 0,
+                   {{"HIP_HRR_CAPTURE_MAX_MB", std::to_string(kLimitMiB)}});
+  INFO("Capture output:\n" << run.out);
+  REQUIRE(run.rc == 0);
+  CHECK(count_of(run.out, kStopped) == 1);
+  CHECK(count_processes(cap.path) == 2);
+}
+
+// A copy over the per-blob limit is recorded without its contents and the
+// archive is marked incomplete, but capture goes on and stores the next copy.
+// Replay refuses each call whose host memory it has no contents for.
+HRR_TEST_CASE(Unit_HRR_CaptureLimit_SkipsLargeBlob) {
+  ScopedDir cap(cap_dir("limit_blob"));
+  const WorkloadRun run = run_workload("Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct", cap.path,
+                                       kTotal64M, 0, {{"HIP_HRR_CAPTURE_MAX_BLOB_MB", "1"}});
+  INFO("Capture output:\n" << run.out);
+  REQUIRE(run.rc == 0);
+  CHECK(count_of(run.out, kStopped) == 0);
+  CHECK(count_of(run.out, "over the HIP_HRR_CAPTURE_MAX_BLOB_MB limit of 1 MiB") == 1);
+  const fs::path proc_dir = hrr_single_process_archive(cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(proc_dir.string(), arc));
+  CHECK_FALSE(arc.complete);
+  CHECK(read_text_file(proc_dir / "manifest.json").find(kIncomplete) != std::string::npos);
+
+  size_t big = 0, small = 0;
+  for (const auto& ev : arc.events) {
+    if (ev.header().event_type != HRR_API_HIPMEMCPY) continue;
+    const bool hashed = ev.memcpy_ev.hash_lo != 0 || ev.memcpy_ev.hash_hi != 0;
+    if (ev.memcpy_ev.size == kBigCopy) {
+      CHECK_FALSE(hashed);
+      ++big;
+    } else if (ev.memcpy_ev.size == kStepCopy) {
+      std::vector<uint8_t> data;
+      CHECK(hashed);
+      CHECK(hrr::read_blob(arc, ev.memcpy_ev.hash_lo, ev.memcpy_ev.hash_hi, data));
+      CHECK(data.size() == kStepCopy);
+      ++small;
+    }
+  }
+  CHECK(big == 2);
+  CHECK(small == 2);  // the copy in and its read back
+
+  const auto [rc, out] = hrr_playback_merged(cap.path, "--continue-on-error");
+  INFO("Replay output:\n" << out);
+  CHECK(rc != 0);
+  const std::string refused = ": " + std::to_string(kBigCopy) +
+                              " bytes of host memory were captured without their contents; "
+                              "refusing the call";
+  CHECK(count_of(out, "hipMemcpy" + refused) == 2);
+  CHECK(count_of(out, "hipMemcpy2D" + refused) == 1);
+  CHECK(count_of(out, "hipHostRegister" + refused) == 1);
+  CHECK(count_of(out, "hipGraphAddMemcpyNodeToSymbol" + refused) == 2);
 }
 
 #endif  // !_WIN32 && HRR_TEST_EXE

@@ -10,6 +10,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+- Fixed rocpd reporting a counter at N times its value under `rocprofv3 --replay-mode kernel` when N `--pmc` groups list it, for example a sanity counter such as `SQ_WAVES` in every group. Every pass of a replayed dispatch shares the dispatch's record, so the `counters_collection` view, and the counter CSV and Perfetto output that `rocpd convert` builds from it, summed the passes. Passes after the first are now tagged with `replay_pass` in `rocpd_pmc_event.extdata`, the view averages a counter over the passes that collected it, and the `pmc_events` view reports each row's pass in a new `replay_pass` column. This behavior is identified by rocpd schema version 3.0.6.
+
 ### Known issues
 
 ### Removed
@@ -174,6 +176,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 
 ### Resolved issues
+
+  - Improved `rocpd` time-window validation to clamp overlapping ranges, account for all timed tables, and report invalid input without tracebacks.
 
   - Fixed `rocprofv3` crashing during output generation when a second tool subscribed to code object tracing in the same process, which blocked profiling PyTorch and Triton workloads through rocprofiler-compute.
   - Fixed `rocprofv3` hanging instead of exiting when a fatal signal arrives while it is already handling one, for example when output generation aborts. It previously left GPU child processes running and required killing the process manually.

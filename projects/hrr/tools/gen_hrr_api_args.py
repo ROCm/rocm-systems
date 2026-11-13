@@ -286,6 +286,11 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipEventCreate",
     "hipEventCreateWithFlags",
     "hipEventDestroy",
+    # Elapsed time on a pair that hipExtModuleLaunchKernel marked internally.
+    # Archives from before that side effect was recorded have no hipEventRecord
+    # for the pair; HIP then returns hipErrorInvalidHandle. See
+    # playback_hipEventElapsedTime.
+    "hipEventElapsedTime",
     # Query APIs — capture only logs hipSuccess (event/stream already complete).
     # Replay may reach the same API sooner relative to GPU work; spin on
     # hipErrorNotReady until hipSuccess.  See DESIGN.md § HIP-Specific Polling.
@@ -303,10 +308,12 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipGetSymbolAddress",
     "hipGetSymbolSize",
     # Pinned host allocation — charged to the host budget (--max-host-bytes), a
-    # replaced entry is freed first, and hipFreeHost gives the allocation back
+    # replaced entry is freed first, and hipFreeHost / hipHostFree give the
+    # allocation back
     "hipHostMalloc",
     "hipMallocHost",
     "hipFreeHost",
+    "hipHostFree",
     # Host memory registration — need handle map + blob restore + device ptr recording
     "hipHostRegister",
     "hipHostUnregister",
@@ -1286,6 +1293,21 @@ DEREF_FIELDS: Dict[str, List[Deref]] = {
         Deref("attrsIdxs", "size_t", 8, count="numAttrs", max_count=16),
         Deref("failIdx", "size_t", 8, direction="out"),
     ],
+    # Same arrays as hipMemcpyBatchAsync, plus the swap partner sizes and the
+    # per-entry waits/signals, whose addr is a recorded device address.
+    "hipExtMemcpyBatchAsync": [
+        Deref("dsts", "void*", 8, count="count", max_count=16, elem_ptr=True),
+        Deref("srcs", "void*", 8, count="count", max_count=16, elem_ptr=True),
+        Deref("sizes", "size_t", 8, count="count", max_count=16),
+        Deref("sizesDst", "size_t", 8, count="count", max_count=16),
+        Deref("waits", "hipExtMemcpyWait", 64, count="count", max_count=16,
+              ptr_members=("addr",)),
+        Deref("signals", "hipExtMemcpySignal", 64, count="count", max_count=16,
+              ptr_members=("addr",)),
+        Deref("attrs", "hipExtMemcpyAttributes", 56, count="numAttrs",
+              max_count=16),
+        Deref("attrsIdxs", "size_t", 8, count="numAttrs", max_count=16),
+    ],
     # Each operand is a tagged union of a pointer and an array handle, so
     # which member holds the recorded address depends on the tag beside it —
     # a rewrite no table entry can express.
@@ -2064,8 +2086,11 @@ _HEADER_PREAMBLE = """\
  * arguments (num_snapshots was always 0). A v9 reader would not restore them.
  * v11: hipKernelSetCacheConfig was appended to HipDispatchTable, taking the
  * first compiler ID and shifting the compiler API IDs up by one.
- * A v10 reader would decode those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)11u)
+ * A v10 reader would decode those events as the wrong API.
+ * v12: hipExtMemcpyBatchAsync was appended to HipDispatchTable,
+ * shifting the compiler API IDs up by one. A v11 reader would decode
+ * those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)12u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -2083,8 +2108,15 @@ typedef struct {
  * the copied rows, packed end to end: width*height*depth bytes, whatever the
  * pitch. Without it, a blob spans the host rect from its base pointer through
  * the last copied byte, or holds the flat width*height*depth bytes from the
- * base pointer (3D and driver D2H, hipMemcpy3D H2D). */
+ * base pointer (3D and driver D2H, hipMemcpy3D H2D).
+ * HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS: hipExtModuleLaunchKernel records
+ * its start and stop events as hipEventRecord events around the launch.
+ * Without it, replay cannot tell a missing marker from a replay that failed to
+ * apply one, so only an archive without the flag may tolerate a
+ * hipEventElapsedTime that returns hipErrorInvalidHandle. No version bump: an
+ * older reader replays the extra hipEventRecord events like any others. */
 #define HRR_FILE_FLAG_PACKED_HOST_RECTS ((uint16_t)0x0001u)
+#define HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS ((uint16_t)0x0002u)
 
 #ifdef __cplusplus
 static_assert(sizeof(hrr_file_header) == 8, "hrr_file_header must be 8 bytes");
@@ -2992,7 +3024,6 @@ _HOST_ALLOC_CREATE_APIS = {'hipHostMalloc', 'hipHostAlloc'}
 _ALLOC_FREE_APIS: Dict[str, str] = {
     'hipFree':              'ptr',
     'hipFreeAsync':         'dev_ptr',
-    'hipHostFree':          'ptr',
     'hipIpcCloseMemHandle': 'devPtr',
 }
 
@@ -3154,6 +3185,7 @@ _POST_CALL_EXTRA: Dict[str, List[str]] = {
 # Add an API here when its first CI build fails to link against the SDK.
 _PLAYBACK_RUNTIME_RESOLVED_APIS = frozenset({
     "hipDeviceFlushGPUDirectRDMAWrites",   # added by #10176
+    "hipExtMemcpyBatchAsync",              # added by #9098
 })
 
 _PLAYBACK_ARG_BRIDGES: Dict[str, Dict[str, object]] = {

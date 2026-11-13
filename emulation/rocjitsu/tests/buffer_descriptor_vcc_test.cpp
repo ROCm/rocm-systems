@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
@@ -34,6 +35,7 @@
 namespace {
 
 using namespace rocjitsu;
+constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
 
 TEST(RdnaAddrCalcTest, BufferDescriptorCanSpanSgprsAndVccWithoutReadingAdjacentWave) {
   for (auto arch :
@@ -48,7 +50,9 @@ TEST(RdnaAddrCalcTest, BufferDescriptorCanSpanSgprsAndVccWithoutReadingAdjacentW
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("descriptor_vcc", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "descriptor_vcc", cfg, &mem, &l2));
     auto *wf = cu->dispatch_wf(0, 0, 106, 16);
     auto *next = cu->dispatch_wf(1, 0, 106, 16);
     ASSERT_NE(wf, nullptr);
@@ -60,7 +64,8 @@ TEST(RdnaAddrCalcTest, BufferDescriptorCanSpanSgprsAndVccWithoutReadingAdjacentW
     // Adjacent storage has zero NUM_RECORDS; the real bound lives in VCC_LO.
     cu->write_sgpr(next->sgpr_alloc().base, 0);
     cu->write_sgpr(next->sgpr_alloc().base + 1, 0);
-    wf->set_vcc_raw(arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : (uint64_t{3u << 28} << 32) | 16);
+    wf->set_vcc_raw(
+        arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : (uint64_t{(3u << 28) | kRdnaFormat32} << 32) | 16);
     amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
     state.elem_size = 4;
     state.num_elems = 1;

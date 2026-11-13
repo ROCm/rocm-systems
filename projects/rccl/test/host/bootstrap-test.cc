@@ -536,8 +536,9 @@ TEST_F(BootstrapMicrotest, Accept_BadHandshakePeerIsClosedAndTheNextOneAccepted)
   for (auto* s : {&l, &stray, &good, &sock}) (void)ncclSocketClose(s);
 }
 
-// bootstrapAccept retries only on BadHandshake, so it returns a rejected peer unconnected; a fix flips this pin.
-TEST_F(BootstrapMicrotest, Accept_KnownBug_RejectedPeerReportedAsAccepting_IsReturnedUnconnected) {
+// socket.cc reports Accepting after bad magic. Bootstrap must skip that peer
+// and return a Ready connection before the caller reads its payload.
+TEST_F(BootstrapMicrotest, Accept_RejectedPeerReportedAsAccepting_RetriesUntilReady) {
   struct ncclSocket l, stray, good, sock;
   ASSERT_EQ(ncclSuccess, ncclSocketInit(&l, &bootstrapNetIfAddr, 7, ncclSocketTypeBootstrap, &abort_));
   ASSERT_EQ(ncclSuccess, ncclSocketListen(&l));
@@ -548,9 +549,11 @@ TEST_F(BootstrapMicrotest, Accept_KnownBug_RejectedPeerReportedAsAccepting_IsRet
 
   EXPECT_EQ(ncclSuccess, bootstrapAccept(&sock, &l, &abort_));
 
-  EXPECT_EQ(ncclSocketStateAccepting, sock.state);
-  char out[2];
-  EXPECT_NE(ncclSuccess, socketRecv(&sock, out, 2));
+  EXPECT_EQ(ncclSocketStateReady, sock.state);
+  ASSERT_EQ(ncclSuccess, socketSend(&good, (void*)"ok", 2));
+  char out[3] = {};
+  EXPECT_EQ(ncclSuccess, socketRecv(&sock, out, 2));
+  EXPECT_STREQ("ok", out);
   for (auto* s : {&l, &stray, &good, &sock}) (void)ncclSocketClose(s);
 }
 
@@ -678,17 +681,18 @@ TEST_F(BootstrapMicrotest, Root_RankGoneBeforeItsAnswer_MakesTheRootGiveUp) {
   (void)ncclSocketClose(&listen[1]);
 }
 
-// The Accept_KnownBug_ above makes one stray connection end the root; a fix flips this pin.
-TEST_F(BootstrapMicrotest, Root_KnownBug_StrayPeerWithTheWrongMagicMakesTheRootExit) {
+// A bad-cookie peer must not terminate the detached root before valid ranks
+// exchange their ring information.
+TEST_F(BootstrapMicrotest, Root_StrayPeerWithTheWrongMagicDoesNotPreventCheckIn) {
   ASSERT_EQ(ncclSuccess, bootstrapGetUniqueId(&handle_, nullptr));
   struct ncclSocket stray;
   ASSERT_EQ(ncclSuccess, ncclSocketInit(&stray, &handle_.addr, handle_.magic + 1, ncclSocketTypeBootstrap));
   ASSERT_EQ(ncclSuccess, ncclSocketConnect(&stray));
+  struct ncclSocket listen;
+  CheckIn(0, 1, &listen);
+  auto answer = Answer(&listen);
+  EXPECT_EQ(1, answer.fwd.handle[0]);
   WaitRoots();
-  // A valid one-rank check-in: a fixed root still listening then finishes, rather than dividing by nroots 0.
-  struct extInfo info = {};
-  info.nranks = info.nroots = 1;
-  EXPECT_EQ(ncclRemoteError, sendToRoot(&handle_, self_.comm.get(), &info));
   (void)ncclSocketClose(&stray);
 }
 
@@ -1139,9 +1143,10 @@ TEST_F(BootstrapMicrotest, Grow_ExistingAndNewRanksCloseOneRing) {
   EXPECT_TRUE(AllOk(CloseRanks()));
 }
 
-// With OOB net + bidir net a grow's reverse ring never connects, so init hangs until abort.
-// Pins AICOMRCCL-3004; a fix flips this pin.
-TEST_F(BootstrapMicrotest, Grow_KnownBug_NetBidirReverseRingNeverConnectsSoInitHangs) {
+// With OOB net + bidir net a grow's reverse ring would never connect and init would hang. The fix
+// disables net bidir during grow, so init falls back to the one-way ring and completes regardless of
+// NCCL_BOOTSTRAP_BIDIR_NET. Guards AICOMRCCL-3004.
+TEST_F(BootstrapMicrotest, Grow_NetBidirFallsBackToUnidirRing) {
   params_["OOB_NET_ENABLE"] = 1;
   for (int bidir : {0, 1})
     for (int existing : {2, 3}) {
@@ -1158,14 +1163,13 @@ TEST_F(BootstrapMicrotest, Grow_KnownBug_NetBidirReverseRingNeverConnectsSoInitH
       ASSERT_EQ(ncclSuccess, bootstrapGetUniqueId(&grow, parent[0]->comm.get()));
       for (auto* p : parent) p->comm->childCount++;
       MakeRanks(existing + 2);
-      watchdog_ = bidir ? std::chrono::milliseconds(300) : g_waitLimit;
       auto res = OnRanks([&](int r) {
         Comm(r)->isGrow = true;
         if (r >= existing) return bootstrapInit(1, &grow, Comm(r), nullptr);
         bool boundary = r == 0 || r == existing - 1;  // only these receive the handle
         return bootstrapInit(boundary ? 1 : 0, boundary ? &grow : nullptr, Comm(r), parent[r]->comm.get());
       });
-      for (int r = 0; r < existing + 2; r++) EXPECT_EQ(bidir ? ncclInternalError : ncclSuccess, res[r]) << r;
+      for (int r = 0; r < existing + 2; r++) EXPECT_EQ(ncclSuccess, res[r]) << r;
       WaitRoots();
     }
 }

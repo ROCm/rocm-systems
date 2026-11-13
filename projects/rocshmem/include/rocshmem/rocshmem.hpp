@@ -200,8 +200,9 @@ __host__ void rocshmem_query_thread(int *provided);
  * @brief Bytes of dynamic LDS the TDM (Tensor Data Mover) fast path wants
  * for work-group or wave put/get on gfx1250 -- size the kernel's dynamic
  * LDS and the buffer passed to rocshmem_set_tdm_lds() with this. Reflects
- * ROCSHMEM_TDM_TILE_BYTES, doubled for double buffering (0/unset
- * auto-sizes from this device's available LDS). Wave put/get splits this
+ * ROCSHMEM_TDM_TILE_BYTES, doubled for double buffering (defaults to a
+ * fixed size; explicitly setting ROCSHMEM_TDM_TILE_BYTES=0 auto-sizes
+ * from this device's available LDS instead). Wave put/get splits this
  * buffer across the block's waves, so its effective tile is smaller.
  * Returns 0 if rocSHMEM wasn't built with USE_TDM.
  *
@@ -725,13 +726,49 @@ __host__ void rocshmem_putmem_signal_on_stream(void *dest, const void *source,
                                                int pe, hipStream_t stream);
 
 /**
+ * @brief Enqueue a signal add operation on a HIP stream.
+ *
+ * Atomically adds \p signal to the signal data object at \p sig_addr on PE
+ * \p pe after all previously enqueued work on \p stream completes. Use
+ * rocshmem_quiet_on_stream to ensure completion of the update.
+ *
+ * @param[in] sig_addr  Symmetric address of the signal data object on the
+ *                      remote PE
+ * @param[in] signal    Value to add to the signal data object
+ * @param[in] pe        PE number of the remote PE
+ * @param[in] stream    HIP stream on which to enqueue the operation
+ *
+ * @return void
+ */
+__host__ void rocshmem_signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                            int pe, hipStream_t stream);
+
+/**
+ * @brief Enqueue a signal set operation on a HIP stream.
+ *
+ * Atomically sets the signal data object at \p sig_addr on PE \p pe to
+ * \p signal after all previously enqueued work on \p stream completes. Use
+ * rocshmem_quiet_on_stream to ensure completion of the update.
+ *
+ * @param[in] sig_addr  Symmetric address of the signal data object on the
+ *                      remote PE
+ * @param[in] signal    Value to store in the signal data object
+ * @param[in] pe        PE number of the remote PE
+ * @param[in] stream    HIP stream on which to enqueue the operation
+ *
+ * @return void
+ */
+__host__ void rocshmem_signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                            int pe, hipStream_t stream);
+
+/**
  * @brief Wait on a signal variable until it satisfies the specified condition,
  * with the operation enqueued on a HIP stream.
  *
- * This function blocks the calling thread until the signal variable at
+ * This function does not block the calling thread. Work enqueued on
+ * \p stream after this call does not start until the signal variable at
  * \p sig_addr satisfies the comparison condition (* \p sig_addr \p cmp
- * \p cmp_value). The wait operation is executed asynchronously on the
- * specified HIP stream.
+ * \p cmp_value).
  *
  * @param[in] sig_addr  Address of the signal variable on the symmetric heap
  * @param[in] cmp       Comparison operator (e.g., ROCSHMEM_CMP_EQ,
@@ -835,8 +872,9 @@ __device__ void rocshmem_query_thread(int *provided);
  * @brief Bytes of dynamic LDS the TDM (Tensor Data Mover) fast path wants
  * for work-group or wave put/get on gfx1250 -- size the kernel's dynamic
  * LDS and the buffer passed to rocshmem_set_tdm_lds() with this. Reflects
- * ROCSHMEM_TDM_TILE_BYTES, doubled for double buffering (0/unset
- * auto-sizes from this device's available LDS). Wave put/get splits this
+ * ROCSHMEM_TDM_TILE_BYTES, doubled for double buffering (defaults to a
+ * fixed size; explicitly setting ROCSHMEM_TDM_TILE_BYTES=0 auto-sizes
+ * from this device's available LDS instead). Wave put/get splits this
  * buffer across the block's waves, so its effective tile is smaller.
  * Returns 0 if rocSHMEM wasn't built with USE_TDM.
  *
