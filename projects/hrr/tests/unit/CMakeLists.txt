@@ -46,6 +46,7 @@ find_package(Threads REQUIRED)
 
 target_link_libraries(hrr-unit-tests PRIVATE
   hrr::reader
+  hrr::warnings
   hip::host
   Threads::Threads
   Catch2::Catch2WithMain)
@@ -129,7 +130,7 @@ if(TARGET hrr-playback AND NOT WIN32)
     __HIP_PLATFORM_AMD__)
   find_package(Threads REQUIRED)
   target_link_libraries(hrr-handler-tests PRIVATE
-    hrr::reader hip::host Threads::Threads Catch2::Catch2WithMain)
+    hrr::reader hrr::warnings hip::host Threads::Threads Catch2::Catch2WithMain)
   if(HRR_HANDLER_TESTS_ASAN AND NOT WIN32)
     target_compile_options(hrr-handler-tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(hrr-handler-tests PRIVATE -fsanitize=address)
