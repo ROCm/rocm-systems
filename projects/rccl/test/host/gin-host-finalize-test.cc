@@ -307,8 +307,10 @@ TEST_F(GinHostFinalizeTest, DeregisterSkipsWindowStampedByAnotherGeneration) {
 
 // A splitShare child reuses the owner's connected ginComms[]. Anvil SDMA fabric
 // registration allgathers on the owner's bootstrap, so there a child that does
-// not span the owner's ranks in order would wait alone. Other backends, and
-// Anvil SDMA without fabric memory, keep the develop behavior.
+// not span the owner's ranks in order would wait alone. That includes a 1-rank
+// child, which is not fabric-capable itself once the owner has voted fabric
+// memory on. Other backends, and Anvil SDMA without that vote, keep the
+// develop behavior.
 class GinHostSplitShareTest : public GinHostFinalizeTest {
  protected:
   std::unique_ptr<ncclComm> child_ = std::make_unique<ncclComm>();
@@ -389,6 +391,32 @@ TEST_F(GinHostSplitShareTest, AnvilWithoutFabricMem_SubsetChildReusesConnections
 
   EXPECT_EQ(ncclGinConnectOnce(child_.get()), ncclSuccess);
   EXPECT_EQ(fake_.listenCalls, 0);
+}
+
+// A 1-rank child never sets MNNVL, so ginAnvilFabricMemCapable is false. After
+// the owner has voted fabric registration on, the child still registers
+// through that context and would allgather alone.
+TEST_F(GinHostSplitShareTest, AnvilFabric_OneRankChildIsRejectedAfterOwnerVote) {
+  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  g_anvilFabricMemCapable = false;
+  ginState()->anvilFabricMem = true;
+  makeChild(/*ownerNRanks=*/2, {0});
+
+  EXPECT_EQ(ncclGinConnectOnce(child_.get()), ncclInvalidUsage);
+  EXPECT_EQ(fake_.listenCalls, 0);
+  EXPECT_TRUE(ginState()->connected);
+  EXPECT_EQ(backend()->ginComms[0], ginComm0_);
+  EXPECT_EQ(backend()->ginComms[1], ginComm1_);
+}
+
+TEST_F(GinHostSplitShareTest, AnvilWithoutFabricVote_OneRankChildReusesConnections) {
+  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  g_anvilFabricMemCapable = false;
+  makeChild(/*ownerNRanks=*/2, {0});
+
+  EXPECT_EQ(ncclGinConnectOnce(child_.get()), ncclSuccess);
+  EXPECT_EQ(fake_.listenCalls, 0);
+  EXPECT_TRUE(ginState()->connected);
 }
 
 TEST_F(GinHostFinalizeTest, AlreadyDisconnectedIsNoOp) {

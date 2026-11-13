@@ -74,6 +74,12 @@ struct ncclGinState {
   // points at the comm that ran ncclGinInit, which may already be freed, so no
   // comm on this sharedRes may advertise, select or reconnect these backends.
   bool finalized;
+  // Set by a successful Anvil-SDMA connect when every rank voted fabric
+  // registration on. Shared through sharedRes. A splitShare child can miss
+  // MNNVL on its own topology (a 1-rank child returns before it is set) and
+  // still register through this context, so the connect gate reads this
+  // instead of trusting the child's topology alone.
+  bool anvilFabricMem;
   int numActiveBackends;
   struct ncclGinBackendState backends[NCCL_GIN_MAX_ACTIVE_BACKENDS];
 };
