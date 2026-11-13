@@ -3534,6 +3534,20 @@ const _: () = {
     ["Offset of field: AmdsmiNicStatT::value"]
         [::std::mem::offset_of!(AmdsmiNicStatT, value) - 256usize];
 };
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicCapabilityBitsT {
+    AmdsmiNicCapFwctl = 1,
+    AmdsmiNicCapNetdev = 2,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicTypeT {
+    AmdsmiNicTypeUnknown = 0,
+    AmdsmiNicTypeAinic = 1,
+    AmdsmiNicTypeUaloe = 2,
+    AmdsmiNicTypeOther = 3,
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiNicAsicInfoT {
@@ -3642,6 +3656,140 @@ const _: () = {
     ["Offset of field: AmdsmiNicFwInfoT::fw"]
         [::std::mem::offset_of!(AmdsmiNicFwInfoT, fw) - 4usize];
 };
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicHealthStateT {
+    AmdsmiNicHealthUnknown = 0,
+    AmdsmiNicHealthHealthy = 1,
+    AmdsmiNicHealthWarning = 2,
+    AmdsmiNicHealthError = 3,
+    AmdsmiNicHealthUnsupported = 4,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicHealthT {
+    pub state: u8,
+    pub error_count: u32,
+    pub reporter: [::std::os::raw::c_char; 64usize],
+    pub reserved: [u64; 4usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicHealthT"][::std::mem::size_of::<AmdsmiNicHealthT>() - 104usize];
+    ["Alignment of AmdsmiNicHealthT"][::std::mem::align_of::<AmdsmiNicHealthT>() - 8usize];
+    ["Offset of field: AmdsmiNicHealthT::state"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, state) - 0usize];
+    ["Offset of field: AmdsmiNicHealthT::error_count"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, error_count) - 4usize];
+    ["Offset of field: AmdsmiNicHealthT::reporter"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, reporter) - 8usize];
+    ["Offset of field: AmdsmiNicHealthT::reserved"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, reserved) - 72usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicPortSplitT {
+    pub splittable: u8,
+    pub split_count: u8,
+    pub reserved: [u64; 1usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicPortSplitT"][::std::mem::size_of::<AmdsmiNicPortSplitT>() - 16usize];
+    ["Alignment of AmdsmiNicPortSplitT"][::std::mem::align_of::<AmdsmiNicPortSplitT>() - 8usize];
+    ["Offset of field: AmdsmiNicPortSplitT::splittable"]
+        [::std::mem::offset_of!(AmdsmiNicPortSplitT, splittable) - 0usize];
+    ["Offset of field: AmdsmiNicPortSplitT::split_count"]
+        [::std::mem::offset_of!(AmdsmiNicPortSplitT, split_count) - 1usize];
+    ["Offset of field: AmdsmiNicPortSplitT::reserved"]
+        [::std::mem::offset_of!(AmdsmiNicPortSplitT, reserved) - 8usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicTelemetryT {
+    pub health: AmdsmiNicHealthT,
+    pub port_split: AmdsmiNicPortSplitT,
+    pub reserved: [u64; 4usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicTelemetryT"][::std::mem::size_of::<AmdsmiNicTelemetryT>() - 152usize];
+    ["Alignment of AmdsmiNicTelemetryT"][::std::mem::align_of::<AmdsmiNicTelemetryT>() - 8usize];
+    ["Offset of field: AmdsmiNicTelemetryT::health"]
+        [::std::mem::offset_of!(AmdsmiNicTelemetryT, health) - 0usize];
+    ["Offset of field: AmdsmiNicTelemetryT::port_split"]
+        [::std::mem::offset_of!(AmdsmiNicTelemetryT, port_split) - 104usize];
+    ["Offset of field: AmdsmiNicTelemetryT::reserved"]
+        [::std::mem::offset_of!(AmdsmiNicTelemetryT, reserved) - 120usize];
+};
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiMetricUnitT {
+    AmdsmiMetricUnitBool = 2,
+    AmdsmiMetricUnitMillivolt = 5,
+    AmdsmiMetricUnitMillidegreeCelsius = 15,
+    AmdsmiMetricUnitMicrowatt = 16,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiMetricCategoryT {
+    AmdsmiMetricCategoryTemperature = 3,
+    AmdsmiMetricCategoryPower = 4,
+    AmdsmiMetricCategoryVoltage = 14,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicSensorNameT {
+    AmdsmiNicSensorNameUnknown = 0,
+    AmdsmiNicSensorNameInput = 1,
+    AmdsmiNicSensorNameMin = 2,
+    AmdsmiNicSensorNameMax = 3,
+    AmdsmiNicSensorNameLcrit = 4,
+    AmdsmiNicSensorNameCrit = 5,
+    AmdsmiNicSensorNameEmergency = 6,
+    AmdsmiNicSensorNameShutdown = 7,
+    AmdsmiNicSensorNameCap = 8,
+    AmdsmiNicSensorNameAlarmMin = 9,
+    AmdsmiNicSensorNameAlarmMax = 10,
+    AmdsmiNicSensorNameAlarmLcrit = 11,
+    AmdsmiNicSensorNameAlarmCrit = 12,
+    AmdsmiNicSensorNameAlarmEmergency = 13,
+    AmdsmiNicSensorNameAlarmShutdown = 14,
+    AmdsmiNicSensorNameAlarmCap = 15,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicSensorT {
+    pub category: AmdsmiMetricCategoryT,
+    pub name: AmdsmiNicSensorNameT,
+    pub unit: AmdsmiMetricUnitT,
+    pub channel: u32,
+    pub instance: u32,
+    pub label: [::std::os::raw::c_char; 256usize],
+    pub value: i64,
+    pub reserved: [u64; 4usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicSensorT"][::std::mem::size_of::<AmdsmiNicSensorT>() - 320usize];
+    ["Alignment of AmdsmiNicSensorT"][::std::mem::align_of::<AmdsmiNicSensorT>() - 8usize];
+    ["Offset of field: AmdsmiNicSensorT::category"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, category) - 0usize];
+    ["Offset of field: AmdsmiNicSensorT::name"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, name) - 4usize];
+    ["Offset of field: AmdsmiNicSensorT::unit"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, unit) - 8usize];
+    ["Offset of field: AmdsmiNicSensorT::channel"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, channel) - 12usize];
+    ["Offset of field: AmdsmiNicSensorT::instance"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, instance) - 16usize];
+    ["Offset of field: AmdsmiNicSensorT::label"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, label) - 20usize];
+    ["Offset of field: AmdsmiNicSensorT::value"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, value) - 280usize];
+    ["Offset of field: AmdsmiNicSensorT::reserved"]
+        [::std::mem::offset_of!(AmdsmiNicSensorT, reserved) - 288usize];
+};
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct AmdsmiNicPortT {
@@ -3650,7 +3798,7 @@ pub struct AmdsmiNicPortT {
     pub type_: [::std::os::raw::c_char; 256usize],
     pub flavour: [::std::os::raw::c_char; 256usize],
     pub netdev: [::std::os::raw::c_char; 256usize],
-    pub ifindex: u32,
+    pub ifindex: u8,
     pub mac_address: [::std::os::raw::c_char; 256usize],
     pub carrier: u8,
     pub mtu: u16,
@@ -3664,7 +3812,7 @@ pub struct AmdsmiNicPortT {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiNicPortT"][::std::mem::size_of::<AmdsmiNicPortT>() - 2336usize];
+    ["Size of AmdsmiNicPortT"][::std::mem::size_of::<AmdsmiNicPortT>() - 2328usize];
     ["Alignment of AmdsmiNicPortT"][::std::mem::align_of::<AmdsmiNicPortT>() - 8usize];
     ["Offset of field: AmdsmiNicPortT::bdf"][::std::mem::offset_of!(AmdsmiNicPortT, bdf) - 0usize];
     ["Offset of field: AmdsmiNicPortT::port_num"]
@@ -3678,25 +3826,25 @@ const _: () = {
     ["Offset of field: AmdsmiNicPortT::ifindex"]
         [::std::mem::offset_of!(AmdsmiNicPortT, ifindex) - 780usize];
     ["Offset of field: AmdsmiNicPortT::mac_address"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, mac_address) - 784usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, mac_address) - 781usize];
     ["Offset of field: AmdsmiNicPortT::carrier"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, carrier) - 1040usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, carrier) - 1037usize];
     ["Offset of field: AmdsmiNicPortT::mtu"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, mtu) - 1042usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, mtu) - 1038usize];
     ["Offset of field: AmdsmiNicPortT::link_state"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, link_state) - 1044usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, link_state) - 1040usize];
     ["Offset of field: AmdsmiNicPortT::link_speed"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, link_speed) - 1300usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, link_speed) - 1296usize];
     ["Offset of field: AmdsmiNicPortT::active_fec"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, active_fec) - 1304usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, active_fec) - 1300usize];
     ["Offset of field: AmdsmiNicPortT::autoneg"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, autoneg) - 1308usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, autoneg) - 1304usize];
     ["Offset of field: AmdsmiNicPortT::pause_autoneg"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, pause_autoneg) - 1564usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, pause_autoneg) - 1560usize];
     ["Offset of field: AmdsmiNicPortT::pause_rx"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, pause_rx) - 1820usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, pause_rx) - 1816usize];
     ["Offset of field: AmdsmiNicPortT::pause_tx"]
-        [::std::mem::offset_of!(AmdsmiNicPortT, pause_tx) - 2076usize];
+        [::std::mem::offset_of!(AmdsmiNicPortT, pause_tx) - 2072usize];
 };
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -3706,7 +3854,7 @@ pub struct AmdsmiNicPortInfoT {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiNicPortInfoT"][::std::mem::size_of::<AmdsmiNicPortInfoT>() - 74760usize];
+    ["Size of AmdsmiNicPortInfoT"][::std::mem::size_of::<AmdsmiNicPortInfoT>() - 74504usize];
     ["Alignment of AmdsmiNicPortInfoT"][::std::mem::align_of::<AmdsmiNicPortInfoT>() - 8usize];
     ["Offset of field: AmdsmiNicPortInfoT::num_ports"]
         [::std::mem::offset_of!(AmdsmiNicPortInfoT, num_ports) - 0usize];
@@ -5433,6 +5581,18 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_nic_type(
+        processor_handle: AmdsmiProcessorHandle,
+        type_: *mut AmdsmiNicTypeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_nic_capability(
+        processor_handle: AmdsmiProcessorHandle,
+        capability: *mut u32,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_nic_bus_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiNicBusInfoT,
@@ -5448,6 +5608,13 @@ extern "C" {
     pub fn amdsmi_get_nic_port_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiNicPortInfoT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_nic_port_ifindex(
+        processor_handle: AmdsmiProcessorHandle,
+        port_index: u32,
+        ifindex: *mut u32,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
@@ -5471,6 +5638,19 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_nic_telemetry(
+        processor_handle: AmdsmiProcessorHandle,
+        info: *mut AmdsmiNicTelemetryT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_nic_hwmon_sensors(
+        processor_handle: AmdsmiProcessorHandle,
+        num_sensors: *mut u32,
+        sensors: *mut AmdsmiNicSensorT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_nic_port_statistics(
         processor_handle: AmdsmiProcessorHandle,
         port_index: u32,
@@ -5478,12 +5658,27 @@ extern "C" {
         stats: *mut AmdsmiNicStatT,
     ) -> AmdsmiStatusT;
 }
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicStatScopeT {
+    AmdsmiNicStatScopeDefault = 0,
+    AmdsmiNicStatScopeExtended = 1,
+}
 extern "C" {
     pub fn amdsmi_get_nic_vendor_statistics(
         processor_handle: AmdsmiProcessorHandle,
         port_index: u32,
         num_stats: *mut u32,
         stats: *mut AmdsmiNicStatT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_nic_vendor_statistics_with_scope(
+        processor_handle: AmdsmiProcessorHandle,
+        port_index: u32,
+        num_stats: *mut u32,
+        stats: *mut AmdsmiNicStatT,
+        scope: AmdsmiNicStatScopeT,
     ) -> AmdsmiStatusT;
 }
 #[repr(C)]

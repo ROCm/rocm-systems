@@ -8,9 +8,7 @@
 
 #include <functional>
 #include <iomanip>
-#include <limits>
 #include <optional>
-#include <string>
 
 namespace {
 struct RAII {
@@ -19,16 +17,8 @@ struct RAII {
   std::function<void()> _finish;
 };
 
-// The library reports a number it cannot read as the maximum value of its type.
-template <typename T>
-std::string num_or_na(T value, const char* unit = "") {
-  if (value == std::numeric_limits<T>::max()) return "N/A";
-  return std::to_string(+value) + unit;
-}
-
 void dump_ainic_info(uint32_t idx, const amd::smi::AMDSmiAINICDevice::AINICInfo& ainic_info) {
-#if 0   // Expected output for one NIC. A number the library cannot read prints as N/A, e.g.
-        // CARRIER and LINK_SPEED of a port whose interface is down.
+#if 0   // Expected Output:
 NIC: 0
    ASIC:
        VENDOR_ID: 0x1dd8
@@ -36,52 +26,122 @@ NIC: 0
        DEVICE_ID: 0x8
        SUBSYSTEM_ID: 0x5201
        REVISION: 0x0
-       PERMANENT_ADDRESS: 04:90:81:xx:xx:xx
-       PRODUCT_NAME: POLLARA 1x400G QSFP112
-       PART_NUMBER: POLLARA-1Q400P
-       SERIAL_NUMBER: FPLxxxxxxxxxxxxx
+       PERMANENT_ADDRESS: 04:90:81:01:09:38
+       PRODUCT_NAME: ,Pensando DSC2-200 50/100/200G 2p QSFP56 Card
+       PART_NUMBER: DSC2-2Q200-32R32F64P-R4
+       SERIAL_NUMBER: FPF2316002EEC0V2
        VENDOR_NAME: AMD Pensando Systems, Inc.
    BUS:
-      BDF: 0000:86:00.00
+      BDF: 0000:e2:00.0
       MAX_PCIE_WIDTH: 16
       MAX_PCIE_SPEED: 32
       PCIE_INTERFACE_VERSION: N/A
       SLOT_TYPE: N/A
    DRIVER:
       NAME: ionic
-      VERSION: 25.12.15.001
+      VERSION: 25.08.2.001
+      FW_VERSION: 1.97.0-A-5
+      BUS_INFO: 0000:83:00.0
    NUMA:
       NODE: 1
-      AFFINITY: 64-127,192-255
+      AFFINITY: 16-31,48-63
+   VERSIONS:
+      RUNNING:
+          fw: ??
+          fw.heartbeat: ??
+          fw.status: ??
    PORTS:
       PORT_0:
             BDF: 0
             TYPE: Ethernet
             FLAVOUR: N/A
-            NETDEV: enp137s0np0
-            IFINDEX: 14
-            MAC_ADDRESS: 04:90:81:xx:xx:xx
-            CARRIER: 1
+            NETDEV: enp131s0
+            IFINDEX: 11
+            MAC_ADDRESS: 04:90:81:01:09:38
+            CARRIER: 0
             MTU: 1500B
-            LINK_STATE: up
-            LINK_SPEED: 100000 Mb/s
-            ACTIVE_FEC: 8
-            AUTONEG: OFF
-            PAUSE_AUTONEG: OFF
-            PAUSE_RX: ON
-            PAUSE_TX: ON
+            LINK_STATE: down
+            LINK_SPEED: 0 Mb/s
+            ACTIVE_FEC: Off
+            AUTONEG: off
+            PAUSE_AUTONEG: off
+            PAUSE_RX: on
+            PAUSE_TX: on
+      PORT_1:
+            BDF: 0
+            TYPE: Ethernet
+            FLAVOUR: N/A
+            NETDEV: enp132s0
+            IFINDEX: 12
+            MAC_ADDRESS: 04:90:81:01:09:39
+            CARRIER: 0
+            MTU: 1500B
+            LINK_STATE: down
+            LINK_SPEED: 0 Mb/s
+            ACTIVE_FEC: Off
+            AUTONEG: off
+            PAUSE_AUTONEG: off
+            PAUSE_RX: on
+            PAUSE_TX: on
+      PORT_2:
+            BDF: 0
+            TYPE: Ethernet
+            FLAVOUR: N/A
+            NETDEV: enp229s0
+            IFINDEX: 14
+            MAC_ADDRESS: 04:90:81:2c:77:b0
+            CARRIER: 0
+            MTU: 1500B
+            LINK_STATE: down
+            LINK_SPEED: 0 Mb/s
+            ACTIVE_FEC: Off
+            AUTONEG: off
+            PAUSE_AUTONEG: off
+            PAUSE_RX: off
+            PAUSE_TX: off
    RDMA_DEVICES:
       RDMA_DEVICES:
             RDMA_DEVICE_0:
-               NAME: ionic_0
-               NODE_GUID: 0690:81ff:fexx:xxxx
-               NODE_TYPE: CA
-               SYS_IMAGE_GUID: 0690:81ff:fexx:xxxx
-               FW_VER: 1.117.5-a-56
+               NAME: rocep131s0
+               NODE_GUID: 0690:81ff:fe01:0938
+               NODE_TYPE: 1: CA
+               SYS_IMAGE_GUID: 0690:81ff:fe01:0938
+               FW_VER: 1.97.0-A-5
                PORTS:
                   PORT_0:
-                     NETDEV: enp137s0np0
-                     STATE: ACTIVE
+                     NETDEV:
+                     PORT_NUM: 1
+                     STATE: DOWN
+                     MAX_MTU: 65535
+                     ACTIVE_MTU: 65535
+      RDMA_DEVICES:
+            RDMA_DEVICE_0:
+               NAME: rocep132s0
+               NODE_GUID: 0690:81ff:fe01:0939
+               NODE_TYPE: 1: CA
+               SYS_IMAGE_GUID: 0690:81ff:fe01:0939
+               FW_VER: 1.97.0-A-5
+               PORTS:
+                  PORT_0:
+                     NETDEV:
+                     PORT_NUM: 1
+                     STATE: DOWN
+                     MAX_MTU: 65535
+                     ACTIVE_MTU: 65535
+      RDMA_DEVICES:
+            RDMA_DEVICE_0:
+               NAME: rocep229s0
+               NODE_GUID: 0690:81ff:fe2c:77b0
+               NODE_TYPE: 1: CA
+               SYS_IMAGE_GUID: 0690:81ff:fe2c:77b0
+               FW_VER: 1.110.1-a-1
+               PORTS:
+                  PORT_0:
+                     NETDEV:
+                     PORT_NUM: 1
+                     STATE: DOWN
+                     MAX_MTU: 65535
+                     ACTIVE_MTU: 65535
 #endif  // 0
   std::ostringstream oss;
   oss << std::hex << std::setw(4) << std::setfill('0') << ainic_info.bus.bdf.domain_number << ":"
@@ -106,8 +166,8 @@ NIC: 0
       << "       VENDOR_NAME: " << ainic_info.asic.vendor_name << "\n"
       << "   BUS:" << "\n"
       << "      BDF: " << bdf_str << "\n"
-      << "      MAX_PCIE_WIDTH: " << num_or_na(ainic_info.bus.max_pcie_width) << "\n"
-      << "      MAX_PCIE_SPEED: " << num_or_na(ainic_info.bus.max_pcie_speed) << "\n"
+      << "      MAX_PCIE_WIDTH: " << static_cast<int>(ainic_info.bus.max_pcie_width) << "\n"
+      << "      MAX_PCIE_SPEED: " << ainic_info.bus.max_pcie_speed << "\n"
       << "      PCIE_INTERFACE_VERSION: " << ainic_info.bus.pcie_interface_version << "\n"
       << "      SLOT_TYPE: " << ainic_info.bus.slot_type << "\n"
       << "   DRIVER:" << "\n"
@@ -117,7 +177,7 @@ NIC: 0
       // "      FW_VERSION: " << ainic_info.driver.version << "\n" <<
       // "      BUS_INFO: " << ainic_info.driver.bus_info << "\n" <<
       "   NUMA:" << "\n"
-      << "      NODE: " << num_or_na(ainic_info.numa.node) << "\n"
+      << "      NODE: " << static_cast<int>(ainic_info.numa.node) << "\n"
       << "      AFFINITY: " << ainic_info.numa.affinity << "\n"
       <<
       // "   LIMIT:" << "\n" << //can be fetched through
@@ -139,15 +199,15 @@ NIC: 0
         << "            TYPE: " << ainic_info.port.ports[port_idx].type << "\n"
         << "            FLAVOUR: " << ainic_info.port.ports[port_idx].flavour << "\n"
         << "            NETDEV: " << ainic_info.port.ports[port_idx].netdev << "\n"
-        << "            IFINDEX: " << num_or_na(ainic_info.port.ports[port_idx].ifindex) << "\n"
-        << "            MAC_ADDRESS: " << ainic_info.port.ports[port_idx].mac_address << "\n"
-        << "            CARRIER: " << num_or_na(ainic_info.port.ports[port_idx].carrier) << "\n"
-        << "            MTU: " << num_or_na(ainic_info.port.ports[port_idx].mtu, "B") << "\n"
-        << "            LINK_STATE: " << ainic_info.port.ports[port_idx].link_state << "\n"
-        << "            LINK_SPEED: "
-        << num_or_na(ainic_info.port.ports[port_idx].link_speed, " Mb/s") << "\n"
-        << "            ACTIVE_FEC: " << num_or_na(ainic_info.port.ports[port_idx].active_fec)
+        << "            IFINDEX: " << static_cast<int>(ainic_info.port.ports[port_idx].ifindex)
         << "\n"
+        << "            MAC_ADDRESS: " << ainic_info.port.ports[port_idx].mac_address << "\n"
+        << "            CARRIER: " << static_cast<int>(ainic_info.port.ports[port_idx].carrier)
+        << "\n"
+        << "            MTU: " << ainic_info.port.ports[port_idx].mtu << "B\n"
+        << "            LINK_STATE: " << ainic_info.port.ports[port_idx].link_state << "\n"
+        << "            LINK_SPEED: " << ainic_info.port.ports[port_idx].link_speed << " Mb/s\n"
+        << "            ACTIVE_FEC: " << ainic_info.port.ports[port_idx].active_fec << "\n"
         << "            AUTONEG: " << ainic_info.port.ports[port_idx].autoneg << "\n"
         << "            PAUSE_AUTONEG: " << ainic_info.port.ports[port_idx].pause_autoneg << "\n"
         << "            PAUSE_RX: " << ainic_info.port.ports[port_idx].pause_rx << "\n"

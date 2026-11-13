@@ -2,79 +2,39 @@
 // SPDX-License-Identifier: MIT
 
 // RDMA info is optional: a tolerated status keeps the NIC with a zeroed
-// rdma_dev, while every other RDMA failure and any failure from the five
-// required getters drops it. Driven through the test seam, so each getter's
-// status is set independently and no NIC hardware is needed.
+// rdma_dev. Driver/port info is optional too, tolerating NO_DATA alone with no
+// zeroing guarantee. Every other failure on any of the five required getters
+// drops the NIC. Driven through the test seam, so each getter's status is set
+// independently and no NIC hardware is needed.
 //
 // Coverage stops at populate_amd_ainic_device(). Reaching the public
 // amdsmi_get_nic_rdma_dev_info() needs a handle registered with AMDSmiSystem,
 // which no seam exposes, so its zeroed-struct contract is unverified here.
 
 #include <gtest/gtest.h>
-#include <stdlib.h>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <iterator>
-#include <limits>
-#include <optional>
-#include <string>
-#include <system_error>
 
 #include "amd_smi/impl/amd_smi_nic_testing.h"
-#include "smi_nic.h"
-#include "smi_nic_subsystem.h"
+#include "nic_unit_fixture.h"
 
 namespace {
 
 using amd::smi::AMDSmiAINICDevice;
-using amd::smi::nic_info_getters_t;
 using amd::smi::nic_set_info_getters_for_testing;
 using amd::smi::populate_amd_ainic_device;
 
-// Positions in nic_info_getters_t, in declaration order.
-constexpr size_t kBus = 0;
-constexpr size_t kDriver = 1;
-constexpr size_t kAsic = 2;
-constexpr size_t kNuma = 3;
-constexpr size_t kPort = 4;
-constexpr size_t kRdma = 5;
-constexpr size_t kGetterCount = 6;
-
 // The five getters ahead of the RDMA one; failing any must drop the NIC.
 constexpr std::array<size_t, 5> kRequiredGetters = {kBus, kDriver, kAsic, kNuma, kPort};
-
-std::array<smi_nic_status_t, kGetterCount> g_status;
-
-// A byte unique to each getter position, so a swapped reinterpret_cast
-// destination surfaces as the wrong byte instead of an indistinguishable zero.
-constexpr unsigned char FillByte(size_t index) { return static_cast<unsigned char>(0xA0 + index); }
 
 template <typename T>
 bool IsFilledWith(const T& value, unsigned char byte) {
   const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
   return std::all_of(bytes, bytes + sizeof(T), [byte](unsigned char b) { return b == byte; });
 }
-
-template <size_t Index, typename Info>
-smi_nic_status_t Stub(smi_nic_ctx_t, uint64_t, Info* info) {
-  std::memset(info, FillByte(Index), sizeof(*info));
-  return g_status[Index];
-}
-
-// The RDMA stub fills like the rest rather than writing nothing: a non-zero fill
-// is what the real getter leaves behind when it takes its ports.empty() early
-// return without its own `*info = {}`, so the zeroing the tolerated path is
-// asserted to perform still has to come from production.
-const nic_info_getters_t kStubGetters = {
-    Stub<kBus, smi_nic_bus_info_t>,   Stub<kDriver, smi_nic_driver_info_t>,
-    Stub<kAsic, smi_nic_asic_info_t>, Stub<kNuma, smi_nic_numa_info_t>,
-    Stub<kPort, smi_nic_port_info_t>, Stub<kRdma, smi_nic_rdma_devices_info_t>,
-};
 
 // Every non-SUCCESS status, paired with the amdsmi_status_t a fatal getter
 // failure must surface. Mirrors ainic_status_map in amd_smi_common.h.
@@ -88,7 +48,7 @@ constexpr std::array<StatusMapping, 8> kStatusMappings = {{
     {SMI_NIC_STATUS_WRONG_PARAM, AMDSMI_STATUS_INVAL},
     {SMI_NIC_STATUS_NOT_FOUND, AMDSMI_STATUS_NOT_FOUND},
     {SMI_NIC_STATUS_NO_RESOURCE, AMDSMI_STATUS_OUT_OF_RESOURCES},
-    {SMI_NIC_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED},
+    {SMI_NIC_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_SUPPORTED},
     {SMI_NIC_STATUS_NOT_INIT, AMDSMI_STATUS_NOT_INIT},
     {SMI_NIC_STATUS_NO_DATA, AMDSMI_STATUS_NO_DATA},
     {SMI_NIC_STATUS_DRIVER_NOT_LOADED, AMDSMI_STATUS_DRIVER_NOT_LOADED},
@@ -103,6 +63,13 @@ static_assert(kStatusMappings.size() == SMI_NIC_STATUS_DRIVER_NOT_LOADED,
 // The two the RDMA getter is allowed to return without losing the NIC.
 bool IsToleratedForRdma(smi_nic_status_t status) {
   return status == SMI_NIC_STATUS_NO_DATA || status == SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+}
+
+// kDriver and kPort additionally forgive NO_DATA alone: a fwctl-only NIC has no
+// host netdev to query for driver info or link state. Mirrors the carve-outs in
+// populate_amd_ainic_device() (amd_smi_system.cc).
+bool IsToleratedForDriverOrPort(size_t getter, smi_nic_status_t status) {
+  return (((getter == kDriver) || (getter == kPort)) && (status == SMI_NIC_STATUS_NO_DATA));
 }
 
 template <size_t N>
@@ -130,26 +97,6 @@ void ExpectRdmaZeroed(const amdsmi_nic_rdma_devices_info_t& rdma) {
     }
   }
 }
-
-class NicUnit : public ::testing::Test {
- protected:
-  void SetUp() override {
-    g_status.fill(SMI_NIC_STATUS_SUCCESS);
-    nic_set_info_getters_for_testing(&kStubGetters);
-  }
-
-  // Restores the production getters however a test exits.
-  void TearDown() override { nic_set_info_getters_for_testing(nullptr); }
-
-  amdsmi_status_t Populate() {
-    smi_nic_ctx_t ctx = nullptr;
-    info_ = {};
-    std::memset(&info_.rdma_dev, 0xFF, sizeof(info_.rdma_dev));
-    return populate_amd_ainic_device(ctx, 0x1000, info_);
-  }
-
-  AMDSmiAINICDevice::AINICInfo info_ = {};
-};
 
 // Each sub-struct must carry its own getter's byte, so a swapped
 // reinterpret_cast destination among the six near-identical blocks fails here.
@@ -185,6 +132,19 @@ TEST_F(NicUnit, RdmaNoDataKeepsNic) {
   ExpectRdmaZeroed(info_.rdma_dev);
 }
 
+// Unlike the RDMA getter, driver/port never write on this path (they return
+// before touching their output struct), so there is no zeroed-struct contract
+// to assert here.
+TEST_F(NicUnit, DriverNoDataKeepsNic) {
+  g_status[kDriver] = SMI_NIC_STATUS_NO_DATA;
+  EXPECT_EQ(Populate(), AMDSMI_STATUS_SUCCESS);
+}
+
+TEST_F(NicUnit, PortNoDataKeepsNic) {
+  g_status[kPort] = SMI_NIC_STATUS_NO_DATA;
+  EXPECT_EQ(Populate(), AMDSMI_STATUS_SUCCESS);
+}
+
 // Pins the status translation, not just "something went wrong".
 TEST_F(NicUnit, RdmaHardFailureMapsToItsAmdsmiStatus) {
   for (const StatusMapping& mapping : kStatusMappings) {
@@ -197,11 +157,16 @@ TEST_F(NicUnit, RdmaHardFailureMapsToItsAmdsmiStatus) {
   }
 }
 
-// Tolerance belongs to the RDMA getter alone: the required five must drop the
-// NIC for every status, including the two the RDMA path forgives.
+// The required five must drop the NIC for every status, including the two the
+// RDMA path forgives, except NO_DATA on driver/port (see
+// IsToleratedForDriverOrPort, covered separately by DriverNoDataKeepsNic and
+// PortNoDataKeepsNic).
 TEST_F(NicUnit, RequiredGetterFailureDropsNicForEveryStatus) {
   for (size_t getter : kRequiredGetters) {
     for (const StatusMapping& mapping : kStatusMappings) {
+      if (IsToleratedForDriverOrPort(getter, mapping.nic)) {
+        continue;
+      }
       SetUp();
       g_status[getter] = mapping.nic;
       EXPECT_EQ(Populate(), mapping.amdsmi)
@@ -217,107 +182,6 @@ TEST_F(NicUnit, RestoreRebindsProductionGetters) {
   nic_set_info_getters_for_testing(nullptr);
   AMDSmiAINICDevice::AINICInfo info = {};
   EXPECT_EQ(populate_amd_ainic_device(nullptr, 0x1000, info), AMDSMI_STATUS_INVAL);
-}
-
-// Creates a unique directory and removes it however the test exits.
-class ScopedTempDir {
- public:
-  ScopedTempDir() {
-    std::string tmpl = (std::filesystem::temp_directory_path() / "amdsmi_nic_port_XXXXXX").string();
-    if (mkdtemp(tmpl.data()) != nullptr) {
-      path_ = tmpl;
-    }
-  }
-  ~ScopedTempDir() {
-    if (!path_.empty()) {
-      std::error_code ec;
-      std::filesystem::remove_all(path_, ec);
-    }
-  }
-  ScopedTempDir(const ScopedTempDir&) = delete;
-  ScopedTempDir& operator=(const ScopedTempDir&) = delete;
-
-  const std::string& path() const { return path_; }
-
- private:
-  std::string path_;
-};
-
-// The reader returns an empty file as 0, so a failed write has to stop the
-// test instead of surfacing as a wrong index.
-::testing::AssertionResult WriteFile(const std::string& path, const std::string& contents) {
-  std::ofstream out(path);
-  out << contents;
-  out.close();
-  if (!out) {
-    return ::testing::AssertionFailure() << "cannot write " << path;
-  }
-  return ::testing::AssertionSuccess();
-}
-
-// The kernel numbers network interfaces with an int, and hosts with many
-// interfaces, such as container hosts, hand out indexes above 255. INT_MAX, the
-// largest it assigns, fails any field narrower than 32 bits. These tests live
-// here because every NicUnit test has to share this file's fixture.
-TEST_F(NicUnit, PortIfindexIsReadAtFullWidth) {
-  ScopedTempDir dir;
-  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
-  constexpr auto kIfindex = static_cast<uint32_t>(std::numeric_limits<int>::max());
-  ASSERT_TRUE(WriteFile(dir.path() + "/ifindex", std::to_string(kIfindex) + "\n"));
-
-  const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
-  EXPECT_EQ(port.ifindex(), kIfindex);
-}
-
-// A missing file must read as no value, not as a number.
-TEST_F(NicUnit, PortIfindexWithoutFileIsUnknown) {
-  ScopedTempDir dir;
-  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
-
-  const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
-  EXPECT_EQ(port.ifindex(), std::nullopt);
-}
-
-// Text with no number has no value; std::stoul throws on it.
-TEST_F(NicUnit, PortIfindexThatIsNotANumberIsUnknown) {
-  ScopedTempDir dir;
-  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
-  ASSERT_TRUE(WriteFile(dir.path() + "/ifindex", "Unknown\n"));
-
-  const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
-  EXPECT_EQ(port.ifindex(), std::nullopt);
-}
-
-// The kernel refuses carrier and speed reads on a port that is down; an empty
-// or blank file reads nothing the same way and must give no value, not 0 or "0".
-TEST_F(NicUnit, PortFileWithNothingToReadIsUnknown) {
-  ScopedTempDir dir;
-  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
-  ASSERT_TRUE(WriteFile(dir.path() + "/carrier", ""));
-  ASSERT_TRUE(WriteFile(dir.path() + "/address", " \n"));
-
-  const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
-  EXPECT_EQ(port.carrier(), std::nullopt);
-  EXPECT_EQ(port.mac_address(), std::nullopt);
-}
-
-// Exposes the protected PCI id reader that NIC discovery uses.
-class PciIdReader : public SmiNicSubsystemPensando {
- public:
-  using SmiNicSubsystem::read_pci_ids;
-};
-
-// A PCI id that is not a number reads as 0, so only that device goes unrecognized. std::stoul
-// threw on it, and AI NIC discovery then reported no NICs at all.
-TEST_F(NicUnit, PciIdThatIsNotANumberIsZero) {
-  ScopedTempDir dir;
-  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
-  ASSERT_TRUE(WriteFile(dir.path() + "/vendor", "Unknown\n"));
-  ASSERT_TRUE(WriteFile(dir.path() + "/device", "0x1002\n"));
-
-  const auto [vendor_id, device_id] = PciIdReader().read_pci_ids(dir.path());
-  EXPECT_EQ(vendor_id, 0);
-  EXPECT_EQ(device_id, 0x1002);
 }
 
 }  // namespace

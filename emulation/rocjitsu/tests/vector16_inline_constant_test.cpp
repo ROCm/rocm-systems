@@ -492,6 +492,10 @@ protected:
       auto decode_dpp = [&]<typename Raw>() {
         Raw raw = std::bit_cast<Raw>(words);
         raw.src0 = amdgpu::SRC_DPP;
+        // GFX11.0 DPP requires a VGPR in SRC1. v1 contains zero on every lane;
+        // the inline or scalar accumulator being tested is independently in SRC2.
+        if (GetParam().arch == ROCJITSU_CODE_ARCH_RDNA3)
+          raw.src1 = 257;
         raw.vsrc0 = 1;
         raw.dpp_ctrl = amdgpu::dpp::ROW_MIRROR;
         raw.bound_ctrl = 1;

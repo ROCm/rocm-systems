@@ -4721,7 +4721,7 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
     NCCLCHECK(hostToDevRedOp(&opDev, info->op, info->datatype, comm));
     if (comm->nRanks == 1) {
       NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream,
-                                  ncclCollConfigGetLaunchCompletionEvent(&info->collConfig)));
+                                  ncclCollConfigGetLaunchCompletionEvent(&info->collConfig), info->acc));
       return ncclSuccess;
     }
     t = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
@@ -4736,6 +4736,8 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
     t->coll.opDev = opDev;
     t->coll.stream = info->stream;
     t->coll.collConfig = info->collConfig;
+    t->coll.acc = info->acc;
+    t->coll.opCount = comm->opCount;
     if (info->coll == ncclFuncBroadcast) {
       ncclIntruQueueEnqueue(&rtq->bcastQueue, t);
     } else {
