@@ -24,6 +24,7 @@ namespace {
 
 using dda::common::DdaArSplitB;
 using dda::common::DdaKernelParams;
+using dda::common::kDdaArSplitBDma;
 using dda::common::kDdaArSplitBPairwise;
 using dda::common::kDdaArSplitBWide;
 using dda::common::kDdaArSplitBWideChunked;
@@ -68,7 +69,7 @@ struct Case {
   int epochLen = 0;       // epoch cells the launch owns; 0 is one per block
   bool inPlace = false;   // sendbuff == recvbuff
   bool handoff = false;   // the split's B -> C hand-off through LDS
-  DdaArSplitB b = kDdaArSplitBPairwise;  // the hand-off split's B form
+  DdaArSplitB b = kDdaArSplitBPairwise;  // B's form: wide forms with the hand-off; DMA B with the 8 B flag
 };
 
 int epochLen(const Case& c) {
@@ -138,6 +139,16 @@ __global__ void PublishLinesAfterMyCopy(uint64_t* area, const int8_t* rows, cons
   }
 }
 
+// Garbles (data and flag) each line of wire slice blockIdx.x at `slot` whose bit in `keep` is clear: it reads stale.
+__global__ void TearLines(uint32_t* slot, uint32_t keep) {
+  constexpr int kWords = (int)(dda::common::kDdaLL128WireBytesPerSlice / sizeof(uint32_t));
+  for (int w = threadIdx.x; w < kWords; w += blockDim.x) {
+    if (((keep >> (w * sizeof(uint32_t) / dda::common::kDdaLL128LineBytes)) & 1u) == 0) {
+      slot[(size_t)blockIdx.x * kWords + w] = 0x5A5A5A5Au;
+    }
+  }
+}
+
 __global__ void ReportStaged(int* out) {
   *out = dda::common::ddaLL128Staged<kDdaLL128WireAsync>() ? 1 : 0;
 }
@@ -154,9 +165,15 @@ __global__ void CountResident(int* live, int* most, long long ticks) {
   __syncthreads();
 }
 
-// The split kernel of T with kFlagBytes for c: my own slot, or the hand-off with c.b's B.
+// The split kernel of T with kFlagBytes for c: my own slot, or the hand-off with c.b's B; DMA B either way.
 template <typename T, int kFlagBytes>
 auto splitKernel(const Case& c) {
+  if constexpr (kFlagBytes == kDdaLL128FlagBytesWide) {
+    if (c.b == kDdaArSplitBDma) {
+      return c.handoff ? &dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, true, kDdaArSplitBDma>
+                       : &dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes, false, kDdaArSplitBDma>;
+    }
+  }
   if (!c.handoff) {
     return &dda::common::ddaAllReduceTwoShotLL128Split<T, kFlagBytes>;
   }
@@ -174,9 +191,16 @@ auto splitKernel(const Case& c) {
 template <typename T, int kFlagBytes>
 void launchSplit(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch, const DdaKernelParams& params,
                  hipStream_t stream) {
-  const size_t lds = dda::common::ddaLL128ArSplitSharedBytes(c.block, c.nRanks, c.handoff, c.b);
+  size_t lds = dda::common::ddaLL128ArSplitSharedBytes(c.block, c.nRanks, c.handoff, c.b);
+  if (c.b == kDdaArSplitBDma) {
+    // The group the kernel derives from a block's most slices, as the launcher sizes it.
+    const size_t group = dda::common::ddaArSplitDmaGroupSlices(
+      c.block, c.nRanks, c.handoff, (slicesOf(c.kind, c.shardBytes) + c.grid - 1) / c.grid);
+    ASSERT_NE(group, 0u) << "no DMA B group fits the LDS budget";
+    lds = dda::common::ddaLL128ArSplitDmaSharedBytes(c.block, c.nRanks, c.handoff, group);
+  }
   auto* kernel = splitKernel<T, kFlagBytes>(c);
-  if (c.handoff) {
+  if (c.handoff || c.b == kDdaArSplitBDma) {
     HIP_CHECK(
       hipFuncSetAttribute(reinterpret_cast<const void*>(kernel), hipFuncAttributeMaxDynamicSharedMemorySize, (int)lds));
   }
@@ -461,10 +485,11 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
     return peers;
   }
 
-  // The peers but skip publish rows at `at` in kind_'s line format; on `stream` after `ticks` of wall clock, else now.
+  // The peers but skip (or only peer `only`) publish rows at `at` in kind_'s line format; on `stream` after `ticks` of
+  // wall clock, else now.
   void publish(uint64_t* at, const std::vector<int8_t>& rows, int skip, uint32_t flag, hipStream_t stream = nullptr,
-               long long ticks = 0) {
-    const std::vector<int> peers = peersBut(skip);
+               long long ticks = 0, int only = -1) {
+    const std::vector<int> peers = only >= 0 ? std::vector<int>{only} : peersBut(skip);
     auto dRows = std::make_shared<DeviceBuffer<int8_t>>(rows.size());
     dRows->copyFrom(rows);
     auto dPeers = std::make_shared<DeviceBuffer<int>>(peers.size());
@@ -783,7 +808,14 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, AbortInTheReduceLeavesNoPartialSum) {
                {wideCase(8, 5, 2, 512, kSmallShardBytes, kDdaArSplitBWide, Kind::kSplitNarrow), 7},
                {wideCase(9, 4, 2, 512, kMediumShardBytes, kDdaArSplitBWide, Kind::kSplit, kFlag + 1), 3},
                {wideCase(18, 3, 2, 512, kMediumShardBytes, kDdaArSplitBWideChunked, Kind::kSplitNarrow), 17},
-               {wideCase(20, 7, 1, 64, kSmallShardBytes, kDdaArSplitBWideChunked), 9}};
+               {wideCase(20, 7, 1, 64, kSmallShardBytes, kDdaArSplitBWideChunked), 9},
+               {wideCase(8, 5, 2, 512, kSmallShardBytes, kDdaArSplitBDma), 1},
+               {wideCase(16, 9, 2, 512, kMediumShardBytes, kDdaArSplitBDma), 15},
+               {{16, 9, 0, Kind::kSplit, 1, 512, kMediumShardBytes, kFlag + 1, 0, false, /*handoff=*/false,
+                 kDdaArSplitBDma},
+                7},
+               {{5, 2, 0, Kind::kSplit, 1, 64, kSmallShardBytes, kFlag, 0, false, /*handoff=*/false, kDdaArSplitBDma},
+                3}};
   for (const auto& cell : cells) {
     const Case& c = cell.c;
     SCOPED_TRACE(testing::Message() << c.nRanks << "r kind " << (int)c.kind << " shard " << c.shardBytes
@@ -841,18 +873,25 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitAbortInTheGatherKeepsMyReducedShard)
                              /*handoff=*/true},
                         wideCase(8, 5, 2, 512, kSmallShardBytes, kDdaArSplitBWide, Kind::kSplitNarrow),
                         wideCase(18, 3, 2, 512, kMediumShardBytes, kDdaArSplitBWideChunked, Kind::kSplit,
-                                 kFlag + 1)}) {
-    SCOPED_TRACE(testing::Message() << c.nRanks << "r kind " << (int)c.kind << " shard " << c.shardBytes);
-    setUpFloat(c);
-    const int missing = (c.self + 3) % c.nRanks;
-    reset(c, 1, -1, missing);
-    run<float>(c);
-    expectMyShard(/*reduced=*/true);
-    const std::vector<uint8_t> recv = recvBuf_->copyTo();
-    for (size_t i = 0; i < c.shardBytes; ++i) {
-      ASSERT_EQ(recv[(size_t)missing * c.shardBytes + i], kUntouched) << "byte " << i;
+                                 kFlag + 1),
+                        wideCase(8, 5, 2, 512, kSmallShardBytes, kDdaArSplitBDma),
+                        Case{5, 2, 0, Kind::kSplit, 4, 512, kMediumShardBytes, kFlag + 1, 0, false, /*handoff=*/false,
+                             kDdaArSplitBDma}}) {
+    // Peer self + 1's shard starts where my partial last slice ends: nothing of mine may spill into it.
+    for (const int r : {3, 1}) {
+      SCOPED_TRACE(testing::Message() << c.nRanks << "r kind " << (int)c.kind << " shard " << c.shardBytes
+                                      << " missing self + " << r);
+      setUpFloat(c);
+      const int missing = (c.self + r) % c.nRanks;
+      reset(c, 1, -1, missing);
+      run<float>(c);
+      expectMyShard(/*reduced=*/true);
+      const std::vector<uint8_t> recv = recvBuf_->copyTo();
+      for (size_t i = 0; i < c.shardBytes; ++i) {
+        ASSERT_EQ(recv[(size_t)missing * c.shardBytes + i], kUntouched) << "byte " << i;
+      }
+      expectEpochAdvanced(c);
     }
-    expectEpochAdvanced(c);
   }
 }
 
@@ -905,7 +944,7 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitDrainsWhenTheGridIsNotCoResident) {
   const int mostResident = counts.copyTo()[1];
 
   // The 8 B split, the narrow one, then the narrow one handing off on 64 blocks (17 slices each) with pairwise, wide
-  // and chunked B, each a new epoch.
+  // and chunked B, and the 8 B one with DMA B (18 slices each), each a new epoch.
   struct Pass {
     Kind kind;
     bool handoff;
@@ -916,7 +955,8 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitDrainsWhenTheGridIsNotCoResident) {
   const Pass passes[] = {{Kind::kSplit, false, c.grid, c.flag - 1}, {Kind::kSplitNarrow, false, c.grid, c.flag},
                          {Kind::kSplitNarrow, true, 64, c.flag + 1},
                          {Kind::kSplitNarrow, true, 64, c.flag + 2, kDdaArSplitBWide},
-                         {Kind::kSplitNarrow, true, 64, c.flag + 3, kDdaArSplitBWideChunked}};
+                         {Kind::kSplitNarrow, true, 64, c.flag + 3, kDdaArSplitBWideChunked},
+                         {Kind::kSplit, true, 64, c.flag + 4, kDdaArSplitBDma}};
   for (const Pass& pass : passes) {
     SCOPED_TRACE(testing::Message() << "kind " << (int)pass.kind << " handoff " << pass.handoff << " b " << pass.b);
     // Host and null-stream work first: between two launches it would queue rank r + 1 behind rank r, which waits on it.
@@ -1145,6 +1185,118 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitWideBMatchesOnBf16AndFp8) {
       setUp(c.nRanks, c.self, c.shardBytes, Fp8Rows(c.nRanks, (size_t)c.nRanks * c.shardBytes, 0),
             Fp8Rows(c.nRanks, c.shardBytes, 5));
       expectSplitMatchesCoop<dda::common::fp8e4m3>(c, "fp8e4m3");
+    }
+  }
+}
+
+// ---- DMA B ----
+
+// Every split case with the 8 B flag, own slot and (where it fits) the hand-off, plus many groups: 16 ranks of 41
+// slices on one block (7 a group, own slot) and on two (5 a group handed off), 32 ranks (3 a group), 33 ranks on
+// 256-thread blocks in bank 1, in place, and shards of 16 B to 1936 B (one or two slices, a block owning none).
+std::vector<Case> dmaCases() {
+  std::vector<Case> base(std::begin(kSplitCases), std::end(kSplitCases));
+  base.push_back({16, 9, 0, Kind::kSplit, 1, 512, kMediumShardBytes});
+  base.push_back({16, 9, 0, Kind::kSplit, 2, 512, kMediumShardBytes});
+  base.push_back({32, 17, 0, Kind::kSplit, 1, 512, kMediumShardBytes});
+  base.push_back({33, 5, 0, Kind::kSplit, 2, 256, kMediumShardBytes, kFlag + 1});
+  base.push_back({16, 3, 0, Kind::kSplit, 1, 512, kMediumShardBytes, kFlag, 0, true});
+  for (const int shard : {16, 128, kDdaLL128DataBytesPerSlice - 16, kDdaLL128DataBytesPerSlice,
+                          kDdaLL128DataBytesPerSlice + 16}) {
+    base.push_back({8, 5, 8, Kind::kSplit, 2, 512, (size_t)shard});  // 1 or 2 slices, a full or partial last one
+  }
+  std::vector<Case> out;
+  for (Case c : base) {
+    c.b = kDdaArSplitBDma;
+    for (const bool handoff : {false, true}) {
+      c.handoff = handoff;
+      if (!handoff || handoffFits(c)) {
+        out.push_back(c);
+      }
+    }
+  }
+  return out;
+}
+
+// DMA B leaves the cooperative two-shot's recvbuff and every peer's lines: the fold order and the add are pairwise B's.
+TEST_F(DdaAllReduceFabricLL128TwoShot, SplitDmaMatchesTheHostFold) {
+  // The runtime accepts the launcher's limit for DMA B: its LDS budget.
+  HIP_CHECK(hipFuncSetAttribute(
+    reinterpret_cast<const void*>(
+      &dda::common::ddaAllReduceTwoShotLL128Split<float, kDdaLL128FlagBytesWide, true, kDdaArSplitBDma>),
+    hipFuncAttributeMaxDynamicSharedMemorySize, (int)dda::common::kDdaArSplitDmaLdsBudget));
+  int handoffRows = 0;
+  for (const Case& c : dmaCases()) {
+    handoffRows += c.handoff ? 1 : 0;
+    setUpFloat(c);
+    const Snapshot want = expectMatchesCoop<float>(c);
+    ASSERT_TRUE(want.recv == Concat(reduced_)) << "the cooperative two-shot left the host fold";
+  }
+  EXPECT_GT(handoffRows, 10) << "the hand-off rows ran";
+}
+
+// bf16 against its host fold and fp8 against the cooperative writer, own slot and hand-off, in place too.
+TEST_F(DdaAllReduceFabricLL128TwoShot, SplitDmaMatchesOnBf16AndFp8) {
+  for (Case c : {Case{5, 2, 0, Kind::kSplit, 1, 64, kSmallShardBytes},
+                 Case{8, 5, 8, Kind::kSplit, 8, 512, kLargeShardBytes},
+                 Case{16, 9, 0, Kind::kSplit, 1, 512, kMediumShardBytes},
+                 Case{8, 5, 8, Kind::kSplit, 2, 512, kMediumShardBytes, kFlag, 0, true}}) {
+    c.b = kDdaArSplitBDma;
+    for (const bool handoff : {false, true}) {
+      c.handoff = handoff;
+      if (handoff && !handoffFits(c)) {
+        continue;
+      }
+      const auto send = Bf16Messages(c.nRanks, c.shardBytes);
+      setUp(c.nRanks, c.self, c.shardBytes, send, Bf16Reduced(send, c.nRanks, c.shardBytes));
+      expectMatchesCoop<bf16>(c);
+      EXPECT_TRUE(recvBuf_->copyTo() == Concat(reduced_)) << "bf16: not the host fold";
+      setUp(c.nRanks, c.self, c.shardBytes, Fp8Rows(c.nRanks, (size_t)c.nRanks * c.shardBytes, 0),
+            Fp8Rows(c.nRanks, c.shardBytes, 5));
+      expectMatchesCoop<dda::common::fp8e4m3>(c);
+    }
+  }
+}
+
+// One peer's copy lands 1 ms after the launch, so the first load likely sees it stale (a wall-clock race, not a sync)
+// and reloads until fresh: missing (zeroed), or partly published with only its first 512 B, only each 512 B's first
+// line (the lines lane 7 checks), or all but those fresh. The result is the same.
+TEST_F(DdaAllReduceFabricLL128TwoShot, SplitDmaReloadsStaleCopies) {
+  int clockKhz = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&clockKhz, hipDeviceAttributeWallClockRate, 0));
+  for (Case c : {Case{8, 5, 8, Kind::kSplit, 2, 512, kSmallShardBytes},
+                 Case{16, 9, 0, Kind::kSplit, 1, 512, kMediumShardBytes},
+                 Case{5, 2, 0, Kind::kSplit, 4, 512, kLargeShardBytes, kFlag + 1}}) {
+    c.b = kDdaArSplitBDma;
+    for (const bool handoff : {false, true}) {
+      c.handoff = handoff;
+      if (handoff && !handoffFits(c)) {
+        continue;
+      }
+      for (const int late : {1, c.nRanks - 1}) {
+        for (const uint32_t keep : {0x0000u, 0x000Fu, 0x1111u, 0xFFF0u, 0xEEEEu}) {
+          SCOPED_TRACE(testing::Message() << c.nRanks << "r shard " << c.shardBytes << " handoff " << handoff
+                                          << " late copy from self + " << late << " fresh lines 0x" << std::hex
+                                          << keep);
+          setUpFloat(c);
+          const int peer = (c.self + late) % c.nRanks;
+          reset(c, 0, keep == 0 ? peer : -1);
+          if (keep != 0) {
+            uint64_t* const copy = area(self_, 0) + (size_t)peer * slotWords(nRanks_, shardBytes_);
+            hipLaunchKernelGGL(TearLines, dim3((unsigned)slicesOf(c.kind, c.shardBytes)), dim3(256), 0, nullptr,
+                               reinterpret_cast<uint32_t*>(copy), keep);
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+          }
+          // Only that copy, whole, on the side stream once 1 ms passed: the launch sees it late.
+          publish(area(self_, 0), copyRows(), -1, c.flag, side_, clockKhz, peer);
+          run<float>(c);
+          EXPECT_TRUE(drain({side_})) << "the late peer did not finish";
+          latePublishBuffers_.clear();
+          EXPECT_TRUE(recvBuf_->copyTo() == Concat(reduced_)) << "recvbuff is not the host fold";
+          expectEpochAdvanced(c);
+        }
+      }
     }
   }
 }
