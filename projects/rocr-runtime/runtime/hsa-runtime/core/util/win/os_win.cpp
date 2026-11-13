@@ -469,6 +469,12 @@ bool MapMemory(void* addr, size_t size, MemProt perms, int fd [[maybe_unused]],
   return VirtualProtect(addr, size, memProtToOsProt(perms), &OldProtect) != 0;
 }
 
+bool RemapMemory(void* old_addr [[maybe_unused]], void* new_addr [[maybe_unused]],
+                 size_t size [[maybe_unused]]) {
+  /* No Win32 equivalent of mremap: a view cannot be relocated. */
+  return false;
+}
+
 hsa_status_t DmaBufClose(int* dmabuf) {
   if (dmabuf) *dmabuf = -1;
   return HSA_STATUS_SUCCESS;

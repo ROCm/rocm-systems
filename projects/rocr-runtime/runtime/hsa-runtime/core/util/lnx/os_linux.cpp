@@ -885,6 +885,20 @@ bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) 
   return true;
 }
 
+bool RemapMemory(void* old_addr, void* new_addr, size_t size) {
+  if (old_addr == nullptr || new_addr == nullptr || size == 0) return false;
+  if (old_addr == new_addr) return true;
+
+  // Equal lengths skip mremap's VM_PFNMAP rejection, so /dev/dxg ranges move too.
+  void* moved = ::mremap(old_addr, size, size, MREMAP_MAYMOVE | MREMAP_FIXED, new_addr);
+  if (moved == MAP_FAILED) {
+    debug_print("mremap(%p -> %p, %zu) failed: %s\n", old_addr, new_addr, size,
+                strerror(errno));
+    return false;
+  }
+  return moved == new_addr;
+}
+
 hsa_status_t DmaBufClose(int* dmabuf) {
   if (dmabuf == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (*dmabuf < 0) return HSA_STATUS_SUCCESS;

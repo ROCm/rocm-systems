@@ -323,6 +323,8 @@ bool UncommitMemory(void* addr, size_t size);
 /// Changes the Protection of a region of committed pages in virtual address space
 bool UnmapMemory(void* addr, size_t size);
 bool MapMemory(void* addr, size_t size, MemProt prot, int fd, uint64_t cpu_addr);
+/// Move a same-length mapping onto @p new_addr, leaving @p old_addr unmapped
+bool RemapMemory(void* old_addr, void* new_addr, size_t size);
 
 /// Close a dmabuf file descriptor and set *dmabuf to -1.
 hsa_status_t DmaBufClose(int* dmabuf);

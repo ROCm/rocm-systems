@@ -949,10 +949,10 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
       // Host memory DMA-BUF allocation via vmem APIs requires:
       //  - Virtual Memory APIs supported by the driver
       //  - At least one GPU agent (needed for DRM operations)
-      //  - Requires vmem support, a GPU agent, and a non-DXG backend (WDDM/DXG has no host-memory VMM).
+      // Also ROCclr's hostVmemAlloc() gate; DXG now serves host views via D3DKMTLock2.
       auto* runtime = core::Runtime::runtime_singleton_;
       *((bool*)value) = runtime->VirtualMemApiSupported() && !runtime->gpu_agents().empty() &&
-                        !runtime->thunkLoader()->IsDXG();
+                        (!runtime->thunkLoader()->IsDXG() || runtime->thunkLoader()->IsWslDxg());
       break;
     }
     default:
@@ -4800,7 +4800,17 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(MappedHandle* _mappe
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) assert(!"Unimplemented");
+    /* Unless DxgEnableHostAccess() took va over, it is still the caller's reservation. */
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) {
+      hsa_status_t status = DxgRemoveHostAccess();
+      assert(status == HSA_STATUS_SUCCESS && "Failed to drop DXG host mapping");
+      (void)status;
+      return;
+    }
+    /* Native WDDM/DXG never establishes a CPU mapping - EnableAccess() rejects CPU agents there,
+       and SetMemoryHandleAccess() destroys this entry on that failure. va is still the client's
+       bare reservation carrying a live GPU mapping, so the un-remap below would decommit it. */
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
 
     /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
     bool result = rocr::os::UncommitMemory(va, size);
@@ -4815,9 +4825,66 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   }
 }
 
+/* No DRM render node on DXG: Lock2 maps where dxgkrnl picks, then move it onto the client VA. */
+hsa_status_t Runtime::MappedHandleAllowedAgent::DxgEnableHostAccess(
+    hsa_access_permission_t perms) {
+  if (perms == HSA_ACCESS_PERMISSION_NONE) {
+    hsa_status_t status = DxgRemoveHostAccess();
+    if (status != HSA_STATUS_SUCCESS) return status;
+    permissions = perms;
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /* Lock2 maps a whole allocation, never a sub-range. */
+  if (mappedHandle->offset != 0) {
+    debug_print("DXG: CPU access at handle offset %lu is not supported\n",
+                mappedHandle->offset);
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  HsaMemoryObjectHandle bo = reinterpret_cast<HsaMemoryObjectHandle>(
+      mappedHandle->mem_handle->driver_handle.handle);
+  void* cpuPtr = nullptr;
+  if (HSAKMT_CALL(hsaKmtMemoryCpuMap(bo, &cpuPtr)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  /* Device memory has no lockable CPU view on DXG; record the grant and leave va untouched. */
+  if (cpuPtr == nullptr) {
+    permissions = perms;
+    return HSA_STATUS_SUCCESS;
+  }
+
+  if (!rocr::os::RemapMemory(cpuPtr, va, size)) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  dxg_host_mapped = true;
+
+  /* Unlock2 vm_munmap()s the address dxgkrnl chose, so park the hole the move left behind. */
+  if (!rocr::os::UncommitMemory(cpuPtr, size)) {
+    debug_print("DXG: failed to park the vacated lock address %p\n", cpuPtr);
+    return HSA_STATUS_ERROR;
+  }
+
+  if (!rocr::os::ProtectMemory(va, size, PermissionsToMemProt(perms))) return HSA_STATUS_ERROR;
+
+  permissions = perms;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t Runtime::MappedHandleAllowedAgent::DxgRemoveHostAccess() {
+  if (!dxg_host_mapped) return HSA_STATUS_SUCCESS;
+
+  /* Give va back to the client's reservation. The thunk issues Unlock2 at destroy. */
+  if (!rocr::os::UncommitMemory(va, size)) return HSA_STATUS_ERROR;
+  dxg_host_mapped = false;
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+      /* Native Windows DXG is unchanged; only WSL grows a host mapping. */
+      if (!core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
+      return DxgEnableHostAccess(perms);
+    }
 
     MemoryHandle* memHandle = mappedHandle->mem_handle;
 
@@ -4861,7 +4928,14 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
-      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
+      /* A relocated Lock2 range has to be replaced, not just re-protected. */
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+        if (!core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
+        hsa_status_t status = DxgRemoveHostAccess();
+        if (status != HSA_STATUS_SUCCESS) return status;
+        permissions = HSA_ACCESS_PERMISSION_NONE;
+        return HSA_STATUS_SUCCESS;
+      }
 
       hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
       if (!rocr::os::ProtectMemory(va, size, PermissionsToMemProt(perms))) {

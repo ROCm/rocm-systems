@@ -1170,6 +1170,10 @@ class Runtime {
     hsa_status_t RemoveAccess();
     hsa_status_t EnableAccess(hsa_access_permission_t perms);
 
+    // DXG/WSL: the host mapping comes from D3DKMTLock2, not an mmap of a render node.
+    hsa_status_t DxgEnableHostAccess(hsa_access_permission_t perms);
+    hsa_status_t DxgRemoveHostAccess();
+
     void* va;
     size_t size;
     Agent* targetAgent;
@@ -1178,6 +1182,8 @@ class Runtime {
     DriverMemoryHandle driver_handle;
     // False when driver_handle is borrowed from MemoryHandle::driver_handle (drm_owner reuse path)
     bool owns_driver_handle = true;
+    // DXG only: va holds a relocated Lock2 mapping, not the caller's reservation.
+    bool dxg_host_mapped = false;
   };
 
   struct MappedHandle {

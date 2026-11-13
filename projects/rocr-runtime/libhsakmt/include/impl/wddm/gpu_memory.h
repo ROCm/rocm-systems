@@ -232,6 +232,7 @@ public:
   inline uint32_t Flags() const { return desc_.flags.reserved; }
   inline int GetAllocInfo() const { return desc_.mem_flags; }
   inline bool IsFineGrain() const { return (desc_.mem_flags & Wkmi::kFineGrain); }
+  inline bool IsHostAccessible() const { return (desc_.mem_flags & Wkmi::kHostAccess); }
   inline bool IsSameAdapter(const LUID &luid) const {
     return (desc_.adapter_luid.HighPart == luid.HighPart &&
       desc_.adapter_luid.LowPart == luid.LowPart);
@@ -276,6 +277,10 @@ public:
   // the allocation lifetime to prevent KMD-side eviction/trim of backing pages.
   ErrorCode LockSystemMemory();
   ErrorCode UnlockSystemMemory();
+
+  // Return a CPU view via D3DKMTLock2. Needs Wkmi::kHostAccess.
+  ErrorCode CpuMap(void** out_cpu_addr);
+  ErrorCode CpuUnmap();
   ErrorCode CreatePhysicalMemory();
   ErrorCode FreePhysicalMemory();
 
@@ -318,6 +323,7 @@ private:
 
   bool is_phymem_created = false; // status of physical memory allocation
   bool is_sysmem_locked_ = false; // kSystem allocation pinned via D3DKMTLock2
+  bool is_cpu_mapped_ = false;    // CPU mapping held via CpuMap()
 
   // Number of outstanding GPU mappings of a user pointer.
   uint32_t mapping_count_ = 1;
