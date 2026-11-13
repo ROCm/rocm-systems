@@ -466,8 +466,39 @@ TEST_F(DdaAllReduceFabricLL, SpreadMatchesOneShotBitwise) {
 TEST_F(DdaAllReduceFabricLL, SpreadPassesIdleBlocksAndShortShards) {
   spreadCase<float, 4>(4, kSelf, kBufBytes, 1);  // 768-packet shards, 512 a pass
   spreadCase<float, 0>(12, kSelf, kBufBytes, 1);  // 256-packet shards, 170 a pass
-  spreadCase<float, 0>(12, 11, 400, 8);  // 50 packets in shards of 5: ranks 10 and 11 own none, blocks 5 to 7 idle
-  spreadCase<float, 0>(12, 11, 448, 2);  // 56 packets: my shard is one packet, so block 1 reduces nothing
+  spreadCase<float, 0>(12, 11, 400, 8);  // 50 packets in shards of 5: ranks 10 and 11 own none, blocks 1 to 7 idle
+  spreadCase<float, 0>(12, 11, 448, 2);  // 56 packets: my shard is one packet, block 1 idle
+  spreadCase<float, 0>(12, 11, 1560, 2);  // 195 packets in shards of 17, mine 8: block 1 (packet 16) reduces nothing
+}
+
+// Results stay the one-shot's when 16-packet slices leave trailing blocks short (5 ranks on 7 blocks) or idle (8 on 5).
+TEST_F(DdaAllReduceFabricLL, SpreadRoundedSlicesLeaveTrailingBlocksShortOrIdle) {
+  spreadCase<float, 0>(5, kSelf, kOneShotBytes, 7);  // 308-packet shards: 48 a block, block 6 has 20 (16 for rank 4)
+  spreadCase<float, 8>(8, kSelf, kOneShotBytes, 5);  // 192-packet shards: 48 a block, block 4 idle
+}
+
+// 256-packet shards: 48 a block on 7 blocks, 32 on 8. Copies held past block 0's slice stall the rest until the abort,
+// so only that slice finishes.
+TEST_F(DdaAllReduceFabricLL, SpreadAbortStopsAtTheFirstBlockSlice) {
+  struct Case {
+    unsigned grid;
+    size_t slice;
+  };
+  for (const Case c : {Case{7, 48}, Case{8, 32}}) {
+    SCOPED_TRACE(::testing::Message() << "grid " << c.grid);
+    heldFrom_ = c.slice;
+    ASSERT_NO_FATAL_FAILURE((spreadReference<float, 0>(6, kSelf, kOneShotBytes, 1)));
+    ASSERT_EQ(dda::common::ddaLLSpreadBlockPkts(shardPkts(), c.grid), heldFrom_);
+    reset();
+    ASSERT_NO_FATAL_FAILURE((spreadRun<float, 0>(c.grid, kCopyArea, kAbort, dSend_)));
+    const std::vector<uint32_t> out = recvWords();
+    for (size_t i = 0; i < out.size(); ++i) {
+      const size_t pk = i / 2 % shardPkts();
+      ASSERT_EQ(out[i], pk < heldFrom_ ? ref_[i] : bitsOf(kUntouched)) << "word " << i << ", packet " << pk;
+    }
+    ASSERT_NO_FATAL_FAILURE(expectSpreadPublished(false));
+    expectEpochAdvanced();
+  }
 }
 
 // Rank 0's copy of my shard lands only once the kernel is polling (phase 2), then a peer's reduced shard (phase 3).
