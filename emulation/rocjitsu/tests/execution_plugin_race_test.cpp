@@ -1262,7 +1262,7 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreRegistersItsLdsSource) {
   waves[0]->pc = 0x3000;
   fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
   ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
-  test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), inst.release(), *waves[0]);
+  test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), std::move(inst), *waves[0]);
 
   EXPECT_FALSE(ds_write(1, lds_base + 36));
   const size_t previous = sink->str().size();
@@ -1292,7 +1292,7 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreOutsideTheAllocationRegistersNoLdsBy
   ASSERT_NE(inst, nullptr);
   fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
   ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
-  test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), inst.release(), *waves[0]);
+  test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), std::move(inst), *waves[0]);
 
   EXPECT_FALSE(ds_write(1, lds_base + 252));
   EXPECT_FALSE(ds_write(1, lds_base + 256));
@@ -1320,7 +1320,7 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreStraddlingTheAllocationTracksItsInRa
   ASSERT_NE(inst, nullptr);
   fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
   ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
-  test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), inst.release(), *waves[0]);
+  test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), std::move(inst), *waves[0]);
 
   EXPECT_FALSE(ds_write(1, lds_base + 246));
   EXPECT_TRUE(ds_write(1, lds_base + 254));
@@ -1346,7 +1346,7 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreWithoutActiveLanesKeepsItsAsynccntSl
   waves[0]->pc += 16;
   fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
   ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
-  test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), inst.release(), *waves[0]);
+  test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), std::move(inst), *waves[0]);
   waves[0]->set_exec(1);
 
   wait_asynccnt(0, 1);
@@ -1373,7 +1373,7 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncLoadWithoutActiveLanesKeepsItsAsynccntSlo
   waves[0]->pc += 16;
   fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
   ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
-  test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), inst.release(), *waves[0]);
+  test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), std::move(inst), *waves[0]);
   waves[0]->set_exec(1);
 
   wait_asynccnt(0, 1);

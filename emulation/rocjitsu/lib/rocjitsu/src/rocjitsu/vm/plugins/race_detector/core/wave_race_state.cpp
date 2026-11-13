@@ -174,7 +174,7 @@ util::Result WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType t
   if (waveMemoryEvents.size() * amdgpu::MemoryCounterObligation::MAX_COUNTER_INCREMENT +
           increment <=
       static_cast<size_t>(capacity))
-    return;
+    return util::Result::success();
 
   int pending_tokens = 0;
   for (const EventId event_id : waveMemoryEvents)

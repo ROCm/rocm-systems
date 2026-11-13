@@ -7,7 +7,6 @@
 
 #include <array>
 #include <ostream>
-#include <stdexcept>
 
 using namespace rocjitsu::plugins::race_detector;
 namespace amdgpu = rocjitsu::amdgpu;
@@ -495,8 +494,12 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(RaceDetector, Gfx1250CounterCapacity_CombinedCounterFailsLoudly) {
   for (const auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::LGKMCNT}) {
     SCOPED_TRACE(static_cast<int>(counter));
-    auto builder = makeGfx1250Test();
-    EXPECT_THROW(builder.prepareCounterIncrement(kWave, counter), std::logic_error);
+    RaceDetector detector(/*nWaves=*/
+                          1, /*vgprCount=*/8, /*sgprCount=*/kGfx1250ScalarRegisters, Dim3d(0),
+                          [](RaceViolation) {}, counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5),
+                          /*ldsSizeBytes=*/64 * 1024);
+    EXPECT_TRUE(detector.getWaveRaceState(0).prepareForCounterIncrement(counter).failed());
+    EXPECT_TRUE(detector.getWaveRaceState(0).getWaveMemoryEvents().empty());
   }
 }
 
