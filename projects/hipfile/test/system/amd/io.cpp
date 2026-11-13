@@ -23,6 +23,7 @@
 #include <hip/hip_runtime_api.h>
 #include <linux/stat.h>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -328,8 +329,6 @@ struct HipFileIoHipErrors : public testing::Test {
     }
 };
 
-// TODO: Test that a successful fallback IO does not set HIP Error
-
 // The HIP Runtime only sets the HIP error value on a failed fastpath request
 // on ROCm >= 10.3 (HIP 7.18).
 #if HIP_VERSION_MAJOR > 7 || (HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 18)
@@ -379,6 +378,38 @@ TEST_F(HipFileIoHipErrors, FailedHipRuntimeCallReturnsHipDriverError)
         // Use expect so test-specific cleanup will run.
         EXPECT_EQ(-hipFileHipDriverError, hipFileWrite(handle, device_buffer, io_size, 0, 0));
         EXPECT_NE(hipSuccess, hipGetLastError());
+    }
+
+    hipFileHandleDeregister(handle);
+}
+
+// A retryable Fastpath failure that the fallback recovers from does not leave
+// a HIP error behind.
+TEST_F(HipFileIoHipErrors, RecoveredFastpathIoClearsHipError)
+{
+    hipFileHandle_t handle{registerFd(tmpfile.fd)};
+
+    enforceFastpathGate(handle, device_buffer);
+    if (!IsSkipped() && !HasFatalFailure()) {
+        NiceMock<MHip> mhip;
+        mhip.enable_passthrough();
+
+        // Make the real hipAmdFileWrite() fail, as above, so the HIP Runtime
+        // sets a real HIP error. Then report a retryable error so the IO is
+        // retried on the fallback.
+        int not_device_memory{};
+        EXPECT_CALL(mhip, hipAmdFileWrite)
+            .WillOnce([&mhip, &not_device_memory](hipAmdFileHandle_t fh, void *, uint64_t size,
+                                                   int64_t file_offset) -> uint64_t {
+                EXPECT_THROW(mhip.Hip::hipAmdFileWrite(fh, &not_device_memory, size, file_offset),
+                             Hip::RuntimeError);
+                EXPECT_NE(hipSuccess, hipPeekAtLastError());
+                throw std::system_error(ENODEV, std::generic_category());
+            });
+
+        // Use expect so test-specific cleanup will run.
+        EXPECT_EQ(io_size, hipFileWrite(handle, device_buffer, io_size, 0, 0));
+        EXPECT_EQ(hipSuccess, hipGetLastError());
     }
 
     hipFileHandleDeregister(handle);
