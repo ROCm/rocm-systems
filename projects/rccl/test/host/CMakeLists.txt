@@ -1365,6 +1365,10 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+  set(TEST_MICRO_DEVCOMM_V23000_SOURCE_FILES
+    devcomm-v23000-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -3497,6 +3501,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaIpcLifecycle
     DDA_IPC_MEM_HANDLER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_mem_handler.cc"
     DDA_IPC_GPU_BARRIER_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_gpu_barrier.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda_ipc_lifecycle.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroDevcommV23000
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroDevcommV23000
+  SOURCES ${TEST_MICRO_DEVCOMM_V23000_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    DEVCOMM_V23000_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v23000.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_devcomm_v23000.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsHostAll
