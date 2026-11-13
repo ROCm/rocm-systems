@@ -855,29 +855,6 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # src/diagnostics/p2p.cc; fakes transport/p2p.cc, which rccl-UnitTestsMicro compiles.
-  set(TEST_MICRO_DIAGNOSTICS_SOURCE_FILES
-    diag-p2p-test.cc
-    diag-ib-write-bw-test.cc
-    diagnostics-test.cc
-    diag-p2p-device-test.cc
-    fakes/argcheck_fakes.cc
-    fakes/dev_runtime_micro_fakes.cc     # bootstrap collectives
-    fakes/env_fakes.cc
-    fakes/diagnostics_fakes.cc           # src/diagnostics.cc external-tool runners
-    fakes/diagnostics_p2p_device_fakes.cc  # src/diagnostics/device/p2p.cu
-    fakes/hip_fakes.cc
-    fakes/libc_fakes.cc
-    fakes/mgmt_task_enq_fakes.cc         # src/enqueue/mgmt_task_enq.cc
-    fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
-    fakes/nccl_fakes.cc
-    fakes/topo_stubs.cc
-    fakes/search_fakes.cc
-    fakes/transport_net_ib_fakes.cc
-    fakes/transport_p2p_fakes.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
   # rccl-UnitTestsMicroTopo -- the src/graph units listed below, one test TU each.
   # Own binary: rccl-UnitTestsMicroGraph links tuning_fakes.cc, which defines connect.cc's params,
   # and os_fakes.cc, whose CPU and sysfs seams these tests cannot drive.
@@ -1925,20 +1902,24 @@ rccl_add_micro_binary(rccl-UnitTestsMicroSearch
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_search.yaml")
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroDiagnostics
+# rccl-UnitTestsMicroDiagnostics -- src/diagnostics.cc
 # ---------------------------------------------------------------------------
-# p2p.cu's <<<>>> must not reach hip_fakes.cc's aborting hipLaunchKernel; see diag-p2p-device-test.cc.
-set_source_files_properties(diag-p2p-device-test.cc PROPERTIES
-  COMPILE_OPTIONS "-fno-hip-new-launch-api;-fuse-cuid=none")
-rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
-  SOURCES ${TEST_MICRO_DIAGNOSTICS_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    DIAG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/p2p.cc"
-    DIAG_IB_WRITE_BW_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/ib_write_bw.cc"
-    DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics.cc"
-    DIAG_P2P_DEVICE_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp"
+# Root binaries share rccl-root-obj objects, so pass no COMMON_DEFS/COMMON_INCLUDES with that prefix. A binary with
+# EXTRA_DEFS compiles its own sources and takes its *_CC_PATH there; the rest set it with target_compile_definitions().
+rccl_add_unit_micro_binary(rccl-UnitTestsMicroDiagnostics diagnostics-test.cc
+  OBJECT_PREFIX rccl-root-obj
+  SOURCES
+    fakes/dev_runtime_micro_fakes.cc
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc
+    fakes/nccl_device_core_fakes.cc
+    fakes/nccl_fakes.cc
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
+target_compile_definitions(rccl-UnitTestsMicroDiagnostics PRIVATE
+  DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics.cc")
+
+include("${CMAKE_CURRENT_LIST_DIR}/diagnostics/host_tests.cmake")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroP2pResiliency
