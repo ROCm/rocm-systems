@@ -24,6 +24,7 @@
 #include "rma.h"
 #include "diagnostics.h"
 #include "enqueue.h"
+#include "hier_host.h"
 #include "graph.h"
 #include "graph/topo.h"
 #include "argcheck.h"
@@ -572,6 +573,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
     comm->hierarchicalInterComm = nullptr;
   }
   comm->hierarchicalCommsInitialized = false;
+  NCCLCHECK(rcclHostHierTeardown(comm));
 
   if (comm->symmetricSupport) {
     ncclResult_t finalizeResult = ncclSymkFinalize(comm);
@@ -869,6 +871,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->hierarchicalLazyCalls = 0;
   comm->hierarchicalCommsInitialized = false;
   comm->hierarchicalTempBuffer = nullptr;
+  comm->hostHier = nullptr;
+  comm->hostHierState = rcclHostHierUnprobed;
   // Enable PAT for interComm hierarchical collectives
   comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
   comm->patSharedQps = rcclParamPatSharedQps() != 0;

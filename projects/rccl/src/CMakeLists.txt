@@ -144,6 +144,7 @@ set(SRC_FILES
   graph/xml.cc
   graph/xml.h
   group.cc
+  hier_host.cc
   include/BfdBacktrace.hpp
   algorithms/dda/device/CollCommon.h
   algorithms/dda/device/CollCommon_ll128.h
@@ -239,6 +240,7 @@ set(SRC_FILES
   include/git_version.h
   include/graph.h
   include/group.h
+  include/hier_host.h
   include/hip_rocm_version_info.h
   include/ib_gid_utils.h
   include/ibvcore.h
