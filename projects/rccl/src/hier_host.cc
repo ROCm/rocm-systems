@@ -8,6 +8,7 @@
 
 #include "algorithms/dda/fabric/fabric_init.h"
 #include "alloc.h"
+#include "archinfo.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -18,7 +19,7 @@
 #include <cstdlib>
 #include <vector>
 
-RCCL_PARAM(HostHierAllReduce, "HOST_HIER_ALLREDUCE", 0);
+RCCL_PARAM(HostHierAllReduce, "HOST_HIER_ALLREDUCE", -1);
 
 namespace {
 
@@ -180,11 +181,33 @@ exit:
   return res;
 }
 
+bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes) {
+  constexpr size_t MiB = size_t{1} << 20;
+  switch (nHosts) {
+  case 2:
+    return (bytes >= 1 * MiB && bytes <= 2 * MiB) || (bytes >= 8 * MiB && bytes <= 16 * MiB) ||
+           (bytes >= 128 * MiB && bytes <= 512 * MiB);
+  case 4:
+    return bytes >= 1 * MiB && bytes <= 1024 * MiB;
+  case 8:
+    return bytes >= 1 * MiB && bytes <= 2048 * MiB;
+  default:
+    return false;
+  }
+}
+
 bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
-  if (rcclParamHostHierAllReduce() != 1) return false;
+  const int64_t mode = rcclParamHostHierAllReduce();
+  if (mode == 0) return false;
   if (count == 0 || !opSplitsAcrossStages(op, datatype)) return false;
+  const bool forced = mode == 1;
+  if (!forced && !(IsArchMatch(comm->archName, "gfx1250") && datatype == ncclFloat32 && op == ncclSum)) {
+    return false;
+  }
   const struct rcclHostLayout* layout = rcclHostHierGetLayout(comm);
-  return layout != nullptr && count % layout->ranksPerHost == 0;
+  if (layout == nullptr || count % layout->ranksPerHost != 0) return false;
+  if (forced) return true;
+  return layout->ranksPerHost == 8 && rcclHostHierAllReduceAutoWindow(layout->nHosts, count * ncclTypeSize(datatype));
 }
 
 ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
