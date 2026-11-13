@@ -38,15 +38,20 @@ class TestSet(TestCliBase):
         """Put the values the sweep changed back to what setUpClass recorded."""
         cmds = []
         for index, gpu in enumerate(self.common.processors):
+            # An APU reports no "fan" section, or one without max/speed (only
+            # apu_fan_pwm), so a missing field reads as "N/A" like an unreadable one.
+            fan = self.metric_data["gpu_data"][index].get("fan")
+            if not isinstance(fan, dict):
+                fan = {}
             # max fan speed is the hwmon pwm1_max ceiling on every interface
-            fan_max = self.metric_data["gpu_data"][index]["fan"]["max"]
+            fan_max = fan.get("max", "N/A")
             if fan_max != "N/A":
                 self.assertGreater(fan_max, 0, f"GPU {index}: max fan speed must be > 0")
                 self.assertLessEqual(fan_max, 255, f"GPU {index}: max fan speed must be <= 255")
 
             # reset --fans (works for both legacy hwmon and gpu_od interfaces)
             # A readable fan speed does not imply the fan can be controlled.
-            fan_speed = self.metric_data["gpu_data"][index]["fan"]["speed"]
+            fan_speed = fan.get("speed", "N/A")
             if fan_speed != "N/A":
                 cmds.append(
                     (
