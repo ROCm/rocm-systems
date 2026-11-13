@@ -123,7 +123,7 @@ ncclResult_t FakeCudaMemcpy(T* dst, T* src, size_t nelem) {
 #include "gin/gin_host_proxy.h"
 #include "gin/proxy_gpucontext/gpucontext.h"
 
-#include "../common/LogCapture.hpp"
+#include "../../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"

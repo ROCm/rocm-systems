@@ -789,15 +789,6 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroGinHostProxy -- src/gin/gin_host_proxy.cc + src/gin/proxy_gpucontext/. Own
-  # binary: gin-plugin-init-test.cc in rccl-UnitTestsMicro defines ncclGinProxy and ncclGinProxyVersion.
-  set(TEST_MICRO_GIN_HOST_PROXY_SOURCE_FILES
-    gin-host-proxy-test.cc
-    fakes/hip_fakes.cc
-    fakes/nccl_fakes.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
   # rccl-UnitTestsMicroClientSupport -- src/ras/client_support.cc. Its own binary: this test's
   # inline stand-ins for ncclSocketsSameNode/rasPeerInfoToString/rasPeerToString (client_support.cc's
   # callees into src/ras/peers.cc) collide with the REAL peers.cc compiled into rccl-UnitTestsMicro
@@ -1085,22 +1076,6 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity). Own
-  # binary: gin-plugin-init-test.cc already defines ncclParamGinEnable in
-  # rccl-UnitTestsMicro, and gin_fakes.cc supplies ncclGinQueryLastError to Init.
-  set(TEST_MICRO_GIN_HOST_SOURCE_FILES
-    gin-host-test.cc
-    fakes/nccl_fakes.cc
-    fakes/search_fakes.cc
-    fakes/hip_fakes.cc
-    fakes/env_fakes.cc
-    fakes/bootstrap_stubs.cc             # src/bootstrap.cc AllGather seam
-    fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
-    fakes/os_fakes.cc                    # src/os/linux.cc proxy-thread affinity seams
-    fakes/topo_stubs.cc                  # src/graph/topo.cc ncclTopoGetLocalGinDevs seam
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
   # rccl-UnitTestsMicroProfiler -- src/plugin/profiler.cc and its profiler_v1..v7.cc adapters. Own binary: the
   # tests define the logging, env, plugin-open and dlsym seams the shared fakes also define.
   set(TEST_MICRO_PROFILER_SOURCE_FILES
@@ -1214,21 +1189,6 @@ function(rccl_define_micro_source_lists)
     fakes/search_fakes.cc
     fakes/transport_net_ib_fakes.cc
     fakes/transport_p2p_fakes.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroGinHostFinalize -- host finalize / connect generation.
-  # Not rccl-UnitTestsMicroGinHost: gin-host-test.cc defines the same ConnectOnce
-  # seams (ncclParamGinType, ncclOsCpuCount, bootstrapAllGather). Not
-  # rccl-UnitTestsMicro: that target defines the GIN host entry points in
-  # fakes/dev_runtime_micro_fakes.cc for dev-runtime-test.cc.
-  # os_fakes.cc for ncclOsCpuCount / ncclOsSetAffinity: no test starts a progress
-  # thread, but -fprofile-instr-generate / -fcoverage-mapping keep ncclGinProgress
-  # live against --gc-sections. The test TU defines the ConnectOnce / DevCommSetup
-  # link seams (topology, bootstrap, team and thread-name helpers, ncclParamGinType).
-  set(TEST_MICRO_GIN_HOST_FINALIZE_SOURCE_FILES
-    gin-host-finalize-test.cc
-    fakes/os_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -2053,19 +2013,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroMgmtTaskEnq
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mgmt_task_enq.yaml")
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity)
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
-  SOURCES ${TEST_MICRO_GIN_HOST_SOURCE_FILES}
-  EXTRA_INCLUDES
-    ${RCCL_HOST_HIPIFY_DIR}/src/include/plugin
-    ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host.yaml")
-
-# ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCrypt
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroCrypt
@@ -2243,9 +2190,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed
     SYMMETRIC_SCHED_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/scheduler/symmetric_sched.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_scheduler.yaml")
 
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroGinHostProxy
-# ---------------------------------------------------------------------------
 # In-build, RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED arrives with rccl's own compile definitions; standalone
 # repeats the top-level probe, so rocmwrap.h's NCCL_CUMEM_DMABUF_EXPORT_GATE matches what rccl compiles.
 set(_MICRO_DMABUF_EXPORT_DEF "")
@@ -2261,23 +2205,8 @@ if(NOT BUILD_TESTS)
     set(_MICRO_DMABUF_EXPORT_DEF RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
   endif()
 endif()
-# The test redirects rocmwrap.cc's DmaBufEnable param; keep the name and default in step.
-foreach(_f "${CMAKE_CURRENT_LIST_DIR}/../../src/misc/rocmwrap.cc" "${CMAKE_CURRENT_LIST_DIR}/gin-host-proxy-test.cc")
-  rccl_assert_source_line("${_f}" "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1)" "gin-host-proxy-test.cc")
-endforeach()
-rccl_add_micro_binary(rccl-UnitTestsMicroGinHostProxy
-  SOURCES ${TEST_MICRO_GIN_HOST_PROXY_SOURCE_FILES}
-  EXTRA_INCLUDES
-    ${RCCL_HOST_HIPIFY_DIR}/src/include/plugin
-    ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    ${_MICRO_DMABUF_EXPORT_DEF}
-    GIN_HOST_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host_proxy.cc"
-    GPUCONTEXT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/proxy_gpucontext/gpucontext.cc"
-    GPUCONTEXT_V1_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/proxy_gpucontext/gpucontext_v1.cc"
-    GPUCONTEXT_V2_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/proxy_gpucontext/gpucontext_v2.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host_proxy.yaml")
+
+include("${CMAKE_CURRENT_LIST_DIR}/gin/host_tests.cmake")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroInit and variants
@@ -2721,19 +2650,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
     DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics.cc"
     DIAG_P2P_DEVICE_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroGinHostFinalize -- host finalize for src/gin/gin_host.cc.
-# Separate from rccl-UnitTestsMicroGinHost: both compile gin_host.cc, and their
-# test TUs define the same link seams.
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroGinHostFinalize
-  SOURCES ${TEST_MICRO_GIN_HOST_FINALIZE_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    # Hipify keeps gin/gin_host.cc (no basename collision with another gin_host.cc).
-    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host_finalize.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDda
