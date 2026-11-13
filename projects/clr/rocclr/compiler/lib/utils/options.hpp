@@ -37,46 +37,56 @@ enum OptionType { OT_BOOL, OT_INT32, OT_UINT32, OT_CSTRING, OT_UCHAR, OT_MASK = 
    OA_<sth>  : Each one is independent, all OA_<sth> can be OR'ed together.
 */
 
-// Option Value Attributes
-enum OptionValue {
+// All of the attributes below are disjoint bit ranges of the single Info[6:31]
+// word, and every OPTION() entry in OPTIONS.def ORs across the groups. They are
+// therefore one enumeration, not six: C++20 deprecates `|` between different
+// enumeration types (MSVC C5054), and splitting them bought no type safety
+// anyway, since the whole point is to combine them.
+//
+// The group comments are retained below; the old group type names remain as
+// aliases for the handful of places that spell one as a type.
+enum OptionAttr : uint32_t {
+  // Option Value Attributes : exactly one.
   OVA_OPTIONAL = 0x00,    // value is optional
   OVA_REQUIRED = 0x40,    // value is required to appear;
   OVA_DISALLOWED = 0x80,  // value may not be specified.
-  OVA_MASK = 0xC0
-};
+  OVA_MASK = 0xC0,
 
-// Option Form Attributes
-enum OptionForm {
+  // Option Form Attributes : exactly one.
   OFA_NORMAL = 0x000,    // normal form, no prefix
   OFA_PREFIX_F = 0x100,  // -f<flag>, machine-independent
   OFA_PREFIX_M = 0x200,  // -m<flag>, machine-dependent
   OFA_PREFIX_W = 0x300,  // -W<flag>, warning (TODO)
-  OFA_MASK = 0x300
-};
+  OFA_MASK = 0x300,
 
-// Option Group, at least one must be used.
-enum OptionGroup { OA_RUNTIME = 0x400, OA_CLC = 0x800, OA_LINK_EXE = 0x1000, OA_LINK_LIB = 0x2000 };
+  // Option Group, at least one must be used.
+  OA_RUNTIME = 0x400,
+  OA_CLC = 0x800,
+  OA_LINK_EXE = 0x1000,
+  OA_LINK_LIB = 0x2000,
 
-// Option Value Separator, at least one must be used.
-enum OptionValueSeparator {
+  // Option Value Separator, at least one must be used.
   OA_SEPARATOR_NONE = 0x4000,
   OA_SEPARATOR_EQUAL = 0x8000,
-  OA_SEPARATOR_SPACE = 0x10000
-};
+  OA_SEPARATOR_SPACE = 0x10000,
 
-// Option visibility : at least one must be used.
-enum OptionVisibility {
+  // Option visibility : at least one must be used.
   OVIS_PUBLIC = 0x00000,    // ducumented
   OVIS_SUPPORT = 0x20000,   // supported, but undocumented
   OVIS_INTERNAL = 0x40000,  // internal-only, not available in product release
-  OVIS_MASK = 0x60000
-};
+  OVIS_MASK = 0x60000,
 
-// Option other attributes : optional
-enum OptionMisc {
+  // Option other attributes : optional
   OA_MISC_ALIAS = 0x80000  // An alias option is one that refers to another option or options
                            // and its meaning is hard-coded in setAliasOptionVariable().
 };
+
+using OptionValue = OptionAttr;
+using OptionForm = OptionAttr;
+using OptionGroup = OptionAttr;
+using OptionValueSeparator = OptionAttr;
+using OptionVisibility = OptionAttr;
+using OptionMisc = OptionAttr;
 
 typedef bool OT_BOOL_t;
 typedef int32_t OT_INT32_t;

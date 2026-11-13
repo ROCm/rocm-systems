@@ -125,9 +125,9 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
 
 #define HIP_INIT(noReturn)                                                                         \
   {                                                                                                \
-    bool status = true;                                                                            \
-    std::call_once(hip::g_ihipInitialized, hip::init, &status);                                    \
-    if (!status && !noReturn) {                                                                    \
+    bool _initStatus = true;                                                                       \
+    std::call_once(hip::g_ihipInitialized, hip::init, &_initStatus);                               \
+    if (!_initStatus && !noReturn) {                                                               \
       HIP_RETURN(hipErrorInvalidDevice);                                                           \
     }                                                                                              \
     HIP_INIT_TLS_DEVICE()                                                                          \
@@ -135,8 +135,8 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
 
 #define HIP_INIT_VOID()                                                                            \
   {                                                                                                \
-    bool status = true;                                                                            \
-    std::call_once(hip::g_ihipInitialized, hip::init, &status);                                    \
+    bool _initStatus = true;                                                                       \
+    std::call_once(hip::g_ihipInitialized, hip::init, &_initStatus);                               \
     HIP_INIT_TLS_DEVICE()                                                                          \
   }
 
@@ -185,9 +185,9 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
 #define HIP_UPDATE_ERROR_STATE(ret)                                                                \
   hip::tls.last_command_error_ = ret;                                                              \
   if (amd::Device::IsGPUInError()) {                                                               \
-    hipError_t hip_error = ConvertCLErrorIntoHIPError(amd::Device::GetGPUError());                 \
-    hip::tls.last_error_ = hip_error;                                                              \
-    hip::tls.last_command_error_ = hip_error;                                                      \
+    hipError_t _hipError = ConvertCLErrorIntoHIPError(amd::Device::GetGPUError());                 \
+    hip::tls.last_error_ = _hipError;                                                              \
+    hip::tls.last_command_error_ = _hipError;                                                      \
   } else if (hip::tls.last_command_error_ != hipSuccess &&                                         \
              hip::tls.last_command_error_ != hipErrorNotReady) {                                   \
     hip::tls.last_error_ = hip::tls.last_command_error_;                                           \
@@ -256,16 +256,16 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
   if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeThreadLocal ||                          \
       hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {                               \
     if (!hip::tls.capture_streams_.empty()) {                                                      \
-      for (auto stream : hip::tls.capture_streams_) {                                              \
-        stream->InvalidateCapture();                                                               \
+      for (auto _captureStream : hip::tls.capture_streams_) {                                      \
+        _captureStream->InvalidateCapture();                                                       \
       }                                                                                            \
       HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                \
     }                                                                                              \
   }                                                                                                \
   if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal &&                               \
       !g_captureStreams.empty()) {                                                                 \
-    for (auto stream : g_captureStreams) {                                                         \
-      stream->InvalidateCapture();                                                                 \
+    for (auto _captureStream : g_captureStreams) {                                                 \
+      _captureStream->InvalidateCapture();                                                         \
     }                                                                                              \
     HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                  \
   }

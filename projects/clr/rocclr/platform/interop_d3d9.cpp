@@ -23,7 +23,10 @@ size_t D3D9Object::getElementBytes(D3DFORMAT d3d9Format, cl_uint plane) {
   // unrecognised-format path uses rather than leaving this indeterminate.
   size_t bytesPerPixel = 0;
 
-  switch (d3d9Format) {
+  // Switched as DWORD, not D3DFORMAT: the D3DFMT_NV_12/P010/YV_12 cases below
+  // are FourCC codes ('NV12', 'P010', 'YV12') that _D3DFORMAT does not
+  // enumerate, so they are not valid enumerators of the switch type.
+  switch (static_cast<DWORD>(d3d9Format)) {
     case D3DFMT_UNKNOWN:
     case D3DFMT_UYVY:
     case D3DFMT_DXT1:
@@ -139,7 +142,8 @@ void setObjDesc(amd::D3D9ObjDesc_t& objDesc, D3DSURFACE_DESC& resDesc, cl_uint p
   objDesc.resType_ = resDesc.Type;
   objDesc.usage_ = resDesc.Usage;
   objDesc.d3dFormat_ = resDesc.Format;
-  switch (resDesc.Format) {
+  // See getElementBytes: FourCC cases are not D3DFORMAT enumerators.
+  switch (static_cast<DWORD>(resDesc.Format)) {
     case D3DFMT_NV_12:
     case D3DFMT_P010:
       objDesc.surfRect_.left = 0;
@@ -365,7 +369,8 @@ int D3D9Object::initD3D9Object(const Context& amdContext,
   return errcode;
 }
 cl_uint D3D9Object::getMiscFlag() {
-  switch (objDescOrig_.d3dFormat_) {
+  // See getElementBytes: FourCC cases are not D3DFORMAT enumerators.
+  switch (static_cast<DWORD>(objDescOrig_.d3dFormat_)) {
     case D3DFMT_NV_12:
     case D3DFMT_P010:
       return 1;
@@ -392,7 +397,8 @@ cl_image_format D3D9Object::getCLFormatFromD3D9(D3DFORMAT d3d9Fmt, cl_uint plane
   fmt.image_channel_order = 0;      // CL_RGBA;
   fmt.image_channel_data_type = 0;  // CL_UNSIGNED_INT8;
 
-  switch (d3d9Fmt) {
+  // See getElementBytes: FourCC cases are not D3DFORMAT enumerators.
+  switch (static_cast<DWORD>(d3d9Fmt)) {
     case D3DFMT_R32F:
       fmt.image_channel_order = CL_R;
       fmt.image_channel_data_type = CL_FLOAT;

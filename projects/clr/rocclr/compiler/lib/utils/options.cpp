@@ -29,7 +29,7 @@ using namespace amd::option;
 #define OPTION(type, a, sn, ln, var, ideft, imin, imax, sdeft, desc)                               \
   {sn,                                                                                             \
    ln,                                                                                             \
-   (type) | (a),                                                                                   \
+   static_cast<uint32_t>(type) | (a),                                                              \
    (uint32_t)reinterpret_cast<size_t>(&(((OptionVariables*)0)->var)),                              \
    (int64_t)ideft,                                                                                 \
    imin,                                                                                           \
@@ -38,7 +38,7 @@ using namespace amd::option;
    desc},
 
 #define NOPTION(type, a, sn, ln, var, ideft, imin, imax, sdeft, desc)                              \
-  {sn, ln, (type) | (a), 0, (int64_t)ideft, imin, imax, sdeft, desc},
+  {sn, ln, static_cast<uint32_t>(type) | (a), 0, (int64_t)ideft, imin, imax, sdeft, desc},
 
 /*
    FLAG is a special option with the form
@@ -47,7 +47,7 @@ using namespace amd::option;
 #define FLAG(type, a, sn, var, deft, desc)                                                         \
   {sn,                                                                                             \
    NULL,                                                                                           \
-   (type) | (a) | OA_RUNTIME | OVA_REQUIRED | OA_SEPARATOR_EQUAL,                                  \
+   static_cast<uint32_t>(type) | (a) | OA_RUNTIME | OVA_REQUIRED | OA_SEPARATOR_EQUAL,             \
    (uint32_t)reinterpret_cast<size_t>(&(((OptionVariables*)0)->var)),                              \
    (type == OT_CSTRING) ? (int64_t)0 : (int64_t)deft,                                              \
    (type == OT_INT32) ? -0x80000000LL : 0LL,                                                       \
