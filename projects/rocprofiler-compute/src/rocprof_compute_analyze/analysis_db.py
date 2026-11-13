@@ -671,15 +671,15 @@ class db_analysis(OmniAnalyze_Base):
             )
             keys: list[str] = []
 
-            matrix_ops_type = mi_gpu_specs.get_roofline_matrix_type(gpu_arch)
-
             for mem_level in mi_gpu_specs.get_roofline_bandwidth(gpu_arch):
                 keys.append(roofline_column(mem_level, "bandwidth"))
             for dtype, support in SUPPORTED_DATATYPES[gpu_arch].items():
                 if OpsSupport.VALU in support:
                     keys.append(roofline_column(dtype, "valu"))
                 if OpsSupport.MATRIX in support:
-                    keys.append(roofline_column(dtype, matrix_ops_type))
+                    keys.append(
+                        mi_gpu_specs.get_roofline_matrix_column(gpu_arch, dtype)
+                    )
             roofline_ceilings_per_workload[workload_path] = {
                 key: roofline_dict[key] for key in keys if key in roofline_dict
             }
