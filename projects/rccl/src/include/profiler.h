@@ -160,6 +160,10 @@ void ncclProfilerReserveSymCounters(struct ncclComm* comm, struct ncclKernelPlan
 // Profiler callback for network plugin
 ncclResult_t ncclProfilerCallback(void** eHandle, int type, void* pHandle, int64_t pluginId, void* extData);
 
+// Profiler Start/Stop wrappers for Addon Collectives
+ncclResult_t ncclProfilerStartAddonCollEvent(struct ncclInfo* info, bool isGraphCaptured, void** eHandle);
+ncclResult_t ncclProfilerStopAddonCollEvent(void* eHandle);
+
 // ============================================================================
 // CE Profiler Declarations
 // ============================================================================
