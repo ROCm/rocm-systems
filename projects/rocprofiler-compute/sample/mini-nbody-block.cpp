@@ -7,7 +7,6 @@
 // This file is not a copy of that sample.
 //
 // Usage: mini-nbody-block <bodies> <iterations>
-//   health: mini-nbody-block 81920 500
 
 #include "hip/hip_runtime.h"
 
