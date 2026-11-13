@@ -786,6 +786,30 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LLSpreadSelected_ShardMustFitTheTwoShotSlo
   EXPECT_FALSE(ddaLLArSpreadSelected(mock_.get(), 1u << 20, kFull - 64)) << "a narrowed block keeps the one-shot";
 }
 
+// A spread block's slice is the even split rounded up to a multiple of 16 packets (256 B of LL lines).
+TEST_F(DdaAllReduceFabricLLMicrotest, LLSpreadBlockPkts_EvenSplitRoundedUpTo16Packets) {
+  using dda::common::ddaLLSpreadBlockPkts;
+  constexpr size_t kAlign = dda::common::kDdaLLSpreadBlockAlignPkts;
+  static_assert(kAlign == 16, "16 packets: 256 B of LL lines");
+  EXPECT_EQ(ddaLLSpreadBlockPkts(6656, 192), 48u) << "16 ranks, 832 KiB: 35 packets a block unrounded";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(8192, 192), 48u) << "16 ranks, 1 MiB: 43 unrounded";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(14336, 192), 80u) << "8 ranks, 896 KiB: 75 unrounded";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(6144, 192), 32u) << "16 ranks, 768 KiB: already a multiple of 16";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(256, 16), 16u) << "32 ranks, 64 KiB: already 16";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(1, 192), kAlign) << "a short shard still takes 16 packets";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(0, 192), 0u) << "an empty shard gives every block an empty slice";
+  for (size_t shard : {1u, 5u, 17u, 256u, 308u, 4096u, 14336u, 28672u, 87382u}) {
+    for (size_t blocks : {1u, 2u, 7u, 128u, 192u}) {
+      SCOPED_TRACE(::testing::Message() << shard << " packets on " << blocks << " blocks");
+      const size_t even = (shard + blocks - 1) / blocks;
+      const size_t got = ddaLLSpreadBlockPkts(shard, blocks);
+      EXPECT_EQ(got % kAlign, 0u);
+      EXPECT_GE(got, even);
+      EXPECT_LT(got, even + kAlign);
+    }
+  }
+}
+
 // A cap that narrows the blocks keeps the one-shot; one that lowers only the blocks runs the spread on the capped grid.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadNeedsFullWidthBlocksUnderACap) {
   comm().nRanks = 32;
