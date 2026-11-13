@@ -289,19 +289,10 @@ TEST_F(NetIbGinMicrotest, InitType_NoDevicesOrGdrReturnsErrorWithoutPublishingCo
   EXPECT_TRUE(g_hostAllocs.live.empty());
 }
 
-TEST_F(NetIbGinMicrotest, InitType_AnvilSdmaSkipsVerbsInit) {
-  ScopedHook init(g_ginInitDevices, [](ncclDebugLogger_t, ncclProfilerCallback_t) { return ncclSuccess; });
-  void* context = nullptr;
-
-  EXPECT_EQ(ncclGinIbInitType(&context, 0, nullptr, NCCL_NET_DEVICE_GIN_ANVIL_SDMA), ncclInternalError);
-  EXPECT_EQ(init.calls, 0);
-  EXPECT_EQ(context, nullptr);
-}
-
-// With NCCL_GIN_TYPE unset, verbs are skipped only on gfx1250 when NET runs
-// IB-CAST, which has already enumerated the providers. Everywhere else the IB
-// RMA proxy starts.
-TEST_F(NetIbGinMicrotest, InitType_UnsetTypeSkipsVerbsOnlyUnderIbCastOnGfx1250) {
+// With NCCL_GIN_TYPE unset or Anvil SDMA, verbs are skipped only on gfx1250 when
+// NET runs IB-CAST, which has already enumerated the providers. Everywhere else
+// the IB RMA proxy starts, so host RMA keeps its plugin.
+TEST_F(NetIbGinMicrotest, InitType_UnsetOrAnvilSdmaSkipsVerbsOnlyUnderIbCastOnGfx1250) {
   struct Case {
     const char* name;
     int type;
@@ -323,6 +314,9 @@ TEST_F(NetIbGinMicrotest, InitType_UnsetTypeSkipsVerbsOnlyUnderIbCastOnGfx1250) 
       {"gfx1250 PROXY on AINIC", NCCL_GIN_TYPE_PROXY, "gfx1250", nullptr, nullptr, true, false},
       {"gfx950 AINIC default", -1, "gfx950", nullptr, nullptr, true, false},
       {"gfx942 NCCL_NET=IB-CAST", -1, "gfx942", "IB-CAST", nullptr, false, false},
+      {"gfx1250 Anvil SDMA on AINIC", NCCL_NET_DEVICE_GIN_ANVIL_SDMA, "gfx1250", nullptr, nullptr, true, true},
+      {"gfx1250 Anvil SDMA NCCL_NET=IB", NCCL_NET_DEVICE_GIN_ANVIL_SDMA, "gfx1250", "IB", nullptr, true, false},
+      {"gfx950 Anvil SDMA on AINIC", NCCL_NET_DEVICE_GIN_ANVIL_SDMA, "gfx950", nullptr, nullptr, true, false},
   };
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
