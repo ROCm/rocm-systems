@@ -5,9 +5,8 @@
 
 from __future__ import annotations
 
-import re
 import warnings
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -27,38 +26,28 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.common import EVAL_BUILTINS
+from utils.metrics.expression import columns_read
 from utils.metrics.noise_clamper import to_noise_clamp
 
-# Columns an expression reads, whether the frame is named raw_pmc_df or pmc_df.
-_FRAME_COLUMN_RE = re.compile(r"(?:raw_pmc_df|pmc_df)\[['\"]([^'\"]+)['\"]\]")
-_TO_SUM_RE = re.compile(r"\bto_sum\s*\(")
 
-
-def rows_for_expression(frame: pd.DataFrame, expression: str) -> pd.DataFrame:
-    """Keep dispatches that have every counter a summed expression reads.
-
-    Numerator and denominator sums then use one set of rows.
-    """
-    if (
-        not isinstance(frame, pd.DataFrame)
-        or frame.empty
-        or not expression
-        or _TO_SUM_RE.search(expression) is None
-    ):
-        return frame
-    columns: list[str] = []
-    seen: set[str] = set()
-    for column in _FRAME_COLUMN_RE.findall(expression):
-        if column in seen or column not in frame.columns:
-            continue
-        seen.add(column)
-        columns.append(column)
-    if not columns:
-        return frame
-    complete = frame[columns].notna().all(axis=1)
-    if bool(complete.all()):
-        return frame
-    return frame.loc[complete]
+def pass_frame_index(
+    eval_string: object,
+    pass_frames: list[pd.DataFrame],
+    build_in_vars: dict[str, str],
+) -> Optional[int]:
+    """Return the index of the first pass table that has every column the
+    eval string reads, or None when no pass table has them all."""
+    if not isinstance(eval_string, str):
+        return None
+    columns = columns_read(eval_string, build_in_vars)
+    return next(
+        (
+            index
+            for index, frame in enumerate(pass_frames)
+            if columns <= set(frame.columns)
+        ),
+        None,
+    )
 
 
 class MetricEvaluator:
@@ -79,9 +68,7 @@ class MetricEvaluator:
         try:
             # Create comprehensive local context
             local_expr_context: dict[str, Any] = {}
-            local_expr_context.update({
-                "raw_pmc_df": rows_for_expression(self.raw_pmc_df, expr),
-            })
+            local_expr_context.update({"raw_pmc_df": self.raw_pmc_df})
             local_expr_context.update(self.sys_vars)
             local_expr_context.update(self.empirical_peaks)
 

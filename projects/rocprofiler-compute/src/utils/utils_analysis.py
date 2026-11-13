@@ -5,13 +5,10 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-
-if TYPE_CHECKING:
-    from utils.metrics.pass_provenance import PassLayout
 
 from utils import csv_compression, schema
 from utils.inject_roctx.constants import (
@@ -26,7 +23,6 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.metrics.pass_provenance import natural_pass_sort_key
 from utils.ml_api_trace_errors import (
     KernelSequenceLengthMismatchError,
     LauncherThreadNotFoundError,
@@ -109,6 +105,8 @@ _DISPATCH_ID_KEYS = [
     "End_Timestamp",
 ]
 _KERNEL_ID_KEYS = ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"]
+# The keys process_rocpd_csv merges the passes of one dispatch by.
+_MERGE_KEYS = ["Dispatch_ID", *_KERNEL_ID_KEYS]
 ARGS_DISPLAY_MAX_ITEMS = 8
 ARGS_DISPLAY_MAX_CHARS = 160
 ARGS_DISPLAY_MAX_VARIANTS = 5
@@ -1758,6 +1756,25 @@ def impute_counters_iteration_multiplex(
     """
     Perform data imputation for missing counter values due to iteration multiplexing.
     """
+    imputed_df, _pass_frames = impute_counters_by_pass_iteration_multiplex(
+        df, policy, workload_dir
+    )
+    return imputed_df
+
+
+def impute_counters_by_pass_iteration_multiplex(
+    df: pd.DataFrame,
+    policy: str,
+    workload_dir: Path,
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Impute the counters each launch missed under iteration multiplexing.
+
+    Each launch of a kernel collects one pass, in rotation. A round is one
+    rotation through the passes. Returns the imputed frame, where every
+    launch takes each missing counter from its round, and one table per pass,
+    where every launch takes that pass's counters from the one launch of its
+    round that collected the pass.
+    """
     # Counter buckets configured for the workload. A kernel needs at least
     # this many dispatches to cover every bucket.
     num_perfmon_files = len(list(workload_dir.glob("perfmon/*.txt"))) + len(
@@ -1798,6 +1815,8 @@ def impute_counters_iteration_multiplex(
     counter_columns = [col for col in df.columns if col not in non_counter_column_index]
     # Collect imputed groups as dataframes
     group_dfs: list[pd.DataFrame] = []
+    # Per group, each pass's counters on that group's rows
+    group_pass_values: list[dict[frozenset[str], pd.DataFrame]] = []
 
     # Log imputation task summary before processing
     console_debug(
@@ -1816,10 +1835,11 @@ def impute_counters_iteration_multiplex(
             group_copy[counter_columns] = np.nan
             incomplete_kernel_names.add(group_copy["Kernel_Name"].iloc[0])
             group_dfs.append(group_copy)
+            group_pass_values.append({})
             continue
 
-        # Identify counter buckets
-        counter_groups: set[frozenset[str]] = set()
+        # Identify counter buckets, in the order the rotation collects them
+        counter_groups: list[frozenset[str]] = []
         for _, row in group.iterrows():
             # Set of counter column names with non empty values
             cols_frozenset = frozenset(row[counter_columns].dropna().index)
@@ -1830,7 +1850,7 @@ def impute_counters_iteration_multiplex(
             # we can stop once we see a repeated bucket
             if cols_frozenset in counter_groups:
                 break
-            counter_groups.add(cols_frozenset)
+            counter_groups.append(cols_frozenset)
 
         # If no counters found for this group, continue
         if not counter_groups:
@@ -1840,8 +1860,15 @@ def impute_counters_iteration_multiplex(
         # all counters and impute missing values
         # Create subgroup_id column for groupby: 0,0,0,...,1,1,1,...,2,2,2,...
         # Use numpy for vectorized operation
+        round_ids = np.arange(len(group)) // len(counter_groups)
+        group_pass_values.append({
+            counter_group: _pass_values_by_round(
+                group, counter_columns, counter_group, round_ids
+            )
+            for counter_group in counter_groups
+        })
         group_copy = group.copy()
-        group_copy["__subgroup_id"] = np.arange(len(group_copy)) // len(counter_groups)
+        group_copy["__subgroup_id"] = round_ids
         # groupby().bfill() automatically excludes the grouping column from result
         group_copy[counter_columns] = (
             group_copy[[*counter_columns, "__subgroup_id"]]
@@ -1856,8 +1883,27 @@ def impute_counters_iteration_multiplex(
         _warn_kernels_with_incomplete_coverage(incomplete_kernel_names)
 
     if not group_dfs:
-        return pd.DataFrame(columns=df.columns)
-    return pd.concat(group_dfs, ignore_index=True)
+        return pd.DataFrame(columns=df.columns), {}
+    imputed_df = pd.concat(group_dfs, ignore_index=True)
+    dispatch_df = imputed_df.drop(columns=counter_columns)
+    counter_groups_seen = dict.fromkeys(
+        counter_group
+        for pass_values in group_pass_values
+        for counter_group in pass_values
+    )
+    pass_frames = {
+        f"pass_{number}": dispatch_df.join(
+            pd.concat(
+                [
+                    pass_values.get(counter_group, group_df[[]])
+                    for group_df, pass_values in zip(group_dfs, group_pass_values)
+                ],
+                ignore_index=True,
+            )
+        )
+        for number, counter_group in enumerate(counter_groups_seen)
+    }
+    return imputed_df, pass_frames
 
 
 def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) -> None:
@@ -1884,44 +1930,54 @@ def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) ->
     )
 
 
+def _pass_values_by_round(
+    group: pd.DataFrame,
+    counter_columns: list[str],
+    counter_group: frozenset[str],
+    round_ids: np.ndarray,
+) -> pd.DataFrame:
+    """Copy one pass's counters onto every launch of the group.
+
+    The values come from the launch of the same round that collected exactly
+    that pass. A round without such a launch gets empty values.
+    """
+    columns = sorted(counter_group)
+    collected = group[counter_columns].notna()
+    collected_this_pass = collected[columns].all(axis=1) & ~collected.drop(
+        columns=columns
+    ).any(axis=1)
+    source = (
+        group
+        .loc[collected_this_pass, columns]
+        .assign(Round=round_ids[collected_this_pass.to_numpy()])
+        .drop_duplicates("Round")
+    )
+    values = (
+        pd
+        .DataFrame({"Round": round_ids})
+        .merge(source, on="Round", how="left")
+        .drop(columns="Round")
+    )
+    values.index = group.index
+    return values
+
+
 def process_rocpd_csv(
     df: pd.DataFrame,
-    pass_layout: Optional["PassLayout"] = None,
 ) -> tuple[pd.DataFrame, dict[tuple, int]]:
     """Merge counters across unique dispatches into one row each.
 
     The dict maps each groupby key to the new 1..N Dispatch_ID, in the
     same order as those ids are assigned.
-
-    When ``pass_layout`` is provided and the long frame has ``Pass_Key``,
-    duplicated counters keep a base column (first pass in natural order)
-    plus per-pass shadow columns ``{counter}@pass:{pass_key}``.
     """
     if df.empty:
         return df, {}
 
-    use_provenance = (
-        pass_layout is not None
-        and pass_layout.has_duplicates
-        and "Pass_Key" in df.columns
-    )
-
     data: list[dict[str, Any]] = []
     slot_to_id: dict[tuple, int] = {}
-    missing_dispatches: List[int] = []
 
     # Group by unique kernel and merge into a single row
-    grouped = df.groupby([
-        "Dispatch_ID",
-        "Kernel_Name",
-        "Grid_Size",
-        "Workgroup_Size",
-        "LDS_Per_Workgroup",
-    ])
-    by_pass_tables = (
-        _pivot_counters_by_pass(df, grouped.ngroup()) if use_provenance else {}
-    )
-    for group_id, (group_key, group_df) in enumerate(grouped):
+    for group_key, group_df in df.groupby(_MERGE_KEYS):
         row = {
             "GPU_ID": group_df["GPU_ID"].iloc[0],
             "Grid_Size": group_df["Grid_Size"].iloc[0],
@@ -1936,28 +1992,54 @@ def process_rocpd_csv(
             "Start_Timestamp": group_df["Start_Timestamp"].iloc[0],
             "End_Timestamp": group_df["End_Timestamp"].iloc[0],
         }
-        if use_provenance:
-            row.update(
-                _merge_counters_with_pass_provenance(
-                    by_pass_tables[group_id], pass_layout, missing_dispatches
-                )
-            )
-        else:
-            # Each counter will become its own column (last write wins).
-            row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
+        # Each counter becomes its own column. A counter that several passes
+        # collected keeps the value of the first pass.
+        first_values = group_df.drop_duplicates("Counter_Name")
+        row.update(
+            dict(zip(first_values["Counter_Name"], first_values["Counter_Value"]))
+        )
         data.append(row)
         slot_to_id[group_key] = len(data)
-    if missing_dispatches:
-        console_warning(
-            "pass_provenance",
-            f"{len(missing_dispatches)} dispatch(es) are missing a duplicated "
-            "counter from a profiling pass; those cells are NaN and drop out "
-            "of sums.",
-        )
     df = pd.DataFrame(data)
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(1, len(df) + 1)
     return df, slot_to_id
+
+
+def split_counters_by_pass(
+    counter_rows: pd.DataFrame,
+    merged_df: pd.DataFrame,
+) -> dict[str, pd.DataFrame]:
+    """Return one table per pass, keyed by Pass_Key.
+
+    Each table has the rows of merged_df, its dispatch columns, and only the
+    counters and timestamps that pass collected. A dispatch the pass did not see
+    has empty counters there.
+    """
+    if counter_rows.empty or "Pass_Key" not in counter_rows.columns:
+        return {}
+    counter_rows = counter_rows.assign(
+        Merged_Row=counter_rows.groupby(_MERGE_KEYS).ngroup()
+    )
+    dispatch_columns = [
+        column
+        for column in merged_df.columns
+        if column not in set(counter_rows["Counter_Name"])
+        and column not in ("Start_Timestamp", "End_Timestamp")
+    ]
+    pass_frames: dict[str, pd.DataFrame] = {}
+    for pass_key, rows in counter_rows.groupby("Pass_Key", sort=False):
+        counters = rows.pivot_table(
+            index="Merged_Row",
+            columns="Counter_Name",
+            values="Counter_Value",
+            aggfunc="first",
+        )
+        timestamps = rows.groupby("Merged_Row")[["Start_Timestamp", "End_Timestamp"]]
+        pass_frames[str(pass_key)] = (
+            merged_df[dispatch_columns].join(timestamps.first()).join(counters)
+        )
+    return pass_frames
 
 
 def find_native_artifacts(workload_dir: Path) -> List[NativeArtifacts]:
@@ -2035,75 +2117,3 @@ def assign_native_ids(counter_set: pd.DataFrame) -> pd.DataFrame:
         Kernel_ID=kernel_groups.ngroup(),
     )
     return numbered.loc[:, COUNTER_RESULTS_COLUMNS]
-
-
-def _merge_counters_with_pass_provenance(
-    by_pass: pd.DataFrame,
-    pass_layout: "PassLayout",
-    missing_dispatches: List[int],
-) -> Dict[str, Any]:
-    """Build base + shadow counter columns for one dispatch group.
-
-    ``by_pass`` is the group's counter by pass table. The base column is the
-    first pass in natural order that has a value. A duplicated counter also
-    gets a column for every layout pass that collects it, and a dispatch
-    missing that pass stores NaN so later dispatches still align.
-    """
-    merged: Dict[str, Any] = by_pass.bfill(axis=1).iloc[:, 0].to_dict()
-    shadow = by_pass.reindex(columns=list(pass_layout.pass_keys))
-    missing = 0
-    for name in shadow.index.intersection(list(pass_layout.duplicated)):
-        for pass_key in pass_layout.pass_keys:
-            if name not in pass_layout.counters_by_pass[pass_key]:
-                continue
-            value = shadow.at[name, pass_key]
-            merged[pass_layout.qualified_column(name, pass_key)] = value
-            missing += bool(pd.isna(value))
-    if missing:
-        missing_dispatches.append(missing)
-    return merged
-
-
-def _pivot_counters_by_pass(
-    df: pd.DataFrame, group_ids: pd.Series
-) -> Dict[int, pd.DataFrame]:
-    """Each dispatch's values as a counter by pass table, passes in natural order.
-
-    The whole frame is pivoted once and then split by ``group_ids``; a row
-    with a NaN id belongs to no dispatch and is dropped. Each table keeps only
-    the passes its dispatch has. Rows keep the order counters first appear in
-    within their dispatch. A repeated (counter, pass) row keeps its last value.
-    A table without empty cells keeps the counter value dtype, because the
-    whole-frame pivot turns integer values into floats.
-    """
-    cells = df.assign(
-        Group_ID=group_ids,
-        Counter_Name=df["Counter_Name"].astype(str),
-        Pass_Key=df["Pass_Key"].astype(str),
-    )
-    cells = (
-        cells[cells["Group_ID"].notna()]
-        .astype({"Group_ID": int})
-        .drop_duplicates(["Group_ID", "Counter_Name", "Pass_Key"], keep="last")
-    )
-    by_pass = cells.pivot(
-        index=["Group_ID", "Counter_Name"],
-        columns="Pass_Key",
-        values="Counter_Value",
-    ).reindex(
-        index=pd.MultiIndex.from_frame(
-            cells[["Group_ID", "Counter_Name"]].drop_duplicates()
-        ),
-        columns=sorted(cells["Pass_Key"].unique(), key=natural_pass_sort_key),
-    )
-    passes_by_group = cells.groupby("Group_ID")["Pass_Key"].agg(set)
-    tables: Dict[int, pd.DataFrame] = {}
-    for group_id, table in by_pass.groupby(level="Group_ID", sort=False):
-        present = passes_by_group[group_id]
-        table = table.droplevel("Group_ID").loc[
-            :, [key for key in table.columns if key in present]
-        ]
-        if not table.isna().to_numpy().any():
-            table = table.astype(df["Counter_Value"].dtype)
-        tables[group_id] = table
-    return tables

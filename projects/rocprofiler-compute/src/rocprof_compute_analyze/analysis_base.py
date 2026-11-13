@@ -24,7 +24,7 @@ from utils.logger import (
 )
 from utils.metrics.expression import build_metric_value_string
 from utils.utils_analysis import (
-    impute_counters_iteration_multiplex,
+    impute_counters_by_pass_iteration_multiplex,
     validate_workload,
 )
 from utils.utils_common import (
@@ -157,8 +157,8 @@ class OmniAnalyze_Base:
     @demarcate
     def iteration_multiplex_impute_counters(
         self, df: pd.DataFrame, policy: str, workload_dir: Path
-    ) -> pd.DataFrame:
-        return impute_counters_iteration_multiplex(df, policy, workload_dir)
+    ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+        return impute_counters_by_pass_iteration_multiplex(df, policy, workload_dir)
 
     @demarcate
     def generate_configs(

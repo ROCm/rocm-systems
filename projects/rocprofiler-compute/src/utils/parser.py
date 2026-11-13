@@ -596,15 +596,16 @@ def load_table_data(
     """
     load_non_mertrics_table(workload, dir_path, args, pc_sampling_tool_data)
 
+    filtered_pmc = apply_filters(workload, args.debug_metric_expression)
     eval_metric(
         workload.dfs,
         workload.dfs_type,
         dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
-        apply_filters(workload, args.debug_metric_expression),
+        filtered_pmc,
         args.debug_metric_expression,
-        pass_layout=getattr(workload, "pmc_pass_layout", None),
+        [frame.loc[filtered_pmc.index] for frame in workload.pmc_by_pass.values()],
     )
 
 

@@ -20,11 +20,6 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.metrics.pass_provenance import (
-    PassLayout,
-    build_pass_layout,
-    natural_pass_sort_key,
-)
 from utils.utils_common import normalize_filter_to_str_list
 
 KERNEL_SYMBOLS_CSV_GLOB = f"rocpd_kernel_symbols_*.csv{csv_compression.GZIP_SUFFIX}"
@@ -367,58 +362,6 @@ def process_pc_sampling_kernel_trace(
     return pd.DataFrame(rows, columns=columns)
 
 
-def _pass_key_from_result_file(result_file: Path) -> str:
-    """Map ``results_pmc_perf_3.csv.gz`` → ``pmc_perf_3``."""
-    name = result_file.name
-    if name.endswith(".gz"):
-        name = name[:-3]
-    if name.endswith(".csv"):
-        name = name[:-4]
-    if name.startswith("results_"):
-        return name[len("results_") :]
-    return name
-
-
-@demarcate
-def load_df_pmc(
-    raw_data_dir: str,
-    verbose: int,
-    *,
-    preserve_pass_provenance: bool = True,
-) -> tuple[pd.DataFrame, PassLayout]:
-    """
-    Read all raw pmc counters into one analysis df plus a ``PassLayout``.
-
-    Counter data comes from the native tool's per-pid artifacts when there are
-    any, and from the rocpd result artifacts otherwise. When single-pass metric
-    packing copies a counter across passes, the wide frame keeps a base column
-    (first pass) and per-pass shadow columns.
-    """
-    long_df = _read_counter_rows(Path(raw_data_dir))
-    if long_df.empty:
-        return pd.DataFrame(), PassLayout.empty()
-
-    if not preserve_pass_provenance:
-        long_df = long_df.drop(columns=["Pass_Key"])
-        df, _slot_to_id = utils_analysis.process_rocpd_csv(long_df)
-        layout = PassLayout.empty()
-    else:
-        layout = build_pass_layout(long_df)
-        df, _slot_to_id = utils_analysis.process_rocpd_csv(long_df, pass_layout=layout)
-
-    utils_analysis.add_unit_counter(df)
-
-    if verbose >= 2:
-        frame_info = io.StringIO()
-        df.info(buf=frame_info)
-        console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
-        console_debug(
-            "pass_provenance",
-            f"passes={len(layout.pass_keys)} duplicated={len(layout.duplicated)}",
-        )
-    return df, layout
-
-
 @demarcate
 def create_df_pmc(
     raw_data_dir: str,
@@ -431,11 +374,7 @@ def create_df_pmc(
     any, and from the rocpd result artifacts otherwise. Bad profiling output
     stops the run instead of producing a partial frame.
     """
-    df, _layout = load_df_pmc(
-        raw_data_dir,
-        verbose,
-        preserve_pass_provenance=False,
-    )
+    df, _slot_to_id, _pass_frames = create_df_pmc_with_slot_ids(raw_data_dir, verbose)
     return df
 
 
@@ -443,30 +382,23 @@ def create_df_pmc(
 def create_df_pmc_with_slot_ids(
     raw_data_dir: str,
     verbose: int,
-) -> tuple[pd.DataFrame, dict[tuple, int], PassLayout]:
-    """Read pmc counters, slot ids, and the pass layout used to bind metrics.
-
-    Operator filtering uses this loader. It keeps the same pass provenance as
-    ``load_df_pmc`` so a later metric bind cannot read a divisor from another
-    pass.
-    """
+) -> tuple[pd.DataFrame, dict[tuple, int], dict[str, pd.DataFrame]]:
+    """Read pmc counters, the map from process_rocpd_csv group keys to 1..N ids,
+    and one counter table per pass, keyed by pass name."""
     counter_rows = _read_counter_rows(Path(raw_data_dir))
     if counter_rows.empty:
-        return pd.DataFrame(), {}, PassLayout.empty()
+        return pd.DataFrame(), {}, {}
 
-    layout = build_pass_layout(counter_rows)
-    df, slot_to_id = utils_analysis.process_rocpd_csv(
-        counter_rows,
-        pass_layout=layout,
-    )
+    df, slot_to_id = utils_analysis.process_rocpd_csv(counter_rows)
 
     utils_analysis.add_unit_counter(df)
+    pass_frames = utils_analysis.split_counters_by_pass(counter_rows, df)
 
     if verbose >= 2:
         frame_info = io.StringIO()
         df.info(buf=frame_info)
         console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
-    return df, slot_to_id, layout
+    return df, slot_to_id, pass_frames
 
 
 def _read_counter_rows(workload_dir: Path) -> pd.DataFrame:
@@ -479,17 +411,19 @@ def _read_counter_rows(workload_dir: Path) -> pd.DataFrame:
     if artifacts:
         return _read_native_counter_rows(workload_dir, artifacts)
 
+    result_suffix = f".csv{csv_compression.GZIP_SUFFIX}"
     result_files = sorted(
-        workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}"),
-        key=lambda path: natural_pass_sort_key(_pass_key_from_result_file(path)),
+        workload_dir.glob(f"results_*{result_suffix}"),
+        key=lambda path: _natural_sort_key(path.name),
     )
     if not result_files:
         return pd.DataFrame()
-    frames = []
-    for result_file in result_files:
-        frame = _read_counter_results(result_file)
-        frame["Pass_Key"] = _pass_key_from_result_file(result_file)
-        frames.append(frame)
+    frames = [
+        _read_counter_results(result_file).assign(
+            Pass_Key=result_file.name[len("results_") : -len(result_suffix)]
+        )
+        for result_file in result_files
+    ]
     counter_rows = pd.concat(frames, ignore_index=True)
     # rocpd lists no agents, so number the GPUs that ran dispatches from 0.
     counter_rows["GPU_ID"] = counter_rows["GPU_ID"].rank(method="dense").astype(int) - 1
@@ -503,7 +437,9 @@ def _read_native_counter_rows(
     """Join each process's native CSVs, numbering ids per counter set and GPUs
     from the agents CSVs."""
     counter_sets = []
-    for fbase in sorted({artifact.fbase for artifact in artifacts}):
+    for fbase in sorted(
+        {artifact.fbase for artifact in artifacts}, key=_natural_sort_key
+    ):
         processes = [
             utils_analysis.join_native_counters(
                 _read_profiling_csv(
@@ -518,11 +454,11 @@ def _read_native_counter_rows(
             for artifact in artifacts
             if artifact.fbase == fbase
         ]
-        numbered = utils_analysis.assign_native_ids(
-            pd.concat(processes, ignore_index=True)
+        counter_sets.append(
+            utils_analysis.assign_native_ids(
+                pd.concat(processes, ignore_index=True)
+            ).assign(Pass_Key=fbase)
         )
-        numbered["Pass_Key"] = fbase
-        counter_sets.append(numbered)
 
     counter_rows = pd.concat(counter_sets, ignore_index=True)
     gpu_ids = utils_analysis.number_gpus_by_node(
@@ -554,6 +490,11 @@ def _read_counter_results(result_file: Path) -> pd.DataFrame:
         )
 
     return df
+
+
+def _natural_sort_key(name: str) -> list[Any]:
+    """Sort key that puts pmc_perf_2 before pmc_perf_10."""
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)]
 
 
 def _read_profiling_csv(

@@ -14,6 +14,7 @@ from utils import file_io
 from utils.file_io import (
     create_df_kernel_top_stats,
     create_df_pmc,
+    create_df_pmc_with_slot_ids,
     load_kernel_short_names,
     rank_kernels_by_total_duration,
     validate_kernel_filter_ids,
@@ -299,6 +300,26 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
     assert "Counter_Name" not in df.columns
 
 
+def test_create_df_pmc_with_slot_ids_returns_pass_tables_in_pass_order(
+    tmp_path,
+) -> None:
+    """Each result file is one pass table, and pmc_perf_2 comes before
+    pmc_perf_10."""
+    for pass_index, counter in ((10, "SQ_BUSY_CYCLES,100\n"), (2, "SQ_WAVES,4\n")):
+        common.write_result_csv(
+            tmp_path,
+            ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + counter,
+            pass_index=pass_index,
+        )
+
+    df, _slot_to_id, pass_frames = create_df_pmc_with_slot_ids(str(tmp_path), verbose=0)
+
+    assert list(pass_frames) == ["pmc_perf_2", "pmc_perf_10"]
+    assert pass_frames["pmc_perf_2"]["SQ_WAVES"].tolist() == [4]
+    assert "SQ_WAVES" not in pass_frames["pmc_perf_10"].columns
+    assert df[["SQ_WAVES", "SQ_BUSY_CYCLES"]].iloc[0].tolist() == [4, 100]
+
+
 def test_create_df_pmc_numbers_result_gpus_from_zero(tmp_path) -> None:
     """rocpd GPU ids are node ids, numbered from 0 among the GPUs that ran."""
     common.write_gzip_csv(
@@ -331,23 +352,6 @@ def test_create_df_pmc_combines_result_files_of_one_workload(tmp_path) -> None:
     assert df["SQ_WAVES"].iloc[0] == 4
     assert df["SQ_BUSY_CYCLES"].iloc[0] == 100
     assert df["Dispatch_Unit"].iloc[0] == 1
-
-
-def test_create_df_pmc_keeps_the_legacy_frame_shape(tmp_path) -> None:
-    """Legacy callers get last-write base columns and no pass shadows."""
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_0.csv.gz",
-        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_WAVES,4\n",
-    )
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_1.csv.gz",
-        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_WAVES,9\n",
-    )
-
-    df = create_df_pmc(str(tmp_path), verbose=0)
-
-    assert df["SQ_WAVES"].iloc[0] == 9
-    assert not any("@pass:" in column for column in df.columns)
 
 
 def test_create_df_pmc_rejects_wide_result_file(tmp_path) -> None:

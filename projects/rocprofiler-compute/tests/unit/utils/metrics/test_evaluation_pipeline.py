@@ -10,7 +10,6 @@ import pandas as pd
 import pytest
 
 from utils.metrics.evaluation_pipeline import (
-    _gui_active_zero_detected,
     calc_builtin_vars,
     compute_pct_of_peak,
     create_empirical_peaks_dict,
@@ -128,6 +127,48 @@ class TestEvaluationPipeline:
         assert call_args.args[0] == "Value"
         assert call_args.kwargs["show_inputs"] is True
         assert metric_df.loc["1.1.0", "Value"] == 450
+
+    @pytest.mark.parametrize(
+        ("pass_counters", "expected"),
+        [
+            ([["SQ_WAVES"], ["SQ_WAVES", "GRBM_GUI_ACTIVE"]], 0.4),
+            ([["SQ_WAVES"], ["GRBM_GUI_ACTIVE"]], 0.1),
+        ],
+        ids=["pass_holds_all", "no_pass_holds_all"],
+    )
+    def test_eval_metric_reads_metric_from_first_pass_holding_it(
+        self, pass_counters, expected
+    ):
+        """A metric reads the first pass that has all its counters, and the
+        merged frame when no pass has them all."""
+        fixture = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": "to_sum(raw_pmc_df['SQ_WAVES']) / "
+                "to_sum(raw_pmc_df['GRBM_GUI_ACTIVE'])",
+            }
+        )
+        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
+        pass_values = {"SQ_WAVES": [10, 20, 30], "GRBM_GUI_ACTIVE": [50, 50, 50]}
+        pass_frames = [
+            pd.DataFrame({name: pass_values[name] for name in counters})
+            for counters in pass_counters
+        ]
+        with patch(
+            "utils.metrics.evaluation_pipeline.get_build_in_vars",
+            return_value={},
+        ):
+            eval_metric(
+                dfs,
+                dfs_type,
+                dfs_expressions,
+                sys_info,
+                pd.DataFrame(),
+                raw_pmc_df,
+                debug=False,
+                pass_frames=pass_frames,
+            )
+
+        assert metric_df.loc["1.1.0", "Value"] == pytest.approx(expected)
 
     def test_eval_metric_computes_value_from_expression(self):
         """eval_metric writes the computed Value back to the metric DataFrame."""
@@ -528,56 +569,3 @@ class TestEvaluationPipeline:
         sys_info = pd.Series({**self.sys_info_fields, "num_gl1c": 8})
         result = create_sys_vars(sys_info)
         assert result["ammolite__num_gl1c"] == 8
-
-
-def test_pass_scoped_builtin_is_computed_for_the_used_pass() -> None:
-    from utils.metrics.evaluation_pipeline import _calc_pass_scoped_builtins
-    from utils.metrics.pass_provenance import PassLayout
-
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE"}),
-            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE", "TA_BUSY"}),
-        },
-        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
-    )
-    raw_pmc_df = pd.DataFrame({
-        "TA_BUSY": [50.0],
-        "GRBM_GUI_ACTIVE": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
-    })
-    result = _calc_pass_scoped_builtins(
-        raw_pmc_df,
-        {"ammolite__num_xcd": 1},
-        "gfx942",
-        layout,
-        {"pmc_perf_1"},
-        ["to_avg(raw_pmc_df['TA_BUSY'] / ammolite__GRBM_GUI_ACTIVE_PER_XCD)"],
-    )
-    value = result["ammolite__GRBM_GUI_ACTIVE_PER_XCD__pass1"]
-    if isinstance(value, pd.Series):
-        value = value.iloc[0]
-    assert float(value) == 200.0
-
-
-def test_gui_active_zero_ignores_shadow_columns() -> None:
-    frame = pd.DataFrame({
-        "GRBM_GUI_ACTIVE_sum": [10],
-        "GRBM_GUI_ACTIVE": [0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [0],
-    })
-    assert _gui_active_zero_detected(frame) is None
-
-    base_only = pd.DataFrame({
-        "GRBM_GUI_ACTIVE": [0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [5],
-    })
-    assert _gui_active_zero_detected(base_only) == "GRBM_GUI_ACTIVE"
-
-    summed_zero = pd.DataFrame({
-        "GRBM_GUI_ACTIVE_sum": [0],
-        "GRBM_GUI_ACTIVE": [5],
-    })
-    assert _gui_active_zero_detected(summed_zero) == "GRBM_GUI_ACTIVE_sum"
