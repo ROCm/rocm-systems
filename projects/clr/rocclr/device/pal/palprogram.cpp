@@ -146,7 +146,7 @@ void Segment::copy(size_t offset, const void* src, size_t size) {
   }
 }
 
-bool Segment::freeze(bool destroySysmem) {
+bool Segment::freeze([[maybe_unused]] bool destroySysmem) {
   VirtualGPU& gpu = *gpuAccess_->dev().xferQueue();
   bool result = true;
   if (cpuAccess_ != nullptr) {

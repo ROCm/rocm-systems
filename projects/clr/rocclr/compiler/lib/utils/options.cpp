@@ -140,7 +140,8 @@ void getDefault2(int OptDescTableIx, int64_t& idefault2, const char*& sdefault2)
   }
 }
 
-bool setAliasOptionVariable(int OptDescTableIx, Options& Opts, int64_t IValue, const char* SValue) {
+bool setAliasOptionVariable(int OptDescTableIx, Options& Opts,
+                            [[maybe_unused]] int64_t IValue, const char* SValue) {
   OptionDescriptor* od;
   OptionVariables* oVars = Opts.oVariables;
 
@@ -213,7 +214,7 @@ bool setAliasOptionVariable(int OptDescTableIx, Options& Opts, int64_t IValue, c
   return true;
 }
 
-void ShowOptionsHelp(const char* helpValue, Options& Opts) {
+void ShowOptionsHelp([[maybe_unused]] const char* helpValue, Options& Opts) {
   // -h[--help][=public|all]  : public is the second default
   bool showAll = false;
   bool showSupport = false;

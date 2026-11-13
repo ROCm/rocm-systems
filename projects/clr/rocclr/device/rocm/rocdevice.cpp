@@ -2020,8 +2020,10 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
   return true;
 }
 
-bool Device::amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
-                      uint64_t* size_copied, int32_t* status) {
+bool Device::amdFileRead(amd::Os::FileDesc handle, [[maybe_unused]] void* devicePtr,
+                         [[maybe_unused]] uint64_t size, [[maybe_unused]] int64_t file_offset,
+                         [[maybe_unused]] uint64_t* size_copied,
+                         [[maybe_unused]] int32_t* status) {
   hsa_amd_ais_file_handle_t fh{};
   hsa_status_t ret = HSA_STATUS_ERROR;
 #if defined(_WIN32)
@@ -2038,8 +2040,10 @@ bool Device::amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t siz
   return true;
 }
 
-bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
-                       uint64_t* size_copied, int32_t* status) {
+bool Device::amdFileWrite(amd::Os::FileDesc handle, [[maybe_unused]] void* devicePtr,
+                          [[maybe_unused]] uint64_t size, [[maybe_unused]] int64_t file_offset,
+                          [[maybe_unused]] uint64_t* size_copied,
+                          [[maybe_unused]] int32_t* status) {
   hsa_amd_ais_file_handle_t fh{};
   hsa_status_t ret = HSA_STATUS_ERROR;
 #if defined(_WIN32)
