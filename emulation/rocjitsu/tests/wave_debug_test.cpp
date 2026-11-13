@@ -867,7 +867,12 @@ TEST(WaveDebugTest, MisalignedFlatLdsAtomicPrecedesGlobalFaultAndWatchpoint) {
               return true;
             });
         fx.cu->step();
-        if (offset != 4) {
+        if (offset >= 0x80000000u) {
+          // Beyond the LDS allocation the lane is DDS, which fails before any
+          // VM fault report; it aborts the queue instead of reaching the
+          // memory-violation owner, which would wait for a VM fault event.
+          EXPECT_TRUE(faults.empty());
+        } else if (offset != 4) {
           EXPECT_EQ(faults, (std::vector<uint64_t>{0}));
         } else if (!mapped) {
           EXPECT_EQ(faults, (std::vector<uint64_t>{global}));
