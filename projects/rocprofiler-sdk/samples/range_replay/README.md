@@ -11,13 +11,14 @@ Build with `-DROCPROFILER_BUILD_SAMPLES=ON`.
 Kernel replay re-executes one dispatch **in place**, before the application observes its
 completion, so the application never knows it happened and the tool alone drives it.
 
-A range covers a *sequence* of dispatches the application has **already observed**. There is no
-"in place" left, so the SDK records the range while it runs and re-executes the recording
-afterwards:
+A range covers a *phase* the application has **already started**. This line does not re-submit
+recorded packets. When the tool sets `host_replay` and the application opens the range with
+`sigsetjmp`, later passes re-enter that function:
 
-- **pass 0** is the application's own execution, which the SDK observes rather than drives, and
-  which raises no PASS callback
-- **passes 1..N-1** are SDK-driven re-executions from the memory state captured at range entry
+- **pass 0** is the application's own execution, which raises no PASS callback
+- **passes 1..N-1** are the same code again, after the SDK restores device memory and registered
+  host memory and `siglongjmp`s back to the mark
+- without `host_replay`, the range runs once and closes as `PACKET_REPLAY_UNSUPPORTED`
 
 That is also why the application is a participant here and not just a subject: only it knows where
 its range boundaries are. `main.cpp` calls `rocprofiler_range_replay_begin` / `_end` around the
@@ -65,8 +66,8 @@ streams would share a queue and the range would be replayed rather than declined
 
 | Sample | Asks for | CLOSE status | Shows |
 |---|---|---|---|
-| `range-replay-basic` | 4 passes | `REPLAYED` | The whole loop: one CONFIG, three PASS callbacks (passes 1-3), one CLOSE, and a zero divergence count. |
-| `range-replay-host` | 4 passes, `host_replay` | `REPLAYED` | The same checks, but passes 1-3 re-enter `main` through `siglongjmp` instead of re-submitting recorded packets. |
+| `range-replay-basic` | 4 passes, `host_replay` unset | `PACKET_REPLAY_UNSUPPORTED` | The range runs once. This line does not re-submit recorded packets, so CLOSE names that and no PASS callback is raised. |
+| `range-replay-host` | 4 passes, `host_replay` | `REPLAYED` | Passes 1-3 re-enter `main` through `siglongjmp`. One CONFIG, three PASS callbacks, one CLOSE, divergence count 0. |
 | `range-replay-opt-out` | nothing | `NO_PASS_COUNT` | Leaving `pass_count_cb` NULL is the per-range opt-out: the range is still opened, tracked and closed, but no pass runs. |
 | `range-replay-decline` | 4 passes | `MULTI_QUEUE` | A range the SDK refuses. CLOSE names the reason, and the application's result is untouched. |
 

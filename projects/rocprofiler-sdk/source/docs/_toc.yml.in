@@ -138,6 +138,8 @@ subtrees:
       title: Range replay (experimental)
       subtrees:
       - entries:
+        - file: conceptual/range_replay/range_replay_control_flow
+          title: Control flow
         - file: conceptual/range_replay/range_replay_callback_api
           title: Callback API and tool configuration
         - file: conceptual/range_replay/range_replay_soundness

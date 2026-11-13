@@ -44,7 +44,8 @@
 
 // Implemented in replay_abi_c.c, compiled as C against the same public header. See that file for
 // why the C translation unit exists.
-extern "C" {
+extern "C"
+{
 size_t
 rocprofiler_test_c_range_record_size(void);
 size_t
@@ -327,7 +328,8 @@ TEST(range_replay_abi, status_enum_values_are_stable)
     EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_UNSUPPORTED_QUEUE_PATH), 13);
     EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE), 14);
     EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET), 15);
-    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_LAST), 16);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_PACKET_REPLAY_UNSUPPORTED), 16);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_LAST), 17);
 }
 
 // Every decline reason must be distinguishable from REPLAYED, since that is the single comparison

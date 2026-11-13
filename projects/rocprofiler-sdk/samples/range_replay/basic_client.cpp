@@ -30,7 +30,11 @@ std::atomic<int>      g_status{ROCPROFILER_RANGE_REPLAY_STATUS_LAST};
 std::atomic<uint64_t> g_divergence{0};
 std::atomic<bool>     g_agent_bound{false};
 
-uint64_t pass_count(uint64_t, rocprofiler_user_data_t) { return kPasses; }
+uint64_t
+pass_count(uint64_t, rocprofiler_user_data_t)
+{
+    return kPasses;
+}
 
 void
 range_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t*, void*)
@@ -105,23 +109,33 @@ tool_fini(void*)
             g_closes.load(),
             status_name(static_cast<rocprofiler_range_replay_status_t>(g_status.load())));
 
+    const auto* host_env = std::getenv("RR_HOST_REPLAY");
+    const bool  host     = host_env != nullptr && host_env[0] != '\0' && host_env[0] != '0';
+
     bool ok = true;
     // One CONFIG and one CLOSE per range, no matter how many passes ran.
     ok = ok && g_configs.load() == 1;
     ok = ok && g_closes.load() == 1;
-    // PASS is raised for the re-executions only: the application's own run is pass 0 and the SDK
-    // observes it rather than driving it.
-    ok = ok && g_passes.load() == expected_passes;
-    ok = ok && g_last_pass.load() == kPasses - 1;
-    ok = ok && g_status.load() == ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED;
-    ok = ok && g_dispatch_count.load() == kRangeDispatches;
-    ok = ok && g_agent_bound.load();
-    // The CTest target runs with ROCPROF_RANGE_REPLAY_VERIFY=1, so this is the repeatability
-    // check: the SDK compares what the application's own execution left in device memory against
-    // what the final replayed pass left there. Any region that differs means the range did not
-    // re-execute to the same result -- a between-pass rewind that did not happen, a recording
-    // replayed out of order, or state the snapshot does not cover.
-    ok = ok && g_divergence.load() == 0;
+    if(host)
+    {
+        // PASS is raised for the re-executions only: the application's own run is pass 0 and the
+        // SDK observes it rather than driving it.
+        ok = ok && g_passes.load() == expected_passes;
+        ok = ok && g_last_pass.load() == kPasses - 1;
+        ok = ok && g_status.load() == ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED;
+        ok = ok && g_dispatch_count.load() == kRangeDispatches;
+        ok = ok && g_agent_bound.load();
+        // The CTest target runs with ROCPROF_RANGE_REPLAY_VERIFY=1, so this is the repeatability
+        // check: the SDK compares what the application's own execution left in device memory
+        // against what the final replayed pass left there.
+        ok = ok && g_divergence.load() == 0;
+    }
+    else
+    {
+        // This line does not re-submit recorded packets. Without host_replay the range runs once.
+        ok = ok && g_passes.load() == 0;
+        ok = ok && g_status.load() == ROCPROFILER_RANGE_REPLAY_STATUS_PACKET_REPLAY_UNSUPPORTED;
+    }
 
     if(!ok)
     {

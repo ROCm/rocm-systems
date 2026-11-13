@@ -52,6 +52,8 @@ status_name(rocprofiler_range_replay_status_t status)
         case ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE:
             return "CODE_OBJECT_CHANGED_IN_RANGE";
         case ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET: return "HOST_JMP_NOT_SET";
+        case ROCPROFILER_RANGE_REPLAY_STATUS_PACKET_REPLAY_UNSUPPORTED:
+            return "PACKET_REPLAY_UNSUPPORTED";
         case ROCPROFILER_RANGE_REPLAY_STATUS_LAST: break;
     }
     return "<unknown>";

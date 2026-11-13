@@ -72,6 +72,11 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET,  ///< Tool asked for host replay, but the
                                                        ///< application did not arm a sigsetjmp in
                                                        ///< the caller's frame
+    ROCPROFILER_RANGE_REPLAY_STATUS_PACKET_REPLAY_UNSUPPORTED,  ///< The tool did not ask for host
+                                                                ///< replay. This build does not
+                                                                ///< re-submit recorded packets, so
+                                                                ///< the range closes after the
+                                                                ///< application's own run
     ROCPROFILER_RANGE_REPLAY_STATUS_LAST,
 } rocprofiler_range_replay_status_t;
 
@@ -94,26 +99,19 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
  *   execution and the final replayed pass (0 when verification is off or nothing diverged).
  *
  * Unlike @ref ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY, which re-executes one dispatch in place
- * before the application observes its completion, a range covers a *sequence* of dispatches that
- * the application has already observed. The SDK therefore records the range while it runs, and
- * re-executes the recording afterwards: pass 0 is the application's own run, passes 1..N-1 are
- * SDK-driven re-executions of the recorded dispatches from the range-entry memory state.
+ * before the application observes its completion, a range covers a phase the application has
+ * already started. This build replays that phase by re-running the application's own code. It does
+ * not record packets and re-submit them. Pass 0 is the application's own run. Passes 1..N-1 are
+ * further entries to the same function, reached by @c siglongjmp back to the @c sigsetjmp taken by
+ * @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN, after device memory and registered host memory have
+ * been restored.
  *
- * @warning Beta. A range is replayed only when every recorded dispatch targets one queue on one
- * agent, no HIP graph launch occurs inside it, no async copy writes device memory inside it, no
- * device allocation is made or freed inside it, and no other thread dispatches to the same agent
- * while it is open. Repeatability rests on the same
- * device-memory snapshot kernel replay uses (coarse-grained device allocations owned by the agent
- * plus module-scope @c __device__ / @c __constant__ variables), so unified/managed memory, host and
- * fine-grained memory, and virtual-memory-mapped allocations are not restored between passes.
- * Replayed passes are serialized dispatch-by-dispatch, so concurrency-sensitive measurements differ
- * from pass 0. A range whose kernels consume values the host recomputed inside the range is not a
- * candidate for packet replay.
+ * A range whose tool does not set @c host_replay closes after pass 0 with
+ * @ref ROCPROFILER_RANGE_REPLAY_STATUS_PACKET_REPLAY_UNSUPPORTED.
  *
- * Host replay (@c host_replay set during CONFIG, range opened with
- * @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN) lifts the packet restrictions: nothing is recorded, and
- * each extra pass re-runs the application's own code between begin and end, so memory copies,
- * memsets, multiple queues and agents, HIP graphs, balanced allocate/free pairs, and host
+ * @warning Beta. Host replay (@c host_replay set during CONFIG, range opened with
+ * @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN) re-runs the code between begin and end, so memory
+ * copies, memsets, multiple queues and agents, HIP graphs, balanced allocate/free pairs, and host
  * computation all take part in every pass. Device memory on every GPU agent and the host regions
  * registered with @ref rocprofiler_range_replay_host_track_memory are restored before each extra
  * pass. Another thread dispatching or copying to a device inside the range, or a device allocation
@@ -122,6 +120,10 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
  * The application must synchronize all GPU work on every participating device before begin and
  * before end on every pass, including asynchronous copies and non-compute queues. The SDK's
  * compute-queue barriers and dispatch-handler drains do not wait for untracked copy completions.
+ * Repeatability rests on the same device-memory snapshot kernel replay uses (coarse-grained
+ * device allocations owned by the agent plus module-scope @c __device__ / @c __constant__
+ * variables), so unified/managed memory, host memory that was not registered, and
+ * virtual-memory-mapped allocations are not restored between passes.
  *
  * @see `source/docs/conceptual/range_replay/index.md`
  */

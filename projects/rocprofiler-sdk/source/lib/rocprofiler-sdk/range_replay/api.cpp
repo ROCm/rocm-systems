@@ -24,7 +24,6 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
-#include "lib/rocprofiler-sdk/range_replay/executor.hpp"
 #include "lib/rocprofiler-sdk/range_replay/host_replay.hpp"
 #include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
 #include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
@@ -85,19 +84,29 @@ end_range()
         return 0;
     }
 
+    // No packet re-submit on this line. A range the tool did not open for host replay has already
+    // had its one execution. Close it. An earlier decline (another queue, a foreign thread) is
+    // reported as-is. Opt-out stays NO_PASS_COUNT. Anything that would have been packet-replayed
+    // closes as PACKET_REPLAY_UNSUPPORTED.
     auto ctx = range_context_t{};
     if(!take_range(ctx)) return -1;
 
-    auto       divergence_count = uint64_t{0};
-    const auto status           = execute_range(ctx, divergence_count);
-    close_range(ctx, status, divergence_count);
+    auto status = ctx.record.status();
+    if(ctx.record.eligible())
+    {
+        status = ctx.plan.replay_requested
+                     ? ROCPROFILER_RANGE_REPLAY_STATUS_PACKET_REPLAY_UNSUPPORTED
+                     : ROCPROFILER_RANGE_REPLAY_STATUS_NO_PASS_COUNT;
+    }
+    close_range(ctx, status, 0);
     return 0;
 }
 }  // namespace
 }  // namespace range_replay
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_range_replay_begin(uint64_t range_id)
 {
@@ -128,10 +137,9 @@ rocprofiler_range_replay_begin(uint64_t range_id)
     ctx->plan = range_replay::execute_config_callback(
         range_id, ctx->thread_id, ctx->internal_corr_id, ctx->ancestor_corr_id);
 
-    // Both replay paths depend on the interception path in hsa/queue.cpp: packet replay to
-    // re-submit, host replay to see dispatches from other threads. The write-pointer
-    // virtualization path has its own submission handling, which this beta does not cover, so a
-    // range opened under it is declined rather than replayed.
+    // Host replay uses the interception path in hsa/queue.cpp to see dispatches from other
+    // threads. The write-pointer virtualization path has its own submission handling, which this
+    // beta does not cover, so a range opened under it is declined rather than replayed.
     if(::rocprofiler::hsa::queue_interposition::supports_queue_interposition())
     {
         static std::atomic<bool> _warned{false};

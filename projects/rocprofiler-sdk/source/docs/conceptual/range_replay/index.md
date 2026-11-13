@@ -9,75 +9,52 @@ phase's kernels feed each other. Re-running one kernel of a phase in isolation m
 whose inputs the rest of the phase has already changed, so the passes are not comparable to each
 other and none of them corresponds to what the phase actually did.
 
-**Range replay** covers a sequence. A tool brackets the phase; the SDK records the dispatches inside
-it, and after the range closes it restores the range-entry device memory and re-submits the whole
-recording once per extra pass.
+**Range replay** on this line covers a sequence by re-running the application's own code. The
+application marks the phase with `sigsetjmp`. After each pass the SDK restores device memory and
+the host regions the application registered, then `siglongjmp`s back to that mark. The next pass
+is the same instructions again, including host calls such as `hipDeviceSynchronize`. Recorded
+packets are not re-submitted. A range whose tool does not set `host_replay` runs once and closes
+with `PACKET_REPLAY_UNSUPPORTED`.
 
-| | Kernel replay | Range replay |
+| | Kernel replay | Host range replay |
 |---|---|---|
-| Unit of repetition | one dispatch | a recorded sequence of dispatches |
-| Who drives pass 0 | the SDK | the application (the SDK only observes) |
-| When passes run | inside the dispatch, before the application sees it complete | after the range closes |
-| Application observability | none: the extra passes are invisible | none for correctness, but the range takes longer to close |
-| Ordering within a pass | n/a (one dispatch) | serialized dispatch-by-dispatch |
+| Unit of repetition | one dispatch | the application's code between begin and end |
+| Who drives pass 0 | the SDK | the application |
+| Who drives later passes | the SDK, in place | the application, re-entered by `siglongjmp` |
+| When later passes run | inside the dispatch, before the application sees it complete | before `end` returns |
+| What is restored | that dispatch's device inputs | every GPU agent's tracked device memory, plus registered host memory |
+
+The control flow, the stack at the jump, and the locks around the restore are in
+[Control flow](range_replay_control_flow.md).
 
 Range replay is **experimental**. The public header is
 `rocprofiler-sdk/experimental/range_replay.h`. It shares kernel replay's device-memory snapshot,
 its per-agent replay window, and its pass-count and localized-context-toggle semantics, so a tool
 that already drives kernel replay reuses most of its pass logic unchanged.
 
-## Record live, then replay
+## Host replay is the replay
 
-The essential difference from kernel replay is *when* the SDK gets control. Kernel replay intercepts
-a dispatch and expands it into `N` passes before returning. A range has already run by the time the
-tool closes it, so the SDK cannot drive its first execution — it records it instead:
+The tool sets `host_replay` on the CONFIG record. The application opens the range with
+`ROCPROFILER_RANGE_REPLAY_HOST_BEGIN`, which takes a `sigsetjmp` in the caller's frame.
+`rocprofiler_range_replay_end` fences every intercepted compute queue, restores device memory on
+every GPU agent plus the host regions registered with
+`rocprofiler_range_replay_host_track_memory`, and `siglongjmp`s back while passes remain. Copies,
+memsets, multiple streams, graph launches, balanced allocations, and host calls are part of each
+pass because the application issues them again.
 
-```text
-rocprofiler_range_replay_begin(id)
-    CONFIG callback (ENTER then EXIT)  ->  tool returns the pass count for this range
+Pass 0 raises no `PASS` callback. A tool that wants pass 0 measured configures its services
+normally and uses the `PASS` toggles only on the re-entered passes.
 
-    <the application's dispatches>     ->  recorded from WriteInterceptor; kernarg bytes copied
-                                           out; device-memory snapshot taken before the first
-                                           one executes.  This is PASS 0 -- the application's
-                                           own execution, forwarded unmodified.
-
-rocprofiler_range_replay_end()
-    take the per-agent writer lock, drain the agent
-    for pass = 1 .. N-1:
-        restore the entry snapshot
-        PASS PHASE_ENTER          ->  tool may toggle its contexts for this pass
-        re-submit the recorded dispatches, serialized
-        PASS PHASE_EXIT
-        ask the tool whether to continue
-    CLOSE callback                ->  status, dispatch count, divergence count
-```
-
-Because pass 0 is the application's own run, it raises no `PASS` callback: there is nothing for the
-tool to configure, since the dispatches have already been submitted by the time the SDK sees them.
-A tool that wants pass 0 measured configures its services normally and uses the `PASS` toggles only
-to change what is collected on the *re-executed* passes.
-
-## Host replay (`sigsetjmp` / `siglongjmp`)
-
-Packet replay re-submits the recorded packets and never runs the host code inside the range again,
-which is why it declines ranges with copies, several streams, graphs, or host computation that feeds
-the kernels. Host replay is the alternate path for those ranges. The tool sets `host_replay` on the
-CONFIG record. The application opens the range with `ROCPROFILER_RANGE_REPLAY_HOST_BEGIN`, which
-takes a `sigsetjmp` in the caller's frame. `rocprofiler_range_replay_end` then fences every GPU queue,
-restores device memory on every GPU agent plus the host regions registered with
-`rocprofiler_range_replay_host_track_memory`, and `siglongjmp`s back. The application's own code runs
-again for every pass, so copies, memsets, multiple streams, graph launches, balanced allocations and
-host calls are all part of each pass.
-
-See [Host range replay](range_replay_host.md) for the protocol, the application's contract, what is
-restored, and what still declines.
+See [Control flow](range_replay_control_flow.md) for the sequence, and
+[Host range replay](range_replay_host.md) for the application's contract, what is restored, and
+what still declines.
 
 ## Soundness is checked, not enforced
 
-Replaying a range is only meaningful if re-running the recorded dispatches from the restored
-snapshot reproduces what the application's own execution did. That holds when the range is
-**self-contained under the snapshot's coverage**: everything the recorded dispatches read is either
-captured by the snapshot or unchanged across passes.
+Replaying a range is only meaningful if re-running the application's code from the restored
+snapshot reproduces what pass 0 did. That holds when the range is **self-contained under the
+snapshot's coverage**: everything the kernels read is either captured by the snapshot or unchanged
+across passes.
 
 The SDK cannot enforce that property — it would have to constrain the application. So it checks the
 conditions it can observe and *declines* a range that fails any of them. A declined range is not
@@ -95,12 +72,11 @@ experimental/range_replay.h           public payload struct, status enum, begin/
         +-- callback_tracing.cpp      subscription; switches on the allocation tracker
         |
         +-- range_replay/
-        |     api.cpp                 begin/end, context validation
-        |     range_state.cpp         eligibility bookkeeping, the recorder, decline channels
+        |     api.cpp                 begin/end. end() host-replays, or closes without
+        |                             re-submitting packets
+        |     range_state.cpp         eligibility bookkeeping, decline channels
         |     replay_callbacks.cpp    CONFIG / PASS / CLOSE delivery, pass-count decisions
-        |     executor.cpp            snapshot, kernarg staging, the pass loop, restore
-        |     host_replay.cpp         host replay: all-agent fence/snapshot/restore, host regions
-        |     retained_kernarg.cpp    the kernarg block kept for each agent's next range
+        |     host_replay.cpp         fence, snapshot, restore, the jump back into the caller
         |     digest.cpp              region hashing and divergence counting
         |
         +-- hsa/replay_window.cpp     per-agent lock, drains, ring submit, passthrough gate
@@ -114,7 +90,7 @@ experimental/range_replay.h           public payload struct, status enum, begin/
 `range_state.cpp` and `digest.cpp` are deliberately free of GPU dependencies. The eligibility
 decision table and the divergence hashing are the two parts most likely to be wrong in a way that
 silently produces misleading measurements, so both are unit tested directly rather than only through
-hardware integration tests; the executor consumes an already-decided record.
+hardware integration tests; host replay consumes an already-decided record.
 
 ## Carve-outs
 
@@ -130,7 +106,7 @@ lifts the rows marked *(packet only)*; see [Host range replay](range_replay_host
 | Async copies into device memory inside a range *(packet only)* | declined (`MEMORY_COPY_IN_RANGE`) |
 | Code objects loaded or unloaded inside a range (lazy module loading, JIT, `hipModuleUnload`) | declined (`CODE_OBJECT_CHANGED_IN_RANGE`); run a range once before measuring it |
 | Kernels that call `printf` | replayed output is printed again (hostcall `printf`, HIP's default) or lost (`-mprintf-kind=buffered`); see [Soundness and declining](range_replay_soundness.md) |
-| Concurrency within a pass | passes are serialized dispatch-by-dispatch, so concurrency-sensitive measurements differ from pass 0 |
+| Concurrency within a pass | host replay re-runs the application's own submission order, including concurrent streams. The SDK does not rewrite the queue |
 
 ## Multi-GPU and collectives
 
