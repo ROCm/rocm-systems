@@ -9,7 +9,7 @@
 //! that uncertainty and refuses to replay the event ID.
 
 use super::{errno, error, native_error, sys, uapi};
-use crate::device::gpu::event::linux::SignalEventInfo;
+use crate::driver::kfd_notifications::SignalEventInfo;
 use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
 use std::sync::Mutex;

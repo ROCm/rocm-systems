@@ -973,6 +973,40 @@ TEST_F(GinHostTypeQueryMicrotest, GetRailedGinType_UnconnectedComm_ReportsNoGin)
   EXPECT_EQ(NCCL_GIN_TYPE_NONE, type);
 }
 
+// ncclGinTypeActive looks past the default backend, with ncclGetGinType's gates.
+TEST_F(GinHostTypeQueryMicrotest, GinTypeActive_TypeInANonDefaultSlot_ReportsActive) {
+  auto* gs = gin();
+  gs->numActiveBackends = 2;
+  gs->backends[1] = gs->backends[0];
+  gs->backends[1].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+
+  EXPECT_TRUE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_PROXY));
+  EXPECT_TRUE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_ANVIL_SDMA));
+  EXPECT_FALSE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_ROCSHMEM_GDA));
+
+  ncclGinType_t def = NCCL_GIN_TYPE_NONE;
+  ASSERT_EQ(ncclSuccess, ncclGetGinType(comm(), &def));
+  EXPECT_EQ(NCCL_GIN_TYPE_PROXY, def);
+
+  // Slots past numActiveBackends are stale, not active.
+  gs->numActiveBackends = 1;
+  EXPECT_FALSE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_ANVIL_SDMA));
+}
+
+TEST_F(GinHostTypeQueryMicrotest, GinTypeActive_RailOnlyFinalizedOrNullComm_ReportsInactive) {
+  EXPECT_TRUE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_PROXY));
+
+  comm_->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+  EXPECT_FALSE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_PROXY));
+  comm_->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+  gin()->finalized = true;
+  EXPECT_FALSE(ncclGinTypeActive(comm(), NCCL_GIN_TYPE_PROXY));
+  gin()->finalized = false;
+
+  EXPECT_FALSE(ncclGinTypeActive(nullptr, NCCL_GIN_TYPE_PROXY));
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGinValidateSignalRequest
 
@@ -1109,6 +1143,25 @@ TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_SecondConnectFails_ClosesTheEarl
   EXPECT_EQ(1, fake_.closeCollCalls);
   EXPECT_EQ(nullptr, gin()->backends[0].ginComms[0]);
   EXPECT_FALSE(gin()->connected);
+}
+
+// AICOMRCCL-3418: every active backend connects in one pass, so with
+// RCCL_GIN_TYPE_LIST naming two, one backend's connect failure closes the other
+// too. src/gin/README.md ("Mixing backends") documents this.
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_SecondBackendConnectFails_ClosesEveryBackend) {
+  auto* gs = gin();
+  gs->numActiveBackends = 2;
+  gs->backends[1] = gs->backends[0];
+  gs->backends[1].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  fake_.failConnect = {ncclSystemError, 2};  // one connection per backend: call 2 is backends[1]
+
+  EXPECT_EQ(ncclSystemError, connectOnce());
+  EXPECT_EQ(2, fake_.connectCalls);
+  EXPECT_EQ(1, fake_.closeCollCalls);  // backends[0]'s connection, which had succeeded
+  EXPECT_EQ(nullptr, gs->backends[0].ginComms[0]);
+  EXPECT_TRUE(gs->backends[0].closed);
+  EXPECT_TRUE(gs->backends[1].closed);
+  EXPECT_FALSE(gs->connected);
 }
 
 // Two local GIN devices, four connections: connections are spread round-robin
@@ -1297,6 +1350,31 @@ TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_FirstBackendsSetupFails_Succe
   EXPECT_EQ(2, fake_.createContextCalls);
 }
 
+// ncclGinDevCommSetup honors reqs.ginType: an SDMA request binds backendIndex 1 when
+// PROXY is the default; NCCL_GIN_TYPE_NONE still takes backends[0].
+TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_RequestedTypeIsNotTheDefault_BindsThatBackend) {
+  auto* gs = gin();
+  gs->numActiveBackends = 2;
+  gs->backends[1] = gs->backends[0];
+  gs->backends[1].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  gs->backends[1].ginComms[0] = fake_.collCommHandle(1);
+  fake_.needsProxyProgress = false;
+
+  auto reqs = proxyReqs();
+  reqs.ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  ASSERT_EQ(ncclSuccess, setup(reqs));
+  EXPECT_EQ(1, devComm_.backendIndex);
+  ASSERT_NE(nullptr, gs->devComms);
+  EXPECT_EQ(1, gs->devComms->backendIndex);
+
+  // Without a type the DevComm takes the default, which is what the SDMA paths got before.
+  reqs.ginType = NCCL_GIN_TYPE_NONE;
+  ncclDevComm dflt{};
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &dflt, NCCL_VERSION_CODE));
+  EXPECT_EQ(0, dflt.backendIndex);
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &dflt));
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ncclGinDevCommSetup -- config, strides, and failure cleanup
 
@@ -1368,6 +1446,7 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_DeviceCodeVersionAndBackendTyp
     {"gdaki tops out at its last revision", NCCL_GIN_TYPE_GDAKI, NCCL_VERSION(2, 32, 0), 2},
     {"gpi tops out at its last revision", NCCL_GIN_TYPE_GPI, NCCL_VERSION(2, 32, 0), 1},
     {"efa gda at its first revision", NCCL_GIN_TYPE_EFA_GDA, NCCL_VERSION(2, 31, 0), 1},
+    {"efa gda tops out at its last revision", NCCL_GIN_TYPE_EFA_GDA, NCCL_VERSION(2, 32, 0), 2},
     // AMD device-initiated backends ignore the host-provided version entirely.
     {"rocshmem gda is version-less", NCCL_GIN_TYPE_ROCSHMEM_GDA, NCCL_VERSION(2, 32, 0), 0},
     {"anvil sdma is version-less", NCCL_GIN_TYPE_ANVIL_SDMA, NCCL_VERSION(2, 32, 0), 0},

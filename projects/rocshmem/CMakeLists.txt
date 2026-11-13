@@ -45,6 +45,7 @@ endif()
 
 option(PROFILE "Enable statistics and timing support" OFF)
 option(USE_RO "Enable RO conduit" OFF)
+option(USE_HOST_VERBS "Enable host-side verbs networking layer (src/net)" OFF)
 option(USE_IPC "Enable IPC support (using HIP)" ON)
 option(USE_GDA "Enable GDA conduit" OFF)
 option(USE_SDMA "Enable SDMA transport (MI300X+). Implied by USE_IPC." ${USE_IPC})
@@ -431,6 +432,10 @@ if (NOT BUILD_TESTS_ONLY)
     find_package(rocprofiler-register QUIET)
     if(NOT rocprofiler-register_FOUND)
       message(STATUS "rocprofiler-register not found - rocSHMEM tracing disabled.")
+    endif()
+    # Set before configure_file so #cmakedefine picks it up in rocshmem_config.h
+    if(TARGET rocprofiler-register::rocprofiler-register)
+      set(ROCSHMEM_ROCPROFILER_REGISTER 1)
     endif()
   endif()
 

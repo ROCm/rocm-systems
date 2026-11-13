@@ -79,7 +79,7 @@ jobs:
       gfx120x_runner: ${{ steps.runner.outputs.gfx120x_runner }}
     steps:
       - name: Checkout workflow actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
@@ -97,7 +97,7 @@ jobs:
       matrix: ${{ steps.generate_matrix.outputs.matrix }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: projects/rocprofiler-systems/.github
 
@@ -170,7 +170,7 @@ jobs:
         --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/rocprofiler-systems
@@ -244,7 +244,7 @@ jobs:
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
           python3 ./scripts/run-ci.py --stage generate \
-            --name "${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
+            --name "${{ github.repository }}-${GITHUB_REF_NAME}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
             --build-jobs 16 \
             --site ${{ matrix.system.runner }} \
             --mode ${{ steps.setup_env.outputs.mode }} \
@@ -277,7 +277,7 @@ jobs:
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
           python3 ./scripts/run-ci.py --stage configure \
-            --name "${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
+            --name "${{ github.repository }}-${GITHUB_REF_NAME}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
             -B build
 
       - name: Build
@@ -291,7 +291,7 @@ jobs:
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
           python3 ./scripts/run-ci.py --stage build \
-            --name "${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
+            --name "${{ github.repository }}-${GITHUB_REF_NAME}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
             -B build
 
       - name: CDash link
@@ -300,7 +300,7 @@ jobs:
         working-directory: projects/rocprofiler-systems
         run: |
           python3 ./scripts/run-ci.py --stage cdash-link \
-            --name "${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}"
+            --name "${{ github.repository }}-${GITHUB_REF_NAME}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}"
 
       - name: Test
         timeout-minutes: 60
@@ -310,7 +310,7 @@ jobs:
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
           python3 ./scripts/run-ci.py --stage test \
-            --name "${{ github.repository }}-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
+            --name "${{ github.repository }}-${GITHUB_REF_NAME}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
             -B build
 
       - name: Publish test results
