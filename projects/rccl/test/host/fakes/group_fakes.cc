@@ -29,8 +29,18 @@ thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {nullptr
 thread_local int ncclGroupBlocking = -1;  // group.cc's "default mode" sentinel
 thread_local struct ncclComm* ncclGroupCommPreconnectHead = nullptr;
 
+// ncclProfilerStopGroupApiEvent has a testable fake in comm_fakes.cc. RCCL only emits profiler GroupApi stop events
+// via calls to ncclGroupEndInternal. To allow testing of these events by replacing g_profilerStartGroupApiEvent,
+// the faked ncclGroupEndInternal needs to call ncclProfilerStopGroupApiEvent just like the real function.
+// Since not all users of group_fakes.cc want or need to link comm_fakes.cc, (re)declare ncclProfilerStopGroupApiEvent
+// as a weak symbol so that it only gets called when a test actually links with comm_fakes.cc.
+__attribute__((weak)) ncclResult_t ncclProfilerStopGroupApiEvent();
+
 ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
-ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
+ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) {
+  if (ncclProfilerStopGroupApiEvent) return ncclProfilerStopGroupApiEvent();
+  return ncclSuccess;
+}
 
 static ncclResult_t DefaultNcclGroupJobAbort(struct ncclGroupJob*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;
