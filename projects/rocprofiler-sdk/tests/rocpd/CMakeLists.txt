@@ -64,3 +64,27 @@ rocprofiler_add_integration_validate_test(
     ENVIRONMENT "ROCPD_SCHEMA_PATH=${rocpd-schema-path}"
     PYTHON_PATH "${rocpd-site-packages}" LIBRARY_PATH "${rocprofiler-sdk_LIB_DIR}"
     DEPENDS rocprofiler-sdk::rocprofv3)
+
+#########################################################################################
+#
+# PC-sampling post-processing on synthetic databases (no GPU required)
+#
+#########################################################################################
+
+set(_rocpd_python_bindings_dependency
+    rocprofiler-sdk-rocpd-python-bindings-${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}
+    )
+if(NOT TARGET ${_rocpd_python_bindings_dependency})
+    set(_rocpd_python_bindings_dependency "")
+endif()
+
+rocprofiler_add_integration_validate_test(
+    rocpd-pc-sampling-postprocess
+    TEST_PATHS pc_sampling_postprocess.py
+    CONFIG pytest.ini
+    TIMEOUT 300
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    DEPENDS ${_rocpd_python_bindings_dependency})

@@ -1,7 +1,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -34,11 +34,31 @@ import sqlite3
 from .schema import RocpdSchema
 from . import libpyrocpd
 from .features import get_supported_features_from_version
+from .pc_sampling_support import (
+    add_decode_args,
+    get_decode_args,
+    setup_blob_views,
+    setup_isa_decode_views,
+)
 
-__all__ = ["RocpdImportData", "execute_statement"]
+__all__ = [
+    "RocpdImportData",
+    "add_decode_args",
+    "get_decode_args",
+    "execute_statement",
+    "setup_blob_views",
+    "setup_isa_decode_views",
+]
 
 
-def internal_init(_input, _output, skip_auto_merge, automerge_limit):
+def internal_init(
+    _input,
+    _output,
+    skip_auto_merge,
+    automerge_limit,
+    codeobj_path_prefix_map=None,
+    cache_disassembly=True,
+):
     from . import package
 
     _input = package.flatten_rocpd_yaml_input_file(
@@ -51,15 +71,33 @@ def internal_init(_input, _output, skip_auto_merge, automerge_limit):
     _connection = libpyrocpd.connect(_output)
     _connection.execute("PRAGMA foreign_keys = ON")
     _table_info = _create_temp_views(_connection, _input)
-    _schema_version = _fetch_version_info(_connection)
-    _create_meta_views(_connection, _schema_version)
+    _schema_version = libpyrocpd.schema_version(0, 0, 0)
+    # When _input is empty (e.g. a missing file caused package.py to return []),
+    # _create_temp_views creates no TEMP VIEWs.  Calling _create_meta_views
+    # with uuid="" would then produce circularly-defined TEMP VIEWs because
+    # {{uuid}} renders as "" making every view reference its own name.  Skip it
+    # entirely; there is no data to set up views for anyway.
+    if _input:
+        _schema_version = _fetch_version_info(_connection)
+        _create_meta_views(
+            _connection,
+            _schema_version,
+            codeobj_path_prefix_map=codeobj_path_prefix_map,
+            cache_disassembly=cache_disassembly,
+        )
     return (_connection, _input, _table_info, _schema_version)
 
 
 class RocpdImportData(libpyrocpd.RocpdImportData):
 
     def __init__(
-        self, input, skip_auto_merge=False, automerge_limit=None, dbname=":memory:"
+        self,
+        input,
+        skip_auto_merge=False,
+        automerge_limit=None,
+        dbname=":memory:",
+        codeobj_path_prefix_map=None,
+        cache_disassembly=True,
     ):
         from . import package
 
@@ -79,7 +117,12 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                 isinstance(input, list) and len(input) > 0 and isinstance(input[0], str)
             ):
                 _connection, _filenames, _table_info, _schema_version = internal_init(
-                    input, dbname, skip_auto_merge, automerge_limit
+                    input,
+                    dbname,
+                    skip_auto_merge,
+                    automerge_limit,
+                    codeobj_path_prefix_map=codeobj_path_prefix_map,
+                    cache_disassembly=cache_disassembly,
                 )
                 self.table_info = _table_info
             else:
@@ -206,10 +249,28 @@ def _create_temp_views(connection, input):
     return all_tables
 
 
-def _create_meta_views(connection, schema_version):
+def _create_meta_views(
+    connection, schema_version, codeobj_path_prefix_map=None, cache_disassembly=True
+):
     schema = RocpdSchema(version=str(schema_version))
     sql_script = schema.views.replace("CREATE VIEW", "CREATE TEMPORARY VIEW")
     execute_statement(connection, sql_script, is_script=True)
+    # Decoded blob/ISA views are optional conveniences layered on top of the base
+    # rocpd_ views. A malformed or unrecognized blob schema (e.g. a newer database or
+    # third-party input) must not make the whole database unusable, so degrade
+    # gracefully: skip the decoded views while leaving the base tables and standard
+    # rocpd_ views fully queryable.
+    try:
+        setup_blob_views(connection)
+        setup_isa_decode_views(
+            connection,
+            codeobj_path_prefix_map=codeobj_path_prefix_map,
+            cache_disassembly=cache_disassembly,
+        )
+    except (
+        Exception
+    ) as error:  # noqa: BLE001 - keep base views usable on decode-setup failure
+        print(f"rocpd: skipping decoded blob/ISA views: {error}", file=sys.stderr)
 
 
 def _fetch_version_info(connection):

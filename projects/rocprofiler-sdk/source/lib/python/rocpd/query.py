@@ -2,7 +2,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 ###############################################################################
 
 import os
+import re
 import sys
 
 from typing import Union, Tuple, List, Optional
@@ -31,16 +32,28 @@ from datetime import datetime
 
 from . import output_config
 from . import libpyrocpd
-from .importer import RocpdImportData
+from .importer import RocpdImportData, add_decode_args, get_decode_args
+from .pc_sampling_support import update_query_for_blob_views
 
 __all__ = [
     "export_sqlite_query",
     "send_report_email",
     "zip_files",
+    "update_query_for_blob_views",
     "add_args",
     "execute",
     "main",
 ]
+
+
+_INTEGER_TEXT = re.compile(r"\s*[+-]?[0-9]+\s*")
+
+
+def _integer_text_to_int(value):
+    """Return integer text as an int; leave every other value unchanged."""
+    if isinstance(value, str) and _INTEGER_TEXT.fullmatch(value):
+        return int(value)
+    return value
 
 
 def export_sqlite_query(
@@ -68,6 +81,9 @@ def export_sqlite_query(
     If export_format == "dashboard", you may optionally pass a
     dashboard_template_path (a Jinja2 template file). If omitted,
     a built-in default template is used.
+
+    For CSV, the ``integer_columns`` keyword names columns whose integer text
+    values are written as unquoted numbers; all other values are unchanged.
     """
     try:
         import pandas as pd
@@ -113,6 +129,12 @@ def export_sqlite_query(
         # 3) Export based on format
         if export_format == "csv":
             import csv
+
+            # Callers name columns that hold integer text (e.g. a 64-bit mask
+            # stored as TEXT) so QUOTE_NONNUMERIC writes them as numbers.
+            for column in kwargs.get("integer_columns", ()):
+                if column in df.columns:
+                    df[column] = df[column].map(_integer_text_to_int)
 
             cols = [f"{itr}" for itr in df.columns.tolist()]
             col_names = (
@@ -187,7 +209,7 @@ def _export_df_to_pdf(df, path: str):
     from reportlab.lib.units import inch
 
     c = canvas.Canvas(path, pagesize=letter)
-    width, height = letter
+    _, height = letter
     x = 0.5 * inch
     y = height - 1 * inch
     row_height = 14
@@ -470,11 +492,20 @@ def execute(input, args, config=None, **kwargs):
         # read script and execute statements
         with open(args.script, "r") as ifs:
             for itr in ifs.read().split(";"):
-                input.execute(f"{itr}")
+                stmt = itr.strip()
+                if stmt:
+                    input.execute(stmt)
 
     # Prepare parameters for export
     query = args.query
     db = input
+
+    query = update_query_for_blob_views(
+        db,
+        query=query,
+        profile=getattr(args, "blob_view_profile", False),
+    )
+
     export_format = args.format
     export_path = os.path.join(config.output_path, config.output_file)
 
@@ -538,11 +569,14 @@ def main(argv=None):
     process_generic_args = output_config.add_generic_args(parser)
     process_time_window_args = time_window.add_args(parser)
     process_query_args = add_args(parser)
+    add_decode_args(parser, query_profile=True)
 
     args = parser.parse_args(argv)
 
     input = RocpdImportData(
-        args.input, automerge_limit=getattr(args, "automerge_limit", None)
+        args.input,
+        automerge_limit=getattr(args, "automerge_limit", None),
+        **get_decode_args(args),
     )
 
     out_cfg_args = process_out_config_args(input, args)

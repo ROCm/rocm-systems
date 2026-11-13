@@ -38,6 +38,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/output/agent_info.hpp"
 #include "lib/output/kernel_symbol_info.hpp"
+#include "lib/output/metadata.hpp"
 #include "lib/output/output_config.hpp"
 #include "lib/output/output_stream.hpp"
 #include "lib/output/sql/common.hpp"
@@ -45,6 +46,8 @@
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/pc_sampling.h>
+#include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 #include <rocprofiler-sdk/cxx/details/mpl.hpp>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 #include <rocprofiler-sdk/cxx/hash.hpp>
@@ -66,8 +69,10 @@
 
 #include <atomic>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -238,6 +243,82 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .value("node", tool::agent_indexing::node)
         .value("logical_node", tool::agent_indexing::logical_node)
         .value("logical_node_type", tool::agent_indexing::logical_node_type);
+
+    namespace codeobj = ::rocprofiler::sdk::codeobj::disassembly;
+
+    py::class_<codeobj::CodeobjAddressTranslate>(pyrocpd, "isa_decoder")
+        .def(py::init<>())
+        .def("add_code_object_file",
+             [](codeobj::CodeobjAddressTranslate& self,
+                const std::string&                path,
+                uint64_t                          code_object_id,
+                uint64_t                          load_delta,
+                uint64_t                          load_size) {
+                 self.addDecoder(path.c_str(), code_object_id, load_delta, load_size);
+             })
+        .def("add_code_object_memory",
+             [](codeobj::CodeobjAddressTranslate& self,
+                const py::bytes&                  data,
+                uint64_t                          code_object_id,
+                uint64_t                          load_delta,
+                uint64_t                          load_size) {
+                 // The decoder copies the bytes; a view avoids a second copy.
+                 auto bytes = static_cast<std::string_view>(data);
+                 self.addDecoder(bytes.data(), bytes.size(), code_object_id, load_delta, load_size);
+             })
+        .def("decode",
+             [](codeobj::CodeobjAddressTranslate& self,
+                uint64_t                          code_object_id,
+                uint64_t                          code_object_offset) -> py::object {
+                 auto instruction = self.get(code_object_id, code_object_offset);
+                 if(!instruction) return py::none{};
+
+                 py::dict result{};
+                 result["instruction"] = instruction->inst;
+                 result["comment"]     = instruction->comment;
+                 result["size"]        = instruction->size;
+                 result["faddr"]       = instruction->faddr;
+                 result["vaddr"]       = instruction->vaddr;
+                 return result;
+             });
+
+    pyrocpd.def(
+        "code_object_content_hash",
+        [](const py::bytes& data) {
+            char*      buffer = nullptr;
+            Py_ssize_t length = 0;
+            if(PyBytes_AsStringAndSize(data.ptr(), &buffer, &length) != 0)
+                throw py::error_already_set{};
+            return tool::compute_code_object_content_hash(buffer, static_cast<size_t>(length));
+        },
+        "Return the content hash rocprofv3 records for a code object it decodes during PC "
+        "sampling (rocpd_info_code_object extdata 'content_hash').");
+
+    // Expose the SDK's canonical PC-sampling enum->name lookups so post-processing
+    // (rocpd importer) can resolve inst_type / stall_reason names without hardcoding
+    // the enum tables.  The SDK generates these from the enums at compile time, so new
+    // hardware values are picked up automatically -- nothing here needs updating.
+    pyrocpd.def(
+        "pc_sampling_instruction_type_name",
+        [](int value) -> py::object {
+            const auto* name = rocprofiler_get_pc_sampling_instruction_type_name(
+                static_cast<rocprofiler_pc_sampling_instruction_type_t>(value));
+            if(name == nullptr) return py::none{};
+            return py::str{name};
+        },
+        "Return the ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_* name for a PC sampling "
+        "inst_type enum value, or None if the value is not recognized by this SDK.");
+
+    pyrocpd.def(
+        "pc_sampling_instruction_not_issued_reason_name",
+        [](int value) -> py::object {
+            const auto* name = rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
+                static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(value));
+            if(name == nullptr) return py::none{};
+            return py::str{name};
+        },
+        "Return the ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_* name for a "
+        "PC sampling stall_reason enum value, or None if unrecognized by this SDK.");
 
     // demo for creating python bindings to a class
     py::class_<rocpd::types::agent>(pyrocpd, "agent")

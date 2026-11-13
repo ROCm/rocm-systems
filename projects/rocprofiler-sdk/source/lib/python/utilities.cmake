@@ -231,6 +231,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         output_config.py
         otf2.py
         package.py
+        pc_sampling_support.py
         pftrace.py
         query.py
         schema.py

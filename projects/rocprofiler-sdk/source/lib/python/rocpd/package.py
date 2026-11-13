@@ -165,6 +165,8 @@ def flatten_rocpd_yaml_input_file(input, **kwargs) -> list:
             return [item]
 
     # Sanitize and categorize input
+    if isinstance(input, str):
+        input = [input]
     sanitized_input = output_config.sanitize_input_list(input)
 
     # Process each input item based on its type
