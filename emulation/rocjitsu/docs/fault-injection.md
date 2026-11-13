@@ -230,8 +230,8 @@ addresses. The restriction is conservative and can reject a safe target when
 unrelated allocated metadata moves. Complete address-builder relocation is not
 implemented; see [replacement validation](dbi-design.md#instruction-replacement).
 
-Retained direct branches also reject when their destinations lie in storage
-moved or consumed by growth, including later allocated sections and loaded tails.
+Retained direct branches also reject when growth moves their source and
+destination differently, including later allocated sections and loaded tails.
 Full-text source facts include unreachable references, so discovery may succeed
 while apply rejects the complete Drop batch.
 

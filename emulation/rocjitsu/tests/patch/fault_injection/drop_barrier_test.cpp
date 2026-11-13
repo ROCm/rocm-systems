@@ -565,7 +565,7 @@ TEST_P(FaultDropBarrierFamily, PreservesAdditionalExecutableSection) {
   std::vector<uint8_t> image = make_barrier_elf_for_target(row, make_barrier_words(row));
   const AmdGpuCodeObject original(image.data(), image.size());
   ASSERT_TRUE(original.is_valid());
-  const std::vector<Elf64_Shdr> sections = CodeObjectPatcher(original).section_headers();
+  std::vector<Elf64_Shdr> sections = CodeObjectPatcher(original).section_headers();
   const std::vector<Elf64_Shdr>::const_iterator data =
       std::ranges::find_if(sections, [](const Elf64_Shdr &candidate) {
         return candidate.sh_type == SHT_PROGBITS && (candidate.sh_flags & SHF_ALLOC) != 0 &&
@@ -573,15 +573,67 @@ TEST_P(FaultDropBarrierFamily, PreservesAdditionalExecutableSection) {
       });
   ASSERT_NE(data, sections.end());
   const size_t data_index = static_cast<size_t>(data - sections.begin());
+  const Elf64_Shdr section = *data;
   Elf64_Ehdr header = {};
   std::memcpy(&header, image.data(), sizeof(header));
-  Elf64_Shdr section = *data;
-  const size_t offset = header.e_shoff + data_index * header.e_shentsize;
-  section.sh_flags |= SHF_EXECINSTR;
-  std::memcpy(image.data() + offset, &section, sizeof(section));
+  // Descriptors are data, not instructions. Keep them separate from the real
+  // executable sibling while sharing its loaded mapping.
+  const std::array<uint32_t, 2> sibling_words = {checked_encoding(build_s_nop(0, row.arch)),
+                                                 checked_encoding(build_s_endpgm(row.arch))};
+  const uint64_t sibling_offset = section.sh_offset + section.sh_size;
+  const Elf64_Shdr sibling = {.sh_name = 0,
+                              .sh_type = SHT_PROGBITS,
+                              .sh_flags = SHF_ALLOC | SHF_EXECINSTR,
+                              .sh_addr = section.sh_addr + section.sh_size,
+                              .sh_offset = sibling_offset,
+                              .sh_size = sizeof(sibling_words),
+                              .sh_link = 0,
+                              .sh_info = 0,
+                              .sh_addralign = sizeof(uint32_t),
+                              .sh_entsize = 0};
+  const uint8_t *sibling_bytes = reinterpret_cast<const uint8_t *>(sibling_words.data());
+  image.insert(image.begin() + sibling_offset, sibling_bytes,
+               sibling_bytes + sizeof(sibling_words));
+  for (Elf64_Shdr &shifted : sections) {
+    if (shifted.sh_offset >= sibling_offset)
+      shifted.sh_offset += sizeof(sibling_words);
+  }
+  const size_t sibling_index = sections.size();
+  sections.push_back(sibling);
+  header.e_shoff += sizeof(sibling_words);
+  header.e_shnum = static_cast<uint16_t>(sections.size());
+  image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
+  std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  ASSERT_TRUE(segments);
+  const std::vector<Elf64_Phdr>::iterator data_load =
+      std::ranges::find_if(*segments, [&](const Elf64_Phdr &segment) {
+        return segment.p_type == PT_LOAD && segment.p_offset == section.sh_offset;
+      });
+  ASSERT_NE(data_load, segments->end());
+  data_load->p_filesz += sizeof(sibling_words);
+  data_load->p_memsz += sizeof(sibling_words);
+  data_load->p_flags |= PF_X;
+  std::memcpy(image.data(), &header, sizeof(header));
+  std::memcpy(image.data() + header.e_phoff, segments->data(),
+              segments->size() * sizeof(Elf64_Phdr));
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
   const FaultMutationContext context(image);
+  ASSERT_TRUE(context.source().is_valid());
   ASSERT_EQ(context.source().text_sections().size(), 1u);
   ASSERT_EQ(context.source().allocated_executable_sections().size(), 2u);
+  std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), row.target);
+  ASSERT_TRUE(decoder);
+  std::array<uint32_t, 2> decoded_words = {};
+  std::memcpy(decoded_words.data(), image.data() + sibling.sh_offset, sizeof(decoded_words));
+  constexpr std::array<std::string_view, 2> mnemonics = {"s_nop", "s_endpgm"};
+  for (size_t index = 0; index < decoded_words.size(); ++index) {
+    const DecodeResult instruction =
+        decoder->decode_window(std::span(decoded_words).subspan(index), index * sizeof(uint32_t));
+    ASSERT_TRUE(instruction.succeeded());
+    EXPECT_EQ(instruction.value()->size(), sizeof(uint32_t));
+    EXPECT_EQ(instruction.value()->mnemonic(), mnemonics[index]);
+  }
   FaultMutationError error;
   const FailureOr<FaultBarrierInventory> inventory =
       discover_drop_barriers(context, "test_kernel", error);
@@ -589,16 +641,29 @@ TEST_P(FaultDropBarrierFamily, PreservesAdditionalExecutableSection) {
   const DropBarrierSelection selection = select_barrier_for_test(inventory.value());
   const FailureOr<DropBarrierResult> result = apply_drop_barrier(context, selection, error);
   ASSERT_TRUE(result.succeeded()) << error.message;
-  std::vector<uint8_t> expected = expected_drop_for_test(context, selection);
+  const std::vector<uint8_t> expected = expected_drop_for_test(context, selection);
   EXPECT_EQ(result.value().image, expected);
   EXPECT_TRUE(matches_drop_output(context, selection, result.value().image, error).succeeded());
   std::vector<uint8_t> candidate = result.value().image;
   const AmdGpuCodeObject emitted(candidate.data(), candidate.size());
   const std::vector<Elf64_Shdr> updated_sections = CodeObjectPatcher(emitted).section_headers();
-  ASSERT_LT(data_index, updated_sections.size());
-  const Elf64_Shdr &updated_section = updated_sections[data_index];
-  EXPECT_EQ(updated_section.sh_flags, section.sh_flags);
-  EXPECT_EQ(updated_section.sh_size, section.sh_size);
+  ASSERT_EQ(updated_sections.size(), sections.size());
+  const Elf64_Shdr &updated_executable = updated_sections[sibling_index];
+  EXPECT_EQ(updated_executable.sh_flags, sibling.sh_flags);
+  ASSERT_EQ(updated_executable.sh_size, sibling.sh_size);
+  EXPECT_GT(updated_executable.sh_offset, sibling.sh_offset);
+  EXPECT_GT(updated_executable.sh_addr, sibling.sh_addr);
+  ASSERT_LE(updated_executable.sh_offset + updated_executable.sh_size, candidate.size());
+  EXPECT_EQ(std::memcmp(candidate.data() + updated_executable.sh_offset, sibling_words.data(),
+                        sizeof(sibling_words)),
+            0);
+  const Elf64_Shdr &updated_data = updated_sections[data_index];
+  EXPECT_EQ(updated_data.sh_flags, section.sh_flags);
+  ASSERT_EQ(updated_data.sh_size, section.sh_size);
+  EXPECT_EQ(updated_data.sh_flags & SHF_EXECINSTR, 0u);
+  EXPECT_GT(updated_data.sh_offset, section.sh_offset);
+  EXPECT_GT(updated_data.sh_addr, section.sh_addr);
+  ASSERT_LE(updated_data.sh_offset + updated_data.sh_size, candidate.size());
   const FaultMutationContext mutant(candidate);
   ASSERT_TRUE(descriptors_preserved(context, mutant));
   const Section &original_text = *context.source().text_sections().front();
@@ -609,23 +674,29 @@ TEST_P(FaultDropBarrierFamily, PreservesAdditionalExecutableSection) {
   const std::vector<KernelDescriptorInfo> updated_descriptors =
       scan_kernel_descriptors(mutant.image(), updated_text.sectionOffset(), updated_text.size(),
                               updated_text.sectionHeaderIndex());
-  std::vector<uint8_t> normalized(candidate.begin() + updated_section.sh_offset,
-                                  candidate.begin() + updated_section.sh_offset +
-                                      updated_section.sh_size);
-  // This fixture's extra executable section contains descriptors. Its payload
-  // remains byte-identical apart from each independently checked relative entry.
+  ASSERT_FALSE(original_descriptors.empty());
+  ASSERT_EQ(updated_descriptors.size(), original_descriptors.size());
+  std::vector<uint8_t> normalized(candidate.begin() + updated_data.sh_offset,
+                                  candidate.begin() + updated_data.sh_offset +
+                                      updated_data.sh_size);
   for (const KernelDescriptorInfo &original_descriptor : original_descriptors) {
-    if (original_descriptor.descriptor_file_offset < section.sh_offset ||
-        original_descriptor.descriptor_file_offset - section.sh_offset > section.sh_size ||
-        sizeof(original_descriptor.descriptor) >
-            section.sh_size - (original_descriptor.descriptor_file_offset - section.sh_offset))
-      continue;
+    ASSERT_GE(original_descriptor.descriptor_file_offset, section.sh_offset);
+    const uint64_t relative = original_descriptor.descriptor_file_offset - section.sh_offset;
+    ASSERT_LE(relative + sizeof(original_descriptor.descriptor), section.sh_size);
     const std::vector<KernelDescriptorInfo>::const_iterator updated_descriptor = std::ranges::find(
         updated_descriptors, original_descriptor.kernel_name, &KernelDescriptorInfo::kernel_name);
     ASSERT_NE(updated_descriptor, updated_descriptors.end());
-    ASSERT_GE(updated_descriptor->descriptor_file_offset, updated_section.sh_offset);
-    const uint64_t relative = original_descriptor.descriptor_file_offset - section.sh_offset;
-    ASSERT_EQ(updated_descriptor->descriptor_file_offset - updated_section.sh_offset, relative);
+    ASSERT_GE(updated_descriptor->descriptor_file_offset, updated_data.sh_offset);
+    ASSERT_EQ(updated_descriptor->descriptor_file_offset - updated_data.sh_offset, relative);
+    EXPECT_EQ(updated_descriptor->entry_text_offset, original_descriptor.entry_text_offset);
+    ASSERT_LE(updated_text.vaddr() + original_descriptor.entry_text_offset,
+              static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
+    ASSERT_LE(updated_data.sh_addr + relative,
+              static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
+    const int64_t expected_entry =
+        static_cast<int64_t>(updated_text.vaddr() + original_descriptor.entry_text_offset) -
+        static_cast<int64_t>(updated_data.sh_addr + relative);
+    EXPECT_EQ(updated_descriptor->descriptor.kernel_code_entry_byte_offset, expected_entry);
     std::memcpy(normalized.data() + relative +
                     offsetof(amdhsa::kernel_descriptor_t, kernel_code_entry_byte_offset),
                 &original_descriptor.descriptor.kernel_code_entry_byte_offset,
@@ -633,7 +704,13 @@ TEST_P(FaultDropBarrierFamily, PreservesAdditionalExecutableSection) {
   }
   EXPECT_TRUE(
       std::ranges::equal(normalized, std::span(image).subspan(section.sh_offset, section.sh_size)));
-  candidate[updated_section.sh_offset] ^= 1;
+  EXPECT_TRUE(std::ranges::equal(context.image(), image));
+  EXPECT_EQ(std::memcmp(context.source().image_data(), image.data(), image.size()), 0);
+  candidate[updated_executable.sh_offset] ^= 1;
+  EXPECT_TRUE(matches_drop_output(context, selection, candidate, error).failed());
+  EXPECT_EQ(error.code, FaultMutationErrorCode::ValidationFailure);
+  candidate[updated_executable.sh_offset] ^= 1;
+  candidate[updated_data.sh_offset] ^= 1;
   EXPECT_TRUE(matches_drop_output(context, selection, candidate, error).failed());
   EXPECT_EQ(error.code, FaultMutationErrorCode::ValidationFailure);
 }
@@ -2297,7 +2374,7 @@ TEST(FaultDropBarrier, UnreachableBranchToMovedStorageRejectsApply) {
         EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
         EXPECT_EQ(error.offset, kBranchOffset);
         EXPECT_EQ(error.message,
-                  "replacement growth cannot preserve a retained direct branch to moved storage");
+                  "replacement growth cannot preserve a retained direct branch displacement");
       } else {
         ASSERT_TRUE(result.succeeded()) << error.message;
         const AmdGpuCodeObject mutant(result.value().image.data(), result.value().image.size());
