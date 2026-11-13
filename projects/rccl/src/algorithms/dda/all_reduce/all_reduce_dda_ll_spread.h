@@ -65,6 +65,16 @@ __host__ __device__ constexpr size_t ddaLLSpreadShardPkts(size_t nPk, int nRanks
   return (nPk + (size_t)nRanks - 1) / (size_t)nRanks;
 }
 
+// Alignment of a block's slice: 16 packets, so each run of a block's (peer, packet) units starts on a 256 B boundary.
+constexpr size_t kDdaLLSpreadBlockAlignPkts = 16;
+
+// Packets of every shard each of `blocks` blocks owns: the even split rounded up to kDdaLLSpreadBlockAlignPkts, so
+// trailing blocks run short or idle.
+__host__ __device__ constexpr size_t ddaLLSpreadBlockPkts(size_t shardPkts, size_t blocks) {
+  const size_t even = (shardPkts + blocks - 1) / blocks;
+  return (even + kDdaLLSpreadBlockAlignPkts - 1) / kDdaLLSpreadBlockAlignPkts * kDdaLLSpreadBlockAlignPkts;
+}
+
 // Packets rank owns in shards of shardPkts: the last shards are shorter, or empty, when nRanks does not divide nPk.
 __host__ __device__ constexpr size_t ddaLLSpreadShardLen(size_t nPk, size_t shardPkts, int rank) {
   const size_t first = (size_t)rank * shardPkts;
@@ -116,7 +126,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
   const size_t slot = ddaLLArTwoShotSlotPkts(bankSize, nRanks);
 
   // This block's slice of every shard: the same packet range on every rank, so its LL epoch stays in lockstep.
-  const size_t chunk = (nPkRank + gridDim.x - 1) / gridDim.x;
+  const size_t chunk = ddaLLSpreadBlockPkts(nPkRank, gridDim.x);
   const size_t p0 = (size_t)blockIdx.x * chunk < nPkRank ? (size_t)blockIdx.x * chunk : nPkRank;
   const size_t p1 = p0 + chunk < nPkRank ? p0 + chunk : nPkRank;
   const size_t len = p1 - p0;
