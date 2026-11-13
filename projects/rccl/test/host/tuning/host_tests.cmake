@@ -6,6 +6,10 @@ set(_MICRO_TUNING_DEFS
   TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
   TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
   RING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/ring.cc"
+  TREE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tree.cc"
+  PAT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/pat.cc"
+  COLLNET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/collnet.cc"
+  CE_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/ce_model.cc"
   COST_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/cost_model.cc"
   ALGORITHM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc"
   WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
@@ -16,7 +20,7 @@ set(_MICRO_TUNING_DEFS
   SYM_MODEL_LSA_BASE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa_base.cc"
   SYM_MODEL_LSA_A2A_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa_a2a.cc")
 
-# cost-model-test.cc links the real tuning_general.cc for ncclTuningExpandId.
+# cost-model, tree, pat and collnet tests link the real tuning_general.cc for ncclTuningExpandId et al.
 set_source_files_properties(${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc PROPERTIES
   GENERATED TRUE
   COMPILE_OPTIONS "-include;fakes/nccl_fakes.h;-include;fakes/param_redirect.h")
@@ -67,6 +71,34 @@ rccl_add_tuning_micro_binary(rccl-UnitTestsMicroTuningGeneral tuning-general-tes
     fakes/wrap_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc)
+
+rccl_add_tuning_micro_binary(rccl-UnitTestsMicroTuningTree tree-test.cc
+  SOURCES
+    fakes/nccl_fakes.cc
+    fakes/rccl_wrap_fakes.cc  # rcclDdaLL128Threshold, linked by ncclTuningGetTime
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc)
+
+rccl_add_tuning_micro_binary(rccl-UnitTestsMicroTuningPat pat-test.cc
+  SOURCES
+    fakes/nccl_fakes.cc
+    fakes/rccl_wrap_fakes.cc  # rcclDdaLL128Threshold, linked by ncclTuningGetTime
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc)
+
+rccl_add_tuning_micro_binary(rccl-UnitTestsMicroTuningCollnet collnet-test.cc
+  SOURCES
+    fakes/nccl_fakes.cc
+    fakes/rccl_wrap_fakes.cc  # rcclDdaLL128Threshold, linked by ncclTuningGetTime
+    fakes/topo_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc)
+
+rccl_add_tuning_micro_binary(rccl-UnitTestsMicroTuningCeModel ce-model-test.cc
+  SOURCES
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/nccl_stubs.cc)  # ncclCudaDriverVersionCache
 
 # sym_kernels_host.cc only exists when sym kernels are generated.
 if(_MICRO_BUILD_SYM_KERNELS)
