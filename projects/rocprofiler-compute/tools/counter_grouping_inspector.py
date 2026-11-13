@@ -15,10 +15,8 @@ is stubbed so the tool runs without rocprofiler. Bucket views reuse a second
 `_allocate_perfmon_counter_files` call on the same counter set (same result as
 the coalesce pass).
 
-Each bucket-plan Summary is followed by HW packing limits from the arch's
-`perfmon_config` and notes that CPC/CPF/SQC/SQ table columns are
-display-only name-prefix lanes (SQC remaps to SQ for packing; CPC/CPF keep
-their own caps).
+Each plan summary ends with the arch's counter limits per block and a note on
+which table columns are real packing blocks.
 
 Usage (from the `rocprofiler-compute` project root):
     ./tools/counter_grouping_inspector.py --arch gfx942
@@ -44,21 +42,21 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 # Import from existing modules to maintain single source of truth
-import config  # noqa: E402
-from rocprof_compute_soc.soc_base import (  # noqa: E402
+import config
+from rocprof_compute_soc.soc_base import (
     OmniSoC_Base,
     is_tcc_channel_counter,
     iter_analysis_config_metrics,
 )
-from utils.counters.allocator import metric_counter_sets  # noqa: E402
-from utils.counters.counter_file import (  # noqa: E402
+from utils.counters.allocator import metric_counter_sets
+from utils.counters.counter_file import (
     CounterFile,
     flat_counters_in_perfmon_file,
 )
-from utils.logger import console_error  # noqa: E402
-from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
-from utils.utils_common import canonical_config_arch  # noqa: E402
-from utils.utils_counter_defs import BLOCK_REMAP  # noqa: E402
+from utils.logger import console_error
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import canonical_config_arch
+from utils.utils_counter_defs import BLOCK_REMAP
 
 
 def _counter_display_ip_prefix(counter: str) -> str:
@@ -197,27 +195,18 @@ def _format_bucket_markdown(
 
 
 def _format_hw_limits_line(perfmon_config: dict[str, int]) -> str:
-    """Format packing slot caps from `perfmon_config` / mi_gpu_spec."""
+    """Format the counter limit of each perfmon block."""
     limits = ", ".join(f"{block}: {cap}" for block, cap in perfmon_config.items())
-    return f"HW counter limits (perfmon_config packing slots): {limits}"
+    return f"Counter limits per block: {limits}"
 
 
 def _format_display_column_comments() -> str:
-    """Clarify name-prefix columns vs real packing blocks / remaps."""
-    remap_bits = ", ".join(f"{src}→{dst}" for src, dst in sorted(BLOCK_REMAP.items()))
+    """Explain which table columns are real packing blocks."""
+    remaps = ", ".join(f"{src}->{dst}" for src, dst in sorted(BLOCK_REMAP.items()))
     return (
-        "Comments: CPC, CPF, SQC, and SQ columns above are for display only "
-        "(name-prefix lanes), not separate perfmon buckets. SQC shares SQ's "
-        f"slot budget via BLOCK_REMAP ({remap_bits}); CPC and CPF each have "
-        "their own caps and do not remap into CP."
-    )
-
-
-def _format_summary_trailer(perfmon_config: dict[str, int]) -> str:
-    """HW limits + display notes appended after each Summary line."""
-    return (
-        f"\n{_format_hw_limits_line(perfmon_config)}\n"
-        f"{_format_display_column_comments()}\n\n"
+        "Note: the table columns group counters by name prefix. Some blocks "
+        f"count against another block's limit ({remaps}); CPC and CPF have "
+        "their own limits."
     )
 
 
@@ -248,7 +237,8 @@ def generate_bucket_plan(
         f"{total_assignments} counter assignment(s).\n"
     )
     perfmon_config = mi_gpu_specs.get_perfmon_config(arch) or {}
-    buf.write(_format_summary_trailer(perfmon_config))
+    buf.write(f"\n{_format_hw_limits_line(perfmon_config)}\n")
+    buf.write(f"{_format_display_column_comments()}\n\n")
 
     return buf.getvalue()
 
@@ -339,9 +329,8 @@ def generate_bucket_metrics(
         f"({len(multi_rows)} of {total_metrics} metrics, {multi_pct:.1f}%)\n"
     )
     buf.write(
-        "All *.yaml under the arch are scanned. Listed rows are metrics with at "
-        "least one formula counter in this plan's collection; Buckets lists "
-        "every bucket that holds one of those counters.\n"
+        "Lists every arch config metric that reads a collected counter. Buckets "
+        "are the ones holding any of its counters.\n"
     )
     buf.write(f"Config tree: {config_dir / config_arch}\n")
 
@@ -376,9 +365,8 @@ def generate_bucket_metrics(
         f"({len(single_rows)} of {total_metrics} metrics, {single_pct:.1f}%)\n"
     )
     buf.write(
-        "Listed rows are metrics with at least one formula counter in this "
-        "plan's collection; Bucket is the first bucket that holds all of them "
-        "(metrics with no in-collection PMCs are omitted).\n"
+        "Lists every arch config metric that reads a collected counter. Bucket "
+        "is the first one holding all of its counters.\n"
     )
 
     if single_rows:
