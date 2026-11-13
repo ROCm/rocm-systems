@@ -532,10 +532,8 @@ typedef struct cudaFuncAttributes hipFuncAttributes;
 typedef struct cudaLaunchParams hipLaunchParams;
 typedef CUDA_LAUNCH_PARAMS hipFunctionLaunchParams;
 typedef cudaArrayMemoryRequirements hipArrayMemoryRequirements;
-#if CUDA_VERSION >= CUDA_11010
 typedef struct cudaArraySparseProperties hipArraySparseProperties;
 #define hipArraySparsePropertiesSingleMipTail cudaArraySparsePropertiesSingleMipTail
-#endif  // CUDA_VERSION >= CUDA_11010
 #define hipFunction_attribute CUfunction_attribute
 #define hipPointer_attribute CUpointer_attribute
 
@@ -2643,12 +2641,10 @@ inline static hipError_t hipMipmappedArrayGetMemoryRequirements(
       cudaMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
 }
 
-#if CUDA_VERSION >= CUDA_11010
 inline static hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
                                                      hipArray_t array) {
   return hipCUDAErrorTohipError(cudaArrayGetSparseProperties(sparseProperties, array));
 }
-#endif  // CUDA_VERSION >= CUDA_11010
 
 __HIP_DEPRECATED inline static hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset,
                                                            size_t hOffset, const void* src,
