@@ -22,9 +22,9 @@
 
 #include "net/rma_engine.hpp"
 
-#include <cstdio>
 #include <cstring>
 
+#include "log.hpp"
 #include "net/remote_region.hpp"
 
 namespace rocshmem {
@@ -56,7 +56,7 @@ uint32_t RmaEngine::lkey_for(const void *addr) const {
       return m.lkey;
     }
   }
-  fprintf(stderr, "[rocSHMEM] net: no MR for local addr %p\n", addr);
+  LOG_ERROR("net: no MR for local addr %p", addr);
   return 0;
 }
 
@@ -90,7 +90,7 @@ uint64_t RmaEngine::post_write(int lane, uintptr_t laddr, uint32_t lkey,
   struct ibv_send_wr *bad = nullptr;
   int rc = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
   if (rc != 0) {
-    fprintf(stderr, "[rocSHMEM] net: post_write rc=%d (lane %d)\n", rc, lane);
+    LOG_ERROR("net: post_write rc=%d (lane %d)", rc, lane);
     return 0;
   }
   return wr_id;
@@ -118,7 +118,36 @@ uint64_t RmaEngine::post_read(int lane, uintptr_t laddr, uint32_t lkey,
   struct ibv_send_wr *bad = nullptr;
   int rc = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
   if (rc != 0) {
-    fprintf(stderr, "[rocSHMEM] net: post_read rc=%d (lane %d)\n", rc, lane);
+    LOG_ERROR("net: post_read rc=%d (lane %d)", rc, lane);
+    return 0;
+  }
+  return wr_id;
+}
+
+uint64_t RmaEngine::post_signal_set(int lane, uintptr_t raddr, uint32_t rk,
+                                    uint64_t value, uint64_t wr_id) {
+  // The immediate value is copied into the WQE at post time (IBV_SEND_INLINE),
+  // so &value (a parameter, live for this call) needs no registration.
+  struct ibv_sge sge;
+  memset(&sge, 0, sizeof(sge));
+  sge.addr = reinterpret_cast<uintptr_t>(&value);
+  sge.length = sizeof(value);
+  sge.lkey = 0;  // ignored for inline
+
+  struct ibv_send_wr wr;
+  memset(&wr, 0, sizeof(wr));
+  wr.wr_id = wr_id;
+  wr.sg_list = &sge;
+  wr.num_sge = 1;
+  wr.opcode = IBV_WR_RDMA_WRITE;
+  wr.send_flags = IBV_SEND_SIGNALED | IBV_SEND_INLINE;
+  wr.wr.rdma.remote_addr = raddr;
+  wr.wr.rdma.rkey = rk;
+
+  struct ibv_send_wr *bad = nullptr;
+  int rc = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
+  if (rc != 0) {
+    LOG_ERROR("net: post_signal_set rc=%d (lane %d)", rc, lane);
     return 0;
   }
   return wr_id;
@@ -149,7 +178,7 @@ uint64_t RmaEngine::post_atomic(int lane, int opcode, uintptr_t result,
   struct ibv_send_wr *bad = nullptr;
   int rc = ibv_->post_send(ctrl_->qp(lane), &wr, &bad);
   if (rc != 0) {
-    fprintf(stderr, "[rocSHMEM] net: post_atomic rc=%d (lane %d)\n", rc, lane);
+    LOG_ERROR("net: post_atomic rc=%d (lane %d)", rc, lane);
     return 0;
   }
   return wr_id;
