@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 635 | 635 | 0 |
-| **total** | **635** | **635** | **0** |
+| `contract` | 638 | 638 | 0 |
+| **total** | **638** | **638** | **0** |
 
 ## Tier: `contract`
 
@@ -1016,6 +1016,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_PeerCopy_HipMemcpyPeerAsync_SelfDevice1DAsync_CopiesBytesAfterSync` | hipMemcpyPeerAsync | a same-device async 1D peer copy is complete and visible after the stream is synchronized |
 | `Contract_PeerCopy_HipMemcpyPeer_InvalidDevice_IsRejected` | hipMemcpyPeer | rejects an out-of-range device ordinal and leaves a matching sticky last error that clears once consumed |
 | `Contract_PeerCopy_HipMemcpyPeer_SelfDevice1D_CopiesBytes` | hipMemcpyPeer | a same-device (degenerate) 1D peer copy transfers bytes like an ordinary device-to-device copy |
+
+### `peer_host_memory` (3 cases)
+
+| Case | API | Asserts |
+|---|---|---|
+| `Contract_PeerHostMemory_HipHostGetDevicePointer_OwnerAndPeer_SeeConsistentData` | hipHostGetDevicePointer | owner and peer GPUs see consistent data through mapped host memory |
+| `Contract_PeerHostMemory_HipHostGetDevicePointer_PeerDeviceCopy_RoundTrips` | hipHostGetDevicePointer | peer GPU can transfer data through mapped host memory via a peer-device buffer |
+| `Contract_PeerHostMemory_HipHostGetDevicePointer_PeerMemset_RoundTrips` | hipHostGetDevicePointer | peer GPU can write mapped host memory via hipMemset, visible to the CPU |
 
 ### `peer_query` (5 cases)
 

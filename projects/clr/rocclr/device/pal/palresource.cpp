@@ -32,12 +32,13 @@
 namespace amd::pal {
 
 // ================================================================================================
-Pal::Result GpuMemoryReference::MakeResident() const {
+Pal::Result GpuMemoryReference::MakeResident(bool cantTrim) const {
   Pal::Result result = Pal::Result::Success;
   if (device_.settings().alwaysResident_) {
     Pal::GpuMemoryRef memRef = {};
     memRef.pGpuMemory = gpuMem_;
-    result = device_.iDev()->AddGpuMemoryReferences(1, &memRef, nullptr, Pal::GpuMemoryRefCantTrim);
+    result = device_.iDev()->AddGpuMemoryReferences(1, &memRef, nullptr,
+                                                    cantTrim ? Pal::GpuMemoryRefCantTrim : 0);
   }
   return result;
 }
@@ -61,23 +62,20 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
       result = dev.iDev()->CreateGpuMemory(createInfo, &memRef[1], &memRef->gpuMem_);
     }
     if (result == Pal::Result::Success) {
-      // Skip MakeResident for peer mappings of pinned host memory (second+ device
-      // mapping of the same system RAM pages). The KMD already mapped the SVM VA
-      // for all GPUs when the first device created the allocation. Calling
-      // MakeResident on the peer creates a redundant WDDM residency entry; VidMm
-      // double-counts the budget across adapters, which halves the usable pinned
-      // host memory limit on multi-GPU systems.
-      // Guards: alwaysResident_ (first device holds CantTrim), peer mapping,
-      // and both this allocation and its owner are host memory.
+      // Peer mappings of pinned host memory (second+ device mapping of the same
+      // system RAM pages) are made resident WITHOUT GpuMemoryRefCantTrim.
+      // CantTrim causes VidMm to double-count the budget across adapters, halving
+      // the usable pinned host memory limit on multi-GPU systems (ROCM-33542).
+      // Trimmable residency avoids the budget issue while still populating the
+      // peer GPU's page tables (skipping MakeResident entirely caused TDR/silent
+      // corruption — ROCM-34275, ROCM-34281).
       const bool isPeerPinnedHostMem = dev.settings().alwaysResident_ &&
           (createInfo.pReservedGpuVaOwner != nullptr) &&
           (createInfo.heaps[0] == Pal::GpuHeapGartCacheable ||
            createInfo.heaps[0] == Pal::GpuHeapGartUswc) &&
           (createInfo.pReservedGpuVaOwner->Desc().heaps[0] == Pal::GpuHeapGartCacheable ||
            createInfo.pReservedGpuVaOwner->Desc().heaps[0] == Pal::GpuHeapGartUswc);
-      if (!isPeerPinnedHostMem) {
-        result = memRef->MakeResident();
-      }
+      result = memRef->MakeResident(!isPeerPinnedHostMem);
     }
     if (result != Pal::Result::Success) {
       memRef->release();
@@ -131,17 +129,14 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
   if (memRef != nullptr) {
     result = dev.iDev()->CreateSvmGpuMemory(createInfo, &memRef[1], &memRef->gpuMem_);
     if (result == Pal::Result::Success) {
-      // Skip MakeResident for peer pinned host memory — see comment in the
-      // GpuMemoryCreateInfo overload above for the full rationale.
+      // See comment in GpuMemoryCreateInfo overload for rationale.
       const auto heap0 = memRef->gpuMem_->Desc().heaps[0];
       const bool isPeerPinnedHostMem = dev.settings().alwaysResident_ &&
           (createInfo.pReservedGpuVaOwner != nullptr) &&
           (heap0 == Pal::GpuHeapGartCacheable || heap0 == Pal::GpuHeapGartUswc) &&
           (createInfo.pReservedGpuVaOwner->Desc().heaps[0] == Pal::GpuHeapGartCacheable ||
            createInfo.pReservedGpuVaOwner->Desc().heaps[0] == Pal::GpuHeapGartUswc);
-      if (!isPeerPinnedHostMem) {
-        result = memRef->MakeResident();
-      }
+      result = memRef->MakeResident(!isPeerPinnedHostMem);
     }
     if (result != Pal::Result::Success) {
       memRef->release();

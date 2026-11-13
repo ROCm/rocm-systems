@@ -13,8 +13,8 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 635
-contract_domains: 119
+contract_tests: 638
+contract_domains: 120
 declared_apis: 507
 covered_apis: 494
 uncovered_allowlisted: 13
@@ -23,8 +23,8 @@ coverage_pct: 97.4
 
 - Snapshot date: 2026-11-05
 - Snapshot commit: `1daccbf1b37`
-- Contract tests: 635
-- Contract domains: 119
+- Contract tests: 638
+- Contract domains: 120
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 507
 - Declared HIP runtime APIs directly exercised by contract tests: 494
 - Intentionally uncovered, allowlisted APIs: 13
@@ -189,6 +189,7 @@ binaries instead of exposing portable state to assert.
 | `occupancy_variable` | 6 |
 | `peer_access` | 6 |
 | `peer_copy` | 5 |
+| `peer_host_memory` | 3 |
 | `peer_query` | 5 |
 | `pitched_memory` | 4 |
 | `pointer_info` | 7 |
