@@ -88,7 +88,6 @@ rj_add_object_library(rocjitsu_code
     dbt/waitcnt_translator.cpp
     patch/code_object_patcher.cpp
     patch/checked_text_edits.cpp
-    patch/fault_injection/drop_barrier.cpp
     patch/entry_prologue.cpp
     patch/kernel_text_layout.cpp
     patch/log_buffer.cpp
@@ -100,6 +99,9 @@ rj_add_object_library(rocjitsu_code
     patch/spill_manager.cpp
     patch/trampoline_builder.cpp
 )
+if(RJ_BUILD_FAULT_INJECTION)
+    target_sources(rocjitsu_code PRIVATE patch/fault_injection/drop_barrier.cpp)
+endif()
 target_link_libraries(
     rocjitsu_code
     PUBLIC rocjitsu_kernarg_extension rocjitsu_amdhsa_metadata

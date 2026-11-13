@@ -1062,11 +1062,7 @@ TEST(FaultDropBarrier, LongSameBlockPairUsesCompleteMembersWithoutDistanceCutoff
 
 TEST(FaultDropBarrier, OutOfRangeSecondMemberRejectsDropWithoutPublishingMutation) {
   const uint32_t nop = checked_encoding(build_s_nop(0, kArch));
-  std::vector<uint32_t> words(32767, nop);
-  words[0] = kSignal;
-  words[1] = kWait;
-  words.back() = kEnd;
-  const std::vector<uint8_t> image = make_gfx1250_barrier_elf(words);
+  const std::vector<uint8_t> image = test::make_out_of_range_second_member_elf();
   const FaultMutationContext context(image);
   FaultMutationError error;
   const FailureOr<FaultBarrierInventory> inventory =

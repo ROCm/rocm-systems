@@ -284,7 +284,7 @@ to this checkout's CMake configuration, preserving its compiler, sanitizer,
 ROCm, and other options. For an existing build, the corresponding commands are:
 
 ```bash
-cmake -S emulation/rocjitsu -B emulation/rocjitsu/build -DRJ_FAULT_INJECTION_CORPUS_OBJECT="${fi_corpus_dir}/fa_barrier_epoch.hsaco"
+cmake -S emulation/rocjitsu -B emulation/rocjitsu/build -DRJ_BUILD_FAULT_INJECTION=ON -DRJ_FAULT_INJECTION_CORPUS_OBJECT="${fi_corpus_dir}/fa_barrier_epoch.hsaco"
 cmake --build emulation/rocjitsu/build --target rocjitsu_fault_injection_tests
 ctest --test-dir emulation/rocjitsu/build -R '^FaultDropBarrier\.CompiledCorpusCompleteDrop$' --output-on-failure --no-tests=error
 ```
@@ -294,9 +294,14 @@ request requirement or evidence of physical GPU or detector qualification.
 
 ## Command-line usage
 
-Build the executable and host integration tests from this checkout:
+The mutation library, CLI, and dedicated tests are optional and default to `OFF`.
+Enable `RJ_BUILD_FAULT_INJECTION` when configuring the build described in
+[Building](building.md); it is independent of the ConSan build options. For an
+existing configured build, enable it and build the executable and host
+integration tests from this checkout:
 
 ```bash
+cmake -S emulation/rocjitsu -B emulation/rocjitsu/build -DRJ_BUILD_FAULT_INJECTION=ON
 cmake --build emulation/rocjitsu/build --target rj_code_mutate rocjitsu_fault_mutation_cli_tests
 emulation/rocjitsu/build/tools/rj_code_mutate --help
 emulation/rocjitsu/build/tools/rj_code_mutate --capabilities

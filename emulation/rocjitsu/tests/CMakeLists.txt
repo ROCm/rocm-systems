@@ -1086,91 +1086,109 @@ target_link_libraries(
 rj_configure_target(rocjitsu_text_edit_tests PRIVATE_INCLUDES WARNINGS)
 rj_add_gtest_tests(rocjitsu_text_edit_tests)
 
-# Host-only Drop recipe tests use shared DBI replacement and model ISA providers.
-add_executable(
-    rocjitsu_fault_injection_tests
-    patch/fault_injection/drop_barrier_test.cpp
-)
-target_include_directories(
-    rocjitsu_fault_injection_tests
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-)
-target_link_libraries(
-    rocjitsu_fault_injection_tests
-    PRIVATE
-        rocjitsu_dbt_internal
-        rocjitsu_amdgpu_isa_model_registry
-        simdojo_headers
-        GTest::gtest_main
-)
-rj_configure_target(rocjitsu_fault_injection_tests PRIVATE_INCLUDES WARNINGS)
-if(TARGET probe_fault_injection_pc_global)
-    add_dependencies(
-        rocjitsu_fault_injection_tests
-        probe_fault_injection_pc_global
-    )
-    target_compile_definitions(
-        rocjitsu_fault_injection_tests
-        PRIVATE
-            RJ_FAULT_INJECTION_PC_GLOBAL_OBJECT="${KERNEL_OUTPUT_DIR}/fault_injection_pc_global.hsaco"
-    )
-endif()
-set(RJ_FAULT_INJECTION_CORPUS_OBJECT
-    ""
-    CACHE FILEPATH
-    "Optional compiled fa_barrier_epoch device ELF for host mutation tests"
-)
-if(RJ_FAULT_INJECTION_CORPUS_OBJECT)
-    if(NOT EXISTS "${RJ_FAULT_INJECTION_CORPUS_OBJECT}")
-        message(FATAL_ERROR "RJ_FAULT_INJECTION_CORPUS_OBJECT does not exist")
-    endif()
-    target_compile_definitions(
-        rocjitsu_fault_injection_tests
-        PRIVATE
-            RJ_FAULT_INJECTION_CORPUS_OBJECT="${RJ_FAULT_INJECTION_CORPUS_OBJECT}"
-            RJ_FAULT_INJECTION_CORPUS_MUTANT="${CMAKE_CURRENT_BINARY_DIR}/fa_barrier_epoch.mutant.hsaco"
-    )
-endif()
-rj_add_gtest_tests(rocjitsu_fault_injection_tests)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(RJ_BUILD_FAULT_INJECTION)
+    # Host-only Drop recipe tests use shared DBI replacement and model ISA providers.
     add_executable(
-        rocjitsu_fault_mutation_cli_tests
-        patch/fault_injection/mutation_cli_test.cpp
+        rocjitsu_fault_injection_tests
+        patch/fault_injection/drop_barrier_test.cpp
     )
     target_include_directories(
-        rocjitsu_fault_mutation_cli_tests
+        rocjitsu_fault_injection_tests
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
     )
     target_link_libraries(
-        rocjitsu_fault_mutation_cli_tests
+        rocjitsu_fault_injection_tests
         PRIVATE
             rocjitsu_dbt_internal
             rocjitsu_amdgpu_isa_model_registry
             simdojo_headers
             GTest::gtest_main
     )
-    rj_add_test_path(rocjitsu_fault_mutation_cli_tests RJ_CODE_MUTATE_PATH "$<TARGET_FILE:rj_code_mutate>")
-    add_dependencies(rocjitsu_fault_mutation_cli_tests rj_code_mutate)
-    rj_configure_target(rocjitsu_fault_mutation_cli_tests PRIVATE_INCLUDES WARNINGS)
-    rj_add_gtest_tests(rocjitsu_fault_mutation_cli_tests PROPERTIES TIMEOUT 30)
-    add_test(
-        NAME FaultMutationCli.SymbolBoundary
-        COMMAND
-            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:rj_code_mutate>
-            -DREQUIRED_MODEL_ARCHES=cdna1,cdna2,cdna3,cdna4,cdna5,rdna1,rdna2,rdna3,rdna3_5,rdna4
-            -P
-            ${CMAKE_CURRENT_SOURCE_DIR}/patch/fault_injection/check_fault_injection_symbols.cmake
+    rj_configure_target(rocjitsu_fault_injection_tests PRIVATE_INCLUDES WARNINGS)
+    if(TARGET probe_fault_injection_pc_global)
+        add_dependencies(
+            rocjitsu_fault_injection_tests
+            probe_fault_injection_pc_global
+        )
+        target_compile_definitions(
+            rocjitsu_fault_injection_tests
+            PRIVATE
+                RJ_FAULT_INJECTION_PC_GLOBAL_OBJECT="${KERNEL_OUTPUT_DIR}/fault_injection_pc_global.hsaco"
+        )
+    endif()
+    set(RJ_FAULT_INJECTION_CORPUS_OBJECT
+        ""
+        CACHE FILEPATH
+        "Optional compiled fa_barrier_epoch device ELF for host mutation tests"
     )
-    add_test(
-        NAME FaultDropBarrier.SymbolBoundary
-        COMMAND
-            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_fault_injection_tests>
-            -DREQUIRED_MODEL_ARCHES=cdna1,cdna2,cdna3,cdna4,cdna5,rdna1,rdna2,rdna3,rdna3_5,rdna4
-            -P
-            ${CMAKE_CURRENT_SOURCE_DIR}/patch/fault_injection/check_fault_injection_symbols.cmake
-    )
+    if(RJ_FAULT_INJECTION_CORPUS_OBJECT)
+        if(NOT EXISTS "${RJ_FAULT_INJECTION_CORPUS_OBJECT}")
+            message(
+                FATAL_ERROR
+                "RJ_FAULT_INJECTION_CORPUS_OBJECT does not exist"
+            )
+        endif()
+        target_compile_definitions(
+            rocjitsu_fault_injection_tests
+            PRIVATE
+                RJ_FAULT_INJECTION_CORPUS_OBJECT="${RJ_FAULT_INJECTION_CORPUS_OBJECT}"
+                RJ_FAULT_INJECTION_CORPUS_MUTANT="${CMAKE_CURRENT_BINARY_DIR}/fa_barrier_epoch.mutant.hsaco"
+        )
+    endif()
+    rj_add_gtest_tests(rocjitsu_fault_injection_tests)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_executable(
+            rocjitsu_fault_mutation_cli_tests
+            patch/fault_injection/mutation_cli_test.cpp
+        )
+        target_include_directories(
+            rocjitsu_fault_mutation_cli_tests
+            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        target_link_libraries(
+            rocjitsu_fault_mutation_cli_tests
+            PRIVATE
+                rocjitsu_dbt_internal
+                rocjitsu_amdgpu_isa_model_registry
+                simdojo_headers
+                GTest::gtest_main
+        )
+        rj_add_test_path(rocjitsu_fault_mutation_cli_tests RJ_CODE_MUTATE_PATH "$<TARGET_FILE:rj_code_mutate>")
+        rj_add_test_path(rocjitsu_fault_mutation_cli_tests RJ_CODE_MUTATE_TEST_PATH "$<TARGET_FILE:rocjitsu_fault_mutation_cli_tests>")
+        _rj_path_from_installed_test_bin(
+            _rj_installed_code_mutate
+            "${CMAKE_INSTALL_BINDIR}"
+            "rj_code_mutate"
+        )
+        rj_add_test_path(rocjitsu_fault_mutation_cli_tests RJ_INSTALLED_CODE_MUTATE_PATH "${_rj_installed_code_mutate}")
+        add_dependencies(rocjitsu_fault_mutation_cli_tests rj_code_mutate)
+        rj_configure_target(rocjitsu_fault_mutation_cli_tests PRIVATE_INCLUDES WARNINGS)
+        rj_add_gtest_tests(rocjitsu_fault_mutation_cli_tests PROPERTIES TIMEOUT 30)
+        if(RJ_INSTALL_TESTS)
+            file(
+                APPEND "${RJ_INSTALL_CTEST_FILE}"
+                "include(\"rocjitsu_fault_mutation_cli_tests.cmake\")\n"
+            )
+        endif()
+        add_test(
+            NAME FaultMutationCli.SymbolBoundary
+            COMMAND
+                ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+                -DMODEL_BINARY=$<TARGET_FILE:rj_code_mutate>
+                -DREQUIRED_MODEL_ARCHES=cdna1,cdna2,cdna3,cdna4,cdna5,rdna1,rdna2,rdna3,rdna3_5,rdna4
+                -P
+                ${CMAKE_CURRENT_SOURCE_DIR}/patch/fault_injection/check_fault_injection_symbols.cmake
+        )
+        add_test(
+            NAME FaultDropBarrier.SymbolBoundary
+            COMMAND
+                ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+                -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_fault_injection_tests>
+                -DREQUIRED_MODEL_ARCHES=cdna1,cdna2,cdna3,cdna4,cdna5,rdna1,rdna2,rdna3,rdna3_5,rdna4
+                -P
+                ${CMAKE_CURRENT_SOURCE_DIR}/patch/fault_injection/check_fault_injection_symbols.cmake
+        )
+    endif()
 endif()
 
 # These existing suites exercise ELF inspection, CFG construction, kernel

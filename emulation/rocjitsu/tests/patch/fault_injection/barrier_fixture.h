@@ -84,4 +84,17 @@ inline std::vector<uint8_t> make_barrier_elf_for_target(const DropTargetRow &row
   return image;
 }
 
+inline std::vector<uint8_t> make_out_of_range_second_member_elf() {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
+  std::vector<uint32_t> words(32767, checked_encoding(build_s_nop(0, arch)));
+  words[0] = kSignal;
+  words[1] = kWait;
+  words.back() = checked_encoding(build_s_endpgm(arch));
+  std::vector<uint8_t> image = make_amdgpu_kernel_elf(words, 0, 3, EF_AMDGPU_MACH_AMDGCN_GFX1250, 0,
+                                                      0, false, false, false, false, true);
+  image[EI_DATA] = ELFDATA2LSB;
+  image[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  return image;
+}
+
 } // namespace rocjitsu::test

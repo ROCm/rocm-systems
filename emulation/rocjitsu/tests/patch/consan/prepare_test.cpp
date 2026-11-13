@@ -9,7 +9,9 @@
 #include "rocjitsu/code/consan/image/artifact.h"
 #include "rocjitsu/code/consan/image/metadata.h"
 #include "rocjitsu/code/patch/consan/prepare.h"
+#if defined(RJ_BUILD_FAULT_INJECTION)
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
+#endif
 #include "rocjitsu/isa/register_set.h"
 
 #include <gtest/gtest.h>
@@ -74,6 +76,7 @@ TEST_F(ConSanPrepare, AllAdmittedCompanionsHaveOwningValidatedReplayableArtifact
   }
 }
 
+#if defined(RJ_BUILD_FAULT_INJECTION)
 TEST_F(ConSanPrepare, DropBarrierMutantReceivesFreshPreparation) {
   std::vector<uint8_t> source_image = load("barrier");
   ASSERT_FALSE(source_image.empty());
@@ -134,6 +137,7 @@ TEST_F(ConSanPrepare, DropBarrierMutantReceivesFreshPreparation) {
       << image_error.message;
   EXPECT_EQ(source_image, pristine);
 }
+#endif
 
 TEST_F(ConSanPrepare, NonExecutableOriginalCannotProduceAPublishableArtifact) {
   Elf64_Ehdr header{};
