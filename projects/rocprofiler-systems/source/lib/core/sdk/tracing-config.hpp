@@ -11,6 +11,7 @@
 #include "policies/rocprofiler-sdk/tracing_config/externals.hpp"
 
 #include <algorithm>
+#include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -90,18 +91,31 @@ public:
 
     static common::version get_version();
 
+    /// @brief Values accepted by ROCPROFSYS_ROCM_DOMAINS, sorted: the aliases plus
+    /// every SDK domain that rocprofiler-systems traces at the compile-time SDK
+    /// version.
     static std::vector<std::string>            get_domain_choices();
     static std::string                         get_domain_defaults();
     static std::vector<operation_setting_spec> get_operation_settings();
 
     /// @brief Domains selected by ROCPROFSYS_ROCM_DOMAINS (aliases expanded, plus
-    /// the implicitly enabled ones), ordered by name. Domains traced outside
-    /// domain_service (marker API, legacy page_migration) are omitted.
-    /// @throws std::runtime_error on an unsupported domain name.
+    /// the implicitly enabled ones), ordered by name. The marker API (traced by
+    /// roctx_client) and page_migration are omitted.
+    /// @throws std::runtime_error on a name that is not in get_domain_choices().
     static std::vector<domain_request> get_domains();
 
 private:
     using operation_item = std::pair<std::int32_t, std::string>;
+
+    struct supported_domain
+    {
+        std::string_view name;
+        common::version  min_sdk_version = {};
+    };
+
+    /// @brief True when domain_service can trace the SDK domain name (lowercase)
+    /// at the compile-time SDK version.
+    static constexpr bool is_supported_domain(std::string_view name);
 
     static std::vector<std::string> expand_domain_names();
 
@@ -142,27 +156,84 @@ private:
     static const std::unordered_set<std::string_view>&
     get_domains_to_skip_for_operation_options();
 
-    static const std::unordered_set<std::string_view>&
-    get_domains_to_skip_for_domain_choices();
-
-    static constexpr common::version s_compile_time_sdk_version =
+    static constexpr common::version k_compile_time_sdk_version =
         common::version::from_formatted(SdkBackend::compile_time_version);
 
     /// @brief Named SDK version gates used by if constexpr feature checks below,
     /// in place of raw common::version{...} literals at each call site.
-    static constexpr common::version s_sdk_version_1_0_0{ .major = 1,
+    static constexpr common::version k_sdk_version_1_0_0{ .major = 1,
                                                           .minor = 0,
                                                           .patch = 0 };
-    static constexpr common::version s_sdk_version_0_6_0{ .major = 0,
+    static constexpr common::version k_sdk_version_0_6_0{ .major = 0,
                                                           .minor = 6,
                                                           .patch = 0 };
-    static constexpr common::version s_sdk_version_0_7_0{ .major = 0,
+    static constexpr common::version k_sdk_version_0_7_0{ .major = 0,
                                                           .minor = 7,
                                                           .patch = 0 };
-    static constexpr common::version s_sdk_version_1_2_2{ .major = 1,
+    static constexpr common::version k_sdk_version_1_2_2{ .major = 1,
                                                           .minor = 2,
                                                           .patch = 2 };
+    static constexpr common::version k_sdk_version_1_3_4{ .major = 1,
+                                                          .minor = 3,
+                                                          .patch = 4 };
+    static constexpr common::version k_sdk_version_1_3_5{ .major = 1,
+                                                          .minor = 3,
+                                                          .patch = 5 };
+
+    /// @brief Domains with a domain_service definition and the SDK version that
+    /// introduced each. Keep in sync with domains::registry
+    /// (library/rocprofiler-sdk/domain_registry.hpp): a name listed here but missing
+    /// there makes domain_service::configure() throw "unknown domain".
+    static constexpr auto k_supported_domains = std::array{
+        supported_domain{ .name = "kernel_dispatch" },
+        supported_domain{ .name = "memory_copy" },
+        supported_domain{ .name = "scratch_memory" },
+        supported_domain{ .name            = "memory_allocation",
+                          .min_sdk_version = k_sdk_version_0_6_0 },
+        supported_domain{ .name            = "kfd_page_fault",
+                          .min_sdk_version = k_sdk_version_1_2_2 },
+        supported_domain{ .name            = "kfd_page_migrate",
+                          .min_sdk_version = k_sdk_version_1_2_2 },
+        supported_domain{ .name = "kfd_queue", .min_sdk_version = k_sdk_version_1_2_2 },
+        supported_domain{ .name            = "kfd_event_page_fault",
+                          .min_sdk_version = k_sdk_version_1_2_2 },
+        supported_domain{ .name            = "kfd_event_page_migrate",
+                          .min_sdk_version = k_sdk_version_1_2_2 },
+        supported_domain{ .name            = "kfd_event_queue",
+                          .min_sdk_version = k_sdk_version_1_2_2 },
+        supported_domain{ .name            = "kfd_event_unmap_from_gpu",
+                          .min_sdk_version = k_sdk_version_1_2_2 },
+        supported_domain{ .name            = "kfd_event_dropped_events",
+                          .min_sdk_version = k_sdk_version_1_2_2 },
+        supported_domain{ .name = "hip_compiler_api" },
+        supported_domain{ .name = "hip_runtime_api" },
+        supported_domain{ .name = "hsa_core_api" },
+        supported_domain{ .name = "hsa_amd_ext_api" },
+        supported_domain{ .name = "hsa_image_ext_api" },
+        supported_domain{ .name = "hsa_finalize_ext_api" },
+        supported_domain{ .name = "rccl_api" },
+        supported_domain{ .name = "hip_stream", .min_sdk_version = k_sdk_version_0_7_0 },
+        supported_domain{ .name            = "rocdecode_api",
+                          .min_sdk_version = k_sdk_version_0_6_0 },
+        supported_domain{ .name = "ompt", .min_sdk_version = k_sdk_version_0_6_0 },
+        supported_domain{ .name = "rocjpeg_api", .min_sdk_version = k_sdk_version_0_7_0 },
+        supported_domain{ .name            = "rocshmem_api",
+                          .min_sdk_version = k_sdk_version_1_3_4 },
+        supported_domain{ .name = "hipfile_api", .min_sdk_version = k_sdk_version_1_3_5 },
+    };
 };
+
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
+constexpr bool
+tracing_config<SdkBackend, Externals>::is_supported_domain(std::string_view name)
+{
+    return std::ranges::any_of(
+        k_supported_domains, [name](const supported_domain& domain) {
+            return domain.name == name &&
+                   k_compile_time_sdk_version >= domain.min_sdk_version;
+        });
+}
 
 /// @brief Return the version of the rocprofiler-sdk
 template <policies::tracing_config::backend   SdkBackend,
@@ -183,32 +254,32 @@ tracing_config<SdkBackend, Externals>::get_domain_choices()
     const auto& buffered_tracing_info = SdkBackend::get_buffer_tracing_names();
     const auto& callback_tracing_info = SdkBackend::get_callback_tracing_names();
 
-    auto choices = std::unordered_set<std::string>{};
-    choices.reserve(buffered_tracing_info.size() + callback_tracing_info.size());
+    auto choices =
+        std::unordered_set<std::string>{ "hip_api", "hsa_api", "marker_api", "roctx" };
 
-    auto const add_domain_f = [&choices](std::string_view domain_to_add) {
-        const auto domain_lowercase = utility::string::to_lower(domain_to_add);
-        if(get_domains_to_skip_for_domain_choices().contains(domain_lowercase))
-        {
-            return;
-        }
-
-        choices.emplace(domain_lowercase);
-    };
-
-    add_domain_f("hip_api");
-    add_domain_f("hsa_api");
-    add_domain_f("marker_api");
-    add_domain_f("roctx");
-
-    if constexpr(s_compile_time_sdk_version >= s_sdk_version_1_2_2)
+    if constexpr(k_compile_time_sdk_version >= k_sdk_version_1_2_2)
     {
-        add_domain_f("kfd_events");
+        choices.emplace("kfd_events");
     }
+    // Pre-1.0 default domain: it stays accepted so the default value validates, and
+    // get_domains() drops it.
+    if constexpr(k_compile_time_sdk_version < k_sdk_version_1_0_0)
+    {
+        choices.emplace("page_migration");
+    }
+
+    // Only domains the running SDK reports, so a domain missing from it is rejected.
+    auto const add_supported_domain_f = [&choices](std::string_view sdk_name) {
+        auto name = utility::string::to_lower(sdk_name);
+        if(is_supported_domain(name))
+        {
+            choices.emplace(std::move(name));
+        }
+    };
     const auto name_projection = [](const auto& info) { return info.name; };
 
-    std::ranges::for_each(buffered_tracing_info, add_domain_f, name_projection);
-    std::ranges::for_each(callback_tracing_info, add_domain_f, name_projection);
+    std::ranges::for_each(buffered_tracing_info, add_supported_domain_f, name_projection);
+    std::ranges::for_each(callback_tracing_info, add_supported_domain_f, name_projection);
 
     std::vector<std::string> choices_vec{ choices.begin(), choices.end() };
     std::ranges::sort(choices_vec);
@@ -224,7 +295,7 @@ tracing_config<SdkBackend, Externals>::get_domain_defaults()
     auto defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
                                  "memory_copy,scratch_memory" };
 
-    if constexpr(s_compile_time_sdk_version < s_sdk_version_1_0_0)
+    if constexpr(k_compile_time_sdk_version < k_sdk_version_1_0_0)
     {
         defaults.append(",page_migration");
     }
@@ -325,7 +396,8 @@ tracing_config<SdkBackend, Externals>::get_domains()
 
     for(auto& name : expand_domain_names())
     {
-        // Pre-1.0 SDK domain that domain_service has no definition for.
+        // Pre-1.0 SDK domain; domain_service has no definition for it and nothing
+        // else in the library handles it, so it is dropped.
         if(name == "page_migration")
         {
             continue;
@@ -372,7 +444,7 @@ tracing_config<SdkBackend, Externals>::expand_domain_names()
         }
     }
 
-    if constexpr(s_compile_time_sdk_version >= s_sdk_version_0_6_0)
+    if constexpr(k_compile_time_sdk_version >= k_sdk_version_0_6_0)
     {
         if(Externals::get_use_rcclp())
         {
@@ -384,7 +456,7 @@ tracing_config<SdkBackend, Externals>::expand_domain_names()
         }
     }
 
-    if constexpr(s_compile_time_sdk_version >= s_sdk_version_1_2_2)
+    if constexpr(k_compile_time_sdk_version >= k_sdk_version_1_2_2)
     {
         if(Externals::get_use_unified_memory_profiling())
         {
@@ -397,7 +469,7 @@ tracing_config<SdkBackend, Externals>::expand_domain_names()
 
     // hip_stream has no user-facing switch: it is derived from the domains whose
     // records it correlates with streams.
-    if constexpr(s_compile_time_sdk_version >= s_sdk_version_0_7_0)
+    if constexpr(k_compile_time_sdk_version >= k_sdk_version_0_7_0)
     {
         if(names.contains("kernel_dispatch") || names.contains("memory_copy"))
         {
@@ -425,7 +497,7 @@ tracing_config<SdkBackend, Externals>::get_domain_aliases()
             { "roctx", {} },
         };
 
-        if constexpr(s_compile_time_sdk_version >= s_sdk_version_1_2_2)
+        if constexpr(k_compile_time_sdk_version >= k_sdk_version_1_2_2)
         {
             aliases.emplace("kfd_events",
                             std::vector<std::string>{
@@ -589,22 +661,6 @@ tracing_config<SdkBackend, Externals>::get_domains_to_skip_for_operation_options
         "code_object",
         "kernel_dispatch",
         "page_migration",
-    };
-    return s_domains;
-}
-
-template <policies::tracing_config::backend   SdkBackend,
-          policies::tracing_config::externals Externals>
-const std::unordered_set<std::string_view>&
-tracing_config<SdkBackend, Externals>::get_domains_to_skip_for_domain_choices()
-{
-    static const auto s_domains = std::unordered_set<std::string_view>{
-        "none",
-        "correlation_id_retirement",
-        "marker_core_api",
-        "marker_control_api",
-        "marker_name_api",
-        "code_object",
     };
     return s_domains;
 }

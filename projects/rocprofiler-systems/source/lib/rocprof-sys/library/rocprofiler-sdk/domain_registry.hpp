@@ -113,6 +113,8 @@ struct registry
     }
 
 private:
+    // tracing_config::k_supported_domains (core/sdk/tracing-config.hpp) lists the same
+    // names and version gates; update both together.
     consteval static auto collect_buffered_domains()
     {
         constexpr auto k_buffered_domains_size = 12;
