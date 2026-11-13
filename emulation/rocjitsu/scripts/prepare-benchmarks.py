@@ -7,6 +7,7 @@ import argparse
 import ast
 import hashlib
 import io
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -46,6 +47,17 @@ class Preparation:
             'rocjitsu-benchmark-' + attempt.replace(':', '-')
         )
         require(self.root == expected, 'Refusing unowned benchmark directory')
+        for key in ('FULL_TENSILE_SOURCE', 'LLAMA_SOURCE'):
+            if key not in self.env:
+                continue  # Legacy preparation does not require the RDNA sources.
+            source = Path(self.env[key])
+            require(
+                source.is_absolute()
+                and not any(p.is_symlink() for p in (source, *source.parents))
+                and not source.resolve().is_relative_to(self.root.resolve())
+                and not self.root.resolve().is_relative_to(source.resolve()),
+                'RDNA source must remain external to owned scratch without symlinks',
+            )
         require(
             not any(path.is_symlink() for path in (self.root, *self.root.parents)),
             'Owned path contains a symlink',
@@ -215,12 +227,22 @@ class Preparation:
         return output.read_text(errors='replace').strip() if capture else ''
 
     def sources(self):
-        for name, path, revision in [
+        sources = [
             ('tensile', self.env['TENSILE_SOURCE'], self.env['TENSILE_SHA']),
             ('nanobind', self.env['NANOBIND_SOURCE'], self.env['NANOBIND_SHA']),
             ('corpus', self.env['CORPUS_SOURCE_DIR'], self.env['CORPUS_SHA']),
             ('rocjitsu', self.env['ROCJITSU_SOURCE_DIR'], self.env['BENCHMARK_SHA']),
-        ]:
+        ]
+        for prefix in ('FULL_TENSILE', 'LLAMA'):
+            if prefix + '_SOURCE' in self.env or prefix + '_SHA' in self.env:
+                sources.append(
+                    (
+                        prefix.lower().replace('_', '-'),
+                        self.env[prefix + '_SOURCE'],
+                        self.env[prefix + '_SHA'],
+                    )
+                )
+        for name, path, revision in sources:
             require(
                 re.fullmatch(r'[a-f0-9]{40}', revision),
                 'Expected exact immutable source pin',
@@ -240,6 +262,7 @@ class Preparation:
                         '--porcelain',
                         '--untracked-files=all',
                         '--ignore-submodules=none',
+                        *(['--ignored'] if name in ('full-tensile', 'llama') else []),
                     ],
                     True,
                 ),
@@ -702,7 +725,7 @@ class Preparation:
         self.run('packages-after', [self.python, '-m', 'pip', 'list', '--format=json'])
         self.sources()
 
-    def inventory(self):
+    def recipe(self):
         require(self.manifest, 'Manifest is required for inventory')
         relative = Path(self.manifest)
         require(
@@ -719,7 +742,102 @@ class Preparation:
             and manifest.is_file(),
             'Manifest must be a contained regular file without symlinks',
         )
-        recipe = tomllib.loads(manifest.read_text())
+        return tomllib.loads(manifest.read_text())
+
+    def full_tensile_provider(self):
+        corpus = Path(self.env['CORPUS_SOURCE_DIR'])
+        path = corpus / 'corpus/benchmarks/full_tensile/prepare.py'
+        require(
+            path.is_file()
+            and not any(p.is_symlink() for p in (path, *path.parents))
+            and path.resolve().is_relative_to(corpus.resolve()),
+            'Full Tensile provider must be a contained regular file',
+        )
+        spec = importlib.util.spec_from_file_location('full_tensile_preparation', path)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        # Do not let importlib write __pycache__ into the preserved corpus.
+        exec(compile(path.read_bytes(), str(path), 'exec'), module.__dict__)
+        return module
+
+    def rdna_inventory(self):
+        recipe = self.recipe()
+        provider = self.full_tensile_provider()
+        selected = {}
+        for case in recipe['cases']:
+            if case['workload'] != 'full_tensile':
+                continue
+            require(case['targets'], 'Full Tensile selection needs targets')
+            for target in case['targets']:
+                variant = provider.validate_parameters(case['params'], target)
+                selected[target, variant] = dict(
+                    target=target, variant=variant, parameters=case['params']
+                )
+        return list(selected.values())
+
+    def validate_rdna_artifacts(self, selected):
+        artifacts = self.root / 'full-tensile-artifacts'
+        require(
+            artifacts.is_dir() and not artifacts.is_symlink(),
+            'Full Tensile artifact root missing or symbolic',
+        )
+        expected_cells = {(item['target'], item['variant']) for item in selected}
+        actual_cells = set()
+        for target in artifacts.iterdir():
+            require(
+                target.is_dir() and not target.is_symlink(), 'Invalid artifact target'
+            )
+            for variant in target.iterdir():
+                require(
+                    variant.is_dir() and not variant.is_symlink(),
+                    'Invalid artifact variant',
+                )
+                actual_cells.add((target.name, variant.name))
+        require(actual_cells == expected_cells, 'Full Tensile cell inventory mismatch')
+        generator = (
+            Path(self.env['CORPUS_SOURCE_DIR'])
+            / 'corpus/benchmarks/full_tensile/prepare.py'
+        )
+        for item in selected:
+            output = artifacts / item['target'] / item['variant']
+            metadata_path = output / 'artifacts.json'
+            require(
+                self.diagnostic_file(metadata_path),
+                'Invalid full Tensile metadata path',
+            )
+            metadata = json.loads(metadata_path.read_text())
+            expected = dict(
+                source_revision=self.env['FULL_TENSILE_SHA'],
+                target=item['target'],
+                parameters=item['parameters'],
+                generator_cpu_threads=1,
+                generator_sha256=sha256(generator),
+            )
+            require(
+                all(metadata.get(k) == v for k, v in expected.items()),
+                'Full Tensile artifact provenance mismatch',
+            )
+            files = metadata.get('files')
+            objects = {
+                p.name for p in output.iterdir() if p.suffix in ('.co', '.hsaco')
+            }
+            require(
+                isinstance(files, dict)
+                and objects
+                and set(files) == objects | {'TensileLibrary.dat', 'selection.yaml'},
+                'Full Tensile artifact file inventory mismatch',
+            )
+            for name, digest in files.items():
+                path = output / name
+                require(
+                    Path(name).name == name
+                    and self.diagnostic_file(path)
+                    and sha256(path) == digest,
+                    'Full Tensile artifact hash/path mismatch',
+                )
+
+    def inventory(self):
+        recipe = self.recipe()
         candidates_file = (
             Path(self.env['CORPUS_SOURCE_DIR'])
             / 'corpus/benchmarks/tensile_candidates/prepare.py'
@@ -883,6 +1001,187 @@ class Preparation:
                 f'TENSILE_CANDIDATE_ARTIFACTS={self.artifacts}\nTENSILE_CANDIDATE_RUNNER={self.env["TENSILE_CANDIDATE_RUNNER"]}\n'
             )
 
+    def validate_llama_build(self):
+        build = self.root / 'llama-hip'
+        binary = build / 'llama_bounded_ops'
+        receipt_path = build / 'benchmark-build.json'
+        require(
+            self.diagnostic_file(binary) and self.diagnostic_file(receipt_path),
+            'Invalid llama binary/receipt path',
+        )
+        receipt = json.loads(receipt_path.read_text())
+        expected = dict(
+            schema='rocjitsu.benchmark.llama-build.v1',
+            source_pin=self.env['LLAMA_SHA'],
+            source=self.env['LLAMA_SOURCE'],
+            backend='hip',
+            targets=['gfx1100', 'gfx1201'],
+            adapter_sha256=sha256(
+                Path(self.env['CORPUS_SOURCE_DIR'])
+                / 'corpus/benchmarks/llama/runner.cpp'
+            ),
+        )
+        require(
+            all(receipt.get(k) == v for k, v in expected.items()),
+            'Llama build receipt provenance mismatch',
+        )
+
+    def rdna(self):
+        require(
+            json.loads((self.root / 'phase-generate.json').read_text())['success'],
+            'Legacy artifact generation did not complete',
+        )
+        for prefix in ('FULL_TENSILE', 'LLAMA'):
+            require(
+                self.env.get(prefix + '_SOURCE') and self.env.get(prefix + '_SHA'),
+                'RDNA preparation requires separate pinned source roots',
+            )
+        self.sources()
+        selected = self.rdna_inventory()  # Validate all fixed shapes before any build.
+        workloads = {case['workload'] for case in self.recipe()['cases']}
+        self.sdk_environment()
+        self.pins()
+        provider = Path(self.env['CORPUS_SOURCE_DIR']) / 'corpus/benchmarks'
+        full_build = self.root / 'full-tensile-native'
+        full_artifacts = self.root / 'full-tensile-artifacts'
+        llama_build = self.root / 'llama-hip'
+        for path in (
+            full_build,
+            full_artifacts,
+            llama_build,
+            self.root / 'reports/gluon-source.json',
+            self.root / 'reports/rdna-ready.json',
+        ):
+            require(
+                not path.exists() and not path.is_symlink(),
+                'Refusing stale RDNA preparation output',
+            )
+        exports = {}
+        if selected:
+            self.run(
+                'full-tensile-requirements',
+                [
+                    self.python,
+                    '-m',
+                    'pip',
+                    'install',
+                    '--index-url',
+                    'https://pypi.org/simple',
+                    '--constraint',
+                    self.root / 'benchmark-constraints.txt',
+                    '--report',
+                    self.root / 'reports/full-tensile-resolution.json',
+                    '-r',
+                    Path(self.env['FULL_TENSILE_SOURCE'])
+                    / 'shared/tensile/requirements.txt',
+                ],
+            )
+            self.run(
+                'full-tensile-configure',
+                [
+                    'cmake',
+                    '-S',
+                    provider / 'full_tensile',
+                    '-B',
+                    full_build,
+                    '-G',
+                    'Ninja',
+                    '-DCMAKE_BUILD_TYPE=Release',
+                    f'-DTENSILE_SOURCE={self.env["FULL_TENSILE_SOURCE"]}',
+                    f'-DCMAKE_PREFIX_PATH={self.env["ROCM_PATH"]}',
+                    f'-DCMAKE_CXX_COMPILER={self.env["ROCM_PATH"]}/bin/amdclang++',
+                ],
+            )
+            self.run(
+                'full-tensile-build',
+                [
+                    'cmake',
+                    '--build',
+                    full_build,
+                    '--target',
+                    'full_tensile_runner',
+                    '--parallel',
+                    '16',
+                ],
+            )
+            for item in selected:
+                self.run(
+                    'full-tensile-generate-' + item['target'] + '-' + item['variant'],
+                    [
+                        self.python,
+                        '-B',
+                        provider / 'full_tensile/prepare.py',
+                        '--source-root',
+                        self.env['FULL_TENSILE_SOURCE'],
+                        '--sdk-root',
+                        self.env['ROCM_PATH'],
+                        '--output',
+                        full_artifacts,
+                        '--target',
+                        item['target'],
+                        '--variant',
+                        item['variant'],
+                    ],
+                    env_overrides={'HCC_AMDGPU_TARGET': item['target']},
+                )
+            self.validate_rdna_artifacts(selected)
+            binary = full_build / 'full_tensile_runner'
+            require(self.diagnostic_file(binary), 'Invalid full Tensile runner path')
+            self.binary_inventory(
+                'full-tensile-build', ['full-tensile-native/full_tensile_runner']
+            )
+            exports.update(
+                FULL_TENSILE_ARTIFACTS=str(full_artifacts),
+                FULL_TENSILE_RUNNER=str(binary),
+            )
+        if any(name.startswith('llama_') for name in workloads):
+            self.run(
+                'llama-prepare',
+                [
+                    self.python,
+                    '-B',
+                    provider / 'llama/prepare.py',
+                    '--source',
+                    self.env['LLAMA_SOURCE'],
+                    '--build',
+                    llama_build,
+                    '--backend',
+                    'hip',
+                    '--rocm-path',
+                    self.env['ROCM_PATH'],
+                ],
+            )
+            self.validate_llama_build()
+            exports['ROCJITSU_LLAMA_BINARY'] = str(llama_build / 'llama_bounded_ops')
+        if any(name.startswith('gluon_') for name in workloads):
+            self.run(
+                'gluon-prepare',
+                [
+                    self.python,
+                    '-B',
+                    provider / 'gluon/prepare.py',
+                    '--upstream',
+                    '--output',
+                    self.root / 'reports/gluon-source.json',
+                ],
+            )
+        self.pins()
+        self.run('rdna-pip-check', [self.python, '-m', 'pip', 'check'])
+        self.sources()
+        (self.root / 'reports/rdna-ready.json').write_text(
+            json.dumps(
+                dict(manifest=self.manifest, full_tensile=selected, exports=exports),
+                indent=2,
+            )
+            + '\n'
+        )
+        with Path(self.env['GITHUB_ENV']).open('a') as output:
+            for key, value in exports.items():
+                require(
+                    '\n' not in value and '\r' not in value, 'Invalid environment value'
+                )
+                output.write(f'{key}={value}\n')
+
     def diagnostic_file(self, path):
         return (
             self.root in path.parents
@@ -909,6 +1208,11 @@ class Preparation:
                 'build/CMakeCache.txt',
                 'rocisa-build/CMakeCache.txt',
                 'tensile-native/CMakeCache.txt',
+                'full-tensile-native/CMakeCache.txt',
+                'llama-hip/CMakeCache.txt',
+                'llama-hip/configure.log',
+                'llama-hip/build.log',
+                'llama-hip/benchmark-build.json',
                 'dependency-preflight/build/CMakeCache.txt',
             )
         )
@@ -925,6 +1229,16 @@ class Preparation:
                             'generation-command.json',
                         )
                     )
+        full_artifacts = self.root / 'full-tensile-artifacts'
+        if full_artifacts.is_dir() and not full_artifacts.is_symlink():
+            for target in full_artifacts.iterdir():
+                if target.is_dir() and not target.is_symlink():
+                    for variant in target.iterdir():
+                        if variant.is_dir() and not variant.is_symlink():
+                            files.extend(
+                                variant / name
+                                for name in ('artifacts.json', 'selection.yaml')
+                            )
         files = sorted({path for path in files if self.diagnostic_file(path)})
         summary = []
         # Exclusive creation refuses existing files, dangling links and links to
@@ -971,14 +1285,17 @@ def main():
             'rocjitsu',
             'native',
             'generate',
+            'rdna',
             'diagnostics',
             'cleanup',
         ),
     )
-    parser.add_argument('--manifest', help='Corpus-relative TOML recipe for generate')
+    parser.add_argument(
+        '--manifest', help='Corpus-relative TOML recipe for generate or rdna'
+    )
     args = parser.parse_args()
-    if args.phase == 'generate' and not args.manifest:
-        parser.error('--manifest is required for generate')
+    if args.phase in ('generate', 'rdna') and not args.manifest:
+        parser.error('--manifest is required for ' + args.phase)
     ctx = None
 
     # Actions may deliver SIGTERM to this helper rather than its separate child

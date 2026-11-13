@@ -45,18 +45,25 @@ defaults:
     shell: bash
 
 env:
-  BENCHMARK_MANIFEST: benchmarks/suites/performance-v1.toml
+  BENCHMARK_MANIFEST: benchmarks/suites/performance-v2.toml
   # Theoretical feature-compatibility floor: --cpu-thread-budget (PR #12245).
   MIN_BENCHMARK_SOURCE_COMMIT: b38e78f1b7cb0f45904fcac3680cdf072ceecd7c
   GFX950_CONFIG_FILENAME: gfx950_mi355x_kmd.json
   GFX1250_CONFIG_FILENAME: gfx1250_mi455x.json
-  CORPUS_SHA: b95ea549e1f500ce4ce83ae511ae5e4434930374
+  GFX1100_CONFIG_FILENAME: gfx1100_w7900.json
+  GFX1201_CONFIG_FILENAME: gfx1201_r9700.json
+  # Temporary corpus PR-head pin; replace with the merged corpus commit before merging this workflow change.
+  CORPUS_SHA: f3d8c49d7f0ead0f7369eda577cd46d73aa54a93
   TENSILE_SHA: dd77374194a3ea1a7258cd54f87af6747b6362a5
+  FULL_TENSILE_SHA: 1c63e26254a357007ce2d963266085a30b39515b
+  LLAMA_SHA: 26d52b0f9543f441fc2bfa383557c992a4fbf4b9
   NANOBIND_SHA: 9b3afa9dbdc23641daf26fadef7743e7127ff92f
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   WORKFLOW_SOURCE_DIR: ${{ github.workspace }}/workflow-source/emulation/rocjitsu
   CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   TENSILE_SOURCE: ${{ github.workspace }}/tensile-source
+  FULL_TENSILE_SOURCE: ${{ github.workspace }}/full-tensile-source
+  LLAMA_SOURCE: ${{ github.workspace }}/llama-source
   NANOBIND_SOURCE: ${{ github.workspace }}/native-nanobind
   RESULTS_BRANCH: gh-pages-rocjitsu
   RESULTS_ARTIFACT: rocjitsu-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
@@ -294,6 +301,9 @@ jobs:
             git \
             libclang-rt-dev \
             libdrm-dev \
+            libboost-dev \
+            libmsgpack-dev \
+            libmsgpack-cxx-dev \
             libomp-dev \
             libzstd-dev \
             ninja-build \
@@ -345,6 +355,22 @@ jobs:
           path: tensile-source
           persist-credentials: false
 
+      - name: Checkout pinned full Tensile source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ROCm/rocm-libraries
+          ref: ${{ env.FULL_TENSILE_SHA }}
+          path: full-tensile-source
+          persist-credentials: false
+
+      - name: Checkout pinned llama source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ggml-org/llama.cpp
+          ref: ${{ env.LLAMA_SHA }}
+          path: llama-source
+          persist-credentials: false
+
       - name: Record checked Tensile revision
         id: tensile
         run: |
@@ -384,8 +410,13 @@ jobs:
         run: |
           "${ROCJITSU_VENV}/bin/python" "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" generate --manifest "${BENCHMARK_MANIFEST}"
 
+      - name: Prepare RDNA providers
+        id: rdna
+        run: |
+          "${ROCJITSU_VENV}/bin/python" "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" rdna --manifest "${BENCHMARK_MANIFEST}"
+
       - name: Run performance suite
-        if: ${{ success() && steps.prepare.outcome == 'success' }}
+        if: ${{ success() && steps.prepare.outcome == 'success' && steps.rdna.outcome == 'success' }}
         timeout-minutes: 60
         id: benchmark
         working-directory: ${{ env.CORPUS_SOURCE_DIR }}
@@ -399,6 +430,8 @@ jobs:
             --build-dir "${ROCJITSU_BUILD_DIR}" \
             --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/${GFX950_CONFIG_FILENAME}" \
             --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/${GFX1250_CONFIG_FILENAME}" \
+            --target-config "gfx1100=${ROCJITSU_SOURCE_DIR}/configs/${GFX1100_CONFIG_FILENAME}" \
+            --target-config "gfx1201=${ROCJITSU_SOURCE_DIR}/configs/${GFX1201_CONFIG_FILENAME}" \
             --run-wrapper "/usr/bin/python3 -E -s /usr/local/libexec/rocjitsu-benchmark-runner/benchmark_run.py -- \"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
             --manifest "${BENCHMARK_MANIFEST}" \
             --output "${ROCJITSU_RESULT_DIR}" | taskset -c 0-15 tee "${BENCHMARK_DIR}/runner-output.txt"

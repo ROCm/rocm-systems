@@ -51,6 +51,343 @@ def environment(tmp_path):
     )
 
 
+def rdna_context(tmp_path, cases=None):
+    env = environment(tmp_path)
+    env.update(
+        FULL_TENSILE_SOURCE=str(tmp_path / 'full-tensile'),
+        FULL_TENSILE_SHA='1c63e26254a357007ce2d963266085a30b39515b',
+        LLAMA_SOURCE=str(tmp_path / 'llama'),
+        LLAMA_SHA='26d52b0f9543f441fc2bfa383557c992a4fbf4b9',
+    )
+    corpus = Path(env['CORPUS_SOURCE_DIR'])
+    provider = corpus / 'corpus/benchmarks/full_tensile'
+    provider.mkdir(parents=True)
+    (provider / 'prepare.py').write_text(
+        "CASES = {'valu': dict(variant='valu', dtype='fp32', m=3072, n=2048, k=1024, beta=0)}\n"
+        "TARGETS = {'gfx1100': (11,0,0), 'gfx1201': (12,0,1)}\n"
+        "def validate_parameters(params, target):\n"
+        " if target not in TARGETS or params != CASES.get(params.get('variant')): raise ValueError('fixed parameters')\n"
+        " return params['variant']\n"
+    )
+    manifest = corpus / 'benchmarks/suites/rdna.toml'
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(cases or '''[[cases]]
+id = "full"
+workload = "full_tensile"
+targets = ["gfx1100", "gfx1201"]
+[cases.params]
+variant = "valu"
+dtype = "fp32"
+m = 3072
+n = 2048
+k = 1024
+beta = 0
+''')
+    return load_helper().Preparation(env, 'benchmarks/suites/rdna.toml')
+
+
+def test_rdna_inventory_uses_provider_parameters_and_only_selected_cells(tmp_path):
+    ctx = rdna_context(tmp_path)
+    selected = ctx.rdna_inventory()
+    assert [(item['target'], item['variant']) for item in selected] == [
+        ('gfx1100', 'valu'),
+        ('gfx1201', 'valu'),
+    ]
+    assert selected[0]['parameters']['m'] == 3072
+    manifest = Path(ctx.env['CORPUS_SOURCE_DIR']) / ctx.manifest
+    manifest.write_text(manifest.read_text().replace('m = 3072', 'm = 3073'))
+    with pytest.raises(ValueError, match='fixed parameters'):
+        ctx.rdna_inventory()
+
+
+@pytest.mark.parametrize(
+    'fault', ['none', 'revision', 'hash', 'symlink', 'extra', 'threads']
+)
+def test_rdna_artifacts_validate_exact_inventory_and_provenance(tmp_path, fault):
+    import hashlib
+
+    ctx = rdna_context(tmp_path)
+    selected = ctx.rdna_inventory()[:1]
+    output = ctx.root / 'full-tensile-artifacts/gfx1100/valu'
+    output.mkdir(parents=True)
+    files = {}
+    for name in ('TensileLibrary.dat', 'selection.yaml', 'kernel.co'):
+        (output / name).write_text(name)
+        files[name] = hashlib.sha256(name.encode()).hexdigest()
+    metadata = dict(
+        source_revision=ctx.env['FULL_TENSILE_SHA'],
+        target='gfx1100',
+        parameters=selected[0]['parameters'],
+        files=files,
+        generator_cpu_threads=1,
+        generator_sha256=load_helper().sha256(
+            Path(ctx.env['CORPUS_SOURCE_DIR'])
+            / 'corpus/benchmarks/full_tensile/prepare.py'
+        ),
+    )
+    if fault == 'revision':
+        metadata['source_revision'] = ctx.env['TENSILE_SHA']
+    if fault == 'threads':
+        metadata['generator_cpu_threads'] = 4
+    if fault == 'hash':
+        (output / 'kernel.co').write_text('wrong')
+    if fault == 'extra':
+        (output / 'extra.hsaco').write_text('extra')
+    if fault == 'symlink':
+        external = tmp_path / 'external'
+        external.write_text('kernel.co')
+        (output / 'kernel.co').unlink()
+        (output / 'kernel.co').symlink_to(external)
+    (output / 'artifacts.json').write_text(json.dumps(metadata))
+    if fault == 'none':
+        ctx.validate_rdna_artifacts(selected)
+    else:
+        with pytest.raises(ValueError):
+            ctx.validate_rdna_artifacts(selected)
+
+
+@pytest.mark.parametrize(
+    'fault',
+    [
+        'none',
+        'schema',
+        'source',
+        'pin',
+        'backend',
+        'target',
+        'adapter-source',
+        'missing-adapter-hash',
+        'symlink',
+        'receipt-symlink',
+        'build-symlink',
+    ],
+)
+def test_llama_build_receipt_verified_before_export(tmp_path, fault):
+    ctx = rdna_context(tmp_path)
+    build = ctx.root / 'llama-hip'
+    build.mkdir()
+    adapter = Path(ctx.env['CORPUS_SOURCE_DIR']) / 'corpus/benchmarks/llama/runner.cpp'
+    adapter.parent.mkdir(parents=True)
+    adapter.write_text('// intercepted adapter source\n')
+    binary = build / 'llama_bounded_ops'
+    binary.write_text('intercepted build; not native evidence')
+    receipt = dict(
+        schema='rocjitsu.benchmark.llama-build.v1',
+        source_pin=ctx.env['LLAMA_SHA'],
+        source=ctx.env['LLAMA_SOURCE'],
+        backend='hip',
+        targets=['gfx1100', 'gfx1201'],
+        adapter_sha256=load_helper().sha256(adapter),
+    )
+    assert 'binary_sha256' not in receipt
+    if fault == 'schema':
+        receipt['schema'] = 'unknown'
+    if fault == 'source':
+        receipt['source'] = str(tmp_path / 'other-source')
+    if fault == 'pin':
+        receipt['source_pin'] = 'a' * 40
+    if fault == 'backend':
+        receipt['backend'] = 'cpu'
+    if fault == 'target':
+        receipt['targets'] = ['gfx1100']
+    if fault == 'adapter-source':
+        adapter.write_text('// modified adapter source\n')
+    if fault == 'missing-adapter-hash':
+        del receipt['adapter_sha256']
+    if fault == 'symlink':
+        outside = tmp_path / 'outside-binary'
+        binary.rename(outside)
+        binary.symlink_to(outside)
+    (build / 'benchmark-build.json').write_text(json.dumps(receipt))
+    if fault == 'receipt-symlink':
+        receipt_path = build / 'benchmark-build.json'
+        outside = tmp_path / 'outside-receipt.json'
+        receipt_path.rename(outside)
+        receipt_path.symlink_to(outside)
+    if fault == 'build-symlink':
+        outside = tmp_path / 'outside-build'
+        build.rename(outside)
+        build.symlink_to(outside, target_is_directory=True)
+    if fault == 'none':
+        ctx.validate_llama_build()
+    else:
+        with pytest.raises(ValueError):
+            ctx.validate_llama_build()
+    assert not Path(ctx.env['GITHUB_ENV']).exists()
+
+
+@pytest.mark.parametrize(
+    'fault', ['manifest-path', 'parameters', 'provenance', 'stale']
+)
+def test_rdna_phase_failure_never_exports_ready_state(tmp_path, fault):
+    ctx = rdna_context(tmp_path)
+    (ctx.root / 'phase-generate.json').write_text('{"success":true}')
+    ctx.env['ROCM_PATH'] = str(ctx.root / 'venv/sdk')
+    if fault == 'manifest-path':
+        ctx.manifest = '../outside.toml'
+    if fault == 'parameters':
+        manifest = Path(ctx.env['CORPUS_SOURCE_DIR']) / ctx.manifest
+        manifest.write_text(manifest.read_text().replace('m = 3072', 'm = 1'))
+    if fault == 'stale':
+        (ctx.root / 'full-tensile-native').symlink_to(tmp_path)
+    with mock.patch.object(ctx, 'sources'), mock.patch.object(
+        ctx, 'sdk_environment'
+    ), mock.patch.object(ctx, 'pins'), mock.patch.object(ctx, 'run') as run:
+        with pytest.raises(ValueError):
+            ctx.rdna()
+    if fault != 'provenance':
+        run.assert_not_called()
+    assert not (ctx.root / 'reports/rdna-ready.json').exists()
+    assert not Path(ctx.env['GITHUB_ENV']).exists()
+
+
+def test_rdna_diagnostics_include_owned_build_logs_and_cell_receipts(tmp_path):
+    import tarfile
+
+    ctx = rdna_context(tmp_path)
+    paths = [
+        'full-tensile-native/CMakeCache.txt',
+        'llama-hip/configure.log',
+        'llama-hip/build.log',
+        'llama-hip/benchmark-build.json',
+        'full-tensile-artifacts/gfx1100/valu/artifacts.json',
+        'full-tensile-artifacts/gfx1100/valu/selection.yaml',
+    ]
+    for name in paths:
+        path = ctx.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('intercepted diagnostic')
+    with mock.patch.object(ctx, 'sources'):
+        ctx.diagnostics()
+    with tarfile.open(ctx.root / 'preparation-diagnostics.tar.gz') as archive:
+        assert set(paths) <= set(archive.getnames())
+
+
+def test_rdna_orchestration_builds_owned_providers_and_exports_after_validation(
+    tmp_path,
+):
+    ctx = rdna_context(tmp_path)
+    manifest = Path(ctx.env['CORPUS_SOURCE_DIR']) / ctx.manifest
+    manifest.write_text(manifest.read_text() + '''
+[[cases]]
+workload = "llama_rope"
+[[cases]]
+workload = "gluon_copy"
+''')
+    (ctx.root / 'phase-generate.json').write_text('{"success":true}')
+    (ctx.root / 'benchmark-constraints.txt').write_text('PyYAML==6.0.2\n')
+    ctx.env['ROCM_PATH'] = str(ctx.root / 'venv/sdk')
+    commands = {}
+
+    def run(label, argv, capture=False, env_overrides=None):
+        commands[label] = [str(a) for a in argv]
+        if label == 'full-tensile-build':
+            output = ctx.root / 'full-tensile-native/full_tensile_runner'
+            output.parent.mkdir()
+            output.write_text('intercepted native build')
+        if label == 'llama-prepare':
+            output = ctx.root / 'llama-hip/llama_bounded_ops'
+            output.parent.mkdir()
+            output.write_text('intercepted HIP build')
+
+    with mock.patch.object(ctx, 'run', side_effect=run), mock.patch.object(
+        ctx, 'sources'
+    ) as sources, mock.patch.object(ctx, 'sdk_environment'), mock.patch.object(
+        ctx, 'pins'
+    ), mock.patch.object(
+        ctx, 'validate_rdna_artifacts'
+    ) as artifacts, mock.patch.object(
+        ctx, 'validate_llama_build', create=True
+    ) as llama:
+        ctx.rdna()
+    assert sources.call_count == 2
+    artifacts.assert_called_once_with(ctx.rdna_inventory())
+    llama.assert_called_once()
+    assert commands['full-tensile-build'][-4:] == [
+        '--target',
+        'full_tensile_runner',
+        '--parallel',
+        '16',
+    ]
+    configure = commands['full-tensile-configure']
+    assert '-DTENSILE_SOURCE=' + ctx.env['FULL_TENSILE_SOURCE'] in configure
+    assert '-DCMAKE_PREFIX_PATH=' + ctx.env['ROCM_PATH'] in configure
+    assert (
+        '-DCMAKE_CXX_COMPILER=' + ctx.env['ROCM_PATH'] + '/bin/amdclang++' in configure
+    )
+    install = commands['full-tensile-requirements']
+    assert install[install.index('--constraint') + 1] == str(
+        ctx.root / 'benchmark-constraints.txt'
+    )
+    assert (
+        install[-1]
+        == ctx.env['FULL_TENSILE_SOURCE'] + '/shared/tensile/requirements.txt'
+    )
+    generations = [
+        argv
+        for label, argv in commands.items()
+        if label.startswith('full-tensile-generate-')
+    ]
+    assert len(generations) == 2
+    for argv, target in zip(generations, ('gfx1100', 'gfx1201')):
+        assert argv[-4:] == ['--target', target, '--variant', 'valu']
+    assert commands['llama-prepare'][-4:] == [
+        '--backend',
+        'hip',
+        '--rocm-path',
+        ctx.env['ROCM_PATH'],
+    ]
+    assert commands['gluon-prepare'][-3:] == [
+        '--upstream',
+        '--output',
+        str(ctx.root / 'reports/gluon-source.json'),
+    ]
+    exported = Path(ctx.env['GITHUB_ENV']).read_text()
+    assert f'ROCJITSU_LLAMA_BINARY={ctx.root}/llama-hip/llama_bounded_ops\n' in exported
+    for key in (
+        'FULL_TENSILE_ARTIFACTS',
+        'FULL_TENSILE_RUNNER',
+        'ROCJITSU_LLAMA_BINARY',
+    ):
+        assert f'{key}={ctx.root}/' in exported
+    assert (ctx.root / 'reports/rdna-ready.json').is_file()
+
+
+@pytest.mark.parametrize('name', ['FULL_TENSILE', 'LLAMA'])
+def test_rdna_sources_checked_and_never_owned_as_scratch(tmp_path, name):
+    ctx = rdna_context(tmp_path)
+    calls = []
+
+    def run(label, argv, capture=False):
+        calls.append(label)
+        if label.endswith('-revision'):
+            return ctx.env[
+                {
+                    'tensile': 'TENSILE_SHA',
+                    'nanobind': 'NANOBIND_SHA',
+                    'corpus': 'CORPUS_SHA',
+                    'rocjitsu': 'BENCHMARK_SHA',
+                    'full-tensile': 'FULL_TENSILE_SHA',
+                    'llama': 'LLAMA_SHA',
+                }[label[:-9]]
+            ]
+        if label == name.lower().replace('_', '-') + '-clean':
+            assert (
+                '--ignored' in argv
+            )  # Ignored cache/build files are not pristine sources.
+            return '!! ignored-cache'
+        return ''
+
+    with mock.patch.object(ctx, 'run', side_effect=run):
+        with pytest.raises(ValueError, match='source is dirty'):
+            ctx.sources()
+    assert name.lower().replace('_', '-') + '-clean' in calls
+    for path in (ctx.root / 'nested-source', ctx.root.parent):
+        env = {**ctx.env, name + '_SOURCE': str(path)}
+        with pytest.raises(ValueError, match='source.*scratch'):
+            load_helper().Preparation(env)
+
+
 def test_early_failure_handlers_run_without_python_setup_or_venv(tmp_path):
     import subprocess
     import tarfile
@@ -1124,14 +1461,16 @@ def test_actual_performance_condition_blocks_preparation_failure():
     expression = condition.removeprefix('${{ ').removesuffix(' }}')
     for success in (False, True):
         for outcome in ('success', 'failure', 'skipped'):
-            actual = (
-                expression.replace('success()', str(success))
-                .replace('steps.prepare.outcome', repr(outcome))
-                .replace('&&', 'and')
-            )
-            assert eval(actual, {'__builtins__': {}}) == (
-                success and outcome == 'success'
-            )
+            for rdna in ('success', 'failure', 'skipped'):
+                actual = (
+                    expression.replace('success()', str(success))
+                    .replace('steps.prepare.outcome', repr(outcome))
+                    .replace('steps.rdna.outcome', repr(rdna))
+                    .replace('&&', 'and')
+                )
+                assert eval(actual, {'__builtins__': {}}) == (
+                    success and outcome == 'success' and rdna == 'success'
+                )
 
 
 def test_rocjitsu_still_requires_successful_dependencies(tmp_path):
