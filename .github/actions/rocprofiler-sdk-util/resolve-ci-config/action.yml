@@ -81,6 +81,7 @@ runs:
         repository: ROCm/therock-ci-config
         ref: main
         path: ${{ inputs.config-path }}
+        persist-credentials: false
       continue-on-error: true
 
     - name: Resolve runner labels
