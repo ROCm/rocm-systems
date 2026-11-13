@@ -487,6 +487,7 @@ add_executable(
     mes_engine_test.cpp
     aql_packet_processor_test.cpp
     pm4_packet_processor_test.cpp
+    pm4_data_transfer_test.cpp
     packet_processor_contract_test.cpp
     pm4_compute_queue_test.cpp
     sdma_queue_scheduler_test.cpp

@@ -3496,6 +3496,10 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
 }
 
 void CommandProcessor::complete_failed_queue(ComputeQueueRecord &queue) {
+  // Completion callbacks can release command resources. Cancel queued data
+  // effects first; entered effects retain their backing until retirement drains.
+  for (auto &submission : queue.commands.submissions)
+    submission.data_transfer.reset();
   if (flush_gpu_caches(queue.address_space) != VmAccessOutcome::Complete)
     util::Logger::warn("PM4 queue cancellation cache flush failed");
   for (auto &submission : queue.commands.submissions)

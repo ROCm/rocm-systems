@@ -30,6 +30,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     memory_side_cache.cpp
     mes_engine.cpp
     memory_wait_scoreboard.cpp
+    pm4/pm4_data_transfer.cpp
     pm4/pm4_packet_processor.cpp
     sdma_packet_processor.cpp
     sdma_queue_binding_factory.cpp

@@ -3877,6 +3877,90 @@ TEST_F(KfdPeerBindingTest, LocalOnlyRetirementLeavesOtherGpuDirtyResidencyUntouc
     EXPECT_EQ(::close(fd), 0);
 }
 
+TEST_F(KfdPeerClientMappingTest, Pm4DataPacketsTransferThroughCanonicalPeerBacking) {
+  constexpr size_t kPage = 4096;
+  std::array<kfd_ioctl_alloc_memory_of_gpu_args, 2> allocations{};
+  std::array<std::byte *, 2> hosts{};
+  for (size_t i = 0; i < allocations.size(); ++i) {
+    auto &allocation = allocations[i];
+    allocation.size = kPage;
+    allocation.gpu_id = i == 0 ? kRequester : kOwner;
+    allocation.flags = (i == 0 ? KFD_IOC_ALLOC_MEM_FLAGS_GTT : KFD_IOC_ALLOC_MEM_FLAGS_VRAM) |
+                       KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    hosts[i] = static_cast<std::byte *>(driver_->mmap(process_id_, nullptr, kPage,
+                                                      PROT_READ | PROT_WRITE, MAP_SHARED,
+                                                      static_cast<off_t>(allocation.mmap_offset)));
+    ASSERT_NE(hosts[i], MAP_FAILED);
+    if (i == 1) {
+      kfd_ioctl_ipc_export_handle_args exported{};
+      exported.handle = allocation.handle;
+      exported.gpu_id = kOwner;
+      ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    }
+    std::array ids{allocation.gpu_id, kRequester};
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = i == 0 ? 1 : 2;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+
+  const uint64_t local = allocations[0].va_addr;
+  const uint64_t peer = allocations[1].va_addr;
+  std::array<std::byte, 17> source{};
+  for (size_t i = 0; i < source.size(); ++i)
+    source[i] = std::byte(i + 1);
+  std::memcpy(hosts[0] + 512, source.data(), source.size());
+  std::vector<uint32_t> words;
+  const auto copy = [&](uint64_t source, uint64_t destination, uint32_t bytes) {
+    words.insert(words.end(), {0xc0055000u, 0u, uint32_t(source), uint32_t(source >> 32),
+                               uint32_t(destination), uint32_t(destination >> 32), bytes});
+  };
+  copy(local + 512, peer + 64, source.size());
+  words.insert(words.end(), {0xc0055000u, 2u << 29, 0x78563412u, 0u, uint32_t(peer + 128),
+                             uint32_t((peer + 128) >> 32), 7u});
+  words.insert(words.end(), {0xc0053700u, 5u << 8, uint32_t(peer + 192),
+                             uint32_t((peer + 192) >> 32), 0x12345678u, 0x87654321u, 99u});
+  words.insert(words.end(), {0xc0044000u, 1u | (5u << 8) | (1u << 16), uint32_t(peer + 192),
+                             uint32_t((peer + 192) >> 32), uint32_t(local + 640),
+                             uint32_t((local + 640) >> 32)});
+  copy(peer + 64, local + 672, source.size());
+  copy(peer + 128, local + 704, 7);
+  std::memcpy(hosts[0], words.data(), words.size() * sizeof(uint32_t));
+
+  auto *soc = machine_->soc(0);
+  const auto handle = soc->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  auto *cp = soc->xcd(0)->command_processor();
+  ASSERT_TRUE(cp->register_drm_queue(
+      {.address_space = *handle, .process_id = process_id_, .queue_id = 99}));
+  bool completed = false;
+  rocjitsu::amdgpu::Pm4Submission submission;
+  submission.buffers.push_back({.address = local, .dwords = static_cast<uint32_t>(words.size())});
+  submission.complete = [&](bool success) {
+    EXPECT_TRUE(success);
+    completed = true;
+  };
+  ASSERT_TRUE(cp->submit_pm4(99, process_id_, std::move(submission)));
+  while (!completed) {
+    ASSERT_TRUE(engine_.step());
+    std::this_thread::yield();
+  }
+  cp->unregister_drm_queue(99, process_id_);
+  const std::array<uint32_t, 2> written{0x12345678u, 0x87654321u};
+  EXPECT_EQ(std::memcmp(hosts[0] + 640, written.data(), sizeof(written)), 0);
+  EXPECT_EQ(std::memcmp(hosts[0] + 672, source.data(), source.size()), 0);
+  const std::array<uint8_t, 7> filled{0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56};
+  EXPECT_EQ(std::memcmp(hosts[0] + 704, filled.data(), filled.size()), 0);
+  EXPECT_GT(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+  for (const auto &allocation : allocations) {
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = allocation.handle;
+    EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  }
+}
+
 TEST_F(KfdPeerClientMappingTest, LocalOrdinaryMunmapLeavesOtherGpuDirtyResidencyUntouched) {
   using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
   constexpr size_t kPage = 4096;
