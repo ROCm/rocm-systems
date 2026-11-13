@@ -255,12 +255,19 @@ def generate_summary_query(
             additional_select_columns = "json_extract(PI.environment, '$.{rank_column_name}') AS {rank_alias}, AD.pid AS Process_Id, P.hostname AS Hostname,".format(
                 rank_column_name=rank_column_name, rank_alias=rank_alias
             )
-            total_duration_join = "JOIN total_duration TD ON AD.guid = TD.guid JOIN processes P ON AD.pid = P.pid JOIN rocpd_info_process PI ON AD.pid = PI.pid"
+            total_duration_join = (
+                "JOIN total_duration TD ON AD.guid = TD.guid "
+                "JOIN processes P ON AD.pid = P.pid AND AD.guid = P.guid "
+                "JOIN rocpd_info_process PI ON AD.pid = PI.pid AND AD.guid = PI.guid"
+            )
         else:
             rank_column_name = ""
             rank_alias = ""
             additional_select_columns = "AD.pid AS Process_Id, P.hostname AS Hostname,"
-            total_duration_join = "JOIN total_duration TD ON AD.guid = TD.guid JOIN processes P ON AD.pid = P.pid"
+            total_duration_join = (
+                "JOIN total_duration TD ON AD.guid = TD.guid "
+                "JOIN processes P ON AD.pid = P.pid AND AD.guid = P.guid"
+            )
     else:
         view_suffix = "_summary"
         group_by_columns = name_column
@@ -357,11 +364,10 @@ def generate_domain_query(
                          Returns an empty tuple if no matching summary queries are found.
     """
 
-    by_rank_env_var = get_rank_env_variable_name(connection)
-
     if by_rank:
         view_suffix = "_summary_by_rank"
         view_name = "domain_summary_by_rank"
+        by_rank_env_var = get_rank_env_variable_name(connection)
         if by_rank_env_var is not None:
             rank_column_name = by_rank_env_var
             rank_alias = "Rank"
@@ -718,12 +724,12 @@ def create_process_files_query(connection: RocpdImportData, by_rank=False):
     query = f"""
         SELECT
             {rank_select}
-            P.id AS Process_Id,
+            P.pid AS Process_Id,
             N.hostname AS Hostname,
             json_extract(P.extdata, '$.output_file') AS Filename
         FROM rocpd_info_process P
         LEFT JOIN rocpd_info_node N ON P.nid = N.id AND P.guid = N.guid
-        ORDER BY {rank_order} P.id
+        ORDER BY {rank_order} P.pid
     """
 
     return {query_name: query}
