@@ -112,13 +112,15 @@ static inline bool m2nSameTensorTopology(const ncclDistTensor_t& a, const ncclDi
 
 #define NCCL_M2N_CUDACHECK(cmd) NCCL_M2N_CUDACHECK_IMPL(cmd, NCCL_M2N_UNIQUE(m2nCudaError_))
 
-/* HIP rejects a cudaMemcpy3DAsync whose extent.width is >= 2^31 bytes with cudaErrorInvalidValue (CUDA accepts
- * it), which a fully contiguous >= 2 GiB pack/unpack span produces. Issue such copies row by row instead. */
+/* HIP rejects a cudaMemcpy3DAsync whose source or destination pitch is >= INT32_MAX bytes with
+ * cudaErrorInvalidValue. A >= 2 GiB contiguous pack/unpack span or a >= 2 GiB outer stride produces one; issue
+ * such copies row by row instead. Rows are then >= 2 GiB apart, so there are few of them. */
 inline cudaError_t m2nMemcpy3DAsync(const cudaMemcpy3DParms* p, cudaStream_t stream) {
 #if !defined(__HIP_PLATFORM_AMD__)
   return cudaMemcpy3DAsync(p, stream);
 #else
-  if (p->extent.width < ((size_t)1 << 31)) return cudaMemcpy3DAsync(p, stream);
+  const size_t maxPitch = 0x7fffffff;
+  if (p->srcPtr.pitch < maxPitch && p->dstPtr.pitch < maxPitch) return cudaMemcpy3DAsync(p, stream);
   const cudaPitchedPtr& s = p->srcPtr;
   const cudaPitchedPtr& d = p->dstPtr;
   char* srcBase = (char*)s.ptr + (p->srcPos.z * s.ysize + p->srcPos.y) * s.pitch + p->srcPos.x;

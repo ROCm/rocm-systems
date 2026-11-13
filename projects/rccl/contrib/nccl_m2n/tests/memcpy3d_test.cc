@@ -54,7 +54,7 @@ protected:
   }
 };
 
-/* A fully contiguous span past 2 GiB is one row of width >= 2^31, which hipMemcpy3DAsync rejects. */
+/* A fully contiguous span past 2 GiB is one row whose pitch is its >= 2^31 width, which hipMemcpy3DAsync rejects. */
 TEST_F(Memcpy3DTest, ContiguousRowAbove2GiB) {
   const size_t width = 2 * kGiB + 4096;
   if (!haveFree(2 * width)) GTEST_SKIP() << "needs " << 2 * width << " B of free device memory";
@@ -110,6 +110,38 @@ TEST_F(Memcpy3DTest, PitchedRowsAbove2GiB) {
     EXPECT_EQ(0xb0 + r, get(dst, row + width - 8));
     EXPECT_EQ(0x1111111111111111ull, get(dst, row + kGiB));
   }
+}
+
+/* Narrow rows whose source pitch (a >= 2 GiB outer stride) is past INT32_MAX: HIP rejects the pitch, not the width. */
+TEST_F(Memcpy3DTest, NarrowRowsWithPitchAbove2GiB) {
+  const size_t width = 4096, height = 2, depth = 2;
+  const size_t srcPitch = 2 * kGiB + 256;
+  const size_t srcX = 128;
+  const size_t srcBytes = (height * depth - 1) * srcPitch + srcX + width;
+  if (!haveFree(srcBytes)) GTEST_SKIP() << "needs " << srcBytes << " B of free device memory";
+  char* src = alloc(srcBytes, 0x33);
+  char* dst = alloc(width * height * depth, 0);
+  ASSERT_NE(src, nullptr);
+  ASSERT_NE(dst, nullptr);
+  for (size_t r = 0; r < height * depth; r++) {
+    put(src, r * srcPitch + srcX, 0xd0 + r);
+    put(src, r * srcPitch + srcX + width - 8, 0xe0 + r);
+  }
+
+  cudaMemcpy3DParms cp = {};
+  cp.kind = cudaMemcpyDeviceToDevice;
+  cp.srcPtr = make_cudaPitchedPtr(src, srcPitch, width, height);
+  cp.srcPos = make_cudaPos(srcX, 0, 0);
+  cp.dstPtr = make_cudaPitchedPtr(dst, width, width, height);
+  cp.extent = make_cudaExtent(width, height, depth);
+  ASSERT_EQ(cudaSuccess, m2nMemcpy3DAsync(&cp, stream));
+  ASSERT_EQ(cudaSuccess, cudaStreamSynchronize(stream));
+
+  for (size_t r = 0; r < height * depth; r++) {
+    EXPECT_EQ(0xd0 + r, get(dst, r * width));
+    EXPECT_EQ(0xe0 + r, get(dst, r * width + width - 8));
+  }
+  EXPECT_EQ(0x3333333333333333ull, get(dst, width / 2));
 }
 
 /* Narrow strided copies keep going through a single cudaMemcpy3DAsync. */
