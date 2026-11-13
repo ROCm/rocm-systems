@@ -23,6 +23,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -223,6 +224,53 @@ std::vector<EnvVar> baseEnvironment(const FixtureTree &tree)
     return ::testing::AssertionFailure() << "\"" << needle << "\" is not in:\n" << text;
 }
 
+// Whether every attribute value in *xml* is escaped, as a parser requires.
+//
+// Not a parser: a parser is a dependency this binary does not have, and the one rule worth
+// checking is narrow -- an attribute value may contain no raw '<', and no '&' that does not
+// begin an entity. Both are exactly what an unescaped path smuggles in.
+::testing::AssertionResult attributesAreEscaped(const std::string &xml)
+{
+    const std::vector<std::string> entities = {"&amp;", "&lt;", "&gt;", "&quot;", "&apos;",
+                                               "&#"};
+    bool inTag = false;
+    bool inValue = false;
+    for (size_t at = 0; at < xml.size(); ++at) {
+        const char c = xml[at];
+        if (!inTag) {
+            inTag = c == '<';
+            continue;
+        }
+        if (c == '"') {
+            inValue = !inValue;
+            continue;
+        }
+        if (!inValue) {
+            inTag = c != '>';
+            continue;
+        }
+        if (c == '<') {
+            return ::testing::AssertionFailure()
+                   << "a raw '<' at offset " << at << " of:\n"
+                   << xml;
+        }
+        if (c == '&') {
+            const std::string rest = xml.substr(at, 6);
+            const bool escaped =
+                std::any_of(entities.begin(), entities.end(),
+                            [&rest](const std::string &entity) {
+                                return rest.compare(0, entity.size(), entity) == 0;
+                            });
+            if (!escaped) {
+                return ::testing::AssertionFailure()
+                       << "a raw '&' at offset " << at << " of:\n"
+                       << xml;
+            }
+        }
+    }
+    return ::testing::AssertionSuccess();
+}
+
 }  // namespace
 
 TEST(HostDispatchEndToEnd, EveryFrontedBinarysCasesReachTheMergedReport)
@@ -420,4 +468,27 @@ TEST(HostDispatchEndToEnd, AManifestNamingABinaryThatIsNotThereFailsTheRun)
     EXPECT_EQ(run.status, 1) << run.console;
     EXPECT_TRUE(contains(run.report, std::string(kSecondQualifier) + "/HostTestDispatch"));
     EXPECT_TRUE(contains(run.report, "could not list its tests"));
+}
+
+TEST(HostDispatchEndToEnd, AReportAboutALogPathFullOfXmlStaysReadable)
+{
+    // The log directory is the caller's to name, and the dispatcher writes that path into the
+    // crash fragment's message. A directory called "logs & <today>" then puts a bare '&' and a
+    // bare '<' inside an attribute value, and no XML parser will read the result -- on exactly
+    // the run that failed, which is the only run whose report anybody opens.
+    FixtureTree tree;
+    RCCL_REQUIRE_TREE(tree, kFirstBinary);
+
+    const std::string logDir = (fs::path(tree.path()) / "logs & <today>").string();
+    std::vector<EnvVar> environment = baseEnvironment(tree);
+    environment.push_back({"RCCL_HOST_DISPATCH_LOG_DIR", logDir});
+    environment.push_back({"RCCL_FIXTURE_HANG", "1"});
+    environment.push_back({"RCCL_HOST_DISPATCH_CHILD_TIMEOUT", "1"});
+
+    const DispatchRun run = runFrontDoor(
+        tree, {"--gtest_output=xml:" + tree.reportPath()}, environment);
+
+    EXPECT_EQ(run.status, 1) << run.console;
+    EXPECT_TRUE(attributesAreEscaped(run.report));
+    EXPECT_TRUE(contains(run.report, "logs &amp; &lt;today&gt;"));
 }

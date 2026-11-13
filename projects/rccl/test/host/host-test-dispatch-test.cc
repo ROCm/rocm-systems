@@ -477,6 +477,39 @@ TEST(HostDispatchReportMicrotest, CrashFragmentReportsOneFailure)
     EXPECT_NE(fragment.xml.find("exit status 139"), std::string::npos);
 }
 
+TEST(HostDispatchReportMicrotest, ACrashDetailCarryingXmlSyntaxDoesNotBreakTheReport)
+{
+    // The detail names the child's log path, and the log directory is the caller's to name: a
+    // run writing into "logs & more/<today>" put a bare '&' and a bare '<' inside an attribute
+    // value, which no XML parser will accept. The report that then cannot be read is the one
+    // for the run that already failed, which is the only run anybody reads it for.
+    const SuiteFragment fragment =
+        crashFragment("Micro&Init", "binary timed out; output in /tmp/logs & more/<today>.log");
+
+    EXPECT_NE(fragment.xml.find("Micro&amp;Init/HostTestDispatch"), std::string::npos);
+    EXPECT_NE(fragment.xml.find("/tmp/logs &amp; more/&lt;today&gt;.log"), std::string::npos);
+    // The JSON half needs none of this: nlohmann escapes the value when it serialises it, and
+    // pre-escaping it would put "&amp;" in front of a reader of the JSON report.
+    EXPECT_EQ(fragment.suites[0]["testsuite"][0]["failures"][0]["failure"],
+              "binary timed out; output in /tmp/logs & more/<today>.log");
+}
+
+TEST(HostDispatchReportMicrotest, AChildsOwnReportIsNotEscapedASecondTime)
+{
+    // The other half of the rule: gtest escaped its own report when it wrote it, so the
+    // dispatcher splices it in verbatim. Escaping it again would show "&amp;lt;" to the reader.
+    const SuiteFragment fragment =
+        parsedOrFail("<?xml version=\"1.0\"?>\n<testsuites tests=\"1\" failures=\"1\">\n"
+                     "  <testsuite name=\"Suite\" tests=\"1\" failures=\"1\">\n"
+                     "    <testcase name=\"Case\" classname=\"Suite\">\n"
+                     "      <failure message=\"expected a &lt; b\" type=\"\"/>\n"
+                     "    </testcase>\n  </testsuite>\n</testsuites>\n",
+                     "Micro");
+
+    EXPECT_NE(fragment.xml.find("expected a &lt; b"), std::string::npos);
+    EXPECT_EQ(fragment.xml.find("&amp;lt;"), std::string::npos);
+}
+
 // ── mergeReports ────────────────────────────────────────────────────
 
 TEST(HostDispatchMergeMicrotest, TotalsAreSummedAcrossChildren)

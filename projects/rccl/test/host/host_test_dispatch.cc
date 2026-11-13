@@ -595,6 +595,28 @@ std::optional<SuiteFragment> parseChildReport(const std::string &text, std::stri
                                         : parseChildXmlReport(text, qualifier);
 }
 
+// *text* with the five characters XML gives meaning to replaced by their entities.
+//
+// Only ever applied to text this dispatcher composes itself -- a qualifier, and a message
+// naming a path. A child's own report is spliced in verbatim, because gtest escaped it when it
+// wrote it and escaping it twice would show the entities to the reader.
+std::string escapeXml(std::string_view text)
+{
+    std::string escaped;
+    escaped.reserve(text.size());
+    for (const char c : text) {
+        switch (c) {
+            case '&': escaped += "&amp;"; break;
+            case '<': escaped += "&lt;"; break;
+            case '>': escaped += "&gt;"; break;
+            case '"': escaped += "&quot;"; break;
+            case '\'': escaped += "&apos;"; break;
+            default: escaped += c; break;
+        }
+    }
+    return escaped;
+}
+
 // A one-case <testsuite> standing in for a child that produced no usable report.
 //
 // Synthesised rather than ignored: a binary that crashes, or that rejects an argument and exits
@@ -612,7 +634,10 @@ SuiteFragment crashFragment(std::string_view qualifier, std::string_view detail)
         "      <failure message=\"{detail}\" type=\"\"/>\n"
         "    </testcase>\n"
         "  </testsuite>\n",
-        fmt::arg("qualifier", qualifier), fmt::arg("detail", detail));
+        // Escaped, both of them: the detail carries the child's log path, which is a directory
+        // the caller named, and one '&' or '<' in it would make the merged report unparsable --
+        // on exactly the run that already failed and is being read to find out why.
+        fmt::arg("qualifier", escapeXml(qualifier)), fmt::arg("detail", escapeXml(detail)));
 
     // The same case as JSON. Spelled with the keys the results consumer actually reads -- a
     // non-empty failures array, status RUN and result COMPLETED -- because a case missing them
