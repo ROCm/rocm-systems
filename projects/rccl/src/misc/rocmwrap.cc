@@ -263,7 +263,7 @@ int ncclCuMemHostEnable() {
       CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
       size = 1;
       ALIGN_SIZE(size, granularity);
-      if (CUPFN(cuMemCreate(&handle, size, &prop, 0)) != CUDA_SUCCESS) {
+      if (CUPROBE(cuMemCreate(&handle, size, &prop, 0)) != CUDA_SUCCESS) {
         INFO(NCCL_INIT, "cuMem host allocations do not appear to be working; falling back to a /dev/shm/ based "
                         "implementation. This could be due to the container runtime disabling NUMA support. "
                         "To disable this warning, set NCCL_CUMEM_HOST_ENABLE=0");
