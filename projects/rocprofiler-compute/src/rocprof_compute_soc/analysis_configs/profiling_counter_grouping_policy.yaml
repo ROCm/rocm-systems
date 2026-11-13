@@ -22,6 +22,8 @@ architectures:
     same_bucket_priority_metric_ids:
       "17.2.1":
         name: "HBM Read Traffic"
+      "17.2.3":
+        name: "Uncached Read Traffic"
       "17.2.5":
         name: "HBM Write and Atomic Traffic"
 
@@ -29,6 +31,8 @@ architectures:
     same_bucket_priority_metric_ids:
       "17.2.1":
         name: "HBM Read Traffic"
+      "17.2.3":
+        name: "Uncached Read Traffic"
       "17.2.5":
         name: "HBM Write and Atomic Traffic"
 
@@ -36,11 +40,15 @@ architectures:
     same_bucket_priority_metric_ids:
       "17.2.1":
         name: "HBM Read Traffic"
+      "17.2.3":
+        name: "Uncached Read Traffic"
       "17.2.5":
         name: "HBM Write and Atomic Traffic"
 
   gfx950:
-    same_bucket_priority_metric_ids: {}
+    same_bucket_priority_metric_ids:
+      "17.2.3":
+        name: "Uncached Read Traffic"
 
   # gfx1250: 17 perfmon passes at full counter set. Priority metrics steer
   # metric-aware coalescing without increasing pass count (verified via
