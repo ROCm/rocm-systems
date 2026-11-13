@@ -15,4 +15,8 @@ namespace rocjitsu::arith {
 void frexp_exp_x86_64_v3(bool fp64, uint32_t exec_mask, uint32_t *d, const uint32_t *const *a,
                          bool flush_input);
 
+// AVX-512 counterpart, with the same alias and guest-denormal contract.
+void frexp_exp_x86_64_v4(bool fp64, uint32_t exec_mask, uint32_t *d, const uint32_t *const *a,
+                         bool flush_input);
+
 } // namespace rocjitsu::arith

@@ -81,7 +81,7 @@ constexpr bool is_arithmetic(Fp64 op) {
 // that no ADD/MUL/FMA lane produced one.
 template <Fp64 Op, bool NanPriority>
 bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uint32_t *const *b,
-              const uint32_t *const *c, uint32_t (&result)[2][32], bool quiet_snan) {
+              const uint32_t *const *c, uint32_t (&result)[2][32], bool quiet_snan, bool cdna) {
   // MUL/FMA results at the smallest normal need rechecking only when output flushing or OMOD
   // would act on a tiny result.
   const bool flush_tiny =
@@ -119,7 +119,7 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
       value = _mm256_fmadd_pd(x, y, z);
     }
     if constexpr (Op == Fp64::Mul || Op == Fp64::Fma) {
-      if (flush_tiny) {
+      if (flush_tiny && !cdna) {
         value = flush_tiny_products(value, x, y, z);
       }
     }
@@ -200,7 +200,17 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
         value = _mm256_blendv_pd(value, x, _mm256_cmp_pd(x, x, _CMP_UNORD_Q));
       }
     }
-    if (mode & RJ_ARITH_ALU_OMOD_MASK) {
+    if (cdna && Op == Fp64::Fma && (mode & RJ_ARITH_ALU_OMOD_MASK)) {
+      // FMA flushes its rounded core before scaling, then canonicalizes tiny OMOD results.
+      if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
+        value = flush_denorm_f64(value);
+      }
+      auto scaled = _mm256_mul_pd(value, scale);
+      value = _mm256_blendv_pd(scaled, value, _mm256_cmp_pd(value, value, _CMP_UNORD_Q));
+      value = flush_denorm_f64(value);
+      value = _mm256_blendv_pd(value, _mm256_setzero_pd(),
+                               _mm256_cmp_pd(value, _mm256_setzero_pd(), _CMP_EQ_OQ));
+    } else if (mode & RJ_ARITH_ALU_OMOD_MASK) {
       value = prepare_omod_f64(value, mode);
       if constexpr (rocjitsu::arith::is_selection(Op) || Op == Fp64::Trunc || Op == Fp64::Ceil ||
                     Op == Fp64::Rndne || Op == Fp64::Floor || Op == Fp64::Fract ||
@@ -242,13 +252,13 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
 template <Fp64 Op>
 void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
          const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
-         bool quiet_snan) {
+         bool quiet_snan, bool cdna) {
   uint32_t result[2][32];
   // A NaN source or an invalid operation always yields a NaN. Such results are rare, so
   // ADD/MUL/FMA re-evaluate with NaN priority only when the host produced one.
-  if (evaluate<Op, false>(flags, mode, a, b, c, result, quiet_snan)) {
+  if (evaluate<Op, false>(flags, mode, a, b, c, result, quiet_snan, cdna)) {
     if constexpr (is_arithmetic(Op)) {
-      evaluate<Op, true>(flags, mode, a, b, c, result, quiet_snan);
+      evaluate<Op, true>(flags, mode, a, b, c, result, quiet_snan, cdna);
     }
   }
   // Source halves can alias either output half, so delay all masked writes.
@@ -269,44 +279,44 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
 // Requires the named CPU features and validated instruction controls.
 void fp64_x86_64_v3(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
                     const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
-                    bool quiet_snan) {
+                    bool quiet_snan, bool cdna) {
   switch (op) {
   case Fp64::FrexpMant:
-    return run<Fp64::FrexpMant>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::FrexpMant>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Trunc:
-    return run<Fp64::Trunc>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Trunc>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Ceil:
-    return run<Fp64::Ceil>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Ceil>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Rndne:
-    return run<Fp64::Rndne>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Rndne>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Floor:
-    return run<Fp64::Floor>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Floor>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Fract:
-    return run<Fp64::Fract>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Fract>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Sqrt:
-    return run<Fp64::Sqrt>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Sqrt>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Rcp:
-    return run<Fp64::Rcp>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Rcp>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Rsq:
-    return run<Fp64::Rsq>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Rsq>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::MinLegacy:
-    return run<Fp64::MinLegacy>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::MinLegacy>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::MaxLegacy:
-    return run<Fp64::MaxLegacy>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::MaxLegacy>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::MinNum:
-    return run<Fp64::MinNum>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::MinNum>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::MaxNum:
-    return run<Fp64::MaxNum>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::MaxNum>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Minimum:
-    return run<Fp64::Minimum>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Minimum>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Maximum:
-    return run<Fp64::Maximum>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Maximum>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Add:
-    return run<Fp64::Add>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Add>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Mul:
-    return run<Fp64::Mul>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Mul>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Fma:
-    return run<Fp64::Fma>(flags, exec_mask, mode, d, a, b, c, quiet_snan);
+    return run<Fp64::Fma>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   }
 }
 

@@ -153,7 +153,8 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     amdgpu::ScopedSimdFastPathTracker tracker;
     auto out = fx.run(inst, exec);
-    if (force_scalar)
+    // Integral rounding now uses rj-arith, outside the legacy SIMD tracker.
+    if (force_scalar || c.opcode != 382)
       EXPECT_TRUE(tracker.no_tracked_path_executed())
           << c.name << ": forced-scalar execution used SIMD";
     else

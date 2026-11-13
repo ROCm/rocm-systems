@@ -108,6 +108,7 @@ foreach(
         v_div_scale
         v_fma_dx9_zero
         v_fma
+        v_fma64_variants
         v_fma_mix
         v_fma_mix_bf16
         v_fmaak
@@ -124,6 +125,7 @@ foreach(
         v_minmax_maxmin
         v_minmax_maxmin_num
         v_mul_dx9_zero_f32
+        v_mul_legacy_f32
         v_mul
         v_mad_mix
         v_pk_add_mul_f16

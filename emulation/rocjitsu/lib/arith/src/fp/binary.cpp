@@ -189,6 +189,15 @@ int binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint3
           flags, exec_mask, uint32_t(instruction_flags), d, a, b);
     }
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if constexpr (rocjitsu::arith::is_arithmetic(Op)) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::binary_x86_64_v4(Op, flags, exec_mask, uint32_t(instruction_flags), d[0],
+                                        a[0], b[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::binary_x86_64_v3(Op, flags, exec_mask, instruction_flags, d[0], a[0], b[0]);

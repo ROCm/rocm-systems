@@ -53,6 +53,7 @@ add_library(
     fp/half_fma.cpp
     fp/half_minmax.cpp
     fp/ldexp.cpp
+    fp/legacy_mul.cpp
     fp/minmax.cpp
     fp/mixed_mad.cpp
     fp/mixed_bf16.cpp

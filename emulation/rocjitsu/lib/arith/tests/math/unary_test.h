@@ -408,4 +408,29 @@ void check_unary(Call call, int op, bool iflag = false) {
   }
 }
 
+// CDNA's inherited rounding/decomposition quiets signaling NaNs even with
+// IEEE clear. Keep the existing arithmetic/aliasing checks and pin down that delta.
+template <int Lanes, bool Half, typename Call> void check_cdna_integral_unary(Call call, int op) {
+  check_unary<Lanes, Half, false>(call, op);
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : semantics_modes()) {
+      if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+        continue; // Reporting is checked as unsupported by check_unary.
+      }
+      for (uint64_t ieee : {uint64_t(0), RJ_ARITH_FP_IEEE_MODE}) {
+        Registers<1, Lanes> r;
+        for (int lane = 0; lane < Lanes; ++lane) {
+          r.v[0][lane] = Half ? 0xabcd7d23U : 0xff812345U;
+        }
+        ASSERT_EQ(call(cpu | semantics | ieee | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                       ~WaveMask<Lanes>(0), RJ_ARITH_ALU_OMOD_2, r.v, r.v, nullptr),
+                  RJ_ARITH_SUCCESS);
+        for (int lane = 0; lane < Lanes; ++lane) {
+          EXPECT_EQ(r.v[0][lane], Half ? 0xabcd7f23U : 0xffc12345U);
+        }
+      }
+    }
+  }
+}
+
 } // namespace rocjitsu::arith::test

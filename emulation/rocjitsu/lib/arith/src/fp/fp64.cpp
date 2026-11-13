@@ -72,7 +72,7 @@ template <rocjitsu::arith::Fp64 Op>
 
 // Evaluate FP64 arithmetic or selection for the selected lanes. Reject invalid controls before
 // changing outputs.
-template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false>
+template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool Cdna = false>
 int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
          const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   if constexpr (Op == rocjitsu::arith::Fp64::Rcp || Op == rocjitsu::arith::Fp64::Rsq ||
@@ -107,7 +107,7 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
     instruction_flags = uint32_t(rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags));
   }
   // gfx11 preserves signaling NaNs when IEEE mode is clear.
-  const bool quiet_snan = !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE);
+  const bool quiet_snan = Cdna || !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE);
   // RCP overflow is independent of guest ROUND, including output scaling.
   if constexpr (Op == rocjitsu::arith::Fp64::Rcp) {
     flags &= ~RJ_ARITH_FP_ROUND_MASK;
@@ -116,12 +116,20 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
     return RJ_ARITH_SUCCESS;
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if constexpr (Op == rocjitsu::arith::Fp64::Trunc || Op == rocjitsu::arith::Fp64::Ceil ||
+                Op == rocjitsu::arith::Fp64::Rndne || Op == rocjitsu::arith::Fp64::Floor ||
+                Op == rocjitsu::arith::Fp64::Fract || Op == rocjitsu::arith::Fp64::FrexpMant) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::fp64_x86_64_v4(Op, flags, exec_mask, instruction_flags, d, a, b, c,
+                                      quiet_snan, Cdna);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
   if constexpr (Op == rocjitsu::arith::Fp64::Fma || Op == rocjitsu::arith::Fp64::Add ||
                 Op == rocjitsu::arith::Fp64::Mul) {
-    if ((flags & RJ_ARITH_FP_ROUND_MASK) &&
-        rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-      rocjitsu::arith::fp64_directed_x86_64_v4(Op, flags, exec_mask, instruction_flags, d, a, b, c,
-                                               quiet_snan);
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::fp64_x86_64_v4(Op, flags, exec_mask, instruction_flags, d, a, b, c,
+                                      quiet_snan, Cdna);
       return RJ_ARITH_SUCCESS;
     }
   }
@@ -134,8 +142,8 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
       Op == rocjitsu::arith::Fp64::Mul || Op == rocjitsu::arith::Fp64::Fract;
   if ((!directed_arithmetic || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::fp64_x86_64_v3(Op, flags, exec_mask, instruction_flags, d, a, b, c,
-                                    quiet_snan);
+    rocjitsu::arith::fp64_x86_64_v3(Op, flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan,
+                                    Cdna);
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -182,7 +190,7 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
               : __builtin_fma(x, y, z);
       value = rocjitsu::arith::fp64_nan_priority<true>(value, x, y, z, quiet_snan);
     }
-    if constexpr (Op == rocjitsu::arith::Fp64::Mul || Op == rocjitsu::arith::Fp64::Fma) {
+    if constexpr (!Cdna && (Op == rocjitsu::arith::Fp64::Mul || Op == rocjitsu::arith::Fp64::Fma)) {
       // Products judge tininess after rounding, so a result that reaches the smallest normal
       // only on the subnormal grid still flushes, and OMOD zeroes it even when MODE keeps
       // denormals. ADD results are exact on the subnormal grid and never need this.
@@ -275,9 +283,16 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
       value = rocjitsu::arith::as_double(rocjitsu::arith::selection_output<64>(
           rocjitsu::arith::double_bits(value), instruction_flags, flags));
     } else {
+      if constexpr (Cdna && Op == rocjitsu::arith::Fp64::Fma) {
+        // The fused result is guest-flushed before its separate OMOD rounding.
+        if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
+          value = rocjitsu::arith::fp64_flush_denorm(value);
+        }
+      }
       value = rocjitsu::arith::fp64_output(
           value, preserve_nan ? instruction_flags & ~RJ_ARITH_ALU_CLAMP : instruction_flags,
-          unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24));
+          unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24),
+          Cdna && Op == rocjitsu::arith::Fp64::Fma);
     }
     // Selection preserves a selected subnormal; arithmetic/unary outputs flush.
     constexpr bool selection = rocjitsu::arith::is_selection(Op);
@@ -301,12 +316,12 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
 
 // Evaluate FP64 arithmetic or selection for Wave64. Reject invalid controls before changing
 // outputs.
-template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false>
+template <rocjitsu::arith::Fp64 Op, bool Rdna3 = false, bool Cdna = false>
 int fp64_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
                 const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
   if (int error =
-          fp64<Op, Rdna3>(flags, 0, instruction_flags, nullptr, nullptr, nullptr, nullptr)) {
+          fp64<Op, Rdna3, Cdna>(flags, 0, instruction_flags, nullptr, nullptr, nullptr, nullptr)) {
     return error;
   }
   if (!exec_mask) {
@@ -326,12 +341,30 @@ int fp64_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, 
         z[word] = c[word] + half * 32;
       }
     }
-    if (int error = fp64<Op, Rdna3>(flags, uint32_t(exec_mask >> (half * 32)), instruction_flags,
-                                    dest, x, y, z)) {
+    if (int error = fp64<Op, Rdna3, Cdna>(flags, uint32_t(exec_mask >> (half * 32)),
+                                          instruction_flags, dest, x, y, z)) {
       return error;
     }
   }
   return RJ_ARITH_SUCCESS;
+}
+
+// Preserve inherited CDNA unary quieting and output controls without changing gfx11's model.
+template <rocjitsu::arith::Fp64 Op, typename Mask>
+int cdna_unary(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d,
+               const uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if constexpr (sizeof(Mask) == 4) {
+    return fp64<Op, true, true>(flags, exec_mask, mode, d, a, nullptr, nullptr);
+  } else {
+    return fp64_wave64<Op, true, true>(flags, exec_mask, mode, d, a, nullptr, nullptr);
+  }
 }
 
 } // namespace
@@ -1327,4 +1360,384 @@ int rj_arith_v_frexp_mant_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t i
   }
   return fp64_wave64<rocjitsu::arith::Fp64::FrexpMant, true>(flags, exec_mask, instruction_flags, d,
                                                              a, nullptr, nullptr);
+}
+
+// Fused A*B+D, retaining the inherited FMA rounding and output policy.
+int rj_arith_v_fmac_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *state) {
+  if (instruction_flags & (RJ_ARITH_ALU_ABS_C | RJ_ARITH_ALU_NEG_C)) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  // Validation precedes reading the accumulator pointers, including empty EXEC.
+  if (int error = rj_arith_v_fma_f64_w32(flags, 0, instruction_flags, nullptr, nullptr, nullptr,
+                                         nullptr, state)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  const uint32_t *accumulator[] = {d[0], d[1]};
+  // CDNA retains a minimum-normal result reached by rounding before output flushing.
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  return fp64<rocjitsu::arith::Fp64::Fma, true, true>(flags, exec_mask, uint32_t(instruction_flags),
+                                                      d, a, b, accumulator);
+}
+
+// Fused A*B+D, retaining the inherited FMA rounding and output policy.
+int rj_arith_v_fmac_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *state) {
+  if (instruction_flags & (RJ_ARITH_ALU_ABS_C | RJ_ARITH_ALU_NEG_C)) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  // Validation precedes reading the accumulator pointers, including empty EXEC.
+  if (int error = rj_arith_v_fma_f64_w64(flags, 0, instruction_flags, nullptr, nullptr, nullptr,
+                                         nullptr, state)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  const uint32_t *accumulator[] = {d[0], d[1]};
+  // CDNA retains a minimum-normal result reached by rounding before output flushing.
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  return fp64_wave64<rocjitsu::arith::Fp64::Fma, true, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, b, accumulator);
+}
+
+// Fused A*B+D, retaining the inherited FMA rounding and output policy.
+int rj_arith_v_fmac_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, uint32_t *state) {
+  if (instruction_flags & (RJ_ARITH_ALU_ABS_C | RJ_ARITH_ALU_NEG_C)) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  // Validation precedes reading the accumulator pointers, including empty EXEC.
+  if (int error = rj_arith_v_fma_f64_w32_gfx12(flags, 0, instruction_flags, nullptr, nullptr,
+                                               nullptr, nullptr, state)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  const uint32_t *accumulator[] = {d[0], d[1]};
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  return fp64<rocjitsu::arith::Fp64::Fma, false, true>(
+      flags, exec_mask, uint32_t(instruction_flags), d, a, b, accumulator);
+}
+
+namespace {
+// Expand the uniform literal into the existing split-VGPR FMA representation.
+template <bool Multiply>
+int literal_fma64(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                  uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                  uint64_t literal, uint32_t *state) {
+  if (instruction_flags) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if (int error =
+          rj_arith_v_fma_f64_w32_gfx1250(flags, 0, 0, nullptr, nullptr, nullptr, nullptr, state)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  uint32_t words[2][32];
+  for (int lane = 0; lane < 32; ++lane) {
+    words[0][lane] = uint32_t(literal);
+    words[1][lane] = uint32_t(literal >> 32);
+  }
+  const uint32_t *uniform[] = {words[0], words[1]};
+  return rj_arith_v_fma_f64_w32_gfx1250(flags, exec_mask, 0, d, a, Multiply ? uniform : b,
+                                        Multiply ? b : uniform, state);
+}
+} // namespace
+
+// Fused arithmetic with a raw FP64 literal and no instruction modifiers.
+int rj_arith_v_fmamk_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a, uint64_t literal,
+                                     const uint32_t *const *b, uint32_t *state) {
+  return literal_fma64<true>(flags, exec_mask, instruction_flags, d, a, b, literal, state);
+}
+
+// Fused arithmetic with a raw FP64 literal and no instruction modifiers.
+int rj_arith_v_fmaak_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint64_t literal, uint32_t *state) {
+  return literal_fma64<false>(flags, exec_mask, instruction_flags, d, a, b, literal, state);
+}
+
+// CDNA retains inherited exponent-step scaling and NaN quieting.
+int rj_arith_v_mul_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Mul, true, true>(flags, exec_mask, instruction_flags, d, a, b,
+                                                      nullptr);
+}
+
+// CDNA retains inherited exponent-step scaling and NaN quieting.
+int rj_arith_v_mul_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b,
+                                   [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Mul, false, true>(flags, exec_mask, instruction_flags, d, a, b,
+                                                       nullptr);
+}
+
+// CDNA retains inherited exponent-step scaling and NaN quieting.
+int rj_arith_v_mul_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Mul, true, true>(flags, exec_mask, instruction_flags, d,
+                                                             a, b, nullptr);
+}
+
+// CDNA retains inherited exponent-step scaling and NaN quieting.
+int rj_arith_v_mul_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b,
+                                   [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Mul, false, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, b, nullptr);
+}
+
+// CDNA retains inherited exponent-step scaling and NaN quieting.
+int rj_arith_v_fma_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Fma, true, true>(flags, exec_mask, instruction_flags, d, a, b,
+                                                      c);
+}
+
+// CDNA retains inherited exponent-step scaling and NaN quieting.
+int rj_arith_v_fma_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Fma, false, true>(flags, exec_mask, instruction_flags, d, a, b,
+                                                       c);
+}
+
+// CDNA retains inherited exponent-step scaling and NaN quieting.
+int rj_arith_v_fma_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Fma, true, true>(flags, exec_mask, instruction_flags, d,
+                                                             a, b, c);
+}
+
+// CDNA retains inherited exponent-step scaling and NaN quieting.
+int rj_arith_v_fma_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Fma, false, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, b, c);
+}
+
+// CDNA retains inherited exponent-step scaling and NaN quieting.
+int rj_arith_v_add_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Add, true, true>(flags, exec_mask, instruction_flags, d, a, b,
+                                                      nullptr);
+}
+
+// CDNA retains inherited exponent-step scaling and NaN quieting.
+int rj_arith_v_add_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b,
+                                   [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Add, false, true>(flags, exec_mask, instruction_flags, d, a, b,
+                                                       nullptr);
+}
+
+// CDNA retains inherited exponent-step scaling and NaN quieting.
+int rj_arith_v_add_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Add, true, true>(flags, exec_mask, instruction_flags, d,
+                                                             a, b, nullptr);
+}
+
+// CDNA retains inherited exponent-step scaling and NaN quieting.
+int rj_arith_v_add_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b,
+                                   [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Add, false, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, b, nullptr);
+}
+
+// CDNA retains inherited quieting; gfx942 also serves gfx950.
+int rj_arith_v_trunc_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts) {
+  return cdna_unary<rocjitsu::arith::Fp64::Trunc>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// CDNA retains inherited quieting; gfx942 also serves gfx950.
+int rj_arith_v_trunc_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts) {
+  return cdna_unary<rocjitsu::arith::Fp64::Trunc>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// CDNA retains inherited quieting; gfx942 also serves gfx950.
+int rj_arith_v_ceil_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   [[maybe_unused]] uint32_t *trapsts) {
+  return cdna_unary<rocjitsu::arith::Fp64::Ceil>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// CDNA retains inherited quieting; gfx942 also serves gfx950.
+int rj_arith_v_ceil_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   [[maybe_unused]] uint32_t *trapsts) {
+  return cdna_unary<rocjitsu::arith::Fp64::Ceil>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// CDNA retains inherited quieting; gfx942 also serves gfx950.
+int rj_arith_v_rndne_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts) {
+  return cdna_unary<rocjitsu::arith::Fp64::Rndne>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// CDNA retains inherited quieting; gfx942 also serves gfx950.
+int rj_arith_v_rndne_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts) {
+  return cdna_unary<rocjitsu::arith::Fp64::Rndne>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// CDNA retains inherited quieting; gfx942 also serves gfx950.
+int rj_arith_v_floor_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts) {
+  return cdna_unary<rocjitsu::arith::Fp64::Floor>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// CDNA retains inherited quieting; gfx942 also serves gfx950.
+int rj_arith_v_floor_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts) {
+  return cdna_unary<rocjitsu::arith::Fp64::Floor>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// CDNA retains inherited quieting; gfx942 also serves gfx950.
+int rj_arith_v_fract_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts) {
+  return cdna_unary<rocjitsu::arith::Fp64::Fract>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// CDNA retains inherited quieting; gfx942 also serves gfx950.
+int rj_arith_v_fract_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts) {
+  return cdna_unary<rocjitsu::arith::Fp64::Fract>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// CDNA retains inherited quieting; gfx942 also serves gfx950.
+int rj_arith_v_frexp_mant_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a,
+                                         [[maybe_unused]] uint32_t *trapsts) {
+  return cdna_unary<rocjitsu::arith::Fp64::FrexpMant>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// CDNA retains inherited quieting; gfx942 also serves gfx950.
+int rj_arith_v_frexp_mant_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a,
+                                         [[maybe_unused]] uint32_t *trapsts) {
+  return cdna_unary<rocjitsu::arith::Fp64::FrexpMant>(flags, exec_mask, instruction_flags, d, a);
 }
