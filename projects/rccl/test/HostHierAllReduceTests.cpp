@@ -247,7 +247,11 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
             EXPECT_TRUE(eligible(blockHosts(8, 8), floats(2048 * kMiB)));
             EXPECT_FALSE(eligible(blockHosts(1, 8), floats(16 * kMiB))) << "single host";
             EXPECT_FALSE(eligible(blockHosts(2, 4), floats(16 * kMiB))) << "four ranks per host";
-            EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB, ncclBfloat16)) << "bf16";
+            EXPECT_TRUE(eligible(blockHosts(2, 8), kMiB, ncclBfloat16)) << "bf16, 2 MiB";
+            EXPECT_TRUE(eligible(blockHosts(2, 8), 256 * kMiB, ncclFloat16)) << "fp16, 512 MiB";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB - 8, ncclBfloat16)) << "bf16 below the window";
+            EXPECT_FALSE(eligible(blockHosts(4, 8), 8 * kMiB, ncclBfloat16)) << "bf16 on four hosts";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB, ncclFloat64)) << "fp64";
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB), ncclFloat32, ncclMax)) << "max";
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB), ncclFloat32, ncclSum, "gfx950")) << "gfx950";
         })
