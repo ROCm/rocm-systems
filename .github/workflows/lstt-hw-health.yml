@@ -1,6 +1,10 @@
-# Checks each LSTT CI host: that the host is the machine its labels say it is,
-# that the amdgpu module is loaded, and that ROCm sees the expected GPU. The
-# BIOS version is reported. Nothing is stored or compared.
+# Purpose: host monitoring, not a test of any code change. The CI hosts run
+# real CI jobs, and a broken host (full disk, wedged GPU, wrong GPU or BIOS
+# state) makes unrelated PRs fail. This check names the unhealthy host and
+# layer, so those failures are not blamed on the code. It checks that the host
+# is the machine its labels say it is, that the amdgpu module is loaded, and
+# that ROCm sees the expected GPU. The BIOS version is reported. There is no
+# BMC check yet (see the end of this comment). Nothing is stored or compared.
 #
 # Why this is not part of TheRock CI: these hosts are not in TheRock's runner
 # pool, so TheRock CI does not cover them. This is a per-host check, not a build
