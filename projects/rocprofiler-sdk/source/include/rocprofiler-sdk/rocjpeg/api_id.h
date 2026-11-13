@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/rocjpeg/details/rocjpeg_api_trace.h>
+#include <rocprofiler-sdk/rocjpeg/api_trace.h>
 
 /**
  * @brief ROCProfiler enumeration of rocJPEG API tracing operations

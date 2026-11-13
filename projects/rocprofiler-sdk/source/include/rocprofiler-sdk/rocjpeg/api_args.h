@@ -24,7 +24,8 @@
 
 #include <rocprofiler-sdk/defines.h>
 
-#include <rocprofiler-sdk/rocjpeg/details/rocjpeg_api_trace.h>
+#include <rocprofiler-sdk/rocjpeg/api_trace.h>
+
 #include <rocprofiler-sdk/rocjpeg/details/rocjpeg_headers.h>
 
 #if ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG > 0
