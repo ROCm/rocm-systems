@@ -14,15 +14,15 @@ Panel Config:
         peak: Peak (Empirical)
       metric:
         VALU FLOPs (F16):
-          value: SUM($wave_size * ( SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 )) / SUM(End_Timestamp - Start_Timestamp)
+          value: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16)) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $FP16Flops_empirical_peak
         VALU FLOPs (F32):
-          value: SUM($wave_size * ( SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 )) / SUM(End_Timestamp - Start_Timestamp)
+          value: SUM($wave_size * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32)) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $FP32Flops_empirical_peak
         VALU FLOPs (F64):
-          value: SUM($wave_size * ( SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64 )) / SUM(End_Timestamp - Start_Timestamp)
+          value: SUM($wave_size * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64)) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $FP64Flops_empirical_peak
         MFMA FLOPs (F64):
@@ -46,7 +46,7 @@ Panel Config:
           unit: GIOP/s
           peak: $MFMAI8Ops_empirical_peak
         HBM Bandwidth:
-          value: SUM( TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64 + TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32 ) / SUM(End_Timestamp - Start_Timestamp)
+          value: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64 + TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $HBMBw_empirical_peak
         L2 Cache Bandwidth:
