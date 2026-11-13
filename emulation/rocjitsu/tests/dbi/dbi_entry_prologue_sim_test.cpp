@@ -120,6 +120,7 @@
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
@@ -128,6 +129,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -938,6 +940,86 @@ TEST(DbiEntrySnapshotSim, ReadingLiveTrapTemporaryInsteadOfSnapshotReturnsTheCha
                               true};
   ASSERT_NO_FATAL_FAILURE(expect_scalar_and_vector_entry_snapshots(cdna5, ProbeArgSource::EntryTtmp,
                                                                    /*read_live_ttmp=*/true));
+}
+
+class DistinctEntryScalarInputsPlugin final : public ExecutionPlugin {
+public:
+  DistinctEntryScalarInputsPlugin() : ExecutionPlugin("distinct_entry_scalar_inputs") {}
+
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wave) override {
+    if (wave.wg_id() != 1)
+      return;
+    EXPECT_EQ(wave.ttmp(9), 1u);
+    const amdgpu::RegisterAccess registers(wave);
+    ASSERT_TRUE(registers.write_sgpr(wave.sgpr_alloc().base + 9, 23).succeeded());
+    ++seeded_waves_;
+  }
+
+  uint32_t seeded_waves() const { return seeded_waves_; }
+
+private:
+  uint32_t seeded_waves_ = 0;
+};
+
+TEST(DbiEntrySnapshotSim, SameIndexScalarAndTrapTemporarySnapshotsRemainDistinct) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const util::FailureOr<uint32_t> overwrite = build_s_mov_b32(9, 128, kArch);
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  const util::FailureOr<uint32_t> live_output = build_v_mov_b32_src(4, 9, kArch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  const util::FailureOr<uint32_t> ttmp_output = build_v_mov_b32_src(2, 256, kArch);
+  const util::FailureOr<uint32_t> sgpr_output = build_v_mov_b32_src(3, 257, kArch);
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(overwrite.succeeded() && nop.succeeded() && live_output.succeeded() &&
+              end.succeeded() && ttmp_output.succeeded() && sgpr_output.succeeded() &&
+              ret.succeeded());
+  const std::vector<uint8_t> target = test::with_descriptor_metadata(
+      test::make_kernarg_kernel_elf(
+          {overwrite.value(), nop.value(), live_output.value(), end.value()}, 64,
+          EF_AMDGPU_MACH_AMDGCN_GFX1250, kGuestKernargSize, true, 3, 0, 1, 1),
+      kArch);
+  const std::vector<uint8_t> body = test::make_amdgpu_probe_elf(
+      "distinct_entry_inputs", {ttmp_output.value(), sgpr_output.value(), ret.value()},
+      EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const AmdGpuCodeObject object(target.data(), target.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  Instrumentor instrumentor(object, kArch,
+                            {.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper,
+                             .register_growth = std::nullopt});
+  InstrumentationPoint point;
+  point.anchor_offset = 4;
+  point.probe_obj = &probe;
+  point.probe_symbol = "distinct_entry_inputs";
+  point.probe_args = {{.source = ProbeArgSource::EntryTtmp, .register_index = 9},
+                      {.source = ProbeArgSource::EntrySgpr, .register_index = 9}};
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::optional<uint64_t> entry = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(entry);
+
+  test::DbiSim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna5", 32));
+  sim.set_wave32_dispatch();
+  sim.set_workgroup_count_x(2);
+  auto plugin = std::make_unique<DistinctEntryScalarInputsPlugin>();
+  const DistinctEntryScalarInputsPlugin *inputs = plugin.get();
+  ASSERT_TRUE(sim.add_plugin(std::move(plugin)));
+  sim.set_kernarg(make_wrapper_image());
+  sim.set_entry_offset(*entry);
+  const std::vector<std::vector<uint32_t>> values =
+      sim.run_and_read_vgprs(test::section_words(patched, ".text"),
+                             test::patched_private_segment_size(patched), {2, 3, 4}, 1);
+  ASSERT_EQ(inputs->seeded_waves(), 1u);
+  ASSERT_EQ(values.size(), 3u);
+  for (const std::vector<uint32_t> &value : values)
+    ASSERT_EQ(value.size(), 32u);
+  for (uint32_t lane = 0; lane < 32; ++lane) {
+    EXPECT_EQ(values[0][lane], 1u);
+    EXPECT_EQ(values[1][lane], 23u);
+    EXPECT_EQ(values[2][lane], 0u);
+  }
 }
 
 } // namespace
