@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import config
 from utils import schema
 from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
@@ -27,10 +28,7 @@ from utils.roofline_calc import (
 )
 from vendored import yaml
 
-GFX1201_ROOFLINE_YAML = (
-    Path(__file__).resolve().parents[3]
-    / "src/rocprof_compute_soc/analysis_configs/gfx1201/0400_roofline.yaml"
-)
+GFX1201_ROOFLINE_YAML = config.analysis_configs_dir / "gfx1201" / "0400_roofline.yaml"
 
 
 def gfx1201_roofline_metrics(title: str) -> dict:
