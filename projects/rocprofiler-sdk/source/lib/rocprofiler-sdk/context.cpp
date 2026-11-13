@@ -50,21 +50,15 @@ constexpr auto rocprofiler_context_none = ROCPROFILER_CONTEXT_NONE;
 uint64_t
 synch_on_context(const rocprofiler_context_id_t context, const uint64_t timeout_ns)
 {
-    // The copy drain reports whether it completed. queue_controller_sync reports only its
-    // per-queue waits: its completion-monitor wait has no deadline and no return value, so a
-    // monitor that never drains cannot show up in _dispatches_drained.
     auto outstanding_records = rocprofiler::hsa::async_copy_sync(timeout_ns);
     outstanding_records += rocprofiler::hsa::queue_controller_sync(timeout_ns);
-
-    // Every record in the ring copied, published, popped and processed, and every submitted
-    // completion finished, with signal-less left running.
     outstanding_records += rocprofiler::kfd::drain_signal_less_completions(timeout_ns);
-    // Ordered after the dispatch drains and not beside them: a dispatch's counter sample is
-    // handed off while its completion is being handled, so a drained dispatch is one whose
-    // sample is already counted. Draining first would wait on a ring that is still filling.
+
+    // Ordered after the dispatch drains, not beside them: a dispatch's counter sample is handed
+    // off while its completion is being handled, so a drained dispatch is one whose sample is
+    // already counted. Draining first would wait on a ring that is still filling.
     outstanding_records += rocprofiler::counters::callback_thread_drain(timeout_ns);
 
-    // Peform device counting for the specified context.
     const auto* _ctx = rocprofiler::context::get_registered_context(context);
     if(_ctx != nullptr && _ctx->device_counter_collection)
     {
@@ -91,13 +85,12 @@ peek_outstanding_records(const rocprofiler_context_id_t context)
 }
 
 // Deliver the records now sitting in every buffer this context owns. Goes through the public
-// rocprofiler_flush_buffer rather than buffer::flush so that the PC sampling agent buffers are
-// drained too -- that extra step is the only difference between the two, and it is the whole of
-// this call's PC sampling coverage.
+// rocprofiler_flush_buffer rather than buffer::flush because that is the only one of the two that
+// also drains the PC sampling agent buffers.
 //
-// Buffer ids are snapshotted before any flush: a flush joins the buffer's task group and runs the
-// tool's buffer callback on this thread, and a callback that creates or destroys a context would
-// deadlock against a registry held across it.
+// Buffer ids are snapshotted before any flush: a flush runs the tool's buffer callback on this
+// thread, and a callback that creates or destroys a context would deadlock against a registry
+// held across it.
 rocprofiler_status_t
 flush_context_buffers(const rocprofiler_context_id_t context)
 {
@@ -225,13 +218,12 @@ rocprofiler_synchronize_context(const rocprofiler_context_id_t                  
                                 const rocprofiler_synchronize_context_options_t* options,
                                 rocprofiler_synchronize_context_result_t*        result)
 {
-    // Return if context is not found or invalid
     if(context == rocprofiler_context_none ||
        !rocprofiler::context::get_registered_context(context))
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
-    // Cleared up front so that every path returning SUCCESS leaves the runtime-written fields
-    // readable. size is the caller's input and is left alone.
+    // Cleared up front so the runtime-written fields are readable on every status returned
+    // below. size is the caller's input and is left alone.
     if(result != nullptr)
     {
         result->num_records         = 0;
@@ -241,7 +233,6 @@ rocprofiler_synchronize_context(const rocprofiler_context_id_t                  
     // Finalization has already run these drains.
     if(rocprofiler::registration::get_fini_status() > 0) return ROCPROFILER_STATUS_SUCCESS;
 
-    // Extract options
     auto context_flags = uint64_t{0};
     auto timeout_ns    = uint64_t{0};
     if(options != nullptr)
@@ -259,7 +250,6 @@ rocprofiler_synchronize_context(const rocprofiler_context_id_t                  
     if(result == nullptr && _nohang) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     auto return_status = ROCPROFILER_STATUS_SUCCESS;
-    // Get the number of existing records before any synch if required
     if(result != nullptr)
     {
         result->num_records = peek_outstanding_records(context);
@@ -274,14 +264,13 @@ rocprofiler_synchronize_context(const rocprofiler_context_id_t                  
         }
         if(result != nullptr)
         {
-            // If synched, return best effort estimate of remaining work after timeouts
+            // Best-effort estimate of what the wait did not reach.
             result->num_timeout_records = outstanding_records;
         }
     }
 
-    // Flushed even when the synchronization timed out: the records that did land belong to the
-    // caller, and the status already says that more are outstanding. A flush failure does not
-    // displace that status.
+    // Flushed even when the wait timed out: the records that did land belong to the caller, and
+    // the status already reports the shortfall, so a flush failure must not displace it.
     if(!_noflush)
     {
         auto _flush_status = flush_context_buffers(context);

@@ -20,14 +20,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Regression test for counter-record coverage in rocprofiler_synchronize_contexts.
+// rocprofiler_synchronize_context, over dispatch counter collection records.
 //
-// A dispatch's counter record is handed to a consumer thread and written there, so a tool that
-// synchronizes on its own dispatch and flushes immediately can get a buffer with the dispatch's
-// counter record still missing. The record then lands in the following window.
+// Counter records take a different route out of the runtime than tracing records: a dispatch's
+// counter sample is handed to a consumer thread and written there, later than the dispatch record
+// tracing produces. It then turns up in the following window. Covering the tracing domains says
+// nothing about whether the wait reaches this path, hence a separate test.
 //
-// Every window is asserted, never an aggregate: a late record arrives in the next window, so
-// totals reconcile even when every individual window was short.
+//   every_window_sees_its_counter_records   each window gets a counter record for every dispatch
+//                                           it issued, before the window closes.
+//   noflush_still_waits_for_records         NOFLUSH drops the flush but keeps the wait, so a
+//                                           later explicit flush produces all of them.
+//
+// Flag and argument validation common to the API is covered once, in tracing_window.cpp. Every
+// window is asserted on its own and never in aggregate: a late record still arrives one window
+// later, so totals reconcile even when every window came up short.
+
+#include "counter_config.hpp"
+#include "test_support.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/context.h>
@@ -43,51 +53,30 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <mutex>
-#include <string>
-#include <unordered_map>
-#include <vector>
-
-#define CHECK_ROCP(...)                                                                            \
-    {                                                                                              \
-        auto _status = (__VA_ARGS__);                                                              \
-        if(_status != ROCPROFILER_STATUS_SUCCESS)                                                  \
-        {                                                                                          \
-            fprintf(stderr,                                                                        \
-                    "[counter-window] %s failed at line %i: %s\n",                                 \
-                    #__VA_ARGS__,                                                                  \
-                    __LINE__,                                                                      \
-                    rocprofiler_get_status_string(_status));                                       \
-            std::abort();                                                                          \
-        }                                                                                          \
-    }
-
-#define CHECK_HIP(...)                                                                             \
-    {                                                                                              \
-        auto _err = (__VA_ARGS__);                                                                 \
-        if(_err != hipSuccess)                                                                     \
-        {                                                                                          \
-            fprintf(stderr,                                                                        \
-                    "[counter-window] %s failed at line %i: %s\n",                                 \
-                    #__VA_ARGS__,                                                                  \
-                    __LINE__,                                                                      \
-                    hipGetErrorString(_err));                                                      \
-            std::abort();                                                                          \
-        }                                                                                          \
-    }
 
 namespace
 {
-// Enough windows that passing without the drain is not a realistic outcome. A single window is
-// only sometimes short, so a small count can pass against a broken build.
+constexpr const char* kTestTag = "counter-window";
+
+// A single window is only sometimes short, so a small count passes against a broken build.
 constexpr uint64_t kWindows             = 1000;
 constexpr uint64_t kDispatchesPerWindow = 2;
 
-rocprofiler_context_id_t g_ctx    = {};
-rocprofiler_buffer_id_t  g_buffer = {};
+// Counted per dispatch on every supported agent, so it is the cheapest counter that reliably
+// produces one record per dispatch.
+constexpr const char* kCounterName = "SQ_WAVES";
 
-std::atomic<uint64_t> g_headers_this_window{0};
-std::atomic<uint64_t> g_headers_total{0};
+using sync_test::make_options;
+using sync_test::make_result;
+
+// Tool
+
+rocprofiler_context_id_t g_context = {};
+rocprofiler_buffer_id_t  g_buffer  = {};
+
+// Reset at the top of each window; the window's verdict is what it holds when the window closes.
+std::atomic<uint64_t> g_records_this_window{0};
+std::atomic<uint64_t> g_records_total{0};
 
 void
 buffer_callback(rocprofiler_context_id_t,
@@ -99,13 +88,13 @@ buffer_callback(rocprofiler_context_id_t,
 {
     for(size_t i = 0; i < num_headers; ++i)
     {
-        if(headers[i] == nullptr) continue;
-        if(headers[i]->category != ROCPROFILER_BUFFER_CATEGORY_COUNTERS) continue;
-        if(headers[i]->kind != ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER)
-            continue;
+        const auto* header = headers[i];
+        if(header == nullptr) continue;
+        if(header->category != ROCPROFILER_BUFFER_CATEGORY_COUNTERS) continue;
+        if(header->kind != ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER) continue;
 
-        g_headers_this_window.fetch_add(1, std::memory_order_relaxed);
-        g_headers_total.fetch_add(1, std::memory_order_relaxed);
+        g_records_this_window.fetch_add(1, std::memory_order_relaxed);
+        g_records_total.fetch_add(1, std::memory_order_relaxed);
     }
 }
 
@@ -115,59 +104,15 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t data,
                   rocprofiler_user_data_t*,
                   void*)
 {
-    static auto _mutex = std::mutex{};
-    static auto _cache = std::unordered_map<uint64_t, rocprofiler_counter_config_id_t>{};
-
-    const auto _agent = data.dispatch_info.agent_id;
-    {
-        auto _lk = std::lock_guard<std::mutex>{_mutex};
-        if(auto itr = _cache.find(_agent.handle); itr != _cache.end())
-        {
-            *config = itr->second;
-            return;
-        }
-    }
-
-    auto _all = std::vector<rocprofiler_counter_id_t>{};
-    CHECK_ROCP(rocprofiler_iterate_agent_supported_counters(
-        _agent,
-        [](rocprofiler_agent_id_t, rocprofiler_counter_id_t* cs, size_t n, void* ud) {
-            auto* _v = static_cast<std::vector<rocprofiler_counter_id_t>*>(ud);
-            for(size_t i = 0; i < n; ++i)
-                _v->push_back(cs[i]);
-            return ROCPROFILER_STATUS_SUCCESS;
-        },
-        &_all));
-
-    auto _want = std::vector<rocprofiler_counter_id_t>{};
-    for(auto citr : _all)
-    {
-        auto _info = rocprofiler_counter_info_v0_t{};
-        CHECK_ROCP(
-            rocprofiler_query_counter_info(citr, ROCPROFILER_COUNTER_INFO_VERSION_0, &_info));
-        if(_info.name && std::string{_info.name} == "SQ_WAVES") _want.push_back(citr);
-    }
-
-    if(_want.empty())
-    {
-        fprintf(stderr, "[counter-window] SQ_WAVES is not available on this agent\n");
-        std::abort();
-    }
-
-    auto _cfg = rocprofiler_counter_config_id_t{.handle = 0};
-    CHECK_ROCP(rocprofiler_create_counter_config(_agent, _want.data(), _want.size(), &_cfg));
-    {
-        auto _lk = std::lock_guard<std::mutex>{_mutex};
-        _cache.emplace(_agent.handle, _cfg);
-    }
-    *config = _cfg;
+    *config =
+        sync_test::counter_config_for_agent(data.dispatch_info.agent_id, kCounterName, kTestTag);
 }
 
 int
 tool_init(rocprofiler_client_finalize_t, void*)
 {
-    CHECK_ROCP(rocprofiler_create_context(&g_ctx));
-    CHECK_ROCP(rocprofiler_create_buffer(g_ctx,
+    CHECK_ROCP(rocprofiler_create_context(&g_context));
+    CHECK_ROCP(rocprofiler_create_buffer(g_context,
                                          512 * 1024,
                                          256 * 1024,
                                          ROCPROFILER_BUFFER_POLICY_LOSSLESS,
@@ -175,8 +120,8 @@ tool_init(rocprofiler_client_finalize_t, void*)
                                          nullptr,
                                          &g_buffer));
     CHECK_ROCP(rocprofiler_configure_buffer_dispatch_counting_service(
-        g_ctx, g_buffer, dispatch_callback, nullptr));
-    CHECK_ROCP(rocprofiler_start_context(g_ctx));
+        g_context, g_buffer, dispatch_callback, nullptr));
+    CHECK_ROCP(rocprofiler_start_context(g_context));
     return 0;
 }
 
@@ -184,10 +129,99 @@ void
 tool_fini(void*)
 {}
 
+// Workload
+
 __global__ void
 touch_kernel(float* ptr)
 {
     ptr[threadIdx.x] = static_cast<float>(threadIdx.x);
+}
+
+void
+launch_window_dispatches(float* scratch)
+{
+    for(uint64_t i = 0; i < kDispatchesPerWindow; ++i)
+    {
+        hipLaunchKernelGGL(touch_kernel, dim3(1), dim3(64), 0, nullptr, scratch);
+        CHECK_HIP(hipGetLastError());
+    }
+    CHECK_HIP(hipDeviceSynchronize());
+}
+
+// Checks. Each returns a count of failed expectations.
+
+// The regression guard. The synchronize flushes as part of the call, so the window deliberately
+// does not flush the buffer itself -- that would mask a regression in half the contract.
+uint64_t
+every_window_sees_its_counter_records(float* scratch)
+{
+    auto short_windows          = uint64_t{0};
+    auto first_short_window     = uint64_t{0};
+    auto first_short_window_got = uint64_t{0};
+
+    for(uint64_t window = 0; window < kWindows; ++window)
+    {
+        g_records_this_window.store(0, std::memory_order_relaxed);
+        launch_window_dispatches(scratch);
+
+        auto options = make_options(ROCPROFILER_SYNCHRONIZE_CONTEXT_NONE);
+        auto result  = make_result();
+        CHECK_ROCP(rocprofiler_synchronize_context(g_context, &options, &result));
+
+        const auto delivered = g_records_this_window.load(std::memory_order_relaxed);
+        if(delivered < kDispatchesPerWindow)
+        {
+            if(short_windows == 0)
+            {
+                first_short_window     = window;
+                first_short_window_got = delivered;
+            }
+            ++short_windows;
+        }
+    }
+
+    if(short_windows == 0) return 0;
+
+    fprintf(stderr,
+            "[%s] %lu of %lu windows were short; the first was window %lu with %lu of %lu "
+            "records\n",
+            kTestTag,
+            static_cast<unsigned long>(short_windows),
+            static_cast<unsigned long>(kWindows),
+            static_cast<unsigned long>(first_short_window),
+            static_cast<unsigned long>(first_short_window_got),
+            static_cast<unsigned long>(kDispatchesPerWindow));
+    return short_windows;
+}
+
+// NOFLUSH drops the flush but keeps the wait, isolating the half this test cares about: if the
+// wait reaches the counter consumer thread the records exist on return, so a later explicit flush
+// produces all of them.
+//
+// Deliberately not asserted: that the buffer is still unflushed on return. NOFLUSH promises only
+// that this call will not flush, not that nothing else will, so requiring an empty buffer would
+// be testing a race. The count is read only after the flush, which covers both sides of it.
+uint64_t
+noflush_still_waits_for_records(float* scratch)
+{
+    g_records_this_window.store(0, std::memory_order_relaxed);
+    launch_window_dispatches(scratch);
+
+    auto options = make_options(ROCPROFILER_SYNCHRONIZE_CONTEXT_NOFLUSH);
+    auto result  = make_result();
+    CHECK_ROCP(rocprofiler_synchronize_context(g_context, &options, &result));
+    CHECK_ROCP(rocprofiler_flush_buffer(g_buffer));
+
+    const auto delivered = g_records_this_window.load(std::memory_order_relaxed);
+    if(delivered >= kDispatchesPerWindow) return 0;
+
+    fprintf(stderr,
+            "[%s] a NOFLUSH synchronize followed by an explicit flush produced %lu of %lu "
+            "records, so the wait did not reach the counter consumer thread\n",
+            kTestTag,
+            static_cast<unsigned long>(delivered),
+            static_cast<unsigned long>(kDispatchesPerWindow));
+    return 1;
 }
 }  // namespace
 
@@ -203,65 +237,39 @@ rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t* 
 int
 main()
 {
-    float* _dev = nullptr;
-    CHECK_HIP(hipMalloc(&_dev, 64 * sizeof(float)));
+    float* scratch = nullptr;
+    CHECK_HIP(hipMalloc(&scratch, 64 * sizeof(float)));
 
-    auto     _deficient       = uint64_t{0};
-    auto     _first_bad       = uint64_t{0};
-    uint64_t _first_bad_count = 0;
+    auto failures = uint64_t{0};
+    failures += every_window_sees_its_counter_records(scratch);
+    failures += noflush_still_waits_for_records(scratch);
 
-    for(uint64_t w = 0; w < kWindows; ++w)
-    {
-        g_headers_this_window.store(0, std::memory_order_relaxed);
+    CHECK_HIP(hipFree(scratch));
 
-        for(uint64_t k = 0; k < kDispatchesPerWindow; ++k)
-        {
-            hipLaunchKernelGGL(touch_kernel, dim3(1), dim3(64), 0, nullptr, _dev);
-            CHECK_HIP(hipGetLastError());
-        }
-        CHECK_HIP(hipDeviceSynchronize());
-
-        CHECK_ROCP(rocprofiler_synchronize_contexts(&g_ctx, 1));
-        CHECK_ROCP(rocprofiler_flush_buffer(g_buffer));
-
-        const auto _got = g_headers_this_window.load(std::memory_order_relaxed);
-        if(_got < kDispatchesPerWindow)
-        {
-            if(_deficient == 0)
-            {
-                _first_bad       = w;
-                _first_bad_count = _got;
-            }
-            ++_deficient;
-        }
-    }
-
-    CHECK_HIP(hipFree(_dev));
-
-    // A run that produced no counter records at all would report every window deficient for a
-    // reason unrelated to the ordering this test is about.
-    if(g_headers_total.load() == 0)
-    {
-        fprintf(stderr, "[counter-window] no counter records were delivered at all\n");
-        return 2;
-    }
-
-    if(_deficient > 0)
+    // A run producing no counter records at all reports every window short for a reason that has
+    // nothing to do with ordering.
+    if(g_records_total.load() == 0)
     {
         fprintf(stderr,
-                "[counter-window] FAILED: %lu of %lu windows were short; first was window %lu "
-                "with %lu of %lu records\n",
-                static_cast<unsigned long>(_deficient),
-                static_cast<unsigned long>(kWindows),
-                static_cast<unsigned long>(_first_bad),
-                static_cast<unsigned long>(_first_bad_count),
-                static_cast<unsigned long>(kDispatchesPerWindow));
-        return 1;
+                "[%s] FAILED: no counter records were delivered at all, so this run proves "
+                "nothing about ordering\n",
+                kTestTag);
+        return EXIT_FAILURE;
+    }
+
+    if(failures > 0)
+    {
+        fprintf(stderr,
+                "[%s] FAILED: %lu failed expectations\n",
+                kTestTag,
+                static_cast<unsigned long>(failures));
+        return EXIT_FAILURE;
     }
 
     fprintf(stdout,
-            "[counter-window] PASS: %lu windows, %lu counter records\n",
+            "[%s] PASSED: %lu windows, %lu counter records, and NOFLUSH behaved as documented\n",
+            kTestTag,
             static_cast<unsigned long>(kWindows),
-            static_cast<unsigned long>(g_headers_total.load()));
-    return 0;
+            static_cast<unsigned long>(g_records_total.load()));
+    return EXIT_SUCCESS;
 }

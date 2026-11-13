@@ -90,9 +90,8 @@ public:
             cv.notify_all();
     }
 
-    // Blocks until samples enqueued before this call have been consumed or timeout is hit. Stops
-    // nothing: no exit, no join, no pause on submission -- samples arriving during the wait are
-    // post-call work and are deliberately not waited for.
+    // Blocks until samples enqueued before this call have been consumed, or the timeout expires.
+    // Stops nothing: samples arriving during the wait are post-call work and are not waited for.
     uint64_t drain(const uint64_t timeout_ns)
     {
         auto         lk              = std::unique_lock{mut};
@@ -110,10 +109,9 @@ public:
         else
             drain_cv.wait_until(lk, timeout, predicate);
 
-        // Outstanding is what the consumer has NOT reached yet, so target minus consumed -- the
-        // other order returns zero on exactly the timeout this call exists to report. Computed on
-        // both arms: the untimed wait also returns early when the consumer is shutting down, and
-        // samples it will never consume are still outstanding.
+        // Outstanding is what the consumer has NOT reached, so target minus consumed -- the other
+        // order returns zero on exactly the timeout this exists to report. Computed on both arms:
+        // the untimed wait also returns early on shutdown, leaving samples never consumed.
         const auto consumed = consumed_ptr.load(std::memory_order_relaxed);
         return target > consumed ? target - consumed : 0;
     }
@@ -147,8 +145,8 @@ protected:
             consume_fn(std::move(retrieved));
 
             // Counted under mut, after consume_fn: a drain holds mut while evaluating its
-            // predicate, so incrementing outside the lock could land between that check and
-            // the wait and lose the wakeup.
+            // predicate, so incrementing outside the lock could land between that check and the
+            // wait, losing the wakeup.
             {
                 auto lk = std::unique_lock{mut};
                 consumed_ptr.fetch_add(1, std::memory_order_release);
@@ -163,9 +161,8 @@ protected:
     std::mutex          mut;
     std::atomic<size_t> write_ptr{0};
     std::atomic<size_t> read_ptr{0};
-    // Ring consumption only, and it pairs with write_ptr: advanced after consume_fn returns,
-    // where read_ptr advances before it. A self-consumed sample is counted by neither, since
-    // it never enters the ring.
+    // Pairs with write_ptr: advanced after consume_fn returns, where read_ptr advances before
+    // it. A self-consumed sample enters no ring and is counted by neither.
     std::atomic<size_t>        consumed_ptr{0};
     std::array<DataType, SIZE> buffer;
     std::thread                consumer{};

@@ -195,8 +195,8 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
     if(!buf && callback_data.buffer != rocprofiler_buffer_id_t{.handle = 0})
     {
         // Buffer may be destroyed before callbacks complete during abnormal teardown. The sample
-        // is still finished, so release it on the way out exactly as the other exits do: this
-        // return un-arms the handler, and a waiter would otherwise never be woken.
+        // is still finished, so release it on the way out as the other exits do: this return
+        // un-arms the handler, and a waiter would otherwise never be woken.
         hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 1);
         callback_data.sample_in_flight.store(false, std::memory_order_release);
         ROCP_CI_LOG(WARNING) << fmt::format(
@@ -435,9 +435,9 @@ drain_device_counting_samples(const context::context* ctx, const uint64_t timeou
     if(hsa_inited().load() == false) return 0;
     if(ctx == nullptr || !ctx->device_counter_collection) return 0;
 
-    // sample_in_flight is the only field read, and it is atomic. Reading anything else here --
-    // packet, for instance, which start rewrites -- would race with no latch held, and taking the
-    // latch would make a lost acquisition silently skip a context this call must still drain.
+    // sample_in_flight is the only field read, and it is atomic. Anything else here would race
+    // with start() rewriting it, and taking the latch instead would let a lost acquisition
+    // silently skip a context this call must still drain.
     auto remaining_samples = uint64_t{0};
     for(auto& _cb_data : ctx->device_counter_collection->agent_data)
         remaining_samples += wait_for_sample_handler(_cb_data, timeout_ns) ? 0 : 1;

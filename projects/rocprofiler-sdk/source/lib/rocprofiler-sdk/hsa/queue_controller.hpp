@@ -205,11 +205,10 @@ queue_controller_init(HsaApiTable* table);
 void
 queue_controller_fini();
 
-// Best-effort drain of the queue interceptor and every intercepted queue. Returns the total
-// records still outstanding across them, so ZERO means everything drained -- callers that tear
-// state down behind the drain can say so, and callers that only want a fence may ignore it. Never
-// use the result as a truth value: a non-zero count converts to `true` and reads as "drained".
-// @p timeout_ns bounds each wait individually rather than the call as a whole.
+// Best-effort drain of the queue interceptor and every intercepted queue. Returns the records
+// still outstanding across them, so ZERO means everything drained -- never use the result as a
+// truth value, since a non-zero count converts to `true` and reads as the opposite. @p timeout_ns
+// bounds each wait individually, not the call as a whole.
 uint64_t
 queue_controller_sync(const uint64_t timeout_ns = 0);
 

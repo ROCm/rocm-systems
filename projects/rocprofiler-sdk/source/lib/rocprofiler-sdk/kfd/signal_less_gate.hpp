@@ -68,7 +68,7 @@ void
 signal_less_fence_completions();
 
 // Waits out the reader and joins outstanding completion tasks, leaving signal-less running.
-// Returns outstanding records if timeout value is set.
+// Returns the dispatches still pending when the wait expires, so zero means drained.
 uint64_t
 drain_signal_less_completions(const uint64_t timeout_ns = 0);
 

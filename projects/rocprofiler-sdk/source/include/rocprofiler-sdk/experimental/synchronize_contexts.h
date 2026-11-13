@@ -38,7 +38,8 @@ ROCPROFILER_EXTERN_C_INIT
 typedef enum rocprofiler_synchronize_context_flags_t
 {
     ROCPROFILER_SYNCHRONIZE_CONTEXT_NONE   = 0,
-    ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG = (1 << 0),  ///< populate result and return
+    ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG = (1 << 0),  ///< report what is outstanding without
+                                                        ///< waiting for it
     ROCPROFILER_SYNCHRONIZE_CONTEXT_NOFLUSH =
         (1 << 1),  ///< do not flush buffer(s) associated with context
     ROCPROFILER_SYNCHRONIZE_CONTEXT_LAST = ROCPROFILER_SYNCHRONIZE_CONTEXT_NOFLUSH,
@@ -57,7 +58,7 @@ typedef struct rocprofiler_synchronize_context_options_t
 } rocprofiler_synchronize_context_options_t;
 
 /**
- * @brief Result returned by the runtime after attempting to synchronize contexts.
+ * @brief Result returned by the runtime after attempting to synchronize a context.
  */
 typedef struct rocprofiler_synchronize_context_result_t
 {
@@ -84,6 +85,9 @@ typedef struct rocprofiler_synchronize_context_result_t
  * buffers are flushed for the clients owning @p context. Records written by the calling thread,
  * such as API tracing, never need it. Free-running sources are not covered.
  *
+ * ::ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG skips the wait but not the flush, so combining it
+ * with ::ROCPROFILER_SYNCHRONIZE_CONTEXT_NOFLUSH is the only way to poll without side effects.
+ *
  * The wait spans record production process-wide, since the threads producing records are not
  * partitioned by context; only the flush is scoped to @p context, which is flushed buffer by
  * buffer. The flush runs even when the wait timed out, so the records that did land are still
@@ -93,16 +97,21 @@ typedef struct rocprofiler_synchronize_context_result_t
  * @param [in] options Options controlling the behavior of synchronization. May be NULL, which
  * selects no flags and an unbounded wait.
  * @param [out] result Filled with the outcome of the synchronization attempt. May be NULL unless
- * ::ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG is set. Its counts are zeroed before anything else
- * runs, so they are readable on every status this returns.
+ * ::ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG is set. Its counts are zeroed before any work is
+ * done, so they are readable on every status except
+ * ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND, which returns before touching it.
  * @return ::rocprofiler_status_t
- * @retval ::ROCPROFILER_STATUS_SUCCESS Record writing is caught up for the covered kinds
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Record writing is caught up for the covered kinds, or
+ * nothing was waited for because ::ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG was set or
+ * finalization had already run these drains
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND @p context does not exist
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT @p result is NULL while
  * ::ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG is set, which would leave nothing to return
  * @retval ::ROCPROFILER_STATUS_ERROR_TIMEOUT The operation timed out before all records were
  * written. Nothing was discarded, @p result reports the estimated shortfall, and the call may be
  * retried.
+ * @retval * Any status from ::rocprofiler_flush_buffer, if a buffer failed to flush and the
+ * synchronization itself succeeded
  */
 ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_synchronize_context(rocprofiler_context_id_t                         context,

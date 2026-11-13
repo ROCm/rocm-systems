@@ -102,13 +102,13 @@ device_counting_service_finalize();
 rocprofiler_status_t
 device_counting_service_hsa_registration();
 
-// Blocks until this context's device-counting samples already in flight have been written or
-// timeout is hit. Waits only: no status transition and no end packet, so a context sampling before
-// this call is still sampling after it.
+// Blocks until this context's in-flight device-counting samples have been written, or the
+// timeout expires. Waits only -- no status transition, no end packet -- so a context sampling
+// before this call is still sampling after it.
 uint64_t
 drain_device_counting_samples(const context::context* ctx, const uint64_t timeout_ns = 0);
 
-// Return number of pending samples
+// Samples currently in flight, without waiting.
 uint64_t
 peek_device_counting_samples(const context::context* ctx);
 

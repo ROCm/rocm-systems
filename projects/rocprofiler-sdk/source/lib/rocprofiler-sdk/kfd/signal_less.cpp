@@ -524,14 +524,13 @@ drain_signal_less_completions(const uint64_t timeout_ns)
 {
     if(!signal_less_state_present()) return 0;
 
-    // Mimics signal_less_fence_completions with no permanent teardown/shutdown. Two attempt
-    // wait_for_reader_quiesce to attempt to drain all completed dispatches.
+    // Mirrors signal_less_fence_completions without its teardown: the reader keeps running. The
+    // quiesce is retried once, since the first pass can return with the ring still draining.
     drain_signal_less_interceptor();
     const auto timeout = (timeout_ns > 0) ? timeout_ns : quiesce_budget_ns();
 
     bool _drained = wait_for_reader_quiesce(timeout);
     if(!_drained && !reader_unavailable()) _drained = wait_for_reader_quiesce(timeout);
-    // If drain was unsucessful, get estimate of pending dispatches
     auto pending_dispatches = uint64_t{0};
     if(!_drained)
     {
@@ -539,9 +538,8 @@ drain_signal_less_completions(const uint64_t timeout_ns)
     }
     const auto in_flight = join_signal_less_tasks(timeout_ns);
 
-    // Advisory by construction. On a live session the hub is a moving target, and an entry
-    // whose kernel is still executing has no EOP yet -- so a successful wait does not imply
-    // an empty hub. Nothing is discarded and the caller may retry.
+    // Advisory by construction: on a live session the hub is a moving target, and an entry whose
+    // kernel is still executing has no EOP yet. Nothing is discarded and the caller may retry.
     return pending_dispatches + in_flight;
 }
 
@@ -620,9 +618,8 @@ signal_less_fence_completions()
 uint64_t
 peek_active_signal_less_packets()
 {
-    // Same guard, and for the same reasons, as drain_signal_less_completions: signal_less_hub()
-    // constructs the hub on first touch, so an unguarded peek would stand one up in a process
-    // that never enabled the feature and in a forked child that owns none of this state.
+    // signal_less_hub() constructs the hub on first touch, so an unguarded peek would stand one
+    // up in a process that never enabled the feature, or in a forked child owning none of it.
     if(!signal_less_state_present()) return 0;
 
     return signal_less_hub().pending_count();

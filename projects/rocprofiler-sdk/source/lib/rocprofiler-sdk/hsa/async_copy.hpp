@@ -71,8 +71,8 @@ get_ids();
 void
 async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance);
 
-// Drain outstanding memory copy completion callbacks. Returns outstanding records if
-// the sync times out
+// Drain outstanding memory copy completion callbacks. Returns the number still undelivered
+// when the wait expires, so ZERO means drained.
 uint64_t
 async_copy_sync(const uint64_t timeout_ns = 0);
 
