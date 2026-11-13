@@ -37,7 +37,7 @@ void RequireMultiGpu(int* count) {
 // pageable-host copies to the owning device).
 
 // @asserts: hipHostGetDevicePointer - peer GPU can write mapped host memory via hipMemset, visible to the CPU
-HIP_TEST_CASE(Contract_PeerHostMemory_PortableMapped_PeerMemsetRoundTrips) {
+HIP_TEST_CASE(Contract_PeerHostMemory_HipHostGetDevicePointer_PeerMemset_RoundTrips) {
   hip::contract::ContractCleanup cleanup;
   int device_count = 0;
   RequireMultiGpu(&device_count);
@@ -71,7 +71,7 @@ HIP_TEST_CASE(Contract_PeerHostMemory_PortableMapped_PeerMemsetRoundTrips) {
 }
 
 // @asserts: hipHostGetDevicePointer - peer GPU can transfer data through mapped host memory via a peer-device buffer
-HIP_TEST_CASE(Contract_PeerHostMemory_PortableMapped_PeerDeviceCopyRoundTrips) {
+HIP_TEST_CASE(Contract_PeerHostMemory_HipHostGetDevicePointer_PeerDeviceCopy_RoundTrips) {
   hip::contract::ContractCleanup cleanup;
   int device_count = 0;
   RequireMultiGpu(&device_count);
@@ -119,7 +119,7 @@ HIP_TEST_CASE(Contract_PeerHostMemory_PortableMapped_PeerDeviceCopyRoundTrips) {
 }
 
 // @asserts: hipHostGetDevicePointer - owner and peer GPUs see consistent data through mapped host memory
-HIP_TEST_CASE(Contract_PeerHostMemory_PortableMapped_OwnerAndPeerSeeConsistentData) {
+HIP_TEST_CASE(Contract_PeerHostMemory_HipHostGetDevicePointer_OwnerAndPeer_SeeConsistentData) {
   hip::contract::ContractCleanup cleanup;
   int device_count = 0;
   RequireMultiGpu(&device_count);

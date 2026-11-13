@@ -1023,6 +1023,15 @@ contract:
   Contract_GraphSymbolCopyNodes_HipGraphExecMemcpyNodeSetParamsToSymbol_ExecSetParamsToFromSymbol_UpdatesExecutable:
     <<: *level_0
     tags: [graph_symbol_copy_nodes, P0]
+  Contract_PeerHostMemory_HipHostGetDevicePointer_PeerMemset_RoundTrips:
+    <<: *level_0
+    tags: [peer_host_memory, multigpu, P0]
+  Contract_PeerHostMemory_HipHostGetDevicePointer_PeerDeviceCopy_RoundTrips:
+    <<: *level_0
+    tags: [peer_host_memory, multigpu, P0]
+  Contract_PeerHostMemory_HipHostGetDevicePointer_OwnerAndPeer_SeeConsistentData:
+    <<: *level_0
+    tags: [peer_host_memory, multigpu, P0]
   Contract_HostMemory_HipHostMalloc_Default_ReturnsUsablePointer:
     <<: *level_0
     tags: [host_memory, P0]
