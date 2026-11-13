@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.
+  - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.
+
 - **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
   - When the `amdgpu` driver is not loaded, the command now exits with a clear driver-not-loaded message and exit code 206 instead of an unhandled exception.
 
