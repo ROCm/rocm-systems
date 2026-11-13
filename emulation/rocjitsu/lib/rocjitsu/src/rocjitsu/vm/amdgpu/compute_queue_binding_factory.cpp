@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
 #include <memory>
+#include <utility>
 namespace rocjitsu::amdgpu {
 namespace {
 
@@ -26,6 +27,16 @@ public:
       return QueuePrepareCloseStatus::Ready;
     const QueuePrepareCloseStatus status =
         command_processor_.prepare_unregister_queue_registration(registration_id_);
+    if (status == QueuePrepareCloseStatus::Ready)
+      registration_id_ = 0;
+    return status;
+  }
+
+  QueuePrepareCloseStatus prepare_preempt_close() noexcept override {
+    if (registration_id_ == 0)
+      return QueuePrepareCloseStatus::Ready;
+    const QueuePrepareCloseStatus status =
+        command_processor_.prepare_preempt_queue_registration(registration_id_);
     if (status == QueuePrepareCloseStatus::Ready)
       registration_id_ = 0;
     return status;
@@ -79,6 +90,7 @@ public:
         .address_space = request.identity.address_space,
         .interrupt_sink = request.identity.interrupt_sink,
         .process_id = request.identity.process_id,
+        .process_identity_kind = request.identity.process_identity_kind,
         .queue_id = request.identity.queue_id,
         .ring_base_va = request.ring.base_address,
         .ring_size = request.ring.size_bytes,
@@ -101,15 +113,14 @@ public:
     });
     if (registration_id == 0)
       return {};
-    try {
+    // The processor attachment is live. A failed ownership allocation must not
+    // reach a recovering frontend without a binding that owns that attachment.
+    return [&]() noexcept -> QueueBindingCreateResult {
       return {.status = QueueBindingCreateStatus::Bound,
               .binding = std::make_unique<ComputeQueueBinding>(
                   command_processor_, registration_id, request.packet_format,
                   request.ring.base_address, request.ring.size_bytes)};
-    } catch (...) {
-      (void)command_processor_.unregister_queue_registration(registration_id);
-      throw;
-    }
+    }();
   }
 
 private:

@@ -54,6 +54,7 @@ namespace rocjitsu {
 class PciMemoryAccess {
 public:
   virtual ~PciMemoryAccess() = default;
+  [[nodiscard]] virtual bool supports_translated_local_cache() const { return false; }
 
   /// @brief Capture the exact PCI peer generation backing retained VM state.
   /// @details The returned session never retargets when a later peer attaches.
@@ -70,6 +71,17 @@ public:
   compare_exchange_vram(uint64_t offset, uint32_t width, uint64_t expected, uint64_t desired) = 0;
   [[nodiscard]] virtual bool read_register(uint64_t byte_offset, uint32_t &value) = 0;
   [[nodiscard]] virtual bool write_register(uint64_t byte_offset, uint32_t value) = 0;
+  /// @brief Apply the graphics block's selected VMID register bank to shader CUs.
+  [[nodiscard]] virtual bool program_shader_apertures(uint32_t vmid, uint64_t shared_base,
+                                                      uint64_t shared_limit, uint64_t private_base,
+                                                      uint64_t private_limit) {
+    (void)vmid;
+    (void)shared_base;
+    (void)shared_limit;
+    (void)private_base;
+    (void)private_limit;
+    return false;
+  }
   [[nodiscard]] virtual bool deliver_interrupt(const InterruptEntry &entry) = 0;
 };
 
@@ -124,6 +136,11 @@ public:
   ///          not publish that segment or the register falls outside.
   [[nodiscard]] std::optional<uint64_t> resolve(uint32_t segment_index, uint32_t dword) const;
 
+  /// @brief Address a bus-remapped register by absolute BAR dword offset.
+  /// @details Some NBIF registers are exposed through a fixed BAR remap rather
+  /// than the discovery record's register segments.
+  [[nodiscard]] IpRegisterWindow absolute_remap() const;
+
   /// @brief Model a register at its power-on value.
   /// @copydetails resolve
   /// @param[in] value What the register starts at.
@@ -177,6 +194,11 @@ public:
   /// @details Declared rather than discovered, so the device can resolve them
   /// all once and refuse a profile in which two models claim the same register.
   [[nodiscard]] virtual std::vector<RegisterClaim> claims() const = 0;
+
+  /// @brief Resolve one claim through the window this model actually owns.
+  [[nodiscard]] std::optional<uint64_t> resolve_claim(const RegisterClaim &claim) const {
+    return registers_.resolve(claim.segment_index, claim.first_dword);
+  }
 
   /// @brief Return every claimed register to its power-on value.
   /// @retval false Some register could not be modelled; it has been reported.

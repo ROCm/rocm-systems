@@ -416,6 +416,13 @@ TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
     runAllReduce(count, kTwoShotLogNeedle, "DdaMPI_AllReduce/LLTwoShotMultiRank");
 }
 
+// 1 MiB of f32 is the largest LL one-shot message, which from 5 ranks runs as the spread two-shot on its grid.
+TEST_F(DdaMPI_AllReduce, LLSpreadTwoShotMultiRank)
+{
+    const char* needle = MPIEnvironment::world_size < 5 ? kOneShotLogNeedle : "DDA fabric AllReduce LL spread two-shot";
+    runAllReduce(kDefaultLLOneShotThresholdBytes / sizeof(float), needle, "DdaMPI_AllReduce/LLSpreadTwoShotMultiRank");
+}
+
 // The LL128 tiers sit behind the LL ones in ncclAllReduceDdaFabricLL, each gated
 // on its own threshold. Under the defaults the LL tiers claim everything up to
 // 16 MiB while an LL128 slot tops out near the same size, which leaves LL128 a
@@ -429,6 +436,7 @@ TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
 //
 //   mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter=DdaMPI_AllReduce.LL128OneShot*
 //   mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter=DdaMPI_AllReduce.LL128TwoShot*
+//   mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=DdaMPI_AllReduce.LL128StagedWire*
 //
 // Run in a process that already touched those thresholds, the guards are inert
 // and the COLL-log assertion reports whichever tier actually claimed the message.
@@ -463,6 +471,86 @@ TEST_F(DdaMPI_AllReduce, LL128TwoShotMultiRank)
         GTEST_SKIP() << "Could not find a two-shot-aligned element count for nRanks=" << nRanks;
 
     runAllReduce(count, kLL128TwoShotLogNeedle, "DdaMPI_AllReduce/LL128TwoShotMultiRank");
+}
+
+// RCCL_DDA_LL128_ASYNC_WIRE=1 gives LL128 two-shot shards from 2 MiB the LDS-staged writer. Same thresholds as
+// LL128TwoShotMultiRank, so it needs its own process. Integer sums are exact in any fold order, hence bit for bit what
+// the cooperative writer returns; the COLL log names the writer of each launch.
+TEST_F(DdaMPI_AllReduce, LL128StagedWireTwoShotMultiRank)
+{
+    if(!validateTestPrerequisites(kMinProcessesForMPI))
+    {
+        GTEST_SKIP() << "Need at least 2 MPI ranks";
+    }
+
+    MPIHelpers::MpiEnvGuard llOneShotGuard("RCCL_DDA_LL_ONESHOT_THRESHOLD", "0");
+    MPIHelpers::MpiEnvGuard llTwoShotGuard("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "0");
+    MPIHelpers::MpiEnvGuard ll128OneShotGuard("RCCL_DDA_LL128_ONESHOT_THRESHOLD", "0");
+    MPIHelpers::MpiEnvGuard asyncWireGuard("RCCL_DDA_LL128_ASYNC_WIRE", "1");
+
+    DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric LL128 requires gfx1250"));
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason());
+
+    int rank{}, nRanks{};
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    // A 1 MiB shard keeps the cooperative writer; a 2 MiB shard (16 MiB at 8 ranks) takes the staged one.
+    constexpr size_t kStagedMinShardBytes = size_t(2) * 1024 * 1024;
+    for(const size_t shardBytes : {kStagedMinShardBytes / 2, kStagedMinShardBytes})
+    {
+        const size_t count = shardBytes / sizeof(float) * static_cast<size_t>(nRanks);
+        const size_t bytes = count * sizeof(float);
+        SCOPED_TRACE("shardBytes=" + std::to_string(shardBytes));
+
+        // Index-dependent integers below 251: every partial sum stays exact in f32.
+        auto value = [](size_t i, int r) { return static_cast<float>((i * 7 + static_cast<size_t>(r) * 13) % 251); };
+        std::vector<float> host(count);
+        for(size_t i = 0; i < count; ++i)
+        {
+            host[i] = value(i, rank);
+        }
+
+        void* sendBuf = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
+        DeviceBufferAutoGuard sendGuard(sendBuf);
+        void* recvBuf = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
+        DeviceBufferAutoGuard recvGuard(recvBuf);
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendBuf, host.data(), bytes, hipMemcpyHostToDevice));
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0xFF, bytes));
+
+        ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, ncclFloat32, ncclSum,
+                                                 getActiveCommunicator(), getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(host.data(), recvBuf, bytes, hipMemcpyDeviceToHost));
+
+        int64_t bad      = 0;
+        size_t  firstBad = count;
+        for(size_t i = 0; i < count; ++i)
+        {
+            float want = 0.0f;
+            for(int r = 0; r < nRanks; ++r)
+            {
+                want += value(i, r);
+            }
+            if(std::memcmp(&host[i], &want, sizeof(want)) != 0)
+            {
+                if(bad == 0)
+                {
+                    firstBad = i;
+                }
+                ++bad;
+            }
+        }
+        EXPECT_EQ(0, bad) << "Rank " << rank << ": " << bad << " of " << count << " elements wrong, first at "
+                          << firstBad;
+    }
+
+    EXPECT_TRUE(logContainsNeedle(kLL128TwoShotLogNeedle)) << "Rank " << rank << ": no LL128 two-shot launch";
+    EXPECT_TRUE(logContainsNeedle("wire=0 lds=0")) << "Rank " << rank << ": 1 MiB shards left the cooperative writer";
+    EXPECT_TRUE(logContainsNeedle("wire=1 lds=")) << "Rank " << rank << ": 2 MiB shards missed the staged writer";
 }
 
 // Whatever backend the default selection picks for 256 KiB to 4 MiB, every rank must get the same bits back.

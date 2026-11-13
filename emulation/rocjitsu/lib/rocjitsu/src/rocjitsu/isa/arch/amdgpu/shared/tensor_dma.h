@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -34,8 +35,10 @@ namespace tensor_dma_detail {
 
 // The descriptor layout is specified by the AMD CDNA5 ISA, sections 10.11.1
 // through 10.11.6, and is also present in the ROCm HIP header
-// hip/amd_detail/amd_gfx1250_TDM.h. Descriptors produced from MLIR follow
-// LLVM's AMDGPUToROCDL make_dma_descriptor lowering.
+// hip/amd_detail/amd_gfx1250_TDM.h. LLVM's AMDGPUToROCDL lowering at
+// a0957bb89e36 emits Group 0 word 0x40000001 for make_gather_dma_base with
+// i16 indices. Table 62 selects gather with bit 31, so this word requests a
+// dense transfer and the packed row indices are decoded as dense descriptor fields.
 //
 // read_descriptor treats VADDR3 == VADDR2 as an unused D3 outside gather mode.
 // parse_descriptor consumes the resulting arrays literally: null optional
@@ -123,11 +126,10 @@ inline TensorDmaDescriptor parse_descriptor(std::array<uint32_t, 4> d0, std::arr
   desc.d2 = d2;
   desc.d3 = d3;
 
-  // Descriptor bit layout follows LLVM MLIR's gfx1250 TDM lowering in
-  // mlir/lib/Conversion/AMDGPUToROCDL/AMDGPUToROCDL.cpp.
+  // CDNA5 ISA section 10.11.4, descriptor groups 0 through 3.
   desc.count = d0[0] & 0x3u;
-  desc.gather_indices_32bit = (d0[0] & (1u << 30)) != 0;
   desc.gather = (d0[0] & (1u << 31)) != 0;
+  desc.gather_indices_32bit = desc.gather && (d0[0] & (1u << 30)) != 0;
   desc.lds_base = d0[1];
   desc.global_base =
       static_cast<uint64_t>(d0[2]) | (static_cast<uint64_t>(d0[3] & kGlobalHighBitsMask) << 32);
@@ -222,15 +224,21 @@ struct TensorDmaAxis {
 };
 
 // Iteration advances the global address linearly, but bounds checks need a
-// logical tensor origin. This layout orders non-unit axes by storage stride and
-// supports a greedy inverse only when every axis starts beyond the occupied
-// span of all faster axes. Empty, single-iteration, and zero-increment
-// descriptors need no inverse. Rejecting other advancing layouts is a
-// rocJITsu support boundary rather than an ISA restriction.
+// logical tensor origin. With no skipped axes, the layout can invert the offset
+// when every non-unit axis starts beyond the occupied span of all faster axes.
+// Fully in-bounds 2D whole-row steps can use the row start even when rows
+// overlap or an interior tile dimension is unused. Empty, single-iteration,
+// and zero-increment descriptors need no inverse. Rejecting other advancing
+// layouts is a rocJITsu support boundary.
 class TensorDmaLayout {
 public:
-  explicit TensorDmaLayout(const TensorDmaDescriptor &desc) : rank_(desc.rank()) {
-    for (uint32_t dim = 0; dim < rank_; ++dim) {
+  explicit TensorDmaLayout(const TensorDmaDescriptor &desc) {
+    for (uint32_t dim = 0; dim < desc.rank(); ++dim) {
+      // A zero higher tile dimension is unused, even between active dimensions.
+      // Keep the original dimension numbers for their bounds and global strides.
+      if (dim != 0 && !desc.gather && desc.tile_dims[dim] == 0)
+        continue;
+      dimensions_[dimension_count_++] = dim;
       const uint32_t extent = desc.tensor_dims[dim];
       empty_ |= extent == 0;
       if (extent > 1) {
@@ -262,12 +270,33 @@ public:
     }
   }
 
-  uint32_t rank() const { return rank_; }
+  std::span<const uint32_t> dimensions() const { return {dimensions_.data(), dimension_count_}; }
   bool empty() const { return empty_; }
 
-  util::Result validate_iteration_inverse() const {
-    if (empty_)
+  util::Result validate_iteration_origins(const TensorDmaDescriptor &desc) const {
+    if (empty_ || desc.iteration_count <= 1 || desc.global_increment == 0)
       return util::Result::success();
+
+    // A whole-row step puts each tile at column zero. Even with overlapping
+    // rows, both tile-relative and original-tensor bounds admit the entire
+    // walk if its last tile fits. The stride-ordered inverse below picks the
+    // row before the column (also when both strides are one).
+    if (dimension_count_ == 2 && desc.tile_dims[0] <= desc.tensor_dims[0]) {
+      const uint32_t row_dim = dimensions_[1];
+      const uint64_t row_stride = desc.global_strides[row_dim - 1];
+      if (row_stride != 0 && desc.global_increment % row_stride == 0 &&
+          desc.tile_dims[row_dim] <= desc.tensor_dims[row_dim]) {
+        const uint64_t row_step = desc.global_increment / row_stride;
+        const uint32_t remaining_rows = desc.tensor_dims[row_dim] - desc.tile_dims[row_dim];
+        if (row_step <= remaining_rows / (desc.iteration_count - 1))
+          return util::Result::success();
+      }
+    }
+
+    // Dropping an interior axis can make a step along its stride look like an
+    // out-of-bounds column when the offset is inverted using the surviving axes.
+    if (dimension_count_ < desc.rank()) [[unlikely]]
+      return util::Result::failure();
 
     uint64_t occupied_span = 1;
     for (uint32_t axis_idx = 0; axis_idx < axis_count_; ++axis_idx) {
@@ -304,7 +333,8 @@ public:
 
 private:
   std::array<TensorDmaAxis, 5> axes_{};
-  uint32_t rank_ = 0;
+  std::array<uint32_t, 5> dimensions_{};
+  uint32_t dimension_count_ = 0;
   uint32_t axis_count_ = 0;
   bool empty_ = false;
 };
@@ -313,7 +343,7 @@ private:
 /// @details Gather mode uses valid_indices * tile_dims[0]. Dense mode includes
 /// every iteration. A zero tile_dims[0] makes the instruction a NOP whatever the
 /// higher tile dimensions (CDNA5 ISA 10.11.4, D# field tile_dim0). Arithmetic
-/// overflow and a zero higher dimension below the rank return std::nullopt.
+/// overflow returns std::nullopt.
 ///
 /// A NOP tile and a gather with no valid indices are still active descriptors:
 /// with atomic_barrier set, they validate the barrier address and send exactly
@@ -323,15 +353,15 @@ private:
 /// established hardware behavior.
 inline std::optional<uint64_t> tensor_element_count(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout) {
-  if (layout.rank() == 0 || desc.tile_dims[0] == 0)
+  if (desc.rank() == 0 || desc.tile_dims[0] == 0)
     return uint64_t{0};
   if (desc.gather)
     return util::checked_mul(uint64_t{desc.valid_indices}, uint64_t{desc.tile_dims[0]});
 
   uint64_t elements_per_iteration = 1;
-  for (uint32_t dim = 0; dim < layout.rank(); ++dim) {
+  for (uint32_t dim : layout.dimensions()) {
     const auto product = util::checked_mul(elements_per_iteration, uint64_t{desc.tile_dims[dim]});
-    if (!product || *product == 0) [[unlikely]]
+    if (!product) [[unlikely]]
       return std::nullopt;
     elements_per_iteration = *product;
   }
@@ -348,9 +378,7 @@ inline util::Result validate_supported_descriptor(const TensorDmaDescriptor &des
   if (desc.elem_size != 1 && desc.elem_size != 2 && desc.elem_size != 4 && desc.elem_size != 8)
       [[unlikely]]
     return util::Result::failure();
-  const uint32_t rank = layout.rank();
-  if (!desc.gather && desc.gather_indices_32bit) [[unlikely]]
-    return util::Result::failure();
+  const uint32_t rank = desc.rank();
   if (desc.gather) {
     if (rank != 2) [[unlikely]]
       return util::Result::failure();
@@ -367,10 +395,8 @@ inline util::Result validate_supported_descriptor(const TensorDmaDescriptor &des
     return util::Result::success();
   if (desc.iterate && (rank < 2 || rank > 3)) [[unlikely]]
     return util::Result::failure();
-  if (desc.iterate && desc.iteration_count > 1 && desc.global_increment != 0) {
-    if (layout.validate_iteration_inverse().failed()) [[unlikely]]
-      return util::Result::failure();
-  }
+  if (desc.iterate && layout.validate_iteration_origins(desc).failed()) [[unlikely]]
+    return util::Result::failure();
   if (!tensor_element_count(desc, layout)) [[unlikely]]
     return util::Result::failure();
   return util::Result::success();
@@ -397,6 +423,7 @@ public:
 
   TensorDmaDescriptor desc;
   std::optional<GpuVmAccess> access;
+  VmTransferToken transfer_token;
   std::vector<TensorDmaTransferElement> elements;
   std::size_t next_element = 0;
   /// PC of the tensor DMA instruction. A deferred transfer completes after the
@@ -440,12 +467,13 @@ inline bool validate_global_address_range(const TensorDmaDescriptor &desc,
       const auto iteration_offset = util::checked_mul(uint64_t{iter}, desc.global_increment);
       if (!iteration_offset) [[unlikely]]
         return false;
-      const auto origin = desc.iterate && !layout.empty()
-                              ? layout.origin_from_linear_offset(*iteration_offset)
-                              : std::array<uint64_t, 5>{};
-      bool in_bounds = !layout.empty();
+      if (layout.empty())
+        continue;
+      const auto origin = desc.iterate ? layout.origin_from_linear_offset(*iteration_offset)
+                                       : std::array<uint64_t, 5>{};
+      bool in_bounds = true;
       uint64_t last = *iteration_offset;
-      for (uint32_t dim = 0; dim < layout.rank() && in_bounds; ++dim) {
+      for (uint32_t dim : layout.dimensions()) {
         if (origin[dim] >= desc.tensor_dims[dim]) {
           in_bounds = false;
           break;
@@ -651,12 +679,12 @@ inline void for_each_gather_tensor_element(const TensorDmaDescriptor &desc,
 template <typename Visitor>
 inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
                                           const TensorDmaLayout &layout, Visitor &visit) {
-  const uint32_t rank = layout.rank();
-  if (rank == 0)
+  const std::span<const uint32_t> dimensions = layout.dimensions();
+  if (dimensions.empty())
     return;
 
   uint64_t element_count = 1;
-  for (uint32_t dim = 0; dim < rank; ++dim)
+  for (uint32_t dim : dimensions)
     element_count *= desc.tile_dims[dim];
   // Without elements there is nothing to visit, so reconstruct no origins.
   // validate_supported_descriptor accepts an empty tile without validating its
@@ -673,7 +701,7 @@ inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
                                                ? layout.origin_from_linear_offset(iteration_offset)
                                                : std::array<uint64_t, 5>{};
     bool origin_in_bounds = !layout.empty();
-    for (uint32_t dim = 0; dim < rank; ++dim) {
+    for (uint32_t dim : dimensions) {
       if (origin[dim] >= desc.tensor_dims[dim]) {
         origin_in_bounds = false;
         break;
@@ -684,7 +712,7 @@ inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
       bool in_bounds = origin_in_bounds;
       uint64_t global_element = iteration_offset;
 
-      for (uint32_t dim = 0; dim < rank; ++dim) {
+      for (uint32_t dim : dimensions) {
         const uint32_t tile_dim = desc.tile_dims[dim];
         const uint32_t coord = static_cast<uint32_t>(remaining % tile_dim);
         remaining /= tile_dim;
@@ -867,7 +895,8 @@ inline size_t try_coalesced_transfer(TensorDmaState &state, Wavefront &wf) {
   constexpr size_t kCopyBufferBytes = 256;
   constexpr uint64_t kPageBytes = IdentityAddressSpaceTranslator::kPageSize;
   const auto &first = state.elements[state.next_element];
-  if ((!state.access && wf.process_id() != 0) || !first.in_bounds || first.completed_bytes != 0)
+  if (state.transfer_token.pending() || (!state.access && wf.process_id() != 0) ||
+      !first.in_bounds || first.completed_bytes != 0)
     return 0;
   const size_t size = state.desc.elem_size;
   size_t count = 1;
@@ -918,7 +947,8 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
   if (state.outcome != VmAccessOutcome::Complete && state.outcome != VmAccessOutcome::Unavailable)
     return state.outcome;
 
-  if (state.access && !state.access->info().ready && state.next_element == 0 &&
+  if (state.access && !state.transfer_token.pending() && !state.access->info().ready &&
+      state.next_element == 0 &&
       (state.elements.empty() || state.elements.front().completed_bytes == 0)) {
     state.access = wf.snapshot_vm_access();
     if (!state.access)
@@ -946,12 +976,12 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
             element.global_address,
             std::span<const std::byte>(reinterpret_cast<const std::byte *>(element.bytes.data()),
                                        size),
-            element.completed_bytes);
+            element.completed_bytes, state.transfer_token);
       } else {
         outcome = state.access->read(
             element.global_address,
             std::span<std::byte>(reinterpret_cast<std::byte *>(element.bytes.data()), size),
-            element.completed_bytes);
+            element.completed_bytes, state.transfer_token);
       }
     } else if (state.store_from_lds) {
       outcome = wf.write_gpu_memory(element.global_address,
@@ -1043,6 +1073,8 @@ util::Result execute_tensor_dma(Inst &inst, Wavefront &wf, bool store_from_lds) 
     // Only a fresh instruction reaches this block: a deferred transfer resumes
     // from its retained state, so each instruction is reported once.
     report_issued_tensor_dma(wf, *state);
+    if (wf.instruction_execution_failed()) [[unlikely]]
+      return util::Result::failure();
     inst.set_data(std::move(state));
   }
   TensorDmaState &state = *inst.template data_as<TensorDmaState>();
@@ -1067,6 +1099,8 @@ inline VmAccessOutcome resume_tensor_dma(Instruction &inst, Wavefront &wf) {
   tensor_dma_detail::TensorDmaState &state = *inst.data_as<tensor_dma_detail::TensorDmaState>();
   state.outcome = tensor_dma_detail::resume_tensor_dma_state(state, wf);
   tensor_dma_detail::report_completed_tensor_dma(inst, wf, state);
+  if (wf.instruction_execution_failed()) [[unlikely]]
+    return VmAccessOutcome::Malformed;
   return state.outcome;
 }
 

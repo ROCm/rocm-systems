@@ -8,7 +8,7 @@
 #include "common/cpu.h"
 #include "common/floating_point.h"
 #include "common/half_reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include <bit>
 
 #include <algorithm>
@@ -134,19 +134,6 @@ template <typename Call> void expect_invalid_fp_requests(Call call) {
   }
   EXPECT_EQ(call(1ULL << 63, 0), RJ_ARITH_ERROR_INVALID_FLAGS);
   EXPECT_EQ(call(0, 1ULL << 63), RJ_ARITH_ERROR_INVALID_FLAGS);
-}
-
-// FP64 unary APIs reject nondefault guest rounding in Loose/Compatibility.
-// The caller checks that rejected requests preserve operand and status storage.
-template <typename Call> void expect_invalid_fp64_rounding(Call call) {
-  for (uint64_t cpu : supported_cpu_levels()) {
-    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
-      for (uint64_t rounding :
-           {RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
-        EXPECT_EQ(call(cpu | semantics | rounding, 0), RJ_ARITH_ERROR_INVALID_FLAGS);
-      }
-    }
-  }
 }
 
 // FMA validates malformed controls before rejecting an unsupported status request.
