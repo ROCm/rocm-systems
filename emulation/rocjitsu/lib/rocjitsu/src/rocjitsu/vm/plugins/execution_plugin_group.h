@@ -525,6 +525,26 @@ public:
     });
   }
 
+  void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_) {
+        if (auto *observer = dynamic_cast<AmdgpuTrapEntryObserver *>(entry.plugin.get()))
+          observer->onAmdgpuTrapEntered(wf);
+      }
+    });
+  }
+
+  void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf, const amdgpu::WaitFields &fields) {
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto *observer =
+            dynamic_cast<AmdgpuImplicitMemoryWaitObserver *>(plugins_[index].plugin.get());
+        if (observer && plugin_observes_hot_hooks(index, &wf, cached))
+          observer->onAmdgpuImplicitMemoryWait(wf, fields);
+      }
+    });
+  }
+
   void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts, BarrierKind kind) {
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
@@ -572,31 +592,13 @@ private:
       std::forward<Callback>(callback)();
   }
 
-  // Complete issue accounting for every observer even if one throws. Preserve
-  // the first exception for the issuer, which joins all accepted jobs.
   template <typename Callback>
   void dispatch_async_hook(const amdgpu::Wavefront *wf, Callback &&callback) {
     dispatch_wave_hot_hook(wf, [&](bool cached) {
-      size_t index = 0;
-      try {
-        for (; index != plugins_.size(); ++index) {
-          const auto &entry = plugins_[index];
-          if (entry.observes_async_instruction_issued &&
-              plugin_observes_hot_hooks(index, wf, cached))
-            callback(*plugins_[index].plugin);
-        }
-      } catch (...) {
-        for (++index; index != plugins_.size(); ++index) {
-          const auto &entry = plugins_[index];
-          if (!entry.observes_async_instruction_issued ||
-              !plugin_observes_hot_hooks(index, wf, cached))
-            continue;
-          try {
-            callback(*plugins_[index].plugin);
-          } catch (...) {
-          }
-        }
-        throw;
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        const auto &entry = plugins_[index];
+        if (entry.observes_async_instruction_issued && plugin_observes_hot_hooks(index, wf, cached))
+          callback(*entry.plugin);
       }
     });
   }

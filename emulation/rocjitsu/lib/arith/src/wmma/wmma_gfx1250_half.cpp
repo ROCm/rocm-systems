@@ -4,7 +4,9 @@
 // gfx1250 FP16/BF16 WMMA validation, baseline reduction and CPU dispatch.
 #include "common/float_formats.h"
 #include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
+#include "wmma/flags.h"
 #include "wmma/gfx1250_backends.h"
 #include "wmma/gfx1250_half.h"
 

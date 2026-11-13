@@ -608,7 +608,7 @@ public:
   void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
     EXPECT_TRUE(this->execute_instruction(inst, wf).succeeded());
     if (inst->is_memory_op())
-      this->route_memory_inst(inst, wf);
+      this->route_memory_inst(std::unique_ptr<Instruction>(inst), wf);
     else
       delete inst;
   }
@@ -659,6 +659,7 @@ inline bool should_skip_inst(std::string_view mn) {
       "s_atomic_",
       // Control flow that halts or waits
       "s_endpgm",
+      "s_code_end",
       "s_branch",
       "s_cbranch",
       "s_setpc",
@@ -724,6 +725,7 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
 
   auto cu = amdgpu::ComputeUnitCore::create(std::string(arch_name), cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr) << "Failed to create CU for " << arch_name;
+  cu->set_sendmsg_handler([](amdgpu::Wavefront &, uint32_t) { return true; });
 
   auto decoder = Decoder::create(arch);
   ASSERT_NE(decoder, nullptr) << "Failed to create decoder for " << arch_name;
@@ -1006,7 +1008,7 @@ template <typename Isa> void check_high_shared_flat_addresses(rj_code_arch_t arc
           std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
           ASSERT_NE(inst, nullptr);
           ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-          ASSERT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+          ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Complete);
           cu.flush_all();
           EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
           EXPECT_TRUE(wf->wait_counters().empty());
@@ -1111,7 +1113,7 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAlloc
           std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
           ASSERT_NE(instruction, nullptr);
           ASSERT_TRUE(cu.execute_instruction(instruction.get(), *wave).succeeded());
-          ASSERT_EQ(cu.route_memory_inst(instruction.release(), *wave),
+          ASSERT_EQ(cu.route_memory_inst(std::move(instruction), *wave),
                     amdgpu::VmAccessOutcome::Complete);
           cu.flush_all();
           const uint32_t valid_words = std::min(width, test.valid_words);
@@ -1195,7 +1197,7 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatAtomic64RequiresACompleteAllocationE
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
       ASSERT_NE(instruction, nullptr);
       ASSERT_TRUE(cu.execute_instruction(instruction.get(), *wave).succeeded());
-      ASSERT_EQ(cu.route_memory_inst(instruction.release(), *wave),
+      ASSERT_EQ(cu.route_memory_inst(std::move(instruction), *wave),
                 amdgpu::VmAccessOutcome::Complete);
       cu.flush_all();
       EXPECT_EQ(wave->lds().read64(1024 + 1016), logical_size == 1024 ? initial + 1 : initial);
@@ -1263,7 +1265,7 @@ TEST(Gfx1250MemoryExecutionHarness, DdsFaultsWithoutWrappingIntoAnotherLdsAlloca
           std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
           ASSERT_NE(inst, nullptr);
           ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-          EXPECT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Faulted);
+          EXPECT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Faulted);
           EXPECT_TRUE(wf->wait_counters().empty());
           EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
           for (uint32_t address = 0; address < own_base + wf->lds_size(); address += 4)
@@ -1319,7 +1321,7 @@ TEST(Gfx1250MemoryExecutionHarness, B64AtomicsPreflightEveryParticipatingLane) {
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, local ? ds.data() : flat.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-      EXPECT_EQ(cu.route_memory_inst(inst.release(), *wf),
+      EXPECT_EQ(cu.route_memory_inst(std::move(inst), *wf),
                 local && !valid ? VmAccessOutcome::Faulted : VmAccessOutcome::Complete);
       cu.flush_all();
       EXPECT_EQ(bool(wf->trapsts() & (1u << 8)), !local && !valid);
@@ -1390,7 +1392,7 @@ TEST(Gfx1250MemoryExecutionHarness, MixedFlatLdsAndGlobalLanesPreserveEachResult
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-      ASSERT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Complete);
       cu.flush_all();
       for (uint32_t lane = 0; lane < 3; ++lane) {
         for (uint32_t word = 0; word <= test.width; ++word) {
@@ -1499,7 +1501,7 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-      ASSERT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Complete);
       cu.flush_all();
       auto expected = [&](uint32_t lane, uint32_t word, uint32_t selected_lane) {
         if (lane != selected_lane || word < offset / 4 || word >= offset / 4 + 4)
@@ -1680,7 +1682,7 @@ void check_block_transfer_masks(rj_code_arch_t arch, bool general_completion = f
           inst->data_as<amdgpu::VectorMemState>()->sign_extend = true;
         }
         wf->set_m0(~mask); // Memory access and writeback use the issue-time mask.
-        ASSERT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+        ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Complete);
         cu.flush_all();
         for (uint32_t lane = 0; lane < 3; ++lane) {
           for (uint32_t word = 0; word < 32; ++word) {
@@ -1792,7 +1794,7 @@ template <typename Isa> void check_block_transfer_ownership(rj_code_arch_t arch)
         ASSERT_NE(inst, nullptr);
         ASSERT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
         wave->set_m0(~mask);
-        ASSERT_EQ(cu.route_memory_inst(inst.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+        ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wave), amdgpu::VmAccessOutcome::Complete);
         cu.flush_all();
         for (uint32_t lane = 0; lane < 3; ++lane) {
           for (uint32_t word = 0; word < 32; ++word) {
@@ -9329,7 +9331,7 @@ TEST(Rdna4AtomicReturnTest, FlatPackedHalfAddPreservesLdsDenormals) {
             std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
             ASSERT_NE(inst, nullptr);
             EXPECT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
-            cu.route_memory_inst(inst.release(), *wave);
+            cu.route_memory_inst(std::move(inst), *wave);
             const bool flush =
                 direct_ds && (!(denorm & 2u) || (test.input_denorm && !(denorm & 1u)));
             EXPECT_EQ(cu.lds().read32(kLdsBase + kOffset), flush ? 0u : test.expected);
@@ -9562,6 +9564,8 @@ TEST(HwregTest, GetregReadsModeAndStatusTargetIds) {
     constexpr uint32_t kStatus = 0x12345678u;
     wf->set_mode_raw(kMode);
     wf->set_status_raw(kStatus);
+    wf->set_exec(0);
+    wf->set_vcc_raw(0);
 
     EXPECT_TRUE(cu->execute_instruction(mode_inst.get(), *wf).succeeded());
     EXPECT_TRUE(cu->execute_instruction(status_inst.get(), *wf).succeeded());
@@ -9569,7 +9573,15 @@ TEST(HwregTest, GetregReadsModeAndStatusTargetIds) {
 
     const uint32_t sb = wf->sgpr_alloc().base;
     EXPECT_EQ(cu->read_sgpr(sb + 4), kMode);
-    EXPECT_EQ(cu->read_sgpr(sb + 5), kStatus);
+    // EXECZ, VCCZ and VALID are live. GFX11 retains STATUS bit 6;
+    // RDNA4 and CDNA5 put the separate privileged fields in STATE_PRIV.
+    const auto arch = arch_case.arch;
+    uint32_t expected = (kStatus & ~((1u << 6) | (1u << 11) | (1u << 12))) | (3u << 9) | (1u << 16);
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+      expected |= kStatus & (1u << 6);
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
+      expected = 0x12054600u;
+    EXPECT_EQ(cu->read_sgpr(sb + 5), expected);
     EXPECT_EQ(cu->read_sgpr(sb + 6), 0u);
 
     if (!wf->is_halted())
@@ -9854,10 +9866,13 @@ TEST(HwregTest, OtherArchitecturesPreserveHardwareRegisterMappings) {
       if (state_priv) {
         EXPECT_STREQ(amdgpu::hwreg_name(*wf, field), "WAVE_STATE_PRIV");
       }
+      // On GFX11, HW_ID1[4] is the high wave-slot bit. Slot 1 reads zero.
+      const bool gfx11_wave_slot = id == 23 && (cfg.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                                                cfg.arch == ROCJITSU_CODE_ARCH_RDNA3_5);
       uint32_t value = UINT32_MAX;
       EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value),
-                state_priv ? amdgpu::HwregAccessResult::Success
-                           : amdgpu::HwregAccessResult::Unsupported);
+                (state_priv || gfx11_wave_slot) ? amdgpu::HwregAccessResult::Success
+                                                : amdgpu::HwregAccessResult::Unsupported);
       EXPECT_EQ(value, 0u);
       const auto words = encode_sopk(arch_case.getreg_op, 4, field);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
@@ -10184,6 +10199,46 @@ TEST(HwregHelperTest, Gfx1250WgpIdRequiresRepresentableShaderArrayWidth) {
   wf->halt();
 }
 
+TEST(HwregTest, Gfx10GetregReadsSplitIbStsCounters) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    SCOPED_TRACE(arch);
+    amdgpu::GpuMemory memory("ib_sts_memory");
+    amdgpu::L2Cache l2("ib_sts_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 16;
+    cfg.vgprs_per_wf = 16;
+    auto cu = amdgpu::ComputeUnitCore::create("ib_sts_cu", cfg, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, 16, 16);
+    ASSERT_NE(wf, nullptr);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    auto &c = wf->wait_counters();
+    c.vmcnt = 0x2a;
+    c.expcnt = 5;
+    c.vscnt = 0x29;
+    // GC 10.1 and 10.3 SQ_WAVE_IB_STS place LGKM[4] at bit 7 and LGKM[5] at bit 24.
+    for (auto [lgkm, expected] :
+         {std::pair{0u, 0xa480005au}, {16u, 0xa48000dau}, {32u, 0xa580005au}, {59u, 0xa5800bdau}}) {
+      SCOPED_TRACE(lgkm);
+      c.lgkmcnt = lgkm;
+      for (auto [offset, width] : {std::pair{0u, 32u}, {4u, 4u}, {8u, 4u}, {22u, 4u}, {26u, 6u}}) {
+        SCOPED_TRACE(offset);
+        // s_getreg_b32 s3, hwreg(HW_REG_IB_STS, offset, width)
+        const uint32_t word = 0xb9030000u | encode_hwreg(7, offset, width);
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, &word));
+        ASSERT_NE(inst, nullptr);
+        ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+        const uint32_t mask = UINT32_MAX >> (32 - width);
+        EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 3), (expected >> offset) & mask);
+      }
+    }
+    wf->halt();
+  }
+}
+
 TEST(HwregHelperTest, Gfx1250ReadsModeledIbStsCounters) {
   amdgpu::GpuMemory gpu_mem("hwreg_helper_gfx1250_ib_sts_mem");
   amdgpu::L2Cache l2("hwreg_helper_gfx1250_ib_sts_l2");
@@ -10453,10 +10508,15 @@ TEST(HwregHelperTest, Rdna3TablesNameXmlHwregIds) {
     EXPECT_EQ(trapsts, 1u);
     EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(14)), "FLUSH_IB");
     EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(14), 1u),
-              amdgpu::HwregAccessResult::Unsupported);
+              amdgpu::HwregAccessResult::Success);
     EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(20)), "SHADER_FLAT_SCRATCH_LO");
     EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(20), 1u),
-              amdgpu::HwregAccessResult::ReadOnly);
+              amdgpu::HwregAccessResult::Privileged);
+    wf->set_in_trap_handler(true);
+    EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(20), 0x12340000),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(wf->scratch_base(), 0x12340000u);
+    wf->set_in_trap_handler(false);
     EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(23)), "HW_ID1");
     EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(23), 1u),
               amdgpu::HwregAccessResult::ReadOnly);
@@ -10504,6 +10564,9 @@ TEST(HwregTest, GetregExtractsPartialModeAndStatusFields) {
     ASSERT_NE(wf, nullptr);
 
     wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
+    // The seeded STATUS word has both EXECZ and VCCZ set.
+    wf->set_exec(0);
+    wf->set_vcc(0);
     wf->set_status_raw(0x12345678u);
 
     EXPECT_TRUE(cu->execute_instruction(mode_inst.get(), *wf).succeeded());

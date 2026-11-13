@@ -197,6 +197,7 @@ fn busy_instance_does_not_affect_an_independent_instance() {
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[cfg(target_os = "linux")]
 #[test]
 fn fork_child_rejects_inherited_instance_before_its_mutex() {
     let mut pointer = std::ptr::null_mut();

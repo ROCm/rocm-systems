@@ -20,8 +20,9 @@ function(rj_arith_add_test target source)
     endif()
 endfunction()
 
-rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
+rj_arith_add_test(rj_arith_sparse_matrix_i8_test mfma/sparse_matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
+rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
 rj_arith_add_test(rj_arith_mfma_floating_test mfma/mfma_floating_test.cpp)
 rj_arith_add_test(rj_arith_mfma_fp8_test mfma/mfma_fp8_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_f32_test wmma/gfx1250_f32_test.cpp)
@@ -108,6 +109,7 @@ foreach(
         v_fma_dx9_zero
         v_fma
         v_fma_mix
+        v_fma_mix_bf16
         v_fmaak
         v_fmac
         v_fmamk
@@ -123,8 +125,12 @@ foreach(
         v_minmax_maxmin_num
         v_mul_dx9_zero_f32
         v_mul
+        v_mad_mix
         v_pk_add_mul_f16
+        v_pk_add_mul_f32
+        v_pk_bf16
         v_pk_fma_f16
+        v_pk_fma_f32
         v_pk_fmac_f16
         v_pk_selection_f16
         v_rcp_rsq_sqrt_f64
@@ -140,6 +146,9 @@ foreach(
     IN
     ITEMS
         integer_pack
+        bf16
+        float16_packed
+        nibble_pack
         byte
         float16
         float32
@@ -154,7 +163,11 @@ foreach(
 endforeach()
 
 # Dot-product formats retain family-specific arithmetic and status expectations.
-foreach(family IN ITEMS integer fp8 half dot2)
+foreach(
+    family
+    IN
+    ITEMS integer fp8 half dot2 cdna
+)
     set(target "rj_arith_dot_${family}_test")
     rj_arith_add_test(${target} dot/${family}_test.cpp)
 endforeach()
@@ -222,6 +235,9 @@ endif()
 rj_arith_add_test(rj_arith_mfma_mixed_test mfma/mfma_mixed_test.cpp)
 
 rj_arith_add_test(rj_arith_wmma_gfx1250_mixed_test wmma/gfx1250_mixed_test.cpp)
+rj_arith_add_test(rj_arith_smfmac_float_test mfma/smfmac_float_test.cpp)
+
+rj_arith_add_test(rj_arith_swmmac_gfx1250_float_test wmma/gfx1250_sparse_float_test.cpp)
 
 # Related comparison predicates share a binary; every entry point has its own test.
 foreach(
