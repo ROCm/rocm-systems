@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <linux/capability.h>
+#include <pthread.h>
 #include <sched.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
@@ -21,6 +22,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -32,9 +34,12 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_test_internal.h"
+#include "test_common.h"
 
 namespace {
 
@@ -291,6 +296,46 @@ TEST(GpuUnit, CuidEntryPointsNotSupportedWithoutTheLibrary) {
   }
 }
 
+// One component whose metadata read fails after the listing, as a partition
+// does when its compute mode changes in between, is left out and the rest are
+// listed, as the CUID specification asks. Needs neither a GPU nor libamdcuid.
+TEST(GpuUnit, CuidListingLeavesOutAComponentThatFails) {
+  for (const amdsmi_status_t failure :
+       {AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_FOUND, AMDSMI_STATUS_UNEXPECTED_DATA,
+        AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_FILE_ERROR, AMDSMI_STATUS_FILE_NOT_FOUND,
+        AMDSMI_STATUS_API_FAILED}) {
+    SCOPED_TRACE(failure);
+    std::vector<amdsmi_cuid_component_t> found;
+    const auto fill = [failure](uint32_t i, amdsmi_cuid_component_t* component) {
+      if (i == 1) return failure;
+      component->vendor_id = static_cast<uint16_t>(100 + i);
+      return AMDSMI_STATUS_SUCCESS;
+    };
+    ASSERT_EQ(amdsmi_cuid_collect_components(4, fill, &found), AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(found.size(), 3u);
+    EXPECT_EQ(found[0].vendor_id, 100);
+    EXPECT_EQ(found[1].vendor_id, 102);
+    EXPECT_EQ(found[2].vendor_id, 103);
+  }
+}
+
+// A failure that is no one component's fails the listing rather than leaving
+// out every component one by one: without a machine-id the node has components
+// and cannot name any of them.
+TEST(GpuUnit, CuidListingFailsOnANodeWideStatus) {
+  for (const amdsmi_status_t failure :
+       {AMDSMI_STATUS_NO_DATA, AMDSMI_STATUS_INVAL, AMDSMI_STATUS_INSUFFICIENT_SIZE}) {
+    SCOPED_TRACE(failure);
+    std::vector<amdsmi_cuid_component_t> found;
+    const auto fill = [failure](uint32_t i, amdsmi_cuid_component_t* component) {
+      component->vendor_id = static_cast<uint16_t>(100 + i);
+      return i == 2 ? failure : AMDSMI_STATUS_SUCCESS;
+    };
+    EXPECT_EQ(amdsmi_cuid_collect_components(4, fill, &found), failure);
+    EXPECT_TRUE(found.empty());
+  }
+}
+
 // The decoder the auxiliary check below relies on, against the published
 // conformance vectors: a decoder that reads the wrong octet agrees with a
 // producer that writes the wrong octet. Needs neither a GPU nor libamdcuid.
@@ -337,9 +382,10 @@ TEST(GpuUnit, CuidSnapshotIsSelfConsistent) {
   for (auto handle : handles) {
     amdsmi_cuid_info_t info = {};
     const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handle, &info);
-    // A handle without a CUID, such as a host without a machine-id, or one
-    // this caller may not read in full, leaves nothing to check.
+    // A handle without a CUID, or one this caller may not read in full, leaves
+    // nothing to check.
     if (status == AMDSMI_STATUS_NOT_SUPPORTED || status == AMDSMI_STATUS_NO_PERM) continue;
+    if (CuidMissingForNoMachineId(status)) GTEST_SKIP() << kNoMachineIdSkip;
     ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
     ++checked;
 
@@ -407,6 +453,7 @@ TEST(GpuUnit, CuidSourceNamesTheStageThatAnswered) {
     amdsmi_cuid_info_t info = {};
     const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handle, &info);
     if (status == AMDSMI_STATUS_NOT_SUPPORTED || status == AMDSMI_STATUS_NO_PERM) continue;
+    if (CuidMissingForNoMachineId(status)) GTEST_SKIP() << kNoMachineIdSkip;
     ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS) << bdf_str;
     ++answered;
 
@@ -716,6 +763,7 @@ TEST(GpuUnit, CuidComponentListIsConsistent) {
 
   amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
   const auto components = CuidComponents(&status);
+  if (CuidMissingForNoMachineId(status)) GTEST_SKIP() << kNoMachineIdSkip;
   ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
   if (components.empty()) GTEST_SKIP() << "no component has a CUID";
 
@@ -763,7 +811,9 @@ TEST(GpuUnit, CuidComponentListReportsAShortBuffer) {
   ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
 
   uint32_t total = 0;
-  ASSERT_EQ(amdsmi_get_cuid_components(&total, nullptr), AMDSMI_STATUS_SUCCESS);
+  const amdsmi_status_t status = amdsmi_get_cuid_components(&total, nullptr);
+  if (CuidMissingForNoMachineId(status)) GTEST_SKIP() << kNoMachineIdSkip;
+  ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
   if (total < 2) GTEST_SKIP() << "fewer than two components";
 
   std::vector<amdsmi_cuid_component_t> components(total - 1);
@@ -836,29 +886,51 @@ int RerunHiding(const char* test, std::initializer_list<const char*> dirs,
   return WEXITSTATUS(status);
 }
 
-// Whether libamdcuid finds a machine identity here, read as it reads one:
-// /var/lib/dbus/machine-id only where /etc/machine-id does not exist, and 32
-// hex digits that are not all zero. Without one there is no temporary CUID.
-bool HostHasMachineId() {
-  const char* path =
-      access("/etc/machine-id", F_OK) == 0 ? "/etc/machine-id" : "/var/lib/dbus/machine-id";
-  std::ifstream file(path);
-  std::string line;
-  if (!std::getline(file, line) || line.size() != 32) return false;
-  bool nonzero = false;
-  for (char c : line) {
-    if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
-    if (c != '0') nonzero = true;
-  }
-  return nonzero;
+// Runs `body` on a thread whose mount namespace has `dirs` emptied, and returns
+// whether it could. The library does its work on the calling thread, so what
+// the thread sees is what the library sees, and the rest of the process, whose
+// state an earlier call may have cached, sees the real tree. Needs root.
+template <typename Body>
+bool OnThreadHiding(std::initializer_list<const char*> dirs, Body body) {
+  bool ready = false;
+  std::thread worker([&] {
+    if (unshare(CLONE_NEWNS) != 0) return;
+    if (mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr) != 0) return;
+    for (const char* dir : dirs) {
+      if (access(dir, F_OK) == 0 && mount("none", dir, "tmpfs", 0, nullptr) != 0) return;
+    }
+    ready = true;
+    body();
+  });
+  worker.join();
+  return ready;
+}
+
+std::vector<amdsmi_cuid_component_t> Components(amdsmi_status_t* status) {
+  uint32_t count = 0;
+  *status = amdsmi_get_cuid_components(&count, nullptr);
+  std::vector<amdsmi_cuid_component_t> components;
+  if (*status != AMDSMI_STATUS_SUCCESS) return components;
+  components.resize(count);
+  *status = amdsmi_get_cuid_components(&count, components.data());
+  components.resize(*status == AMDSMI_STATUS_SUCCESS ? count : 0);
+  return components;
+}
+
+size_t CountOfType(const std::vector<amdsmi_cuid_component_t>& components,
+                   amdsmi_cuid_component_type_t type) {
+  size_t count = 0;
+  for (const auto& c : components) count += c.info.component_type == type;
+  return count;
 }
 
 }  // namespace
 
 // Without a machine identity there is no temporary CUID, so a GPU that would
-// get one has none: NOT_SUPPORTED with nothing reported, from both entry
-// points, as amdsmi_get_cuid_components() leaves it out. A GPU that still
-// answers has a CUID from its driver or the node key, never a temporary one.
+// get one has none, and the node cannot name any of its components. That is its
+// own status, not the NOT_SUPPORTED of hardware without a CUID: an operator
+// fixes it by repairing /etc/machine-id. A GPU that still answers has a CUID
+// from its driver or the node key, never a temporary one.
 TEST(GpuUnit, CuidWithoutAMachineIdThereIsNoTemporaryCuid) {
   if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
 
@@ -877,19 +949,14 @@ TEST(GpuUnit, CuidWithoutAMachineIdThereIsNoTemporaryCuid) {
         continue;
       }
       if (status == AMDSMI_STATUS_NO_PERM && geteuid() != 0) continue;
-      EXPECT_EQ(status, AMDSMI_STATUS_NOT_SUPPORTED);
+      EXPECT_EQ(status, AMDSMI_STATUS_NO_DATA);
       ExpectNoCuidReported(info);
       EXPECT_EQ(string_status, status);
     }
     uint32_t count = 0;
     const amdsmi_status_t list_status = amdsmi_get_cuid_components(&count, nullptr);
     if (list_status == AMDSMI_STATUS_NO_PERM && geteuid() != 0) return;
-    ASSERT_EQ(list_status, AMDSMI_STATUS_SUCCESS);
-    std::vector<amdsmi_cuid_component_t> components(count);
-    ASSERT_EQ(amdsmi_get_cuid_components(&count, components.data()), AMDSMI_STATUS_SUCCESS);
-    for (const auto& c : components) {
-      EXPECT_EQ(c.info.auxiliary, 0) << c.bdf << " " << c.device_path << ": " << c.info.derived;
-    }
+    EXPECT_EQ(list_status, AMDSMI_STATUS_NO_DATA);
     return;
   }
 
@@ -986,25 +1053,218 @@ TEST(GpuUnit, CuidTemporaryComponentWithoutAPrimaryIsListed) {
   EXPECT_EQ(status, 0) << "see the rerun above";
 }
 
-// A node where no component has a CUID, such as a container with no GPU and no
-// machine-id, has an empty inventory: success with a count of zero.
-TEST(GpuUnit, CuidComponentListOfAnEmptyNodeIsEmpty) {
+// A node with nothing but its platform, such as a container with no GPU, no NIC
+// and no firmware tables, still has a component: the platform needs only the
+// machine-id.
+TEST(GpuUnit, CuidComponentListOfABareNodeIsThePlatform) {
   if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
+  if (!HostHasMachineId()) GTEST_SKIP() << "no machine identity";
 
-  if (InRerun("CuidComponentListOfAnEmptyNodeIsEmpty")) {
+  if (InRerun("CuidComponentListOfABareNodeIsThePlatform")) {
     // amdsmi_init() for GPUs fails with /sys/class/drm hidden.
     const AmdSmiSession session(AMDSMI_INIT_AMD_NICS);
     ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
-    uint32_t count = 7;
-    EXPECT_EQ(amdsmi_get_cuid_components(&count, nullptr), AMDSMI_STATUS_SUCCESS);
-    EXPECT_EQ(count, 0u);
+    amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
+    const auto components = Components(&status);
+    ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(CountOfType(components, AMDSMI_CUID_COMPONENT_PLATFORM), 1u);
+    EXPECT_EQ(CountOfType(components, AMDSMI_CUID_COMPONENT_GPU), 0u);
+    EXPECT_EQ(CountOfType(components, AMDSMI_CUID_COMPONENT_NIC), 0u);
     return;
   }
 
-  const int status = RerunHiding("CuidComponentListOfAnEmptyNodeIsEmpty",
+  const int status = RerunHiding("CuidComponentListOfABareNodeIsThePlatform",
                                  {"/sys/class/drm", "/sys/class/accel", "/sys/class/net",
                                   "/sys/bus/pci/devices", "/sys/firmware"},
-                                 {"/etc/machine-id", "/var/lib/dbus/machine-id"});
+                                 {});
   if (status == kNoNamespace) GTEST_SKIP() << "cannot create a mount namespace here";
   EXPECT_EQ(status, 0) << "see the rerun above";
+}
+
+// The library discovers components once and keeps them, so the list has to be
+// rediscovered on every call: a function that vanishes must not be listed
+// again, and one that returns must be.
+TEST(GpuUnit, CuidComponentListFollowsTheNode) {
+  if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
+  if (geteuid() != 0 || !HasCapSysAdmin()) GTEST_SKIP() << "needs root with CAP_SYS_ADMIN";
+
+  const AmdSmiSession session;
+  ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
+
+  amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
+  const auto before = Components(&status);
+  if (CuidMissingForNoMachineId(status)) GTEST_SKIP() << kNoMachineIdSkip;
+  ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
+  const size_t devices = CountOfType(before, AMDSMI_CUID_COMPONENT_GPU) +
+                         CountOfType(before, AMDSMI_CUID_COMPONENT_NIC);
+  if (devices == 0) GTEST_SKIP() << "no PCI component to take away";
+
+  size_t hidden_devices = devices;
+  const bool hid = OnThreadHiding({"/sys/bus/pci/devices"}, [&] {
+    amdsmi_status_t hidden_status = AMDSMI_STATUS_SUCCESS;
+    const auto hidden = Components(&hidden_status);
+    EXPECT_EQ(hidden_status, AMDSMI_STATUS_SUCCESS);
+    hidden_devices = CountOfType(hidden, AMDSMI_CUID_COMPONENT_GPU) +
+                     CountOfType(hidden, AMDSMI_CUID_COMPONENT_NIC);
+  });
+  if (!hid) GTEST_SKIP() << "cannot create a mount namespace here";
+  EXPECT_EQ(hidden_devices, 0u) << "components that are gone are still listed";
+
+  const auto after = Components(&status);
+  ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(after.size(), before.size()) << "components that came back are not listed";
+}
+
+// CPU packages are named by their lowest logical CPU, and the node lists them
+// in socket order: cpu96 before cpu100, which a string comparison reverses.
+TEST(GpuUnit, CuidCpuPackagesAreOrderedByLogicalCpuNumber) {
+  if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
+  if (geteuid() != 0 || !HasCapSysAdmin()) GTEST_SKIP() << "needs root with CAP_SYS_ADMIN";
+
+  const AmdSmiSession session;
+  ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
+
+  std::set<std::string> packages;
+  std::ifstream cpuinfo("/proc/cpuinfo");
+  for (std::string line; std::getline(cpuinfo, line);) {
+    if (line.rfind("physical id", 0) == 0) packages.insert(line.substr(line.find(':') + 2));
+  }
+  if (packages.size() < 2) GTEST_SKIP() << "needs a host with two CPU packages";
+  uint32_t count = 0;
+  if (CuidMissingForNoMachineId(amdsmi_get_cuid_components(&count, nullptr)))
+    GTEST_SKIP() << kNoMachineIdSkip;
+
+  std::vector<std::string> order;
+  const bool ready = OnThreadHiding({"/sys/devices/system/cpu"}, [&] {
+    size_t i = 0;
+    for (const std::string& package : packages) {
+      if (i == 2) break;
+      const std::string topology =
+          "/sys/devices/system/cpu/cpu" + std::to_string(i++ == 0 ? 96 : 100) + "/topology";
+      ASSERT_TRUE(MakeDirs(topology));
+      std::ofstream(topology + "/physical_package_id") << package << '\n';
+    }
+    amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
+    for (const auto& c : Components(&status)) {
+      if (c.info.component_type == AMDSMI_CUID_COMPONENT_CPU) order.emplace_back(c.device_path);
+    }
+    EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
+  });
+  if (!ready) GTEST_SKIP() << "cannot create a mount namespace here";
+  const std::vector<std::string> expected = {"/sys/devices/system/cpu/cpu96",
+                                             "/sys/devices/system/cpu/cpu100"};
+  EXPECT_EQ(order, expected);
+}
+
+// A partition handle the library cannot resolve through a render node must not
+// fall back on the BDF it shows, which names the parent GPU: the whole GPU's
+// CUID is not the partition's. Only a GPU that says it is whole gets the
+// fallback: an explicit SPX, or no compute-partition attribute at all, as on a
+// GPU that cannot be partitioned. A mode that is split, empty or unreadable
+// leaves the handle possibly a partition, and gets nothing.
+TEST(GpuUnit, CuidPartitionWithoutARenderNodeHasNoCuid) {
+  if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
+#ifndef AMDSMI_CUID_TEST_SYSFS_OVERRIDE
+  GTEST_SKIP() << "configure with -DAMDSMI_CUID_TEST_SYSFS_OVERRIDE=ON to exercise this case";
+#endif
+  if (geteuid() != 0 || !HasCapSysAdmin()) GTEST_SKIP() << "needs root with CAP_SYS_ADMIN";
+
+  const AmdSmiSession session;
+  ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
+
+  amdsmi_cuid_info_t whole = {};
+  const amdsmi_processor_handle handle = WholeGpuHandle(&whole);
+  if (handle == nullptr) GTEST_SKIP() << "no GPU handle names a whole GPU with a CUID";
+  amdsmi_bdf_t bdf = {};
+  ASSERT_EQ(amdsmi_get_gpu_device_bdf(handle, &bdf), AMDSMI_STATUS_SUCCESS);
+  bdf.function_number = 0;
+
+  const struct {
+    const char* name;
+    bool whole;
+  } kCases[] = {
+      {"SPX", true}, {"missing", true}, {"CPX", false}, {"empty", false}, {"unreadable", false}};
+  for (const auto& mode : kCases) {
+    SCOPED_TRACE(mode.name);
+    ScopedTempDir sysfs;
+    ASSERT_TRUE(sysfs.valid());
+    const std::string device = sysfs.path() + "/bus/pci/devices/" + BdfString(bdf);
+    const std::string attribute = device + "/current_compute_partition";
+    ASSERT_TRUE(MakeDirs(device));
+    const std::string name = mode.name;
+    if (name == "unreadable") {
+      ASSERT_TRUE(MakeDirs(attribute));
+    } else if (name != "missing") {
+      std::ofstream(attribute) << (name == "empty" ? "" : name + "\n");
+    }
+    const ScopedSysfsRoot root(sysfs.path());
+
+    amdsmi_cuid_info_t info = {};
+    amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
+    const bool ready = OnThreadHiding({"/sys/class/drm"},
+                                      [&] { status = amdsmi_get_gpu_cuid_info(handle, &info); });
+    if (!ready) GTEST_SKIP() << "cannot create a mount namespace here";
+    if (mode.whole) {
+      ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
+      EXPECT_STREQ(info.derived, whole.derived);
+    } else {
+      EXPECT_EQ(status, AMDSMI_STATUS_NOT_SUPPORTED);
+      ExpectNoCuidReported(info);
+    }
+  }
+}
+
+// Python's multiprocessing forks with other threads running in the library. A
+// child forked while one of them is inside amdsmi_get_cuid_components() has to
+// be able to call it: the mutex that serializes the calls, and the library's
+// own, are held by a thread that does not exist in the child. Each child
+// carries an alarm, so a hang shows as a signal rather than as a stuck test.
+// No GPU is initialized: amd-smi's GPU calls take rocm_smi mutexes of their
+// own, which a child forked mid-call inherits locked, and that is not what is
+// under test here.
+TEST(GpuUnit, CuidComponentListWorksInAForkedChild) {
+  if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
+
+  const AmdSmiSession session(AMDSMI_INIT_AMD_NICS);
+  ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
+
+  // Without a machine identity every call answers NO_DATA, which a child must
+  // then give too: what is under test is that it answers at all.
+  uint32_t total = 0;
+  const amdsmi_status_t answer = amdsmi_get_cuid_components(&total, nullptr);
+  if (!CuidMissingForNoMachineId(answer)) {
+    ASSERT_EQ(answer, AMDSMI_STATUS_SUCCESS);
+  }
+
+  std::atomic<bool> stop{false};
+  std::thread busy([&] {
+    while (!stop) {
+      uint32_t count = 0;
+      amdsmi_get_cuid_components(&count, nullptr);
+    }
+  });
+
+  constexpr int kChildren = 20;
+  int hung = 0;
+  int failed = 0;
+  for (int i = 0; i < kChildren; ++i) {
+    const pid_t pid = fork();
+    ASSERT_GE(pid, 0);
+    if (pid == 0) {
+      alarm(10);
+      uint32_t count = 0;
+      _exit(amdsmi_get_cuid_components(&count, nullptr) == answer ? 0 : 1);
+    }
+    int status = 0;
+    ASSERT_EQ(waitpid(pid, &status, 0), pid);
+    if (WIFSIGNALED(status)) {
+      ++hung;
+    } else if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      ++failed;
+    }
+  }
+  stop = true;
+  busy.join();
+  EXPECT_EQ(hung, 0) << hung << " of " << kChildren << " forked children hung";
+  EXPECT_EQ(failed, 0) << failed << " of " << kChildren << " forked children failed";
 }

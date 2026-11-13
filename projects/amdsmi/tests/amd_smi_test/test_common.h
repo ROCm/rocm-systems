@@ -39,6 +39,17 @@ const char* GetErrStateNameStr(amdsmi_ras_err_state_t st);
 const char* FreqEnumToStr(amdsmi_clk_type_t amdsmi_clk);
 const std::string GetVoltSensorNameStr(amdsmi_voltage_type_t st);
 
+// Whether libamdcuid finds a machine identity here, read as it reads one:
+// /var/lib/dbus/machine-id only where /etc/machine-id does not exist, and 32
+// hex digits that are not all zero. Without one there is no temporary CUID.
+bool HostHasMachineId();
+
+// Whether `status` is the AMDSMI_STATUS_NO_DATA every CUID call answers on a
+// host without a machine identity. A test that needs a CUID skips on it there
+// with kNoMachineIdSkip; on a host with a machine identity it is a failure.
+bool CuidMissingForNoMachineId(amdsmi_status_t status);
+extern const char kNoMachineIdSkip[];
+
 #if ENABLE_SMI
 void DumpMonitorInfo(const TestBase* test);
 #endif

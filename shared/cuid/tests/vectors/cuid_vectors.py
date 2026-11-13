@@ -88,14 +88,14 @@ def derive(key, raw_primary):
     """HMAC-SHA256(key, the 16 primary octets), folded into the derived layout.
 
     0:63 = hash[0:63]; 64:71 reserved; 72:116 = hash[64:108] (45 bits, not 46);
-    117 = the auxiliary bit copied from the primary; 118:121 reserved.
+    117 = 0, the temporary marker, which no DerivedID sets; 118:121 reserved.
     """
     d = hmac.new(key, raw_primary, hashlib.sha256).digest()
     out = bytearray(16)
     out[0:8] = d[0:8]
     out[8] = 0
     out[9:14] = d[8:13]
-    out[14] = (d[13] & 0x1F) | (raw_primary[14] & 0x20)
+    out[14] = d[13] & 0x1F
     out[15] = 0
     return d, bytes(out)
 
@@ -213,6 +213,9 @@ def build():
     for name, t in [("T-PLATFORM", PLATFORM), ("T-CPU", CPU), ("T-GPU", GPU),
                     ("T-NIC", NIC), ("T-NPU", NPU), ("T-OTHER", OTHER)]:
         primary(name, dict(P1, component_type=t))
+
+    _, marked = derive(TEST_KEY_1, pack_primary(aux=1, **P1))
+    assert (marked[14] >> 5) & 1 == 0, "a DerivedID carried its primary's bit 117"
 
     for name, key in [("D-1", TEST_KEY_1), ("D-2", TEST_SEED)]:
         digest, raw = derive(key, p1)

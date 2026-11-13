@@ -153,6 +153,26 @@ TEST(cuidtstUnprivileged, DerivedAndPrimaryAgreeOnTheLastOctets) {
   EXPECT_EQ(derived.raw_bits[15] & 0xFC, 0) << "derived payload wrote into the UUID padding";
 }
 
+// Bit 117 is 0 in every DerivedID: the specification has no temporary
+// PrimaryID, and a primary built with the bit set must not pass it on.
+TEST(cuidtstUnprivileged, DerivedIdNeverCarriesBit117) {
+  uint8_t key[32] = {0};
+  for (size_t i = 0; i < sizeof(key); ++i) key[i] = static_cast<uint8_t>(0xA5 ^ i);
+  cuid_hmac hmac(key);
+  for (const bool marked : {false, true}) {
+    amdcuid_primary_id primary = {};
+    ASSERT_EQ(CuidUtilities::generate_primary_cuid(0x76543210FEDCBA98ull, 0, 0xC1, 0x73A1, 0x1002,
+                                                   AMDCUID_DEVICE_TYPE_GPU, &primary, marked),
+              AMDCUID_STATUS_SUCCESS);
+    ASSERT_EQ((primary.raw_bits[14] & 0x20) != 0, marked);
+    amdcuid_derived_id derived = {};
+    ASSERT_EQ(CuidUtilities::generate_derived_cuid(&primary, &derived, &hmac),
+              AMDCUID_STATUS_SUCCESS);
+    EXPECT_EQ(derived.raw_bits[14] & 0x20, 0) << "primary bit 117 " << marked;
+    EXPECT_EQ(derived.UUIDv8_representation.bytes[15] & 0x80, 0) << "primary bit 117 " << marked;
+  }
+}
+
 // The HMAC message for an adopted identifier is the firmware UUID itself, all
 // sixteen octets. De-framing it first drops six bits, so two platforms whose
 // system UUIDs differ only in their version and variant bits would collide.

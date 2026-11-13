@@ -1,7 +1,6 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -152,11 +151,37 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count)
 
 namespace {
 
-amdcuid_status_t enumerate_into_manager() {
-  if (!mgr.devices().empty()) {
-    return AMDCUID_STATUS_SUCCESS;
+// The component `matches` names, from an inventory discovery has just taken.
+// A lookup answers only for a component discovery lists: one missing from the
+// inventory may have appeared since it was taken, so discovery runs again, but
+// nothing it does not list is ever added to the inventory. `diagnose` reads
+// the component alone, only to say why discovery left it out.
+template <typename Matches, typename Diagnose>
+amdcuid_status_t find_after_discovery(const Matches& matches, const Diagnose& diagnose,
+                                      amdcuid_id_t* handle) {
+  const auto status = mgr.discover_devices();
+  if (status != AMDCUID_STATUS_SUCCESS && status != AMDCUID_STATUS_DEVICE_NOT_FOUND &&
+      status != AMDCUID_STATUS_UNSUPPORTED)
+    return status;
+  for (const auto& device : mgr.devices()) {
+    if (matches(device)) return current_handle(device, handle);
   }
-  return mgr.discover_devices();
+  const auto why = diagnose();
+  return why == AMDCUID_STATUS_SUCCESS ? AMDCUID_STATUS_DEVICE_NOT_FOUND : why;
+}
+
+// A type this library discovers components of.
+bool discovered_type(amdcuid_device_type_t type) {
+  switch (type) {
+    case AMDCUID_DEVICE_TYPE_PLATFORM:
+    case AMDCUID_DEVICE_TYPE_CPU:
+    case AMDCUID_DEVICE_TYPE_GPU:
+    case AMDCUID_DEVICE_TYPE_NIC:
+    case AMDCUID_DEVICE_TYPE_NPU:
+      return true;
+    default:
+      return false;
+  }
 }
 
 // The physical package of the logical CPU at `path`, or -1. A package is
@@ -294,9 +319,10 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
                                                 amdcuid_device_type_t device_type,
                                                 amdcuid_id_t* handle) {
   std::lock_guard<std::recursive_mutex> operation(cuid_operation_mutex());
-  if (!dev_path || !handle) {
+  if (!dev_path || !handle || !amdcuid_device_type_is_valid(device_type)) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
+  if (!discovered_type(device_type)) return AMDCUID_STATUS_UNSUPPORTED;
 
   std::string input_dev_path(dev_path);
   CuidGpuRoute gpu_route;
@@ -361,105 +387,75 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
     return path == input_dev_path || path == real_dev_path ||
            (!real.empty() && real == real_dev_path);
   };
-  // check mgr first to see if device is already known
   for (const auto& device : mgr.devices()) {
     if (matches(device)) return current_handle(device, handle);
   }
-
-  const auto enumeration_status = enumerate_into_manager();
-  if (enumeration_status == AMDCUID_STATUS_SUCCESS) {
-    for (const auto& enumerated : mgr.devices()) {
-      if (matches(enumerated)) return current_handle(enumerated, handle);
+  const auto diagnose = [&]() {
+    amdcuid_status_t status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
+    if (gpu_resolved) {
+      amdcuid_gpu_info info{};
+      return CuidGpu::discover_single(&info, gpu_route.node);
     }
-  } else if (enumeration_status != AMDCUID_STATUS_DEVICE_NOT_FOUND &&
-             enumeration_status != AMDCUID_STATUS_UNSUPPORTED) {
-    return enumeration_status;
-  }
-
-  // Verified GPU paths can be described without reading a secret.
-  amdcuid_status_t status;
-  DevicePtr device;
-  if (gpu_resolved) {
-    amdcuid_gpu_info info{};
-    status = CuidGpu::discover_single(&info, gpu_route.node);
-    if (status != AMDCUID_STATUS_SUCCESS) return status;
-    device = std::make_shared<CuidGpu>(info);
-  } else {
-    device = discover_device_by_path(real_dev_path.c_str(), device_type, status);
-  }
-
-  if (!device) return status;
-  return current_handle(device, handle);
+    discover_device_by_path(real_dev_path.c_str(), device_type, status);
+    return status;
+  };
+  return find_after_discovery(matches, diagnose, handle);
 }
 
-amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_t device_type,
+amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf_arg, amdcuid_device_type_t device_type,
                                            amdcuid_id_t* handle) {
   std::lock_guard<std::recursive_mutex> operation(cuid_operation_mutex());
   // The BDF becomes a sysfs path component below; anything but DDDD:BB:SS.F
-  // could name somewhere else.
-  if (!bdf || !handle || !CuidUtilities::is_valid_bdf(bdf)) {
+  // could name somewhere else. Discovery and sysfs spell it one way, so every
+  // spelling the validator accepts is looked up as that one.
+  const std::string canonical = bdf_arg ? CuidUtilities::canonical_bdf(bdf_arg) : "";
+  if (canonical.empty() || !handle || !amdcuid_device_type_is_valid(device_type)) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
+  const char* bdf = canonical.c_str();
 
   if (device_type == AMDCUID_DEVICE_TYPE_CPU || device_type == AMDCUID_DEVICE_TYPE_PLATFORM) {
     return AMDCUID_STATUS_WRONG_DEVICE_TYPE;
   }
+  if (!discovered_type(device_type)) return AMDCUID_STATUS_UNSUPPORTED;
 
-  // check mgr first to see if device is already known
-  for (const auto& device : mgr.devices()) {
+  const auto matches = [&](const DevicePtr& device) {
     std::string device_bdf;
-    amdcuid_status_t status = device->get_bdf(device_bdf);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      continue;
-    }
-    if (device_bdf == bdf && device->type() == device_type) {
-      return current_handle(device, handle);
-    }
+    return device->type() == device_type && device->get_bdf(device_bdf) == AMDCUID_STATUS_SUCCESS &&
+           device_bdf == bdf;
+  };
+  for (const auto& device : mgr.devices()) {
+    if (matches(device)) return current_handle(device, handle);
   }
-
-  const auto enumeration_status = enumerate_into_manager();
-  if (enumeration_status == AMDCUID_STATUS_SUCCESS) {
-    for (const auto& enumerated : mgr.devices()) {
+  const auto diagnose = [&]() {
+    for (const auto& device : mgr.devices()) {
       std::string device_bdf;
-      if (enumerated->get_bdf(device_bdf) != AMDCUID_STATUS_SUCCESS) {
-        continue;
-      }
-      if (device_bdf == bdf && enumerated->type() == device_type) {
-        return current_handle(enumerated, handle);
-      }
+      if (device->get_bdf(device_bdf) == AMDCUID_STATUS_SUCCESS && device_bdf == bdf)
+        return AMDCUID_STATUS_WRONG_DEVICE_TYPE;
     }
-  } else if (enumeration_status != AMDCUID_STATUS_DEVICE_NOT_FOUND &&
-             enumeration_status != AMDCUID_STATUS_UNSUPPORTED) {
-    return enumeration_status;
-  }
-
-  // Not already known: discover just this one device by BDF.
-  DevicePtr device = nullptr;
-  if (device_type == AMDCUID_DEVICE_TYPE_GPU) {
-    CuidGpuRoute route;
-    const amdcuid_status_t routed =
-        CuidGpu::resolve_path(std::string("/sys/bus/pci/devices/") + bdf, route);
-    if (routed == AMDCUID_STATUS_SUCCESS && !route.partition)
-      return amdcuid_get_handle_by_dev_path(route.node.c_str(), device_type, handle);
-    if (routed != AMDCUID_STATUS_SUCCESS && routed != AMDCUID_STATUS_UNSUPPORTED &&
-        routed != AMDCUID_STATUS_FILE_NOT_FOUND)
-      return routed;
-  }
-  std::string device_path = CuidUtilities::bdf_to_device_path(bdf, device_type);
-  if (device_path.empty()) {
-    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-  }
-  // bdf_to_device_path() already returns a sysfs path, not a device node.
-  amdcuid_status_t status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
-  device = discover_device_by_path(device_path.c_str(), device_type, status);
-
-  if (!device) return status;
-  return current_handle(device, handle);
+    if (device_type == AMDCUID_DEVICE_TYPE_GPU) {
+      CuidGpuRoute route;
+      const amdcuid_status_t routed =
+          CuidGpu::resolve_path(std::string("/sys/bus/pci/devices/") + bdf, route);
+      if (routed == AMDCUID_STATUS_SUCCESS && !route.partition) {
+        amdcuid_gpu_info info{};
+        return CuidGpu::discover_single(&info, route.node);
+      }
+      if (routed != AMDCUID_STATUS_SUCCESS && routed != AMDCUID_STATUS_UNSUPPORTED &&
+          routed != AMDCUID_STATUS_FILE_NOT_FOUND)
+        return routed;
+    }
+    const std::string device_path = CuidUtilities::bdf_to_device_path(bdf, device_type);
+    amdcuid_status_t status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
+    if (!device_path.empty()) discover_device_by_path(device_path.c_str(), device_type, status);
+    return status;
+  };
+  return find_after_discovery(matches, diagnose, handle);
 }
 
 amdcuid_status_t amdcuid_get_handle_by_fd(int fd, amdcuid_device_type_t device_type,
                                           amdcuid_id_t* handle) {
-  if (fd < 0 || !handle) {
+  if (fd < 0 || !handle || !amdcuid_device_type_is_valid(device_type)) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
 
@@ -467,6 +463,7 @@ amdcuid_status_t amdcuid_get_handle_by_fd(int fd, amdcuid_device_type_t device_t
       device_type == AMDCUID_DEVICE_TYPE_NIC) {
     return AMDCUID_STATUS_WRONG_DEVICE_TYPE;
   }
+  if (!discovered_type(device_type)) return AMDCUID_STATUS_UNSUPPORTED;
 
   std::string device_path = CuidUtilities::real_dev_path_from_fd(fd);
   if (device_path.empty()) {
@@ -746,10 +743,10 @@ amdcuid_status_t amdcuid_get_key_info(amdcuid_key_info_t* info) {
 }
 
 amdcuid_status_t amdcuid_generate_hash_key(uint8_t key[32]) {
+  if (!key) return AMDCUID_STATUS_INVALID_ARGUMENT;
   if (geteuid() != 0) {
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
-  if (!key) return AMDCUID_STATUS_INVALID_ARGUMENT;
 
   cuid_hmac hmac;
   return hmac.generate_key(key);

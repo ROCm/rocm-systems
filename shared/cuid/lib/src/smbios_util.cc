@@ -3,14 +3,16 @@
 
 #include "smbios_util.h"
 
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstring>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 #include "cuid_util.h"
 
@@ -42,120 +44,99 @@ amdcuid_status_t SmbiosUtil::get_system_uuid(uint8_t* uuid) {
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t SmbiosUtil::get_uuid_from_smbios_table(uint8_t* uuid) {
-  const std::string smbios_path = std::string(DMI_TABLES_PATH) + "DMI";
-  const std::string smbios_entry_path = std::string(DMI_TABLES_PATH) + "smbios_entry_point";
+namespace {
 
-  if (geteuid() != 0) {
-    return AMDCUID_STATUS_PERMISSION_DENIED;
-  }
-
-  // validate the SMBIOS entry point and version. If version is < 2.1, then there won't be a UUID
-  // and we should quit there
-  std::ifstream validate_version(smbios_entry_path);
-  if (validate_version.is_open()) {
-    // check the anchor string first
-    char anchor[4];
-    validate_version.read(anchor, 4);
-    if (std::string(anchor, 4) == "_SM_") {
-      // version starts at offset 0x6
-      validate_version.seekg(0x6);
-      char version_major;
-      char version_minor;
-      validate_version.read(&version_major, 1);
-      validate_version.read(&version_minor, 1);
-      // Check if version is less than 2.1
-      if (version_major < 2 || (version_major == 2 && version_minor < 1)) {
-        return AMDCUID_STATUS_UNSUPPORTED;
-      }
-    } else if (std::string(anchor, 4) == "_SM3") {
-      // version starts at offset 0x7
-      validate_version.seekg(0x7);
-      char version_major;
-      char version_minor;
-      validate_version.read(&version_major, 1);
-      validate_version.read(&version_minor, 1);
-      // Check if version is less than 3.0
-      if (version_major < 3) {
-        return AMDCUID_STATUS_UNSUPPORTED;
-      }
-    } else {
-      // file is corrupted/malformed so
-      return AMDCUID_STATUS_SMBIOS_ERROR;
+// read(2) reports a read error as a failed read; a stream iterator throws it
+// out of this status-returning interface.
+bool read_file(const std::string& path, std::vector<uint8_t>& out) {
+  const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return false;
+  out.clear();
+  uint8_t buffer[4096];
+  for (;;) {
+    const ssize_t n = read(fd, buffer, sizeof(buffer));
+    if (n < 0 && errno == EINTR) continue;
+    if (n < 0) {
+      close(fd);
+      return false;
     }
+    if (n == 0) break;
+    out.insert(out.end(), buffer, buffer + n);
+  }
+  close(fd);
+  return true;
+}
+
+}  // namespace
+
+amdcuid_status_t SmbiosUtil::parse_entry_point_version(const uint8_t* entry, size_t length,
+                                                       uint16_t& version) {
+  if (!entry) return AMDCUID_STATUS_INVALID_ARGUMENT;
+  // The 32-bit entry point, "_SM_", has the major and minor version at 0x6
+  // and 0x7; the 64-bit one, "_SM3_", at 0x7 and 0x8.
+  if (length >= 0x8 && std::memcmp(entry, "_SM_", 4) == 0) {
+    version = static_cast<uint16_t>(entry[0x6] << 8 | entry[0x7]);
+  } else if (length >= 0x9 && std::memcmp(entry, "_SM3_", 5) == 0) {
+    version = static_cast<uint16_t>(entry[0x7] << 8 | entry[0x8]);
   } else {
     return AMDCUID_STATUS_SMBIOS_ERROR;
   }
-  // that's all we needed with version so we can close the file
-  validate_version.close();
+  // The System UUID field arrived in SMBIOS 2.1.
+  return version < 0x0201 ? AMDCUID_STATUS_UNSUPPORTED : AMDCUID_STATUS_SUCCESS;
+}
 
-  // now search through the DMI struct table to find the System Header and then the UUID
-  std::ifstream struct_table(smbios_path);
-  if (!struct_table) {
-    // failed to open the SMBIOS struct table file
-    return AMDCUID_STATUS_SMBIOS_ERROR;
-  }
-
-  uint8_t type = 0;
-  uint32_t struct_offset = 0;
-  const uint8_t TYPE_SYSTEM_INFO = 0x1;
-  uint8_t smbios_header[4] = {0};
-  struct_table.read(reinterpret_cast<char*>(smbios_header), 4);
-  type = smbios_header[0];
-  // iterate through the table to find the System Header and then the UUID
-  while (type != TYPE_SYSTEM_INFO && !struct_table.eof()) {
-    // move to the next structure and get past the strings section
-    struct_offset += smbios_header[1];
-    struct_table.seekg(struct_offset, std::ios::beg);
-
-    bool peek1, peek2;
-    peek1 = peek2 = false;
-    while (!peek1 || !peek2) {
-      if (struct_table.eof()) {
-        // reached end of file without finding the System Info structure
-        return AMDCUID_STATUS_SMBIOS_ERROR;
+amdcuid_status_t SmbiosUtil::parse_system_uuid(const uint8_t* table, size_t length,
+                                               uint16_t version, uint8_t* uuid) {
+  if (!table || !uuid) return AMDCUID_STATUS_INVALID_ARGUMENT;
+  constexpr uint8_t kSystemInformation = 1;
+  constexpr uint8_t kEndOfTable = 127;
+  constexpr size_t kUuidOffset = 0x8;
+  constexpr size_t kUuidLength = 16;
+  size_t offset = 0;
+  while (offset + 4 <= length) {
+    const uint8_t type = table[offset];
+    const size_t formatted = table[offset + 1];
+    if (formatted < 4 || offset + formatted > length) return AMDCUID_STATUS_SMBIOS_ERROR;
+    // The string set follows the formatted area and ends with two NULs. Like
+    // Linux's dmi_table(), a structure whose string set the table cuts off is
+    // not read.
+    size_t next = offset + formatted;
+    while (next + 1 < length && (table[next] != 0 || table[next + 1] != 0)) ++next;
+    if (next + 1 >= length) return AMDCUID_STATUS_SMBIOS_ERROR;
+    if (type == kSystemInformation) {
+      // A structure too short to hold the field has no UUID, as Linux's
+      // dmi_save_uuid() also decides.
+      if (formatted < kUuidOffset + kUuidLength) return AMDCUID_STATUS_SMBIOS_ERROR;
+      const uint8_t* raw = table + offset + kUuidOffset;
+      // From SMBIOS 2.6 the first three fields are little-endian; before it
+      // the UUID is stored as written. Linux reads it the same way.
+      if (version >= 0x0206) {
+        const uint8_t swapped[8] = {raw[3], raw[2], raw[1], raw[0], raw[5], raw[4], raw[7], raw[6]};
+        std::memcpy(uuid, swapped, sizeof(swapped));
+        std::memcpy(uuid + 8, raw + 8, 8);
+      } else {
+        std::memcpy(uuid, raw, kUuidLength);
       }
-      peek1 = (struct_table.peek() == 0);
-      struct_table.ignore(1);
-      struct_offset++;
-      peek2 = (struct_table.peek() == 0);
+      return AMDCUID_STATUS_SUCCESS;
     }
-    struct_table.ignore(1);  // Skip the double null terminator
-    struct_offset++;
-    struct_table.read(reinterpret_cast<char*>(smbios_header), 4);
-    type = smbios_header[0];
+    if (type == kEndOfTable) break;
+    offset = next + 2;
   }
+  return AMDCUID_STATUS_SMBIOS_ERROR;
+}
 
-  if (type != TYPE_SYSTEM_INFO) {
+amdcuid_status_t SmbiosUtil::get_uuid_from_smbios_table(uint8_t* uuid) {
+  if (geteuid() != 0) {
+    return AMDCUID_STATUS_PERMISSION_DENIED;
+  }
+  std::vector<uint8_t> entry, table;
+  if (!read_file(std::string(DMI_TABLES_PATH) + "smbios_entry_point", entry) ||
+      !read_file(std::string(DMI_TABLES_PATH) + "DMI", table))
     return AMDCUID_STATUS_SMBIOS_ERROR;
-  }
-
-  // now at the System Info structure, read the UUID at offset 0x8
-  uint8_t raw_bytes[16] = {0};
-  const uint8_t UUID_OFFSET = 0x8;
-  struct_table.seekg(struct_offset + UUID_OFFSET, std::ios::beg);
-  struct_table.read(reinterpret_cast<char*>(raw_bytes), 16);
-
-  // we need to store the bytes in such a way that when we use get_cuid_as_string, it prints out the
-  // same way as regular UUIDs
-  uuid[0] = raw_bytes[3];
-  uuid[1] = raw_bytes[2];
-  uuid[2] = raw_bytes[1];
-  uuid[3] = raw_bytes[0];
-
-  uuid[4] = raw_bytes[5];
-  uuid[5] = raw_bytes[4];
-
-  uuid[6] = raw_bytes[7];
-  uuid[7] = raw_bytes[6];
-
-  for (int i = 8; i < 16; ++i) {
-    uuid[i] = raw_bytes[i];
-  }
-
-  struct_table.close();
-
-  return AMDCUID_STATUS_SUCCESS;
+  uint16_t version = 0;
+  const amdcuid_status_t status = parse_entry_point_version(entry.data(), entry.size(), version);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+  return parse_system_uuid(table.data(), table.size(), version, uuid);
 }
 
 // Get system serial number

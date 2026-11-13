@@ -51,4 +51,14 @@ class CuidCpu : public CuidDevice {
   amdcuid_cpu_info m_info;
 };
 
+// PPIN (Protected Processor Inventory Number) of logical CPU `cpu`. SUCCESS with
+// ppin == 0 means the CPU has none, or this is not an x86 CPU; any other status
+// means it has one this caller cannot read (PERMISSION_DENIED or FILE_ERROR) or
+// the sources are malformed, and ppin is 0. The paths, the kernel release and
+// the AMD CPUID PPIN bit are the system's in CuidCpu and are parameters so tests
+// can fake them.
+amdcuid_status_t read_cpu_ppin(const std::string& cpu_base_path, const std::string& cpuinfo_path,
+                               const std::string& msr_base_path, const std::string& kernel_release,
+                               bool amd_ppin_cpuid, uint16_t vendor_id, int cpu, uint64_t& ppin);
+
 #endif  // CUID_CPU_H

@@ -1,0 +1,10 @@
+prefix=${pcfiledir}/@AMDCUID_PC_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: @AMDCUID@
+Description: AMD Component Unified ID (CUID) library
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lamdcuid_static@AMDCUID_PC_LIBS@
+Cflags: -I${includedir}/@AMDCUID@

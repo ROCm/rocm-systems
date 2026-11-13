@@ -125,6 +125,11 @@ std::string device_type_to_string(amdcuid_device_type_t type);
 
 bool is_valid_bdf(const std::string& bdf);
 
+// The spelling Linux gives a PCI function in sysfs: lower-case hex, a segment
+// of at least four digits with no further leading zeros. Empty when `bdf` is
+// not a valid BDF.
+std::string canonical_bdf(const std::string& bdf);
+
 // Format field of the auxiliary input structure (bits 0:15).
 constexpr uint16_t kAuxFormatPcie = 1;
 constexpr uint16_t kAuxFormatCpu = 2;

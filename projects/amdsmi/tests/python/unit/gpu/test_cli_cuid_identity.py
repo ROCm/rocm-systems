@@ -118,6 +118,7 @@ def make_cli(stack):
     helpers._is_hypervisor = False
     helpers._is_passthrough = False
     helpers.get_gpu_id_from_device_handle = lambda handle: handle - 1
+    helpers.error_collector = sys.modules["amdsmi_cli_exceptions"].AmdSmiErrorCollector()
     return types.SimpleNamespace(
         api=api,
         helpers=helpers,
@@ -477,6 +478,20 @@ class TestCliNodeCuid(unittest.TestCase):
         with self.cli() as cli:
             rows = run_node(cli, "csv", components=LibraryError(2), cuid=True)
         self.assertEqual([row["components"] for row in rows], ["N/A"])
+
+    def test_a_node_that_cannot_name_its_components_fails_the_command(self):
+        # AMDSMI_STATUS_NO_DATA: the library found no usable machine-id.
+        with self.cli() as cli:
+            cuid = run_node(cli, "json", components=LibraryError(40), cuid=True)["cuid"]
+            self.assertEqual(
+                cuid["components"], "Error occurred for node CUID components - amdsmi error 40"
+            )
+            self.assertEqual(cli.helpers.error_collector.resolve_exit_code(), 40)
+
+    def test_an_unsupported_library_leaves_the_exit_code_alone(self):
+        with self.cli() as cli:
+            run_node(cli, "json", components=LibraryError(2), cuid=True)
+            self.assertEqual(cli.helpers.error_collector.resolve_exit_code(), 0)
 
     def test_cuid_is_not_part_of_the_default_node_output(self):
         with self.cli() as cli:

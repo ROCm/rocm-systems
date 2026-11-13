@@ -86,6 +86,8 @@ class TestGpuIdentity(unittest.TestCase):
 
     def test_get_gpu_device_cuid(self):
         self.common.print_func_name("")
+        if not common.host_has_machine_id():
+            self.skipTest("no machine identity on this host, so no temporary CUID")
         self.common.Test_API_Per_GPU(amdsmi_get_gpu_device_cuid=amdsmi.amdsmi_get_gpu_device_cuid)
         return
 
