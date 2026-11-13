@@ -240,9 +240,10 @@ namespace rocjitsu::test {
 
 class KfdCuAtomicTestAccess {
 public:
-  static amdgpu::VmAccessOutcome route(amdgpu::ComputeUnitCore &cu, Instruction *instruction,
+  static amdgpu::VmAccessOutcome route(amdgpu::ComputeUnitCore &cu,
+                                       std::unique_ptr<Instruction> &&instruction,
                                        amdgpu::Wavefront &wave) {
-    return cu.route_memory_inst(instruction, wave);
+    return cu.route_memory_inst(std::move(instruction), wave);
   }
 
   static void retry(amdgpu::ComputeUnitCore &cu) { cu.global_mem_pipeline_.tick(); }
@@ -16756,7 +16757,7 @@ TEST(KfdCuAtomicTest, VmidZeroAtomicSurvivesKfdFrontendTeardown) {
   std::memcpy(atomic->store_data.data(), &kIncrement, sizeof(kIncrement));
 
   EXPECT_EQ(rocjitsu::test::KfdCuAtomicTestAccess::route(
-                *cu, new KfdCuAtomicInstruction(std::move(atomic)), *wave),
+                *cu, std::make_unique<KfdCuAtomicInstruction>(std::move(atomic)), *wave),
             VmAccessOutcome::Complete);
   EXPECT_EQ(soc->memory()->read32(kAddress), kInitial + kIncrement);
 }
@@ -16819,7 +16820,7 @@ TEST_P(KfdPreparedSdmaTest, CuVmidZeroAtomicRetainsKfdDirtyGrantBoundary) {
   std::memcpy(atomic->store_data.data(), &kIncrement, sizeof(kIncrement));
 
   EXPECT_EQ(rocjitsu::test::KfdCuAtomicTestAccess::route(
-                *cu, new KfdCuAtomicInstruction(std::move(atomic)), *wave),
+                *cu, std::make_unique<KfdCuAtomicInstruction>(std::move(atomic)), *wave),
             VmAccessOutcome::Complete);
   EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
   EXPECT_EQ(soc_->memory()->read32(kAddress), kInitial);
@@ -16930,7 +16931,7 @@ TEST_P(KfdPreparedSdmaTest, CuAtomicRetriesClosedDirtyAliasBeforeAnyEffect) {
   const uint64_t epoch = l2->coherence_domain()->current_epoch();
   const uint64_t writes = l2->backing_write_transactions();
   EXPECT_EQ(rocjitsu::test::KfdCuAtomicTestAccess::route(
-                *cu, new KfdCuAtomicInstruction(std::move(atomic)), *wave),
+                *cu, std::make_unique<KfdCuAtomicInstruction>(std::move(atomic)), *wave),
             VmAccessOutcome::Complete);
   EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
   uint32_t observed = 0;
@@ -17012,7 +17013,7 @@ TEST_P(KfdPreparedSdmaTest, CuAtomicRejectsStaleDirtyGenerationBeforeAnyEffect) 
   const uint64_t epoch = l2->coherence_domain()->current_epoch();
   const uint64_t writes = l2->backing_write_transactions();
   EXPECT_EQ(rocjitsu::test::KfdCuAtomicTestAccess::route(
-                *cu, new KfdCuAtomicInstruction(std::move(atomic)), *wave),
+                *cu, std::make_unique<KfdCuAtomicInstruction>(std::move(atomic)), *wave),
             VmAccessOutcome::Revoked);
   uint32_t observed = 0;
   std::memcpy(&observed, target.host, sizeof(observed));

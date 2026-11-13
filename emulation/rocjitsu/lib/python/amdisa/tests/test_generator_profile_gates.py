@@ -924,11 +924,11 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
                         f'SCC={body_writes_scc}, MR ISA writes SCC={mrisa_writes_scc}'
                     )
                 if sem.semantic_class == 'scalar_addk':
-                    # RDNA3/4 delegate signed overflow to the corresponding rj-arith
-                    # ADDK API; other architectures still emit the local helper.
+                    # Migrated architectures delegate signed overflow to rj-arith;
+                    # other architectures still emit the local helper.
                     overflow = (
                         f'rj_arith_{inst.name.lower()}('
-                        if isa_name in ('rdna3', 'rdna4')
+                        if isa_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
                         else 'signed_add_overflows'
                     )
                     if overflow not in body:
@@ -4248,9 +4248,10 @@ def test_scalar_f16_source_lowering_uses_numeric_operand_format(arch_name):
         if not numeric_sources:
             assert 'read_scalar_f16_carrier' not in body, name
         if high:
-            if arch_name == 'rdna4':
+            if arch_name in ('rdna4', 'cdna5'):
                 # The rj-arith entry point selects the high half of the carrier.
-                assert 'rj_arith_s_cvt_hi_f32_f16(' in body
+                suffix = '_gfx1250' if arch_name == 'cdna5' else ''
+                assert f'rj_arith_s_cvt_hi_f32_f16{suffix}(' in body
             else:
                 assert '>> 16' in body, name
 
@@ -4572,14 +4573,16 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
     assert 'amdgpu::pseudo_scalar::' not in ordinary_exp
 
 
-def test_generated_scalar_f16_arithmetic_does_not_consume_fp16_ovfl(
-    execute_shared_path: Path,
+def test_generated_scalar_f16_arithmetic_delegates_overflow_policy(
+    amdgpu_generated_root: Path,
 ):
-    execute_shared = execute_shared_path.read_text()
-    body = _shared_execute_body(execute_shared, 's_add_f16_sop2', 's_add_f32_sop2')
+    source = (amdgpu_generated_root / 'cdna5/sop2_exec.cpp').read_text()
+    body = _generated_method_body(source, 'SAddF16Sop2', 'SSubF16Sop2')
 
-    assert 'util::f32_to_f16(result)' in body
-    assert 'wf.fp16_ovfl()' not in body
+    # The library keeps Compatibility's fixed narrowing; Loose may honor FP16_OVFL.
+    assert 'rj_arith_s_add_f16_gfx1250(flags,' in body
+    assert 'flags |= RJ_ARITH_FP16_OVFL' in body
+    assert 'util::f32_to_f16' not in body
 
 
 def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
@@ -9629,8 +9632,8 @@ def test_gfx1250_async_lds_generators_apply_signed_ioffset():
             [], [], global_store
         )
         assert (
-            'uint32_t lds_addr = '
-            f'async_lds_lane_address(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
+            'const auto source = '
+            f'async_lds_lane_source(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
             in global_store_body
         )
 
@@ -9652,6 +9655,71 @@ def test_gfx1250_async_lds_generators_apply_signed_ioffset():
         '    int64_t offset = static_cast<int64_t>('
         'static_cast<int32_t>(inst_.ioffset << 8) >> 8);' in rdna4_addtid_lines
     )
+
+
+@pytest.mark.parametrize(
+    ('name', 'elem_size', 'num_elems'),
+    [
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B8', 1, 1),
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B32', 4, 1),
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B64', 4, 2),
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B128', 4, 4),
+    ],
+)
+def test_gfx1250_async_store_records_lds_source_addresses(
+    name: str, elem_size: int, num_elems: int
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
+    store = SimpleNamespace(name=name, elem_size=elem_size, num_elems=num_elems)
+
+    body = codegen._gen_global_store_async_from_lds([], [], store)
+
+    assert 'd->lds_src = true;' in body
+    assert 'd->lds_per_lane_addr = true;' in body
+    # Inactive lanes keep the invalid address and read no bytes, so consumers
+    # never see a stale or zero-initialized LDS source.
+    fill = 'd->per_lane_lds_addr.fill(amdgpu::kInvalidLdsAddress);'
+    assert fill in body
+    assert 'd->per_lane_lds_src_bytes.fill(0);' in body
+    assert body.index(fill) < body.index('for (uint32_t lane = 0;')
+    # Each lane reads the in-range bytes of its source, and the rest of its
+    # payload stays zero: a B128 lane at offset 250 of a 256-byte allocation
+    # reads six bytes. The recorded address and byte count are the ones the read
+    # uses, after IOFFSET and the allocation range check.
+    source = (
+        'const auto source = '
+        f'async_lds_lane_source(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
+    )
+    record_address = 'd->per_lane_lds_addr[lane] = source.address;'
+    record_bytes = 'd->per_lane_lds_src_bytes[lane] = source.bytes;'
+    read = (
+        'lds.read(source.address, '
+        f'&d->store_data[lane * {elem_size * num_elems}], source.bytes);'
+    )
+    for line in (source, record_address, record_bytes, read):
+        assert line in body, line
+    assert body.index(source) < body.index(record_address) < body.index(read)
+    assert 'async_lds_lane_address' not in body
+    assert 'd->lds_dst = true;' not in body
+
+
+@pytest.mark.parametrize(
+    'name',
+    [
+        'GLOBAL_LOAD_ASYNC_TO_LDS_B32',
+        'CLUSTER_LOAD_ASYNC_TO_LDS_B32',
+    ],
+)
+def test_gfx1250_async_loads_do_not_mark_an_lds_source(name: str):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
+    load = SimpleNamespace(name=name, elem_size=4, num_elems=1)
+
+    body = codegen._gen_global_load_async_to_lds([], [], load)
+
+    assert 'd->lds_dst = true;' in body
+    assert 'lds_src' not in body
 
 
 def test_gfx1250_buffer_cmpswap_payload_width_is_independent_of_element_width():
