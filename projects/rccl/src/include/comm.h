@@ -1014,6 +1014,7 @@ struct ncclComm {
 #endif
 
   ncclConfig_t config;
+  bool allRanksBlocking;
   // initState is to more conveniently reclaim resources when errors happen.
   ncclResult_t initState;
   // flag to indicate if ncclCommFinalize() is called

@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <iomanip>
 #include <map>
 #include <memory>
@@ -193,6 +194,7 @@ class RecorderMicrotest : public ::testing::Test {
     Recorder& r = Recorder::instance();
     r.~Recorder();
     new (&r) Recorder();
+    Recorder::skipped = false;
     rccl::lastcall = rccl::rrGroupStart;
     Recorder::depth = 0;
     return r;
@@ -276,7 +278,7 @@ TEST_F(RecorderMicrotest, Disabled_WithoutReplayFileNothingIsWritten) {
   rcclApiCall raw(rccl::rrBroadcast);
   EXPECT_EQ(r.record(raw), ncclSuccess);
   r.skip(true);
-  EXPECT_FALSE(r.skipped);
+  EXPECT_FALSE(r.isSkipped());
   EXPECT_FALSE(r.outputFile.is_open());
   EXPECT_EQ(r.logLevel, -1);
 }
@@ -705,17 +707,60 @@ TEST_F(RecorderMicrotest, Skip_HidesCollectivesAndGroupsOnly) {
   Recorder& r = StartBinary();
   ncclInfo info = Info(send_, recv_);
 
+  EXPECT_FALSE(r.isSkipped());
   r.skip(true);
+  EXPECT_TRUE(r.isSkipped());
   r.record(rccl::rrAllGather, info);
   r.record(rccl::rrGroupStart, 1);
   r.record(rccl::rrSend, send_, nullptr, 5, ncclInt32, comm_.get(), stream_);
   r.skip(false);
+  EXPECT_FALSE(r.isSkipped());
   r.record(rccl::rrAllGather, info);
 
   std::vector<rcclApiCall> c = BinaryCalls();
   ASSERT_EQ(c.size(), 2u);
   EXPECT_EQ(c[0].type, rccl::rrSend);
   EXPECT_EQ(c[1].type, rccl::rrAllGather);
+}
+
+TEST_F(RecorderMicrotest, Skip_OverlappingThreadsRestoreTheirOwnState) {
+  Recorder& recorder = StartBinary();
+  std::promise<void> firstSkipped;
+  std::promise<void> secondSkipped;
+  std::promise<void> firstRestored;
+  auto waitFirstSkipped = firstSkipped.get_future();
+  auto waitSecondSkipped = secondSkipped.get_future();
+  auto waitFirstRestored = firstRestored.get_future();
+  bool firstWasSkipped = true;
+  bool secondWasSkipped = true;
+  bool secondStillSkipped = false;
+  std::thread first([&] {
+    firstWasSkipped = recorder.isSkipped();
+    recorder.skip(true);
+    firstSkipped.set_value();
+    waitSecondSkipped.get();
+    recorder.skip(firstWasSkipped);
+    firstRestored.set_value();
+  });
+  std::thread second([&] {
+    waitFirstSkipped.get();
+    secondWasSkipped = recorder.isSkipped();
+    recorder.skip(true);
+    secondSkipped.set_value();
+    waitFirstRestored.get();
+    secondStillSkipped = recorder.isSkipped();
+    recorder.skip(secondWasSkipped);
+  });
+  first.join();
+  second.join();
+  EXPECT_FALSE(firstWasSkipped);
+  EXPECT_FALSE(secondWasSkipped);
+  EXPECT_TRUE(secondStillSkipped);
+  EXPECT_FALSE(recorder.isSkipped());
+  ASSERT_EQ(recorder.record(rccl::rrAllGather, Info(send_, recv_)), ncclSuccess);
+  const auto calls = BinaryCalls();
+  ASSERT_EQ(calls.size(), 1u);
+  EXPECT_EQ(calls[0].type, rccl::rrAllGather);
 }
 
 TEST_F(RecorderMicrotest, Capture_CollectiveIsWrittenNowAndAgainFromAHostNode) {

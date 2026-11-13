@@ -1882,6 +1882,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     int nc;
     int romeTopoModelIdx;
     int treeCompact;
+    bool blocking;
     bool pivotA2AEnabled;
     bool ll128Enabled;
     char hostname[128];
@@ -2473,6 +2474,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].cpuVendor = comm->cpuVendor;
   allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
   allGather3Data[rank].treeCompact = ncclParamTreeCompact() ? 1 : 0;
+  allGather3Data[rank].blocking = comm->config.blocking;
   (void)getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
   allGather3Data[rank].p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
   allGather3Data[rank].p2pMaxPeers = comm->p2pMaxPeers;
@@ -2505,8 +2507,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
                   ret, fail);
   }
 
+  comm->allRanksBlocking = true;
   // NCCL_TREE_COMPACT changes the inter-node tree shape; ranks that disagree would build mismatched trees and hang
   for (int r = 0; r < nranks; r++) {
+    comm->allRanksBlocking &= allGather3Data[r].blocking;
     if (allGather3Data[r].treeCompact != allGather3Data[rank].treeCompact) {
       WARN("NCCL_TREE_COMPACT mismatch: rank %d (%s) has %d, rank %d (%s) has %d; all ranks must set the same value",
            rank, allGather3Data[rank].hostname, allGather3Data[rank].treeCompact, r, allGather3Data[r].hostname,
