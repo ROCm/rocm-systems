@@ -9,6 +9,7 @@
 
 use super::*;
 use crate::driver::AllocationOperations;
+use crate::driver::linux_kfd::target::KfdTargetProfile;
 use crate::memory::host::HostAllocation;
 use crate::memory::{HostMappingPolicy, MemoryKind};
 use std::os::fd::{AsRawFd, IntoRawFd};
@@ -476,9 +477,14 @@ impl Fixture {
                 public_memory_bytes: 1 << 28,
                 ..node()
             },
+            asic_family_id: 0,
             gpu_counter_frequency_hz: 0,
         };
-        super::super::LinuxKfdDriver::with_context_lifetime(lifetime).allocate_owned(
+        super::super::LinuxKfdDriver::with_context_lifetime(
+            lifetime,
+            crate::os::ProcessIdentity::capture().expect("test process identity"),
+        )
+        .allocate_owned(
             &device,
             &[],
             kind,
@@ -599,7 +605,12 @@ fn ais_uses_the_mapped_vram_handle_and_preserves_native_failure() {
     let failure = allocation
         .ais_transfer(4, 256, 512, 16384, uapi::AIS_WRITE)
         .unwrap_err();
-    assert_eq!(failure.native_error_code(), Some(errno::EIO));
+    assert_eq!(
+        failure
+            .native_status()
+            .and_then(crate::NativeStatus::errno_code),
+        Some(errno::EIO)
+    );
     allocation.free().unwrap();
     drop(allocation);
     fixture.exhausted();
@@ -764,6 +775,7 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
             },
             ..node()
         },
+        asic_family_id: 0,
         gpu_counter_frequency_hz: 0,
     };
     let driver = super::super::LinuxKfdDriver::new();
@@ -1240,6 +1252,8 @@ fn failed_peer_map_keeps_old_access_and_retries_its_completed_prefix() {
     )
     .unwrap();
     assert!(allocation.set_access(&[&peer]).is_err());
+    allocation.set_host_alias_identity([19, 31]).unwrap();
+    assert!(allocation.set_host_alias_identity([19, 32]).is_err());
     assert!(allocation.device_address(&fixture.vm).is_ok());
     assert_eq!(
         allocation.device_address(&peer).unwrap_err().kind(),
@@ -1247,6 +1261,21 @@ fn failed_peer_map_keeps_old_access_and_retries_its_completed_prefix() {
     );
     allocation.set_access(&[&peer]).unwrap();
     assert!(allocation.device_address(&peer).is_ok());
+    let mut backing = None;
+    let mut alias = KfdHostAlias::try_create(
+        &peer,
+        &[],
+        allocation.host_address().unwrap(),
+        desc().size,
+        HostMappingPolicy::Fine,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+        &mut backing,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(alias.cached_info().physical_backing_id, [19, 31]);
+    alias.free();
+    drop(alias);
     allocation.free().unwrap();
     drop(allocation);
     fixture.exhausted();
@@ -2440,6 +2469,28 @@ fn late_subscriber_receives_the_latest_fault_without_unbounded_history() {
 }
 
 #[test]
+fn hardware_event_keeps_native_origin_before_endpoint_activation() {
+    let fixture = Fixture::new([]);
+    let origin = crate::device::event::DeviceEventOriginId::from_driver_key(42);
+    assert_eq!(fixture.vm.event_origin_id(), origin);
+    let mut early = fixture.vm.subscribe_events().unwrap();
+    fixture.hardware.store(1, Ordering::Release);
+    let Some(DeviceEvent::GpuHardwareException(unattributed)) = early.poll().unwrap() else {
+        panic!("hardware exception was not delivered");
+    };
+    assert_eq!(unattributed.endpoint_id, None);
+    assert_eq!(unattributed.origin_id, Some(origin));
+
+    fixture.vm.loss.register_identity(42, [42; 16]).unwrap();
+    let mut late = fixture.vm.subscribe_events().unwrap();
+    let Some(DeviceEvent::GpuHardwareException(attributed)) = late.poll().unwrap() else {
+        panic!("retained hardware exception was not replayed");
+    };
+    assert_eq!(attributed.endpoint_id, Some([42; 16]));
+    assert_eq!(attributed.origin_id, Some(origin));
+}
+
+#[test]
 fn later_hardware_loss_is_reported_after_a_nonterminal_exception() {
     let fixture = Fixture::new([]);
     fixture.vm.loss.register_identity(42, [42; 16]).unwrap();
@@ -2450,6 +2501,9 @@ fn later_hardware_loss_is_reported_after_a_nonterminal_exception() {
         subscriber.poll().unwrap(),
         Some(DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some([42; 16]),
+            origin_id: Some(crate::device::event::DeviceEventOriginId::from_driver_key(
+                42
+            )),
             scope: GpuResetScope::Other,
             memory_lost: false,
             cause: GpuResetCause::Ecc,
@@ -2466,6 +2520,9 @@ fn later_hardware_loss_is_reported_after_a_nonterminal_exception() {
         subscriber.poll().unwrap(),
         Some(DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some([42; 16]),
+            origin_id: Some(crate::device::event::DeviceEventOriginId::from_driver_key(
+                42
+            )),
             scope: GpuResetScope::Other,
             memory_lost: true,
             cause: GpuResetCause::Ecc,
@@ -2570,7 +2627,11 @@ fn terminal_hardware_loss_survives_a_second_event_poll_error() {
     };
     assert!(exception.memory_lost);
     assert_eq!(
-        subscription.poll().unwrap_err().native_error_code(),
+        subscription
+            .poll()
+            .unwrap_err()
+            .native_status()
+            .and_then(crate::NativeStatus::errno_code),
         Some(errno::EIO)
     );
     fixture.memory_wait_errno.store(0, Ordering::Release);
@@ -2600,7 +2661,12 @@ fn failed_memory_event_creation_reclaims_every_returned_event_id() {
         }),
     ));
     let error = LossEvent::create(kfd).err().unwrap();
-    assert_eq!(error.native_error_code(), Some(errno::EIO));
+    assert_eq!(
+        error
+            .native_status()
+            .and_then(crate::NativeStatus::errno_code),
+        Some(errno::EIO)
+    );
     assert_eq!(*destroyed.lock().unwrap(), [20, 19]);
 }
 
@@ -2833,7 +2899,11 @@ fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() 
         lost: AtomicBool::new(false),
     }));
     assert_eq!(
-        bindings.shutdown().unwrap_err().native_error_code(),
+        bindings
+            .shutdown()
+            .unwrap_err()
+            .native_status()
+            .and_then(crate::NativeStatus::errno_code),
         Some(errno::EIO)
     );
     assert!(bindings.bindings.get_mut().unwrap().loss.is_some());

@@ -13,7 +13,7 @@
 #include "fp/fma_dpp_test.h"
 #include "fp/mixed_fma_reference.h"
 #include "fp/reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <algorithm>
 #include <cmath>

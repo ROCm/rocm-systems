@@ -310,6 +310,65 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesXOnlyWorkgroupId) {
   EXPECT_EQ(translated->prologue_words, expected);
 }
 
+TEST(KernelDescriptorTranslator, Cdna4ToRdna4RejectsGuestWorkgroupInfo) {
+  using namespace rocjitsu::amdhsa;
+  auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(fixture.valid);
+  kernel_descriptor_t *kd = mutable_kernel_descriptor(fixture);
+  kd->compute_pgm_rsrc2 = 0;
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 1);
+  const auto translations =
+      translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+    return translation.descriptor_file_offset == fixture.kd_file_off;
+  });
+  ASSERT_NE(translated, translations.end());
+  EXPECT_FALSE(translated->supported);
+}
+
+TEST(KernelDescriptorTranslator, RejectsMissingGuestPrivateSegmentWaveOffsetSgpr) {
+  using namespace rocjitsu::amdhsa;
+  constexpr rj_code_arch_t guest = ROCJITSU_CODE_ARCH_CDNA2;
+  auto fixture = mutable_vector_add_descriptor(guest, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(fixture.valid);
+  kernel_descriptor_t *kd = mutable_kernel_descriptor(fixture);
+  kd->compute_pgm_rsrc2 = 0;
+  kd->kernel_code_properties = 0;
+  kd->kernarg_preload = 0;
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 6);
+  RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  RJ_AMDHSA_BITS_SET(kd->kernel_code_properties,
+                     KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 1);
+  RJ_AMDHSA_BITS_SET(kd->kernel_code_properties,
+                     KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  for (const rj_code_arch_t host :
+       {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA3}) {
+    for (bool private_segment : {false, true}) {
+      SCOPED_TRACE(testing::Message() << host << " private_segment=" << private_segment);
+      RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
+                         private_segment);
+      const auto translations = translate_mutable_descriptor(fixture, guest, host);
+      const auto translated =
+          std::ranges::find_if(translations, [&fixture](const auto &translation) {
+            return translation.descriptor_file_offset == fixture.kd_file_off;
+          });
+      ASSERT_NE(translated, translations.end());
+      const bool missing_offset = private_segment && host != ROCJITSU_CODE_ARCH_CDNA2;
+      EXPECT_EQ(translated->supported, !missing_offset);
+      EXPECT_EQ(std::ranges::any_of(translated->diagnostics,
+                                    [](const auto &diagnostic) {
+                                      return diagnostic.message.find(
+                                                 "private-segment wave-offset SGPR") !=
+                                             std::string::npos;
+                                    }),
+                missing_offset);
+    }
+  }
+}
+
 TEST(KernelDescriptorTranslator, Cdna4ToRdna4SkipsPrologueWhenNoWorkgroupIdsAreEnabled) {
   using namespace rocjitsu::amdhsa;
 

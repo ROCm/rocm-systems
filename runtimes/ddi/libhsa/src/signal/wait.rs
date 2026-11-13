@@ -8,8 +8,17 @@ use crate::api::signal::wait::hsa_amd_signal_wait_any;
 
 /// Time spent spinning before a blocked wait yields the CPU.
 const BLOCKED_SPIN_BUDGET: Duration = Duration::from_micros(200);
-/// Cached system clock frequency in hertz for timeout conversion.
-static SYSTEM_FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+thread_local! {
+    /// Pauses one single-signal wait after admission and before its first read.
+    static AFTER_WAIT_ADMISSION: std::cell::RefCell<Option<(Sender<()>, Receiver<()>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn pause_after_wait_admission(entered: Sender<()>, release: Receiver<()>) {
+    AFTER_WAIT_ADMISSION.with(|slot| *slot.borrow_mut() = Some((entered, release)));
+}
 
 #[cfg(test)]
 thread_local! {
@@ -21,46 +30,6 @@ thread_local! {
 #[cfg(test)]
 pub(crate) fn notify_first_unsatisfied_poll(sender: Sender<()>) {
     FIRST_UNSATISFIED_POLL.with(|slot| *slot.borrow_mut() = Some(sender));
-}
-
-/// Caches the frequency reported by native system clock discovery.
-pub(crate) fn set_system_frequency(frequency: u64) {
-    SYSTEM_FREQUENCY_HZ.store(frequency, Ordering::Release);
-}
-
-/// Returns the system-clock frequency used for timeout conversion.
-fn system_frequency() -> u64 {
-    let cached = SYSTEM_FREQUENCY_HZ.load(Ordering::Acquire);
-    if cached != 0 {
-        return cached;
-    }
-    let retained = lock().ok().and_then(|guard| {
-        let generation = guard.active_generation()?;
-        let runtime = guard.as_ref()?;
-        let gpu = runtime.gpus.first()?;
-        let token = runtime.inflight.enter()?;
-        Some((gpu.device.clone(), generation, token))
-    });
-    let Some((device, generation, _call)) = retained else {
-        return 0;
-    };
-    let frequency = crate::runtime::clock_counters(&device)
-        .ok()
-        .map_or(0, |counters| counters.system_frequency);
-    if frequency == 0 {
-        return 0;
-    }
-    // Shutdown can clear the cache while the ioctl runs. Publish only while
-    // the runtime generation that started the query is still active.
-    let Ok(guard) = lock() else {
-        return 0;
-    };
-    if guard.active_generation() == Some(generation) {
-        SYSTEM_FREQUENCY_HZ.store(frequency, Ordering::Release);
-        frequency
-    } else {
-        0
-    }
 }
 
 /// Checks whether an HSA timeout hint has elapsed.
@@ -87,6 +56,14 @@ pub(crate) unsafe fn signal_wait(
         return 0;
     };
     let _lease_scope = crate::runtime::ApiLeaseScope::enter(call);
+    #[cfg(test)]
+    AFTER_WAIT_ADMISSION.with(|slot| {
+        let hook = slot.borrow_mut().take();
+        if let Some((entered, release)) = hook {
+            let _ = entered.send(());
+            let _ = release.recv();
+        }
+    });
     let (generation, observed) = {
         let handles = WAIT_SIGNAL_HANDLES
             .read()
@@ -187,7 +164,7 @@ pub(crate) fn signal_wait_open(
     config: SignalWaitConfig,
 ) -> SignalValue {
     let start = Instant::now();
-    let frequency = system_frequency();
+    let frequency = rocddi::host::clock::info().frequency_hz;
     loop {
         let observed = signal.value.load(config.order);
         if stop.load(Ordering::Acquire)
@@ -440,7 +417,7 @@ pub(crate) unsafe fn signal_wait_any_open(
         return u32::MAX;
     }
     let start = std::time::Instant::now();
-    let frequency = system_frequency();
+    let frequency = rocddi::host::clock::info().frequency_hz;
     loop {
         if stop.load(Ordering::Acquire) {
             return u32::MAX;
@@ -490,7 +467,7 @@ pub(crate) unsafe fn signal_wait_all_open(
         unsafe { std::ptr::write_bytes(satisfying_values, 0, pending.len()) };
     }
     let start = std::time::Instant::now();
-    let frequency = system_frequency();
+    let frequency = rocddi::host::clock::info().frequency_hz;
     loop {
         if stop.load(Ordering::Acquire) {
             return u32::MAX;

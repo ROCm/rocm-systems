@@ -55,10 +55,11 @@ float ncclTuningGetTime(struct ncclTuningInput_t* const inputs, int a, float* la
   // Relegate fp8 reduction trees of sufficient depth that they incur precision loss
   // to be least preferred.
   float precision_ratio = 1.0;
-  if (inputs->datatype == ncclFloat8e4m3 || inputs->datatype == ncclFloat8e5m2) {
-    if (a == NCCL_ALGO_RING && inputs->comm->nRanks > 8) {
-      precision_ratio = 1024.0; // Any factor large enough to act as a partition between lossy and non-lossy algos.
-    }
+  if (a == NCCL_ALGO_RING) {
+    // Any factor large enough to act as a partition between lossy and non-lossy algos.
+    precision_ratio =
+      rcclFp8RingCostFactor(inputs->datatype, inputs->func, inputs->comm->nRanks, inputs->comm->nNodes, inputs->nBytes,
+                            rcclDdaLL128Threshold(inputs->comm, ncclFuncAllReduce), inputs->comm->archName);
   }
 
   return (*lat * latCount + inputs->nBytes / (1000 * (*bw))) * precision_ratio;
@@ -172,6 +173,17 @@ ncclResult_t ncclTuningGetChannels(struct ncclTuningInput_t* const input, struct
     }
   }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // RCCL: host WARP_SIZE is a placeholder and kernels cap at NCCL_MAX_NTHREADS; size as topoGetAlgoInfo() does.
+  {
+    struct ncclTaskColl info = {};
+    info.func = input->func;
+    info.algorithm = result->algo;
+    info.protocol = result->proto;
+    rcclOptThreadBlockSize(input->comm, &info, input->nBytes, nt);
+  }
+  nt = std::max(nt, 3 * input->comm->WarpSize);
+#else
   if (result->algo != NCCL_ALGO_NVLS && result->algo != NCCL_ALGO_NVLS_TREE &&
       result->algo != NCCL_ALGO_COLLNET_DIRECT) {
     while (input->nBytes < nc * nt * threadThreshold) {
@@ -187,13 +199,18 @@ ncclResult_t ncclTuningGetChannels(struct ncclTuningInput_t* const input, struct
   nt = nt / WARP_SIZE < 3 ? 3 * WARP_SIZE : nt;
   if (result->algo == NCCL_ALGO_TREE) nt = NCCL_MAX_NTHREADS; // Tree now uses all threads always.
   if (result->algo == NCCL_ALGO_PAT) nt = NCCL_MAX_NTHREADS;
+#endif
   if (result->maxChannels > 0 && result->maxChannels < nc) {
     nc = result->maxChannels;
   } else {
     result->maxChannels = nc;
   }
   result->nChannels = nc;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  result->nWarps = nt / input->comm->WarpSize;
+#else
   result->nWarps = nt / WARP_SIZE;
+#endif
   TRACE(NCCL_TUNING, "nChannels: %d, nWarps: %d", result->nChannels, result->nWarps);
   return ncclSuccess;
 }

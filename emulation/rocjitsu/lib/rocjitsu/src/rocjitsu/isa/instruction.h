@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_ISA_INSTRUCTION_H_
 #define ROCJITSU_ISA_INSTRUCTION_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/execution_block.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/operand.h"
@@ -96,7 +97,53 @@ enum InstFlags : uint64_t {
   /// @brief IU DOT/WMMA has undefined NEG[2] or NEG_HI modifiers.
   INVALID_IU_MODIFIERS = (1ULL << 28),
   /// @brief A qualified scalar data tuple violates its ISA alignment requirement.
-  MISALIGNED_SCALAR_DATA = (1ULL << 29)
+  MISALIGNED_SCALAR_DATA = (1ULL << 29),
+  /// @brief Encoded for the scalar ALU (SOP1, SOP2, SOPC, SOPK, SOPP), including
+  /// waits, barriers, messages, no-ops and the PC writers.
+  /// @details SALU, VALU, SMEM, VMEM and LDS classify the encoding: the generator
+  /// sets at most one of them, from the encoding alone. amdgpu_execution_block()
+  /// applies policy on top of them; see amdgpu::ExecutionBlock.
+  SALU = (1ULL << 30),
+  /// @brief Encoded for the vector ALU (VOP*, VOPD, VINTERP), including matrix and
+  /// transcendental operations.
+  VALU = (1ULL << 31),
+  /// @brief Encoded for scalar memory (SMEM), including scalar cache maintenance
+  /// and the SMEM timestamp reads.
+  SMEM = (1ULL << 32),
+  /// @brief Encoded for vector memory: buffer, flat, global, scratch, image and
+  /// tensor.
+  VMEM = (1ULL << 33),
+  /// @brief Encoded for LDS (DS, LDS-direct), including GWS and the DS no-op.
+  LDS = (1ULL << 34),
+  /// @brief Evaluated by the VALU transcendental unit: rcp, rsq, sqrt, exp, log,
+  /// sin, cos and tanh, including their pseudo-scalar forms.
+  /// @details An operation (unit) classification, not the S_DELAY_ALU TRANS
+  /// dependency class. It covers every data width, so F64 forms such as
+  /// v_rcp_f64 are included although the ISA tracks them as ordinary VALU for
+  /// delay purposes, and matrix operations are excluded although CDNA5 tracks
+  /// small-data WMMA as TRANS. A consumer that needs the delay class must apply
+  /// those target-specific rules itself.
+  TRANSCENDENTAL = (1ULL << 35),
+  /// @brief May sleep or halt its wave (s_sleep, s_sleep_var, s_monitor_sleep,
+  /// s_sethalt, s_sendmsghalt).
+  /// @details Whether it does depends on operands and execution state; for
+  /// example, s_sethalt 0 clears the halt bit.
+  SUSPENDS_WAVE = (1ULL << 36),
+  /// @brief Marks architectural PC writers, including trap entry and return.
+  /// @details Direct conditional branches additionally carry COND_BRANCH and a
+  /// decoded displacement. Query writes_pc() for the combined classification.
+  WRITES_PC = (1ULL << 37),
+  /// @brief Software trap instruction (s_trap).
+  SOFTWARE_TRAP = (1ULL << 38),
+  /// @brief The trailing DWORD of the VGPR result can preserve the shader's incoming value,
+  /// even at full EXEC. Memory feedback writes only lanes with a fault or warning.
+  CONDITIONAL_LAST_VGPR_DEF = (1ULL << 44),
+  /// The result requires an extra allocated VGPR beyond its data registers.
+  RESERVES_UNWRITTEN_VGPR = (1ULL << 39),
+  /// Global transpose addresses come from lanes 0-31. Each wave64 lane gets half the encoded width.
+  COMPACT_WAVE64_MEMORY_RESULT = (1ULL << 41),
+  /// Global load-transpose instructions acquire no register operands when EXEC is zero.
+  GLOBAL_TRANSPOSE_LOAD = (1ULL << 43)
 };
 
 class BasicBlock;
@@ -229,7 +276,10 @@ public:
   /// and must not be called. No virtual dispatch.
   /// This is a low-level backend callback. AMDGPU callers should use the CU's
   /// execute_instruction() API to reset and check simulator execution failures.
-  /// @details Decoded non-memory instructions without DynamicInstState may be
+  /// @details Decoded operands are immutable after construction, except for
+  /// temporary read delegation through ScopedOperandDelegate on the execution
+  /// thread. The decoded instruction must not execute concurrently while bound.
+  /// Decoded non-memory instructions without DynamicInstState may be
   /// reused across waves without a reset. Executors must read register values,
   /// EXEC and other execution state from the current context, and restore any
   /// temporary operand delegates before returning. Put persistent per-issue
@@ -330,6 +380,10 @@ public:
   bool is_memory_op() const { return flags_ & MEMORY_OP; }
   /// @brief Whether MODE.VSKIP prevents this instruction from being issued.
   bool is_vskip_affected() const { return flags_ & VSKIP_AFFECTED; }
+  /// An empty transpose suppresses register and memory accesses but can occupy LOADCNT.
+  bool is_empty_global_transpose(uint64_t exec) const {
+    return (flags_ & GLOBAL_TRANSPOSE_LOAD) && !exec;
+  }
   /// @brief Whether this instruction can increment a memory completion counter.
   bool is_memory_wait_producer() const { return flags_ & MEMORY_WAIT_PRODUCER; }
   /// @brief Whether the instruction includes a memory completion wait field.
@@ -344,6 +398,13 @@ public:
 
   uint64_t flags() const { return flags_; }
 
+  /// Size an explicit destination according to the issuing wave's width.
+  RegisterRef wave_sized_destination(const Operand &op, RegisterRef ref, uint8_t wave_size) const {
+    if (ref.cls == RegClass::VGPR && wave_size == 64 && (flags_ & COMPACT_WAVE64_MEMORY_RESULT))
+      ref.width /= 2;
+    return wave_sized_register(op, ref, wave_size);
+  }
+
   bool is_waitcnt() const { return flags_ & WAITCNT; }
 
   bool is_barrier() const { return flags_ & BARRIER; }
@@ -351,6 +412,47 @@ public:
   bool is_mfma() const { return flags_ & MFMA; }
 
   bool is_accvgpr() const { return flags_ & ACCVGPR; }
+
+  /// @brief Whether this instruction ends the program (e.g. s_endpgm).
+  bool is_program_terminator() const { return flags_ & PROGRAM_TERMINATOR; }
+
+  /// @brief Whether this instruction may leave the PC somewhere other than the
+  /// next instruction.
+  /// @details The control-flow flags plus WRITES_PC. s_setpc, s_swappc and
+  /// s_call carry INDIRECT_BRANCH or INDIRECT_CALL.
+  bool writes_pc() const {
+    constexpr uint64_t pc_flags =
+        BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR | WRITES_PC;
+    return (flags_ & pc_flags) != 0;
+  }
+
+  /// @brief Whether this is an AMDGPU VALU transcendental. See TRANSCENDENTAL.
+  bool is_transcendental() const { return flags_ & TRANSCENDENTAL; }
+
+  /// @brief Whether this instruction may sleep or halt its wave. See SUSPENDS_WAVE.
+  bool suspends_wave() const { return flags_ & SUSPENDS_WAVE; }
+
+  /// @brief The AMDGPU block this instruction issues to.
+  /// @details The generated encoding sets exactly one of the block flags, or
+  /// none for exports. Every PC writer reports BRANCH, overriding its SALU
+  /// encoding; see amdgpu::ExecutionBlock for that contract and for when to use
+  /// plugins::classify_instruction() instead.
+  [[nodiscard]] amdgpu::ExecutionBlock amdgpu_execution_block() const {
+    using amdgpu::ExecutionBlock;
+    if (flags_ & LDS)
+      return ExecutionBlock::LDS;
+    if (flags_ & VMEM)
+      return ExecutionBlock::VMEM;
+    if (flags_ & SMEM)
+      return ExecutionBlock::SMEM;
+    if (writes_pc())
+      return ExecutionBlock::BRANCH;
+    if (flags_ & SALU)
+      return ExecutionBlock::SALU;
+    if (flags_ & VALU)
+      return ExecutionBlock::VALU;
+    return ExecutionBlock::UNKNOWN;
+  }
 
   /// @brief Signed byte offset for a direct branch target.
   ///
@@ -362,6 +464,8 @@ public:
   /// @brief Whether an explicit source operand contributes its ordinary register dependency.
   /// @details Encodings with non-contiguous source tuples can suppress the
   /// placeholder tuple and report the actual registers through implicit_uses().
+  /// An instruction that ignores an encoded source (s_rfe_restore_b64's second
+  /// operand) suppresses it here too.
   [[nodiscard]] virtual bool tracks_explicit_source(uint8_t /*operand_index*/) const {
     return true;
   }

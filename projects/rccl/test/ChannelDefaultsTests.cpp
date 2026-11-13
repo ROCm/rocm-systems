@@ -91,6 +91,53 @@ TEST(P2pBatchEligibility, AppliesThresholdToExplicitEnable)
     EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/0, threshold, threshold, threshold));
 }
 
+TEST(P2pBatchEligibility, CutoffOnlyOnGfx950At16Nodes)
+{
+    constexpr ssize_t perPeer = 128 * 1024;
+
+    auto eligible = [](const char* arch, int nNodes) {
+        const ssize_t cutoff = rcclP2pBatchCutoff(arch, nNodes, perPeer, perPeer, /*threshold=*/-1);
+        return rcclP2pBatchEligible(/*enabled=*/1, perPeer, perPeer, cutoff);
+    };
+
+    EXPECT_TRUE(eligible("gfx942", 4));
+    EXPECT_TRUE(eligible("gfx942", 16));
+    EXPECT_TRUE(eligible("gfx950", 15));
+    EXPECT_FALSE(eligible("gfx950", 16));
+    EXPECT_TRUE(eligible("gfx1250", 16));
+
+    const ssize_t unequal = rcclP2pBatchCutoff("gfx942", 4, perPeer, perPeer / 2, /*threshold=*/-1);
+    EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/1, perPeer, perPeer / 2, unequal));
+}
+
+TEST(P2pBatchEligibility, ExplicitThresholdOverridesArchFallback)
+{
+    constexpr ssize_t perPeer = 128 * 1024;
+
+    auto eligible = [](const char* arch, int nNodes, ssize_t threshold) {
+        const ssize_t cutoff = rcclP2pBatchCutoff(arch, nNodes, perPeer, perPeer, threshold);
+        return rcclP2pBatchEligible(/*enabled=*/1, perPeer, perPeer, cutoff);
+    };
+
+    EXPECT_FALSE(eligible("gfx942", 4, 64 * 1024));
+    EXPECT_TRUE(eligible("gfx942", 4, -1));
+    EXPECT_TRUE(eligible("gfx942", 4, perPeer));
+    EXPECT_FALSE(eligible("gfx942", 16, 32 * 1024));
+
+    EXPECT_TRUE(eligible("gfx950", 16, perPeer));
+    EXPECT_FALSE(eligible("gfx950", 16, -1));
+    EXPECT_FALSE(eligible("gfx950", 16, 32 * 1024));
+
+    EXPECT_TRUE(eligible("gfx1250", 16, perPeer));
+    EXPECT_FALSE(eligible("gfx942", 4, 0));
+    EXPECT_TRUE(eligible("gfx942", 4, -5));
+
+    const ssize_t unequal = rcclP2pBatchCutoff("gfx942", 4, perPeer, perPeer / 2, perPeer);
+    EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/1, perPeer, perPeer / 2, unequal));
+    const ssize_t open = rcclP2pBatchCutoff("gfx942", 4, perPeer, perPeer, perPeer);
+    EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/0, perPeer, perPeer, open));
+}
+
 // Channel map must follow the comm-level planner flag, not per-send size eligibility.
 TEST(P2pChannelBase, IndependentOfSizeEligibility)
 {
@@ -390,6 +437,20 @@ TEST(ChannelDefaults, Gfx950_SaturateOff_MaxP2pPeersIgnored)
                                                   /*nNodes=*/1, /*allRanksLocal=*/false, /*maxP2pPeers=*/1);
     EXPECT_EQ(r.p2pnChannelsPerPeer, kInputChannelsPerPeer);
     ExpectPoolInvariant(r);
+}
+
+TEST(ChannelDefaults, Gfx1250_CopyEngineDoesNotChangeCommunicatorChannels)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "ChannelDefaults_Gfx1250_CopyEngineKeepsChannels",
+        []()
+        {
+            const ResolvedChannels r = ResolveP2pChannels("gfx1250", /*nRanks=*/8);
+            EXPECT_EQ(r.p2pnChannels, (int)MAXCHANNELS);
+            EXPECT_EQ(r.p2pnChannelsPerPeer, pow2Down(r.p2pnChannels / 8));
+            ExpectPoolInvariant(r);
+        },
+        {{"NCCL_P2P_USE_CUDA_MEMCPY", "1"}});
 }
 
 } // namespace RcclUnitTesting

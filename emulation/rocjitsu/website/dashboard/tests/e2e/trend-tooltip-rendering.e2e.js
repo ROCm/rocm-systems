@@ -21,7 +21,7 @@ for (const theme of ['light', 'dark']) {
         const heading = chart.getByText(/^Commit [a-f0-9]{8}$/);
         await expect(heading).toBeVisible();
         positions.push(await heading.evaluate((element) => {
-          const tooltip = element.parentElement;
+          const tooltip = element.closest('.dashboard-chart-tooltip');
           const style = getComputedStyle(tooltip);
           const rect = tooltip.getBoundingClientRect();
           const chart = tooltip.parentElement.getBoundingClientRect();

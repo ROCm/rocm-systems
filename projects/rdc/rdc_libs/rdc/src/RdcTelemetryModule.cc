@@ -144,8 +144,9 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_value_get(rdc_gpu_field_t*
     ite->first->rdc_telemetry_fields_value_get(f, ite->second.size(), callback, user_data);
   }
 
-  // Notify the caller unsupported fields
-  callback(&unsupport_fields[0], unsupport_fields.size(), user_data);
+  // Notify the caller unsupported fields. data(), not &[0]: the vector is
+  // usually empty, and indexing an empty vector binds a reference to null.
+  callback(unsupport_fields.data(), unsupport_fields.size(), user_data);
 
   return RDC_ST_OK;
 }
