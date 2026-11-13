@@ -42,7 +42,7 @@ exact_integer_bound(double bound)
 class configuration_checker
 {
 public:
-    configuration_checker(const schema& config_schema, const value_map_t& values)
+    configuration_checker(const schema& config_schema, const typed_values_t& values)
     : m_schema(config_schema)
     , m_values(values)
     {}
@@ -67,12 +67,23 @@ private:
             return false;
         }
         const auto provided = m_values.find(param_id);
-        if(provided == m_values.end() || provided->second.empty())
+        if(provided == m_values.end())
         {
             return false;
         }
-        return param->type != param_type::boolean ||
-               parse_boolean(provided->second).value_or(false);
+        if(const auto* flag = std::get_if<bool>(&provided->second))
+        {
+            return *flag;
+        }
+        if(const auto* text = std::get_if<std::string>(&provided->second))
+        {
+            return !text->empty();
+        }
+        if(const auto* parts = std::get_if<std::vector<std::string>>(&provided->second))
+        {
+            return !parts->empty();
+        }
+        return true;
     }
 
     void report(std::string message, std::vector<std::string> params)
@@ -83,18 +94,12 @@ private:
 
     void check_provided_values()
     {
-        for(const auto& [param_id, value] : m_values)
+        for(const auto& [param_id, ignored] : m_values)
         {
-            const auto* param = m_schema.find_param(param_id);
-            if(param == nullptr)
+            static_cast<void>(ignored);
+            if(m_schema.find_param(param_id) == nullptr)
             {
                 report(fmt::format("unknown parameter '{}'", param_id), { param_id });
-            }
-            else if(!is_valid_value(*param, value))
-            {
-                report(
-                    fmt::format("invalid value '{}' for parameter '{}'", value, param_id),
-                    { param_id });
             }
         }
     }
@@ -135,7 +140,7 @@ private:
     }
 
     const schema&                                 m_schema;
-    const value_map_t&                            m_values;
+    const typed_values_t&                         m_values;
     std::vector<violation>                        m_violations;
     std::set<std::pair<std::string, std::string>> m_reported_pairs;
 };
@@ -251,8 +256,14 @@ is_valid_value(const schema_param& param, std::string_view value)
     return accepts_text(param, value);
 }
 
+std::string
+invalid_value_message(std::string_view value, std::string_view param_id)
+{
+    return fmt::format("invalid value '{}' for parameter '{}'", value, param_id);
+}
+
 std::vector<violation>
-validate_values(const schema& config_schema, const value_map_t& values)
+validate_values(const schema& config_schema, const typed_values_t& values)
 {
     return configuration_checker{ config_schema, values }.run();
 }
