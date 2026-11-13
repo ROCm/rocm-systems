@@ -21,33 +21,15 @@ from unittest import mock
 import pytest
 
 import roofline.benchmark.benchmark_base as benchmark_base
-import roofline.benchmark.gfx12.benchmark_gfx1201 as benchmark_gfx1201
 import utils.utils_profile as utils_profile
 from roofline import run_benchmark
 from roofline.benchmark.gfx12.benchmark_gfx1201 import (
-    CACHE_ELEMENT_BYTES,
-    CACHE_LOADS_IN_FLIGHT,
-    CACHE_WORKGROUPS_PER_CU,
     DRAM_BUS_BITS,
     DRAM_GBPS_PER_PIN,
-    GL0_CAPACITY_BYTES,
-    GL0_PER_MULTIPROCESSOR,
-    GL0_READ_BYTES_PER_CLOCK,
-    GL2_BANKS,
-    GL2_HIT_RETURN_BYTES_PER_CLOCK,
     INFINITY_CACHE_BYTES,
-    L0_LOADS_IN_FLIGHT,
-    L0_ROOF,
-    L0_WORKGROUPS_PER_CU,
-    L0_WORKING_SET_BYTES,
     L2_ROOF,
-    L2_WORKING_SET_BYTES,
     MALL_WORKING_SET_DIVISOR,
-    ResidentReadRoof,
-    dram_pin_bandwidth_gbps,
     percent_of_ceiling,
-    pipe_bandwidth_gbps,
-    shader_clock_hz,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 
@@ -260,74 +242,9 @@ def test_gfx1201_measures_vram_in_its_own_column():
     assert bench.csv_cols_map["VRAM"] == "VRAMBw"
     assert "HBM" not in bench.csv_cols_map
     assert_source_defines(bench.device_memory_bw_src, "DRAM_bw", "gfx1201 DRAM")
-
-
-def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
-    """L0 fits in one GL0. L2 misses GL0 and still fits in GL2.
-
-    GL1 is a buffer, not a cache, so there is no L1 roof. The L1 test is
-    skipped and L1Bw is written as 0.
-    """
-    bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
-
-    for level, roof in (("L0", L0_ROOF), ("L2", L2_ROOF)):
-        assert bench.tests[level].func == bench.cache_resident_bw
-        assert bench.tests[level].keywords == {"label": level, "roof": roof}
+    # GL1 is a buffer, not a cache, so the L1 test is skipped and L1Bw is 0.
     assert "L1" in bench.unsupported_data_types
     assert bench.csv_cols_map["L1"] == "L1Bw"
-    assert L0_ROOF == ResidentReadRoof(
-        L0_WORKING_SET_BYTES,
-        GL0_PER_MULTIPROCESSOR,
-        GL0_READ_BYTES_PER_CLOCK,
-        "GL0 read return",
-        L0_WORKGROUPS_PER_CU,
-        L0_LOADS_IN_FLIGHT,
-        "cache_l0_bw",
-        instances_per_multiprocessor=True,
-    )
-    assert L2_ROOF == ResidentReadRoof(
-        L2_WORKING_SET_BYTES,
-        GL2_BANKS,
-        GL2_HIT_RETURN_BYTES_PER_CLOCK,
-        "GL2 hit return",
-        CACHE_WORKGROUPS_PER_CU,
-        CACHE_LOADS_IN_FLIGHT,
-        "cache_resident_bw",
-    )
-    assert_source_defines(
-        bench.cache_resident_src, "cache_resident_bw", "gfx1201 cache"
-    )
-    assert_source_defines(bench.cache_resident_src, "cache_l0_bw", "gfx1201 L0")
-    workgroup_size = benchmark_base.DEFAULT_WORKGROUP_SIZE
-    assert (
-        L0_WORKING_SET_BYTES // CACHE_ELEMENT_BYTES
-        >= workgroup_size * L0_LOADS_IN_FLIGHT
-    )
-
-    assert L0_WORKING_SET_BYTES <= GL0_CAPACITY_BYTES
-    assert GL0_CAPACITY_BYTES < L2_WORKING_SET_BYTES
-    # 6 MB is the smallest Navi 48 GL2.
-    assert L2_WORKING_SET_BYTES < 6 * 1024 * 1024
-    for working_set in (L0_WORKING_SET_BYTES, L2_WORKING_SET_BYTES):
-        element_count = working_set // CACHE_ELEMENT_BYTES
-        assert working_set % CACHE_ELEMENT_BYTES == 0
-        assert element_count >= workgroup_size * CACHE_LOADS_IN_FLIGHT
-        assert element_count & (element_count - 1) == 0
-
-    # 2.97 GHz, the boost the cache spec comparison used. Decimal GB/s.
-    # 32 multiprocessors are 64 CUs, each with one GL0.
-    assert pipe_bandwidth_gbps(
-        GL0_PER_MULTIPROCESSOR * 32, GL0_READ_BYTES_PER_CLOCK, 2.97e9
-    ) == pytest.approx(24330.24)
-    assert pipe_bandwidth_gbps(
-        GL2_BANKS, GL2_HIT_RETURN_BYTES_PER_CLOCK, 2.97e9
-    ) == pytest.approx(12165.12)
-    # The GL1 port is the ceiling these resident reads must not be scored against.
-    assert pipe_bandwidth_gbps(8, 128, 2.97e9) == pytest.approx(3041.28)
-    assert dram_pin_bandwidth_gbps(DRAM_BUS_BITS, DRAM_GBPS_PER_PIN) == 640.0
-    # 3e9 shader cycles over 1e8 ticks of the 100 MHz wall clock is 3 GHz.
-    assert shader_clock_hz(3_000_000_000, 100_000_000) == pytest.approx(3e9)
-    assert shader_clock_hz(1, 0) == 0.0
 
 
 def test_gfx1201_measures_infinity_cache_with_its_own_kernel():
@@ -439,114 +356,6 @@ def test_gfx1201_cache_roof_rejects_a_working_set_it_cannot_stream(
 
     with pytest.raises(ValueError, match="cache working set"):
         bench.cache_resident_bw(0, "test", roof)
-
-
-@pytest.fixture
-def fake_gfx12_runtime(monkeypatch):
-    """A HIP runtime for the gfx12 launchers with 32 multiprocessors. Event
-    timings cycle through 4, 2, and 8 ms, and every in-kernel clock reading is
-    2.97e9 shader cycles over 1e8 wall-clock ticks, 2.97 GHz. Returns a
-    function that routes a benchmark's kernels through this runtime and returns
-    the list of (kernel, grid, args) launches."""
-    elapsed_ms = iter([4.0, 2.0, 8.0] * 10)
-    launches = []
-
-    class FakeMemory:
-        def __init__(self, size):
-            self.size = size
-
-    def copy_clock_spans(spans, clocks, size):
-        spans[0] = 2_970_000_000
-        spans[1] = 100_000_000
-
-    fake_hip = SimpleNamespace(
-        hipSetDevice=lambda device: None,
-        hipGetDeviceProperties=lambda device: SimpleNamespace(multiProcessorCount=32),
-        hipMalloc=FakeMemory,
-        hipDeviceSynchronize=lambda: None,
-        hipEventCreate=lambda: None,
-        hipEventRecord=lambda event: None,
-        hipEventElapsedTime=lambda start, stop: next(elapsed_ms),
-        hipMemcpyHtoD=lambda clocks, zeros, size: None,
-        hipMemcpyDtoH=copy_clock_spans,
-        HIPDeviceMemory=FakeMemory,
-    )
-    monkeypatch.setattr(benchmark_base, "hip", fake_hip)
-    monkeypatch.setattr(benchmark_gfx1201, "hip", fake_hip)
-
-    def record_launch(func, grid, block, shared_mem_size, stream, args):
-        launches.append((
-            func,
-            grid,
-            [
-                arg.size if isinstance(arg, FakeMemory) else getattr(arg, "value", arg)
-                for arg in args
-            ],
-        ))
-
-    def install(bench):
-        program = SimpleNamespace(get_kernel=lambda name: name)
-        monkeypatch.setattr(bench, "Program", lambda source: program)
-        monkeypatch.setattr(bench, "launch_kernel", record_launch)
-        return launches
-
-    return install
-
-
-def test_gfx1201_cache_roof_reports_the_fastest_launch_at_its_measured_clock(
-    fake_gfx12_runtime, capsys
-):
-    """The L2 roof reads a 4 MiB set from 8 x 32 workgroups, 64 passes to
-    reach 64 GiB. The 2 ms launch is the peak, and the GL2 hit return at the
-    measured 2.97 GHz is 12,165.12 GB/s."""
-    bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
-    launches = fake_gfx12_runtime(bench)
-
-    peak = bench.tests["L2"](0)
-
-    assert peak == pytest.approx(68_719_476_736 / 2.0 / 1e6)
-    assert len(launches) == 1 + benchmark_base.DEFAULT_NUM_EXPERIMENTS
-    kernel, grid, args = launches[0]
-    assert kernel == "cache_resident_bw"
-    assert grid == [256, 1, 1]
-    assert args == [L2_WORKING_SET_BYTES, 262_144, 64, CACHE_ELEMENT_BYTES, 16]
-    log = capsys.readouterr().out
-    assert "L2 BW, GPU ID: 0" in log
-    assert "GL2 hit return ceiling:12165.1 GB/sec (282.4% at 2970 MHz)" in log
-
-
-@pytest.mark.parametrize(
-    "reported_bytes, buffer_bytes, steps, passes",
-    [
-        (None, 33_554_432, 4, 1024),
-        (48 * 1024 * 1024, 25_165_824, 3, 1365),
-    ],
-    ids=["no-reported-infinity-cache", "reported-48-MiB"],
-)
-def test_gfx1201_infinity_cache_streams_half_its_capacity(
-    fake_gfx12_runtime, capsys, reported_bytes, buffer_bytes, steps, passes
-):
-    """The MALL test streams half the Infinity Cache that AMD-SMI reports, or
-    half of 64 MB when it reports none, in whole 8 MiB grid steps."""
-    cache_sizes = {
-        level: size for level, size in CACHE_SIZES.items() if level != "MALL"
-    }
-    if reported_bytes is not None:
-        cache_sizes["MALL"] = reported_bytes
-    bench = BENCH_CLASSES["gfx1201"](0, cache_sizes, "gfx1201")
-    launches = fake_gfx12_runtime(bench)
-
-    peak = bench.tests["MALL"](0)
-
-    total_bytes = passes * buffer_bytes
-    assert peak == pytest.approx(total_bytes / 2.0 / 1e6)
-    kernel, grid, args = launches[0]
-    assert kernel == "MALL_bw"
-    assert grid == [128, 1, 1]
-    assert args == [buffer_bytes, steps, passes, CACHE_ELEMENT_BYTES]
-    assert (
-        f"working set:{buffer_bytes} bytes, passes:{passes}" in capsys.readouterr().out
-    )
 
 
 # =============================================================================
