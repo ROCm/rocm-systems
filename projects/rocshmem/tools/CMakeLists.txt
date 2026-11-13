@@ -30,3 +30,5 @@ target_link_libraries(rocshmem_info
   PRIVATE
     roc::rocshmem
 )
+
+_rocshmem_set_native_link_jobs(rocshmem_info)
