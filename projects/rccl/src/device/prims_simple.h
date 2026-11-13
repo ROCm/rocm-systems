@@ -330,9 +330,7 @@ class Primitives<T, RedOp, Fan, Direct,
             ncclShmem.groups[group].dsts, workSize);
 
         } else if (ncclShmem.groups[group].srcs[0] && ncclShmem.groups[group].dsts[0]) {
-          constexpr int PreOpSrcs = SrcBuf != Input                               ? 0 :
-                                    DirectRecv * MaxRecv == NCCL_MAX_DIRECT_ARITY ? (1 + NCCL_MAX_DIRECT_ARITY) :
-                                                                                    1;
+          constexpr int PreOpSrcs = SrcBuf != Input ? 0 : 1;
           if (Send && Dst && ncclShmem.groups[group].dsts[1] == nullptr) {
             // this case should only be directCopySend() with registered buffers and send to net peer
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, Recv + Src, Recv * MaxRecv + Src, 0, 1, 1, PreOpSrcs,

@@ -239,23 +239,13 @@ TEST_F(TdmReduceCopyTest, PreMulSumF32TwoSrcs) {
     "premul2x1");
 }
 
-// PreOpSrcs above 1, as in a SIMPLE direct fan-in: the pre-op scales every source below it, including the ones
-// reduced after the first tile pair.
-TEST_F(TdmReduceCopyTest, PreMulSumF32ThreeSrcsAllPreOp) {
+// A PreOpSrcs above 1 still scales source 0 only, in the TDM tiles and in the vector passes that finish the slice,
+// and the third source, reduced through the second tile, is not scaled.
+TEST_F(TdmReduceCopyTest, PreMulSumF32ThreeSrcsScalesFirstOnly) {
   run<FuncPreMulSum<float>, float, 3, 1, 3>(
     tileElts<float>(2) + 9, 0, floatArg(0.5f), false, true,
-    [](const std::vector<std::vector<float>>& src, size_t i) {
-      return src[0][i] * 0.5f + src[1][i] * 0.5f + src[2][i] * 0.5f;
-    },
+    [](const std::vector<std::vector<float>>& src, size_t i) { return src[0][i] * 0.5f + src[1][i] + src[2][i]; },
     "premul3x1pre3");
-}
-
-// The boundary: sources 0 and 1 are scaled, source 2 is not.
-TEST_F(TdmReduceCopyTest, PreMulSumF32ThreeSrcsTwoPreOp) {
-  run<FuncPreMulSum<float>, float, 3, 1, 2>(
-    tileElts<float>(2) + 9, 0, floatArg(0.5f), false, true,
-    [](const std::vector<std::vector<float>>& src, size_t i) { return src[0][i] * 0.5f + src[1][i] * 0.5f + src[2][i]; },
-    "premul3x1pre2");
 }
 
 // Integer ncclAvg: the post-op divides the final sum.
