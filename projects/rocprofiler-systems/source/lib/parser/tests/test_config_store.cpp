@@ -162,6 +162,8 @@ TEST(parser_config_store, set_value_stores_a_parsed_value)
                  std::runtime_error);
     EXPECT_THROW(store.set_value("trace", std::string{ "yes" }, config_source::file),
                  std::runtime_error);
+    EXPECT_THROW(store.set_value("scale", std::int64_t{ 2 }, config_source::file),
+                 std::runtime_error);
     try
     {
         store.set_value("sampling_freq", std::int64_t{ 4 }, config_source::preset);

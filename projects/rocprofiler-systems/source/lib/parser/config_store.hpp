@@ -85,7 +85,9 @@ public:
     void set(std::string_view param_id, std::string_view value, config_source source);
 
     /**
-     * Store a value that is already parsed, such as one decoded from JSON.
+     * Store a value that is already parsed, such as one decoded from JSON. The value
+     * must hold the parameter's type, as for get_as<T>(): a std::int64_t is refused
+     * for a number parameter, where set() would accept the text "2".
      * @throws std::runtime_error if the id is unknown or accepts_value() refuses it.
      * Change callbacks follow the same rules as set().
      */
