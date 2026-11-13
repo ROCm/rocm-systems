@@ -321,8 +321,9 @@ void primsAllGather(Ranks& R, const std::vector<size_t>& counts, bool inPlace = 
   }
 }
 
-// AlltoAll takes the NaN protocol on its send/recv path.
-void primsAllToAll(Ranks& R, const std::vector<size_t>& counts) {
+// AlltoAll takes the NaN protocol on its send/recv path over intra-node links. Over the network its halves stay on
+// the usual protocols (addP2pToPlan), so the data arrives as sent.
+void primsAllToAll(Ranks& R, const std::vector<size_t>& counts, bool overNet) {
   for (const NanDtype& dt : kNanDtypes) {
     for (size_t count : counts) {
       SCOPED_TRACE(std::string(dt.name) + " count " + std::to_string(count));
@@ -339,7 +340,7 @@ void primsAllToAll(Ranks& R, const std::vector<size_t>& counts) {
         // A rank's block to itself is a local copy that never takes the wire.
         std::vector<uint8_t> want;
         for (int r = 0; r < R.n; r++) {
-          const auto& src = r == q ? in[r] : wire[r];
+          const auto& src = r == q || overNet ? in[r] : wire[r];
           want.insert(want.end(), src.begin() + q * block, src.begin() + (q + 1) * block);
         }
         EXPECT_EQ(firstDiff(out[q], want, dt.size), "") << "rank " << q;
@@ -390,7 +391,7 @@ void primsReduceScatter(Ranks& R, const std::vector<size_t>& counts) {
 
 // Communicator setup (mostly loading librccl's kernels) dwarfs the collectives,
 // so each child process runs all of its collectives on one set of communicators.
-template <const std::vector<size_t>* Counts>
+template <const std::vector<size_t>* Counts, bool OverNet = false>
 void runPrimsRing() {
   Ranks R;
   ASSERT_NO_FATAL_FAILURE(initRanks(R));
@@ -401,7 +402,7 @@ void runPrimsRing() {
   }
   {
     SCOPED_TRACE("AlltoAll");
-    primsAllToAll(R, *Counts);
+    primsAllToAll(R, *Counts, OverNet);
   }
   {
     SCOPED_TRACE("AllReduce");
@@ -437,9 +438,10 @@ void runPrimsDirect() {
 }
 
 // tdmMinBytes, when set, is RCCL_TDM_NAN_MIN_BYTES. Builds without ENABLE_TDM_NAN ignore it. Without algo,
-// NCCL_ALGO stays unset.
+// NCCL_ALGO stays unset. extraEnv is added last, e.g. to steer peers off P2P.
 ProcessIsolatedTestRunner::TestConfig primsConfig(const char* name, const char* algo, int gpus, void (*body)(),
-                                                  const char* tdmMinBytes = nullptr) {
+                                                  const char* tdmMinBytes = nullptr,
+                                                  const std::unordered_map<std::string, std::string>& extraEnv = {}) {
   std::unordered_map<std::string, std::string> env = {
     {"NCCL_PROTO", "NaN"},
     {"RCCL_DDA_ENABLE", "0"},
@@ -447,6 +449,7 @@ ProcessIsolatedTestRunner::TestConfig primsConfig(const char* name, const char* 
     {"NCCL_SOCKET_IFNAME", "lo"},
     {"RCCL_TDM_NAN_ENABLE", tdmMinBytes ? "1" : "0"},
   };
+  env.insert(extraEnv.begin(), extraEnv.end());
   if (algo) env["NCCL_ALGO"] = algo;
   if (tdmMinBytes) env["RCCL_TDM_NAN_MIN_BYTES"] = tdmMinBytes;
   return ProcessIsolatedTestRunner::TestConfig(name, body)
@@ -470,6 +473,24 @@ TEST(PrimsNanSentinelEscape, Ring)
   const int gpus = primsGpus();
   if (!gpus) GTEST_SKIP() << "needs at least 2 GPUs";
   RUN_ISOLATED_TESTS(primsConfig("PrimsNanSentinelEscape.Ring", "Ring", gpus, runPrimsRing<&kCounts>));
+}
+
+// The same collectives over the SHM transport, which seeds and restores the NaN FIFO in host memory.
+TEST(PrimsNanSentinelEscape, RingShm)
+{
+  const int gpus = primsGpus();
+  if (!gpus) GTEST_SKIP() << "needs at least 2 GPUs";
+  RUN_ISOLATED_TESTS(primsConfig("PrimsNanSentinelEscape.RingShm", "Ring", gpus, runPrimsRing<&kCounts>,
+                                 /*tdmMinBytes=*/nullptr, {{"NCCL_P2P_DISABLE", "1"}}));
+}
+
+// The same collectives over the net transport (sockets on lo), whose proxy sizes and maps the NaN FIFO.
+TEST(PrimsNanSentinelEscape, RingNet)
+{
+  const int gpus = primsGpus();
+  if (!gpus) GTEST_SKIP() << "needs at least 2 GPUs";
+  RUN_ISOLATED_TESTS(primsConfig("PrimsNanSentinelEscape.RingNet", "Ring", gpus, runPrimsRing<&kCounts, true>,
+                                 /*tdmMinBytes=*/nullptr, {{"NCCL_P2P_DISABLE", "1"}, {"NCCL_SHM_DISABLE", "1"}}));
 }
 
 // The same collectives with every primitive op on the TDM path (gfx1250 builds

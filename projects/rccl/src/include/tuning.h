@@ -100,6 +100,7 @@ struct ncclTuningInput_t {
   int minCTAs;  // resolved lower CTA bound (env > per-call > comm)
   int maxCTAs;  // resolved upper CTA bound (env > per-call > comm)
   int CTAPolicy;   // resolved effective CTAPolicy (per-call)
+  rcclTuningMask algMask; // [RCCL] per-call algSelection mask, empty for none (ncclCollConfigGetAlgMask)
   int chunkSteps;
   int sliceSteps;
   // [RCCL] Cached ncclSymkMask() result; set once per ncclTuningCompute() invocation.

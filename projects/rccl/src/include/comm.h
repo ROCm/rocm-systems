@@ -662,11 +662,13 @@ struct ncclPeerInfo {
   // comm uses it only when every rank can.
   bool ibGdrFlushFlag;
   // [RCCL] Collective and send/recv LL128 buffer sizes of the proxy this rank shares with its parent, 0 if it shares
-  // none. Every rank of the comm adopts them (computeBuffSizes). Append later fields after these.
+  // none. Every rank of the comm adopts them (ncclComputeBuffSizes). Append later fields after these.
   int sharedLl128BuffSize;
   int sharedP2pLl128BuffSize;
   // [RCCL] That proxy's NaN buffer size, adopted with the LL128 sizes. It may be 0.
   int sharedNanBuffSize;
+  // [RCCL] This rank shares its parent's proxy, so the sizes above are its. Any of them may be 0.
+  bool sharesParentProxy;
   // NCCL 2.32.6 additions, appended at the tail in upstream order.
   int rmaRankStride;
   bool cuMemHostSupport;
@@ -1406,26 +1408,52 @@ static inline bool rcclNanProtoForcedFor(const struct ncclComm* comm, ncclDataTy
          rcclNanProtoDtype(datatype);
 }
 
+// rcclNanProtoFor for one call with per-call algSelection algMask (empty: none). Naming rows per call is as
+// explicit as NCCL_PROTO, so RCCL_NAN_PROTO_AUTO stands down for a call that names no NaN row.
+// NCCL_PROTO=NaN sets tuningContext.forced[], which overrides algMask.
+static inline bool rcclNanProtoForCall(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype,
+                                       size_t bytes, rcclTuningMask algMask) {
+  constexpr rcclTuningMask nanRows = rcclTuningMask::bit(NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_NAN) |
+                                     rcclTuningMask::bit(NCCL_ALGO_TREE * NCCL_NUM_PROTOCOLS + NCCL_PROTO_NAN);
+  if (!rcclNanProtoFor(comm, func, datatype, bytes)) return false;
+  return rcclNanProtoForced() || algMask.none() || (algMask & nanRows).any();
+}
+
+// AllGather's LL, LL128 and Simple kernels are int8, and only Ring has a typed NaN kernel. So an AllGather keeps its
+// dtype only where it will run Ring/NaN: NaN serves the call, and NCCL_ALGO left Ring on (a disabled algorithm has
+// zero bandwidth). Every other AllGather is collapsed to bytes at task append.
+static inline bool rcclNanAllGatherKeepsDtype(const struct ncclComm* comm, ncclDataType_t datatype, size_t bytes,
+                                              rcclTuningMask algMask) {
+  return rcclNanProtoForCall(comm, ncclFuncAllGather, datatype, bytes, algMask) &&
+         comm->bandwidths[ncclFuncAllGather][NCCL_ALGO_RING][NCCL_PROTO_NAN] > 0;
+}
+
 // Whether a planned task must run on a NaN kernel. An AllGather keeps its float dtype past task
 // append only when NaN was chosen for it there, and no other protocol has a float AllGather kernel,
 // so its dtype is the decision; aggregation can grow it past the window it was chosen in.
-static inline bool rcclNanProtoOnly(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype,
-                                    size_t bytes) {
+static inline bool rcclNanProtoOnly(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype, size_t bytes,
+                                    rcclTuningMask algMask) {
   if (!rcclNanProtoFunc(func)) return false;
   if (func == ncclFuncAllGather) {
     return comm->nRanks > 1 && comm->buffSizes[NCCL_PROTO_NAN] > 0 && rcclNanProtoDtype(datatype) &&
            (rcclNanProtoForced() || rcclNanProtoAutoTuned(comm));
   }
-  return rcclNanProtoFor(comm, func, datatype, bytes);
+  return rcclNanProtoForCall(comm, func, datatype, bytes, algMask);
+}
+
+// Whether a cost table drops the (algo, proto) cell. Under nanOnly only the NaN cells of the algorithms with a NaN
+// kernel stay; otherwise NaN is never on offer.
+static inline bool rcclNanCellOff(bool nanOnly, ncclFunc_t func, int algo, int proto) {
+  return proto == NCCL_PROTO_NAN ? !(nanOnly && rcclNanProtoKernel(func, algo)) : nanOnly;
 }
 
 // Whether the protocol is decided for this collective: the user named a protocol
 // list, or the NaN protocol serves it. Heuristics that hardcode a protocol must
 // stand down when it is.
-static inline bool rcclProtoPinned(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype,
-                                   size_t bytes) {
+static inline bool rcclProtoPinned(const struct ncclComm* comm, ncclFunc_t func, ncclDataType_t datatype, size_t bytes,
+                                   rcclTuningMask algMask) {
   static const bool named = rcclTunerProtoEnv() != nullptr;
-  return named || rcclNanProtoOnly(comm, func, datatype, bytes);
+  return named || rcclNanProtoOnly(comm, func, datatype, bytes, algMask);
 }
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);

@@ -669,3 +669,60 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_NanForced_KeepsOnlyNanCells) {
     });
   }
 }
+
+namespace {
+template <typename Body>
+void UnderNanAuto(Body body) {
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+  EXPECT_EXIT(
+      {
+        SetMicroEnv("RCCL_NAN_PROTO_AUTO", "1");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        body();
+        std::exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
+}
+
+// Two gfx950 nodes of 8, where RCCL_NAN_PROTO_AUTO picks NaN for a 1 MiB float AllReduce.
+struct NanAutoCostComm : CostComm {
+  char arch[8] = "gfx950";
+  NanAutoCostComm() : CostComm(/*nRanks=*/16, /*nNodes=*/2) {
+    get()->archName = arch;
+    get()->buffSizes[NCCL_PROTO_NAN] = 1 << 20;
+#if ENABLE_TDM_NAN
+    get()->nanTdmMinBytes = -1;
+#endif
+  }
+};
+}  // namespace
+
+// Under RCCL_NAN_PROTO_AUTO a per-call selection naming no NaN row is priced on exactly the rows it names, and
+// with no selection AUTO still prices NaN alone.
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_NanAuto_PerCallSelectionWithoutNanKeepsItsRows) {
+  UnderNanAuto([] {
+    NanAutoCostComm cc;
+    CostTable tbl;
+    auto task = CostTask(ncclFuncAllReduce, ncclFloat32);
+    task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    task.forceAlgSelection = 1;
+    ScriptAllTimes(1.0f);
+
+    ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0, /*nvls=*/0, 1, 0, tbl.ptr()));
+    EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_LL128));
+    EXPECT_EQ(1, tbl.countWritten());
+  });
+  UnderNanAuto([] {
+    NanAutoCostComm cc;
+    CostTable tbl;
+    auto task = CostTask(ncclFuncAllReduce, ncclFloat32);
+    task.algMask = rcclTuningMask();
+    ScriptAllTimes(1.0f);
+
+    ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, /*collNet=*/0, /*nvls=*/0, 1, 0, tbl.ptr()));
+    EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_NAN));
+    EXPECT_FALSE(tbl.written(NCCL_ALGO_RING, NCCL_PROTO_LL128));
+  });
+}
