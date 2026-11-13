@@ -117,9 +117,7 @@ __launch_bounds__(512)
     uint32_t* out = reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perRankBytes);
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
-      if (!ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1)) {
-        break; // poll is the outermost loop; the ddaSetLLEpoch below still runs
-      }
+      ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1);
       out[2 * pk] = d0;
       out[2 * pk + 1] = d1;
     }

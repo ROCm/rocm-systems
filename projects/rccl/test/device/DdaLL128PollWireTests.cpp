@@ -555,12 +555,9 @@ protected:
       EXPECT_EQ(r.returned, 1);
       EXPECT_EQ(r.mismatches, 0ull);
     }
-    {
-      SCOPED_TRACE("abort while entry 0 is stale");
-      const BatchResult r = WaitBatch<kBatch>(kAll & ~1, 1, kAll, -1, true, timedOut);
-      EXPECT_FALSE(timedOut);
-      EXPECT_EQ(r.returned, 0) << "an aborted wait must report it did not see the flags";
-    }
+    // Abort no longer ends a DDA wait (#11245 reverted). Raising the flag here
+    // would spin until the process is killed.
+    (void)timedOut;
   }
 
   // Each check below backs the test of the same name, and with kBatched its *Batched twin.
@@ -741,10 +738,12 @@ TEST_F(DdaLL128PollWire, WriterOnPeerGpuStagedNeverYieldsOldPayload) {
 }
 
 TEST_F(DdaLL128PollWire, AbortEndsPoll) {
+  GTEST_SKIP() << "DDA waits no longer honor abortFlag (#11245 reverted)";
   AbortEndsPoll<false>();
 }
 
 TEST_F(DdaLL128PollWire, AbortEndsPollBatched) {
+  GTEST_SKIP() << "DDA waits no longer honor abortFlag (#11245 reverted)";
   AbortEndsPoll<true>();
 }
 

@@ -2802,9 +2802,9 @@ TEST(Rcclwrap, SymEligible_YieldsToSymmetricKernel)
 
 // ---------------------------------------------------------------------------
 // rcclCollectiveMustUseEnqueuePath: DDA/CE/GIN early-returns skip ncclEnqueueCheck.
-// NCCL_CHECK_MODE, a suspended communicator and a revoked one must divert to
-// enqueue so pointer checks, the suspend guard and the revoked rejection still run. Named Rcclwrap so fixtures-debug CI
-// selects them (Rcclwrap.* is the listed prefix for this file).
+// NCCL_CHECK_MODE and a suspended communicator divert to enqueue. A revoked comm
+// does not (#11245 reverted). Named Rcclwrap so fixtures-debug CI selects them
+// (Rcclwrap.* is the listed prefix for this file).
 // ---------------------------------------------------------------------------
 
 TEST(Rcclwrap, EnqueueGuards_DefaultCheckModeAllowsAddonEarlyReturn)
@@ -2843,7 +2843,7 @@ TEST(Rcclwrap, EnqueueGuards_RevokedForcesEnqueue)
     ncclComm comm{};
     comm.checkMode = ncclCheckModeDefault;
     __atomic_store_n(&comm.revokedFlag, 1u, __ATOMIC_RELAXED);
-    EXPECT_TRUE(rcclCollectiveMustUseEnqueuePath(&comm));
+    EXPECT_FALSE(rcclCollectiveMustUseEnqueuePath(&comm));
 }
 
 // Call sites: DebugLocal must divert AllReduce / AllGather / AlltoAll / ReduceScatter

@@ -114,10 +114,7 @@ __launch_bounds__(1024)
     const int eltInSlice =
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t vr[kDdaLL128WordsPerThread];
-    if (!ddaLL128PollWireBatched(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
-                                 params)) {
-      break; // not return: every thread must reach the __syncthreads below
-    }
+    ddaLL128PollWireBatched(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane, params);
     ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);
   }
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))

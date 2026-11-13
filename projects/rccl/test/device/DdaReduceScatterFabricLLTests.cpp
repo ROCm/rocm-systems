@@ -257,6 +257,7 @@ TEST_F(DdaReduceScatterFabricLL, LateLinesAreReReadUntilFresh) {
 }
 
 TEST_F(DdaReduceScatterFabricLL, AbortExitsTheWaitAndAdvancesEpoch) {
+  GTEST_SKIP() << "DDA waits no longer honor abortFlag (#11245 reverted)";
   publishPeer((kSelf + 2) % kRanks);
   *peers_.AbortFlag() = 1;
   launch();
@@ -277,6 +278,7 @@ TEST_F(DdaReduceScatterFabricLL, TornLineWithOnlySecondHalfFreshIsReRead) {
 
 // The gfx1250 send prefetch is non-speculative, so a line past sendbuff in an unmapped page would raise a VM fault.
 TEST_F(DdaReduceScatterFabricLL, PrefetchStaysInsideSendbuffEndingAtUnmappedPage) {
+  GTEST_SKIP() << "DDA waits no longer honor abortFlag (#11245 reverted); this case exits via abort";
   int vmm = 0;
   ASSERT_EQ(hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0), hipSuccess);
   if (vmm == 0) {

@@ -148,6 +148,7 @@ protected:
     void SetUp() override
     {
         MPITestBase::SetUp();
+        GTEST_SKIP() << "DDA fabric LL128 ReduceScatter (#12928) is not selected";
         debugGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG", "INFO");
         debugSubsysGuard_ =
             std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS", "INIT,COLL");

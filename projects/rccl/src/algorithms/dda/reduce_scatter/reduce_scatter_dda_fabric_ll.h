@@ -75,6 +75,7 @@ __launch_bounds__(512)
                                            int epochLen, // number of cells in epochDev
                                            size_t bankSize, // scratch bank size (from host)
                                            DdaKernelParams params) {
+  (void)params;
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = recvcount * sizeof(T);
@@ -138,8 +139,7 @@ __launch_bounds__(512)
     for (int base = 1; base < nRanks; base += kDdaLLRsRecvBatch) {
       uint32_t d0[kDdaLLRsRecvBatch], f0[kDdaLLRsRecvBatch];
       uint32_t d1[kDdaLLRsRecvBatch], f1[kDdaLLRsRecvBatch];
-      // Read the batch until every line is fresh; the first pass is the first read, each pass one abort spin tick.
-      int spins = 0;
+      // Read the batch until every line is fresh; the first pass is the first read.
       while (true) {
         // Each pass reads every line, sharing one wait; a fresh line cannot change before this call ends.
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
@@ -185,10 +185,6 @@ __launch_bounds__(512)
         }
         if (fresh) {
           break;
-        }
-        if (params.abortSpinTick(spins)) {
-          ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
-          return;
         }
       }
 #pragma unroll

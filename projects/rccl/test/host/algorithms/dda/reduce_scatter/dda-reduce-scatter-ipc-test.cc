@@ -31,10 +31,10 @@ void* const kRecvbuff = reinterpret_cast<void*>(0x2000);
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
 const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
 
-// Shards up to 1 MiB are copied in the kernel; larger ones are staged by the host first.
+// #12928's in-kernel copy is reverted, so every shard is staged by the host.
 constexpr size_t kInKernelMaxFloats = (1u << 20) / sizeof(float);
 
-template <typename T, bool kCopyInKernel = true>
+template <typename T, bool kCopyInKernel = false>
 const void* Kernel() {
   return KernelPtr(&dda::common::ddaReduceScatterIpc<T, 8, false, kCopyInKernel>);
 }
@@ -190,9 +190,12 @@ TEST_F(DdaReduceScatterIpcMicrotest, Launch_EachDatatypeLaunchesItsOwnKernel) {
 
 TEST_F(DdaReduceScatterIpcMicrotest, Launch_ShardUpTo1MiBIsCopiedInTheKernel) {
   ASSERT_EQ(Run(kInKernelMaxFloats), ncclSuccess);
-  EXPECT_TRUE(copies_.empty());
+  ASSERT_EQ(copies_.size(), 1u);
+  EXPECT_EQ(copies_[0].dst, comm().ddaScratch);
+  EXPECT_EQ(copies_[0].src, kSendbuff);
+  EXPECT_EQ(copies_[0].bytes, 8u * kInKernelMaxFloats * sizeof(float));
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
-  EXPECT_EQ(g_ddaLaunches[0].kernel, (Kernel<float, true>()));
+  EXPECT_EQ(g_ddaLaunches[0].kernel, (Kernel<float, false>()));
 }
 
 TEST_F(DdaReduceScatterIpcMicrotest, Launch_LargerShardIsStagedIntoScratchBeforeTheKernel) {

@@ -72,46 +72,25 @@ public:
     // signaled or waited on, hanging the barrier. Every rank walks peers in the
     // same increasing order, so the interleaved signal/wait cannot deadlock.
     FlagType* selfBuf = peerFlags_[selfRank_];
-    bool gaveUp = false;
-    for (int peerRank = threadIdx.x; !aborted_ && peerRank < nRanks_; peerRank += blockDim.x) {
+    for (int peerRank = threadIdx.x; peerRank < nRanks_; peerRank += blockDim.x) {
       FlagType* peerBuf = peerFlags_[peerRank];
-      bool signaled = false;
 
       // Signal the peer that this rank reached the barrier for this block.
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
-        signaled = putFlag<std::memory_order_relaxed>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), params_);
+        putFlag<std::memory_order_relaxed>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), params_);
       } else {
-        signaled = putFlag<std::memory_order_release>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), params_);
-      }
-      if (!signaled) {
-        gaveUp = true;
-        break;
+        putFlag<std::memory_order_release>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), params_);
       }
 
       // Wait for the peer's signal in this rank's own buffer.
-      bool arrived = false;
       if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
-        arrived = waitFlag<std::memory_order_relaxed>(selfBuf + getFlagIdx(peerRank, blockIdx.x), params_);
+        waitFlag<std::memory_order_relaxed>(selfBuf + getFlagIdx(peerRank, blockIdx.x), params_);
       } else {
-        arrived = waitFlag<std::memory_order_acquire>(selfBuf + getFlagIdx(peerRank, blockIdx.x), params_);
+        waitFlag<std::memory_order_acquire>(selfBuf + getFlagIdx(peerRank, blockIdx.x), params_);
       }
-      if (!arrived) {
-        gaveUp = true;
-        break;
-      }
-    }
-    // With nRanks_ <= warpSize every signaling lane is in wave 0, so a wave vote
-    // suffices; larger cliques span waves and need the block-wide vote.
-    const bool singleWave = nRanks_ <= warpSize;
-    if (singleWave) {
-      aborted_ = __any(aborted_ || gaveUp);
     }
     if constexpr (hasSubsequentMemAccess) {
-      if (singleWave) {
-        __syncthreads();
-      } else {
-        aborted_ = __syncthreads_or(aborted_ || gaveUp);
-      }
+      __syncthreads();
     }
   }
 
@@ -185,9 +164,7 @@ public:
       __scoped_atomic_store_n(peerFlags_[to] + getEpochFlagIdx(selfRank_, blockIdx.x), epoch, __ATOMIC_RELEASE,
                               __MEMORY_SCOPE_SYSTEM);
       const FlagType* flag = epochFlagFrom(from);
-      int spins = 0;
       while (static_cast<int32_t>(__scoped_atomic_load_n(flag, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) - epoch) < 0) {
-        if (params_.abortSpinTick(spins)) break;
       }
     }
     __syncthreads();
@@ -211,9 +188,7 @@ public:
   __device__ __forceinline__ void epochWaitPiece(const FlagType* ready, FlagType epoch, unsigned piece) {
     if (threadIdx.x == 0) {
       const FlagType want = epoch + 2 + piece;
-      int spins = 0;
       while (static_cast<int32_t>(__scoped_atomic_load_n(ready, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM) - want) < 0) {
-        if (params_.abortSpinTick(spins)) break;
       }
       __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "");
     }
@@ -272,8 +247,6 @@ private:
   int nRanks_{-1};
   FlagType** peerFlags_{nullptr};
   DdaKernelParams params_{};
-  // Sticky for the rest of the kernel and uniform across the signaling lanes; see IpcGpuBarrier::aborted_.
-  bool aborted_{false};
   bool useEpoch_{true};
 
   __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags, DdaKernelParams params)

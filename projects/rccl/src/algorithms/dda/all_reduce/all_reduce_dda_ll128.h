@@ -121,11 +121,7 @@ __launch_bounds__(512)
         ddaLL128LoadRegs<int8_t>(vr, srcBytes + dataByte, eltInSlice, lane, flagLane);
       } else {
         const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
-        if (!ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
-                              params)) {
-          ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
-          return;
-        }
+        ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane, params);
       }
       // On a flag lane the odd words hold flags rather than payload, so the sums
       // landing there are meaningless -- ddaLL128StoreRegs re-derives those slots

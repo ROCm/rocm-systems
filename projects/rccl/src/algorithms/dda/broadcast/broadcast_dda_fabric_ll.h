@@ -125,7 +125,7 @@ __launch_bounds__(512)
     const LLPacket16* src = self + nRanks;
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
-      if (!ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1)) break;
+      ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1);
       ddaBcStore8<kAligned>(recvbuff + 8 * pk, d0, d1);
     }
 
@@ -133,7 +133,7 @@ __launch_bounds__(512)
       for (int p = tid; p < nRanks; p += nthreads) {
         if (p == selfRank || p == root) continue;
         uint32_t d0, f0, d1, f1;
-        if (!ddaLLWaitLineFlags(&self[p], flag, params, d0, f0, d1, f1)) break;
+        ddaLLWaitLineFlags(&self[p], flag, params, d0, f0, d1, f1);
       }
     }
   }

@@ -348,6 +348,7 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, StagedMatchesTheCooperativeWriterOnFp8) {
 // A peer that never sends aborts the staged two-shot: my shard is never stored or published, every async store
 // drains, and the epoch still moves on.
 TEST_F(DdaAllReduceFabricLL128TwoShot, StagedAbortLeavesNoPartialSum) {
+  GTEST_SKIP() << "DDA waits no longer honor abortFlag (#11245 reverted)";
   for (const Case& c : {Case{8, 5, 8, Kind::kStaged, 2, 512, kSmallShardBytes},
                         Case{8, 5, 8, Kind::kStaged, 8, 512, kLargeShardBytes}}) {
     SCOPED_TRACE(testing::Message() << "shard " << c.shardBytes);

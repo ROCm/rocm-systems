@@ -35,18 +35,16 @@ __device__ __forceinline__ uint32_t cas(uint32_t* addr, uint32_t compare, uint32
 
 template <std::memory_order Sem>
 __device__ __forceinline__ bool putFlag(uint32_t* addr, DdaKernelParams params) {
-  int spins = 0;
+  (void)params;
   while (cas<Sem>(addr, 0, 1) != 0) {
-    if (params.abortSpinTick(spins)) return false;
   }
   return true;
 }
 
 template <std::memory_order Sem>
 __device__ __forceinline__ bool waitFlag(uint32_t* addr, DdaKernelParams params) {
-  int spins = 0;
+  (void)params;
   while (cas<Sem>(addr, 1, 0) != 1) {
-    if (params.abortSpinTick(spins)) return false;
   }
   return true;
 }
@@ -122,24 +120,19 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < NRANKS && !aborted_) {
+    if (threadIdx.x < NRANKS) {
       auto peerRank = threadIdx.x;
-      bool signaled = false;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
-        signaled = allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x, params_);
+        allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x, params_);
       } else {
-        signaled = allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x, params_);
+        allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x, params_);
       }
 
-      bool arrived = false;
-      if (signaled) {
-        if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
-          arrived = allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x, params_);
-        } else {
-          arrived = allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, params_);
-        }
+      if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
+        allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x, params_);
+      } else {
+        allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, params_);
       }
-      aborted_ = __any(!arrived);
     }
     if constexpr (hasSubsequentMemAccess) {
       __syncthreads();
@@ -151,11 +144,6 @@ private:
   int selfRank_{-1};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
   DdaKernelParams params_{};
-  // Sticky for the rest of the kernel and uniform across the signaling lanes,
-  // which all sit in wave 0: once any of them gives up a barrier on abort, the
-  // block signals no later barrier, so a late peer cannot pair its earlier flag
-  // with this block's next one and read data this rank never finished producing.
-  bool aborted_{false};
 
   __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes,
                          DdaKernelParams params);

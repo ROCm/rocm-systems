@@ -61,12 +61,10 @@ __device__ __forceinline__ uint64_t ddaLL128LoadWord(const uint64_t* p) {
   return __scoped_atomic_load_n((u64_gptr) const_cast<uint64_t*>(p), __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
 }
 
-// Poll the LL128 flag word until it matches, or the comm abort flag is set.
-// Returns false if the wait was aborted so the kernel can exit.
+// Poll the LL128 flag word until it matches. #11245's abort exit is reverted.
 __device__ __forceinline__ bool ddaLL128WaitFlag(const uint64_t* flagAddr, uint64_t flag, DdaKernelParams params) {
-  int spins = 0;
+  (void)params;
   while (ddaLL128LoadWord(flagAddr) != flag) {
-    if (params.abortSpinTick(spins)) return false;
   }
   return true;
 }
@@ -348,14 +346,12 @@ __device__ __forceinline__ void ddaLL128StageDrain() {
 
 // Poll until every line this lane reads has landed. With the cooperative load the
 // payload arrives with its flag, so only the 16B fallback reads it again.
-// Returns false if the comm abort flag is set so the kernel can leave the wait.
 __device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread],
                                                  uint64_t flag, int wid, DdaKernelParams params) {
+  (void)params;
   const bool flagLane = ddaLL128IsFlagLane(wid);
-  int spins = 0;
   bool needReload;
   do {
-    if (params.abortSpinTick(spins)) return false;
     needReload = false;
 #pragma unroll
     for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
@@ -374,11 +370,10 @@ __device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t 
 // ddaLL128PollWire with all loads before any flag check and no second read, which needs cooperative loads.
 __device__ __forceinline__ bool ddaLL128PollWireBatched(const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread],
                                                         uint64_t flag, int wid, DdaKernelParams params) {
+  (void)params;
   const bool flagLane = ddaLL128IsFlagLane(wid);
-  int spins = 0;
   bool needReload;
   do {
-    if (params.abortSpinTick(spins)) return false;
     needReload = false;
 #pragma unroll
     for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)

@@ -438,6 +438,7 @@ TEST_F(DdaAllReduceFabricLL, OneShotTornLineWaitsForBothHalves) {
 
 // An abort raised while the spin-one wait holds a stale line leaves recvbuff untouched and still bumps the epoch.
 TEST_F(DdaAllReduceFabricLL, OneShotAbortDuringStaleBatchLeavesRecvbuffAndAdvancesEpoch) {
+  GTEST_SKIP() << "DDA waits no longer honor abortFlag (#11245 reverted)";
   nRanks_ = 6;
   publishPeer(0);
   publishPeer(2);
@@ -479,12 +480,14 @@ TEST_F(DdaAllReduceFabricLL, SpreadWaitsForLateCopiesAndLateReducedShards) {
 
 // A phase-2 abort writes and publishes no partial sum; a phase-3 abort leaves the missing shard untouched.
 TEST_F(DdaAllReduceFabricLL, SpreadAbortPublishesNoPartialSumAndLeavesMissingShards) {
+  GTEST_SKIP() << "DDA waits no longer honor abortFlag (#11245 reverted)";
   spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, kCopyArea, kAbort);
   spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, kReducedArea, kAbort);
 }
 
 // One block on 4 ranks: pass 0 (packets 0 to 511) finishes, pass 1 waits on rank 0's later copies, then aborts.
 TEST_F(DdaAllReduceFabricLL, SpreadAbortInALaterPassKeepsTheFinishedPass) {
+  GTEST_SKIP() << "DDA waits no longer honor abortFlag (#11245 reverted)";
   heldFrom_ = dda::common::ddaLLSpreadPassPkts(4);
   spreadCase<float, 4>(4, kSelf, kBufBytes, 1, kCopyArea, kAbort);
 }

@@ -860,8 +860,8 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
     return ncclSuccess;
   }
 
-  // Broadcast: report DDA when picked, else the generic query below. Check-mode, suspended and
-  // revoked comms always enqueue, so they skip the selector like ncclBroadcast_impl does.
+  // Broadcast: report DDA when picked, else the generic query below. Check-mode and
+  // suspended comms enqueue, so they skip the selector like ncclBroadcast_impl does.
   if (coll == ncclFuncBroadcast && !rcclCollectiveMustUseEnqueuePath(comm)) {
     struct rcclCollDecision decision;
     NCCLCHECK(rcclSelectBroadcast(comm, (size_t)count, dataType, /*root=*/0, /*query=*/true, &decision));
@@ -1525,10 +1525,9 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
     if (!query && prefix) INFO(NCCL_TUNING, "%s DDA disqualified: RCCL_DDA_ENABLE=%d launchOrderImplicit=%d ncclGroupDepth=%d", prefix, (int)rcclParamDdaEnable(), comm->config.launchOrderImplicit, ncclGroupDepth);
     return false;
   }
-  if (comm->ddaDisabledAfterAbort) {
-    if (!query && prefix) INFO(NCCL_TUNING, "%s DDA disqualified: comm was shrunk with NCCL_SHRINK_ABORT", prefix);
-    return false;
-  }
+  // #11245 turned DDA off after NCCL_SHRINK_ABORT. That gate is reverted;
+  // ddaDisabledAfterAbort is left on the comm and ignored.
+  (void)comm->ddaDisabledAfterAbort;
   if (IsArchMatch(comm->archName, "gfx1250")) {
     // gfx1250 has no nRanks floor.
   } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
@@ -2070,7 +2069,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     const bool symkWithdrawn =
       ddaFabricArch1250 && symkRequested && !symSuppressedByMin && symSuppressedByMax && !ginYield;
     // In graph capture that backend is Ring (no CE); re-route only where the planner picks Ring (fp8 plans Tree).
-    // Check-mode, suspended and revoked comms divert to enqueue, which plans Ring itself.
+    // Check-mode and suspended comms divert to enqueue, which plans Ring itself.
     struct rcclCollDecision ringChoice;
     memset(&ringChoice, 0, sizeof(ringChoice));
     uint32_t ringThreads = 0;
@@ -2084,7 +2083,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // Eager it is CE-registered, which DDA LL128 replaces for the table's eager shards within the LL128 cap.
     // ceAvailable already rejects sysmem windows, and ceRegInWindow implies ceRegEnabled.
     const bool ceRegRuns = ceAvailable && ceRegInWindow;
-    // Check-mode, suspended and revoked comms divert to enqueue, which runs CE only for a CE decision.
+    // Check-mode and suspended comms divert to enqueue, which runs CE only for a CE decision.
     const bool ddaReplacesCeReg = symkWithdrawn && !ceCapturing && ceRegRuns && msgBytes <= arDdaLL128Max &&
                                   rcclDdaArRegEagerShardFitsTab(archTable, comm->nRanks, msgBytes) &&
                                   !rcclCollectiveMustUseEnqueuePath(comm);
@@ -2643,12 +2642,9 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
           decision->protocol = NCCL_PROTO_LL;
           return rcclSelectDone("RS", query, decision);
         }
-        if (rsDdaLL128Max > 0 && totalBytes <= rsDdaLL128Max &&
-            ncclReduceScatterDdaFabricLL128Eligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
-          decision->algo = RCCL_DDA_FABRIC_LL128;
-          decision->protocol = NCCL_PROTO_LL128;
-          return rcclSelectDone("RS", query, decision);
-        }
+        // #12928's DDA fabric LL128 ReduceScatter is reverted. The kernel and its
+        // eligibility helper remain; the selector never takes that tier.
+        (void)rsDdaLL128Max;
         // The entry gate now admits the widest tier, so VMM re-checks its own cap.
         // On gfx1250 SPX this tier runs only on rank-scaled comms (ddaVmmMaxPerRank[RS]); the
         // DPX table's ddaVmmMax total sits under the LL tier except at 8 ranks.
@@ -2732,7 +2728,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
 static bool rcclSelectAlltoAllFabric(struct ncclComm* comm, const rcclArchThresholds* table,
                                     const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                     bool query, struct rcclCollDecision* decision) {
-  // Check mode / suspended / revoked comm: ncclAlltoAll_impl diverts to ncclEnqueueCheck, which
+  // Check mode / suspended comm: ncclAlltoAll_impl diverts to ncclEnqueueCheck, which
   // cannot run these paths. Decide as that path will.
   if (rcclCollectiveMustUseEnqueuePath(comm)) return false;
   const size_t perPeer = count * ncclTypeSize(datatype);

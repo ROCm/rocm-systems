@@ -5131,8 +5131,6 @@ ncclResult_t ncclCommShrink_impl(ncclComm_t comm, int* excludeRanksList, int exc
   // Handle error mode by setting abort flags and waiting for kernels to complete and unset the flags
   // to avoid bootstrap issues
   if (shrinkFlags & NCCL_SHRINK_ABORT) {
-    // [RCCL] Disable DDA on the parent comm; see ncclComm::ddaDisabledAfterAbort.
-    comm->ddaDisabledAfterAbort = true;
     NCCLCHECKGOTO(setCommAbortFlags(comm, 1), res, exit);
     NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->deviceStream), res, exit);
     if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE) && comm->localPersistentRefs != 0) {

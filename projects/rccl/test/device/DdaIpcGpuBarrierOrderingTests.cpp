@@ -412,6 +412,7 @@ TEST(DdaIpcGpuBarrierOrdering, FlatAcquireOnly_Coarse) {
 }
 
 TEST(DdaIpcGpuBarrierOrdering, AbortedBarrierStaysSilent) {
+  GTEST_SKIP() << "DDA barriers no longer give up on abortFlag (#11245 reverted)";
   int n = 0;
   if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) == nullptr &&
       (hipGetDeviceCount(&n) != hipSuccess || n < 1)) {

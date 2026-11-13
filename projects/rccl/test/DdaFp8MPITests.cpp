@@ -477,6 +477,7 @@ TEST_F(DdaFp8MPI_LL128, AllReduceOneShot)
 
 TEST_F(DdaFp8MPI_LL128, ReduceScatter)
 {
+    GTEST_SKIP() << "DDA fabric LL128 ReduceScatter (#12928) is not selected";
     forEachFp8AndCount({kLine, kPrimeLines, 4 * 1024}, [this](ncclDataType_t datatype, size_t count) {
         runReduceScatter(datatype, count, RCCL_DDA_FABRIC_LL128);
     });

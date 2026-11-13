@@ -482,6 +482,7 @@ TEST_F(DdaMPI_ReduceScatter, LLTierBackToBackShapes)
 // 16-byte shards in the LL128 window: just past the LL cap, the next whole slice, two blocks of warps past that slice, and the slot or arch cap.
 TEST_F(DdaMPI_ReduceScatter, LL128TierBackToBackShapes)
 {
+    GTEST_SKIP() << "DDA fabric LL128 ReduceScatter (#12928) is not selected";
     runSteps("DdaMPI_ReduceScatter/LL128TierBackToBackShapes", /*needsLL128=*/true,
              [](const ncclComm* comm, int nRanks) {
                  return repeatEachShape(Tier::kLL128, ll128Shapes(comm, nRanks));
@@ -492,6 +493,7 @@ TEST_F(DdaMPI_ReduceScatter, LL128TierBackToBackShapes)
 // Same-tier calls stay back to back. This variant drains and barriers at each tier switch.
 TEST_F(DdaMPI_ReduceScatter, LLAndLL128Interleaved)
 {
+    GTEST_SKIP() << "DDA fabric LL128 ReduceScatter (#12928) is not selected";
     runSteps("DdaMPI_ReduceScatter/LLAndLL128Interleaved", /*needsLL128=*/true, interleavedSteps,
              2 * (kLLShapes + kLL128Shapes), /*maxBlocks=*/nullptr, /*syncOnTierSwitch=*/true);
 }
@@ -499,6 +501,7 @@ TEST_F(DdaMPI_ReduceScatter, LLAndLL128Interleaved)
 // No drain on an LL/LL128 switch, at two blocks. Both tiers double-buffer on the shared bank stride.
 TEST_F(DdaMPI_ReduceScatter, LLAndLL128InterleavedUnsynchronised)
 {
+    GTEST_SKIP() << "DDA fabric LL128 ReduceScatter (#12928) is not selected";
     runSteps("DdaMPI_ReduceScatter/LLAndLL128InterleavedUnsynchronised", /*needsLL128=*/true, interleavedSteps,
              2 * (kLLShapes + kLL128Shapes), /*maxBlocks=*/"2", /*syncOnTierSwitch=*/false);
 }
@@ -506,6 +509,7 @@ TEST_F(DdaMPI_ReduceScatter, LLAndLL128InterleavedUnsynchronised)
 // The default block cap fits every LL128 shard in one pass; two blocks make both kernels grid-stride.
 TEST_F(DdaMPI_ReduceScatter, GridStrideWithTwoBlocks)
 {
+    GTEST_SKIP() << "DDA fabric LL128 ReduceScatter (#12928) is not selected";
     runSteps("DdaMPI_ReduceScatter/GridStrideWithTwoBlocks", /*needsLL128=*/true, interleavedSteps,
              2 * (kLLShapes + kLL128Shapes), /*maxBlocks=*/"2", /*syncOnTierSwitch=*/true);
 }

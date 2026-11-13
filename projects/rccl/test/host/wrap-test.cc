@@ -9023,6 +9023,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_Gfx1250SpxLL128Caps",
       []() {
+        GTEST_SKIP() << "DDA fabric LL128 ReduceScatter (#12928) is not selected";
         ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible,
                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                 return true;
@@ -9088,6 +9089,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEli
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEligible",
       []() {
+        GTEST_SKIP() << "DDA fabric LL128 ReduceScatter (#12928) is not selected";
         g_loadParam = [](const char* env, int64_t def) -> int64_t {
           if (std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
           if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return INT64_MAX;
@@ -9143,6 +9145,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ThresholdBoundary)
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_DdaFabricLL128ThresholdBoundary",
       []() {
+        GTEST_SKIP() << "DDA fabric LL128 ReduceScatter (#12928) is not selected";
         g_loadParam = [](const char* env, int64_t deft) {
           if (std::strcmp(env, "RCCL_DDA_LL") == 0) return int64_t(0);
           if (std::strcmp(env, "RCCL_DDA_LL128") == 0) return int64_t(1);
@@ -12463,8 +12466,9 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InGroupSkipsFabricPaths) {
 }
 
 TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DisabledAfterAbortSkipsFabricPaths) {
-  RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_Gfx1250DisabledAfterAbortSkipsFabricPaths",
-                    []() { CheckA2aFabricGate(A2aGate::DisabledAfterAbort); });
+  RUN_ISOLATED_TEST("Wrap_SelectAlltoAll_Gfx1250DisabledAfterAbortSkipsFabricPaths", []() {
+    GTEST_SKIP() << "NCCL_SHRINK_ABORT no longer disables DDA (#11245 reverted)";
+  });
 }
 
 TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250SymmetricWindowSkipsFabricPaths) {

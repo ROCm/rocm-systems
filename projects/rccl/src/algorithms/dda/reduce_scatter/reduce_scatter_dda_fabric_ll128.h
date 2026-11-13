@@ -62,13 +62,13 @@ __host__ __device__ __forceinline__ constexpr int ddaLL128RsBatchPeers(int peer,
   return peer;
 }
 
-// Wait until every valid flag in the batch is current; vr then holds the landed payload. Returns false on abort.
+// Wait until every valid flag in the batch is current; vr then holds the landed payload.
 template <int kBatch>
 __device__ __forceinline__ bool ddaLL128RsWaitBatch(const uint64_t* const (&lines)[kBatch], const bool (&valid)[kBatch],
                                                     const bool (&read)[kBatch], int laneWord, uint64_t flag,
                                                     bool flagLane, DdaKernelParams params,
                                                     uint64_t (&vr)[kBatch][kDdaLL128WordsPerThread]) {
-  int spins = 0;
+  (void)params;
   while (true) {
     bool stale = false;
 #pragma unroll
@@ -94,9 +94,6 @@ __device__ __forceinline__ bool ddaLL128RsWaitBatch(const uint64_t* const (&line
       }
 #endif
       return true;
-    }
-    if (params.abortSpinTick(spins)) {
-      return false;
     }
   }
 }
@@ -200,8 +197,6 @@ __launch_bounds__(512)
   const int laneWord = 2 * lane;
   constexpr int kPollBatch = kDdaLL128RsPollBatch<T>;
   const int firstRecvPeer = ddaLL128RsNextRank(selfRank, nRanks);
-  // Abort exits via the common tail: a second ddaSetLLEpoch call would keep its epoch cell index live and spill it.
-  bool aborted = false;
   for (size_t s = gwarp; s < slicesTotal; s += wstride) {
     const size_t sliceByte = s * (size_t)kDdaLL128DataBytesPerSlice;
     const size_t rem = shardBytes - sliceByte;
@@ -226,10 +221,7 @@ __launch_bounds__(512)
         lines[k] = gatherBase + (uint64_t)peers[k] * (uint64_t)slotWords + sliceWire;
       }
       uint64_t vr[kPollBatch][kDdaLL128WordsPerThread];
-      if (!ddaLL128RsWaitBatch(lines, valid, read, laneWord, flag, flagLane, params, vr)) {
-        aborted = true;
-        break;
-      }
+      ddaLL128RsWaitBatch(lines, valid, read, laneWord, flag, flagLane, params, vr);
       // Fold word by word, each word taking the batch's peers in rank order, so every element sums in the same order.
       // On a flag lane the odd words hold flags rather than payload, so the sums
       // landing there are meaningless; ddaLL128StoreRegs re-derives those slots
@@ -250,9 +242,6 @@ __launch_bounds__(512)
           __builtin_amdgcn_sched_barrier(0x20);
         }
       }
-    }
-    if (aborted) {
-      break;
     }
 
     ddaLL128StoreRegs<int8_t>(dstBytes + sliceByte, acc, eltInSlice, lane, flagLane);

@@ -464,6 +464,7 @@ TEST_F(RevokeMPITest, Revoke_ThenFinalize_Rejected)
  */
 TEST_F(RevokeMPITest, IncompleteCollective_Revoke_Shrink_Collective)
 {
+    GTEST_SKIP() << "DDA waits no longer honor abortFlag (#11245 reverted); an incomplete DDA collective hangs";
     SKIP_UNLESS_MPI_PREREQS(4,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
@@ -741,6 +742,7 @@ protected:
     void SetUp() override
     {
         MPITestBase::SetUp();
+        GTEST_SKIP() << "DDA waits no longer honor abortFlag (#11245 reverted)";
         const std::string skipReason
             = mpiCoordinatedSkipReason(!isGfx1250Device(), "DDA fabric requires gfx1250");
         if(!skipReason.empty())
@@ -926,6 +928,7 @@ protected:
             = mpiCoordinatedSkipReason(!isGfx1250Device(), "DDA fabric requires gfx1250");
         if(!skipReason.empty())
             GTEST_SKIP() << skipReason;
+        GTEST_SKIP() << "DDA waits no longer honor abortFlag (#11245 reverted)";
         if(!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit))
             GTEST_SKIP() << "Test requires at least 2 MPI processes";
     }
@@ -1041,6 +1044,7 @@ protected:
             = mpiCoordinatedSkipReason(!isDdaIpcArchDevice(), "DDA IPC requires gfx942 or gfx950");
         if(!skipReason.empty())
             GTEST_SKIP() << skipReason;
+        GTEST_SKIP() << "DDA waits no longer honor abortFlag (#11245 reverted)";
         if(!validateTestPrerequisites(8, 8, kNoPowerOfTwoRequired, 1, 1))
             GTEST_SKIP() << "DDA IPC requires exactly 8 MPI processes on one node";
     }

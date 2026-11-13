@@ -23,16 +23,17 @@ constexpr int kDdaSpinsBeforeCheckAbort = 10000;
 struct DdaKernelParams {
   const uint32_t* flag; // comm->abortFlagDev; null never reports an abort
 
+  // #11245 taught every DDA wait to sample this flag. That behavior is reverted:
+  // the pointer stays one kernarg so later kernels keep their launch signature,
+  // but a wait never gives up on it.
   __device__ __forceinline__ bool aborted() const {
-    return flag != nullptr && __atomic_load_n(flag, __ATOMIC_SEQ_CST) != 0;
+    (void)flag;
+    return false;
   }
 
-  // Count one spin. Every kDdaSpinsBeforeCheckAbort spins, load the flag.
-  // Returns true when the communicator has been revoked/aborted.
   __device__ __forceinline__ bool abortSpinTick(int& spins) const {
-    if (++spins < kDdaSpinsBeforeCheckAbort) return false;
-    spins = 0;
-    return aborted();
+    (void)spins;
+    return false;
   }
 };
 static_assert(sizeof(DdaKernelParams) == sizeof(void*), "DdaKernelParams must stay one pointer (kernarg preload)");

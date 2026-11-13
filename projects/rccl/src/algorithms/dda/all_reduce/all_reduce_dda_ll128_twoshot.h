@@ -193,11 +193,7 @@ __launch_bounds__(512)
       const int peer = (selfRank + r) % nRanks;
       const uint64_t* gatherSlot = selfBase + bankWords + (uint64_t)peer * (uint64_t)slotWords;
       uint64_t vr[kDdaLL128WordsPerThread];
-      if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params)) {
-        ddaLL128StageDrain<WIRE>();
-        ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
-        return;
-      }
+      ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params);
       // On a flag lane the odd words hold flags rather than payload, so the sums
       // landing there are meaningless -- ddaLL128StoreRegs re-derives those slots
       // from the even ones and never writes them out, so folding blind is cheaper
@@ -211,7 +207,7 @@ __launch_bounds__(512)
     // Publish before the local unpack: it is what the peers are spinning on, and
     // ddaLL128StoreRegs rewrites acc in place when it reverses the flag-lane shuffle.
     if constexpr (ddaLL128Staged<WIRE>()) {
-      // The abort return leaves lastOps in a VGPR; an EXEC-masked wait ladder rung would wait to 0, so keep it scalar.
+      // Keep lastOps scalar: an EXEC-masked wait ladder rung would wait to 0.
       stage.lastOps = __builtin_amdgcn_readfirstlane(stage.lastOps);
     }
     ddaLL128StageFill<WIRE>(stage, acc, flag, flagLane, lane);
@@ -236,11 +232,7 @@ __launch_bounds__(512)
       const int peer = (selfRank + r) % nRanks;
       const uint64_t* gatherSlot = selfBase + bankWordsNext + (uint64_t)peer * (uint64_t)slotWords;
       uint64_t vr[kDdaLL128WordsPerThread];
-      if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params)) {
-        ddaLL128StageDrain<WIRE>();
-        ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
-        return;
-      }
+      ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params);
       ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)peer * shardBytes + sliceByte, vr, eltInSlice, lane, flagLane);
     }
   }
