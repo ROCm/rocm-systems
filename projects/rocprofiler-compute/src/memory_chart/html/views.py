@@ -1,0 +1,388 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+"""Evaluate aggregate and per-kernel data for the HTML memory chart."""
+
+import copy
+from argparse import Namespace
+from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional, Tuple
+
+import pandas as pd
+
+from membw_analysis.engine import evaluate_membw_dfs, load_membw_spec
+from membw_analysis.models import MEMBW_TABLE_IDS, MemBwAnalysisResult, TreeSpec
+from membw_analysis.summary import (
+    ACTIVE_FALLBACK_TEXT,
+    active_stall_leaves,
+    has_active_nodes,
+    status_text,
+)
+from memory_chart.html.diagram import SlotSpec, diagram_payload, slot_specs
+from memory_chart.loader import Layout, Layouts
+from memory_chart.render import progress_bar
+from memory_chart.units import display_unit, format_value, numeric, panel_units
+from utils import parser, schema, tty
+from utils.metrics.evaluation_pipeline import eval_metric
+
+
+@dataclass(frozen=True)
+class SlotValue:
+    """One diagram slot with its terminal-equivalent display value."""
+
+    slot_id: str
+    metric: str
+    text: str
+    numeric: Optional[float]
+    bar: Optional[str]
+    unit_label: str = ""
+
+
+@dataclass(frozen=True)
+class TableView:
+    """One processed panel table with immutable rows and column order."""
+
+    table_id: int
+    title: str
+    columns: Tuple[str, ...]
+    rows: Tuple[Tuple[Any, ...], ...]
+
+
+@dataclass(frozen=True)
+class StallAnnotation:
+    """A chart block's active terminal bottleneck."""
+
+    block_id: str
+    label: str
+    value: str
+
+
+@dataclass(frozen=True)
+class MembwDetail:
+    """Availability, annotations, and guidance for one evaluated view."""
+
+    availability: str
+    status: Optional[str]
+    annotations: Tuple[StallAnnotation, ...]
+    guidance_blocks: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ChartView:
+    """All data displayed when aggregate or one kernel is selected."""
+
+    key: str
+    slots: Tuple[SlotValue, ...]
+    tables: Tuple[TableView, ...]
+    membw: Optional[MembwDetail]
+
+
+@dataclass(frozen=True)
+class KernelEntry:
+    """A kernel option in the existing duration-sorted top table."""
+
+    index: int
+    name: str
+
+
+@dataclass(frozen=True)
+class ChartViewSet:
+    """Diagram topology and all selectable chart data for one workload."""
+
+    arch: str
+    diagram: Dict[str, object]
+    aggregate: ChartView
+    kernels: Tuple[KernelEntry, ...]
+    kernel_views: Tuple[ChartView, ...]
+    initial_kernel: Optional[int]
+
+
+@dataclass(frozen=True)
+class _ViewContext:
+    """Shared workload, chart templates, and architecture data for view evaluation."""
+
+    workload: schema.Workload
+    configs: Tuple[Tuple[int, str, Dict[str, Any]], ...]
+    specs: Tuple[SlotSpec, ...]
+    templates: Dict[int, pd.DataFrame]
+    table_types: Dict[int, str]
+    expressions: Dict[int, List[str]]
+    args: Namespace
+    tree_spec: Optional[TreeSpec]
+    arch: str
+    layout: Layout
+
+
+def build_chart_views(
+    workload: schema.Workload,
+    arch_config: schema.ArchConfig,
+    args: Namespace,
+) -> ChartViewSet:
+    """Evaluate chart templates once for all dispatches and once per kernel."""
+    arch = str(workload.sys_info.iloc[0]["gpu_arch"])
+    layout = Layouts.for_arch(arch)
+
+    if layout is None:
+        raise ValueError(f"No memory chart layout for {arch!r}")
+
+    units = panel_units(arch_config.panel_configs[300])
+    specs = slot_specs(layout, units)
+    configs = _available_configs(workload, arch_config)
+
+    template_ids = {table_id for table_id, _, _ in configs}
+    templates = {table_id: arch_config.dfs[table_id] for table_id in template_ids}
+
+    table_types = {
+        table_id: arch_config.dfs_type[table_id] for table_id in template_ids
+    }
+
+    expressions = {
+        table_id: arch_config.dfs_expressions.get(table_id, [])
+        for table_id in template_ids
+    }
+
+    spec = (
+        load_membw_spec(arch)
+        if any(table_id in template_ids for table_id in MEMBW_TABLE_IDS)
+        else None
+    )
+
+    filtered_pmc = parser.apply_non_kernel_filters(workload)
+    kernels = tuple(
+        KernelEntry(index, str(name))
+        for index, name in enumerate(
+            workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID]["Kernel_Name"]
+        )
+    )
+
+    context = _ViewContext(
+        workload,
+        configs,
+        specs,
+        templates,
+        table_types,
+        expressions,
+        args,
+        spec,
+        arch,
+        layout,
+    )
+    aggregate = _evaluate_view("aggregate", filtered_pmc, context)
+    kernel_views = tuple(
+        _evaluate_view(
+            f"kernel-{entry.index}",
+            filtered_pmc.loc[filtered_pmc["Kernel_Name"] == entry.name],
+            context,
+        )
+        for entry in kernels
+    )
+
+    return ChartViewSet(
+        arch=arch,
+        diagram=diagram_payload(layout, units),
+        aggregate=aggregate,
+        kernels=kernels,
+        kernel_views=kernel_views,
+        initial_kernel=_initial_kernel(workload.filter_kernel_ids, kernels),
+    )
+
+
+def _evaluate_view(key: str, pmc: pd.DataFrame, context: _ViewContext) -> ChartView:
+    """Evaluate chart tables, slots, and bandwidth details for one data view."""
+    dfs = copy.deepcopy(context.templates)
+    if dfs:
+        eval_metric(
+            dfs,
+            context.table_types,
+            context.expressions,
+            context.workload.sys_info.iloc[0],
+            context.workload.roofline_peaks,
+            pmc,
+            bool(getattr(context.args, "debug", False)),
+        )
+
+    membw_result = _evaluate_membw(dfs, context.tree_spec, context.arch)
+    tables, metrics = _process_tables(dfs, context.configs, context.args, context.specs)
+
+    return ChartView(
+        key=key,
+        slots=tuple(
+            _slot_value(item, metrics.get(item.metric)) for item in context.specs
+        ),
+        tables=tables,
+        membw=_membw_detail(membw_result, context.layout),
+    )
+
+
+def _available_configs(
+    workload: schema.Workload, arch_config: schema.ArchConfig
+) -> Tuple[Tuple[int, str, Dict[str, Any]], ...]:
+    """Return configured metric tables available to the HTML memory chart."""
+    configs: List[Tuple[int, str, Dict[str, Any]]] = []
+    allowed = set(MEMBW_TABLE_IDS)
+
+    for panel_id, panel in arch_config.panel_configs.items():
+        if panel_id != 300 and panel_id != 3000:
+            continue
+
+        for source in panel["data source"]:
+            for table_type, config in source.items():
+                table_id = config["id"]
+                if not (300 < table_id < 400 or table_id in allowed):
+                    continue
+                if table_id not in arch_config.dfs or table_id not in workload.dfs:
+                    continue
+                if table_type != "metric_table":
+                    continue
+
+                configs.append((table_id, table_type, config))
+
+    return tuple(configs)
+
+
+def _process_tables(
+    dfs: Dict[int, pd.DataFrame],
+    configs: Tuple[Tuple[int, str, Dict[str, Any]], ...],
+    args: Namespace,
+    specs: Tuple[SlotSpec, ...],
+) -> Tuple[Tuple[TableView, ...], Dict[str, Any]]:
+    """Format configured tables and collect displayed chart metric values."""
+    runs = {"chart": SimpleNamespace(dfs=dfs)}
+    comparable = parser.build_comparable_columns(args.time_unit)
+    hidden = tty.resolve_hidden_columns(args)
+
+    tables: List[TableView] = []
+    metrics: Dict[str, Any] = {}
+    spec_by_metric = {spec.metric: spec for spec in specs}
+
+    for table_id, table_type, config in configs:
+        processed = tty.process_table_data(
+            args, runs, config, table_type, comparable, hidden
+        )
+
+        if processed.empty:
+            continue
+
+        if table_id in MEMBW_TABLE_IDS and "Unit" in processed.columns:
+            processed = processed.assign(
+                Unit=processed["Unit"].replace({"Percent": "%"})
+            )
+
+        rows = tuple(tuple(row) for row in processed.itertuples(index=False, name=None))
+        if 300 < table_id < 400 and {"Metric", "Value"} <= set(processed.columns):
+            rows, table_metrics = _format_chart_metric_rows(processed, spec_by_metric)
+            metrics.update(table_metrics)
+
+        tables.append(
+            TableView(
+                table_id=table_id,
+                title=str(config["title"]),
+                columns=tuple(str(column) for column in processed.columns),
+                rows=rows,
+            )
+        )
+
+    return tuple(tables), metrics
+
+
+def _format_chart_metric_rows(
+    table: pd.DataFrame, specs: Dict[str, SlotSpec]
+) -> Tuple[Tuple[Tuple[Any, ...], ...], Dict[str, Any]]:
+    """Format diagram metrics, retaining table units when chart suffixes are absent."""
+    metric_index = table.columns.get_loc("Metric")
+    value_index = table.columns.get_loc("Value")
+    unit_index = table.columns.get_loc("Unit") if "Unit" in table.columns else None
+
+    rows: List[Tuple[Any, ...]] = []
+    metrics: Dict[str, Any] = {}
+
+    for source_row in table.itertuples(index=False, name=None):
+        row = list(source_row)
+        metric = str(row[metric_index])
+        raw_value = row[value_index]
+        metrics[metric] = raw_value
+
+        spec = specs.get(metric)
+        if spec is not None:
+            formatted = format_value(raw_value, spec.unit)
+
+            if unit_index is not None:
+                suffix = spec.unit.suffix
+                row[value_index] = (
+                    formatted[: -len(suffix)]
+                    if suffix and formatted.endswith(suffix)
+                    else formatted
+                )
+                row[unit_index] = suffix.strip() or row[unit_index]
+            else:
+                row[value_index] = formatted
+
+        rows.append(tuple(row))
+
+    return tuple(rows), metrics
+
+
+def _slot_value(spec: SlotSpec, raw: Any) -> SlotValue:  # noqa: ANN401
+    """Format one diagram slot and derive its numeric progress value."""
+    number = numeric(raw)
+
+    return SlotValue(
+        slot_id=spec.slot_id,
+        metric=spec.metric,
+        text=format_value(raw, spec.unit),
+        numeric=number,
+        bar=progress_bar(number) if spec.bar else None,
+    )
+
+
+def _evaluate_membw(
+    dfs: Dict[int, pd.DataFrame], spec: Optional[TreeSpec], arch: str
+) -> Optional[MemBwAnalysisResult]:
+    """Evaluate bandwidth bottlenecks when the architecture has a tree spec."""
+    if spec is None:
+        return None
+
+    return evaluate_membw_dfs(dfs, spec, arch)
+
+
+def _membw_detail(
+    result: Optional[MemBwAnalysisResult], layout: Layout
+) -> Optional[MembwDetail]:
+    """Build display status, annotations, and guidance from an analysis result."""
+    if result is None:
+        return None
+
+    annotations = tuple(
+        StallAnnotation(
+            block_id=block.id,
+            label=node.label,
+            value=format_value(
+                node.supporting[0].value if node.supporting else None,
+                display_unit("Percent"),
+            ),
+        )
+        for block in layout.blocks()
+        for node in active_stall_leaves(result, block.stall_level)
+    )
+
+    active = has_active_nodes(result.nodes)
+    status = status_text(result) if not active else None
+    if active and not result.guidance_blocks:
+        status = ACTIVE_FALLBACK_TEXT
+
+    return MembwDetail(
+        availability=result.availability,
+        status=status,
+        annotations=annotations,
+        guidance_blocks=result.guidance_blocks,
+    )
+
+
+def _initial_kernel(
+    filter_ids: List[int], kernels: Tuple[KernelEntry, ...]
+) -> Optional[int]:
+    """Return the uniquely selected kernel index, if the filters identify one."""
+    selected = {kernel_id for kernel_id in filter_ids if 0 <= kernel_id < len(kernels)}
+
+    return next(iter(selected)) if len(selected) == 1 else None
