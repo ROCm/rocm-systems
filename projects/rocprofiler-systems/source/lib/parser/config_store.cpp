@@ -202,6 +202,19 @@ config_store::values() const
     return result;
 }
 
+std::vector<config_slot>
+config_store::slots() const
+{
+    const std::shared_lock<std::shared_mutex> lock{ m_mutex };
+    std::vector<config_slot>                  result;
+    result.reserve(m_values.size());
+    for(const auto& [param_id, stored] : m_values)
+    {
+        result.push_back(config_slot{ param_id, stored.value, stored.source });
+    }
+    return result;
+}
+
 void
 config_store::on_change(std::string_view param_id, change_callback_t callback)
 {
