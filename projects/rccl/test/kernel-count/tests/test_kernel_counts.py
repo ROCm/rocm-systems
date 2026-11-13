@@ -53,35 +53,42 @@ GENERATE_PY = RCCL_ROOT / "src" / "device" / "generate.py"
 # description WHY the kernel count changed (binary-size / build-time impact).
 # Do not blind-update.
 # ---------------------------------------------------------------------------
+# The NaN-flag protocol (NCCL_PROTO=NaN) adds 340 kernels, all for f16/bf16/f32/f64 at the 4 unrolls:
+#   AllReduce      +256  Ring and Tree x 4 redops x acc 0/1
+#   ReduceScatter   +64  Ring x 4 redops
+#   AllGather       +16  Ring, typed (its other protocols stay int8)
+#   SendRecv         +4  the reg=2 NaN variant (one per unroll, not per type)
 EXPECTED = {
     "OFF": {
-        "total": 4084,
+        "total": 4424,
         "per_coll": {
-            "AllGather": 32,
+            # 32 int8 + 16 typed Ring/NaN.
+            "AllGather": 48,
             "AllGatherV": 12,
-            "AllReduce": 2560,
+            "AllReduce": 2816,
             "AlltoAllPivot": 4,
             "Broadcast": 16,
             "Reduce": 484,
-            "ReduceScatter": 968,
-            # 4 legacy-LL (reg=0) + 4 LL128 (reg=1, arch-guarded).
-            "SendRecv": 8,
+            "ReduceScatter": 1032,
+            # 4 legacy-LL (reg=0) + 4 LL128 (reg=1, arch-guarded) + 4 NaN (reg=2).
+            "SendRecv": 12,
         },
     },
     "ON": {
-        "total": 4092,
+        "total": 4432,
         "per_coll": {
-            "AllGather": 32,
+            # 32 int8 + 16 typed Ring/NaN.
+            "AllGather": 48,
             "AllGatherV": 12,
-            "AllReduce": 2560,
+            "AllReduce": 2816,
             "AlltoAllGda": 4,
             "AlltoAllPivot": 4,
             "AlltoAllvGda": 4,
             "Broadcast": 16,
             "Reduce": 484,
-            "ReduceScatter": 968,
-            # 4 legacy-LL (reg=0) + 4 LL128 (reg=1, arch-guarded).
-            "SendRecv": 8,
+            "ReduceScatter": 1032,
+            # 4 legacy-LL (reg=0) + 4 LL128 (reg=1, arch-guarded) + 4 NaN (reg=2).
+            "SendRecv": 12,
         },
     },
 }
@@ -91,7 +98,7 @@ EXPECTED = {
 # DEFINE_ncclDevFunc: redop as Func*, ty as the C++ type.
 COMMON_DIMS = {
     "algo": {"RING", "TREE", "PAT"},
-    "proto": {"LL", "LL128", "SIMPLE"},
+    "proto": {"LL", "LL128", "SIMPLE", "NAN"},
     "redop": {"FuncSum", "FuncProd", "FuncMinMax", "FuncPreMulSum", "FuncSumPostDiv"},
     "ty": {
         "int8_t", "uint8_t", "uint32_t", "uint64_t", "half", "float",

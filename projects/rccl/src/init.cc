@@ -74,6 +74,7 @@
 #include "rocm_smi_wrap.h"
 #endif
 #include "rccl_common.h"
+#include "scheduler.h"
 // [/RCCL]
 
 #ifdef ENABLE_ROCSHMEM
@@ -1655,6 +1656,24 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
 #endif
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     comm->buffSizes[p] = envs[p] != -2 ? envs[p] : defaults[p];
+  }
+  // Each NaN FIFO slot must hold whole grains: a slot under one grain rounds every chunk to 0, and a partial
+  // grain misaligns the next slot's 16-byte loads. A FIFO too small for one grain per slot turns NaN off.
+  {
+    const int64_t nanQuantum = (int64_t)NCCL_STEPS * rcclProtoGrainSize(NCCL_PROTO_NAN, comm);
+    const int64_t nanSize = comm->buffSizes[NCCL_PROTO_NAN];
+    if (nanQuantum > 0 && nanSize > 0 && nanSize % nanQuantum != 0) {
+      const int64_t rounded = nanSize / nanQuantum * nanQuantum;
+      if (rounded == 0) {
+        WARN("NCCL_NAN_BUFFSIZE=%ld is below the %ld-byte minimum (one %d-byte grain per step); disabling the NaN "
+             "protocol",
+             nanSize, nanQuantum, rcclProtoGrainSize(NCCL_PROTO_NAN, comm));
+      } else {
+        INFO(NCCL_INIT, "Rounded NaN buffer %ld -> %ld so every FIFO slot holds whole %d-byte grains", nanSize, rounded,
+             rcclProtoGrainSize(NCCL_PROTO_NAN, comm));
+      }
+      comm->buffSizes[NCCL_PROTO_NAN] = (int)rounded;
+    }
   }
   comm->p2pLl128BuffSize = comm->buffSizes[NCCL_PROTO_LL128];
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)

@@ -6105,6 +6105,30 @@ TEST_F(InitMicrotest, ComputeBuffSizes_RankSharingAProxyWithNoLl128Buffer_StillT
   EXPECT_EQ(128 << 10, s.comm()->buffSizes[NCCL_PROTO_NAN]);
   EXPECT_EQ(0, s.comm()->buffSizes[NCCL_PROTO_LL128]);
 }
+TEST_F(InitMicrotest, ComputeBuffSizes_NanBuffSizeBelowOneGrainPerStep_TurnsNanOff) {
+  // A wave64 NaN grain is 4 KiB, so a FIFO under 32 KiB rounds every chunk to 0 (calcCollChunking divides by it).
+  for (int size : {1, 1 << 10, 8 << 10, (32 << 10) - 1}) {
+    BuffSizes_Scene s;
+    s.comm()->WarpSize = 64;
+    SetParams({{"NAN_BUFFSIZE", size}});
+    EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+    EXPECT_EQ(0, s.comm()->buffSizes[NCCL_PROTO_NAN]) << size;
+  }
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_NanBuffSize_RoundsDownToWholeGrainsPerStep) {
+  struct Case {
+    int warpSize, size, expected;
+  };
+  for (const Case& c : {Case{64, 32 << 10, 32 << 10}, Case{64, (96 << 10) + 100, 96 << 10},
+                        Case{64, (48 << 10), 32 << 10}, Case{32, 16 << 10, 16 << 10}, Case{32, (24 << 10), 16 << 10},
+                        Case{64, 0, 0}}) {
+    BuffSizes_Scene s;
+    s.comm()->WarpSize = c.warpSize;
+    SetParams({{"NAN_BUFFSIZE", c.size}});
+    EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+    EXPECT_EQ(c.expected, s.comm()->buffSizes[NCCL_PROTO_NAN]) << "wave" << c.warpSize << ", " << c.size;
+  }
+}
 TEST_F(InitMicrotest, ComputeBuffSizes_GrowNewRank_AdoptsTheExistingRanksLl128Sizes) {
   // ncclCommGrow 1x8 -> 2x8: existing ranks share the old comm's unscaled proxy, new ranks have no parent and would
   // scale; they must match or the ranks pick different algorithms (rcclUpdateRemoteFlushAlgoProto reads buffSizes).

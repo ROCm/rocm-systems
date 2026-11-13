@@ -419,6 +419,9 @@ collected in the following table.
         | Size in bytes of the NaN-flag protocol's FIFO on each connection. A
           communicator with no NaN FIFO never selects the protocol. A
           communicator sharing its parent's resources uses the parent's size.
+          The size is rounded down to a multiple of 32 KiB (16 KiB on wave32
+          GPUs), one 4 KiB (2 KiB) grain per FIFO step. A smaller size turns
+          the protocol off.
       - | Default: 4 MiB where ``NCCL_PROTO=NaN`` or ``RCCL_NAN_PROTO_AUTO``
           applies (8 MiB with the gfx1250 TDM path), else ``0``.
 

@@ -827,6 +827,55 @@ TEST(WrapMicrotestIsolated, NanProtoFor_AutoOnUsesWindowsOnGfx950EightPerNode) {
       });
 }
 
+// A query prices the AllGather task append will plan: outside AUTO's window a float AllGather is collapsed to bytes
+// there, so getAlgoInfo() must see bytes too, or it prices only the NaN cells and reports Ring/NaN.
+TEST(WrapMicrotestIsolated, SelectAllGather_QueryUnderNanAuto_PricesTheTaskAppendPlans) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_QueryUnderNanAuto_PricesTheTaskAppendPlans",
+      []() {
+        SetMicroEnv("RCCL_NAN_PROTO_AUTO", "1");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        static ncclDataType_t seenType;
+        static size_t seenCount;
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          seenType = task->datatype;
+          seenCount = task->count;
+          task->algorithm = NCCL_ALGO_RING;
+          task->protocol = NCCL_PROTO_SIMPLE;
+          task->nMaxChannels = 1;
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+#if ENABLE_TDM_NAN
+        comm->nanTdmMinBytes = -1;
+#endif
+        comm->buffSizes[NCCL_PROTO_NAN] = 4 << 20;
+        comm->bandwidths[ncclFuncAllGather][NCCL_ALGO_RING][NCCL_PROTO_NAN] = 1.0f;
+        struct Case {
+          size_t perRankBytes;
+          bool keepsDtype;
+        };
+        for (const Case& c : {Case{16 * kNanMiB, true}, Case{1 * kNanMiB, false}}) {
+          const size_t sendcount = c.perRankBytes / sizeof(float);
+          seenType = ncclNumTypes;
+          seenCount = 0;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, sendcount, ncclFloat32,
+                                                     /*stream=*/nullptr, /*query=*/true,
+                                                     /*graphCapturingHint=*/false, &decision));
+          ASSERT_EQ(1, getAlgo.calls) << c.perRankBytes;
+          getAlgo.calls = 0;
+          EXPECT_EQ(c.keepsDtype ? ncclFloat32 : ncclInt8, seenType) << c.perRankBytes;
+          EXPECT_EQ(c.keepsDtype ? sendcount : c.perRankBytes, seenCount) << c.perRankBytes;
+        }
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
 // NCCL_PROTO, whatever it names, turns RCCL_NAN_PROTO_AUTO off and pins the protocol.
 TEST(WrapMicrotestIsolated, NanProtoFor_NcclProtoTurnsAutoOff) {
   RUN_ISOLATED_TEST(
@@ -1261,6 +1310,21 @@ TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_NanFifoDepth) {
         ClearMicroEnv();
         DeleteCommWithArch(comm);
       });
+}
+
+// A config that builds with --enable-tdm-nan sets RCCL_TEST_EXPECT_TDM_NAN=1. Without the flag every TDM NaN suite
+// runs the register path and passes, covering nothing.
+TEST(WrapMicrotest, NanTdmBuildFlagMatchesExpectation) {
+  const char* want = std::getenv("RCCL_TEST_EXPECT_TDM_NAN");
+  if (want == nullptr) GTEST_SKIP() << "set RCCL_TEST_EXPECT_TDM_NAN=1 to assert the TDM NaN build flag";
+#if ENABLE_TDM_NAN
+  constexpr int built = 1;
+#else
+  constexpr int built = 0;
+#endif
+  EXPECT_EQ(std::atoi(want), built) << "ENABLE_TDM_NAN is " << built << " but RCCL_TEST_EXPECT_TDM_NAN asks for "
+                                    << want << ". Either the build is missing --enable-tdm-nan or the config sets the "
+                                    << "wrong expectation.";
 }
 
 // ===========================================================================

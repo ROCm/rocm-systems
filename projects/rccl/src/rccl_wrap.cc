@@ -709,6 +709,22 @@ extern ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task
 extern int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count, ncclDataType_t datatype,
                                     int protocol, int nMaxChannels);
 
+// The task a query hands getAlgoInfo(), shaped as collTaskAppend() plans it. An AllGather that will not run Ring/NaN
+// is collapsed to bytes there; left typed, getAlgoInfo() would price it on the NaN cells alone.
+static void rcclQueryTaskInit(struct ncclComm* comm, struct ncclTaskColl* task, ncclFunc_t func, size_t count,
+                              ncclDataType_t datatype) {
+  *task = {};
+  task->func = func;
+  task->count = count;
+  task->datatype = datatype;
+  const size_t elementSize = ncclTypeSize(datatype);
+  if (func == ncclFuncAllGather &&
+      !rcclNanAllGatherKeepsDtype(comm, datatype, count * elementSize * comm->nRanks, /*algMask=*/0)) {
+    task->count = count * elementSize;
+    task->datatype = ncclInt8;
+  }
+}
+
 ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
                                       int* algo, int* protocol, int* maxChannels) {
   const bool isAllGather = (coll == ncclFuncAllGather);
@@ -727,10 +743,8 @@ ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, ui
     *protocol = NCCL_PROTO_SIMPLE;
     *maxChannels = interComm->p2pnChannels;
   } else {
-    struct ncclTaskColl task = {};
-    task.func = coll;
-    task.count = count;
-    task.datatype = dataType;
+    struct ncclTaskColl task;
+    rcclQueryTaskInit(interComm, &task, coll, count, dataType);
     NCCLCHECK(getAlgoInfo(interComm, &task, 0, 0, 1));
     *protocol = task.protocol;
     *maxChannels = task.nMaxChannels;
@@ -745,10 +759,8 @@ ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, ui
     intraProto = rcclNanProtoForcedFor(intraComm, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     intraChan = intraComm->p2pnChannels;
   } else {
-    struct ncclTaskColl task = {};
-    task.func = coll;
-    task.count = intraCount;
-    task.datatype = dataType;
+    struct ncclTaskColl task;
+    rcclQueryTaskInit(intraComm, &task, coll, intraCount, dataType);
     NCCLCHECK(getAlgoInfo(intraComm, &task, 0, 0, 1));
     intraProto = task.protocol;
     intraChan = task.nMaxChannels;
@@ -790,10 +802,8 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
-  struct ncclTaskColl task = {};
-  task.func = coll;
-  task.count = count;
-  task.datatype = dataType;
+  struct ncclTaskColl task;
+  rcclQueryTaskInit(comm, &task, coll, count, dataType);
   NCCLCHECK(getAlgoInfo(comm, &task, collNetSupport, nvlsSupport, numPipeOps));
   *protocol = task.protocol;
 #ifdef ENABLE_WARP_SPEED
@@ -1849,12 +1859,9 @@ static ncclResult_t rcclRingFallback(struct ncclComm* comm, const void* sendbuff
   decision->protocol = NCCL_PROTO_SIMPLE;
   if (query) {
     struct ncclTaskColl task;
-    memset(&task, 0, sizeof(task));
-    task.func = func;
+    rcclQueryTaskInit(comm, &task, func, count, datatype);
     task.sendbuff = sendbuff;
     task.recvbuff = recvbuff;
-    task.count = count;
-    task.datatype = datatype;
     NCCLCHECK(getAlgoInfo(comm, &task, 0, 0, 1));
     decision->protocol = task.protocol;
     if (threadsPerBlock != nullptr) {
@@ -2398,10 +2405,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
           decision->nMaxChannels = interComm->p2pnChannels;
         } else {
           // Zero-initialized: getAlgoInfo now reads task.algMask/forceAlgSelection.
-          struct ncclTaskColl task = {};
-          task.func = ncclFuncAllGather;
-          task.count = sendcount;
-          task.datatype = datatype;
+          struct ncclTaskColl task;
+          rcclQueryTaskInit(interComm, &task, ncclFuncAllGather, sendcount, datatype);
           NCCLCHECK(getAlgoInfo(interComm, &task, 0, 0, 1));
           decision->protocol = task.protocol;
           decision->nMaxChannels = task.nMaxChannels;
@@ -2414,10 +2419,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
           intraChan = intraComm->p2pnChannels;
         } else {
           // Zero-initialized: getAlgoInfo now reads task.algMask/forceAlgSelection.
-          struct ncclTaskColl task = {};
-          task.func = ncclFuncAllGather;
-          task.count = intraCount;
-          task.datatype = datatype;
+          struct ncclTaskColl task;
+          rcclQueryTaskInit(intraComm, &task, ncclFuncAllGather, intraCount, datatype);
           NCCLCHECK(getAlgoInfo(intraComm, &task, 0, 0, 1));
           intraProto = task.protocol;
           intraChan = task.nMaxChannels;
