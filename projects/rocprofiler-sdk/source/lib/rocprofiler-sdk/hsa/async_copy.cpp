@@ -26,6 +26,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -42,12 +43,16 @@
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/cxx/constants.hpp>
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <hsa/hsa.h>
 
 #include <chrono>
 #include <cstdlib>
+#include <mutex>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 
 #define ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL 1
@@ -61,17 +66,45 @@ namespace hsa
 {
 namespace async_copy
 {
+namespace
+{
+class copy_time_cache
+{
+public:
+    using value_type = copy_time_t;
+
+    void create(hsa_signal_t signal);
+    void retain(hsa_signal_t signal);
+    void release(hsa_signal_t signal);
+    void record(hsa_signal_t signal, hsa_status_t status, hsa_amd_profiling_async_copy_time_t time);
+    std::optional<value_type> find(hsa_signal_t signal) const;
+    void                      clear();
+
+    auto lock_lifetime() { return std::unique_lock<std::recursive_mutex>{m_lifetime_mutex}; }
+
+private:
+    struct entry
+    {
+        size_t                    references = 1;
+        std::optional<value_type> time       = std::nullopt;
+    };
+
+    using map_type                                  = std::unordered_map<hsa_signal_t, entry>;
+    common::Synchronized<map_type> m_data           = {};
+    std::recursive_mutex           m_lifetime_mutex = {};
+};
+
 void
 copy_time_cache::create(hsa_signal_t signal)
 {
-    m_data.wlock([signal](map_type& data) { data.erase(signal.handle); });
+    m_data.wlock([signal](map_type& data) { data.erase(signal); });
 }
 
 void
 copy_time_cache::retain(hsa_signal_t signal)
 {
     m_data.wlock([signal](map_type& data) {
-        ++data.try_emplace(signal.handle, entry{0, std::nullopt}).first->second.references;
+        ++data.try_emplace(signal, entry{0, std::nullopt}).first->second.references;
     });
 }
 
@@ -79,7 +112,7 @@ void
 copy_time_cache::release(hsa_signal_t signal)
 {
     m_data.wlock([signal](map_type& data) {
-        if(auto itr = data.find(signal.handle); itr != data.end())
+        if(auto itr = data.find(signal); itr != data.end())
         {
             if(--itr->second.references == 0) data.erase(itr);
         }
@@ -92,7 +125,7 @@ copy_time_cache::record(hsa_signal_t                        signal,
                         hsa_amd_profiling_async_copy_time_t time)
 {
     m_data.wlock([=](map_type& data) {
-        auto& value = data[signal.handle].time;
+        auto& value = data[signal].time;
         if(!value || value->first != HSA_STATUS_SUCCESS ||
            (status == HSA_STATUS_SUCCESS && time.end >= value->second.end))
             value = value_type{status, time};
@@ -103,7 +136,7 @@ std::optional<copy_time_cache::value_type>
 copy_time_cache::find(hsa_signal_t signal) const
 {
     return m_data.rlock([signal](const map_type& data) -> std::optional<value_type> {
-        if(auto itr = data.find(signal.handle); itr != data.end()) return itr->second.time;
+        if(auto itr = data.find(signal); itr != data.end()) return itr->second.time;
         return std::nullopt;
     });
 }
@@ -114,8 +147,6 @@ copy_time_cache::clear()
     m_data.wlock([](map_type& data) { data.clear(); });
 }
 
-namespace
-{
 using context_t              = context::context;
 using context_array_t        = common::container::small_vector<const context_t*>;
 using external_corr_id_map_t = tracing::external_correlation_id_map_t;
@@ -838,8 +869,7 @@ async_copy_handler(hsa_signal_value_t, void* arg)
     // Original intercepted signal completion
     if(_data->orig_signal.handle != 0)
     {
-        if(auto* _cache = get_copy_time_cache())
-            _cache->record(_data->orig_signal, copy_time_status, copy_time);
+        record_copy_time(_data->orig_signal, copy_time_status, copy_time);
 
         ROCP_TRACE << "Decrementing Signal: " << std::hex << _data->orig_signal.handle << std::dec;
         get_core_table()->hsa_signal_subtract_screlease_fn(_data->orig_signal, 1);
@@ -879,17 +909,13 @@ get_async_copy_time_impl(hsa_signal_t _signal, hsa_amd_profiling_async_copy_time
     auto _status = _next(_signal, _time);
     if(!_time) return _status;
 
-    if(auto* _cache = get_copy_time_cache())
+    if(auto _entry = find_copy_time(_signal);
+       _entry && (_status == HSA_STATUS_ERROR ||
+                  (_status == HSA_STATUS_SUCCESS && _entry->first == HSA_STATUS_SUCCESS &&
+                   (_time->end <= _time->start || _entry->second.end > _time->end))))
     {
-        auto _entry = _cache->find(_signal);
-
-        if(_entry && (_status == HSA_STATUS_ERROR ||
-                      (_status == HSA_STATUS_SUCCESS && _entry->first == HSA_STATUS_SUCCESS &&
-                       (_time->end <= _time->start || _entry->second.end > _time->end))))
-        {
-            *_time = _entry->second;
-            return _entry->first;
-        }
+        *_time = _entry->second;
+        return _entry->first;
     }
 
     return _status;
@@ -905,7 +931,7 @@ signal_destroy_impl(hsa_signal_t _signal)
 
     auto _lock   = _cache->lock_lifetime();
     auto _status = _next(_signal);
-    if(_status == HSA_STATUS_SUCCESS) _cache->release(_signal);
+    if(_status == HSA_STATUS_SUCCESS) release_copy_signal(_signal);
     return _status;
 }
 
@@ -919,7 +945,7 @@ ipc_signal_attach_impl(const hsa_amd_ipc_signal_t* _handle, hsa_signal_t* _signa
 
     auto _lock   = _cache->lock_lifetime();
     auto _status = _next(_handle, _signal);
-    if(_status == HSA_STATUS_SUCCESS) _cache->retain(*_signal);
+    if(_status == HSA_STATUS_SUCCESS) retain_copy_signal(*_signal);
     return _status;
 }
 
@@ -1000,12 +1026,12 @@ signal_create_impl(Args... args)
     if(_status == HSA_STATUS_SUCCESS)
     {
         auto _signal = *std::get<sizeof...(Args) - 1>(std::tie(args...));
-        _cache->create(_signal);
+        create_copy_signal(_signal);
         if constexpr(TableIdx == ROCPROFILER_HSA_TABLE_ID_AmdExt &&
                      OpIdx == ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_create)
         {
             // IPC attachments can share this handle before any copy records its time.
-            if(std::get<3>(std::tie(args...)) & HSA_AMD_SIGNAL_IPC) _cache->retain(_signal);
+            if(std::get<3>(std::tie(args...)) & HSA_AMD_SIGNAL_IPC) retain_copy_signal(_signal);
         }
     }
     return _status;
@@ -1498,6 +1524,48 @@ using async_copy_index_seq_t = std::index_sequence<async_copy_id,
                                                    >;
 }  // namespace
 
+void
+create_copy_signal(hsa_signal_t signal)
+{
+    if(auto* cache = get_copy_time_cache()) cache->create(signal);
+}
+
+void
+retain_copy_signal(hsa_signal_t signal)
+{
+    if(auto* cache = get_copy_time_cache()) cache->retain(signal);
+}
+
+void
+release_copy_signal(hsa_signal_t signal)
+{
+    if(auto* cache = get_copy_time_cache()) cache->release(signal);
+}
+
+void
+record_copy_time(hsa_signal_t signal, hsa_status_t status, hsa_amd_profiling_async_copy_time_t time)
+{
+    if(auto* cache = get_copy_time_cache()) cache->record(signal, status, time);
+}
+
+std::optional<copy_time_t>
+find_copy_time(hsa_signal_t signal)
+{
+    if(auto* cache = get_copy_time_cache()) return cache->find(signal);
+    return std::nullopt;
+}
+
+void
+clear_copy_time_cache()
+{
+    if(auto* cache = common::static_object<copy_time_cache>::get())
+    {
+        async_copy_sync();
+        auto lock = cache->lock_lifetime();
+        cache->clear();
+    }
+}
+
 // check out the assembly here... this compiles to a switch statement
 const char*
 name_by_id(uint32_t id)
@@ -1605,12 +1673,7 @@ async_copy_sync()
 void
 async_copy_reset()
 {
-    if(auto* _cache = common::static_object<async_copy::copy_time_cache>::get())
-    {
-        async_copy_sync();
-        auto _lock = _cache->lock_lifetime();
-        _cache->clear();
-    }
+    async_copy::clear_copy_time_cache();
 }
 
 void

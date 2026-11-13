@@ -22,12 +22,9 @@
 
 #pragma once
 
-#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-#include <mutex>
 #include <optional>
-#include <unordered_map>
 #include <utility>
 
 namespace rocprofiler
@@ -36,31 +33,27 @@ namespace hsa
 {
 namespace async_copy
 {
-class copy_time_cache
-{
-public:
-    using value_type = std::pair<hsa_status_t, hsa_amd_profiling_async_copy_time_t>;
+using copy_time_t = std::pair<hsa_status_t, hsa_amd_profiling_async_copy_time_t>;
 
-    void create(hsa_signal_t signal);
-    void retain(hsa_signal_t signal);
-    void release(hsa_signal_t signal);
-    void record(hsa_signal_t signal, hsa_status_t status, hsa_amd_profiling_async_copy_time_t time);
-    std::optional<value_type> find(hsa_signal_t signal) const;
-    void                      clear();
+void
+create_copy_signal(hsa_signal_t signal);
 
-    auto lock_lifetime() { return std::unique_lock<std::recursive_mutex>{m_lifetime_mutex}; }
+void
+retain_copy_signal(hsa_signal_t signal);
 
-private:
-    struct entry
-    {
-        size_t                    references = 1;
-        std::optional<value_type> time       = std::nullopt;
-    };
+void
+release_copy_signal(hsa_signal_t signal);
 
-    using map_type                                  = std::unordered_map<uint64_t, entry>;
-    common::Synchronized<map_type> m_data           = {};
-    std::recursive_mutex           m_lifetime_mutex = {};
-};
+void
+record_copy_time(hsa_signal_t                        signal,
+                 hsa_status_t                        status,
+                 hsa_amd_profiling_async_copy_time_t time);
+
+std::optional<copy_time_t>
+find_copy_time(hsa_signal_t signal);
+
+void
+clear_copy_time_cache();
 
 const char*
 name_by_id(uint32_t id);
