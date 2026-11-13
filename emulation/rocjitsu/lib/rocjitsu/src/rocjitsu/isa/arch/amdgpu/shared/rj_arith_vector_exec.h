@@ -196,14 +196,18 @@ private:
 
 // Direct stores are safe without observers: rj-arith preserves storage on rejection.
 // Other destinations stage the result before acquiring an observed write view.
+// preserve_destination is for APIs that may leave selected bytes unchanged and
+// also preserve unselected bytes. Such APIs can safely use direct full-word stores;
+// observed calls initialize scratch from the selected architectural bytes.
 // Returns true on success, or reports an instruction error and returns false.
 template <typename Invoke>
 inline bool write_vector32_result(Wavefront &wave, RegisterAccess &registers,
                                   const Operand &destination, uint64_t exec_mask, Invoke invoke,
-                                  bool allow_direct = true, uint8_t byte_mask = 0xF) {
+                                  bool allow_direct = true, uint8_t byte_mask = 0xF,
+                                  bool preserve_destination = false) {
   if (wave.instruction_execution_failed())
     return false;
-  if (allow_direct && byte_mask == 0xF) {
+  if (allow_direct && (byte_mask == 0xF || preserve_destination)) {
     if (auto status = registers.try_bulk_write_operand(destination, exec_mask, invoke)) {
       if (*status != RJ_ARITH_SUCCESS)
         wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
@@ -211,6 +215,12 @@ inline bool write_vector32_result(Wavefront &wave, RegisterAccess &registers,
     }
   }
   std::array<uint32_t, 64> result{};
+  if (preserve_destination) {
+    VectorInput32 old(registers, wave, destination, exec_mask, byte_mask);
+    for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+      result[lane] = old.data[lane];
+    }
+  }
   uint32_t *d = result.data();
   const int status = invoke(&d, exec_mask);
   if (status != RJ_ARITH_SUCCESS) {
@@ -571,12 +581,14 @@ inline void execute_qsad(Wavefront &wave, Ternary32Function wave32, Ternary64Fun
 inline void execute_binary32(Wavefront &wave, Binary32Function wave32, Binary64Function wave64,
                              uint64_t flags, uint64_t modifiers, const Operand &destination,
                              const Operand &source_a, const Operand &source_b,
-                             uint8_t destination_bytes = 0xF, uint32_t packed_negations = 0) {
+                             uint8_t destination_bytes = 0xF, uint32_t packed_negations = 0,
+                             uint8_t source_a_bytes = 0xF, bool preserve_destination = false) {
   const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
   if (!exec_mask)
     return;
   RegisterAccess registers(wave);
-  VectorInput32 a(registers, wave, source_a, exec_mask), b(registers, wave, source_b, exec_mask);
+  VectorInput32 a(registers, wave, source_a, exec_mask, source_a_bytes),
+      b(registers, wave, source_b, exec_mask);
   if (packed_negations) {
     a.apply_packed_integer_signs(wave.wf_size(), 0, packed_negations, modifiers);
     b.apply_packed_integer_signs(wave.wf_size(), 1, packed_negations, modifiers);
@@ -588,7 +600,8 @@ inline void execute_binary32(Wavefront &wave, Binary32Function wave32, Binary64F
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data)
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data);
       },
-      /*allow_direct=*/destination_bytes == 0xF, destination_bytes);
+      /*allow_direct=*/destination_bytes == 0xF || preserve_destination, destination_bytes,
+      preserve_destination);
 }
 
 // Read the routed source before committing any destination lanes.
@@ -738,7 +751,8 @@ inline void execute_ternary32(Wavefront &wave, Ternary32Function wave32, Ternary
                               const Operand &source_a, const Operand &source_b,
                               const Operand &source_c, uint8_t a_bytes = 0xF, uint8_t b_bytes = 0xF,
                               uint64_t source_exec_mask = ~uint64_t{0},
-                              uint32_t packed_negations = 0) {
+                              uint32_t packed_negations = 0, uint8_t destination_bytes = 0xF,
+                              bool preserve_destination = false) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   source_exec_mask &= wave.exec();
   if (!source_exec_mask)
@@ -753,11 +767,14 @@ inline void execute_ternary32(Wavefront &wave, Ternary32Function wave32, Ternary
     c.apply_packed_integer_signs(wave.wf_size(), 2, packed_negations, modifiers);
   }
   write_vector32_result(
-      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+      wave, registers, destination, exec_mask,
+      [&](uint32_t *const *d, uint64_t write_mask) {
         return wave.wf_size() == 32
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, &c.data)
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data);
-      });
+      },
+      /*allow_direct=*/destination_bytes == 0xF || preserve_destination, destination_bytes,
+      preserve_destination);
 }
 
 } // namespace rocjitsu::amdgpu::arith
