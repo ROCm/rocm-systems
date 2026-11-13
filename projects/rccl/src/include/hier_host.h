@@ -37,6 +37,7 @@ struct rcclHostHier {
   struct rcclHostLayout layout;
   ncclComm_t intra; // Ranks of this host, ordered by local rank
   ncclComm_t inter; // The same local rank on every host, ordered by host. Null with one host
+  int* hostRanks; // Comm rank of local rank l on host h at h * ranksPerHost + l
   // Shared by every host-hierarchical collective on the comm, so running them
   // concurrently on two streams is unsafe.
   void* scratch;
@@ -63,6 +64,10 @@ ncclResult_t rcclHostHierTeardown(struct ncclComm* comm);
 // gfx1250 MNNVL fp32 sum measurements with 8 ranks per host. False for unmeasured host counts.
 bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes);
 
+// Sizes, in bytes, at which the fused DDA kernel beat the three collectives in gfx1250 fp32 sum measurements on one
+// and two hosts with 8 ranks per host.
+bool rcclHostHierAllReduceFusedWindow(int nHosts, size_t bytes);
+
 // Whether RCCL_HOST_HIER_ALLREDUCE and the operands allow host-hierarchical
 // AllReduce. registeredBuffers: the send or receive buffer is in a registered
 // window, which auto mode leaves to the paths that use it. The caller also checks
@@ -71,7 +76,9 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
                                    bool registeredBuffers);
 
 // ReduceScatter within the host, AllReduce across hosts, then AllGather within
-// the host. Needs rcclHostHierEnsure to have succeeded.
+// the host: in one fused DDA kernel where RCCL_HOST_HIER_ALLREDUCE_FUSED selects
+// it, otherwise as three collectives on the child comms. Needs
+// rcclHostHierEnsure to have succeeded.
 ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                    ncclRedOp_t op, struct ncclComm* comm, cudaStream_t stream);
 

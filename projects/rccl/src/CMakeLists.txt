@@ -34,6 +34,7 @@ set(SRC_FILES
   algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu
   algorithms/dda/all_gather/dda_all_gather_ipc.cu
   algorithms/dda/all_reduce/dda_all_reduce_fabric.cu
+  algorithms/dda/all_reduce/dda_all_reduce_fabric_hier.cu
   algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu
   algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu
   algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
@@ -155,6 +156,7 @@ set(SRC_FILES
   algorithms/dda/all_gather/all_gather_dda_fabric_ll128.h
   algorithms/dda/all_reduce/all_reduce_dda.h
   algorithms/dda/all_reduce/all_reduce_dda_fabric.h
+  algorithms/dda/all_reduce/all_reduce_dda_fabric_hier.h
   algorithms/dda/all_reduce/all_reduce_dda_fabric_ll128.h
   algorithms/dda/all_reduce/all_reduce_dda_ll.h
   algorithms/dda/all_reduce/all_reduce_dda_ll128.h
@@ -1013,6 +1015,7 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_all_reduce_sdma\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_anvil_conn_check_device\\.cc$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_hier\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll128\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric\\.cu\\.cpp$")

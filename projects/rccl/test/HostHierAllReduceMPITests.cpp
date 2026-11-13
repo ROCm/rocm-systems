@@ -45,6 +45,7 @@
 using namespace MPITestConstants;
 
 RCCL_PARAM_DECLARE(HostHierAllReduce);
+RCCL_PARAM_DECLARE(HostHierAllReduceFused);
 
 namespace
 {
@@ -278,7 +279,12 @@ TEST_F(HostHierAllReduceMPITest, GrowingSizesReuseChildComms)
         RunResult run = fp32Sum(countFor(perHostRank), false);
         ASSERT_RUN_OK(run);
         ASSERT_MPI_TRUE(builtChildComms());
-        // One stage's chunk, twice with an inter-host stage, which runs out of place.
+        // One stage's chunk, twice with an inter-host stage, which runs out of place. The fused kernel stages
+        // through the DDA scratch instead, so sizes it takes do not grow this one.
+        const size_t  bytes     = countFor(perHostRank) * sizeof(float);
+        const int64_t fusedMode = rcclParamHostHierAllReduceFused();
+        if(fusedMode == 1 || (fusedMode == -1 && rcclHostHierAllReduceFusedWindow(layout_.nHosts, bytes)))
+            continue;
         const size_t chunkBytes = perHostRank * sizeof(float);
         ASSERT_MPI_TRUE(comm()->hostHier->scratchBytes >= (layout_.nHosts > 1 ? 2 : 1) * chunkBytes);
     }
