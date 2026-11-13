@@ -77,6 +77,22 @@
   s_waitcnt lgkmcnt(0)
 #endif
 .endm
+.macro consan_wait_lds
+#if CONSAN_GFX12
+  s_wait_dscnt 0
+#else
+  s_waitcnt lgkmcnt(0)
+#endif
+.endm
+.macro consan_barrier
+  consan_wait_lds
+#if CONSAN_GFX12
+  s_barrier_signal -1
+  s_barrier_wait -1
+#else
+  s_barrier
+#endif
+.endm
 .macro consan_wait_stores
 #if CONSAN_GFX12
   s_wait_storecnt 0
@@ -103,7 +119,7 @@ CONSAN_KERNEL:
   v_mov_b32 v2, s4
   v_mov_b32 v5, 0
 
-#if (CONSAN_CASE >= 25 && CONSAN_CASE <= 35) || CONSAN_CASE == 38 || CONSAN_CASE == 40 || CONSAN_CASE == 41
+#if (CONSAN_CASE >= 25 && CONSAN_CASE <= 35) || CONSAN_CASE == 38 || (CONSAN_CASE >= 40 && CONSAN_CASE <= 42)
 #if CONSAN_CASE == 25
   s_mov_b32 s10, 0
 #elif CONSAN_CASE == 26
@@ -134,10 +150,13 @@ CONSAN_KERNEL:
 .Ltrip_ready:
 #endif
 #if CONSAN_CASE == 32
-  // 576 = 64 * (10 - 1): delay the only cross-wave pair until cycle 10.
+  // Delay the only cross-wave pair until cycle 10.
   // Nine decrements select W0 lane 0 / W1 lane 0 only after the sixteen retained
   // barrier completions, isolating missing sync evidence from access-bank loss.
-  s_mov_b32 s11, 576
+  s_mov_b32 s11, (2*CONSAN_WAVE_SIZE*9)
+#elif CONSAN_CASE == 42
+  // Rotate through three high lanes while selecting independent banks 0..2.
+  s_mov_b32 s11, (CONSAN_WAVE_SIZE-4)
 #else
   s_mov_b32 s11, 0
 #endif
@@ -148,7 +167,7 @@ CONSAN_KERNEL:
   s_cmp_eq_u32 s10, 0
   s_cbranch_scc1 .Lloop_done
 #if CONSAN_CASE == 33
-  v_and_b32 v4, 31, v0
+  v_and_b32 v4, (CONSAN_WAVE_SIZE-1), v0
   v_lshlrev_b32 v1, 2, v4
 #endif
 .Lloop:
@@ -161,11 +180,9 @@ CONSAN_KERNEL:
   DS_STORE v1, v2
   MASK_MOVE MASK_EXEC, MASK_SAVE
 #if CONSAN_CASE != 30 && CONSAN_CASE != 34 && CONSAN_CASE != 35
-  s_wait_dscnt 0
-  s_barrier_signal -1
-  s_barrier_wait -1
+  consan_barrier
 #endif
-  s_add_u32 s12, s11, 32
+  s_add_u32 s12, s11, CONSAN_WAVE_SIZE
 #if CONSAN_CASE == 33
   // All waves read their own first five lanes after the full-workgroup barrier.
   v_cmp_gt_u32 MASK_VCC, 5, v4
@@ -178,18 +195,14 @@ CONSAN_KERNEL:
   GLOBAL_STORE v5, v3, s[6:7]
   MASK_MOVE MASK_EXEC, MASK_SAVE
 #if CONSAN_CASE != 31
-  s_wait_dscnt 0
-  s_barrier_signal -1
-  s_barrier_wait -1
+  consan_barrier
 #endif
 #if CONSAN_CASE == 38
   // A non-power-of-two group count exercises integer-only occurrence division.
-  s_wait_dscnt 0
-  s_barrier_signal -1
-  s_barrier_wait -1
+  consan_barrier
 #endif
 #if CONSAN_CASE == 32
-  s_sub_u32 s11, s11, 64
+  s_sub_u32 s11, s11, (2*CONSAN_WAVE_SIZE)
 #else
   s_add_u32 s11, s11, 1
 #endif
@@ -255,9 +268,7 @@ CONSAN_KERNEL:
   v_mov_b32 v2, 0
   DS_STORE v1, v2
   MASK_MOVE MASK_EXEC, MASK_SAVE
-  s_wait_dscnt 0
-  s_barrier_signal -1
-  s_barrier_wait -1
+  consan_barrier
   v_mov_b32 v2, s4
   v_cmp_eq_u32 MASK_VCC, 0, v0
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
@@ -271,9 +282,7 @@ CONSAN_KERNEL:
 .Lpublication:
   MASK_MOVE MASK_EXEC, MASK_SAVE
 #if CONSAN_CASE == 36
-  s_wait_dscnt 0
-  s_barrier_signal -1
-  s_barrier_wait -1
+  consan_barrier
 #endif
   v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
@@ -315,16 +324,22 @@ CONSAN_KERNEL:
   // Scalar barriers still execute when the guest EXEC is empty.
   MASK_MOVE MASK_EXEC, 0
 #endif
-#if CONSAN_CASE != 18
-  s_wait_dscnt 0
+#if CONSAN_CASE == 21 && !CONSAN_GFX12
+  // Legacy barriers combine signal and wait; arithmetic precedes their drain.
+  VECTOR_ADD v2, 0, v2
+  s_cmp_eq_u32 s4, 7
 #endif
+#if CONSAN_CASE != 18
+  consan_wait_lds
+#endif
+#if CONSAN_GFX12
 #if CONSAN_CASE == 23
   s_barrier_signal m0
 #else
   s_barrier_signal -1
 #endif
 #if CONSAN_CASE == 21
-  v_add_nc_u32 v2, 0, v2
+  VECTOR_ADD v2, 0, v2
   s_cmp_eq_u32 s4, 7
 #elif CONSAN_CASE == 22
   DS_LOAD v3, v1
@@ -334,6 +349,22 @@ CONSAN_KERNEL:
 #else
   s_barrier_wait -1
 #endif
+#else
+#if CONSAN_CASE == 22
+  DS_LOAD v3, v1
+#endif
+#if CONSAN_CASE == 17 || CONSAN_CASE == 23
+  // The assembler only accepts the operand-free spelling. Preserve a
+  // noncanonical immediate in raw code so qualification must reject it.
+#if CONSAN_LEGACY
+  .long 0xbf8a0001
+#else
+  .long 0xbfbd0001
+#endif
+#else
+  s_barrier
+#endif
+#endif
 #if CONSAN_CASE == 24 || CONSAN_CASE == 39
   // B0 publishes the first store. B1 protects the consumer's load before
   // wave 0 reuses the word; case 39 omits only that second barrier group.
@@ -342,9 +373,7 @@ CONSAN_KERNEL:
   DS_LOAD v3, v1
   MASK_MOVE MASK_EXEC, MASK_SAVE
 #if CONSAN_CASE == 24
-  s_wait_dscnt 0
-  s_barrier_signal -1
-  s_barrier_wait -1
+  consan_barrier
 #endif
 #endif
 .Lskip_barrier:

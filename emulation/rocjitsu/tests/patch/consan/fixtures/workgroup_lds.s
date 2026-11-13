@@ -104,9 +104,14 @@ CONSAN_KERNEL:
 #if CONSAN_GROUP_CASE == 5
   MASK_MOVE MASK_EXEC, 0
 #endif
+#if CONSAN_GFX12
   s_wait_dscnt 0
   s_barrier_signal -1
   s_barrier_wait -1
+#else
+  s_waitcnt lgkmcnt(0)
+  s_barrier
+#endif
   MASK_MOVE MASK_EXEC, MASK_SAVE
   v_cmp_eq_u32 MASK_VCC, 0, v7
   MASK_AND_SAVE MASK_SAVE, MASK_VCC

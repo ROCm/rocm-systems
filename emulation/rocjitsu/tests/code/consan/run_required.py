@@ -60,6 +60,28 @@ GFX1250_WIDTH_CASES = (
 )
 
 
+BARRIER_CASES = (
+    'barrier',
+    'barrier_empty',
+    'barrier_high',
+    'barrier_separated',
+    'barrier_multiple',
+    'barrier_missing_second',
+)
+LOOP_CASES = (
+    'loop_zero',
+    'loop_one',
+    'loop_three',
+    'loop_access_loss',
+    'loop_sync_loss',
+    'loop_no_b0',
+    'loop_no_b0_full_journal',
+    'loop_no_b0_sync_loss',
+    'loop_no_b1',
+    'loop_late',
+)
+
+
 def required_names():
     names = {
         'ConSanConfigure.EnvironmentOnlySdk',
@@ -75,22 +97,6 @@ def required_names():
         'ConSanHsaPlugin.UntrackedBarriersAfterARejectionRetainTheirSignalsWithoutPublication',
         'ConSanHsaPlugin.MissingAmdSignalCreationKeepsCoreSignalSupportAvailable',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.mixed_barrier',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_empty',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_high',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_separated',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_multiple',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_missing_second',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_zero',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_one',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_three',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_access_loss',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_sync_loss',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_no_b0',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_no_b0_full_journal',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_no_b0_sync_loss',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_no_b1',
-        'ConSanSimProductionE2E.gfx1250.wave32.assembly.loop_late',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.missing-statistics',
         'ConSanContract.TargetWaveFactsRoundTripAndRowsFollowActualGeometry',
         'ConSanAnalysis.Wave64HighLanesAndFullMasksRetainExactLanePairCounts',
@@ -121,12 +127,14 @@ def required_names():
         'ConSanAnalysis.EveryTargetNeverJoinsIdenticalLdsOffsetsAcrossWorkgroups',
         'ConSanAnalysis.Wave64WorkgroupsKeepHighLanesAndRejectOnlyInvalidPartialWaveMasks',
     }
-    for groups in (1, 4, 16):
-        for case in ('grouped_barrier', 'grouped_empty'):
-            names.add(
-                f'ConSanSimProductionE2E.gfx1250.wave32.assembly.{case}.groups{groups}'
-            )
     for gpu, wave_size in MODES:
+        for case in (*BARRIER_CASES, *LOOP_CASES):
+            names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}')
+        for groups in (1, 4, 16):
+            for case in ('grouped_barrier', 'grouped_empty'):
+                names.add(
+                    f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}.groups{groups}'
+                )
         for groups in (1, 4, 16):
             names.add(
                 f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.grouped_disjoint.groups{groups}'
@@ -187,6 +195,14 @@ def required_names():
             'HighLaneMasksAndEmptyExecHaveRealPublicationEvidence',
             'ThreeWavesAndPartialTailUseDistinctRows',
             'NativeWidthsPreserveEveryWordAndAllGuestState',
+            'PublicationBarrierBlocksAnEarlyConsumer',
+            'BarrierPreservesOutputAndGuestStateAtEmptyExecAndHighLanes',
+            'RepeatedBarrierLoopsPreserveStateAndRetainIndependentSites',
+            'RepeatedBarrierLoopsRetainHighLaneMasks',
+            'ThreeBarrierGroupsRetainEachOccurrenceWithoutChangingGuestState',
+            'RemovingLoopPublicationOrReuseBarrierRetainsConfirmedEndpoints',
+            'SeededNearLimitLoopCountersSaturateWithoutStoppingGuest',
+            'RepeatedAddressGroupExhaustionIsSeparateFromOccupiedBanks',
         ):
             names.add(f'ConSanTargets/ConSanTargetSim.{case}/{suffix}')
         names.add(f'ConSanSimE2E.{gpu}.wave{wave_size}.assembly.high_lane')

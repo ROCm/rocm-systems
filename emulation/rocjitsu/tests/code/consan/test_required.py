@@ -134,16 +134,73 @@ class RequiredCoverage(unittest.TestCase):
                             [{'name': item} for item in required - {name}]
                         )
 
-    def test_multiple_barrier_controls_cannot_be_omitted(self):
+    def test_barrier_and_loop_controls_are_required_for_every_target_and_wave_mode(
+        self,
+    ):
         required = required_names()
-        for case in ('barrier_multiple', 'barrier_missing_second'):
-            with self.subTest(case=case):
-                name = f'ConSanSimProductionE2E.gfx1250.wave32.assembly.{case}'
-                self.assertIn(name, required)
-                with self.assertRaisesRegex(
-                    ValueError, 'Required ConSan registrations missing'
-                ):
-                    validate_selected([{'name': item} for item in required - {name}])
+        for gpu, wave_size in (
+            ('gfx942', 64),
+            ('gfx950', 64),
+            ('gfx1100', 32),
+            ('gfx1100', 64),
+            ('gfx1201', 32),
+            ('gfx1201', 64),
+            ('gfx1250', 32),
+        ):
+            for case in (
+                'barrier',
+                'barrier_empty',
+                'barrier_high',
+                'barrier_separated',
+                'barrier_multiple',
+                'barrier_missing_second',
+                'loop_zero',
+                'loop_one',
+                'loop_three',
+                'loop_access_loss',
+                'loop_sync_loss',
+                'loop_no_b0',
+                'loop_no_b0_full_journal',
+                'loop_no_b0_sync_loss',
+                'loop_no_b1',
+                'loop_late',
+            ):
+                name = f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}'
+                with self.subTest(name=name):
+                    self.assertIn(name, required)
+                    with self.assertRaisesRegex(
+                        ValueError, 'Required ConSan registrations missing'
+                    ):
+                        validate_selected(
+                            [{'name': item} for item in required - {name}]
+                        )
+
+    def test_barrier_publication_and_loop_saturation_need_simulator_controls(self):
+        required = required_names()
+        for gpu, wave_size in (
+            ('gfx942', 64),
+            ('gfx950', 64),
+            ('gfx1100', 32),
+            ('gfx1100', 64),
+            ('gfx1201', 32),
+            ('gfx1201', 64),
+            ('gfx1250', 32),
+        ):
+            for case in (
+                'PublicationBarrierBlocksAnEarlyConsumer',
+                'RepeatedBarrierLoopsPreserveStateAndRetainIndependentSites',
+                'RepeatedBarrierLoopsRetainHighLaneMasks',
+                'SeededNearLimitLoopCountersSaturateWithoutStoppingGuest',
+            ):
+                name = f'ConSanTargets/ConSanTargetSim.{case}/{gpu}Wave{wave_size}'
+                with self.subTest(name=name):
+                    self.assertIn(name, required)
+                    with self.assertRaisesRegex(
+                        ValueError, 'Required ConSan registrations missing'
+                    ):
+                        validate_selected(
+                            [{'name': item} for item in required - {name}]
+                        )
 
     def test_compiled_probe_validation_is_required_for_every_mode(self):
         for name in required_names():

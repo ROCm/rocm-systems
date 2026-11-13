@@ -481,52 +481,48 @@ if(TARGET consan_hsa_runner)
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                         mixed_barrier ${_width_threads} production analysis
                     )
-                    foreach(_groups IN ITEMS 1 4 16)
-                        foreach(
-                            _scenario
-                            IN
-                            ITEMS grouped_barrier grouped_empty
-                        )
-                            consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
-                                ${_scenario} 65 production analysis ${_groups}
-                            )
-                        endforeach()
-                    endforeach()
-                    foreach(
-                        _barrier_case
-                        IN
-                        ITEMS
-                            barrier
-                            barrier_empty
-                            barrier_high
-                            barrier_separated
-                            barrier_multiple
-                            barrier_missing_second
-                    )
-                        consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
-                            ${_barrier_case} 65 production analysis
-                        )
-                    endforeach()
-                    foreach(
-                        _loop_case
-                        IN
-                        ITEMS
-                            loop_zero
-                            loop_one
-                            loop_three
-                            loop_access_loss
-                            loop_sync_loss
-                            loop_no_b0
-                            loop_no_b0_full_journal
-                            loop_no_b0_sync_loss
-                            loop_no_b1
-                            loop_late
-                    )
-                        consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
-                            ${_loop_case} 64 production analysis
-                        )
-                    endforeach()
                 endif()
+                foreach(_groups IN ITEMS 1 4 16)
+                    foreach(_scenario IN ITEMS grouped_barrier grouped_empty)
+                        consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                            ${_scenario} ${_width_threads} production analysis ${_groups}
+                        )
+                    endforeach()
+                endforeach()
+                foreach(
+                    _barrier_case
+                    IN
+                    ITEMS
+                        barrier
+                        barrier_empty
+                        barrier_high
+                        barrier_separated
+                        barrier_multiple
+                        barrier_missing_second
+                )
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        ${_barrier_case} ${_width_threads} production analysis
+                    )
+                endforeach()
+                foreach(
+                    _loop_case
+                    IN
+                    ITEMS
+                        loop_zero
+                        loop_one
+                        loop_three
+                        loop_access_loss
+                        loop_sync_loss
+                        loop_no_b0
+                        loop_no_b0_full_journal
+                        loop_no_b0_sync_loss
+                        loop_no_b1
+                        loop_late
+                )
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        ${_loop_case} ${_threads} production analysis
+                    )
+                endforeach()
                 foreach(_scenario IN LISTS _named_analysis_cases)
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} named-assembly
                         ${_scenario} ${_threads} testable analysis
