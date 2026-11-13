@@ -4,7 +4,6 @@
 import io
 import json
 import re
-from collections import OrderedDict
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
@@ -30,32 +29,6 @@ _CHUNK_COMBINERS = {"sum": "sum", "min": "min", "max": "max", "count": "sum"}
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
-
-
-def load_panel_configs(
-    dirs: list[str],
-) -> OrderedDict[int, dict[str, Any]]:
-    """
-    Load all panel configs from yaml file.
-    """
-    configs: dict[int, dict[str, Any]] = {}
-    for dir_path in dirs:
-        for yaml_file in Path(dir_path).glob("*.yaml"):
-            with open(yaml_file, encoding="utf-8") as file:
-                config_yml = yaml.safe_load(file)
-                # metric key can be None due to some metric-
-                # tables not having any metrics
-                # metric key should be empty dict instead of None
-                panel_config = config_yml["Panel Config"]
-                for data_source in panel_config["data source"]:
-                    metric_table = data_source.get("metric_table")
-                    if metric_table and metric_table["metric"] is None:
-                        metric_table["metric"] = {}
-                configs[panel_config["id"]] = panel_config
-
-    # TODO: sort metrics as the header order in case they-
-    # are not defined in the same order
-    return OrderedDict(sorted(configs.items()))
 
 
 def load_profiling_config(config_dir: str) -> dict[str, Any]:
