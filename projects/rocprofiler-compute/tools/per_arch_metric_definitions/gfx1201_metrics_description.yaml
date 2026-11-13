@@ -169,8 +169,8 @@ Memory chart - Workgroup Processors (WGPs):
     unit: Workgroups per WGP
 Roofline Performance Rates:
   VALU FLOPs (FP32):
-    plain: Floating-point operations per second on the VALU, excluding WMMA instructions. Uses the aggregate VALU instruction counter at one FLOP per lane, 32 lanes per wave32 instruction, so it is an estimate rather than a precision-specific FLOP count.
-    rst: Floating-point operations per second on the VALU, excluding WMMA instructions. Uses the aggregate VALU instruction counter at one FLOP per lane, 32 lanes per wave32 instruction, so it is an estimate rather than a precision-specific FLOP count.
+    plain: Floating-point operations per second on the VALU, excluding WMMA instructions. Counts VALU instruction issues at one FLOP per lane, 32 lanes per wave32 instruction, so it is an estimate rather than a precision-specific FLOP count. It reads above the true rate when a kernel issues many VALU instructions that are not floating-point operations, such as selects, address math, and integer operations. It reads below the true rate when one instruction does more than one operation, such as a fused multiply-add or a dual-issue pair.
+    rst: Floating-point operations per second on the VALU, excluding WMMA instructions. Counts VALU instruction issues at one FLOP per lane, 32 lanes per wave32 instruction, so it is an estimate rather than a precision-specific FLOP count. It reads above the true rate when a kernel issues many VALU instructions that are not floating-point operations, such as selects, address math, and integer operations. It reads below the true rate when one instruction does more than one operation, such as a fused multiply-add or a dual-issue pair.
     unit: GFLOP/s
   WMMA FLOPs (F16->F32):
     plain: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only. V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
