@@ -28,18 +28,42 @@ seven target/wave modes; hardware and simulator coverage must be distinguished.
 ## Architecture
 
 ```text
-InstrumentationPoint: observation / replacement / probe + replacement
-          |
-source-bound admission and operation resolution
-          |
-private effective-guest layout + fresh CFG/liveness when probes need it
-          |
-shared trampoline planning / TrampolineBuilder
-  emit original for observation; emit replacement body for replacement
-          |
-checked atomic source-anchor edits + appended local cave
-          |
-CodeObjectPatcher::replace_text() / resource updates / final ELF
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Instrumentor                                                            │
+│  Queue observation / replacement / probe + replacement                   │
+│                                                                          │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ Source admission + operation resolution                            │  │
+│  │ Observation / replacement checks bound to the original source      │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                     │                                    │
+│                                     v                                    │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ Analysis when required by observations / probes / register growth  │  │
+│  │ Replacements: private effective guest + fresh CFG/liveness         │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                     │                                    │
+│                                     v                                    │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ Shared trampoline planning / TrampolineBuilder                     │  │
+│  │ Observation: relocate original; replacement: emit supplied body    │  │
+│  │ Optional probe runs before the guest body                          │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                     │                                    │
+│                                     v                                    │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ CheckedTextEdits                                                   │  │
+│  │ Validate the full anchor batch; apply source edits atomically      │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                     │                                    │
+│                                     v                                    │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │ ELF layout / CodeObjectPatcher                                     │  │
+│  │ Append local cave; replace_text(); update resources                │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│                                                                          │
+│  Publish ELF bytes + sites only after every stage succeeds               │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 The orchestrator owns the multi-stage pipeline. It builds a private candidate and publishes ELF bytes and site maps only after validation, code emission, layout, and resource updates succeed. A late failure (e.g. branch-range overflow) returns diagnostics without publishing a partial image.
@@ -127,8 +151,9 @@ admission still enforces the missing-reference metadata guards below.
 
 Source admission validates expected bytes, bounds/overflow, physical overlap,
 one complete source extent, clause membership, and collected incoming references.
-References include direct branches throughout pristine text, symbol starts/ends,
-supported raw relocation destinations and descriptor entries. ET_REL symbols
+References include direct branches throughout pristine allocated executable
+sections in linked objects, symbol starts/ends, supported raw relocation
+destinations and descriptor entries. ET_REL symbols
 remain section-relative. Interior references reject the batch; boundary references
 remain permitted. Known `s_cbranch_cdbg*`, `s_subvector_loop_begin`, and
 `s_subvector_loop_end` forms without destination metadata reject source admission;
@@ -147,12 +172,21 @@ whose actual target stays fixed while unrelated metadata moves. Removing every
 source getpc in the batch remains permitted. The check uses immutable source
 facts across queries and forks; it does not add CFG/liveness to pure replacement.
 
-Retained direct branches are checked separately against the storage moved by
-growth, including allocated sections and unsectioned loaded tails. A batch that
-would leave such a branch targeting the old address is rejected before publishing
-ELF bytes or sites. Branches removed by the batch are excluded; same-text and
-earlier-section targets remain supported. This check reuses the pristine boundary
-index's checked destination arithmetic and shared source-facts lifetime.
+Retained direct branches in every allocated executable section of a linked object
+are checked against storage moved by growth, including allocated sections and
+unsectioned loaded tails.
+A batch that changes the distance between a retained branch and its destination is
+rejected before publishing ELF bytes or sites. Branches whose source and target
+both stay fixed or move together remain supported. Only branches removed from
+`.text` by the batch are excluded. Foreign sections are decoded separately without
+adding their offsets to the public `.text` index; incomplete or undecodable streams
+and supported dynamic loader writes into executable bytes reject admission.
+Foreign branch destinations also participate in interior-reference checks, and
+foreign getpc instructions retain the conservative restriction above.
+ET_REL sections retain their separate section-relative coordinate spaces and the
+existing text-local reference proof.
+These checks reuse the boundary index's checked destination arithmetic and shared
+source-facts lifetime across queries and forks.
 
 A replacement point can carry the normal callable-probe fields; its probe runs
 before the replacement body. One separate callable `BeforeInst` at the same offset
