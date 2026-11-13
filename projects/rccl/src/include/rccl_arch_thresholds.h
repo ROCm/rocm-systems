@@ -125,6 +125,10 @@ struct rcclArchThresholds {
   size_t ddaArRegEagerMinShardBytes;   // eager: DDA LL128 instead of CE-registered from this per-rank shard
   size_t ddaArRegEagerMaxShardBytes;   // up to this per-rank shard
 
+  // AllReduce only: DDA LL two-shot up to nRanks x this on comms below rankScaledMinRanks ranks (larger comms run it
+  // to the LL tier's cap). 0 = the RCCL_DDA_LL_TWOSHOT_THRESHOLD default; that env var, when set, wins.
+  size_t ddaArLLTwoShotMaxPerRank;
+
   // DDA VMM (AllReduce / ReduceScatter) launches min(init block cap,
   // clamp(ddaVmmBlockBudget / nRanks, ddaVmmMinBlocks, ddaVmmMaxBlocks)) blocks
   // on comms of at least rankScaledMinRanks ranks. Budget 0 = the init block cap.
@@ -166,6 +170,15 @@ struct rcclArchThresholds {
   size_t rsRingSimpleCappedMaxPerRank;  // Ring Simple ReduceScatter above the LL128 band,
   int rsRingSimpleCappedChannels;       // up to this per rank, runs on at most this many channels
 
+  // ReduceScatter on rank-scaled comms of at most rsSmallCommMaxRanks ranks. A non-zero entry
+  // replaces ddaLL128MaxPerRank[ReduceScatter] (still clipped to rankScaledMaxBytes) or
+  // rsRingLL128MaxPerRank (2- and 4-byte types). 0 ranks = off. The DDA LL128 entry further
+  // stops at rsSmallCommDdaLL128MaxRanks.
+  int rsSmallCommMaxRanks;
+  int rsSmallCommDdaLL128MaxRanks;
+  size_t rsSmallCommDdaLL128MaxPerRank;
+  size_t rsSmallCommRingLL128MaxPerRank;
+
   // Force CE-Scratch for unregistered AllGather / AlltoAll / Gather / Scatter
   // whenever the receive fits ddaScratch, on top of the ceNonRegMin/Max window.
   // NCCL_CTA_POLICY_ZERO forces it on every arch (it is the one zero-CU path for
@@ -186,6 +199,12 @@ enum rcclTuningPartition {
   RCCL_TUNING_PARTITION_SPX = 0,
   RCCL_TUNING_PARTITION_DPX = 1,
 };
+
+// True when the rsSmallComm* entries apply to an nRanks comm.
+inline bool rcclRsSmallComm(const rcclArchThresholds* t, int nRanks) {
+  return t != nullptr && t->rsSmallCommMaxRanks > 0 && t->rankScaledMinRanks > 0 &&
+         nRanks >= t->rankScaledMinRanks && nRanks <= t->rsSmallCommMaxRanks;
+}
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn,
                                                 rcclTuningPartition partition = RCCL_TUNING_PARTITION_SPX);

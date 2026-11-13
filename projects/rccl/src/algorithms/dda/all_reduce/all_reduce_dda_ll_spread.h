@@ -3,7 +3,8 @@
  *
  * Spread two-shot tier of the LL-protocol all-reduce for the DDA path.
  *
- * Runs on the one-shot tier's grid and moves the two-shot tier's bytes. The
+ * Runs on a one-shot-shaped grid (one thread per packet, kDdaLLSpreadThreads
+ * a block) and moves the two-shot tier's bytes. The
  * one-shot puts one packet per thread on the wire to every peer, so one block
  * carries blockDim x 16B x (nRanks-1); here each block owns the same slice of
  * every rank's shard on all ranks, and its threads share (peer, packet) units,
@@ -37,7 +38,7 @@
 
 namespace dda::common {
 
-// Threads per block: the one-shot tier's, so the spread kernel runs on exactly its grid.
+// Threads per block. The plain one-shot runs narrower blocks; the spread keeps this width.
 constexpr int kDdaLLSpreadThreads = 512;
 
 // Payload words (8B each) one reduce pass stages in LDS: the slice length times nRanks.
@@ -89,7 +90,7 @@ __device__ __forceinline__ bool ddaLLSpreadPoll(const uint32_t* const (&line)[kD
   return ddaLLWaitLineFlagsBatched<kDdaLLSpreadBatch>(line, mask, flag, params, d0, d1);
 }
 
-// LL spread two-shot all-reduce kernel; launched on the one-shot tier's grid (kDdaLLSpreadThreads per block).
+// LL spread two-shot all-reduce kernel; one thread per packet, kDdaLLSpreadThreads per block.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(kDdaLLSpreadThreads)

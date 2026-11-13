@@ -103,6 +103,12 @@ constexpr int kDdaLL128DataBytesPerSlice =
 static_assert(kDdaLL128WireBytesPerSlice % (int)kDdaLL128LineBytes == 0,
               "a slice must be a whole number of lines");
 
+// Block width of a warp-per-slice LL128 grid of at most maxBlocks blocks: 256 threads while one pass of them covers
+// every slice (spreading the slices over twice the blocks of 512), else 512, which needs fewer passes.
+constexpr unsigned ddaLL128SliceThreads(size_t slices, size_t maxBlocks) {
+  return slices <= maxBlocks * (256 / kDdaLL128Warp) ? 256u : 512u;
+}
+
 // Per-rank slot in 8B wire words. nStagingAreas is 1 for one-shot publish/reduce
 // and 2 for two-shot (publish plus write-back). Shared by all-reduce, all-gather
 // and reduce-scatter so the four tiers carve the bank the same way.
