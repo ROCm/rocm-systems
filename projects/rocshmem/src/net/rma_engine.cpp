@@ -30,10 +30,6 @@
 namespace rocshmem {
 namespace net {
 
-namespace {
-constexpr uint32_t kInlineMax = 64;
-}  // namespace
-
 RmaEngine::RmaEngine(Ibv *ibv, IbCtrl *ctrl, MrRegistry *mr, LaneMap lm,
                      uintptr_t heap_base, std::vector<LocalMr> local_mrs)
     : ibv_{ibv},
@@ -66,7 +62,7 @@ uint32_t RmaEngine::lkey_for(const void *addr) const {
 
 uint64_t RmaEngine::post_write(int lane, uintptr_t laddr, uint32_t lkey,
                                uintptr_t raddr, uint32_t rk, uint32_t len,
-                               bool inl, uint64_t wr_id) {
+                               uint64_t wr_id) {
   struct ibv_sge sge;
   memset(&sge, 0, sizeof(sge));
   sge.addr = laddr;
@@ -80,7 +76,12 @@ uint64_t RmaEngine::post_write(int lane, uintptr_t laddr, uint32_t lkey,
   wr.num_sge = 1;
   wr.opcode = IBV_WR_RDMA_WRITE;
   wr.send_flags = IBV_SEND_SIGNALED;
-  if (inl && len <= kInlineMax) {
+  // Request inline whenever the payload fits the inline capacity the driver
+  // actually granted at QP-create time (vendor-specific, e.g. bnxt ~16B). This
+  // is the single source of truth for "can this be inlined" -- callers no longer
+  // pass a hint. Posting IBV_SEND_INLINE with len > the granted max_inline_data
+  // makes ibv_post_send fail with ENOMEM, so fall back to an SGE write above it.
+  if (len <= ctrl_->max_inline_data()) {
     wr.send_flags |= IBV_SEND_INLINE;
   }
   wr.wr.rdma.remote_addr = raddr;
