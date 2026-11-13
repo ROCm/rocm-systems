@@ -6,6 +6,7 @@
 //! mapping would violate the kernel contract. Compute queues also retain EOP
 //! and context-save storage; the process/device VM retains its doorbell slice.
 
+use super::target::KfdTargetProfile;
 use crate::memory::storage::TryPush;
 use crate::memory::storage::{Owned, Shared};
 use std::io;
@@ -1774,6 +1775,7 @@ impl KfdQueue {
             doorbell_host_address: 0,
             doorbell_device_address: None,
             doorbell_width: QueueAccessWidth::Bits64,
+            host_publication: crate::device::gpu::queue::HostQueuePublication::Ordered64BitMmio,
         };
         let mut args = uapi::CreateQueue {
             ring_address: ring_device_address,
@@ -1828,7 +1830,7 @@ impl KfdQueue {
             return Err(if queue.uncertain {
                 Error::QueueBackingMayBeLive {
                     operation: "AMDKFD_IOC_CREATE_QUEUE outcome is uncertain",
-                    source: Some(source),
+                    source: crate::NativeStatus::from_io(&source),
                 }
             } else {
                 native_error("AMDKFD_IOC_CREATE_QUEUE", source)

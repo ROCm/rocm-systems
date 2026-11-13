@@ -28,12 +28,12 @@ def context(arch, name, dst, src):
     )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
 @pytest.mark.parametrize('name', sorted(DS_NAMES))
 def test_ds_routing_preserves_offsets_and_selects_wave64_architecture(arch, name):
     sources = ['addr'] if name == 'DS_SWIZZLE_B32' else ['addr', 'data0']
     body = gen_ds(context(arch, name, ['vdst'], sources))
-    if arch == 'rdna3' and name == 'DS_BPERMUTE_FI_B32':
+    if arch not in ('rdna4', 'cdna5') and name == 'DS_BPERMUTE_FI_B32':
         assert body is None
         return
     assert 'inst_.offset0 | (inst_.offset1 << 8)' in body
@@ -42,9 +42,9 @@ def test_ds_routing_preserves_offsets_and_selects_wave64_architecture(arch, name
     assert 'arithmetic_reports_fp_status' not in body
     assert 'VectorMemState' not in body
     if name != 'DS_SWIZZLE_B32':
-        suffix = '_w64_gfx12' if arch == 'rdna4' and '_FI_' not in name else '_w64'
+        suffix = '_w64_gfx12' if arch != 'rdna3' and '_FI_' not in name else '_w64'
         assert 'rj_arith_' + name.lower() + suffix in body
-    assert gen_ds(context('cdna5', name, ['vdst'], sources)) is None
+    assert gen_ds(context('cdna2', name, ['vdst'], sources)) is None
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "async_vm_test_support.h"
 #include "rocjitsu/vm/amdgpu/sdma_ring_consumer.h"
 
 #include <gtest/gtest.h>
@@ -52,6 +53,7 @@ public:
 
   VmAccessOutcome write(VmMemoryDomain, uint64_t address,
                         std::span<const std::byte> bytes) override {
+    ++write_attempts_[address];
     if (const VmAccessOutcome outcome = next(write_outcomes_, address);
         outcome != VmAccessOutcome::Complete)
       return outcome;
@@ -122,6 +124,7 @@ public:
     atomic_store_outcomes_[address].push_back(outcome);
   }
   uint32_t read_attempts(uint64_t address) const { return attempts(read_attempts_, address); }
+  uint32_t write_attempts(uint64_t address) const { return attempts(write_attempts_, address); }
   std::size_t read_bytes(uint64_t begin, uint64_t end) const {
     std::size_t bytes = 0;
     for (const auto &[address, count] : read_bytes_) {
@@ -159,6 +162,7 @@ private:
   std::map<uint64_t, std::deque<VmAccessOutcome>> atomic_load_outcomes_;
   std::map<uint64_t, std::deque<VmAccessOutcome>> atomic_store_outcomes_;
   std::map<uint64_t, uint32_t> read_attempts_;
+  std::map<uint64_t, uint32_t> write_attempts_;
   std::map<uint64_t, std::size_t> read_bytes_;
   std::map<uint64_t, uint32_t> atomic_load_attempts_;
   std::map<uint64_t, uint32_t> atomic_store_attempts_;
@@ -468,6 +472,37 @@ TEST(SdmaRingConsumerTest, InitialCursorOverridesMemoryAndAbsentCursorUsesAtomic
   EXPECT_EQ(fixture.memory->atomic_load_attempts(RingConsumerFixture::kReadPointer), 1u);
 }
 
+TEST(SdmaRingConsumerTest, ClosedIngressBlocksRingFetchAndCursorPublicationWithoutReplay) {
+  RingConsumerFixture fixture;
+  fixture.memory->store<uint32_t>(RingConsumerFixture::kRing, 0); // NOP.
+  bool ring_open = false;
+  bool cursor_write_open = false;
+  SdmaPacketCallbacks callbacks;
+  callbacks.admit_memory_ingress = [&](const GpuVmAccess &,
+                                       std::span<const MemoryIngressSpan> spans) {
+    EXPECT_EQ(spans.size(), 1u);
+    const MemoryIngressSpan &span = spans.front();
+    if ((span.address == RingConsumerFixture::kRing && !ring_open) ||
+        (span.address == RingConsumerFixture::kReadPointer && span.access == VmAccessKind::Write &&
+         !cursor_write_open))
+      return MemoryIngressAdmission{.outcome = VmAccessOutcome::Unavailable, .permit = {}};
+    return MemoryIngressAdmission{};
+  };
+  SdmaRingConsumer consumer = fixture.make_consumer(0, 64, std::move(callbacks));
+
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Blocked);
+  EXPECT_EQ(fixture.memory->read_attempts(RingConsumerFixture::kRing), 0u);
+  EXPECT_EQ(consumer.cursor(), 0u);
+  ring_open = true;
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Blocked);
+  EXPECT_EQ(fixture.memory->read_attempts(RingConsumerFixture::kRing), 1u);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(RingConsumerFixture::kReadPointer), 0u);
+  cursor_write_open = true;
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Idle);
+  EXPECT_EQ(fixture.memory->read_attempts(RingConsumerFixture::kRing), 1u);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(RingConsumerFixture::kReadPointer), 4u);
+}
+
 TEST(SdmaRingConsumerTest, FetchesAcrossRingWrapWithoutReplayingCompletedSegment) {
   RingConsumerFixture fixture;
   constexpr uint64_t kDestination = 0x300;
@@ -665,12 +700,15 @@ TEST(SdmaRingConsumerTest, CacheMaintenanceFailureIsTerminalAndRetiresOnlyCommit
         1, 31, 0, static_cast<uint32_t>(kSource), 0, static_cast<uint32_t>(kDestination), 0};
     fixture.memory->store(RingConsumerFixture::kRing, copy);
     uint32_t maintenance_calls = 0;
+    uint32_t maintenance_rejections = 0;
     SdmaPacketCallbacks callbacks;
     callbacks.acquire_cache_maintenance =
         [&](SdmaCacheOperation) -> util::FailureOr<SdmaCacheLease> {
       ++maintenance_calls;
-      if (!committed_prefix || maintenance_calls == 2)
+      if (!committed_prefix || fixture.memory->write_attempts(kDestination + 16) != 0) {
+        ++maintenance_rejections;
         return util::Result::failure();
+      }
       return SdmaCacheLease{};
     };
     if (committed_prefix)
@@ -690,7 +728,8 @@ TEST(SdmaRingConsumerTest, CacheMaintenanceFailureIsTerminalAndRetiresOnlyCommit
     ASSERT_TRUE(consumer.terminal());
     EXPECT_EQ(*consumer.terminal(), SdmaRingStatus::Faulted);
     EXPECT_EQ(consumer.service(sizeof(copy)), SdmaRingStatus::Faulted);
-    EXPECT_EQ(maintenance_calls, committed_prefix ? 2u : 1u);
+    EXPECT_GE(maintenance_calls, committed_prefix ? 2u : 1u);
+    EXPECT_EQ(maintenance_rejections, 1u);
     for (uint32_t index = 0; index < 32; ++index)
       EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + index),
                 committed_prefix && index < 16 ? static_cast<uint8_t>(index + 1) : 0);
@@ -826,6 +865,75 @@ TEST(SdmaRingConsumerTest, ReconfigureIsIdleOnlyAndResetDiscardsRetryAndTerminal
   consumer.reset();
   EXPECT_FALSE(consumer.terminal());
   EXPECT_FALSE(consumer.in_flight());
+}
+
+TEST(SdmaRingConsumerTest, DeferredRingFetchResumesWithoutRefetchOrWorkerWait) {
+  ::rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, 0x100, 0x104);
+  GpuVm vm;
+  const AddressSpaceHandle handle = vm.register_translated(7, memory, memory);
+  const std::array<std::byte, 4> nop{};
+  memory->store(0x100, nop);
+  SdmaRingConsumer consumer(vm,
+                            {.address_space = handle,
+                             .ring_base = 0x100,
+                             .ring_bytes = 64,
+                             .read_pointer_address = 0x80,
+                             .initial_cursor = 0},
+                            SdmaPacketDialect::Legacy);
+
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Blocked);
+  EXPECT_EQ(consumer.cursor(), 0u);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  (void)sim.engine.step();
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Idle);
+  EXPECT_EQ(consumer.cursor(), 4u);
+  EXPECT_EQ(memory->backing->read_effects, 1u);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_FALSE(consumer.in_flight());
+}
+
+TEST(SdmaRingConsumerTest, ResetCancelsDeferredRingFetchWithoutLateRead) {
+  ::rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, 0x100, 0x104);
+  GpuVm vm;
+  const AddressSpaceHandle handle = vm.register_translated(7, memory, memory);
+  const std::array<std::byte, 4> nop{};
+  memory->store(0x100, nop);
+  SdmaRingConsumer consumer(vm,
+                            {.address_space = handle,
+                             .ring_base = 0x100,
+                             .ring_bytes = 64,
+                             .read_pointer_address = 0x80,
+                             .initial_cursor = 0},
+                            SdmaPacketDialect::Legacy);
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Blocked);
+  consumer.reset();
+  EXPECT_FALSE(consumer.in_flight());
+  (void)sim.engine.step();
+  EXPECT_EQ(memory->backing->read_effects, 0u);
+  EXPECT_GE(memory->backing->cancellations, 1u);
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 2u);
+}
+
+TEST(SdmaRingConsumerTest, DeferredControlPointerIsRejectedWithoutPosting) {
+  ::rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, 0x80, 0x88);
+  GpuVm vm;
+  const AddressSpaceHandle handle = vm.register_translated(7, memory, memory);
+  SdmaRingConsumer consumer(vm,
+                            {.address_space = handle,
+                             .ring_base = 0x100,
+                             .ring_bytes = 64,
+                             .read_pointer_address = 0x80,
+                             .initial_cursor = std::nullopt},
+                            SdmaPacketDialect::Legacy);
+  EXPECT_EQ(consumer.service(4), SdmaRingStatus::Malformed);
+  EXPECT_EQ(memory->backing->posts, 0u);
+  EXPECT_EQ(memory->backing->read_effects, 0u);
 }
 
 } // namespace

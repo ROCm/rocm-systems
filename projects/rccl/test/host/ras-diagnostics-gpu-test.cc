@@ -84,18 +84,7 @@ rasDiagnosticsRankHeader MakeRank(uint64_t commHash, int rank, int nRanks) {
   return header;
 }
 
-template <typename T>
-std::vector<char> BuildRecords(const std::vector<std::pair<rasDiagnosticsRankHeader, T>>& records) {
-  const size_t stride = rasDiagnosticsLocalRecordStride(sizeof(T));
-  std::vector<char> data(records.size() * stride, 0);
-  size_t offset = 0;
-  for (const auto& record : records) {
-    memcpy(data.data() + offset, &record.first, sizeof(record.first));
-    memcpy(data.data() + offset + sizeof(record.first), &record.second, sizeof(record.second));
-    offset += stride;
-  }
-  return data;
-}
+using ras_test::BuildRecords;
 
 rasDiagnosticsGpuModelData GpuModel(int count, const char* model) {
   rasDiagnosticsGpuModelData data{};

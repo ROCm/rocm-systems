@@ -89,6 +89,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
 
+* Fixed the Cache Lookup Hit Rate and Cache Sector Lookup Hit Rate averages in the GL0 Cache and LDS panel on gfx1250, which showed negative values.
+
 ### Upcoming changes
 
 ### Known issues
