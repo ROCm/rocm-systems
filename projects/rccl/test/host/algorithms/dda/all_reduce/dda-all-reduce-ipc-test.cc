@@ -6,7 +6,7 @@
 
 // Host-only microtests for src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu, #include-d via
 // DDA_ALL_REDUCE_IPC_CC_PATH: the eligibility gates, the datatype dispatch and the flat/tree kernel
-// selection. Own binary: rccl-UnitTestsMicro links dda_fakes.cc, which defines these same symbols.
+// selection.
 
 #include <gtest/gtest.h>
 

@@ -329,12 +329,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     must bracket the production source include, after system headers and
     before test helpers. CMake pins the copied `ncclFuncStr` table to
     `src/init.cc`.
-- **`rccl-UnitTestsMicroDdaColl`**: the DDA launchers
-  `algorithms/dda/{all_gather,alltoall,broadcast,reduce_scatter}/dda_*.cu` and the fabric
-  `all_reduce/dda_all_reduce_fabric*.cu` (each via `DDA_<UNIT>_CC_PATH`, from
-  `algorithms/dda/<coll>/<unit>-test.cc`); suites `Dda<Unit>Microtest`. Launches are recorded
-  through `DdaCollSeams.h`, not run. Its own binary: `rccl-UnitTestsMicro` links
-  `fakes/dda_fakes.cc`, which defines the same DDA entry points.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
@@ -504,12 +498,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     resolves their fake plugin libraries.
   - `tuner/csv_tuner.cc` (`CSV_TUNER_CC_PATH`, from `tuner/csv-tuner-test.cc`); suite
     `CsvTunerMicrotest.*`.
-- **`rccl-UnitTestsMicroDdaIpc`**: `algorithms/dda/all_reduce/dda_all_reduce_ipc.cu`
-  (`DDA_ALL_REDUCE_IPC_CC_PATH`, from `dda-allreduce-ipc-test.cc`); suites
-  `DdaAllReduceIpc*`. Eligibility gates, datatype dispatch and flat/tree kernel
-  selection, observed through the `g_hipExtLaunchKernel` seam. Its own binary:
-  `rccl-UnitTestsMicro` links `fakes/dda_fakes.cc`, which defines the same symbols.
-  See `test_categories_micro_dda_ipc.yaml`.
 - **`rccl-UnitTestsMicroProxy`**: `proxy.cc` (via `PROXY_CC_PATH`, from
   `proxy-test.cc`); suites `Proxy*`. Its externals are in
   `fakes/proxy_micro_fakes.cc` (sockets are socketpair-backed). Its own binary:
@@ -611,9 +599,22 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `rccl-UnitTestsMicro`, which fakes those entry points in
   `fakes/dev_runtime_micro_fakes.cc`. See
   `test_categories_micro_gin.yaml`.
-- **`rccl-UnitTestsMicroDda`** — `src/algorithms/dda/`, one binary because the
-  units share the cuMem VMM and bootstrap seams; tests mirror the source tree
-  under `test/host/algorithms/`. See `test_categories_micro_dda.yaml`.
+- **`rccl-UnitTestsMicroDda<SubDir><Unit>`** — `src/algorithms/dda/`, one binary per test
+  file; tests mirror the source tree under `test/host/algorithms/dda/`, and the name drops a
+  `<Unit>` prefix that repeats the dir (`all_gather/dda-all-gather-fabric-ll-test.cc` builds
+  `rccl-UnitTestsMicroDdaAllGatherFabricLl`). Each links the fakes and real sibling units its
+  test file reaches. See `test_categories_micro_dda.yaml`.
+  - The launchers `{all_gather,alltoall,reduce_scatter}/dda_*.cu` and
+    `all_reduce/dda_all_reduce_fabric*.cu` (each via `DDA_<UNIT>_CC_PATH`, from
+    `<coll>/<unit>-test.cc`); suites `Dda<Unit>Microtest`. Launches are recorded through
+    `DdaCollSeams.h` (defined in `dda-coll-seams.cc`), not run.
+  - `all_reduce/dda_all_reduce_ipc.cu` (`DDA_ALL_REDUCE_IPC_CC_PATH`, from
+    `all_reduce/dda-all-reduce-ipc-test.cc`); suites `DdaAllReduceIpc*`. Eligibility gates,
+    datatype dispatch and flat/tree kernel selection, observed through the
+    `g_hipExtLaunchKernel` seam.
+  - `ipc/ipc_init.cu` with `ipc/ipc_mem_handler.cc` and `ipc/ipc_gpu_barrier.cu`
+    (`DDA_IPC_*_PATH`, from `ipc/dda-ipc-lifecycle-test.cc`); suites `DdaIpcLifecycle*`,
+    `DdaIpcMemHandler*`.
   - `fabric/fabric_mem_handler.cc` (`FABRIC_MEM_HANDLER_CC_PATH`, from
     `fabric-mem-handler-test.cc`); suites `FabricMemHandler*`.
   - `fabric/fabric_gpu_barrier.cu` (`FABRIC_GPU_BARRIER_CC_PATH`, from
@@ -1461,8 +1462,9 @@ above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker|-warpspeed]`,
-`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
-`rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDda`, `rccl-UnitTestsMicroMisc`,
+`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroMisc`,
+`rccl-UnitTestsMicroDda<SubDir><Unit>` (one per `src/algorithms/dda/` test file),
 `rccl-UnitTestsMicroTransport<Unit>` (one per `src/transport/` test file),
 `rccl-UnitTestsMicroEnqueue<Unit>` (one per other `src/enqueue/` test file),
 `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroRmaProxy`,
@@ -1511,7 +1513,6 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroInit      # init.cc tests
 ./build/rccl-UnitTestsMicroInit-uncached
 ./build/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
-./build/rccl-UnitTestsMicroDdaColl            # src/algorithms/dda/*/dda_*.cu launchers
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroEnqueue-warpspeed  # same, ENABLE_WARP_SPEED arm
@@ -1541,14 +1542,13 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroNcclDevice         # nccl_device requirement builders tests
 ./build/rccl-UnitTestsMicroCore               # nccl_device/core.cc tests
 ./build/rccl-UnitTestsMicroCftDevRuntime      # cft_dev_runtime.cc tests
-./build/rccl-UnitTestsMicroDdaIpc             # src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
 ./build/rccl-UnitTestsMicroParam              # src/param/*.cc, src/misc/param.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroPluginNet          # src/plugin/net.cc; one binary per src/plugin/ test file
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
 ./build/rccl-UnitTestsMicroProxy              # src/proxy.cc tests
-./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
+./build/rccl-UnitTestsMicroDdaFabricInit      # src/algorithms/dda/fabric/fabric_init.cu; one binary per src/algorithms/dda/ test file
 ./build/rccl-UnitTestsMicroTransportP2p       # src/transport/p2p.cc; one binary per src/transport/ test file
 ./build/rccl-UnitTestsMicroMisc               # src/misc/ IB verbs + dv loaders, gdr_peermem.cc
 ./build/rccl-UnitTestsMicroNetIbCastConnect   # src/transport/net_ib_cast/connect.cc tests
