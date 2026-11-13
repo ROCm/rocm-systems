@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "StickyHipLastError.h"
 #include "fakes/hip_fakes.h"
 
 #include "nccl.h"
@@ -662,6 +663,29 @@ TEST_F(RocmwrapMicrotest, CuMemHostEnable_ReturnsTheCachedValue) {
   ncclCumemHostEnable = 1;
   EXPECT_EQ(ncclCuMemHostEnable(), 1);
 }
+
+#if NCCL_CUMEM_HOST_GATE
+// The host probe's hipMemCreate is expected to fail where containers block get_mempolicy. The fallback
+// must not leave that failure as the thread's HIP last error for the application to read later.
+TEST_F(RocmwrapMicrotest, CuMemHostEnable_FailedHostProbeFallsBackAndClearsTheLastError) {
+  g_params["CUMEM_HOST_ENABLE"] = 1;
+  StickyHipLastError lastError;
+  g_hipMemCreate = [&](hipMemGenericAllocationHandle_t*, size_t, const hipMemAllocationProp* prop,
+                       unsigned long long) {
+    EXPECT_EQ(prop->location.type, hipMemLocationTypeHost);
+    return lastError.Fail(hipErrorNotSupported);
+  };
+  EXPECT_EQ(ncclCuMemHostEnable(), 0);
+  EXPECT_EQ(lastError.pending, hipSuccess) << "the failed host probe left a HIP last error behind";
+  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "cuMem host allocations do not appear to be working"));
+}
+
+TEST_F(RocmwrapMicrotest, CuMemHostEnable_WorkingHostProbeEnablesAndReleasesTheHandle) {
+  g_params["CUMEM_HOST_ENABLE"] = 1;
+  EXPECT_EQ(ncclCuMemHostEnable(), 1);
+  EXPECT_EQ(defaultVmm_.calls, (std::vector<std::string>{"granularity", "create", "release"}));
+}
+#endif
 
 // initOnceFunc / rocmLibraryInit
 

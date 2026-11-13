@@ -29,7 +29,9 @@ extern CUmemAllocationHandleType ncclCuMemHandleType;
 
 #define CUPFN(symbol) pfn_##symbol
 #if !defined(__HIP_PLATFORM_AMD__)
-#define CUPROBE(call) CUPFN(call)
+// Pasted here, not forwarded to CUPFN: forwarding would expand aliases such as
+// cuMemGetAddressRange -> cuMemGetAddressRange_v2 before the paste.
+#define CUPROBE(call) pfn_##call
 #endif
 
 // Emit an actionable hint for a subset of well-known CUDA driver errors.
