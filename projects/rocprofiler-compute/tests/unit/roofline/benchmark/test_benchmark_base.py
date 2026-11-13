@@ -21,12 +21,12 @@ from unittest import mock
 import pytest
 
 import roofline.benchmark.benchmark_base as benchmark_base
+import roofline.benchmark.gfx12.benchmark_gfx1201 as benchmark_gfx1201
 import utils.utils_profile as utils_profile
 from roofline import run_benchmark
 from roofline.benchmark.gfx12.benchmark_gfx1201 import (
     DRAM_BUS_BITS,
     DRAM_GBPS_PER_PIN,
-    INFINITY_CACHE_BYTES,
     L2_ROOF,
     MALL_WORKING_SET_DIVISOR,
     percent_of_ceiling,
@@ -255,11 +255,74 @@ def test_gfx1201_measures_infinity_cache_with_its_own_kernel():
     assert bench.tests["MALL"].func == bench.cache_stream_bw_bench
     assert bench.tests["MALL"].keywords == {
         "level": "MALL",
-        "default_capacity_bytes": INFINITY_CACHE_BYTES,
         "working_set_divisor": MALL_WORKING_SET_DIVISOR,
     }
     assert bench.csv_cols_map["MALL"] == "MALLBw"
     assert_source_defines(bench.mall_bw_src, "MALL_bw", "gfx1201 MALL")
+
+
+def _mall_bench(cache_sizes):
+    return BENCH_CLASSES["gfx1201"](0, cache_sizes, "gfx1201")
+
+
+def _record_mall_stream(bench):
+    called = []
+    bench.resident_stream_bw_bench = lambda *args: called.append(args) or 1.0
+    return called
+
+
+@pytest.mark.parametrize(
+    "cache_sizes",
+    [{}, {"L2": 8 * 1024 * 1024}, {"MALL": 0, "L2": 8 * 1024 * 1024}],
+    ids=["missing", "l2-only", "zero"],
+)
+def test_gfx1201_mall_skips_a_missing_or_zero_level3_size(cache_sizes):
+    """Peers do not invent a cache size. No level-3 report, or a zero one,
+    skips the MALL test instead of falling back to 64 MB."""
+    bench = _mall_bench(cache_sizes)
+    called = _record_mall_stream(bench)
+
+    assert bench.cache_stream_bw_bench(0, "MALL", MALL_WORKING_SET_DIVISOR) == 0.0
+    assert called == []
+
+
+def test_gfx1201_mall_skips_a_working_set_that_fits_in_gl2(monkeypatch):
+    """32 CUs round a tiny level-3 size up to one 8 MB grid step, which fits
+    in an 8 MB GL2. Storing that sample would record the L2 rate as MALLBw."""
+    monkeypatch.setattr(
+        benchmark_gfx1201,
+        "hip",
+        SimpleNamespace(
+            hipSetDevice=lambda device: None,
+            hipGetDeviceProperties=lambda device: SimpleNamespace(
+                multiProcessorCount=32
+            ),
+        ),
+    )
+    bench = _mall_bench({"MALL": 1024, "L2": 8 * 1024 * 1024})
+    called = _record_mall_stream(bench)
+
+    assert bench.cache_stream_bw_bench(0, "MALL", MALL_WORKING_SET_DIVISOR) == 0.0
+    assert called == []
+
+
+def test_gfx1201_mall_streams_a_set_that_misses_gl2(monkeypatch):
+    """Half of a 64 MB Infinity Cache is 32 MB, which misses an 8 MB GL2."""
+    monkeypatch.setattr(
+        benchmark_gfx1201,
+        "hip",
+        SimpleNamespace(
+            hipSetDevice=lambda device: None,
+            hipGetDeviceProperties=lambda device: SimpleNamespace(
+                multiProcessorCount=32
+            ),
+        ),
+    )
+    bench = _mall_bench({"MALL": 64 * 1024 * 1024, "L2": 8 * 1024 * 1024})
+    called = _record_mall_stream(bench)
+
+    assert bench.cache_stream_bw_bench(0, "MALL", MALL_WORKING_SET_DIVISOR) == 1.0
+    assert called == [(0, "MALL", 32 * 1024 * 1024)]
 
 
 def test_percent_of_ceiling_reports_an_unusable_ceiling_as_unavailable():

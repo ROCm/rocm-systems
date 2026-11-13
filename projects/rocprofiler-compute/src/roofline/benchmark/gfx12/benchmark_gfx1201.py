@@ -97,14 +97,14 @@ def shader_clock_hz(shader_cycles: int, wall_ticks: int) -> float:
 WMMA_ACC = 8
 WMMA_FLOPS_PER_INSTRUCTION = 8192
 
-# Infinity Cache size used only when AMD-SMI reports no cache level 3. 64 MB
-# is the largest Navi 48 Infinity Cache. Half of it, the streamed set, still
-# fits a 48 MB Infinity Cache.
-INFINITY_CACHE_BYTES = 64 * 1024 * 1024
-
-# Half the reported Infinity Cache. The stream is large enough to miss GL2 and
-# hit the Infinity Cache.
+# Half the reported Infinity Cache. The stream has to miss GL2. AMD-SMI's
+# level-3 size is the only capacity used; a missing size is not invented.
 MALL_WORKING_SET_DIVISOR = 2
+
+# Navi 48 GL2 is 8 MB. One grid step of the MALL stream is about that large
+# and still hits GL2. A buffer no bigger than the reported L2 is the L2 rate.
+# When AMD-SMI reports no L2, the buffer has to beat this size.
+GL2_CAPACITY_BYTES = 8 * 1024 * 1024
 
 # Navi 48 cache pipes from the gfx1201 cache-hierarchy spec.
 # GL0 is 32 KB per CU, and its read return is 128 B per clock. HIP counts
@@ -188,11 +188,11 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         # into the Infinity Cache. L2_ROOF stays at 4 MB.
         self.tests["L0"] = partial(self.cache_resident_bw, label="L0", roof=L0_ROOF)
         self.tests["L2"] = partial(self.cache_resident_bw, label="L2", roof=L2_ROOF)
-        # The Infinity Cache holds a set that L2 does not.
+        # The Infinity Cache holds a set that L2 does not. A missing level-3
+        # size, or a working set that still fits in GL2, is skipped at run time.
         self.tests["MALL"] = partial(
             self.cache_stream_bw_bench,
             level="MALL",
-            default_capacity_bytes=INFINITY_CACHE_BYTES,
             working_set_divisor=MALL_WORKING_SET_DIVISOR,
         )
         # V_WMMA_F32_16X16X16_BF8_BF8 is the same 16x16x16 shape as FP8.
@@ -340,15 +340,36 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         self,
         device: int,
         level: str,
-        default_capacity_bytes: int,
         working_set_divisor: int,
     ) -> float:
-        """Stream a fraction of one cache level's capacity. The capacity is the
-        one AMD-SMI reports, or default_capacity_bytes when it reports none."""
-        capacity = self.cache_sizes.get(level, default_capacity_bytes)
-        return self.resident_stream_bw_bench(
-            device, level, capacity // working_set_divisor
+        """Stream a fraction of one cache level's reported capacity.
+
+        Peers run a cache test only for a size AMD-SMI reported. A missing or
+        zero size is skipped. The streamed buffer is at least one grid step,
+        about 8 MB, which still fits in GL2, so a buffer that does not exceed
+        GL2 is skipped too. Storing it would record the L2 rate for this level.
+        """
+        capacity = self.cache_sizes.get(level, 0)
+        if capacity <= 0:
+            print(f"Skipping {level}: AMD-SMI reported no cache size")
+            return 0.0
+
+        hip.hipSetDevice(device)
+        cus = hip.hipGetDeviceProperties(device).multiProcessorCount
+        workgroup_size = benchmark_base.DEFAULT_WORKGROUP_SIZE
+        working_set_bytes = capacity // working_set_divisor
+        _, _, buffer_bytes, _, _ = resident_stream_plan(
+            cus, workgroup_size, working_set_bytes
         )
+        reported_l2 = self.cache_sizes.get("L2", 0)
+        gl2_bytes = reported_l2 if reported_l2 > 0 else GL2_CAPACITY_BYTES
+        if buffer_bytes <= gl2_bytes:
+            print(
+                f"Skipping {level}: working set of {buffer_bytes} bytes "
+                f"fits in GL2 ({gl2_bytes} bytes)"
+            )
+            return 0.0
+        return self.resident_stream_bw_bench(device, level, working_set_bytes)
 
     def resident_stream_bw_bench(
         self, device: int, label: str, working_set_bytes: int
