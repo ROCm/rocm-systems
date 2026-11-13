@@ -35,6 +35,24 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
   # trips it, for 542 of the 1517 /W4 sites in CLR. No GCC/Clang analogue.
   target_compile_options(clr_warnings INTERFACE /wd4714)
 
+  # C4201: "nonstandard extension used: nameless struct/union". The anonymous
+  # union is load-bearing wherever it appears: it is how HIP_vector_type lets
+  # `float4::x` and `float4::data[0]` name the same storage, and how the PAL
+  # capture-manager markers overlay a bitfield struct on a raw dword. Naming
+  # the members would be an API break, not a fix.
+  target_compile_options(clr_warnings INTERFACE /wd4201)
+
+  # C4324: "structure was padded due to alignment specifier". Reporting that
+  # alignas() aligned something is reporting that the code worked. The sites
+  # are HSA packets in rocvirtual.hpp that must sit on 64-byte boundaries.
+  target_compile_options(clr_warnings INTERFACE /wd4324)
+
+  # C4200: "nonstandard extension used: zero-sized array in struct/union".
+  # rocglinterop.hpp's metadata_amd_ci_vi_t ends in a flexible array member
+  # (per-mip-level offsets) overlaid on a hardware descriptor. The trailing
+  # array is the layout, so it cannot be given a fixed size.
+  target_compile_options(clr_warnings INTERFACE /wd4200)
+
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # clang-cl understands the GNU-style spellings, so keep the Linux policy of
     # letting deprecations warn without failing the build.
