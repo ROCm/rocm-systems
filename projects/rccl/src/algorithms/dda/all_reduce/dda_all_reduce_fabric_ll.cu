@@ -98,7 +98,9 @@ static inline std::pair<dim3, dim3> ddaArLL128OneShotGeom(const ncclComm* comm, 
 // LL128 two-shot: slices of one shard, one warp each.
 static inline std::pair<dim3, dim3> ddaArLL128TwoShotGeom(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap cap) {
   const size_t shardBytes = bytes / (size_t)std::max(comm->nRanks, 1);
-  return ddaArFabricLLGrid(comm, ddaLL128Slices(shardBytes), kDdaArLL128Threads, kDdaLL128Warp, cap);
+  const size_t slices = ddaLL128Slices(shardBytes);
+  const size_t maxBlocks = dda::common::ddaCapBlocks((size_t)std::max(comm->ddaFabricMaxBlocks, 1), cap.blocks);
+  return ddaArFabricLLGrid(comm, slices, dda::common::ddaLL128SliceThreads(slices, maxBlocks), kDdaLL128Warp, cap);
 }
 
 static_assert(dda::common::kDdaLLSpreadMaxRanks >= dda::common::kDdaMaxNranks, "spread peer table too small");

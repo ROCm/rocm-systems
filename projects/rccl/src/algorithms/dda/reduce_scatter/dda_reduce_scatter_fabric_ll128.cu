@@ -40,12 +40,12 @@ using dda::common::kDdaLL128WireWordsPerSlice;
 // takes several passes through the slice loop.
 static inline std::pair<dim3, dim3> ddaReduceScatterFabricLL128Geom(ncclComm* comm, size_t shardBytes) {
   const size_t slices = ddaLL128Slices(shardBytes);
-  const unsigned threads = 512;
-  const size_t warps = threads / (unsigned)kDdaLL128Warp;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
   }
+  const unsigned threads = dda::common::ddaLL128SliceThreads(slices, (size_t)nBlocksMax);
+  const size_t warps = threads / (unsigned)kDdaLL128Warp;
   unsigned blocks = (unsigned)std::min<size_t>((slices + warps - 1) / warps, (size_t)nBlocksMax);
   if (blocks == 0) {
     blocks = 1;

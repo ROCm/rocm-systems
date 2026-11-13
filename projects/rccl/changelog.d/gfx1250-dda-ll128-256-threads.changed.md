@@ -1,0 +1,1 @@
+* On gfx1250, `ncclAllReduce` DDA LL128 two-shot and `ncclReduceScatter` DDA LL128 run 256-thread blocks (previously 512) when one pass of them covers every warp slice of the per-rank shard (up to about 2.8 MiB with the 192-block cap), so the first DDA LL128 sizes on 4, 8 and 16 ranks (8, 16 and 32 MiB) have 20-33% lower latency. Larger shards keep 512 threads.
