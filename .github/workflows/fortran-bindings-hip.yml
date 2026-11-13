@@ -6,7 +6,7 @@ on:
     paths:
       - 'projects/hip/include/**.h'
       - 'projects/clr/hipamd/include/**.h'
-      - 'bindings/fortran/metadata/hip.toml'
+      - 'bindings/fortran/hip/metadata/**'
       - '.github/workflows/fortran-bindings-hip.yml'
       - '.github/workflows/fortran-bindings.yml'
   schedule:
