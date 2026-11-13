@@ -152,6 +152,22 @@ def test_list_metrics_selected_blocks(binary_handler_analyze_rocprof_compute, ca
     }
 
 
+def test_list_metrics_selects_a_metric_id_in_every_table(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    """A metric library id lists the rows that show it, in Speed of Light and in
+    Compute Pipeline on gfx950."""
+    return_code = binary_handler_analyze_rocprof_compute([
+        "--list-metrics",
+        "compute.salu_util",
+        "--list-metrics-gfx-id",
+        "gfx950",
+    ])
+    assert return_code == 0
+
+    assert first_column_ids(capsys.readouterr().out) == ["2.1.9", "11.2.2"]
+
+
 def test_list_metrics_defaults_to_current_gpu(
     binary_handler_analyze_rocprof_compute, capsys
 ):

@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import config
 from argparser import build_parser
@@ -21,6 +21,7 @@ from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils.analysis_views import (
     arch_panel_configs,
+    expand_metric_ids,
     get_arch_alias_to_panel_id,
     get_arch_panel_id_to_alias,
     has_views,
@@ -327,7 +328,13 @@ class RocProfCompute:
     ) -> None:
         """Print the --list-metrics output for arch and exit."""
         metric_details = self._build_arch_metric_details(arch, sys_info=None)
-        selection = self.__args.list_metrics
+        selection: List[str] = []
+        for token in self.__args.list_metrics:
+            listed = expand_metric_ids([token], arch)
+            if listed != [token]:
+                # A metric id lists its rows; per-channel tables list no rows.
+                listed = [row for row in listed if row in metric_details] or listed
+            selection.extend(listed)
         listed_ids = select_listed_ids(
             list(metric_details),
             selection,

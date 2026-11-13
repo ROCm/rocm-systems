@@ -6,6 +6,7 @@
 README.md in this directory describes the files and the inheritance rules.
 """
 
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -25,6 +26,8 @@ METRIC_LIBRARY_PARENT_ARCH: Dict[str, Optional[str]] = {
 }
 VARIABLES_FILENAME = "variables.yaml"
 SETS_FILENAME = "sets.yaml"
+# Metric id format: {category}.{subcategory}_{name}, in lowercase with underscores.
+METRIC_LIBRARY_ID_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9]+(_[a-z0-9]+)*$")
 # Top-level key for the list of parent ids to drop in a child file.
 REMOVE_KEY = "remove"
 # Metric fields whose expressions can name hardware counters.
