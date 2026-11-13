@@ -60,8 +60,10 @@ tables:
     legacy_id: 17.2.8
   - metric: fabric.rd_lat
     label: Read Latency
+    legacy_id: 17.2.9
   - metric: fabric.wr_lat
     label: Write and Atomic Latency
+    legacy_id: 17.2.10
   - metric: fabric.atomic_lat
     label: Atomic Latency
     legacy_id: 17.2.11

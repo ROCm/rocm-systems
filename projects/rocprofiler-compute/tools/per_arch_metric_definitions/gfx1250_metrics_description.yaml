@@ -147,6 +147,54 @@ System Speed-of-Light:
     plain: Average latency to fetch instruction from GL1 to Instruction Cache.
     rst: Average latency to fetch instruction from GL1 to Instruction Cache.
     unit: Cycles
+  Theoretical LDS Bandwidth:
+    plain: Total LDS bandwidth.
+    rst: Total LDS bandwidth.
+    unit: GB/s
+  GPU Active Cycles:
+    plain: Total GPU-active cycles during the measurement window.
+    rst: Total GPU-active cycles during the measurement window.
+    unit: Cycles
+  WGP Utilization:
+    plain: Percentage of WGP clock cycles at least one wavefront is active.
+    rst: Percentage of WGP clock cycles at least one wavefront is active.
+    unit: Percent
+  WMMA FLOPs (F6F4):
+    plain: Achieved mixed FP6/FP4 WMMA throughput.
+    rst: Achieved mixed FP6/FP4 WMMA throughput.
+    unit: GFLOP/s
+  Pipeline Utilization - XDL:
+    plain: Percentage of WGP-busy cycles the XDL (WMMA) pipeline is busy.
+    rst: Percentage of WGP-busy cycles the XDL (WMMA) pipeline is busy.
+    unit: Percent
+  GL0 Utilization:
+    plain: Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
+    rst: Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
+    unit: Percent
+  LDS Utilization:
+    plain: Percentage of VMW-busy cycles the LDS controller is executing an LDS operation.
+    rst: Percentage of VMW-busy cycles the LDS controller is executing an LDS operation.
+    unit: Percent
+  GL2 Cache Utilization:
+    plain: Percentage of GL2 Cache cycles when it's busy.
+    rst: Percentage of GL2 Cache cycles when it's busy.
+    unit: Percent
+  TXA Utilization:
+    plain: Percentage of cycles the TXA is processing memory requests.
+    rst: Percentage of cycles the TXA is processing memory requests.
+    unit: Percent
+  TXD Utilization:
+    plain: Percentage of VMW-busy cycles the TXD unit is busy returning data to shader VGPRs.
+    rst: Percentage of VMW-busy cycles the TXD unit is busy returning data to shader VGPRs.
+    unit: Percent
+  L1I-GL1 Read Bandwidth:
+    plain: Instruction Cache miss fill bandwidth from GL1.
+    rst: Instruction Cache miss fill bandwidth from GL1.
+    unit: GB/s
+  sL1D-GL1 Read Bandwidth:
+    plain: Scalar Data Cache miss fill bandwidth from GL1.
+    rst: Scalar Data Cache miss fill bandwidth from GL1.
+    unit: GB/s
 Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
     plain: Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.

@@ -12,6 +12,10 @@ Until the cutover, each view is one analysis config panel:
 - every row is a row of the same panel table, and every metric the arch shows has one
   legacy_id, its row's numeric id in the panel file.
 
+A replaced panel (REPLACED_PANEL_IDS: the new Speed of Light) keeps only the panel's
+title and -b alias; its rows are a new design, so a stored legacy_id there is the panel
+file's row named as the row or its metric.
+
 Values, units, peaks and descriptions come from the metric library and are not compared.
 The check skips the panels the metric library sync test skips (the roofline panel of an
 arch without a roofline benchmark).
@@ -19,7 +23,7 @@ arch without a roofline benchmark).
 
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Set
 
 import common
 import pytest
@@ -29,6 +33,7 @@ from rocprof_compute_soc.metric_library import loader
 from utils.analysis_views import (
     METRIC_TABLE,
     NO_VALUE,
+    REPLACED_PANEL_IDS,
     iter_view_rows,
     load_views,
     panel_aliases,
@@ -60,6 +65,10 @@ def structure_errors(
         return [f"panels: analysis configs have {list(expected)}, views {list(actual)}"]
     errors = []
     for panel_id, panel in expected.items():
+        if panel_id in REPLACED_PANEL_IDS:
+            if panel["title"] != actual[panel_id]["title"]:
+                errors.append(f"panel {panel_id}: title {actual[panel_id]['title']!r}")
+            continue
         errors.extend(
             f"panel {panel_id}: {error}"
             for error in _panel_errors(panel, actual[panel_id])
@@ -161,17 +170,24 @@ def _legacy_id_errors(
 ) -> List[str]:
     """Check that each row is a row of the same panel table (positions:
     _panel_positions()), that a stored legacy_id is that row's numeric id, and that
-    every metric has one legacy_id."""
+    every metric has one legacy_id. A replaced panel's row may be new: then it has no
+    panel row and no legacy_id."""
     errors = []
     stored: Dict[str, List[str]] = {}
     for position, row in iter_view_rows(views):
         table = position.rsplit(".", 1)[0]
         name = row_label(row, metrics)
-        old = positions.get((table, name))
-        if old is None:
-            errors.append(f"{position}: {name!r} is not a row of panel table {table}")
-            continue
-        if row.get("legacy_id", old) != old:
+        if _in_replaced_panel(position):
+            names = {name} | {metrics[m]["name"] for m in row_metric_ids(row)}
+            old = _replaced_row_position(table, names, positions)
+        else:
+            old = positions.get((table, name))
+            if old is None:
+                errors.append(
+                    f"{position}: {name!r} is not a row of panel table {table}"
+                )
+                continue
+        if "legacy_id" in row and row["legacy_id"] != old:
             errors.append(f"{position}: legacy_id {row['legacy_id']} is not {old}")
         for metric_id in row_metric_ids(row):
             stored.setdefault(metric_id, [])
@@ -183,6 +199,24 @@ def _legacy_id_errors(
         if len(legacy_ids) != 1
     )
     return errors
+
+
+def _in_replaced_panel(position: str) -> bool:
+    return int(position.split(".")[0]) * 100 in REPLACED_PANEL_IDS
+
+
+def _replaced_row_position(
+    table: str, names: Set[str], positions: Dict[Any, str]
+) -> Optional[str]:
+    """Return the replaced panel file's row named as a view row or its metric (names),
+    or None for a row the panel file did not have."""
+    panel = table.split(".")[0]
+    rows = sorted(
+        position
+        for (number, name), position in positions.items()
+        if number.split(".")[0] == panel and name in names
+    )
+    return rows[0] if rows else None
 
 
 def _panel_positions(panels: Dict[int, Dict[str, Any]]) -> Dict[Any, str]:
@@ -222,6 +256,11 @@ def move_legacy_id(views: List[Dict[str, Any]]) -> None:
     dict(iter_view_rows(views))["11.2.1"]["legacy_id"] = "11.2.2"
 
 
+def move_replaced_legacy_id(views: List[Dict[str, Any]]) -> None:
+    """Point Compute Throughput's VALU FLOPs at the old row of MFMA FLOPs (F8)."""
+    dict(iter_view_rows(views))["2.2.0"]["legacy_id"] = "2.1.1"
+
+
 def arch_errors(arch: str, views: List[Dict[str, Any]]) -> List[str]:
     metrics = loader.MetricLibrary.load(
         loader.default_metric_library_dir(), arch
@@ -242,6 +281,7 @@ def test_views_keep_the_panel_structure(arch):
         (drop_column, "panel 1100: table 1102: header"),
         (change_alias, "panel 11: -b alias 'pipeline', config template has 'cu_pipe'"),
         (move_legacy_id, "11.2.1: legacy_id 11.2.2 is not 11.2.1"),
+        (move_replaced_legacy_id, "2.2.0: legacy_id 2.1.1 is not 2.1.0"),
     ],
 )
 def test_a_changed_structure_is_reported(change, error):

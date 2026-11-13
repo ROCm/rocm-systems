@@ -3,7 +3,31 @@ legacy_panel_id: 200
 alias: sol
 tables:
 - id: 201
-  title: System Speed-of-Light
+  title: GPU Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - metric: lds.theoretical_bw
+    pct_of_peak: false
+  - metric: gl0.bw
+    label: GL0 Cache BW
+  - metric: l2.bw
+    label: GL2 Cache BW
+    legacy_id: 2.1.27
+  - metric: ea.dram_rd_bw
+    label: GL2 to DRAM Read BW
+  - metric: ea.dram_wr_bw
+    label: GL2 to DRAM Write BW
+  - metric: grbm.gpu_active_cycles
+    pct_of_peak: false
+  - metric: wgp.util
+    pct_of_peak: false
+- id: 202
+  title: Compute Throughput
   header:
     metric: Metric
     value: Avg
@@ -14,63 +38,57 @@ tables:
   - metric: compute.valu_flops_fp16
   - metric: compute.valu_flops_fp32
   - metric: compute.valu_flops_fp64
-  - metric: compute.valu_iops
-  - metric: compute.valu_trans_flops_fp16
-  - metric: compute.valu_trans_flops_fp32
-  - metric: compute.valu_trans_flops_fp64
-  - metric: compute.wmma_flops_fp64
-  - metric: compute.wmma_flops_fp32
-  - metric: compute.wmma_flops_fp16
-  - metric: compute.wmma_flops_bf16
   - metric: compute.wmma_flops_fp8
   - metric: compute.wmma_flops_mxfp8
+  - metric: compute.wmma_flops_bf16
+  - metric: compute.wmma_flops_fp16
+  - metric: compute.wmma_flops_fp32
+  - metric: compute.wmma_flops_fp64
   - metric: compute.wmma_flops_fp6
   - metric: compute.wmma_flops_fp4
+  - metric: compute.wmma_flops_f6f4
+    pct_of_peak: false
   - metric: compute.wmma_iops_int8
   - metric: compute.wmma_iops_int4
     legacy_id: 2.1.16
-  - metric: wgp.active_wgps
-    legacy_id: 2.1.17
+  - metric: compute.pipeline_util_xdl
+    pct_of_peak: false
   - metric: compute.ipc
     legacy_id: 2.1.18
-  - metric: wave.occupancy
-    legacy_id: 2.1.19
-  - metric: txa.lds_bw_load
-    label: LDS Read Bandwidth
-  - metric: txa.lds_bw_store
-    label: LDS Write Bandwidth
-  - metric: lds.bank_conflicts_access
-    label: LDS Bank Conflicts/Access
-    legacy_id: 2.1.22
-  - metric: gl0.hit_rate
-    pct_of_peak: false
+- id: 203
+  title: Memory Throughput
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
   - metric: gl0.bw
     label: GL0 Cache BW
-  - metric: gl1.gl1a_util
-    label: GL1A Busy Rate
+  - metric: gl0.util
+    pct_of_peak: false
+  - metric: lds.theoretical_bw
+    pct_of_peak: false
+  - metric: lds.util
     pct_of_peak: false
   - metric: gl2.hit_rate
     pct_of_peak: false
   - metric: l2.bw
     label: GL2 Cache BW
-    legacy_id: 2.1.27
+  - metric: gl2.util
+    pct_of_peak: false
   - metric: ea.dram_rd_bw
     label: GL2 to DRAM Read BW
   - metric: ea.dram_wr_bw
     label: GL2 to DRAM Write BW
-  - metric: ea.gl2_to_dram_rd_lat
-    pct_of_peak: false
-    legacy_id: 2.1.30
-  - metric: ea.gl2_to_dram_wr_lat
-    pct_of_peak: false
-    legacy_id: 2.1.31
+  - metric: sl1d.bw
+    label: Scalar Data Cache BW
+    legacy_id: 2.1.33
   - metric: sl1d.hit_rate_excl_dup
     label: Scalar Data Cache Hit Rate
     pct_of_peak: false
     legacy_id: 2.1.32
-  - metric: sl1d.bw
-    label: Scalar Data Cache BW
-    legacy_id: 2.1.33
   - metric: l1i.hit_rate_excl_dup
     label: Instruction Cache Hit Rate
     pct_of_peak: false
@@ -78,6 +96,11 @@ tables:
   - metric: l1i.bw
     label: Instruction Cache BW
     legacy_id: 2.1.35
-  - metric: compute.inst_cache_fetch_lat
+  - metric: txa.util
     pct_of_peak: false
-    legacy_id: 2.1.36
+  - metric: txd.util
+    pct_of_peak: false
+  - metric: l1i.gl1_rd_bw
+    pct_of_peak: false
+  - metric: sl1d.gl1_rd_bw
+    pct_of_peak: false

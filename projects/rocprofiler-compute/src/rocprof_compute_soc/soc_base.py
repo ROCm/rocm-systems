@@ -25,8 +25,10 @@ from rocprof_compute_soc.metric_library import loader
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils import amdsmi_interface, rocprofv3_avail_interface
 from utils.analysis_views import (
+    REPLACED_PANEL_IDS,
     get_arch_alias_to_panel_id,
     metric_placements,
+    replaced_panel_metric_ids,
     row_ids_as_metric_ids,
     warn_numeric_metric_ids,
 )
@@ -503,15 +505,31 @@ class OmniSoC_Base:
             filter_blocks = list(sets[args.set_selected]["metrics"])
 
         expressions: List[str] = []
+        # The metrics of a replaced panel's rows (REPLACED_PANEL_IDS), whose counters
+        # come from the library as the panel file does not list them all. A whole
+        # replaced panel also keeps its panel file's counters, so the panels still add
+        # up to the default profile until profile reads the views.
+        view_metric_ids: List[str] = []
         if not filter_blocks:
             # Select all sections by default; block 30 only with --membw-analysis
             for metric in self._iter_arch_analysis_yaml_metrics():
                 expressions.extend(metric.expressions)
+            for panel_id in REPLACED_PANEL_IDS:
+                view_metric_ids.extend(
+                    replaced_panel_metric_ids(str(panel_id // 100), self.__arch) or []
+                )
 
         # A metric library id names one metric; its counters come from the library.
         library_ids = [b for b in filter_blocks if loader.METRIC_LIBRARY_ID_RE.match(b)]
         for block_id in filter_blocks:
-            if block_id not in library_ids:
+            if block_id in library_ids:
+                continue
+            replaced = replaced_panel_metric_ids(block_id, self.__arch)
+            if replaced is not None:
+                view_metric_ids.extend(replaced)
+            # A block id or alias has no dot; table and row ids of a replaced panel
+            # select only view rows.
+            if replaced is None or "." not in block_id:
                 self._append_expressions_for_filter_token(
                     block_id, config_filename_dict, config_root_dir, expressions
                 )
@@ -519,15 +537,15 @@ class OmniSoC_Base:
         counters, _ = extract_counters_and_variables(
             "\n".join(expressions), self._mspec.gpu_series
         )
-        if library_ids:
-            # An id the arch's views don't show is an error, as in analyze.
-            for metric_id in library_ids:
-                metric_placements(metric_id, self.__arch)
+        # An id the arch's views don't show is an error, as in analyze.
+        for metric_id in library_ids:
+            metric_placements(metric_id, self.__arch)
+        if library_ids or view_metric_ids:
             library = loader.MetricLibrary.load(
                 loader.default_metric_library_dir(), self.__arch
             )
             counters |= library.get_counters_for_metrics(
-                library_ids, self._mspec.gpu_series
+                library_ids + view_metric_ids, self._mspec.gpu_series
             )
         counters = self._expand_tcc_template_counters(counters)
 

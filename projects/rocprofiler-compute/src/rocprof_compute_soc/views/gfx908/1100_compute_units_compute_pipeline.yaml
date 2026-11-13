@@ -25,6 +25,7 @@ tables:
   - metric: compute.salu_util
   - metric: compute.valu_util
   - metric: compute.valu_active_threads
+    legacy_id: 11.2.4
 - id: 1103
   title: Arithmetic Operations
   header:

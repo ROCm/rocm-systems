@@ -3,7 +3,34 @@ legacy_panel_id: 200
 alias: sol
 tables:
 - id: 201
-  title: System Speed-of-Light
+  title: GPU Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - metric: lds.theoretical_bw
+  - metric: vl1d.cache_bw
+    label: vL1D Cache BW
+  - metric: l2.bw
+    label: L2 Cache BW
+    legacy_id: 2.1.22
+  - metric: fabric.rd_bw
+    label: L2-Fabric Read BW
+  - metric: fabric.wr_atomic_bw
+    label: L2-Fabric Write BW
+  - metric: dispatch.kernel_time
+    pct_of_peak: false
+  - metric: grbm.gui_active_cycles
+    pct_of_peak: false
+  - metric: compute.cu_util
+    label: SIMD Utilization
+    pct_of_peak: false
+    legacy_id: 2.1.32
+- id: 202
+  title: Compute Throughput
   header:
     metric: Metric
     value: Avg
@@ -14,7 +41,6 @@ tables:
   - metric: compute.valu_flops
     legacy_id: 2.1.0
   - metric: compute.mfma_flops_f8
-  - metric: compute.mfma_flops_mxf8
   - metric: compute.mfma_flops_bf16
   - metric: compute.mfma_flops_f16
   - metric: compute.mfma_flops_f32
@@ -37,43 +63,43 @@ tables:
   - metric: compute.branch_util
     pct_of_peak: false
     legacy_id: 2.1.13
-  - metric: compute.valu_active_threads
-    legacy_id: 2.1.14
   - metric: compute.ipc
     legacy_id: 2.1.15
-  - metric: wave.occupancy
-    legacy_id: 2.1.16
-  - metric: lds.theoretical_bw
-  - metric: lds.bank_conflicts_access
-    label: LDS Bank Conflicts/Access
-    legacy_id: 2.1.18
-  - metric: vl1d.hit_rate
-    pct_of_peak: false
+- id: 203
+  title: Memory Throughput
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
   - metric: vl1d.cache_bw
     label: vL1D Cache BW
+  - metric: vl1d.util
+    label: vL1D Cache Utilization
+    pct_of_peak: false
+  - metric: lds.theoretical_bw
+  - metric: lds.util
+    pct_of_peak: false
   - metric: l2.hit_rate
     pct_of_peak: false
   - metric: l2.bw
     label: L2 Cache BW
-    legacy_id: 2.1.22
+  - metric: l2.util
+    label: L2 Cache Utilization
+    pct_of_peak: false
   - metric: fabric.rd_bw
     label: L2-Fabric Read BW
   - metric: fabric.wr_atomic_bw
     label: L2-Fabric Write BW
-  - metric: fabric.rd_lat
-    pct_of_peak: false
-    legacy_id: 2.1.25
-  - metric: fabric.wr_lat
-    label: L2-Fabric Write Latency
-    pct_of_peak: false
-    legacy_id: 2.1.26
+  - metric: sl1d.bw
+    label: sL1D Cache BW
+    legacy_id: 2.1.28
   - metric: sl1d.hit_rate_excl_dup
     label: sL1D Cache Hit Rate
     pct_of_peak: false
     legacy_id: 2.1.27
-  - metric: sl1d.bw
-    label: sL1D Cache BW
-    legacy_id: 2.1.28
   - metric: l1i.hit_rate_excl_dup
     label: L1I Hit Rate
     pct_of_peak: false
@@ -81,9 +107,12 @@ tables:
   - metric: l1i.bw
     label: L1I BW
     legacy_id: 2.1.30
-  - metric: l1i.fetch_lat
+  - metric: ta.busy
     pct_of_peak: false
-    legacy_id: 2.1.31
-  - metric: compute.cu_util
+  - metric: td.busy
     pct_of_peak: false
-    legacy_id: 2.1.32
+  - metric: l1i.l2_bw
+    pct_of_peak: false
+  - metric: sl1d.l2_bw
+    label: sL1D-L2 BW
+    pct_of_peak: false

@@ -42,6 +42,7 @@ tables:
   - metric: compute.vmem_util
   - metric: compute.branch_util
   - metric: compute.valu_active_threads
+    legacy_id: 11.2.8
   - metric: compute.mfma_util
   - metric: compute.mfma_inst_cycles
     legacy_id: 11.2.10

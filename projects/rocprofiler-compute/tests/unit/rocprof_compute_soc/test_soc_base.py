@@ -11,7 +11,7 @@ perfmon_coalesce. No GPU hardware required.
 from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 from unittest.mock import MagicMock, patch
 
 import common
@@ -199,6 +199,10 @@ Panel Config:
     )
 
     monkeypatch.setattr(config, "analysis_configs_dir", tmp_path)
+    # The fixture's panel 200 is not the shipped Speed of Light, whose view replaces it.
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.replaced_panel_metric_ids", lambda *_: None
+    )
     return offline_soc("gfx950", [], membw_analysis=False)
 
 
@@ -918,6 +922,29 @@ def test_metric_id_collects_the_counters_of_its_rows(gpu_arch: str) -> None:
         by_rows, saved = offline_soc(gpu_arch, rows, False).detect_counters()
         assert (by_id, typed) == (by_rows, [metric_id]), metric_id
         assert saved == [metric_id], metric_id
+
+
+def test_speed_of_light_counters_come_from_its_view() -> None:
+    """The new Speed of Light replaces panel 2's rows, so -b with its tables or alias
+    collects the library counters of the view's rows (Memory Throughput is new)."""
+    arch = "gfx942"
+    library = loader.MetricLibrary.load(loader.default_metric_library_dir(), arch)
+    gpu_series = mi_gpu_specs.get_gpu_series(arch)
+    rows = list(iter_view_rows(load_views(arch)))
+
+    def view_counters(prefix: str) -> Set[str]:
+        metric_ids = [
+            metric_id
+            for position, row in rows
+            if position.startswith(prefix)
+            for metric_id in row_metric_ids(row)
+        ]
+        return library.get_counters_for_metrics(metric_ids, gpu_series)
+
+    table, _ = offline_soc(arch, ["2.3"], False).detect_counters()
+    panel, _ = offline_soc(arch, ["sol"], False).detect_counters()
+    assert view_counters("2.3.") <= table
+    assert view_counters("2.") <= panel
 
 
 # =============================================================================
