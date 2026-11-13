@@ -184,7 +184,7 @@ class InstructionPipelines:
     @staticmethod
     def load() -> dict[str, Any]:
         """Read the generated file, or nothing when it is not installed."""
-        path = config.analysis_configs_dir / "instruction_pipelines.yaml"
+        path = config.instruction_pipelines_path
         if not path.is_file():
             return {}
         # The C loader is faster and ships with PyYAML wherever libyaml is.

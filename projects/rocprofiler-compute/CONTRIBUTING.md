@@ -419,7 +419,7 @@ neither diagram can drift from the code. Do not edit the PNGs by hand.
 
 ## Instruction Execution Pipeline Table
 
-[`src/rocprof_compute_soc/analysis_configs/instruction_pipelines.yaml`](src/rocprof_compute_soc/analysis_configs/instruction_pipelines.yaml)
+[`src/pc_sampling/instruction_pipelines.yaml`](src/pc_sampling/instruction_pipelines.yaml)
 is generated, not written by hand. Rerun the generator when a new GPU family
 needs support, or when an instruction shows up with an empty type in analyze,
 and commit the regenerated file as is:
