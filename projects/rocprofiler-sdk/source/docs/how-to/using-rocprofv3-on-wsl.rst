@@ -82,7 +82,7 @@ Hardware counter accuracy
 -------------------------
 
 On WSL2, hardware counters measure all GPU activity, not just your application.
-Windows shares the GPU among all its clients, including the desktop compositor,
+Windows shares the GPU among all its clients, including the desktop compositor.
 and any of their work that runs during a dispatch is counted toward that
 dispatch. ROCprofiler-SDK can't separate it out.
 
