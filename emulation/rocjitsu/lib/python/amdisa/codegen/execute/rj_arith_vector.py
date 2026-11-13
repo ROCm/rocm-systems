@@ -271,9 +271,10 @@ def gen_carry32(ctx: ExecuteContext) -> str | None:
         carry = f'wf.exec() ? {carry} : 0u'
     modifiers = 'inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u' if is_vop3 else '0u'
     api = 'rj_arith_' + mnemonic.lower()
+    carry_policy = ', false' if arch.startswith('cdna') else ''
     return (
         f'  const uint64_t input_carry = {carry};\n'
-        f'  amdgpu::arith::execute_carry32<{str(with_carry).lower()}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
+        f'  amdgpu::arith::execute_carry32<{str(with_carry).lower()}{carry_policy}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
         '      wf.cu().arithmetic_flags(),\n'
         f'      {modifiers}, {dst[0]}, {src[0]}, {src[1]}, input_carry, {result_writer});'
     )

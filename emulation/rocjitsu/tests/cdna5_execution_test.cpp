@@ -2341,6 +2341,29 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
     run_case(false);
 }
 
+TEST(Gfx1250LiteralOperandTest, ScalarFmaLiteralOrder) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0); // Scalar arithmetic is independent of EXEC.
+  wf->set_mode_raw(0xf0);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  const uint32_t base = wf->sgpr_alloc().base;
+  cu->write_sgpr(base, 0x40000000);     // 2
+  cu->write_sgpr(base + 1, 0x40400000); // 3
+  for (bool multiply_literal : {false, true}) {
+    const uint16_t opcode = multiply_literal ? cdna5::kSFmamkF32Sop2 : cdna5::kSFmaakF32Sop2;
+    const std::array words{cdna5::build_sop2(opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2})[0],
+                           0x40800000U}; // literal 4
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_sgpr(base + 2), multiply_literal ? 0x41300000U : 0x41200000U); // 11 or 10
+  }
+}
+
 TEST(Gfx1250LiteralOperandTest, ScalarMaskOperandsRejectLiteralMarkers) {
   struct TestCase {
     const char *name;
