@@ -141,7 +141,8 @@ ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, s
     bytes,
     comm->rank, nRanks, root,
     epochDev, epochLen,
-    slices, cs, bank, params, (int)rcclParamDdaLL128BcFanOut());
+    slices, cs, bank, params, (int)rcclParamDdaLL128BcFanOut(),
+    comm->ddaFabricScaleInSize);
 
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;

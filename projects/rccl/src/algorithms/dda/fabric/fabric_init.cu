@@ -63,6 +63,26 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   }
 
   const int nRanks = comm->nRanks;
+  // TODO: the code below is taken from PR 15647, which is not yet merged.
+  // that code should be refactored instead of copied, adding here now to determine if approach is sound.
+  
+  // How many consecutive ranks share a physical device (DPX scale-in size).
+  // Uses the same busId[63:4] grouping validated by computeHierScaleInSize().
+  int scaleInSize = 0;
+  if (comm->hasMloPart && comm->peerInfo != nullptr && nRanks >= 2) {
+    auto sameCard = [&](int a, int b) {
+      return comm->peerInfo[a].hostHash == comm->peerInfo[b].hostHash &&
+             (comm->peerInfo[a].busId & ~0xfLL) == (comm->peerInfo[b].busId & ~0xfLL);
+    };
+    int s = 1;
+    while (s < nRanks && sameCard(s, 0)) s++;
+    bool valid = s >= 2 && s < nRanks && (nRanks % s == 0);
+    if (valid) {
+      for (int r = 1; r < nRanks && valid; r++)
+        if (sameCard(r, r - 1) != (r % s != 0)) valid = false;
+    }
+    scaleInSize = valid ? s : 0;
+  }
   const int64_t llEnabled = rcclParamDdaLL();
   const int64_t ll128Enabled = rcclParamDdaLL128();
   // Size scratch to the largest DDA/CE-scratch table cap (all collectives,
@@ -231,6 +251,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaPeerPtrsHost = peerHost;
   comm->ddaFabricBarrierState = barrierState;
   comm->ddaFabricMaxBlocks = nBlocksMax;
+  comm->ddaFabricScaleInSize = scaleInSize;
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = (int)epochLen;
   INFO(NCCL_INIT,
@@ -279,6 +300,7 @@ ncclResult_t ncclDdaFabricCommFini(ncclComm* comm) {
   CUDACHECKIGNORE(cudaFree(comm->ddaLLEpochDev));
   comm->ddaLLEpochDev = nullptr;
   comm->ddaLLEpochLen = 0;
+  comm->ddaFabricScaleInSize = 0;
   free(comm->ddaPeerPtrsHost);
   comm->ddaPeerPtrsHost = nullptr;
   // Destroying the fabric handler unmaps/frees the imported peer scratch buffers.

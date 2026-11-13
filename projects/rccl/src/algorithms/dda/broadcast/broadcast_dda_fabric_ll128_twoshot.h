@@ -53,7 +53,8 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
     size_t chunkSlices,
     size_t bankSize,
     DdaKernelParams params,
-    int fanOut) {
+    int fanOut,
+    int scaleInSize) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int nPeers = nRanks - 1;
