@@ -23,7 +23,7 @@ from membw_analysis.summary import (
     has_active_nodes,
     status_text,
 )
-from memory_chart.loader import Layouts, is_memory_chart_panel
+from memory_chart.loader import Layouts
 from memory_chart.render import format_mem_chart_heading, plot_mem_chart
 from memory_chart.units import panel_units
 from utils import parser, schema
@@ -40,6 +40,8 @@ from utils.utils_analysis import (
     simplify_kernel_name,
 )
 from utils.utils_common import (
+    MEMORY_CHART_PANEL_ID,
+    ROOFLINE_PANEL_ID,
     convert_filter_blocks_to_panel_ids,
     format_table_id,
     selects_roofline,
@@ -203,15 +205,8 @@ def is_roofline_shown(
     args: argparse.Namespace,
     runs: dict[str, Any],
     output: Optional[TextIO],
-    panel: dict[str, Any],
 ) -> bool:
-    has_roofline_style = any(
-        data_source.get(table_type, {}).get("cli_style") == "Roofline"
-        for data_source in panel["data source"]
-        for table_type in data_source
-    )
-
-    if not has_roofline_style or not selects_roofline(args.filter_metrics):
+    if not selects_roofline(args.filter_metrics):
         return False
 
     # Check if any run has valid roofline data (already validated in analysis_base.py)
@@ -929,14 +924,14 @@ def show_all(
     roofline_in_filter = (
         selects_roofline(args.filter_metrics)
         if args.filter_metrics
-        else (not filter_panel_ids or 400 in filter_panel_ids)
+        else (not filter_panel_ids or ROOFLINE_PANEL_ID in filter_panel_ids)
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
-        # Handle roofline panel (400) with custom display logic
+        # The roofline panel has its own per-kernel layout.
         # With --debug-table-view, tables 401/402 render as normal tables.
-        if panel_id == 400 and not args.debug_table_view:
-            _ = is_roofline_shown(args, runs, output, panel)
+        if panel_id == ROOFLINE_PANEL_ID and not args.debug_table_view:
+            _ = is_roofline_shown(args, runs, output)
 
         panel_content = ""  # store content of all data_source from one panel
         # Metric id -> value from every table in this panel, drawn as one chart
@@ -1020,12 +1015,12 @@ def show_all(
                 if processed_df.empty:
                     continue
 
-                # For mem_chart panels, collect all tables and merge
+                # For the memory chart panel, collect all tables and merge
                 # into a single chart; skip individual table output.
                 # Gate to architectures with a chart layout; others fall back to
                 # normal table output.
                 is_mem_chart = (
-                    table_config.get("cli_style") == "mem_chart"
+                    panel_id == MEMORY_CHART_PANEL_ID
                     and not args.debug_table_view
                     and Layouts.for_arch(gpu_arch) is not None
                 )
@@ -1075,13 +1070,13 @@ def show_all(
         ):
             if not hasattr(output, "isatty") or not output.isatty():
                 panel_content = strip_ansi(panel_content)
-            # A panel drawn entirely as the memory chart carries its own heading
-            if mem_chart_data and is_memory_chart_panel(panel):
+            # The memory chart carries its own heading
+            if mem_chart_data:
                 print(panel_content, file=output)
             else:
                 print(f"\n{'-' * 80}", file=output)
                 print(f"{panel_id // 100}. {panel['title']}", file=output)
-                if panel_id == 400:
+                if panel_id == ROOFLINE_PANEL_ID:
                     _print_roofline_html_path(runs, output)
                 print(panel_content, file=output)
 
