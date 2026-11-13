@@ -1000,6 +1000,7 @@ void SAddF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   if (!(wf.fp_denorm_mode_f32() & 2u))
     flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
   const uint32_t input0 = registers.read_scalar(ssrc0);
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
@@ -1029,6 +1030,7 @@ void SSubF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   if (!(wf.fp_denorm_mode_f32() & 2u))
     flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
   const uint32_t input0 = registers.read_scalar(ssrc0);
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
@@ -1116,6 +1118,7 @@ void SMulF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   if (!(wf.fp_denorm_mode_f32() & 2u))
     flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;
   const uint32_t input0 = registers.read_scalar(ssrc0);
   const uint32_t input1 = registers.read_scalar(ssrc1);
   uint32_t result = 0;
@@ -1267,6 +1270,7 @@ void SAddF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   if (!(wf.fp_denorm_mode_f16_f64() & 2u))
     flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;
   const uint32_t input0 = amdgpu::read_scalar_f16_carrier(ssrc0, wf);
   const uint32_t input1 = amdgpu::read_scalar_f16_carrier(ssrc1, wf);
   uint32_t result = 0;
@@ -1298,6 +1302,7 @@ void SSubF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   if (!(wf.fp_denorm_mode_f16_f64() & 2u))
     flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;
   const uint32_t input0 = amdgpu::read_scalar_f16_carrier(ssrc0, wf);
   const uint32_t input1 = amdgpu::read_scalar_f16_carrier(ssrc1, wf);
   uint32_t result = 0;
@@ -1387,6 +1392,7 @@ void SMulF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   if (!(wf.fp_denorm_mode_f16_f64() & 2u))
     flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;
   const uint32_t input0 = amdgpu::read_scalar_f16_carrier(ssrc0, wf);
   const uint32_t input1 = amdgpu::read_scalar_f16_carrier(ssrc1, wf);
   uint32_t result = 0;
@@ -1418,6 +1424,7 @@ void SFmacF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   if (!(wf.fp_denorm_mode_f16_f64() & 2u))
     flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  flags |= uint64_t(wf.fp_round_mode_f16_f64()) << 24;
   const uint32_t input0 = amdgpu::read_scalar_f16_carrier(ssrc0, wf);
   const uint32_t input1 = amdgpu::read_scalar_f16_carrier(ssrc1, wf);
   uint32_t result = registers.read_scalar(sdst);

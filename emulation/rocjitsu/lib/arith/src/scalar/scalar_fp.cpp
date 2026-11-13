@@ -6,16 +6,40 @@
 
 // Scalar operations follow rocjitsu generated/shared/execute_shared.h. GFX1201
 // captures establish the output-flush exceptions and multiplication threshold.
+// ADD/SUB/MUL with directed rounding or exact nonfinite inputs use the VALU FMA
+// models; selection shares the VALU minmax model. GFX1201 captures match every
+// form in every MODE setting.
 
 #include "common/float_encoding.h"
 #include "common/validation.h"
 #include "fp/binary.h"
+#include "fp/fma_scalar.h"
+#include "fp/half_fma_scalar.h"
 #include "fp/minmax_impl.h"
 #include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 
 namespace {
+
+// rocjitsu lowers ADD/SUB to FMA(A, 1, +/-B) and MUL to FMA(A, B, a zero with
+// the product sign). SUB negates B before NaN selection, so a NaN B changes sign.
+template <rocjitsu::arith::Binary Op, bool Half>
+uint32_t fused_value(uint64_t flags, uint32_t a, uint32_t b) {
+  constexpr uint32_t sign = Half ? 0x8000 : 0x80000000, one = Half ? 0x3c00 : 0x3f800000;
+  uint32_t c;
+  if constexpr (Op == rocjitsu::arith::Binary::Mul) {
+    c = (a ^ b) & sign;
+  } else {
+    c = Op == rocjitsu::arith::Binary::Sub ? b ^ sign : b;
+    b = one;
+  }
+  if constexpr (Half) {
+    return rocjitsu::arith::half_fma_value(uint16_t(a), uint16_t(b), uint16_t(c), 0, flags);
+  } else {
+    return rocjitsu::arith::fma_value_f32(a, b, c, flags, false);
+  }
+}
 
 // Evaluate scalar FP arithmetic. Reject invalid controls before changing outputs.
 template <rocjitsu::arith::Binary Op, bool Half>
@@ -24,12 +48,12 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a, uint32_t b) {
   static_assert(Op == Binary::Add || Op == Binary::Sub || Op == Binary::Mul ||
                 Op == Binary::MinNum || Op == Binary::MaxNum || Op == Binary::Minimum ||
                 Op == Binary::Maximum);
-  if (int error = rocjitsu::arith::validate(
-          flags, mode, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+  constexpr bool arithmetic = Op == Binary::Add || Op == Binary::Sub || Op == Binary::Mul;
+  if (int error = rocjitsu::arith::validate(flags, mode,
+                                            RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+                                                (arithmetic ? RJ_ARITH_FP_ROUND_MASK : 0))) {
     return error;
-  }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   constexpr uint32_t inf = Half ? 0x7c00 : 0x7f800000, sign = Half ? 0x8000 : 0x80000000;
   if constexpr (Half) {
@@ -42,6 +66,15 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a, uint32_t b) {
     }
     if (!(b & inf)) {
       b &= sign;
+    }
+  }
+  if constexpr (arithmetic) {
+    // As for VALU exact ADD/MUL, nearest-even arithmetic on finite inputs equals the
+    // FMA model natively, given default host FP state; gfx1201 captures agree.
+    const bool finite = (a & inf) != inf && (b & inf) != inf;
+    if ((flags & RJ_ARITH_FP_ROUND_MASK) || (rocjitsu::arith::is_exact(flags) && !finite)) {
+      *d = fused_value<Op, Half>(flags, a, b);
+      return RJ_ARITH_SUCCESS;
     }
   }
   float x = Half ? rocjitsu::arith::f16_to_float(uint16_t(a)) : rocjitsu::arith::as_float(a);
@@ -100,6 +133,9 @@ int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t
           flags, mode, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
     return error;
   }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
   if (compatibility) {
     flags &= ~RJ_ARITH_FP16_OVFL;
     if constexpr (Op == rocjitsu::arith::Binary::Add || Op == rocjitsu::arith::Binary::Sub ||
@@ -117,7 +153,8 @@ int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t
 // require it.
 int rj_arith_s_add_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                        uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -135,7 +172,8 @@ int rj_arith_s_add_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, 
 // require it.
 int rj_arith_s_add_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                        uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -153,7 +191,8 @@ int rj_arith_s_add_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, 
 // require it.
 int rj_arith_s_sub_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                        uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -171,7 +210,8 @@ int rj_arith_s_sub_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, 
 // require it.
 int rj_arith_s_sub_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                        uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -189,7 +229,8 @@ int rj_arith_s_sub_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, 
 // require it.
 int rj_arith_s_mul_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                        uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -207,7 +248,8 @@ int rj_arith_s_mul_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, 
 // require it.
 int rj_arith_s_mul_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                        uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -225,7 +267,8 @@ int rj_arith_s_mul_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, 
 // require it.
 int rj_arith_s_min_num_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -243,7 +286,8 @@ int rj_arith_s_min_num_f32(uint64_t flags, uint64_t instruction_flags, uint32_t 
 // require it.
 int rj_arith_s_min_num_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -261,7 +305,8 @@ int rj_arith_s_min_num_f16(uint64_t flags, uint64_t instruction_flags, uint32_t 
 // require it.
 int rj_arith_s_max_num_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -279,7 +324,8 @@ int rj_arith_s_max_num_f32(uint64_t flags, uint64_t instruction_flags, uint32_t 
 // require it.
 int rj_arith_s_max_num_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -297,7 +343,8 @@ int rj_arith_s_max_num_f16(uint64_t flags, uint64_t instruction_flags, uint32_t 
 // require it.
 int rj_arith_s_minimum_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -315,7 +362,8 @@ int rj_arith_s_minimum_f32(uint64_t flags, uint64_t instruction_flags, uint32_t 
 // require it.
 int rj_arith_s_minimum_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -333,7 +381,8 @@ int rj_arith_s_minimum_f16(uint64_t flags, uint64_t instruction_flags, uint32_t 
 // require it.
 int rj_arith_s_maximum_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -351,7 +400,8 @@ int rj_arith_s_maximum_f32(uint64_t flags, uint64_t instruction_flags, uint32_t 
 // require it.
 int rj_arith_s_maximum_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
