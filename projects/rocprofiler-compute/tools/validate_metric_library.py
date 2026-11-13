@@ -20,18 +20,18 @@ For every arch in METRIC_LIBRARY_PARENT_ARCH, check that:
 src/rocprof_compute_soc/metric_library/README.md explains the rules.
 """
 
+import contextlib
 import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, Hashable, List, Optional, Sequence, Set, Tuple
 
-from format_yaml import normalize_equation
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Make src/ importable.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from rocprof_compute_soc.metric_library import loader  # noqa: E402
+from utils.equation_format import normalize_equation
 from utils.metrics.expression import build_eval_string  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils_common import config_arch_members  # noqa: E402
@@ -127,7 +127,10 @@ def canonical_formula(equation: object) -> Optional[str]:
     if equation is None or str(equation) == "None":
         return None
     match = ROUND_RE.match(str(equation))
-    text = normalize_equation(match.group(1) if match else str(equation))
+    text = match.group(1) if match else str(equation)
+    # _parse_errors() reports an equation that does not parse
+    with contextlib.suppress(ValueError):
+        text = normalize_equation(text)
     return re.sub(r"\s+", "", text)
 
 
