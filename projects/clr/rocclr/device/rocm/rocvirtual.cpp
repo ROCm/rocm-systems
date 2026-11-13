@@ -5727,7 +5727,12 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       }
       case amd::KernelParameterDescriptor::HiddenHostcallBuffer: {
         if (amd::IS_HIP) {
-          if (dev().info().pcie_atomics_) {
+          // The platform reporting no atomic support on the host link is not conclusive,
+          // some drivers get it wrong, so measure it once before rejecting the dispatch.
+          if (!dev().hostcallSupported() && !isGraphCapture) {
+            const_cast<Device&>(dev()).ProbeHostcallAtomics(*this);
+          }
+          if (dev().hostcallSupported()) {
             uintptr_t buffer = reinterpret_cast<uintptr_t>(getOrCreateHostcallBuffer());
             if (!buffer) {
               LogError("Kernel expects a hostcall buffer, but none found");
@@ -5735,7 +5740,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
             }
             WriteAqlArgAt(hidden_arguments, buffer, it.size_, it.offset_);
           } else {
-            LogError("Pcie atomics not enabled, hostcall not supported");
+            LogError(
+                "The device can't complete system scope atomics on host memory, so hostcall "
+                "(device side printf, assert, malloc) is not supported. Rebuild the device code "
+                "with -mprintf-kind=buffered if it only needs printf");
             return false;
           }
         }

@@ -281,6 +281,15 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
       __ockl_dm_init_v1(heap_to_initialize, initial_blocks, heap_size, number_of_initial_blocks);
     }
 
+    // Single system scope atomic on host resident memory. Used to find out whether the
+    // device can really complete atomics over the host link when the platform claims it
+    // can't. Deliberately not an OpenCL atomic_add(), which narrows to agent scope and
+    // would pass without ever reaching the host.
+    __kernel void __amd_rocclr_atomicProbe(ulong ptr, uint value) {
+      __scoped_atomic_fetch_add((__global uint*)ptr, value, __ATOMIC_RELAXED,
+                                __MEMORY_SCOPE_SYSTEM);
+    }
+
     __kernel void __amd_rocclr_gwsInit(uint value) { __builtin_amdgcn_ds_gws_init(value, 0); });
 
 const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
@@ -307,6 +316,12 @@ const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     __kernel void __amd_rocclr_initHeap(ulong heap_to_initialize, ulong initial_blocks,
                                         uint heap_size, uint number_of_initial_blocks) {
       __ockl_dm_init_v1(heap_to_initialize, initial_blocks, heap_size, number_of_initial_blocks);
+    }
+
+    // See the comment on this kernel in HipExtraSourceCode above.
+    __kernel void __amd_rocclr_atomicProbe(ulong ptr, uint value) {
+      __scoped_atomic_fetch_add((__global uint*)ptr, value, __ATOMIC_RELAXED,
+                                __MEMORY_SCOPE_SYSTEM);
     });
 
 const char* BlitImageSourceCode = BLIT_KERNELS(

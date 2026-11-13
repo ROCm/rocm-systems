@@ -791,6 +791,20 @@ class Device : public NullDevice {
   void HiddenHeapInit(const VirtualGPU& gpu);
   bool isXgmi() const override { return isXgmi_; }
 
+  //! Whether the device can complete system scope atomics on host memory. Unknown means
+  //! the platform says no and we haven't measured it yet.
+  enum class HostcallSupport : uint32_t { Unknown = 0, Unsupported, Supported };
+
+  //! Returns true if the device can run hostcall, i.e. complete system scope atomics on
+  //! host memory. Only meaningful after ProbeHostcallAtomics() has run.
+  bool hostcallSupported() const {
+    return hostcall_support_.load(std::memory_order_relaxed) == HostcallSupport::Supported;
+  }
+
+  //! Measures whether system scope atomics on host memory really work, for platforms that
+  //! report no PCIe atomics support. Runs at most once per device.
+  void ProbeHostcallAtomics(const VirtualGPU& gpu);
+
   //! SDMA engine allocation for per-stream affinity
   uint32_t AllocateSdmaEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
                               hsa_agent_t peerAgent, hsa_agent_t copyAgent) const {
@@ -892,6 +906,10 @@ class Device : public NullDevice {
   mutable std::once_flag xferQueueOnce_;  //!< Serialises lazy creation of xferQueue_
   VirtualGPU* coopQueue_;  //!< Cooperative-launch queue, created on demand
   mutable std::once_flag coopQueueOnce_;  //!< Serialises lazy creation of coopQueue_
+
+  //! Result of the system scope atomic probe, see ProbeHostcallAtomics()
+  std::atomic<HostcallSupport> hostcall_support_{HostcallSupport::Unknown};
+  std::once_flag hostcall_probe_once_;  //!< The probe runs at most once per device
 
   std::atomic<size_t> freeMem_;       //!< Total of free memory available
   mutable std::recursive_mutex vgpusAccess_;  //!< Lock to serialise virtual gpu list access
