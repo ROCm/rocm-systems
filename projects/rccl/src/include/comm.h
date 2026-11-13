@@ -410,6 +410,9 @@ struct ncclKernelPlan {
   bool isSymColl;
   bool isCeColl;
   bool isRma;
+#ifdef ENABLE_WARP_SPEED
+  bool warpSpeedPlan;
+#endif
   enum ncclDevWorkStorageType workStorageType;
   bool kernelSpecialized;
   int kernelDynSmem; // only for symmetric kernels
@@ -532,6 +535,7 @@ struct ncclKernelPlanner {
 
   struct Peer {
     bool sendSeen, recvSeen;
+    bool sendCeSeen, recvCeSeen;
     struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> sendQueue;
     struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> recvQueue;
     struct ncclIntruQueue<struct ncclTaskBcast, &ncclTaskBcast::next> bcastQueue;

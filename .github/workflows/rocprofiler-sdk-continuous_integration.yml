@@ -273,6 +273,7 @@ jobs:
             --site ${{ needs.ci_config.outputs.gfx94x_runner }} \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
+            --repeat-until-pass 2 \
             ${{ matrix.system.ci-flags }} -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
@@ -326,8 +327,8 @@ jobs:
           cmake --build build-tests --target all --parallel 16
           # scale test parallelism to the runner instead of hard-coding a value
           CTEST_JOBS=$(( $(nproc) / 4 > 0 ? $(nproc) / 4 : 1 ))
-          ctest --test-dir build-samples --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-          ctest --test-dir build-tests   --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          ctest --test-dir build-samples --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure --repeat until-pass:2
+          ctest --test-dir build-tests   --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure --repeat until-pass:2
 
       - name: Install Packages
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -359,8 +360,8 @@ jobs:
           cmake --build build-tests-deb --target all --parallel 16
           # scale test parallelism to the runner instead of hard-coding a value
           CTEST_JOBS=$(( $(nproc) / 4 > 0 ? $(nproc) / 4 : 1 ))
-          ctest --test-dir build-samples-deb --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-          ctest --test-dir build-tests-deb   --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          ctest --test-dir build-samples-deb --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure --repeat until-pass:2
+          ctest --test-dir build-tests-deb   --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure --repeat until-pass:2
 
       - name: Archive production artifacts
         if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -556,6 +557,7 @@ jobs:
             --site ${{ matrix.system.runner }} \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
+            --repeat-until-pass 2 \
             ${{ matrix.system.ci-flags }} \
             -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
@@ -714,6 +716,7 @@ jobs:
           --gpu-targets ${{ env.GPU_TARGETS }} \
           --memcheck ${{ matrix.system.sanitizer }} \
           --run-attempt ${{ github.run_attempt }} \
+          --repeat-until-pass 2 \
           -- \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}" \

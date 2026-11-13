@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rj_arith/rj_arith.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -18,7 +19,7 @@
 
 namespace rocjitsu::amdgpu::arith {
 
-// A normal VGPR retains its observed storage view. Uniform, subword or delegated
+// A normal VGPR uses observed storage directly. Uniform, subword or delegated
 // operands use scratch storage; their existing implementation owns routing.
 class VectorInput32 {
 public:
@@ -30,18 +31,18 @@ public:
       data = values_.data();
       return;
     }
-    if (operand.simd_capable() && byte_mask == 0xF)
-      region_ = registers.read_operand_region(operand, exec_mask);
-    if (region_) {
-      auto lanes = region_->lanes(0);
-      if (lanes.succeeded()) {
-        data = lanes.value().data();
-      } else {
-        // Keep input storage valid; result writers observe the retained wave error.
-        values_.fill(0);
-        data = values_.data();
+    if (operand.simd_capable() && byte_mask == 0xF) {
+      if (auto region = registers.read_operand_region(operand, exec_mask)) {
+        auto lanes = region->lanes(0);
+        if (lanes.succeeded()) {
+          // The span refers to CU storage (or a static zero buffer), not the view.
+          data = lanes.value().data();
+        } else {
+          values_.fill(0);
+          data = values_.data();
+        }
+        return;
       }
-      return;
     }
     if (operand.simd_capable()) {
       auto view = registers.read_operand(operand, exec_mask, byte_mask);
@@ -77,7 +78,6 @@ public:
   const uint32_t *data;
 
 private:
-  std::optional<RegisterAccess::VgprReadRegion> region_;
   std::array<uint32_t, 64> values_;
 };
 
@@ -85,7 +85,14 @@ private:
 class VectorInput64 {
 public:
   VectorInput64(RegisterAccess &registers, Wavefront &wave, const Operand &operand,
-                uint64_t exec_mask) {
+                uint64_t exec_mask, bool packed_words = false,
+                ScalarPairMode scalar_mode = ScalarPairMode::Preserve) {
+    if (!exec_mask) {
+      values_[0].fill(0);
+      values_[1].fill(0);
+      data = {values_[0].data(), values_[1].data()};
+      return;
+    }
     region_ = registers.read_operand_region(operand, exec_mask, 2);
     if (region_) {
       auto lo = region_->lanes(0);
@@ -97,6 +104,27 @@ public:
         values_[1].fill(0);
         data = {values_[0].data(), values_[1].data()};
       }
+      return;
+    }
+    if (packed_words) {
+      values_[0].fill(0);
+      values_[1].fill(0);
+      // Packed inline constants replicate their FP32 bits, rather than widening
+      // to a numeric 64-bit value. Delegated operands retain pair32 routing.
+      if (operand.const_value()) {
+        const auto value = registers.read_lane_pair32(operand, 0, scalar_mode);
+        values_[0].fill(value.lo);
+        values_[1].fill(value.hi);
+      } else {
+        for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+          if ((exec_mask >> lane) & 1) {
+            const auto value = registers.read_lane_pair32(operand, lane, scalar_mode);
+            values_[0][lane] = value.lo;
+            values_[1][lane] = value.hi;
+          }
+        }
+      }
+      data = {values_[0].data(), values_[1].data()};
       return;
     }
     // A numeric 64-bit operand widens its scalar constant once; the packed
@@ -531,6 +559,37 @@ inline void execute_unary32(Wavefront &wave, Unary32Function wave32, Unary64Func
                                     : wave64(flags, write_mask, modifiers, d, &a.data);
       },
       /*allow_direct=*/destination_bytes == 0xF, destination_bytes);
+}
+
+// Pack a staged SDWA source before applying integer destination placement.
+// All source lanes are captured before any potentially aliased destination write.
+template <typename Inst>
+inline void execute_saturating_pack_sdwa(Inst &inst, Wavefront &wave, Unary32Function wave32,
+                                         Unary64Function wave64, const Operand &destination,
+                                         const Operand &source) {
+  if (!wave.exec()) {
+    return;
+  }
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec());
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  uint64_t flags = wave.cu().arithmetic_flags();
+  const int error = wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), 0, &d, &a.data)
+                                         : wave64(flags, exec_mask, 0, &d, &a.data);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask & (1ULL << lane)) {
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+    }
+  }
 }
 
 // Convert selected source bytes into two full VGPR results, reading the source

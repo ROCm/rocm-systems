@@ -6,16 +6,16 @@
 
 #include "fp/half_binary.h"
 #include "common/alu.h"
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
 #include "common/packed_alu.h"
+#include "common/validation.h"
 #include "fp/binary.h"
 #include "fp/binary_impl.h"
 #include "fp/float_output.h"
 #include "fp/half_fma_scalar.h"
 #include "fp/minmax_impl.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 
@@ -53,6 +53,8 @@ int packed_arithmetic_modes(uint64_t flags, uint32_t exec_mask, uint32_t instruc
       }
       const uint16_t mx = x & 0x7fff, my = y & 0x7fff;
       uint16_t encoded;
+      // Finite results keep their exact value for the tininess test.
+      double value = __builtin_inf();
       if (mx > 0x7c00 || my > 0x7c00) {
         encoded = (mx > 0x7c00 ? x : y) | ((!Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE)) ? 0x200 : 0);
       } else if constexpr (Op == rocjitsu::arith::Binary::Add) {
@@ -61,7 +63,7 @@ int packed_arithmetic_modes(uint64_t flags, uint32_t exec_mask, uint32_t instruc
         } else if (mx == 0x7c00 || my == 0x7c00) {
           encoded = mx == 0x7c00 ? x : y;
         } else {
-          double value =
+          value =
               double(rocjitsu::arith::f16_to_float(x)) + double(rocjitsu::arith::f16_to_float(y));
           if (value == 0 && ((x ^ y) & 0x8000)) {
             value = rounding == 2 ? -0.0 : 0.0;
@@ -75,10 +77,10 @@ int packed_arithmetic_modes(uint64_t flags, uint32_t exec_mask, uint32_t instruc
         } else if (mx == 0x7c00 || my == 0x7c00) {
           encoded = ((x ^ y) & 0x8000) | 0x7c00;
         } else {
-          encoded = rocjitsu::arith::half_fma_narrow(
-              rocjitsu::arith::bit_cast<uint64_t>(double(rocjitsu::arith::f16_to_float(x)) *
-                                                  double(rocjitsu::arith::f16_to_float(y))),
-              flags & RJ_ARITH_FP16_OVFL, rounding);
+          value =
+              double(rocjitsu::arith::f16_to_float(x)) * double(rocjitsu::arith::f16_to_float(y));
+          encoded = rocjitsu::arith::half_fma_narrow(rocjitsu::arith::bit_cast<uint64_t>(value),
+                                                     flags & RJ_ARITH_FP16_OVFL, rounding);
         }
       }
       const bool preserve_nan =
@@ -87,8 +89,10 @@ int packed_arithmetic_modes(uint64_t flags, uint32_t exec_mask, uint32_t instruc
         encoded = rocjitsu::arith::half_fma_clamp(encoded);
       }
 
-      // Unlike FMA, packed binary operations test the packed result's exponent.
-      if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && (encoded & 0x7fff) < 0x400) {
+      // Tininess is judged after rounding: a product that reaches the smallest normal only
+      // on the subnormal grid still flushes. Every subnormal result is tiny.
+      if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
+          rocjitsu::arith::half_rounds_below(value, 0x1p-14, rounding)) {
         encoded &= 0x8000;
       }
       result[lane] |= uint32_t(encoded) << (half * 16);
@@ -161,6 +165,9 @@ int arithmetic_modes(uint64_t flags, uint32_t exec_mask, uint32_t instruction_fl
         value = rhs;
       }
     }
+    // The exact value is tiny if it rounds below the smallest normal at FP16 precision,
+    // even when subnormal rounding reaches it. OMOD and output flushing both use this test.
+    const bool tiny = rocjitsu::arith::half_rounds_below(value, 0x1p-14, rounding);
     // Compatibility retains rocjitsu's FP16 rounding before OMOD. Loose keeps
     // the wider result so that scaling and destination rounding can be combined.
     if (compatibility && omod && __builtin_isfinite(value)) {
@@ -168,10 +175,10 @@ int arithmetic_modes(uint64_t flags, uint32_t exec_mask, uint32_t instruction_fl
           rocjitsu::arith::bit_cast<uint64_t>(value), flags & RJ_ARITH_FP16_OVFL, rounding));
     }
     if (omod) {
-      const double magnitude = value < 0 ? -value : value;
-      if (magnitude < 0x1p-14) {
+      // Halving gives a signed zero when the rounded result has the smallest exponent.
+      if (tiny) {
         value = 0;
-      } else if (omod == 3 && magnitude < 0x1p-13) {
+      } else if (omod == 3 && rocjitsu::arith::half_rounds_below(value, 0x1p-13, rounding)) {
         value = value < 0 ? -0.0 : 0.0;
       }
       const double scales[] = {1, 2, 4, 0.5};
@@ -194,7 +201,8 @@ int arithmetic_modes(uint64_t flags, uint32_t exec_mask, uint32_t instruction_fl
             ? rocjitsu::arith::float_to_f16(float(value), flags & RJ_ARITH_FP16_OVFL)
             : rocjitsu::arith::half_fma_narrow(rocjitsu::arith::bit_cast<uint64_t>(value),
                                                flags & RJ_ARITH_FP16_OVFL, rounding);
-    if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && (encoded & 0x7fff) < 0x400) {
+    // OMOD has already zeroed tiny results; scaled results are normal.
+    if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && tiny) {
       encoded &= 0x8000;
     }
     result[lane] = encoded;
@@ -274,6 +282,10 @@ template <rocjitsu::arith::Binary Op, bool Packed, bool GuestDenormals, bool Rdn
         value = rocjitsu::arith::minmax<true, true>(x, y);
       }
 
+      // FP16 sums and products are exact in FP32 near the smallest normal, so this is
+      // tininess after rounding: subnormal rounding may still reach the smallest normal.
+      const bool tiny = arithmetic && rocjitsu::arith::half_rounds_below(double(value), 0x1p-14, 0);
+
       // Host subtraction may keep a NaN subtrahend's old sign, and host ADD
       // need not preserve the guest's first-source NaN priority.
       if (arithmetic && compatibility) {
@@ -283,9 +295,14 @@ template <rocjitsu::arith::Binary Op, bool Packed, bool GuestDenormals, bool Rdn
           value = y;
         }
       }
-      if (arithmetic && compatibility && !Packed && (m & RJ_ARITH_ALU_OMOD_MASK)) {
-        value = rocjitsu::arith::f16_to_float(
-            rocjitsu::arith::float_to_f16(value, flags & RJ_ARITH_FP16_OVFL));
+      if (arithmetic && !Packed && (m & RJ_ARITH_ALU_OMOD_MASK)) {
+        // OMOD turns a tiny result into +0. Compatibility rounds the others before scaling.
+        if (tiny) {
+          value = 0;
+        } else if (compatibility) {
+          value = rocjitsu::arith::f16_to_float(
+              rocjitsu::arith::float_to_f16(value, flags & RJ_ARITH_FP16_OVFL));
+        }
       }
       if (arithmetic && compatibility && __builtin_isnan(value)) {
         value = rocjitsu::arith::as_float(rocjitsu::arith::as_bits(value) | 0x00400000U);
@@ -296,8 +313,9 @@ template <rocjitsu::arith::Binary Op, bool Packed, bool GuestDenormals, bool Rdn
       }
       uint16_t encoded;
       if constexpr (arithmetic) {
-        encoded = rocjitsu::arith::float_to_f16(rocjitsu::arith::alu_output_f16(value, m),
-                                                flags & RJ_ARITH_FP16_OVFL);
+        encoded = rocjitsu::arith::float_to_f16(
+            rocjitsu::arith::alu_output_f16</*AfterRounding=*/true>(value, m),
+            flags & RJ_ARITH_FP16_OVFL);
       } else {
         encoded = uint16_t(rocjitsu::arith::selection_output<16>(
             rocjitsu::arith::float_to_f16(value, false), m, flags));
@@ -313,8 +331,8 @@ template <rocjitsu::arith::Binary Op, bool Packed, bool GuestDenormals, bool Rdn
           }
         }
       }
-      if (GuestDenormals && arithmetic && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
-          (encoded & 0x7fff) < 0x0400) {
+      // Every subnormal result is tiny; OMOD has already zeroed tiny results.
+      if (GuestDenormals && arithmetic && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && tiny) {
         encoded &= 0x8000;
       }
       result[lane] |= uint32_t(encoded) << (16 * half);
@@ -366,7 +384,9 @@ int half_binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, 
           rocjitsu::arith::validate(flags, instruction_flags & ~known, fp_flags | mode_flags)) {
     return error;
   }
-  if (arithmetic &&
+  // RDNA3 packed ADD/MUL are exact through the guest-mode model below.
+  constexpr bool exact_capable = Packed && Rdna3;
+  if (arithmetic && !exact_capable &&
       (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
@@ -383,7 +403,7 @@ int half_binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, 
     }
   }
   if constexpr (Packed && arithmetic) {
-    if ((flags & RJ_ARITH_FP_ROUND_MASK) ||
+    if ((flags & RJ_ARITH_FP_ROUND_MASK) || (exact_capable && rocjitsu::arith::is_exact(flags)) ||
         ((instruction_flags & RJ_ARITH_PK_CLAMP) && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF))) {
       return packed_arithmetic_modes<Op, Rdna3>(flags, exec_mask, uint32_t(instruction_flags), d, a,
                                                 b);

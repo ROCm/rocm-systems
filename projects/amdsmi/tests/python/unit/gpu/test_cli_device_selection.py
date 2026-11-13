@@ -48,7 +48,6 @@ _GPUS = _device_choices(0x100, 3, 0)
 _CPUS = _device_choices(0x200, 2, 1)
 _CORES = _device_choices(0x300, 2, 2)
 _NICS = _device_choices(0x400, 2, 3)
-_SWITCHES = _device_choices(0x500, 2, 4)
 _GPU_VALUES = [0x100, 0x101, 0x102]
 
 
@@ -110,12 +109,6 @@ def _baremetal_helpers(helpers_type, errors):
         def is_ainic_initialized(self):
             return True
 
-        def is_brcm_nic_initialized(self):
-            return False
-
-        def is_brcm_switch_initialized(self):
-            return True
-
         def get_missing_drivers(self):
             return []
 
@@ -139,9 +132,6 @@ def _baremetal_helpers(helpers_type, errors):
 
         def get_nic_choices(self):
             return dict(_NICS), "0, 1"
-
-        def get_switch_choices(self):
-            return dict(_SWITCHES), "0, 1"
 
         def get_fan_support(self):
             return "0-255"
@@ -265,17 +255,11 @@ class TestRepeatedDeviceSelection(_CliFixture):
             (["--cpu", "1", "--cpu=1"], "cpu", [0x201]),
             (["-O", "0", "-O", "1"], "core", [0x300, 0x301]),
             (["-N", _NICS["0"]["bdf"], "--nic", _NICS["1"]["bdf"]], "nic", [0x400, 0x401]),
-            (["--switch", "0", "--switch", "1", "--switch", "0"], "switch", [0x500, 0x501]),
         ):
             with self.subTest(argv=argv):
                 self.assertEqual(_values(getattr(self.parse("list", *argv), dest)), expected)
 
     def test_other_selectors_select_all_once(self):
-        by_type = {
-            amdsmi_interface.AmdSmiProcessorType.AMD_BRCM_NIC: [],
-            amdsmi_interface.AmdSmiProcessorType.AMD_AINIC: [0x400, 0x401],
-            amdsmi_interface.AmdSmiProcessorType.AMD_BRCM_SWITCH: [0x500, 0x501],
-        }
         with mock.patch.object(
             amdsmi_interface,
             "amdsmi_get_cpu_handles",
@@ -285,19 +269,12 @@ class TestRepeatedDeviceSelection(_CliFixture):
             "amdsmi_get_cpucore_handles",
             side_effect=lambda: [_HANDLE(0x300), _HANDLE(0x301)],
         ), mock.patch.object(
-            amdsmi_interface, "amdsmi_get_socket_handles", return_value=["socket"]
-        ), mock.patch.object(
-            amdsmi_interface,
-            "amdsmi_get_processor_handles_by_type",
-            side_effect=lambda socket, kind: {
-                "processor_handles": [_HANDLE(value) for value in by_type[kind]]
-            },
+            self.helpers, "get_ainic_handles", side_effect=lambda: [_HANDLE(0x400), _HANDLE(0x401)]
         ):
             for argv, dest, expected in (
                 (["-U", "1", "-U", "all"], "cpu", [0x201, 0x200]),
                 (["-O", "all", "-O", "0"], "core", [0x300, 0x301]),
                 (["-N", _NICS["1"]["bdf"], "-N", "all"], "nic", [0x401, 0x400]),
-                (["--switch", "all", "--switch", "1"], "switch", [0x500, 0x501]),
             ):
                 with self.subTest(argv=argv):
                     self.assertEqual(_values(getattr(self.parse("list", *argv), dest)), expected)
@@ -318,7 +295,6 @@ class TestRepeatedDeviceSelection(_CliFixture):
             ["-U", "0", "-U", "9"],
             ["-O", "0", "-O", "9"],
             ["-N", _NICS["0"]["bdf"], "-N", "0003:09:00.0"],
-            ["--switch", "0", "--switch", "9"],
         ):
             with self.subTest(argv=argv):
                 with self.assertRaises(self.errors.AmdSmiDeviceNotFoundException):

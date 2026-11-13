@@ -7,9 +7,9 @@
 
 #include "integer/integer_mad.h"
 #include "common/bits.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <stdint.h>
 

@@ -38,7 +38,7 @@
 ///     is capture-backed; see floating_policy.py for the migration constraint.
 ///   - Specialized generators using vop3_dst_mod: F32 intermediate modifiers,
 ///     including the current pre-narrowing F16 DIV_FIXUP implementation.
-///   - F64 FMA/FMAC: scalar and SIMD retain finish_f64, unlike migrated ADD/MUL.
+///   - Unmigrated F64 FMA/FMAC paths retain finish_f64. RDNA2 FMA uses rj-arith.
 ///     finish_f64 scales first and flushes only a subnormal scaled result;
 ///     V_FMA_F64 captures match this stage instead. On gfx1201 with MODE 0xff
 ///     (RTZ, denormals kept), mul:4 of the FMA result 0x800fffffffffffff gives
@@ -47,10 +47,10 @@
 ///     gfx1030 and gfx1010, where finish_f64 gives +0. Migrating them must also
 ///     apply FMA tininess before rounding.
 ///   - Other SDWA F16 producers (dpp_sdwa_ops.h):
-///     - Arithmetic keeps the emulator's scaling before rounding. gfx1030 SDWA
-///       captures contradict it: with div:2, MODE=0 and IEEE=0, MUL_F16
-///       0x3e00 * 0x7bff and ADD_F16 0x7bff + 0x7bff give 0x7c00 through SDWA
-///       and VOP3, where the emulator's SDWA path returns 0x79ff and 0x7bff.
+///     - CDNA SDWA arithmetic scales before narrowing. GFX10 instead scales
+///       the rounded arithmetic result here: gfx1030 SDWA and VOP3 both give
+///       0x7c00 for MUL_F16 0x3e00 * 0x7bff and ADD_F16 0x7bff + 0x7bff
+///       with div:2, MODE=0 and IEEE=0.
 ///     - TRANS scales its rounded half through a separate helper, and other
 ///       producers scale before narrowing; no SDWA captures cover either.
 ///     Migrating these producers needs SDWA captures of each.

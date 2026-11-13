@@ -17,7 +17,6 @@ use std::cell::Cell;
 use std::ffi::c_void;
 use std::fmt::Arguments;
 use std::io::Write;
-use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
@@ -34,7 +33,8 @@ use rocddi::memory::device::Allocation;
 use rocddi::session::{DriverContextLifetime, Session, SessionRetirement};
 use rocddi::topology::host::{CpuCacheKind, CpuInfo};
 use rocddi::topology::{
-    Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo, TopologySnapshot,
+    CacheAssociations, Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo,
+    TopologyGraphSnapshot,
 };
 
 use crate::callback_arg::CallbackArg;
@@ -207,7 +207,7 @@ pub(crate) struct HsaState {
     /// CPU and GPU cache records exposed through HSA queries.
     pub(crate) caches: Vec<Cache>,
     /// Passive node, cache, and reported-route facts for this HSA generation.
-    pub(crate) topology: TopologySnapshot,
+    pub(crate) topology: TopologyGraphSnapshot,
     /// Activated GPU agents and their native owners.
     pub(crate) gpus: Vec<Gpu>,
     /// Native session retained until all GPU and memory owners are gone.
@@ -406,7 +406,7 @@ impl HsaState {
             .session
             .as_ref()
             .ok_or(ERROR)
-            .and_then(|session| session.topology_snapshot().map_err(map_error))
+            .and_then(|session| session.topology_graph_snapshot().map_err(map_error))
         {
             Ok(topology) => topology,
             Err(status) => {
@@ -431,8 +431,8 @@ impl HsaState {
                 cleanup_failed: !pending.cleanup(),
             });
         }
-        let host = topology.host.cpu.clone().unwrap_or_else(|| CpuInfo {
-            name: "CPU".to_owned(),
+        let host = topology.host.cpu.clone().unwrap_or(CpuInfo {
+            name: None,
             compute_units: 0,
         });
         match Self::create_with_session(
@@ -457,14 +457,14 @@ impl HsaState {
         host_page_size: usize,
         host_memory_bytes: usize,
         host: &CpuInfo,
-        topology: TopologySnapshot,
+        topology: TopologyGraphSnapshot,
         lifetime: DriverContextLifetime,
     ) -> Result<Self, Status> {
         let session = pending.session.as_ref().ok_or(ERROR)?;
         let endpoints = topology
             .endpoints
             .iter()
-            .filter(|endpoint| endpoint.gpu().is_some_and(|gpu| gpu.queues.aql))
+            .filter(|endpoint| endpoint.gpu().is_some_and(|gpu| gpu.queues.aql.is_some()))
             .cloned()
             .collect::<Vec<_>>();
         if endpoints.is_empty() {
@@ -485,7 +485,7 @@ impl HsaState {
             let native_caches = cpu.node.into_iter().flat_map(|node| {
                 topology.caches.iter().filter(move |cache| {
                     cache.node == node
-                        && cache.info.cpu_cache
+                        && cache.info.associations.contains(CacheAssociations::CPU)
                         && matches!(cache.info.kind, CpuCacheKind::Data | CpuCacheKind::Other)
                 })
             });
@@ -591,7 +591,7 @@ impl HsaState {
             });
         }
         let gpus = std::mem::take(&mut pending.gpus);
-        let signal_state = SignalState::new(pending.session.as_ref().ok_or(ERROR)?);
+        let signal_state = SignalState::new(pending.session.as_ref().ok_or(ERROR)?)?;
         let session = pending.session.take().ok_or(ERROR)?;
         let health = Arc::new(GenerationHealth::new());
         Ok(Self {
