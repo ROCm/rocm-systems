@@ -472,7 +472,7 @@ def test_ltoir_macro_requires_bitcode_lib_macro(ir_artifacts, paths, tmp_path):
     """
     out = str(tmp_path / "defective.bc")
     argv = [
-        paths.AMDCLANGPP,
+        os.path.join(paths.LLVM_BIN, "clang++"),
         "-c", "-emit-llvm", "-O3", "-Xclang", "-disable-llvm-passes",
         "-std=gnu++17", "-x", "hip",
         f"--rocm-path={paths.ROCM_PATH}",
