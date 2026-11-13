@@ -374,7 +374,7 @@ class VirtualGPU : public device::VirtualDevice {
     virtual bool IsBusy(const ProfilingSignal* signal) const = 0;
 
     //! The signal's last use is known complete from host bookkeeping, without reading it
-    virtual bool IsKnownRetired(const ProfilingSignal* signal) const { return false; }
+    virtual bool IsKnownRetired(const ProfilingSignal* /*signal*/) const { return false; }
 
     //! The operations consuming the waits of the previous WaitingSignal call have been submitted
     virtual void NoteWaitsSubmitted() {}
@@ -803,11 +803,11 @@ class VirtualGPU : public device::VirtualDevice {
   void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) override;
   void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd) override;
   void SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd) override;
-  void submitSignal(amd::SignalCommand& cmd) override {}
-  void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) override {}
+  void submitSignal(amd::SignalCommand& /*cmd*/) override {}
+  void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& /*cmd*/) override {}
 
-  void submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& cmd) override {}
-  void submitThreadTrace(amd::ThreadTraceCommand& vcmd) override {}
+  void submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& /*cmd*/) override {}
+  void submitThreadTrace(amd::ThreadTraceCommand& /*vcmd*/) override {}
 
   virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) override;
 

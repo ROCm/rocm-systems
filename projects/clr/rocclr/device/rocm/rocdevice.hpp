@@ -231,32 +231,32 @@ class NullDevice : public amd::Device {
   // List of dummy functions which are disabled for NullDevice
 
   //! Create a new virtual device environment.
-  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
-                                             bool cooperative = false) override {
+  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* /*queue*/ = nullptr,
+                                             bool /*cooperative*/ = false) override {
     ShouldNotReachHere();
     return nullptr;
   }
 
-  virtual bool registerSvmMemory(void* ptr, size_t size) const {
+  virtual bool registerSvmMemory(void* /*ptr*/, size_t /*size*/) const {
     ShouldNotReachHere();
     return false;
   }
 
-  virtual void deregisterSvmMemory(void* ptr) const { ShouldNotReachHere(); }
+  virtual void deregisterSvmMemory(void* /*ptr*/) const { ShouldNotReachHere(); }
 
   //! Just returns nullptr for the dummy device
   device::Memory* createMemory(
-      amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const override {
+      amd::Memory& /*owner*/, amd::Memory::ErrorCode* /*errorCode*/) const override {
     ShouldNotReachHere();
     return nullptr;
   }
-  device::Memory* createMemory(size_t size, size_t alignment = 0) const override {
+  device::Memory* createMemory(size_t /*size*/, size_t /*alignment*/ = 0) const override {
     ShouldNotReachHere();
     return nullptr;
   }
   //! Sampler object allocation
-  bool createSampler(const amd::Sampler& owner,  //!< abstraction layer sampler object
-                     device::Sampler** sampler   //!< device sampler object
+  bool createSampler(const amd::Sampler& /*owner*/,  //!< abstraction layer sampler object
+                     device::Sampler** /*sampler*/   //!< device sampler object
   ) const override {
     ShouldNotReachHere();
     return true;
@@ -264,8 +264,8 @@ class NullDevice : public amd::Device {
 
   //! Just returns nullptr for the dummy device
   device::Memory* createView(
-      amd::Memory& owner,           //!< Owner memory object
-      const device::Memory& parent  //!< Parent device memory object for the view
+      amd::Memory& /*owner*/,           //!< Owner memory object
+      const device::Memory& /*parent*/  //!< Parent device memory object for the view
   ) const override {
     ShouldNotReachHere();
     return nullptr;
@@ -277,62 +277,62 @@ class NullDevice : public amd::Device {
   }
 
   //! Just returns nullptr for the dummy device
-  void* svmAlloc(amd::Context& context,   //!< The context used to create a buffer
-                 size_t size,             //!< size of svm spaces
-                 size_t alignment,        //!< alignment requirement of svm spaces
-                 cl_svm_mem_flags flags,  //!< flags of creation svm spaces
-                 void* svmPtr             //!< existing svm pointer for mGPU case
+  void* svmAlloc(amd::Context& /*context*/,   //!< The context used to create a buffer
+                 size_t /*size*/,             //!< size of svm spaces
+                 size_t /*alignment*/,        //!< alignment requirement of svm spaces
+                 cl_svm_mem_flags /*flags*/,  //!< flags of creation svm spaces
+                 void* /*svmPtr*/             //!< existing svm pointer for mGPU case
   ) const override {
     ShouldNotReachHere();
     return nullptr;
   }
 
   //! Just returns nullptr for the dummy device
-  void svmFree(void* ptr  //!< svm pointer needed to be freed
+  void svmFree(void* /*ptr*/  //!< svm pointer needed to be freed
   ) const override {
     ShouldNotReachHere();
     return;
   }
 
-  void* virtualAlloc(void* req_addr, size_t size, size_t alignment) override {
+  void* virtualAlloc(void* /*req_addr*/, size_t /*size*/, size_t /*alignment*/) override {
     ShouldNotReachHere();
     return nullptr;
   }
 
-  bool virtualFree(void* addr) override {
+  bool virtualFree(void* /*addr*/) override {
     ShouldNotReachHere();
     return true;
   }
 
-  cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override {
+  cl_int virtualMap(void* /*va*/, size_t /*size*/, amd::Memory* /*phys*/) override {
     ShouldNotReachHere();
     return CL_INVALID_OPERATION;
   }
 
-  cl_int virtualUnmap(void* va, size_t size) override {
+  cl_int virtualUnmap(void* /*va*/, size_t /*size*/) override {
     ShouldNotReachHere();
     return CL_INVALID_OPERATION;
   }
 
-  virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+  virtual bool SetMemAccess(void* /*va_addr*/, size_t /*va_size*/, VmmAccess /*access_flags*/,
                             VmmLocationType = VmmLocationType::kDevice,
-                            int numaNode = -1) override {
+                            int /*numaNode*/ = -1) override {
     ShouldNotReachHere();
     return false;
   }
 
-  virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override {
+  virtual bool GetMemAccess(void* /*va_addr*/, VmmAccess* /*access_flags_ptr*/) const override {
     ShouldNotReachHere();
     return false;
   }
 
-  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override {
+  virtual bool ValidateMemAccess(amd::Memory& /*mem*/, bool /*read_write*/) const override {
     ShouldNotReachHere();
     return true;
   }
 
-  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
-                                       const void* src) const override {
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& /*dst*/, size_t /*offset*/, size_t /*size*/,
+                                       const void* /*src*/) const override {
     ShouldNotReachHere();
     return false;
   }
@@ -342,64 +342,67 @@ class NullDevice : public amd::Device {
     return (memory->getContext().devices().size() > 1);
   }
 
-  virtual bool importExtSemaphore(void** extSemahore, const amd::Os::FileDesc& handle,
-                                  amd::ExternalSemaphoreHandleType sem_handle_type) override {
+  virtual bool importExtSemaphore(void** /*extSemahore*/, const amd::Os::FileDesc& /*handle*/,
+                                  amd::ExternalSemaphoreHandleType /*sem_handle_type*/) override {
     ShouldNotReachHere();
     return false;
   }
 
-  void DestroyExtSemaphore(void* extSemaphore) override { ShouldNotReachHere(); }
+  void DestroyExtSemaphore(void* /*extSemaphore*/) override { ShouldNotReachHere(); }
 
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device
 
-  bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                          bool validateOnly) override {
+  bool bindExternalDevice(uint /*flags*/, void* const /*pDevice*/[], void* /*pContext*/,
+                          bool /*validateOnly*/) override {
     ShouldNotReachHere();
     return false;
   }
 
-  bool unbindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                            bool validateOnly) override {
+  bool unbindExternalDevice(uint /*flags*/, void* const /*pDevice*/[], void* /*pContext*/,
+                            bool /*validateOnly*/) override {
     ShouldNotReachHere();
     return false;
   }
 
   //! Releases non-blocking map target memory
-  virtual void freeMapTarget(amd::Memory& mem, void* target) { ShouldNotReachHere(); }
+  virtual void freeMapTarget(amd::Memory& /*mem*/, void* /*target*/) { ShouldNotReachHere(); }
 
   //! Empty implementation on Null device
-  bool globalFreeMemory(size_t* freeMemory) const override {
+  bool globalFreeMemory(size_t* /*freeMemory*/) const override {
     ShouldNotReachHere();
     return false;
   }
 
   //! Empty implementation on Null device
-  bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
-                uint64_t* size_copied, int32_t* status) override {
+  bool amdFileRead(amd::Os::FileDesc /*handle*/, void* /*devicePtr*/, uint64_t /*size*/,
+                   int64_t /*file_offset*/, uint64_t* /*size_copied*/,
+                   int32_t* /*status*/) override {
     ShouldNotReachHere();
     return false;
   }
 
   //! Empty implementation on Null device
-  bool amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
-                 uint64_t* size_copied, int32_t* status) override {
+  bool amdFileWrite(amd::Os::FileDesc /*handle*/, void* /*devicePtr*/, uint64_t /*size*/,
+                    int64_t /*file_offset*/, uint64_t* /*size_copied*/,
+                    int32_t* /*status*/) override {
     ShouldNotReachHere();
     return false;
   }
 
-  bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
-                    cl_set_device_clock_mode_output_amd* pSetClockModeOutput) override {
+  bool SetClockMode(const cl_set_device_clock_mode_input_amd /*setClockModeInput*/,
+                    cl_set_device_clock_mode_output_amd* /*pSetClockModeOutput*/) override {
     return true;
   }
 
-  bool IsHwEventReady(const amd::Event& event, bool wait = false,
-                      amd::SyncPolicy policy = amd::SyncPolicy::Auto) const override {
+  bool IsHwEventReady(const amd::Event& /*event*/, bool /*wait*/ = false,
+                      amd::SyncPolicy /*policy*/ = amd::SyncPolicy::Auto) const override {
     return false;
   }
 
-  void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override {};
-  void ReleaseGlobalSignal(void* signal) const override {}
+  void getHwEventTime(const amd::Event& /*event*/, uint64_t* /*start*/,
+                      uint64_t* /*end*/) const override {};
+  void ReleaseGlobalSignal(void* /*signal*/) const override {}
 
 #if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const {
@@ -494,8 +497,8 @@ class Device : public NullDevice {
 
   //! Just returns nullptr for the dummy device
   virtual device::Memory* createView(
-      amd::Memory& owner,           //!< Owner memory object
-      const device::Memory& parent  //!< Parent device memory object for the view
+      amd::Memory& /*owner*/,           //!< Owner memory object
+      const device::Memory& /*parent*/  //!< Parent device memory object for the view
   ) const override {
     return nullptr;
   }
@@ -585,7 +588,9 @@ class Device : public NullDevice {
                             VmmLocationType = VmmLocationType::kDevice,
                             int numaNode = -1) override;
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override;
-  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override { return true; }
+  virtual bool ValidateMemAccess(amd::Memory& /*mem*/, bool /*read_write*/) const override {
+    return true;
+  }
 
   virtual VmmExportStatus ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
                                                  void* shareableHandle,
@@ -924,7 +929,7 @@ class Device : public NullDevice {
     }
 
     //! Get a combined metric for queue selection (lower is better)
-    uint64_t GetLoadMetric(hsa_queue_t* queue, uint32_t mode = 1) const {
+    uint64_t GetLoadMetric(hsa_queue_t* queue, uint32_t /*mode*/ = 1) const {
       auto depth = GetHwQueueDepth(queue);
 
       // Dedicated queue penalty: prefer regular queues, but use dedicated if regular queues
