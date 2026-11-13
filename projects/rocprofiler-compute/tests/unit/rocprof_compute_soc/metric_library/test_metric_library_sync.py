@@ -35,7 +35,7 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     ROOFLINE_PANEL_ID,
-    canonical_config_arch,
+    config_arch_members,
     parse_sets_yaml,
 )
 from utils.utils_counter_defs import get_build_in_vars, metric_value_keys
@@ -185,11 +185,7 @@ UNIT_VARIANTS["gfx1250"] = {
 
 def member_arch(arch: str) -> str:
     """Return a GPU arch with the analysis configs of arch (gfx1150 for gfx115x)."""
-    return next(
-        gpu_arch
-        for gpu_arch in sorted(mi_gpu_specs.get_gpu_series_dict())
-        if canonical_config_arch(gpu_arch) == arch
-    )
+    return config_arch_members(arch)[0]
 
 
 def unshown_file_ids(arch: str) -> Set[str]:

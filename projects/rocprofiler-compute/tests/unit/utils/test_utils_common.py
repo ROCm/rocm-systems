@@ -15,7 +15,8 @@ from unittest import mock
 import pytest
 
 import utils.utils_common as utils_common
-from utils.utils_common import canonical_config_arch
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import canonical_config_arch, config_arch_members
 
 LISTED_METRIC_IDS = ["0", "2", "2.1", "2.1.0", "2.1.1", "18", "18.1", "18.1.0", "18.2"]
 LISTED_METRIC_DETAILS = {
@@ -1303,6 +1304,19 @@ def test_canonical_config_arch_maps_gfx115_variants_to_shared_dir():
     assert canonical_config_arch("gfx1152") == "gfx115x"
     assert canonical_config_arch("gfx1153") == "gfx115x"
     assert canonical_config_arch("gfx942") == "gfx942"
+
+
+@pytest.mark.misc
+def test_config_arch_members_lists_each_gpu_arch_under_its_config_arch():
+    gpu_archs = sorted(mi_gpu_specs.get_gpu_series_dict())
+    config_archs = sorted({canonical_config_arch(arch) for arch in gpu_archs})
+    members = {arch: config_arch_members(arch) for arch in config_archs}
+    assert sorted(sum(members.values(), [])) == gpu_archs
+    for config_arch, gpu_archs_of_config in members.items():
+        assert gpu_archs_of_config == sorted(gpu_archs_of_config)
+        assert {canonical_config_arch(arch) for arch in gpu_archs_of_config} == {
+            config_arch
+        }
 
 
 @pytest.mark.misc
