@@ -106,8 +106,8 @@ template <bool Maximum, bool PropagateNaN> __m256d minmax(__m256d x, __m256d y) 
   }
 }
 
-// RDNA3 selection adds IEEE-mode signaling-NaN priority to number preference.
-template <bool Maximum> __m256 minmax_rdna3(__m256 x, __m256 y, bool ieee) {
+// Legacy selection adds IEEE signaling-NaN priority and architecture-specific two-NaN order.
+template <bool Maximum, bool FirstNaN = true> __m256 minmax_legacy(__m256 x, __m256 y, bool ieee) {
   auto value = minmax<Maximum, false>(x, y);
   auto a_bits = _mm256_castps_si256(x), b_bits = _mm256_castps_si256(y);
   auto magnitude = _mm256_set1_epi32(INT32_MAX);
@@ -115,6 +115,7 @@ template <bool Maximum> __m256 minmax_rdna3(__m256 x, __m256 y, bool ieee) {
   auto quiet = _mm256_set1_epi32(0x00400000);
   auto an = _mm256_cmpgt_epi32(_mm256_and_si256(a_bits, magnitude), infinity);
   auto bn = _mm256_cmpgt_epi32(_mm256_and_si256(b_bits, magnitude), infinity);
+  value = _mm256_blendv_ps(value, FirstNaN ? x : y, _mm256_castsi256_ps(_mm256_and_si256(an, bn)));
   if (ieee) {
     auto sna = _mm256_andnot_si256(_mm256_cmpeq_epi32(_mm256_and_si256(a_bits, quiet), quiet), an);
     auto snb = _mm256_andnot_si256(_mm256_cmpeq_epi32(_mm256_and_si256(b_bits, quiet), quiet), bn);
@@ -122,14 +123,13 @@ template <bool Maximum> __m256 minmax_rdna3(__m256 x, __m256 y, bool ieee) {
                              _mm256_castsi256_ps(snb));
     value = _mm256_blendv_ps(value, _mm256_castsi256_ps(_mm256_or_si256(a_bits, quiet)),
                              _mm256_castsi256_ps(sna));
-  } else {
-    value = _mm256_blendv_ps(value, x, _mm256_castsi256_ps(_mm256_and_si256(an, bn)));
   }
   return value;
 }
 
-// RDNA3 selection adds IEEE-mode signaling-NaN priority to number preference.
-template <bool Maximum> __m256d minmax_rdna3(__m256d x, __m256d y, bool ieee) {
+// Legacy selection adds IEEE signaling-NaN priority and architecture-specific two-NaN order.
+template <bool Maximum, bool FirstNaN = true>
+__m256d minmax_legacy(__m256d x, __m256d y, bool ieee) {
   auto value = minmax<Maximum, false>(x, y);
   auto a_bits = _mm256_castpd_si256(x), b_bits = _mm256_castpd_si256(y);
   auto magnitude = _mm256_set1_epi64x(INT64_MAX);
@@ -137,6 +137,7 @@ template <bool Maximum> __m256d minmax_rdna3(__m256d x, __m256d y, bool ieee) {
   auto quiet = _mm256_set1_epi64x(0x0008000000000000LL);
   auto an = _mm256_cmpgt_epi64(_mm256_and_si256(a_bits, magnitude), infinity);
   auto bn = _mm256_cmpgt_epi64(_mm256_and_si256(b_bits, magnitude), infinity);
+  value = _mm256_blendv_pd(value, FirstNaN ? x : y, _mm256_castsi256_pd(_mm256_and_si256(an, bn)));
   if (ieee) {
     auto sna = _mm256_andnot_si256(_mm256_cmpeq_epi64(_mm256_and_si256(a_bits, quiet), quiet), an);
     auto snb = _mm256_andnot_si256(_mm256_cmpeq_epi64(_mm256_and_si256(b_bits, quiet), quiet), bn);
@@ -144,8 +145,6 @@ template <bool Maximum> __m256d minmax_rdna3(__m256d x, __m256d y, bool ieee) {
                              _mm256_castsi256_pd(snb));
     value = _mm256_blendv_pd(value, _mm256_castsi256_pd(_mm256_or_si256(a_bits, quiet)),
                              _mm256_castsi256_pd(sna));
-  } else {
-    value = _mm256_blendv_pd(value, x, _mm256_castsi256_pd(_mm256_and_si256(an, bn)));
   }
   return value;
 }
@@ -169,20 +168,31 @@ __m256 minmax3_value(__m256 x, __m256 y, __m256 z) {
   return value;
 }
 
-// Apply RDNA3's binary selection policy at each step of the ternary operation.
-template <bool FirstMaximum, bool SecondMaximum, bool Median>
-__m256 minmax3_rdna3(__m256 x, __m256 y, __m256 z, bool ieee) {
+// Apply the legacy binary policy at each step, including CDNA's numerical median ties.
+template <bool FirstMaximum, bool SecondMaximum, bool Median, bool FirstNaN = true>
+__m256 minmax3_legacy(__m256 x, __m256 y, __m256 z, bool ieee) {
   if constexpr (Median) {
-    // Match the ordered-zero median used by the scalar RDNA3 model.
-    auto value =
-        minmax_rdna3<true>(minmax_rdna3<false>(x, y, ieee),
-                           minmax_rdna3<false>(minmax_rdna3<true>(x, y, ieee), z, ieee), ieee);
+    __m256 value;
+    if constexpr (FirstNaN) {
+      value =
+          minmax_legacy<true>(minmax_legacy<false>(x, y, ieee),
+                              minmax_legacy<false>(minmax_legacy<true>(x, y, ieee), z, ieee), ieee);
+    } else {
+      auto ab = minmax_legacy<true, false>(x, y, ieee);
+      auto largest = minmax_legacy<true, false>(ab, z, ieee);
+      value = _mm256_blendv_ps(ab, minmax_legacy<true, false>(x, z, ieee),
+                               _mm256_cmp_ps(largest, y, _CMP_EQ_OQ));
+      value = _mm256_blendv_ps(value, minmax_legacy<true, false>(y, z, ieee),
+                               _mm256_cmp_ps(largest, x, _CMP_EQ_OQ));
+    }
     auto has_nan =
         _mm256_or_ps(_mm256_cmp_ps(x, y, _CMP_UNORD_Q), _mm256_cmp_ps(z, z, _CMP_UNORD_Q));
-    auto minimum = minmax_rdna3<false>(minmax_rdna3<false>(x, y, ieee), z, ieee);
+    auto minimum =
+        minmax_legacy<false, FirstNaN>(minmax_legacy<false, FirstNaN>(x, y, ieee), z, ieee);
     return _mm256_blendv_ps(value, minimum, has_nan);
   }
-  return minmax_rdna3<SecondMaximum>(minmax_rdna3<FirstMaximum>(x, y, ieee), z, ieee);
+  return minmax_legacy<SecondMaximum, FirstNaN>(minmax_legacy<FirstMaximum, FirstNaN>(x, y, ieee),
+                                                z, ieee);
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

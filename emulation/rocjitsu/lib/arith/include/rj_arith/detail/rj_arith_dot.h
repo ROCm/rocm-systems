@@ -191,9 +191,9 @@ int rj_arith_v_dot4_f32_bf8_bf8_w64(uint64_t flags, uint64_t exec_mask, uint64_t
                                     const uint32_t *const *b, const uint32_t *const *c);
 
 // Integer DOT modifiers: SIGNED selects signed factors for I32_IU forms.
-// These RDNA3/RDNA4 entry points accept CLAMP and source-half selection. CLAMP
+// Ordinary integer DOT entry points accept CLAMP and source-half selection. CLAMP
 // saturates the final accumulator to its signed/unsigned 32-bit range; otherwise
-// arithmetic wraps modulo 2^32. They do not model gfx1250 DOT4, which ignores CLAMP.
+// arithmetic wraps modulo 2^32. The gfx1250 DOT4 variants below ignore CLAMP.
 constexpr uint32_t RJ_ARITH_DOT_SIGNED_A = 1U << 0;
 constexpr uint32_t RJ_ARITH_DOT_SIGNED_B = 1U << 1;
 constexpr uint32_t RJ_ARITH_DOT_CLAMP = 1U << 6;
@@ -235,6 +235,88 @@ int rj_arith_v_dot8_u32_u4_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b, const uint32_t *const *c);
 
+// CDNA fixed-signed DOT2/4/8 and unsigned DOT2: one VGPR per A/B/C/D, with
+// packed 16/8/4-bit factors. Source-half selectors and CLAMP are accepted;
+// SIGNED_A/B are rejected. Saturation occurs only after all products and C.
+// DOT*C reads D as the accumulator, wraps, and requires instruction_flags == 0.
+// gfx1250 DOT4 keeps IU signedness and half selection but accepts and ignores CLAMP.
+// Wave32/64 use 32/64 lanes per VGPR. All semantics have the same integer result.
+
+int rj_arith_v_dot2_i32_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_dot2_i32_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_dot2_u32_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_dot2_u32_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_dot4_i32_i8_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_dot4_i32_i8_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_dot8_i32_i4_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_dot8_i32_i4_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_dot2c_i32_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b);
+
+int rj_arith_v_dot2c_i32_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b);
+
+int rj_arith_v_dot4c_i32_i8_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b);
+
+int rj_arith_v_dot4c_i32_i8_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b);
+
+int rj_arith_v_dot8c_i32_i4_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b);
+
+int rj_arith_v_dot8c_i32_i4_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b);
+
+int rj_arith_v_dot4_i32_iu8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+
+int rj_arith_v_dot4_i32_iu8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+
+int rj_arith_v_dot4_u32_u8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c);
+
+int rj_arith_v_dot4_u32_u8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c);
 // CDNA FP16/BF16 DOT2 uses one packed A/B VGPR and one FP32 C/D VGPR.
 // Compatibility inherits host FP32 pair-sum-then-C arithmetic; Loose may differ
 // from GPU rounding. Strict exact modes are unsupported. Guest FP modes and CLAMP

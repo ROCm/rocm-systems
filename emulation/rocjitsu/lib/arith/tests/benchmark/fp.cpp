@@ -108,6 +108,139 @@ void add_fp(std::vector<Benchmark> &cases) {
     return rj_arith_v_fmaak_f64_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, r.b,
                                             0x3fe8000020000000ULL, &r.status);
   });
+  add(cases, "fp", "v_pk_minimum_f16_w32_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_minimum_f16_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_minimum_f16_w64_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_minimum_f16_w64_gfx1250(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_maximum_f16_w32_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_maximum_f16_w32_gfx1250(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_maximum_f16_w64_gfx1250", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_maximum_f16_w64_gfx1250(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+
+  add(cases, "fp", "v_min_f32_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_min_f32_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_min_f32_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_min_f32_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_max_f32_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_max_f32_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_max_f32_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_max_f32_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_min_f64_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_min_f64_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_min_f64_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_min_f64_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_max_f64_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_max_f64_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_max_f64_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_max_f64_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_min3_f16_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_min3_f16_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_min3_f16_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_min3_f16_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_max3_f16_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_max3_f16_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_max3_f16_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_max3_f16_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_med3_f16_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_med3_f16_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_med3_f16_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_med3_f16_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_minimum3_f32_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_minimum3_f32_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_minimum3_f32_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_minimum3_f32_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_maximum3_f32_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_maximum3_f32_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_maximum3_f32_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_maximum3_f32_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_min3_f32_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_min3_f32_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_min3_f32_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_min3_f32_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_max3_f32_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_max3_f32_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_max3_f32_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_max3_f32_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_med3_f32_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_med3_f32_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_med3_f32_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_med3_f32_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_min_f16_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_min_f16_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_min_f16_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_min_f16_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_max_f16_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_max_f16_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_max_f16_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_max_f16_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_min_f16_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_min_f16_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_min_f16_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_min_f16_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_max_f16_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_max_f16_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_max_f16_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_max_f16_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "fp", "v_pk_minimum3_f16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_minimum3_f16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_pk_minimum3_f16_w64", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_minimum3_f16_w64(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_pk_maximum3_f16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_maximum3_f16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_pk_maximum3_f16_w64", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_maximum3_f16_w64(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_pk_min3_num_f16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_min3_num_f16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_pk_min3_num_f16_w64", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_min3_num_f16_w64(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_pk_max3_num_f16_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_max3_num_f16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "fp", "v_pk_max3_num_f16_w64", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_pk_max3_num_f16_w64(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
   add(cases, "fp", "v_div_fmas_f32_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_div_fmas_f32_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, 0, &r.status);
   });

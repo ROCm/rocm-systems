@@ -39,6 +39,12 @@ int arithmetic(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *cons
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::integer16_x86_64_v4<Op, Signed, Packed>(exec_mask, mode, d[0], a[0], b[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::integer16_x86_64_v3<Op, Signed, Packed>(exec_mask, mode, d[0], a[0], b[0]);
@@ -75,7 +81,8 @@ int arithmetic(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *cons
       if constexpr (Op == rocjitsu::arith::Integer16::Max) {
         value = rocjitsu::arith::maximum(x, y);
       }
-      if constexpr (Op == rocjitsu::arith::Integer16::Mul) {
+      if constexpr (Op == rocjitsu::arith::Integer16::Mul ||
+                    Op == rocjitsu::arith::Integer16::MulClamp) {
         value = x * y;
       }
       if constexpr (Op == rocjitsu::arith::Integer16::ShiftLeft) {
@@ -89,7 +96,8 @@ int arithmetic(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *cons
       }
 
       if constexpr (Op == rocjitsu::arith::Integer16::Add ||
-                    Op == rocjitsu::arith::Integer16::Sub) {
+                    Op == rocjitsu::arith::Integer16::Sub ||
+                    Op == rocjitsu::arith::Integer16::MulClamp) {
         if (arithmetic_mode & RJ_ARITH_PK_CLAMP) {
           value = rocjitsu::arith::clamp(value, Signed ? INT64_C(-32768) : INT64_C(0),
                                          Signed ? INT64_C(32767) : INT64_C(65535));
@@ -878,4 +886,62 @@ int rj_arith_v_ashrrev_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
   }
   return arithmetic_wave64<rocjitsu::arith::Integer16::ShiftRight, true, false>(
       flags, exec_mask, instruction_flags, d, a, b);
+}
+
+// gfx942 CLAMP saturates the full unsigned product before narrowing.
+int rj_arith_v_mul_lo_u16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return arithmetic<rocjitsu::arith::Integer16::MulClamp, false, false>(flags, exec_mask,
+                                                                        instruction_flags, d, a, b);
+}
+
+// gfx942 CLAMP saturates the full unsigned product before narrowing.
+int rj_arith_v_mul_lo_u16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return arithmetic_wave64<rocjitsu::arith::Integer16::MulClamp, false, false>(
+      flags, exec_mask, instruction_flags, d, a, b);
+}
+
+// gfx942 CLAMP saturates the full unsigned product before narrowing.
+int rj_arith_v_pk_mul_lo_u16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic<rocjitsu::arith::Integer16::MulClamp, false>(flags, exec_mask,
+                                                                 instruction_flags, d, a, b);
+}
+
+// gfx942 CLAMP saturates the full unsigned product before narrowing.
+int rj_arith_v_pk_mul_lo_u16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return arithmetic_wave64<rocjitsu::arith::Integer16::MulClamp, false>(flags, exec_mask,
+                                                                        instruction_flags, d, a, b);
 }

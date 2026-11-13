@@ -197,6 +197,12 @@ int binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint3
       return RJ_ARITH_SUCCESS;
     }
   }
+  if constexpr (rocjitsu::arith::is_selection(Op)) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::selection_f32_x86_64_v4(Op, flags, exec_mask, instruction_flags, d, a, b);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
@@ -240,10 +246,14 @@ int binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint3
     if constexpr (Op == rocjitsu::arith::Binary::Maximum) {
       value = rocjitsu::arith::minmax<true, true>(x, y);
     }
-    if constexpr (Op == rocjitsu::arith::Binary::MinLegacy ||
+    if constexpr (Op == rocjitsu::arith::Binary::MinLegacyCdna ||
+                  Op == rocjitsu::arith::Binary::MaxLegacyCdna ||
+                  Op == rocjitsu::arith::Binary::MinLegacy ||
                   Op == rocjitsu::arith::Binary::MaxLegacy) {
-      value = rocjitsu::arith::minmax_rdna3<Op == rocjitsu::arith::Binary::MaxLegacy>(
-          x, y, flags & RJ_ARITH_FP_IEEE_MODE);
+      value = rocjitsu::arith::minmax_legacy < Op == rocjitsu::arith::Binary::MaxLegacy ||
+              Op == rocjitsu::arith::Binary::MaxLegacyCdna,
+      Op != rocjitsu::arith::Binary::MinLegacyCdna &&
+          Op != rocjitsu::arith::Binary::MaxLegacyCdna > (x, y, flags & RJ_ARITH_FP_IEEE_MODE);
     }
     value = rocjitsu::arith::as_float(rocjitsu::arith::scale_omod_f32_bits(
         rocjitsu::arith::as_bits(value), (instruction_flags >> 6) & 3,
@@ -860,4 +870,68 @@ int rj_arith_v_max_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
   }
   return binary_wave64<rocjitsu::arith::Binary::MaxLegacy, true>(flags, exec_mask,
                                                                  instruction_flags, d, a, b);
+}
+
+// CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
+int rj_arith_v_min_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::MinLegacyCdna, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, b);
+}
+
+// CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
+int rj_arith_v_min_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::MinLegacyCdna, true>(flags, exec_mask,
+                                                                     instruction_flags, d, a, b);
+}
+
+// CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
+int rj_arith_v_max_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::MaxLegacyCdna, true>(flags, exec_mask, instruction_flags,
+                                                              d, a, b);
+}
+
+// CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
+int rj_arith_v_max_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::MaxLegacyCdna, true>(flags, exec_mask,
+                                                                     instruction_flags, d, a, b);
 }

@@ -129,8 +129,11 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
       // A running sum keeps any NaN at one add per group; opposite infinities only add a pass.
       sum = _mm256_add_pd(sum, value);
     }
-    if constexpr (Op == Fp64::MinLegacy || Op == Fp64::MaxLegacy) {
-      value = minmax_rdna3<Op == Fp64::MaxLegacy>(x, y, flags & RJ_ARITH_FP_IEEE_MODE);
+    if constexpr (Op == Fp64::MinLegacyCdna || Op == Fp64::MaxLegacyCdna || Op == Fp64::MinLegacy ||
+                  Op == Fp64::MaxLegacy) {
+      value = minmax_legacy < Op == Fp64::MaxLegacy || Op == Fp64::MaxLegacyCdna,
+      Op != Fp64::MinLegacyCdna &&
+          Op != Fp64::MaxLegacyCdna > (x, y, flags & RJ_ARITH_FP_IEEE_MODE);
     }
     if constexpr (Op == Fp64::MinNum) {
       value = minmax<false, false>(x, y);
@@ -299,6 +302,10 @@ void fp64_x86_64_v3(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, 
     return run<Fp64::Rcp>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::Rsq:
     return run<Fp64::Rsq>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
+  case Fp64::MinLegacyCdna:
+    return run<Fp64::MinLegacyCdna>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
+  case Fp64::MaxLegacyCdna:
+    return run<Fp64::MaxLegacyCdna>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::MinLegacy:
     return run<Fp64::MinLegacy>(flags, exec_mask, mode, d, a, b, c, quiet_snan, cdna);
   case Fp64::MaxLegacy:

@@ -116,8 +116,10 @@ foreach(
         v_fmamk
         v_exponent
         v_min_max_med3
+        v_min_max_med3_cdna
         v_min_max_med3_num
         v_min_max
+        v_min_max_cdna
         v_min_max_num
         v_minimum_maximum3
         v_minimum_maximum
@@ -273,6 +275,8 @@ foreach(
     IN
     ITEMS
         half_binary
+        integer64
+        byte_shift
         half_ternary
         add
         multiply
@@ -283,7 +287,7 @@ foreach(
         boolean
         mad
         packed_binary
-        packed_mad
+        packed_ternary
         shift
         sad
         carry

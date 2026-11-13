@@ -70,6 +70,18 @@ void integer16_ternary_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d,
       } else {
         result = _mm256_add_epi16(_mm256_mullo_epi16(x, y), z);
       }
+    } else if constexpr (Op == Integer16Ternary::AddMin || Op == Integer16Ternary::AddMax) {
+      auto sum = Signed ? _mm256_adds_epi16(x, y) : _mm256_adds_epu16(x, y);
+      if constexpr (Op == Integer16Ternary::AddMin) {
+        result = Signed ? _mm256_min_epi16(sum, z) : _mm256_min_epu16(sum, z);
+      } else {
+        result = Signed ? _mm256_max_epi16(sum, z) : _mm256_max_epu16(sum, z);
+      }
+      if constexpr (Signed) {
+        if (mode & RJ_ARITH_PK_CLAMP) {
+          result = _mm256_max_epi16(result, _mm256_setzero_si256());
+        }
+      }
     } else if constexpr (Op == Integer16Ternary::Min) {
       result = Signed ? _mm256_min_epi16(_mm256_min_epi16(x, y), z)
                       : _mm256_min_epu16(_mm256_min_epu16(x, y), z);
@@ -81,6 +93,12 @@ void integer16_ternary_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d,
       auto upper = Signed ? _mm256_max_epi16(x, y) : _mm256_max_epu16(x, y);
       auto limited = Signed ? _mm256_min_epi16(upper, z) : _mm256_min_epu16(upper, z);
       result = Signed ? _mm256_max_epi16(lower, limited) : _mm256_max_epu16(lower, limited);
+    }
+    if constexpr (Packed && Signed &&
+                  (Op == Integer16Ternary::Min || Op == Integer16Ternary::Max)) {
+      if (mode & RJ_ARITH_PK_CLAMP) {
+        result = _mm256_max_epi16(result, _mm256_setzero_si256());
+      }
     }
     if constexpr (!Packed) {
       auto output_mask = _mm256_set1_epi32(int(65535U << d_shift));
@@ -116,6 +134,23 @@ template void integer16_ternary_x86_64_v3<true, Integer16Ternary::Max, false>(
 template void integer16_ternary_x86_64_v3<false, Integer16Ternary::Median, false>(
     uint32_t, uint32_t, uint32_t *, const uint32_t *, const uint32_t *, const uint32_t *);
 template void integer16_ternary_x86_64_v3<true, Integer16Ternary::Median, false>(
+    uint32_t, uint32_t, uint32_t *, const uint32_t *, const uint32_t *, const uint32_t *);
+
+template void integer16_ternary_x86_64_v3<false, Integer16Ternary::AddMin, true>(
+    uint32_t, uint32_t, uint32_t *, const uint32_t *, const uint32_t *, const uint32_t *);
+template void integer16_ternary_x86_64_v3<true, Integer16Ternary::AddMin, true>(
+    uint32_t, uint32_t, uint32_t *, const uint32_t *, const uint32_t *, const uint32_t *);
+template void integer16_ternary_x86_64_v3<false, Integer16Ternary::AddMax, true>(
+    uint32_t, uint32_t, uint32_t *, const uint32_t *, const uint32_t *, const uint32_t *);
+template void integer16_ternary_x86_64_v3<true, Integer16Ternary::AddMax, true>(
+    uint32_t, uint32_t, uint32_t *, const uint32_t *, const uint32_t *, const uint32_t *);
+template void integer16_ternary_x86_64_v3<false, Integer16Ternary::Min, true>(
+    uint32_t, uint32_t, uint32_t *, const uint32_t *, const uint32_t *, const uint32_t *);
+template void integer16_ternary_x86_64_v3<true, Integer16Ternary::Min, true>(
+    uint32_t, uint32_t, uint32_t *, const uint32_t *, const uint32_t *, const uint32_t *);
+template void integer16_ternary_x86_64_v3<false, Integer16Ternary::Max, true>(
+    uint32_t, uint32_t, uint32_t *, const uint32_t *, const uint32_t *, const uint32_t *);
+template void integer16_ternary_x86_64_v3<true, Integer16Ternary::Max, true>(
     uint32_t, uint32_t, uint32_t *, const uint32_t *, const uint32_t *, const uint32_t *);
 
 } // namespace rocjitsu::arith

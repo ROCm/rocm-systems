@@ -16,6 +16,8 @@ enum class Fp64 {
   Mul,
   Fma,
   MinLegacy,
+  MinLegacyCdna,
+  MaxLegacyCdna,
   MaxLegacy,
   MinNum,
   MaxNum,
@@ -47,6 +49,11 @@ void fp64_x86_64_v3(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, 
 void fp64_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
                     uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                     const uint32_t *const *c, bool quiet_snan = true, bool cdna = false);
+// Evaluate a binary selection with validated controls, preserving inactive lanes and aliases.
+void selection_f64_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode,
+                             uint32_t *const *d, const uint32_t *const *a,
+                             const uint32_t *const *b);
+
 #endif
 
 } // namespace rocjitsu::arith

@@ -889,8 +889,8 @@ inline void execute_dot2_f16(Wavefront &wave, FloatTernaryWave32Function wave32,
 }
 
 // Fixed-rounding cores can still use guest rounding for FRACT or output scaling.
-// Routed VOP1 halves and explicit VOP3 selectors both
-// preserve the destination's other half, including when source and destination alias.
+// Preserve the unselected half, unless zero_extend_low requests zero-extension
+// of low-half results for older CDNA instructions. Source/destination aliasing is supported.
 inline void execute_float_unary16(Wavefront &wave, FloatUnary32Function wave32,
                                   FloatUnary64Function wave64, uint64_t flags, uint64_t modifiers,
                                   const Operand &destination, const Operand &source, bool rdna3,
@@ -997,7 +997,7 @@ template <HalfBinaryOperation Op = HalfBinaryOperation::None>
 inline void execute_float_binary16(Wavefront &wave, FloatBinary32Function wave32,
                                    FloatBinary64Function wave64, uint64_t flags, uint64_t modifiers,
                                    const Operand &destination, const Operand &lhs,
-                                   const Operand &rhs, bool rdna3) {
+                                   const Operand &rhs, bool rdna3, bool zero_extend_low = false) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   if (!wave.exec())
     return;
@@ -1005,6 +1005,8 @@ inline void execute_float_binary16(Wavefront &wave, FloatBinary32Function wave32
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, lhs, wave.exec(), modifiers & RJ_ARITH_ALU_HIGH_A ? 0xC : 0x3);
   VectorInput32 b(registers, wave, rhs, wave.exec(), modifiers & RJ_ARITH_ALU_HIGH_B ? 0xC : 0x3);
+  // CDNA whole-register destinations clear the upper half of low-half results.
+  const uint8_t bytes = modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : zero_extend_low ? 0xF : 0x3;
   uint32_t causes = 0;
   if constexpr (Op != HalfBinaryOperation::None)
     causes =
@@ -1018,7 +1020,7 @@ inline void execute_float_binary16(Wavefront &wave, FloatBinary32Function wave32
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, state)
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, state);
       },
-      /*allow_direct=*/false, modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : 0x3);
+      /*allow_direct=*/false, bytes);
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);
@@ -1127,7 +1129,7 @@ inline void execute_float_ternary16(Wavefront &wave, FloatTernaryWave32Function 
                                     FloatTernaryWave64Function wave64, uint64_t flags,
                                     uint64_t modifiers, const Operand &destination,
                                     const Operand &lhs, const Operand &rhs, const Operand &third,
-                                    bool rdna3) {
+                                    bool rdna3, bool zero_extend_low = false) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   if (!wave.exec())
     return;
@@ -1136,6 +1138,9 @@ inline void execute_float_ternary16(Wavefront &wave, FloatTernaryWave32Function 
   VectorInput32 a(registers, wave, lhs, wave.exec(), modifiers & RJ_ARITH_ALU_HIGH_A ? 0xC : 0x3);
   VectorInput32 b(registers, wave, rhs, wave.exec(), modifiers & RJ_ARITH_ALU_HIGH_B ? 0xC : 0x3);
   VectorInput32 c(registers, wave, third, wave.exec(), modifiers & RJ_ARITH_ALU_HIGH_C ? 0xC : 0x3);
+  // CDNA VOP3 low-half writes clear the other half. The staging bank starts at zero,
+  // so publishing all four bytes preserves that behavior without an extra VGPR read.
+  const uint8_t bytes = modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : zero_extend_low ? 0xF : 0x3;
   uint32_t causes = 0;
   const bool success = write_vector32_result(
       wave, registers, destination, exec_mask,
@@ -1146,7 +1151,7 @@ inline void execute_float_ternary16(Wavefront &wave, FloatTernaryWave32Function 
                             state)
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data, state);
       },
-      /*allow_direct=*/false, modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : 0x3);
+      /*allow_direct=*/false, bytes);
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);

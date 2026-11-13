@@ -747,6 +747,7 @@ def test_gfx1250_model_include_graph_does_not_reach_vm(
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
         rocjitsu_source_root / 'lib' / 'util' / 'include',
         rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
+        rocjitsu_source_root / 'lib' / 'arith' / 'include',
     )
     model_sources = [
         path
@@ -3929,7 +3930,8 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     assert 'base + (inst_.vdst & 0x7fu), lane)' not in fmac_f16
 
     add_co = _generated_method_body(cdna4_vop2_exec, 'VAddCoU32Vop2', 'VSubCoU32Vop2')
-    assert 'execute_v_add_co_u32_vop2' in add_co
+    assert 'rj_arith_v_add_co_u32_w64' in add_co
+    assert 'execute_carry32' in add_co
 
     # Migrated DS routing passes logical operands to the bridge, preserving
     # the high-VGPR addressing contract instead of reconstructing raw indices.
@@ -3967,11 +3969,10 @@ def test_gfx1250_generated_vop3_mad_u16_uses_true16_helpers(
     body = _generated_method_body(vop3_ternary, 'VMadU16Vop3', 'VXadU32Vop3')
 
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT' not in body
-    assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in body
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
-    assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result, false)' in body
+    assert 'rj_arith_v_mad_u16_w32' in body
+    assert 'execute_integer16<3>' in body
+    for selector in ('A', 'B', 'C', 'D'):
+        assert f'RJ_ARITH_ALU_HIGH_{selector}' in body
 
 
 def test_generated_special_vop3_true16_paths_use_selected_halves(
@@ -4038,13 +4039,11 @@ def test_cdna_generated_vop3_b16_i16_u16_paths_use_selected_halves(
     for class_name, next_class_name, src_count in cases:
         body = _generated_method_body(vop3, class_name, next_class_name)
         assert 'amdgpu::execute_v_' not in body
-        assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in body
-        for src_idx in range(src_count):
-            assert (
-                f'read_vop3_true16_src(src{src_idx}, wf, lane, opsel, {src_idx})'
-                in body
-            )
-        assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in body
+        assert 'const uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
+        assert f'execute_integer16<{src_count}, true>' in body
+        for selector in ('A', 'B', 'C')[:src_count]:
+            assert f'RJ_ARITH_ALU_HIGH_{selector}' in body
+        assert 'RJ_ARITH_ALU_HIGH_D' in body
 
 
 def test_generated_classified_alu_latches_trapsts_before_simd_return(
@@ -4750,6 +4749,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
         runtime_api_headers_include_root,
         rocjitsu_source_root / 'lib' / 'util' / 'include',
         rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
+        rocjitsu_source_root / 'lib' / 'arith' / 'include',
     )
     subprocess.run(
         [
@@ -4795,6 +4795,7 @@ def test_custom_identity_preprocesses_with_profile_handwritten_includes(
         rocjitsu_source_root / 'lib' / 'arith' / 'include',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
+        rocjitsu_source_root / 'lib' / 'arith' / 'include',
         runtime_api_headers_include_root,
         rocjitsu_source_root / 'lib' / 'arith' / 'include',
         rocjitsu_source_root / 'lib' / 'util' / 'include',
@@ -5061,10 +5062,10 @@ def test_gfx1250_generated_vop3_lshrrev_b16_uses_true16_helpers(
     vop3_alu = (gfx1250_generated_root / 'vop3_exec_alu.cpp').read_text()
     body = _generated_method_body(vop3_alu, 'VLshrrevB16Vop3', 'VAshrrevI16Vop3')
 
-    assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in body
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result, true)' in body
+    assert 'rj_arith_v_lshrrev_b16_w32' in body
+    assert 'execute_integer16<2>' in body
+    for selector in ('A', 'B', 'D'):
+        assert f'RJ_ARITH_ALU_HIGH_{selector}' in body
     assert 'inst.vdst.write_lane' not in body
 
 
@@ -5326,32 +5327,32 @@ def test_gfx1250_generator_wires_instruction_specific_integer_saturation():
         )
 
     vop3 = generated_body('V_ADD_NC_U32', 'ENC_VOP3')
-    assert 'vop3_integer_add<uint32_t>' in vop3
+    assert 'rj_arith_v_add_nc_u32_w64' in vop3
+    assert 'RJ_ARITH_ALU_CLAMP' in vop3
     assert 'inst_.clamp' in vop3
 
     subrev = generated_body('V_SUBREV_NC_U32', 'ENC_VOP3')
-    assert 'vop3_integer_sub<uint32_t>' in subrev
-    assert subrev.index('read_lane(src1, lane)') < subrev.index('read_lane(src0, lane)')
+    assert 'rj_arith_v_subrev_nc_u32_w64' in subrev
+    assert 'vdst, src0, src1' in subrev
     assert 'inst_.clamp' in subrev
 
     add_u64 = generated_body('V_ADD_NC_U64', 'ENC_VOP3')
-    assert 'vop3_integer_add<uint64_t>' in add_u64
+    assert 'execute_binary64' in add_u64
+    assert 'rj_arith_v_add_nc_u64_w32' in add_u64
     assert 'inst_.clamp' in add_u64
 
     sub_u64 = generated_body('V_SUB_NC_U64', 'ENC_VOP3')
-    assert 'vop3_integer_sub<uint64_t>' in sub_u64
+    assert 'execute_binary64' in sub_u64
+    assert 'rj_arith_v_sub_nc_u64_w32' in sub_u64
     assert 'inst_.clamp' in sub_u64
 
-    expected_helpers = {
-        'V_ADD_MAX_I32': 'vop3_integer_add_minmax<int32_t, true>',
-        'V_ADD_MAX_U32': 'vop3_integer_add_minmax<uint32_t, true>',
-        'V_ADD_MIN_I32': 'vop3_integer_add_minmax<int32_t, false>',
-        'V_ADD_MIN_U32': 'vop3_integer_add_minmax<uint32_t, false>',
-    }
-    for name, helper in expected_helpers.items():
+    # Intrinsic saturation now belongs to the library, independently of CLAMP.
+    for name in ('V_ADD_MAX_I32', 'V_ADD_MAX_U32', 'V_ADD_MIN_I32', 'V_ADD_MIN_U32'):
         body = generated_body(name, 'ENC_VOP3')
-        assert helper in body
-        assert 'inst_.clamp' in body
+        assert 'execute_ternary32' in body
+        assert f'rj_arith_{name.lower()}_w32' in body
+        assert f'rj_arith_{name.lower()}_w64' in body
+        assert 'vop3_integer_add_minmax' not in body
 
     for name, enc_name, result_writer in (
         ('V_MAD_NC_U64_U32', 'ENC_VOP3', None),
@@ -5360,7 +5361,14 @@ def test_gfx1250_generator_wires_instruction_specific_integer_saturation():
         ('V_MAD_CO_I64_I32', 'VOP3_SDST_ENC', 'commit_result'),
     ):
         body = generated_body(name, enc_name, result_writer=result_writer)
-        assert 'bool overflow' in body
+        if result_writer:
+            assert 'execute_mad64' in body
+            assert 'rj_arith_' + name.lower() + '_w64' in body
+            assert 'commit_result' in body
+        else:
+            assert 'execute_mad64_nc' in body
+            assert 'rj_arith_' + name.lower() + '_w64' in body
+            assert 'commit_result' not in body
         assert '__int128' not in body
         assert 'inst_.clamp' in body
 
@@ -5369,8 +5377,8 @@ def test_gfx1250_generator_wires_instruction_specific_integer_saturation():
         ('V_PK_MAD_U16', 'vop3_integer_mad<uint16_t, 16>'),
     ):
         body = generated_body(name, 'ENC_VOP3P')
-        assert body.count(helper) == 2
-        assert body.count('inst_.clamp') == 2
+        assert 'rj_arith_' + name.lower() + '_w64' in body
+        assert 'inst_.clamp ? RJ_ARITH_PK_CLAMP' in body
 
     for name in ('V_QSAD_PK_U16_U8', 'V_MQSAD_PK_U16_U8', 'V_MQSAD_U32_U8'):
         body = generated_body(name, 'ENC_VOP3')
@@ -5383,9 +5391,10 @@ def test_gfx1250_generator_wires_instruction_specific_integer_saturation():
     carry = generated_body(
         'V_ADD_CO_U32', 'VOP3_SDST_ENC', result_writer='commit_result'
     )
-    assert 'inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX' in carry
+    assert 'rj_arith_v_add_co_u32_w64' in carry
+    assert 'RJ_ARITH_ALU_CLAMP' in carry
     assert 'inst_.clamp' in carry
-    assert 'if (w > 0xFFFFFFFFULL) vcc |=' in carry
+    assert 'input_carry, commit_result' in carry
 
 
 def test_rdna4_generator_uses_instruction_policy_for_integer_clamp():

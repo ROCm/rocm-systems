@@ -13,8 +13,9 @@ namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 // Identify FP64 selections, which preserve selected subnormal outputs.
 constexpr bool is_selection(Fp64 op) {
-  return op == Fp64::MinLegacy || op == Fp64::MaxLegacy || op == Fp64::MinNum ||
-         op == Fp64::MaxNum || op == Fp64::Minimum || op == Fp64::Maximum;
+  return op == Fp64::MinLegacyCdna || op == Fp64::MaxLegacyCdna || op == Fp64::MinLegacy ||
+         op == Fp64::MaxLegacy || op == Fp64::MinNum || op == Fp64::MaxNum || op == Fp64::Minimum ||
+         op == Fp64::Maximum;
 }
 
 // Return the number of source operands required by the selected FP64 operation.
@@ -22,6 +23,8 @@ constexpr int fp64_sources(Fp64 op) {
   switch (op) {
   case Fp64::Add:
   case Fp64::Mul:
+  case Fp64::MinLegacyCdna:
+  case Fp64::MaxLegacyCdna:
   case Fp64::MinLegacy:
   case Fp64::MaxLegacy:
   case Fp64::MinNum:
