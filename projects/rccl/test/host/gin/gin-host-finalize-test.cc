@@ -9,10 +9,9 @@
 // ginComms[] after host finalize, and ncclGinConnectOnce's failure and
 // finalized paths (AICOMRCCL-2739).
 //
-// Own binary: rccl-UnitTestsMicro already defines the GIN host entry points in
-// fakes/dev_runtime_micro_fakes.cc for dev-runtime-test.cc. Compiling gin_host.cc
-// into that binary is a duplicate-symbol error. GinFinalizeTest in
-// gin-plugin-init-test.cc covers ncclGinFinalize against a hand-built ginState;
+// fakes/dev_runtime_micro_fakes.cc fakes the GIN host entry points for
+// dev-runtime-test.cc, so this binary must not link it beside the real
+// gin_host.cc. GinFinalizeTest in gin-plugin-init-test.cc covers ncclGinFinalize against a hand-built ginState;
 // this suite covers the host half that preserves those records and marks
 // backends closed.
 

@@ -57,7 +57,7 @@
 
 
 // devcomm compat tables (defined in devcomm/devcomm_v*.cc in the real build).
-// rccl-UnitTestsMicro compiles the v22902 and v22907 sources for real; the
+// Binaries that need v22902 and v22907 compile their sources for real; the
 // rest only need to exist for getNcclVersionCompat's table to link.
 struct ncclDevCommCompat ncclDevCommCompat_v23000 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v23100 = {};
@@ -149,6 +149,12 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // ---------------------------------------------------------------------------
 // Group state machine.
 // ---------------------------------------------------------------------------
+
+// group.cc's thread-local group state, which group.h's inline helpers read, for binaries without group.cc.
+#ifndef RCCL_DEV_RUNTIME_MICRO_FAKES_OMIT_GROUP_STATE
+thread_local int ncclGroupDepth = 0;
+thread_local ncclResult_t ncclGroupError = ncclSuccess;
+#endif
 
 // Emitted by init.cc, which this binary does not link, so the redirected
 // NCCL_PARAM in dev_runtime.cc does not cover it. Routed through g_loadParam
@@ -415,8 +421,8 @@ ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState* devr, 
 // The segment cross-rank layout check and the GIN segment-info build, both
 // reached from symMemoryRegisterGin and both real in dev_runtime_segments.cc.
 // dev-runtime-test.cc compiles that source and routes these seams to it, so
-// the no-op defaults here only serve the other suites in this binary, which
-// never enable GIN and so never reach either call.
+// the no-op defaults here only serve the other binaries linking this file,
+// which never enable GIN and so never reach either call.
 static ncclResult_t DefaultVerifySegmentLayouts(struct ncclDevrMemory*, struct ncclComm*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclDevrMemory*, struct ncclComm*)> g_devrVerifySegmentLayouts =
     DefaultVerifySegmentLayouts;
@@ -503,8 +509,8 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
   return ncclSuccess;
 }
 
-// ncclRmaProxyEnabled is no longer faked here: the real predicate is linked into
-// this binary, so a fake would be a duplicate. Tests drive its terms instead of
+// ncclRmaProxyEnabled is not faked here: the binaries that reach it link the real
+// predicate (rma.cc), so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
 
 #undef ASSERT_HOOK_MATCHES_PROD

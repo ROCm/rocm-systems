@@ -782,8 +782,8 @@ class AsyncLaunchTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    // Not just this class's own SetUp: other TUs sharing this binary/thread (e.g. rccl_wrap.cc's
-    // rcclDdaEnabled reading ncclGroupDepth) can run next, especially under --gtest_shuffle.
+    // Not just this class's own SetUp: any test on this thread can run next, especially under
+    // --gtest_shuffle.
     ResetGroupThreadLocals();
     s_active = nullptr;
   }
@@ -1466,8 +1466,8 @@ TEST_F(MgmtTaskJobFuncTest, FailingTaskStopsDequeuingAndStillRunsItsOwnDestructo
 }
 
 // ncclCommGroupRegisterSymmetric: only the ceInitTaskQueue branch. rmaCeInitTaskQueue is not
-// covered because this binary links the real src/rma/rma_ce.cc, whose ncclRmaCeInit needs the
-// dev_runtime fixture; the other four queues need that fixture or new seams. Deferred.
+// covered because ncclRmaCeInit is a plain ::abort() stub here (collective_stubs.cc); the other
+// four queues need the dev_runtime fixture or new seams. Deferred.
 class GroupRegisterSymmetricCeInitTest : public ::testing::Test {
  protected:
   std::unique_ptr<ncclComm> comm_;

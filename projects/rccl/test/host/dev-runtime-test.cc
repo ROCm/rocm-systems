@@ -237,9 +237,8 @@ TEST(SymIsHostSegment, Invalid_ReturnsFalse) {
 // The shared HIP fakes default to fail-loud (hipErrorInvalidValue) so that an
 // unstubbed call surfaces. dev_runtime.cc cannot run a single symmetric-memory
 // path against that, so the working emulator has to be installed per test
-// rather than relied on as a process-wide default -- these tests share a binary
-// with group, and that suite's TearDown restores the fail-loud defaults between
-// two of ours.
+// rather than relied on as a process-wide default -- other fixtures in this
+// file reset to the fail-loud defaults between two of ours.
 //
 // SetUp, not just TearDown: a TearDown-only reset leaves whichever test runs
 // first after another suite with no emulator at all.
@@ -272,10 +271,9 @@ protected:
   }
   void TearDown() override { ResetDevRuntimeMicroFakes(); }
 
-  // Hand the shared fakes back in their pristine state, so the p2p
-  // suites that share this binary do not inherit working HIP memory from
-  // whichever of our tests ran before them -- the fail-loud defaults are
-  // precisely what those suites rely on being in place.
+  // Hand the shared fakes back in their pristine state, so a later test that
+  // relies on the fail-loud defaults does not inherit working HIP memory from
+  // whichever of our tests ran before it.
   //
   // The destructor rather than TearDown: most fixtures here override TearDown
   // without chaining to the base, and their cleanup still needs the emulator
@@ -6390,10 +6388,9 @@ TEST_F(DeepCopyDevCommRequirementsTest, FreeNull_IsSafe) {
 // getNcclVersionCompat picks the compatibility record covering the version the
 // caller compiled against, refusing a caller newer than the library.
 //
-// The compat table is three globals owned by the v22902/v22907 devcomm shim
-// sources, which rccl-UnitTestsMicro compiles for real. Each test needs its own
-// version window, so the fixture zeroes them, then restores the real tables
-// that static initialisation put there.
+// The compat table is three globals owned by the devcomm shim sources, which
+// this binary compiles for real. Each test needs its own version window, so the
+// fixture zeroes them and hands the real tables back afterwards.
 
 class NcclVersionCompatTest : public DevRuntimeMicroTest {
 protected:

@@ -10,9 +10,10 @@
  * fakes/nccl_fakes.h.
  *
  * Distinct from fakes/dev_runtime_fakes.{h,cc}, which fakes two dev_runtime.cc
- * predicates for binaries that do NOT compile that file. This one belongs to
- * rccl-UnitTestsMicro, which compiles dev_runtime.cc itself (dev-runtime-test.cc);
- * the two must never be linked into the same binary.
+ * predicates for binaries that do NOT compile that file. This one fakes the
+ * externals dev_runtime.cc reaches, for binaries that compile it (e.g.
+ * rccl-UnitTestsMicroDevRuntime); the two must never be linked into the same
+ * binary.
  *
  * Each hook defaults to the success behaviour the rest of the suite relies on.
  * A test that needs a call to fail installs its own via ScopedHook

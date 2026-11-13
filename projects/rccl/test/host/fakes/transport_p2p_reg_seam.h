@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Routes a unit's calls into the src/transport/p2p.cc registration entry points to the micro_* trampolines in
-// transport_p2p_reg_fakes.h, kept only because rccl-UnitTestsMicro still links those beside the real p2p.cc.
+// transport_p2p_reg_fakes.h.
 // Include it before the #include <UNIT>_CC_PATH and transport_p2p_reg_seam_undef.h after it. No include guard on
 // purpose.
 
