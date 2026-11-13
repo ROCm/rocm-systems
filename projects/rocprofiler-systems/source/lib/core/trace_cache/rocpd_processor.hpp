@@ -10,9 +10,9 @@
 #include "library/pmc/collectors/hipfile/sample.hpp"
 #include "trace_cache/sample_type.hpp"
 
-#include <profiler-hub/storage.hpp>
-#include <profiler-hub/writer.hpp>
-#include <profiler-hub/writer_types.hpp>
+#include <profiler-hub/cpp/storage.hpp>
+#include <profiler-hub/cpp/writer.hpp>
+#include <profiler-hub/cpp/writer_types.hpp>
 
 #include <cstddef>
 #include <string>
