@@ -174,11 +174,8 @@ int rj_arith_v_div_scale_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // D[0] before D[1], so D[1] wins if both destination pointers alias.
 // Supports all source ABS/NEG, OMOD and CLAMP. Nonzero OMOD flushes subnormals
 // before scaling, maps existing zeros to +0 and preserves signed underflow zero.
-// RDNA4 FP16_OVFL saturates provisional-quotient overflow before OMOD and finite
+// FP16_OVFL saturates provisional-quotient overflow before OMOD and finite
 // scaling overflow; exceptional B/C cases retain their infinity/NaN behavior.
-// RDNA3 FP16 preserves nearest-rounded provisional infinities, scales in the promoted domain,
-// then narrows and saturates finite overflow; active OMOD flushes rounded
-// subnormals and signed zeros to +0. Subnormal inputs can scale to normal results.
 // All formats accept RJ_ARITH_FP_ROUND_MASK for overflow recovery; FP16 output
 // narrowing remains nearest-even. Nearest-even retains SIMD; directed rounding
 // uses integer scalar recovery and scaling. Denormals are preserved by default.
@@ -196,7 +193,7 @@ int rj_arith_v_div_scale_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // that domain with UNSUPPORTED_FP_STATUS. DX10_CLAMP set suppresses those causes.
 // RDNA3 preserves selected signaling NaNs with IEEE clear; IEEE set quiets them.
 // FP16 with active RDNA3 OMOD rejects strict numeric semantics; Compatibility
-// and mode 1 use the inherited Loose promoted-half behavior. FP32/FP64 Compatibility still reports
+// and mode 1 resolve to Loose. FP32/FP64 Compatibility still reports
 // INVALID.
 // Wave64 retains each format's operand layout, modifiers and exact exception
 // accumulation. FP16 supports four independent DPP rows.
@@ -536,7 +533,9 @@ int rj_arith_v_pk_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 // guest-mode path, IEEE controls NaN quieting. Directed guest rounding uses
 // scalar FP64 arithmetic and integer narrowing. RDNA3 RJ_ARITH_FP_DX10_CLAMP_OFF uses
 // that scalar path to preserve NaNs under CLAMP. Loose and Compatibility are
-// supported; mode 1 may fall back to Loose. Explicit exact modes are unsupported.
+// supported; mode 1 may fall back to Loose. RDNA3 variants also support exact semantics
+// (no FP status) through the scalar guest-mode path, which matches gfx1100 with IEEE set
+// and clear; Compatibility keeps the SIMD path. RDNA4 variants reject exact modes.
 // Compatibility preserves selected gfx11 input NaN bits with IEEE clear in both
 // scalar and SIMD paths; IEEE set quiets them. Loose permits approximate NaN results.
 // ADD/MUL without _gfx12 take RDNA3 trapsts; RDNA4 variants
