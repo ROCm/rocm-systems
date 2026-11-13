@@ -798,6 +798,31 @@ public:
   [[nodiscard]] bool clear_host_svm_policy_locked(uint64_t gpu_va, uint64_t size,
                                                   uint64_t preserve_userptr_handle = 0) {
     const uint64_t end = gpu_va + size;
+    const bool retired_view_removed =
+        std::ranges::any_of(retired_identity_views_, [&](const auto &view) {
+          return view.gpu_va < end && gpu_va < view.gpu_va + view.mapped_bytes;
+        });
+    if (retired_view_removed) {
+      // A fixed BO's denial follows its surviving CPU view, including fragments
+      // left by partial unmaps or replacements of a guarded SVM reservation.
+      std::vector<RetiredIdentityView> remaining_views;
+      remaining_views.reserve(retired_identity_views_.size() + 1);
+      for (const auto &view : retired_identity_views_) {
+        const uint64_t view_end = view.gpu_va + view.mapped_bytes;
+        if (view_end <= gpu_va || end <= view.gpu_va) {
+          remaining_views.push_back(view);
+          continue;
+        }
+        const uint64_t removed_begin = std::max(gpu_va, view.gpu_va);
+        const uint64_t removed_end = std::min(end, view_end);
+        claim_gpu_range_locked(removed_begin, removed_end - removed_begin);
+        if (view.gpu_va < removed_begin)
+          remaining_views.push_back({view.gpu_va, removed_begin - view.gpu_va});
+        if (removed_end < view_end)
+          remaining_views.push_back({removed_end, view_end - removed_end});
+      }
+      retired_identity_views_ = std::move(remaining_views);
+    }
     const auto overlaps = [&](const auto &range) {
       return range.gpu_va < end && gpu_va < range.gpu_va + range.size;
     };
@@ -830,7 +855,7 @@ public:
           return range.host_vma_backed && overlaps(range);
         });
     if (!has_denials && !has_host_tombstones && !has_access)
-      return false;
+      return retired_view_removed;
     std::vector<GpuSvmDeniedRange> remaining;
     if (has_denials) {
       remaining.reserve(svm_denied_ranges_.size() + 1);
