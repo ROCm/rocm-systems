@@ -147,8 +147,9 @@ inline bool CheckSignalCondition(int64_t value, hsa_signal_condition_t condition
 }
 
 namespace core {
-// The same global as in runtime.h, which includes this header and so can't be included here
+// The same globals as in runtime.h, which includes this header and so can't be included here
 extern bool g_use_mwaitx;
+extern bool g_use_clflushopt;
 
 class Agent;
 class Signal;
@@ -261,12 +262,13 @@ class SignalBatch {
   /// @p access_agents are granted access to the arena; empty when @p region is
   /// already mapped for every agent. @p host_access_across_link states that the host reaches the
   /// arena uncached across PCIe or XGMI; the batch then keeps a host-side copy of each member's
-  /// Signal*, since reading it from the slot would cost link round trips.
+  /// Signal*, since reading it from the slot would cost link round trips. @p host_caches_arena
+  /// states that the host maps the arena write-back (coherent XGMI).
   static hsa_status_t Create(uint32_t count, const hsa_signal_value_t* initial_values,
                              bool use_interrupt, const MemoryRegion* region,
                              const std::vector<hsa_agent_t>& access_agents,
                              bool host_access_via_hdp, bool host_access_across_link,
-                             SignalBatch** batch, hsa_signal_t* signals);
+                             bool host_caches_arena, SignalBatch** batch, hsa_signal_t* signals);
 
   static __forceinline hsa_amd_signal_batch_t Convert(SignalBatch* batch) {
     const hsa_amd_signal_batch_t handle = {
@@ -284,6 +286,9 @@ class SignalBatch {
 
   /// @brief The arena is in device memory the host reaches across PCIe or XGMI, uncached.
   bool host_access_across_link() const { return host_access_across_link_; }
+
+  /// @brief The host maps the arena write-back, so a host read leaves the line in the CPU cache.
+  bool host_caches_arena() const { return host_caches_arena_; }
 
   /// @brief Releases the batch handle. Members stay valid until each is destroyed.
   void ReleaseHandle();
@@ -303,11 +308,13 @@ class SignalBatch {
   static bool FindShadowedMember(uint64_t handle, Signal** member);
 
  private:
-  SignalBatch(void* arena, uint32_t count, bool host_access_via_hdp, bool host_access_across_link)
+  SignalBatch(void* arena, uint32_t count, bool host_access_via_hdp, bool host_access_across_link,
+              bool host_caches_arena)
       : arena_(arena),
         count_(count),
         host_access_via_hdp_(host_access_via_hdp),
         host_access_across_link_(host_access_across_link),
+        host_caches_arena_(host_caches_arena),
         references_(1),
         destroyed_(false) {}
   ~SignalBatch();
@@ -328,6 +335,7 @@ class SignalBatch {
   const uint32_t count_;
   const bool host_access_via_hdp_;
   const bool host_access_across_link_;
+  const bool host_caches_arena_;
 
   /// Host copy of each slot's core_signal, cleared when the member is destroyed. Only
   /// allocated when host_access_across_link_.
@@ -666,6 +674,15 @@ class Signal {
     return 0;
   }
 
+  /// @brief Loads the value from the host, then evicts its line where the host caches it.
+  __forceinline int64_t LoadValue(std::memory_order order) {
+    const int64_t value = atomic::Load(&signal_.value, order);
+    if (evict_after_host_load_) {
+      cacheline_evict(const_cast<int64_t*>(&signal_.value), g_use_clflushopt);
+    }
+    return value;
+  }
+
   /// @variable The value is in device memory the host reaches through HDP: host
   /// atomics don't reach it and host stores need a flush. Cached so host operations
   /// never read the signal's properties across the bus.
@@ -675,6 +692,11 @@ class Signal {
   /// device memory the host reaches across a link is uncached: the agent's store never reaches
   /// the monitor, and MWAITX would sleep out its whole timeout.
   bool host_can_monitor_ = true;
+
+  /// @variable The host caches the value's line in device memory across a coherent link. A
+  /// copy a host load leaves in the CPU cache delays the agent that next updates the value and
+  /// every agent waiting on it, by microseconds, so loads evict it.
+  bool evict_after_host_load_ = false;
 
   /// @brief One pause of a polling wait on the value. Where the host can monitor the value,
   /// MWAITX returns once it changes from @p value_on_last_check or after @p timeout MWAITX

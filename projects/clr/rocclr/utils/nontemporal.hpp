@@ -351,6 +351,32 @@ static inline void nontemporalCopyAQL(AqlPacket* __restrict dst,
   nontemporalMemcpy(dst_bytes + 4, src_bytes + 4, sizeof(AqlPacket) - 4);
 }
 
+// Stores |value| without bringing the line into the CPU cache; a cached copy is evicted. Ordered
+// only by a later nontemporalStoreFence().
+static inline void nontemporalStore64(volatile int64_t* dst, int64_t value) {
+#if IS_LINUX && defined(ATI_ARCH_X86)
+  _mm_stream_si64(const_cast<long long*>(reinterpret_cast<volatile long long*>(dst)), value);
+#else
+  *dst = value;
+#endif
+}
+
+// Evicts the line holding |p| from the CPU caches without waiting for it: CLFLUSHOPT where the
+// CPU has it, else CLFLUSH. Where the host maps device memory write-back, a line a host load leaves
+// in the cache delays the GPU agent that next updates it and every agent waiting on it.
+static inline void cachelineEvict(const volatile void* p) {
+#if IS_LINUX && defined(ATI_ARCH_X86)
+  if (Os::hasClflushopt()) {
+    auto* line = static_cast<volatile char*>(const_cast<void*>(p));
+    __asm__ __volatile__("clflushopt %0" : "+m"(*line));
+  } else {
+    _mm_clflush(const_cast<const void*>(p));
+  }
+#else
+  (void)p;
+#endif
+}
+
 // Drain the write-combining buffer and wait for all preceding NT stores to
 // reach the destination coherence point.  On PCIe this stalls the CPU until
 // WriteACK returns, so minimise the number of fences per submission.
@@ -381,10 +407,12 @@ static inline void ringDoorbell(volatile uint64_t* doorbell, uint64_t index,
 
 // ---- Streaming loads from device memory -------------------------------------------
 //
-// A load from WC-mapped device memory stalls for a bus round trip. MOVNTDQA fills a
-// streaming-load buffer with the 64-byte line instead, and loads of different lines overlap,
-// so reading n lines costs about one round trip rather than n. Streaming loads are weakly
-// ordered: the caller fences them after the loads that proved the data final.
+// A load from WC-mapped device memory (a PCIe BAR) stalls for a bus round trip. MOVNTDQA fills
+// a streaming-load buffer with the 64-byte line instead, and loads of different lines overlap,
+// so reading n lines costs about one round trip rather than n. On a host that maps device memory
+// write-back (A+A), MOVNTDQA is an ordinary load: each line it reads stays in the CPU cache,
+// where the GPU's next access to it has to probe. Streaming loads are weakly ordered: the caller
+// fences them after the loads that proved the data final.
 
 // Copies the 16 bytes at src, which must be 16-byte aligned, to dst with a streaming load.
 #if IS_LINUX && defined(ATI_ARCH_X86)

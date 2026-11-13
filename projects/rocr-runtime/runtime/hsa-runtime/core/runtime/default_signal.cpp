@@ -62,13 +62,11 @@ BusyWaitSignal::BusyWaitSignal(SharedSignal* abi_block, bool enableIPC)
 }
 
 hsa_signal_value_t BusyWaitSignal::LoadRelaxed() {
-  return hsa_signal_value_t(
-      atomic::Load(&signal_.value, std::memory_order_relaxed));
+  return hsa_signal_value_t(LoadValue(std::memory_order_relaxed));
 }
 
 hsa_signal_value_t BusyWaitSignal::LoadAcquire() {
-  return hsa_signal_value_t(
-      atomic::Load(&signal_.value, std::memory_order_acquire));
+  return hsa_signal_value_t(LoadValue(std::memory_order_acquire));
 }
 
 void BusyWaitSignal::StoreRelaxed(hsa_signal_value_t value) {
