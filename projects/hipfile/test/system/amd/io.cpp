@@ -371,7 +371,7 @@ TEST_F(HipFileIoHipErrors, FailedHipRuntimeCallReturnsHipDriverError)
         int not_device_memory{};
         EXPECT_CALL(mhip, hipAmdFileWrite)
             .WillOnce([&mhip, &not_device_memory](hipAmdFileHandle_t fh, void *, uint64_t size,
-                                                   int64_t file_offset) {
+                                                  int64_t file_offset) {
                 return mhip.Hip::hipAmdFileWrite(fh, &not_device_memory, size, file_offset);
             });
 
@@ -400,7 +400,7 @@ TEST_F(HipFileIoHipErrors, RecoveredFastpathIoClearsHipError)
         int not_device_memory{};
         EXPECT_CALL(mhip, hipAmdFileWrite)
             .WillOnce([&mhip, &not_device_memory](hipAmdFileHandle_t fh, void *, uint64_t size,
-                                                   int64_t file_offset) -> uint64_t {
+                                                  int64_t file_offset) -> uint64_t {
                 EXPECT_THROW(mhip.Hip::hipAmdFileWrite(fh, &not_device_memory, size, file_offset),
                              Hip::RuntimeError);
                 EXPECT_NE(hipSuccess, hipPeekAtLastError());

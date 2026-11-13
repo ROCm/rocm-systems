@@ -27,6 +27,7 @@
 // EXPECT_CALL(mhip, <passthrough_func>).Times(AnyNumber());
 // EXPECT_CALL(mhip, <modified_func>).WillOnce(...).RetiresOnSaturation();
 // ```
-#define MOCK_PASSTHROUGH(base_class, func)                                                             \
-    ON_CALL(*this, func).WillByDefault(                                                                \
-        [this](auto &&...args) { return this->base_class::func(std::forward<decltype(args)>(args)...); })
+#define MOCK_PASSTHROUGH(base_class, func)                                                                   \
+    ON_CALL(*this, func).WillByDefault([this](auto &&...args) {                                              \
+        return this->base_class::func(std::forward<decltype(args)>(args)...);                                \
+    })
