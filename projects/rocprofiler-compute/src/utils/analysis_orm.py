@@ -48,7 +48,7 @@ from pc_sampling.source_snapshot_analysis import (
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "2.5.0"
+SCHEMA_VERSION = "3.0.0"
 
 
 Base = declarative_base()
@@ -120,7 +120,8 @@ class KernelRooflineData(Base):
     l0_cache_data = Column(Float)
     l1_cache_data = Column(Float)
     l2_cache_data = Column(Float)
-    hbm_cache_data = Column(Float)
+    # Arithmetic intensity at the device-memory level: HBM on MI, VRAM on gfx1201.
+    device_memory_cache_data = Column(Float)
     lds_cache_data = Column(Float)
 
     # Roofline data point can have one kernel

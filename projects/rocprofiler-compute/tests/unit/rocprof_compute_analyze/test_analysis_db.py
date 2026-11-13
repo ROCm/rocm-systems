@@ -3692,7 +3692,7 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
         "l0_cache_data",
         "l1_cache_data",
         "l2_cache_data",
-        "hbm_cache_data",
+        "device_memory_cache_data",
         "lds_cache_data",
     ]
     for col in expected_columns:
@@ -3705,11 +3705,11 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
 @pytest.mark.parametrize(
     "device_memory_metric", ["AI HBM", "AI VRAM"], ids=["hbm", "vram"]
 )
-def test_calc_roofline_data_stores_the_device_memory_point_in_hbm_cache_data(
+def test_calc_roofline_data_stores_the_device_memory_point_in_device_memory_cache_data(
     monkeypatch, device_memory_metric
 ):
-    """The column keeps its hbm_cache_data name. MI architectures fill it from
-    AI HBM, and gfx1201, which has no HBM, fills it from AI VRAM."""
+    """MI architectures fill device_memory_cache_data from AI HBM, and gfx1201,
+    which has no HBM, fills it from AI VRAM."""
     pmc_df = pd.DataFrame({
         "Kernel_Name": ["kernel"],
         "Start_Timestamp": [0],
@@ -3732,7 +3732,7 @@ def test_calc_roofline_data_stores_the_device_memory_point_in_hbm_cache_data(
 
     df = db_analysis.calc_roofline_data(analyzer)[workload_path]
 
-    assert df["hbm_cache_data"].iloc[0] == 7.0
+    assert df["device_memory_cache_data"].iloc[0] == 7.0
     assert df["total_flops"].iloc[0] == 5.0
 
 
