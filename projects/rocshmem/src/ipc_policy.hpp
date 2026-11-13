@@ -399,16 +399,18 @@ class IpcSdmaImpl : public IpcOnImpl {
   __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
     if (size >= constmem.ipc_sdma_threshold) {
       auto* handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
-      assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
-      if constexpr (is_blocking(Kind)) {
-        handle->quietAll();
-        // SDMA wrote dst to GL2, bypassing L1; device-scope acquire invalidates
-        // stale L1 so the get returns fresh data (partner of sdmaCopy release).
-        if constexpr (!is_put(Kind))
-          atomic::threadfence<atomic::memory_scope::device,
-                              atomic::memory_order::acquire>();
+      // Every pod slot has a queue once SDMA is agreed, so nullptr is only a safety net.
+      if (handle != nullptr) {
+        if constexpr (is_blocking(Kind)) {
+          handle->quietAll();
+          // SDMA wrote dst to GL2, bypassing L1; device-scope acquire invalidates
+          // stale L1 so the get returns fresh data (partner of sdmaCopy release).
+          if constexpr (!is_put(Kind))
+            atomic::threadfence<atomic::memory_scope::device,
+                                atomic::memory_order::acquire>();
+        }
+        return;
       }
-      return;
     }
     memcpy_lane<Kind>(dst, src, size);
   }
@@ -473,12 +475,11 @@ class IpcSdmaImpl : public IpcOnImpl {
             atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence(int local_pe) {
     if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
-      uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
-                         (local_pe * sdmaImpl_.numChannels);
+      uint64_t pe_mask = sdmaImpl_.sdmaPeMask(local_pe);
       if (atomic::load<atomic::memory_scope::device,
                        atomic::memory_order::relaxed>(
                         &sdmaImpl_.sdmaDirty) & pe_mask)
-        sdmaImpl_.sdmaQuiet(local_pe);
+        sdmaImpl_.sdmaQuietMask(pe_mask);
     }
     atomic::threadfence<scope, order>();
   }
@@ -503,12 +504,11 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   __device__ void ipcQuiet(int local_pe) {
     if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
-      uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
-                         (local_pe * sdmaImpl_.numChannels);
+      uint64_t pe_mask = sdmaImpl_.sdmaPeMask(local_pe);
       if (atomic::load<atomic::memory_scope::device,
                        atomic::memory_order::relaxed>(
                          &sdmaImpl_.sdmaDirty) & pe_mask)
-        sdmaImpl_.sdmaQuiet(local_pe);
+        sdmaImpl_.sdmaQuietMask(pe_mask);
       atomic::threadfence<atomic::memory_scope::system,
                           atomic::memory_order::acq_rel>();
       return;

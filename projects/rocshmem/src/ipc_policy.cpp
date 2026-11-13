@@ -301,8 +301,9 @@ __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases
                                        MPI_Comm thread_comm) {
   MPI_Comm shmcomm = MPI_COMM_NULL;
   IpcOnImpl::ipcHostInit(my_pe, heap_bases, thread_comm, &shmcomm);
-  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](int *values) {
-    mpilib_ftable_.Allgather(MPI_IN_PLACE, 1, MPI_INT, values, 1, MPI_INT, shmcomm);
+  // shmcomm is the IPC pod, which vmm_fabric can stretch over several hosts.
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](void *buf, int bytes) {
+    mpilib_ftable_.Allgather(MPI_IN_PLACE, bytes, MPI_BYTE, buf, bytes, MPI_BYTE, shmcomm);
   });
 }
 
@@ -310,8 +311,9 @@ __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases
                                        TcpBootstrap *bootstrap) {
   std::vector<int> shm_ranks;
   IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap, &shm_ranks);
-  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](int *values) {
-    bootstrap->groupAllGather(values, sizeof(int), shm_ranks);
+  // shm_ranks is the IPC pod, which vmm_fabric can stretch over several hosts.
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](void *buf, int bytes) {
+    bootstrap->groupAllGather(buf, bytes, shm_ranks);
   });
 }
 
