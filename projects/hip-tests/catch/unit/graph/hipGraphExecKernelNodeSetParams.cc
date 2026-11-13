@@ -18,14 +18,40 @@ Functional -
 2) In a chain of kernel nodes with the middle node disabled, update the first and the
    last node and check the updates take effect both while the middle node is disabled
    and after it is re-enabled.
+3) Disable the head of a cross-stream batch so its fallback dependency barrier occupies
+   the first filtered slot, update a later enabled kernel in that batch, and check the
+   new params and the dependency wait.
 */
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 #include <resource_guards.hh>
+#include <utils.hh>
+
+#include <chrono>
+#include <thread>
 
 __global__ void ExecKernelNodeSetParamsStore(int* output, int value) { output[0] = value; }
+
+__global__ void ExecKernelNodeSetParamsDelayStore(int* output, int value, unsigned long long ticks) {
+#if HT_AMD
+  const unsigned long long start = wall_clock64();
+  while (wall_clock64() - start < ticks) {
+  }
+#else
+  const unsigned long long start = clock64();
+  while (clock64() - start < ticks) {
+  }
+#endif
+  output[0] = value;
+}
+
+// Copies |src| and then stores |value|, so a lost dependency wait observes the cleared source.
+__global__ void ExecKernelNodeSetParamsCopyStore(const int* src, int* dst, int value) {
+  dst[0] = src[0];
+  dst[1] = value;
+}
 
 /**
  * Negative Test for API hipGraphExecKernelNodeSetParams
@@ -253,6 +279,134 @@ HIP_TEST_CASE(Unit_hipGraphExecKernelNodeSetParams_DisabledNeighborInBatch) {
 
   HIP_CHECK(hipGraphNodeSetEnabled(exec, nodes[1], 1));
   LaunchChainAndCheck(exec, stream, output.ptr(), {10, 2, 30});
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+// Fails the test when a lost completion signal would otherwise hang the suite.
+static void LaunchAndWaitBounded(hipGraphExec_t exec, hipStream_t stream) {
+  HIP_CHECK(hipGraphLaunch(exec, stream));
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+  hipError_t query = hipErrorNotReady;
+  while ((query = hipStreamQuery(stream)) == hipErrorNotReady &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  REQUIRE(query == hipSuccess);
+}
+
+/**
+ * The batch under test is three kernels that wait on one spinning kernel on another stream.
+ * Disabling its first node splices the reserved dependency barrier into filtered slot 0.
+ * Disabling the middle node as well puts the last kernel's filtered slot off its dispatch
+ * index, so the in-place param update has to use that slot. The last kernel copies the
+ * producer's output: a rewrite that lands on the barrier leaves the old value or lets the
+ * kernel run before the producer. Forks ahead of the batch make the segment graph deeper
+ * than four levels, so the default scheduler does not collapse it onto one stream.
+ */
+HIP_TEST_CASE(Unit_hipGraphExecKernelNodeSetParams_DisabledBatchHead) {
+  constexpr int kSteps = 6;
+  constexpr int kProducer = 40;
+  constexpr int kHead = 1;
+  constexpr int kMiddle = 2;
+  constexpr int kLast = 3;
+  constexpr int kLastUpdated = 30;
+  constexpr unsigned long long kSpinUs = 2000;
+  // [0] producer, [1] copy of producer, [2] last kernel's value, [3] head, [4] middle, [5] scratch
+  constexpr int kOutputs = 6;
+  LinearAllocGuard<int> output(LinearAllocs::hipMalloc, kOutputs * sizeof(int));
+  int* producer_ptr = output.ptr();
+  int* copy_ptr = output.ptr() + 1;
+  int* head_ptr = output.ptr() + 3;
+  int* middle_ptr = output.ptr() + 4;
+  int* scratch_ptr = output.ptr() + 5;
+  int scratch = 0;
+  int producer = kProducer;
+  int head_value = kHead;
+  int middle_value = kMiddle;
+  int last_value = kLast;
+  unsigned long long ticks = kSpinUs * SpinTicksPerUs();
+  void* scratch_args[] = {&scratch_ptr, &scratch};
+  void* producer_args[] = {&producer_ptr, &producer, &ticks};
+  void* head_args[] = {&head_ptr, &head_value};
+  void* middle_args[] = {&middle_ptr, &middle_value};
+  void* last_args[] = {&producer_ptr, &copy_ptr, &last_value};
+
+  hipKernelNodeParams store{};
+  store.func = reinterpret_cast<void*>(ExecKernelNodeSetParamsStore);
+  store.gridDim = dim3(1);
+  store.blockDim = dim3(1);
+  store.kernelParams = scratch_args;
+  hipKernelNodeParams delay = store;
+  delay.func = reinterpret_cast<void*>(ExecKernelNodeSetParamsDelayStore);
+  delay.kernelParams = producer_args;
+  hipKernelNodeParams head_params = store;
+  head_params.kernelParams = head_args;
+  hipKernelNodeParams middle_params = store;
+  middle_params.kernelParams = middle_args;
+  hipKernelNodeParams last_params{};
+  last_params.func = reinterpret_cast<void*>(ExecKernelNodeSetParamsCopyStore);
+  last_params.gridDim = dim3(1);
+  last_params.blockDim = dim3(1);
+  last_params.kernelParams = last_args;
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphNode_t chain[kSteps];
+  hipGraphNode_t side[kSteps];
+  // Continuation is added before the side branch, so the chain segment is first at its level
+  // and stays on stream 0. The last chain node then forks to a filler first and the batch
+  // second, which puts the batch on the other stream.
+  HIP_CHECK(hipGraphAddKernelNode(&chain[0], graph, nullptr, 0, &store));
+  for (int i = 0; i < kSteps - 2; ++i) {
+    HIP_CHECK(hipGraphAddKernelNode(&chain[i + 1], graph, &chain[i], 1, &store));
+    HIP_CHECK(hipGraphAddKernelNode(&side[i], graph, &chain[i], 1, &store));
+  }
+  HIP_CHECK(hipGraphAddKernelNode(&chain[kSteps - 1], graph, &chain[kSteps - 2], 1, &delay));
+  HIP_CHECK(hipGraphAddKernelNode(&side[kSteps - 2], graph, &chain[kSteps - 2], 1, &store));
+  HIP_CHECK(hipGraphAddKernelNode(&side[kSteps - 1], graph, &chain[kSteps - 1], 1, &store));
+
+  hipGraphNode_t head = nullptr;
+  hipGraphNode_t middle = nullptr;
+  hipGraphNode_t last = nullptr;
+  HIP_CHECK(hipGraphAddKernelNode(&head, graph, &chain[kSteps - 1], 1, &head_params));
+  HIP_CHECK(hipGraphAddKernelNode(&middle, graph, &head, 1, &middle_params));
+  HIP_CHECK(hipGraphAddKernelNode(&last, graph, &middle, 1, &last_params));
+
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  StreamGuard stream_guard(Streams::created);
+  const hipStream_t stream = stream_guard.stream();
+
+  auto check = [&](int copied, int last_stored, int head_stored, int middle_stored) {
+    for (int launch = 0; launch < 3; ++launch) {
+      HIP_CHECK(hipMemset(output.ptr(), 0, kOutputs * sizeof(int)));
+      LaunchAndWaitBounded(exec, stream);
+      int actual[kOutputs] = {};
+      HIP_CHECK(hipMemcpy(actual, output.ptr(), sizeof(actual), hipMemcpyDeviceToHost));
+      INFO("launch " << launch);
+      REQUIRE(actual[0] == kProducer);
+      REQUIRE(actual[1] == copied);
+      REQUIRE(actual[2] == last_stored);
+      REQUIRE(actual[3] == head_stored);
+      REQUIRE(actual[4] == middle_stored);
+    }
+  };
+
+  check(kProducer, kLast, kHead, kMiddle);
+
+  HIP_CHECK(hipGraphNodeSetEnabled(exec, head, 0));
+  HIP_CHECK(hipGraphNodeSetEnabled(exec, middle, 0));
+  check(kProducer, kLast, 0, 0);
+
+  last_value = kLastUpdated;
+  HIP_CHECK(hipGraphExecKernelNodeSetParams(exec, last, &last_params));
+  check(kProducer, kLastUpdated, 0, 0);
+
+  HIP_CHECK(hipGraphNodeSetEnabled(exec, head, 1));
+  HIP_CHECK(hipGraphNodeSetEnabled(exec, middle, 1));
+  check(kProducer, kLastUpdated, kHead, kMiddle);
 
   HIP_CHECK(hipGraphExecDestroy(exec));
   HIP_CHECK(hipGraphDestroy(graph));
