@@ -6,6 +6,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+**Out-of-process collector (experimental, off by default):**
+
+  - New `librocprofiler-sdk-collector` library (`rocprofiler-sdk-collector/collector.h`, built with `-DROCPROFILER_BUILD_COLLECTOR=ON`, requires liblttng-ctl 2.13). It records the runtimes' LTTng trace events for a process it launches, with no profiler code in that process: a private LTTng session daemon, one capture session (per-process buffers of 4 × 512 KiB per CPU by default; lossless by default, so a thread waits up to 1 s for buffer space, as with `ROCPROFILER_BUFFER_POLICY_LOSSLESS`, or discard mode; vpid and vtid contexts), and a C API to create, start, launch, wait, stop and destroy. Reading and joining the trace follow in later releases.
+
 ### Changed
 
 ### Resolved issues
