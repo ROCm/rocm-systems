@@ -69,6 +69,12 @@ int swap_half(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::swap_half_x86_64_v4(Lanes, exec_mask, mode, d[0], a[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::swap_half_x86_64_v3(Lanes, exec_mask, mode, d[0], a[0]);
@@ -85,6 +91,44 @@ int swap_half(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const
 
       // Preserve the first write if A and D are halves of the same VGPR.
       a[0][lane] = (a[0][lane] & ~(65535U << sa)) | (old_d << sa);
+    }
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
+// Exchange A's lower rows with D's adjacent upper rows. Each destination uses
+// its own EXEC bit; inactive source lanes remain readable. Alias-safe by pairs.
+template <int Lanes, int Stride>
+int swap_rows(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+              uint32_t *const *a) {
+  if (int error = swap<Lanes>(flags, 0, mode, nullptr, nullptr)) {
+    return error;
+  }
+  if (!exec_mask || Lanes <= Stride) {
+    return RJ_ARITH_SUCCESS;
+  }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::swap_rows_x86_64_v4(Lanes, Stride, exec_mask, d[0], a[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    rocjitsu::arith::swap_rows_x86_64_v3(Lanes, Stride, exec_mask, d[0], a[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+  for (int base = 0; base + Stride < Lanes; base += 2 * Stride) {
+    for (int i = 0; i < Stride; ++i) {
+      int low = base + i, high = low + Stride;
+      uint32_t old_a = a[0][low], old_d = d[0][high];
+      if ((exec_mask >> low) & 1) {
+        a[0][low] = old_d;
+      }
+      if ((exec_mask >> high) & 1) {
+        d[0][high] = old_a;
+      }
     }
   }
   return RJ_ARITH_SUCCESS;
@@ -166,4 +210,52 @@ int rj_arith_v_swaprel_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
   }
   return swap_relative<64>(flags, exec_mask, instruction_flags, d, a, d_count, a_count, d_base,
                            a_base, m0);
+}
+
+// Exchange adjacent rows, masking each destination independently.
+int rj_arith_v_permlane16_swap_b32_w32(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return swap_rows<32, 16>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// Exchange adjacent rows, masking each destination independently.
+int rj_arith_v_permlane16_swap_b32_w64(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return swap_rows<64, 16>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// Exchange adjacent rows, masking each destination independently.
+int rj_arith_v_permlane32_swap_b32_w32(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return swap_rows<32, 32>(flags, exec_mask, instruction_flags, d, a);
+}
+
+// Exchange adjacent rows, masking each destination independently.
+int rj_arith_v_permlane32_swap_b32_w64(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return swap_rows<64, 32>(flags, exec_mask, instruction_flags, d, a);
 }

@@ -26,6 +26,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
@@ -12834,6 +12837,36 @@ TEST(ArithBridgeTest, Gfx1250ScalarCompareCompatibility) {
       EXPECT_FALSE(fixture.wave->read_scc());
       EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
       EXPECT_EQ(fixture.wave->exec(), 0U);
+    }
+  }
+}
+
+// RDNA2 constant predicates retain strict-mode support and signaling CLAMP status.
+TEST(ArithBridgeTest, Rdna2TruePredicatesRetainLegacyStatus) {
+  ArithmeticPolicy policy{};
+  policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+  for (bool update_exec : {false, true}) {
+    for (bool clamp : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << update_exec << ":" << clamp);
+      BridgeFixture fixture(ROCJITSU_CODE_ARCH_RDNA2, 32, policy);
+      fixture.wave->set_exec(1);
+      fixture.wave->set_mode_raw(0x200); // IEEE, no DX10 NaN clamping.
+      fixture.wave->set_trapsts(0);
+      fixture.cu->write_vgpr(fixture.base(), 0, clamp ? 0x7fc00000U : 0x3f800000U);
+      auto words = rdna2::build_vop3(update_exec ? rdna2::kVCmpxTruF32Vop3 : rdna2::kVCmpTruF32Vop3,
+                                     {.vdst = uint8_t(update_exec ? 126 : 106),
+                                      .clamp = uint8_t(clamp),
+                                      .src0 = 256,
+                                      .src1 = 256});
+      util::StringDiagnostic diagnostic;
+      auto inst = fixture.decoder->decode_window(words, 0, diagnostic.emitter());
+      ASSERT_TRUE(inst.succeeded()) << diagnostic.message();
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+      if (!update_exec) {
+        EXPECT_EQ(fixture.wave->vcc_mask(), 1U);
+      }
+      EXPECT_EQ(fixture.wave->trapsts() & 1U, uint32_t(clamp));
+      EXPECT_EQ(fixture.wave->exec(), 1U);
     }
   }
 }

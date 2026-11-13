@@ -49,6 +49,7 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_bf16_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/float16_conversion_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/nibble_pack_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/pair_move_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/byte_conversion_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/conversion16_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/conversion32_x86_64_v3.cpp
@@ -117,7 +118,9 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/ds_routing_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/move_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/packed_permute_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/permlane_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/screen_partition_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/integer_wmma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_float_x86_64_v3.cpp
@@ -144,6 +147,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/cdna_dot_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/float16_conversion_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/nibble_pack_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/pair_move_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/byte_conversion_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/conversion16_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/conversion32_x86_64_v4.cpp
@@ -192,7 +196,11 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trans_f64_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_preop_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/ds_routing_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/move_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/packed_permute_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/permlane_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/screen_partition_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_float_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_integer_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_exact_x86_64_v4.cpp
