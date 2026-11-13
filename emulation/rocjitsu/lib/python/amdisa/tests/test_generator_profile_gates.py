@@ -9929,6 +9929,32 @@ def test_all_mfma_constructors_declare_complete_matrix_register_accesses(
     assert constructors > 100
 
 
+def test_mfma_broadcast_metadata_excludes_fields_with_other_meanings(
+    amdgpu_generated_root: Path,
+):
+    broadcast_forms = 0
+    for arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+        header = (amdgpu_generated_root / arch / 'vop3p.h').read_text()
+        for name, body in re.findall(
+            r'class (\w+) : public Vop3pMfma \{(.*?)\n\};', header, re.S
+        ):
+            broadcasts = name.startswith(('VMfmaF32', 'VMfmaI32')) and (
+                'F8f6f4' not in name
+            )
+            assert ('modifiers.mfma =' in body) == broadcasts, (arch, name)
+            if broadcasts:
+                broadcast_forms += 1
+                a_block_lanes = (
+                    int(re.search(r'VMfma[FI]32(\d+)x', name)[1])
+                    if arch == 'cdna2'
+                    else 0
+                )
+                assert (
+                    '{inst_.cbsz, inst_.abid, inst_.blgp, ' + str(a_block_lanes) + '}'
+                ) in body
+    assert broadcast_forms > 80
+
+
 def test_cdna4_mfma_f8f6f4_decodes_dense_and_exact_abid1_scaled_encodings(
     amdgpu_generated_root: Path,
 ):
