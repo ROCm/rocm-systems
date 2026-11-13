@@ -427,6 +427,10 @@ jobs:
             )
           fi
 
+          if [[ "${{ matrix.name }}" == release ]]; then
+            CMAKE_CONFIG_FLAGS+=(-DRJ_INSTALL_TESTS=ON)
+          fi
+
           CXXFLAGS=""
           if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
             CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
@@ -442,6 +446,7 @@ jobs:
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
+            -DRJ_BUILD_FAULT_INJECTION=ON \
             -DROCJITSU_ENABLE_PERFSIM_PLUGIN=ON \
             -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
@@ -459,8 +464,24 @@ jobs:
             --output-on-failure \
             -j
 
+          # Keep both optional mutation suites present in every lane, including
+          # asan-ubsan and tsan, where all three ConSan components remain OFF.
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R 'FaultDropBarrier' --no-tests=error --output-on-failure -j
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R 'FaultMutationCli' --no-tests=error --output-on-failure -j
+
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
+
+      - name: Test installed fault-injection CLI
+        if: matrix.name == 'release'
+        shell: bash
+        run: |
+          FI_INSTALL_PREFIX="$(mktemp -d "${RUNNER_TEMP}/rocjitsu-fi-installed.XXXXXX")"
+          cmake --install "${ROCJITSU_BUILD_DIR}" --prefix "${FI_INSTALL_PREFIX}"
+          ctest --test-dir "${FI_INSTALL_PREFIX}/share/rocjitsu/tests" \
+            -R 'FaultMutationCli' --no-tests=error --output-on-failure
 
       # Debug retains callable inline definitions that optimized builds can hide.
       # Check both compilers without building the simulator or enabling sanitizers.
