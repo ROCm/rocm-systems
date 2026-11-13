@@ -44,6 +44,7 @@
 #include "util/simd.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <cassert>
@@ -52,6 +53,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 #include <type_traits>
 
 namespace rocjitsu::cdna5 {
@@ -1906,6 +1908,65 @@ template <typename Tout, typename Inst, typename CvtOp>
 template <typename Tout, typename Inst, typename CvtOp>
 [[nodiscard]] bool try_execute_cvt_f64_to_b32_simd(Inst &, Wavefront &, CvtOp) {
   return false;
+}
+
+/// Pack eight FP32 VGPRs into two words per lane for a constant unit scale.
+template <typename Encode>
+inline bool try_pack_unit_scale_pk8(Wavefront &wf, uint32_t src_base, uint32_t dst_base,
+                                    Encode encode) {
+  RegisterAccess regs(wf);
+  if (!regs.owns_vgpr_range(src_base, 8))
+    return false;
+  const uint64_t exec = wf.exec() & util::mask<uint64_t>(wf.wf_size());
+  return regs
+      .try_bulk_write_vgprs<2>(
+          dst_base, 2,
+          [&](uint32_t *const *dst) {
+            const auto src = regs.read_vgpr_region(src_base, 8, exec);
+            std::array<std::span<const uint32_t>, 8> sources;
+            for (unsigned i = 0; i < sources.size(); ++i)
+              sources[i] = src.lanes(i).value();
+            const bool overflow = wf.fp16_ovfl();
+            for (uint64_t remaining = exec; remaining; remaining &= remaining - 1) {
+              const unsigned lane = std::countr_zero(remaining);
+              uint32_t packed[2]{};
+              for (unsigned i = 0; i < sources.size(); ++i) {
+                const auto value = std::bit_cast<float>(sources[i][lane]);
+                packed[i / 4] |= uint32_t{encode(value, overflow)} << (8 * (i % 4));
+              }
+              // Both destination registers can overlap the input tuple.
+              dst[0][lane] = packed[0];
+              dst[1][lane] = packed[1];
+            }
+            return 0;
+          })
+      .has_value();
+}
+
+/// Expand two packed source VGPRs into eight FP32 VGPRs for a unit E8M0 scale.
+inline bool try_unpack_unit_scale_pk8(Wavefront &wf, uint32_t src_base, uint32_t dst_base,
+                                      const float *table) {
+  RegisterAccess regs(wf);
+  if (!regs.owns_vgpr_range(src_base, 2) || !regs.owns_vgpr_range(dst_base, 8))
+    return false;
+  const uint64_t exec = wf.exec() & util::mask<uint64_t>(wf.wf_size());
+  return regs
+      .try_bulk_write_vgprs<8>(
+          dst_base, 8,
+          [&](uint32_t *const *dst) {
+            const auto src = regs.read_vgpr_region(src_base, 2, exec);
+            const auto lo = src.lanes(0).value();
+            const auto hi = src.lanes(1).value();
+            for (uint64_t remaining = exec; remaining; remaining &= remaining - 1) {
+              const unsigned lane = std::countr_zero(remaining);
+              // Snapshot both words before any overlapping destination is written.
+              const uint64_t packed = lo[lane] | (uint64_t{hi[lane]} << 32);
+              for (unsigned i = 0; i < 8; ++i)
+                dst[i][lane] = std::bit_cast<uint32_t>(table[uint8_t(packed >> (8 * i))]);
+            }
+            return 0;
+          })
+      .has_value();
 }
 
 /// Mixed-width VOP1 conversion SIMD fast path, 32-bit source -> f64 dst

@@ -1132,11 +1132,29 @@ bool L2Cache::try_write_private_dwords(std::span<const VmRamDwordStore> stores,
 
 VmAccessOutcome L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype,
                                uint32_t vmid) {
+  return write_impl(addr, src, size, mtype, vmid, nullptr);
+}
+
+VmAccessOutcome L2Cache::write_from_l1(const GpuVmAccess &counted, uint64_t addr,
+                                       const uint8_t *src, uint32_t size, Mtype mtype,
+                                       uint32_t vmid) {
+  return write_impl(addr, src, size, mtype, vmid, &counted);
+}
+
+VmAccessOutcome L2Cache::write_impl(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype,
+                                    uint32_t vmid, const GpuVmAccess *counted) {
   if (size == 0)
     return VmAccessOutcome::Complete;
-  const VmAccessAdmission admission = admit_access(addr, size, vmid, VmAccessKind::Write);
-  if (!admission)
-    return admission.outcome;
+  const auto *access = vmid && gpu_vm_ && GpuVmAccessBatchGuard::active()
+                           ? gpu_vm_->borrow_snapshot_vmid(vmid)
+                           : nullptr;
+  // L1 has counted the write on this root. Recheck the live local grant before
+  // reusing it. Replacement roots must record their own write.
+  if (!access || access != counted || !access->local_admission(addr, size)) {
+    const auto admission = admit_access(addr, size, vmid, VmAccessKind::Write);
+    if (!admission)
+      return admission.outcome;
+  }
   if (direct_controlled_writeback(addr, size, vmid))
     return VmAccessOutcome::Unavailable;
   auto maintenance_lock = acquire_cache_access();
@@ -1168,12 +1186,16 @@ VmAccessOutcome L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size,
     const uint64_t ea = addr + copied;
     const uint32_t line_offset = CacheStore::line_offset(ea);
     const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
-    const VmAccessAdmission chunk_admission = admit_access(ea, chunk, vmid, VmAccessKind::Write);
+    const auto local =
+        access ? access->local_admission(CacheStore::line_address(ea), LINE_SIZE) : std::nullopt;
+    const VmAccessAdmission chunk_admission =
+        local ? *local : admit_access(ea, chunk, vmid, VmAccessKind::Write);
     if (!chunk_admission)
       return chunk_admission.outcome;
     const VmAccessAdmission line_admission =
-        admit_access(CacheStore::line_address(ea), LINE_SIZE, vmid, VmAccessKind::Write,
-                     /*report_fault=*/false);
+        local ? *local
+              : admit_access(CacheStore::line_address(ea), LINE_SIZE, vmid, VmAccessKind::Write,
+                             false);
     const bool cache_line = line_admission && line_admission.cacheable &&
                             line_admission.generation == chunk_admission.generation;
     std::lock_guard set_lock(set_mutex(ea));
@@ -1225,9 +1247,14 @@ VmAccessOutcome L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size,
   return VmAccessOutcome::Complete;
 }
 
-VmAccessOutcome L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
+VmAccessOutcome L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid,
+                                    const VmLocalGrantView *local) {
   const uint64_t line_addr = CacheStore::line_address(addr);
-  const VmAccessAdmission admission = admit_access(line_addr, LINE_SIZE, vmid, VmAccessKind::Read);
+  const bool same_grant = local && local->covers(line_addr, LINE_SIZE) &&
+                          current_cache_identity(vmid) == local->identity();
+  const VmAccessAdmission admission =
+      same_grant ? VmAccessAdmission{.generation = local->generation()}
+                 : admit_access(line_addr, LINE_SIZE, vmid, VmAccessKind::Read);
   if (!admission)
     return admission.outcome;
   auto maintenance_lock = acquire_cache_access();
@@ -1237,6 +1264,17 @@ VmAccessOutcome L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t v
     if (flush_outcome != VmAccessOutcome::Complete)
       return flush_outcome;
     return send_backing(line_addr, line_buf, LINE_SIZE, simdojo::MessageOp::READ, vmid);
+  }
+  if (same_grant) {
+    const auto *data = cache_.line_data_for_read_if(addr, vmid, 0, [&](const auto &tag) {
+      return tag.cache_identity == local->identity() &&
+             tag.admission_generation == admission.generation &&
+             CacheStore::bytes_valid(tag, 0, LINE_SIZE) && local->covers(line_addr, LINE_SIZE);
+    });
+    if (data) {
+      std::memcpy(line_buf, data, LINE_SIZE);
+      return VmAccessOutcome::Complete;
+    }
   }
   const VmAccessOutcome outcome = ensure_line(line_addr, vmid, admission.generation);
   if (outcome != VmAccessOutcome::Complete)

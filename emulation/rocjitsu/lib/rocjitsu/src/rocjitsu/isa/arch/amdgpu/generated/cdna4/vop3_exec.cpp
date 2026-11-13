@@ -2616,6 +2616,15 @@ void VBitop3B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32PkFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (const auto scale = src2.const_value();
+      scale && ((*scale >> 23) & 0xffu) == 127u && !wf.cu().observes_register_access()) {
+    const bool high = (inst_.op_sel & 8) != 0;
+    const uint64_t flags = wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0u);
+    amdgpu::arith::execute_binary32(
+        wf, rj_arith_v_cvt_pk_fp8_f32_w32_gfx950, rj_arith_v_cvt_pk_fp8_f32_w64_gfx950, flags,
+        high ? RJ_ARITH_ALU_HIGH_D : 0u, vdst, src0, src1, high ? 0xC : 0x3);
+    return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2651,6 +2660,15 @@ void VCvtScalef32PkFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32PkBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (const auto scale = src2.const_value();
+      scale && ((*scale >> 23) & 0xffu) == 127u && !wf.cu().observes_register_access()) {
+    const bool high = (inst_.op_sel & 8) != 0;
+    const uint64_t flags = wf.cu().arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0u);
+    amdgpu::arith::execute_binary32(
+        wf, rj_arith_v_cvt_pk_bf8_f32_w32_gfx950, rj_arith_v_cvt_pk_bf8_f32_w64_gfx950, flags,
+        high ? RJ_ARITH_ALU_HIGH_D : 0u, vdst, src0, src1, high ? 0xC : 0x3);
+    return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2738,6 +2756,13 @@ void VCvtScalef32SrBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32PkF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (const auto scale = src1.const_value(); scale && ((*scale >> 23) & 0xFFu) == 127u) {
+    const bool high = (inst_.op_sel & 1) != 0;
+    amdgpu::arith::execute_widen32_to_pair(
+        wf, rj_arith_v_cvt_pk_f32_fp8_w32_gfx950, rj_arith_v_cvt_pk_f32_fp8_w64_gfx950,
+        wf.cu().arithmetic_flags(), high ? RJ_ARITH_ALU_HIGH_A : 0u, vdst, src0, high ? 0xC : 0x3);
+    return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2765,6 +2790,13 @@ void VCvtScalef32PkF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32PkF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (const auto scale = src1.const_value(); scale && ((*scale >> 23) & 0xFFu) == 127u) {
+    const bool high = (inst_.op_sel & 1) != 0;
+    amdgpu::arith::execute_widen32_to_pair(
+        wf, rj_arith_v_cvt_pk_f32_bf8_w32_gfx950, rj_arith_v_cvt_pk_f32_bf8_w64_gfx950,
+        wf.cu().arithmetic_flags(), high ? RJ_ARITH_ALU_HIGH_A : 0u, vdst, src0, high ? 0xC : 0x3);
+    return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

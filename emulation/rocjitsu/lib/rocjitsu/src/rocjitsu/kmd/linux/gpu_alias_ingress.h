@@ -9,6 +9,8 @@
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
+#include <array>
+#include <atomic>
 #include <compare>
 #include <condition_variable>
 #include <cstddef>
@@ -122,6 +124,9 @@ public:
   /// permit keeps every admitted generation counted until its release.
   [[nodiscard]] std::optional<amdgpu::MemoryIngressPermit>
   try_acquire(std::span<const Key> aliases) noexcept;
+  // Common local requests register in one worker slot. A concurrent close
+  // transfers their count into the same Entry used by general admission.
+  [[nodiscard]] std::optional<amdgpu::MemoryIngressPermit> try_acquire_local(Key key) noexcept;
   /// @brief Count every touched alias atomically during drained maintenance.
   /// @details Only the authority's exact closed key or batch keys bypass
   /// ordinary denial; all other keys follow try_acquire().
@@ -221,10 +226,7 @@ public:
   /// effect, but its gate permit may still briefly exist while it rechecks the
   /// table. This wait observes active counts without allocating gate state.
   void wait_for_process_quiescent(uint64_t process_incarnation) noexcept;
-  [[nodiscard]] size_t tracked_generation_count() const {
-    std::lock_guard lock(mutex_);
-    return entries_.size();
-  }
+  [[nodiscard]] size_t tracked_generation_count() const;
 
 private:
   struct Drain {
@@ -267,6 +269,31 @@ private:
   void finish_drain(Key alias) noexcept;
   void fail_batch(const std::shared_ptr<Batch> &batch) noexcept;
   void finish_batch(const std::shared_ptr<Batch> &batch) noexcept;
+  struct alignas(64) LocalSlot {
+    mutable std::mutex mutex;
+    std::optional<Key> key;
+    // Retained by the permit until its release, including on another thread.
+    std::shared_ptr<GpuAliasIngressGate> owner;
+    bool transferred = false;
+  };
+  // A close holds all slots plus the gate. Leave room for outer KFD locks in
+  // the thread sanitizer's bounded lock-order graph.
+#if defined(__SANITIZE_THREAD__)
+  static constexpr size_t kLocalSlots = 4;
+#elif defined(__has_feature)
+  static constexpr size_t kLocalSlots = __has_feature(thread_sanitizer) ? 4 : 64;
+#else
+  static constexpr size_t kLocalSlots = 64;
+#endif
+  // Lock order is the main gate, then slots in ascending order. Release a
+  // transferred slot before entering the main gate to deliver its drain.
+  mutable std::array<LocalSlot, kLocalSlots> local_slots_;
+  std::atomic<size_t> quiescence_waiters_{0};
+  std::atomic<bool> maintenance_active_{false};
+  using SlotLocks = std::array<std::unique_lock<std::mutex>, kLocalSlots>;
+  SlotLocks lock_local_slots() const;
+  void transfer_local_key(const Key &key, Entry &entry);
+  static void release_local(LocalSlot &slot) noexcept;
   mutable std::mutex mutex_;
   std::condition_variable quiescent_;
   std::map<Key, Entry> entries_;

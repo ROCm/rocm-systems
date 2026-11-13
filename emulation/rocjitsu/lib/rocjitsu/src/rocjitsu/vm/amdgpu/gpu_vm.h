@@ -70,6 +70,8 @@ public:
   }
 };
 
+class VmLocalGrants;
+
 /// @brief Address-space policy separated from the physical backing transport.
 class AddressSpaceTranslator {
 public:
@@ -92,6 +94,13 @@ public:
   /// checks without reentering frontend policy. Implementations with live grants
   /// must leave this false for the binding's whole lifetime.
   [[nodiscard]] virtual bool execute_admission_is_fixed() const { return false; }
+  /// Optional versioned, uniformly cacheable local grants for every access kind.
+  /// The epoch lives as long as the translator. Saturation disables all reuse.
+  virtual const VmLocalGrants *local_grants() const { return nullptr; }
+  /// Whether this binding can prove local backing for all of the requested spans.
+  virtual bool local_ingress_mapped(std::span<const MemoryIngressSpan>, uint64_t, uint64_t) const {
+    return false;
+  }
   /// @brief Read a live write grant for cache-tag freshness without authorizing
   /// a backing write. The returned direct-write flag remains advisory here.
   [[nodiscard]] virtual VmAccessAdmission query_cache_write_grant(uint64_t address,
@@ -565,6 +574,7 @@ private:
 
   mutable util::DistributedSharedMutex mutex_;
   std::mutex controlled_backing_mutex_;
+  std::atomic<bool> has_controlled_backings_{false};
   std::atomic<std::shared_ptr<const std::vector<ControlledCacheBacking>>> controlled_backings_;
   std::vector<Slot> slots_;
   std::vector<uint32_t> free_slots_;

@@ -166,7 +166,7 @@ private:
                            uint64_t admission_generation, uint64_t cache_identity);
   // Store allocation leaves untouched bytes absent instead of reading backing.
   VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid, uint64_t admission_generation,
-                              bool fetch_on_miss = true);
+                              bool fetch_on_miss = true, const VmLocalGrantView *local = nullptr);
 
   CacheStore cache_;
   // Acquired before any L2 maintenance lock on ordinary accesses and scoped maintenance.

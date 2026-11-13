@@ -8520,8 +8520,90 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
   for (uint32_t i = 18; i <= 33; ++i)
     EXPECT_EQ(cu->read_vgpr(vb + i, 0), std::bit_cast<uint32_t>(2.0f)) << "vgpr=" << i;
 
+  // Compare the literal fast path against the per-lane register scale with
+  // overlapping source and destination tuples and inactive lanes.
+  const uint64_t mask = 0x55555555u;
+  wf->set_exec(mask);
+  for (const auto opcode : {cdna5::kVCvtScalePk8F32Fp8Vop3, cdna5::kVCvtScalePk8F32Bf8Vop3}) {
+    for (unsigned select = 0; select < 4; ++select) {
+      const uint32_t first = (0x35u << 26) | (uint32_t{opcode} << 16) | (select << 11);
+      const uint32_t literal = 127u << (select * 8);
+      const uint32_t constant_words[] = {first, 0x0201ff00u, literal};
+      const uint32_t register_words[] = {first | 16u, 0x02021500u};
+      std::unique_ptr<Instruction> constant(decode_valid(*decoder, constant_words));
+      std::unique_ptr<Instruction> reg(decode_valid(*decoder, register_words));
+      ASSERT_TRUE(constant && reg);
+      for (unsigned block = 0; block < 16; ++block) {
+        for (unsigned lane = 0; lane < 32; ++lane) {
+          const uint32_t word = (block * 16 + lane / 2) * 0x01010101u;
+          for (unsigned i = 0; i < 8; ++i) {
+            const uint32_t initial = i == 0 ? word ^ 0x00ff55aau : i == 1 ? ~word : 0xcafef00du;
+            cu->write_vgpr(vb + i, lane, initial);
+            cu->write_vgpr(vb + 16 + i, lane, initial);
+          }
+          cu->write_vgpr(vb + 10, lane, literal);
+        }
+        ASSERT_TRUE(cu->execute_instruction(reg.get(), *wf).succeeded());
+        ASSERT_TRUE(cu->execute_instruction(constant.get(), *wf).succeeded());
+        for (unsigned i = 0; i < 8; ++i)
+          for (unsigned lane = 0; lane < 32; ++lane)
+            EXPECT_EQ(cu->read_vgpr(vb + i, lane), cu->read_vgpr(vb + 16 + i, lane));
+      }
+    }
+  }
+
   if (!wf->is_halted())
     wf->halt();
+}
+
+TEST(Gfx1250CvtScaleTest, UnitScalePackMatchesRegisterScaleWithOverlappingTuples) {
+  amdgpu::GpuMemory memory("pk8_memory");
+  amdgpu::L2Cache l2("pk8_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("pk8_cu", cfg, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(cfg.arch);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  const auto base = wf->vgpr_alloc().base;
+  wf->set_exec(0x55555555);
+  constexpr std::array<uint32_t, 16> inputs{0u,          0x80000000u, 1u,          0x80000001u,
+                                            0x39800000u, 0x3b000000u, 0x3f880000u, 0x3f980000u,
+                                            0x3f800000u, 0xc0000000u, 0x43f00000u, 0x47700000u,
+                                            0x7f800000u, 0xff800000u, 0x7fc00001u, 0xff800001u};
+  for (auto opcode : {cdna5::kVCvtScalef32Pk8Fp8F32Vop3, cdna5::kVCvtScalef32Pk8Bf8F32Vop3}) {
+    const uint32_t first = (0x35u << 26) | (uint32_t{opcode} << 16);
+    // Inline 1.0 packs v[2:9] into v[4:5]. The control reads 1.0 from v14.
+    const uint32_t fast_words[] = {first | 4u, 0x0201e502u};
+    const uint32_t control_words[] = {first | 20u, 0x02021d02u};
+    std::unique_ptr<Instruction> fast(decode_valid(*decoder, fast_words));
+    std::unique_ptr<Instruction> control(decode_valid(*decoder, control_words));
+    ASSERT_TRUE(fast && control);
+    for (bool clamp : {false, true}) {
+      wf->set_mode_raw(clamp ? amdgpu::Wavefront::FP16_OVFL_BIT : 0u);
+      for (unsigned lane = 0; lane < 32; ++lane) {
+        for (unsigned word = 0; word < 8; ++word) {
+          const auto bits = inputs[(lane + word) % inputs.size()];
+          cu->write_vgpr(base + 2 + word, lane, bits);
+          if (word == 2 || word == 3)
+            cu->write_vgpr(base + 18 + word, lane, bits);
+        }
+        cu->write_vgpr(base + 14, lane, 0x3f800000u);
+      }
+      ASSERT_TRUE(cu->execute_instruction(control.get(), *wf).succeeded());
+      ASSERT_TRUE(cu->execute_instruction(fast.get(), *wf).succeeded());
+      for (unsigned lane = 0; lane < 32; ++lane)
+        for (unsigned word = 0; word < 2; ++word)
+          EXPECT_EQ(cu->read_vgpr(base + 4 + word, lane), cu->read_vgpr(base + 20 + word, lane));
+    }
+  }
+  wf->halt();
 }
 
 TEST(Gfx1250CvtScaleTest, WideUnpackRejectsDestinationRangeBeforeWriting) {
