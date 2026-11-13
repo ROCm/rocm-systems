@@ -24,6 +24,7 @@
 #include "test-options.h"
 
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <cstdint>
@@ -1036,16 +1037,19 @@ INSTANTIATE_TEST_SUITE_P(
 // selected fails at stream-execution time. Every other HIP call inherits the real implementation, so
 // the fallback path runs for real.
 struct FaultInjectingHip : public Hip {
-    int errno_to_throw;
+    int                      errno_to_throw;
+    mutable std::atomic<int> calls{0};
     explicit FaultInjectingHip(int e) : errno_to_throw{e}
     {
     }
     [[noreturn]] uint64_t hipAmdFileRead(hipAmdFileHandle_t, void *, uint64_t, int64_t) const override
     {
+        ++calls;
         throw std::system_error(errno_to_throw, std::generic_category());
     }
     [[noreturn]] uint64_t hipAmdFileWrite(hipAmdFileHandle_t, void *, uint64_t, int64_t) const override
     {
+        ++calls;
         throw std::system_error(errno_to_throw, std::generic_category());
     }
 };
@@ -1135,6 +1139,26 @@ TEST_P(HipAsyncFailover, ineligibleFaultSkipsFallback)
     else {
         HipFileDataOps::assertZeroedFileRegion(tf.fd, 0, io_size);
     }
+}
+
+// ENOTTY (the GPU driver has no AIS ioctl) diverts the IO to the fallback and disables the fastpath,
+// so the next IO goes straight to the fallback.
+TEST_P(HipAsyncFailover, ENOTTYDisablesFastpath)
+{
+    FaultInjectingHip    fault{ENOTTY};
+    ContextOverride<Hip> guard{&fault};
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    ASSERT_FALSE(Context<Configuration>::get()->fastpath());
+
+    ASSERT_EQ(io_op(fh, dev_ptr, &io_size, &file_offset, &buffer_offset, &bytes_transferred, stream),
+              HIPFILE_SUCCESS);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(bytes_transferred, io_size);
+    ASSERT_EQ(1, fault.calls);
+    HipFileDataOps::assertFileAndMemoryRegionsMatch(dev_ptr, buffer_offset, tf.fd, file_offset, io_size);
 }
 
 INSTANTIATE_TEST_SUITE_P(HipAsyncFailoverSuite, HipAsyncFailover, ::testing::ValuesIn(asyncIOFns),

@@ -32,6 +32,7 @@ extern SystemTestOptions test_env;
 
 using namespace hipFile;
 using ::testing::NiceMock;
+using ::testing::Throw;
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 
@@ -415,5 +416,71 @@ TEST_F(HipFileIoHipErrors, RecoveredFastpathIoClearsHipError)
     hipFileHandleDeregister(handle);
 }
 #endif
+
+// A fastpath IO that fails with ENOTTY (the GPU driver has no AIS ioctl) is
+// retried on the fallback, and hipFile stops trying the fastpath.
+struct HipFileIoFastpathENOTTY : public testing::Test {
+
+    Tmpfile         tmpfile;
+    size_t          io_size;
+    hipFileHandle_t handle;
+    void           *device_buffer;
+
+    HipFileIoFastpathENOTTY()
+        : tmpfile{test_env.ais_capable_dir}, io_size{1_MiB}, handle{nullptr}, device_buffer{nullptr}
+    {
+    }
+
+    void SetUp() override
+    {
+        Context<Configuration>::get()->fastpath(true);
+        Context<Configuration>::get()->fallback(true);
+
+        ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(io_size)));
+        ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, io_size));
+
+        hipFileDescr_t descr{};
+        descr.type      = hipFileHandleTypeOpaqueFD;
+        descr.handle.fd = tmpfile.fd;
+        ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&handle, &descr));
+
+        enforceFastpathGate(handle, device_buffer);
+    }
+
+    void TearDown() override
+    {
+        // The test disables the fastpath. Re-enable it for later tests.
+        Context<Configuration>::get()->fastpath(true);
+
+        hipFileHandleDeregister(handle);
+        ASSERT_EQ(hipSuccess, hipFree(device_buffer));
+    }
+};
+
+TEST_F(HipFileIoFastpathENOTTY, ReadDisablesFastpath)
+{
+    NiceMock<MHip> mhip;
+    mhip.enable_passthrough();
+
+    // Only the first read may try the fastpath.
+    EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(std::system_error(ENOTTY, std::generic_category())));
+
+    ASSERT_EQ(io_size, hipFileRead(handle, device_buffer, io_size, 0, 0));
+    ASSERT_FALSE(Context<Configuration>::get()->fastpath());
+    ASSERT_EQ(io_size, hipFileRead(handle, device_buffer, io_size, 0, 0));
+}
+
+TEST_F(HipFileIoFastpathENOTTY, WriteDisablesFastpath)
+{
+    NiceMock<MHip> mhip;
+    mhip.enable_passthrough();
+
+    // Only the first write may try the fastpath.
+    EXPECT_CALL(mhip, hipAmdFileWrite).WillOnce(Throw(std::system_error(ENOTTY, std::generic_category())));
+
+    ASSERT_EQ(io_size, hipFileWrite(handle, device_buffer, io_size, 0, 0));
+    ASSERT_FALSE(Context<Configuration>::get()->fastpath());
+    ASSERT_EQ(io_size, hipFileWrite(handle, device_buffer, io_size, 0, 0));
+}
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
