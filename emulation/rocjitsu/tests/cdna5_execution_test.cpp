@@ -2341,6 +2341,29 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
     run_case(false);
 }
 
+TEST(Gfx1250LiteralOperandTest, ScalarFmaLiteralOrder) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0); // Scalar arithmetic is independent of EXEC.
+  wf->set_mode_raw(0xf0);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  const uint32_t base = wf->sgpr_alloc().base;
+  cu->write_sgpr(base, 0x40000000);     // 2
+  cu->write_sgpr(base + 1, 0x40400000); // 3
+  for (bool multiply_literal : {false, true}) {
+    const uint16_t opcode = multiply_literal ? cdna5::kSFmamkF32Sop2 : cdna5::kSFmaakF32Sop2;
+    const std::array words{cdna5::build_sop2(opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2})[0],
+                           0x40800000U}; // literal 4
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_sgpr(base + 2), multiply_literal ? 0x41300000U : 0x41200000U); // 11 or 10
+  }
+}
+
 TEST(Gfx1250LiteralOperandTest, ScalarMaskOperandsRejectLiteralMarkers) {
   struct TestCase {
     const char *name;
@@ -7151,3 +7174,50 @@ TEST(Gfx1250ExecutionTest, PackedAddMaxMinSaturateBeforeSelectingThirdOperand) {
 }
 
 } // namespace
+
+TEST(Gfx1250LiteralOperandTest, MoveVop3AppliesAbsAndNeg) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  for (bool negate : {false, true}) {
+    cu->write_vgpr(wf->vgpr_alloc().base, 0, negate ? 0x3f800000U : 0xbf800000U);
+    const auto words = cdna5::build_vop3(
+        cdna5::kVMovB32Vop3,
+        {.vdst = 1, .abs = uint8_t(!negate), .src0 = 256, .neg = uint8_t(negate)});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 1, 0), negate ? 0xbf800000U : 0x3f800000U);
+  }
+}
+
+// The group width is scalar, source/destination may alias, and EXEC masks writes.
+TEST(Gfx1250ExecutionTest, PermlaneIndexGenerationSupportsAliasedDestination) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x55555555U);
+  uint32_t base = wf->vgpr_alloc().base;
+  write_wave_sgpr(*cu, *wf, 0, 8U);
+  for (uint32_t lane = 0; lane < 32; ++lane) {
+    cu->write_vgpr(base, lane, 0x12340005U + lane);
+  }
+  auto words =
+      cdna5::build_vop3(cdna5::kVPermlaneIdxGenB32Vop3, {.vdst = 0, .src0 = 256, .src1 = 0});
+  cdna5::VPermlaneIdxGenB32Vop3 inst(words.data());
+  inst.execute_impl(*wf);
+  EXPECT_FALSE(wf->instruction_execution_failed());
+  for (uint32_t lane = 0; lane < 32; ++lane) {
+    uint32_t expected = 0x12340005U + lane;
+    if (!(lane & 1)) {
+      expected = ((lane / 8) * 8 + (lane + 5) % 8) * 4;
+    }
+    EXPECT_EQ(cu->read_vgpr(base, lane), expected);
+  }
+}

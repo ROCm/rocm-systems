@@ -7452,6 +7452,17 @@ TEST(MemoryWaitFootprintTest, DirectAluFamiliesMatchObservedAccesses) {
   check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA4, 64, 16, cases);
 }
 
+// Selected SDWA bytes must have exactly the same lane dependencies as execution.
+TEST(MemoryWaitFootprintTest, CdnaConditionalSdwaMatchesWaitFootprints) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (uint64_t condition : {0ULL, 1ULL, ~0ULL}) {
+      // v_cndmask_b32 v2, v0, v1; BYTE_1 sources and destination, preserve other bytes.
+      check_vector_footprints(arch, 64, 4, {{0x000402f9U, 0x01011100U}}, 0, 0,
+                              [condition](Wavefront &wf) { wf.set_vcc(condition); });
+    }
+  }
+}
+
 TEST(MemoryWaitFootprintTest, RestrictedPackedAndScalarBranchSourcesKeepVccWords) {
   GpuMemory memory("restricted_memory");
   L2Cache l2("restricted_l2");
