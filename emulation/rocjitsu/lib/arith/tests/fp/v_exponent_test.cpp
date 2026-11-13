@@ -3,6 +3,7 @@
 
 // Tests for exponent extraction and power-of-two scaling entry points.
 
+#include "fp/captured_gfx11_test.h"
 #include "fp/frexp_exp_test.h"
 #include "fp/ldexp_test.h"
 #include "fp/loose_unary_f64.h"
@@ -273,19 +274,80 @@ TEST(FpLdexpF32, Rdna3OmodGate) {
   }
 }
 
-// Legacy FREXP_MANT quiets signaling NaNs without losing their sign/payload.
+// FREXP_MANT quiets signaling NaNs without losing their sign/payload, except on gfx11 with
+// IEEE mode clear, which returns them unquieted.
 TEST(FpFrexpMantF64, CompatibilitySignalingNan) {
   using namespace rocjitsu::arith::test;
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (auto call : {rj_arith_v_frexp_mant_f64_w32, rj_arith_v_frexp_mant_f64_w32_gfx12}) {
-      for (uint64_t bits : {0x7ff0000000000001ULL, 0xfff4000000000001ULL}) {
-        Registers<4, 32> r;
-        r.v[0][0] = uint32_t(bits);
-        r.v[1][0] = uint32_t(bits >> 32);
-        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, 1, 0, r.v + 2, r.v, nullptr),
-                  RJ_ARITH_SUCCESS);
-        EXPECT_EQ(uint64_t(r.v[2][0]) | (uint64_t(r.v[3][0]) << 32), bits | 0x0008000000000000ULL);
+    for (uint64_t ieee : {uint64_t(0), RJ_ARITH_FP_IEEE_MODE}) {
+      for (bool gfx12 : {false, true}) {
+        auto call = gfx12 ? rj_arith_v_frexp_mant_f64_w32_gfx12 : rj_arith_v_frexp_mant_f64_w32;
+        for (uint64_t bits : {0x7ff0000000000001ULL, 0xfff4000000000001ULL}) {
+          Registers<4, 32> r;
+          r.v[0][0] = uint32_t(bits);
+          r.v[1][0] = uint32_t(bits >> 32);
+          ASSERT_EQ(
+              call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | ieee, 1, 0, r.v + 2, r.v, nullptr),
+              RJ_ARITH_SUCCESS);
+          EXPECT_EQ(uint64_t(r.v[2][0]) | (uint64_t(r.v[3][0]) << 32),
+                    gfx12 || ieee ? bits | 0x0008000000000000ULL : bits);
+        }
       }
     }
   }
+}
+
+namespace {
+
+using rocjitsu::arith::test::CapturedGfx11;
+
+// gfx1100 LDEXP lanes from the MODE.IEEE-clear corpus (hw1100-noieee): a signaling NaN source
+// is returned unquieted, also under directed rounding and OMOD.
+const CapturedGfx11 ldexp_f16_lanes[] = {
+    {"E32Mode00", 0, 0x100, 0xcb4d7c01, 0x80fd0000, 0, 0xa5a57c01},
+    {"E32RoundDown", 0, 0x15a, 0xcb4d7c01, 0x80fd0000, 0, 0xa5a57c01},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x24f27c01, 0x151c0000, 0, 0xa5a5fc01},
+    {"Div2", RJ_ARITH_ALU_OMOD_HALF, 0x100, 0x5aa27c01, 0xa6020000, 0, 0xa5a57c01},
+    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0x1f0,
+     0xfcd07c01, 0xe94fffff, 0, 0xfcd0a5a5},
+};
+const CapturedGfx11 ldexp_f32_lanes[] = {
+    {"Mode00", 0, 0x100, 0x7f800001, 0x0, 0, 0x7f800001},
+    {"RoundDown", 0, 0x15a, 0x7f800001, 0x1, 0, 0x7f800001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7f800001, 0x0, 0, 0xff800001},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x7f800001, 0x0, 0, 0x7f800001},
+};
+// FREXP_MANT returns a signaling NaN source unquieted in the same corpus.
+const CapturedGfx11 frexp_mant_f64_lanes[] = {
+    {"E32Mode00", 0, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"E32RoundDown", 0, 0x15a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
+    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"NegativePayload", 0, 0x1f0, 0xfff027eaf1f97f65, 0, 0, 0xfff027eaf1f97f65},
+};
+const CapturedGfx11 ldexp_f64_lanes[] = {
+    {"Mode00", 0, 0x100, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
+    {"RoundDown", 0, 0x15a, 0x7ff0000000000001, 0x1, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff0000000000001, 0x0, 0, 0xfff0000000000001},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
+};
+
+} // namespace
+
+// Compatibility reproduces captured gfx1100 LDEXP lanes.
+TEST(FpLdexpGfx11, CapturedSignalingNans) {
+  using rocjitsu::arith::test::check_captured_gfx11;
+  check_captured_gfx11<32, 16>(rj_arith_v_ldexp_f16_w32, ldexp_f16_lanes);
+  check_captured_gfx11<64, 16>(rj_arith_v_ldexp_f16_w64, ldexp_f16_lanes);
+  check_captured_gfx11<32, 32>(rj_arith_v_ldexp_f32_w32, ldexp_f32_lanes);
+  check_captured_gfx11<64, 32>(rj_arith_v_ldexp_f32_w64, ldexp_f32_lanes);
+  check_captured_gfx11<32, 64>(rj_arith_v_ldexp_f64_w32, ldexp_f64_lanes);
+  check_captured_gfx11<64, 64>(rj_arith_v_ldexp_f64_w64, ldexp_f64_lanes);
+}
+
+// Compatibility reproduces captured gfx1100 FREXP_MANT lanes.
+TEST(FpFrexpMantF64Gfx11, CapturedSignalingNans) {
+  using rocjitsu::arith::test::check_captured_gfx11;
+  check_captured_gfx11<32, 64>(rj_arith_v_frexp_mant_f64_w32, frexp_mant_f64_lanes);
+  check_captured_gfx11<64, 64>(rj_arith_v_frexp_mant_f64_w64, frexp_mant_f64_lanes);
 }

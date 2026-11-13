@@ -106,6 +106,8 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
   if constexpr (Rdna3) {
     instruction_flags = uint32_t(rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags));
   }
+  // gfx11 preserves signaling NaNs when IEEE mode is clear.
+  const bool quiet_snan = !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE);
   // RCP overflow is independent of guest ROUND, including output scaling.
   if constexpr (Op == rocjitsu::arith::Fp64::Rcp) {
     flags &= ~RJ_ARITH_FP_ROUND_MASK;
@@ -119,7 +121,7 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
     if ((flags & RJ_ARITH_FP_ROUND_MASK) &&
         rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
       rocjitsu::arith::fp64_directed_x86_64_v4(Op, flags, exec_mask, instruction_flags, d, a, b, c,
-                                               Rdna3);
+                                               quiet_snan);
       return RJ_ARITH_SUCCESS;
     }
   }
@@ -132,7 +134,8 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
       Op == rocjitsu::arith::Fp64::Mul || Op == rocjitsu::arith::Fp64::Fract;
   if ((!directed_arithmetic || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::fp64_x86_64_v3(Op, flags, exec_mask, instruction_flags, d, a, b, c, Rdna3);
+    rocjitsu::arith::fp64_x86_64_v3(Op, flags, exec_mask, instruction_flags, d, a, b, c,
+                                    quiet_snan);
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -166,9 +169,7 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
       } else {
         value = Op == rocjitsu::arith::Fp64::Add ? x + y : x * y;
       }
-      if constexpr (!Rdna3) {
-        value = rocjitsu::arith::fp64_nan_priority<false>(value, x, y);
-      }
+      value = rocjitsu::arith::fp64_nan_priority<false>(value, x, y, 0, quiet_snan);
     }
     if constexpr (Op == rocjitsu::arith::Fp64::Fma) {
       const uint64_t xb = rocjitsu::arith::double_bits(x), yb = rocjitsu::arith::double_bits(y),
@@ -179,9 +180,7 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
                   (zb & exponent) != exponent
               ? rocjitsu::arith::as_double(rocjitsu::arith::fma_finite_f64(xb, yb, zb, rounding))
               : __builtin_fma(x, y, z);
-      if constexpr (!Rdna3) {
-        value = rocjitsu::arith::fp64_nan_priority<true>(value, x, y, z);
-      }
+      value = rocjitsu::arith::fp64_nan_priority<true>(value, x, y, z, quiet_snan);
     }
     if constexpr (Op == rocjitsu::arith::Fp64::Mul || Op == rocjitsu::arith::Fp64::Fma) {
       // Products judge tininess after rounding, so a result that reaches the smallest normal
@@ -213,8 +212,8 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
     }
     if constexpr (Op == rocjitsu::arith::Fp64::FrexpMant) {
       uint64_t magnitude = rocjitsu::arith::double_bits(x) & 0x7fffffffffffffffULL;
-      // Retain legacy NaN quieting and payload; Compatibility resolves to this loose path.
-      if (magnitude > 0x7ff0000000000000ULL) {
+      // Retain NaN quieting and payload; Compatibility resolves to this loose path.
+      if (magnitude > 0x7ff0000000000000ULL && quiet_snan) {
         x = rocjitsu::arith::as_double(rocjitsu::arith::double_bits(x) | 0x0008000000000000ULL);
       }
       int exponent;
@@ -260,11 +259,13 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
       }
     }
     if constexpr (Op == rocjitsu::arith::Fp64::Trunc || Op == rocjitsu::arith::Fp64::Ceil ||
-                  Op == rocjitsu::arith::Fp64::Floor || Op == rocjitsu::arith::Fp64::Rndne) {
-      // Integral rounding quiets NaNs before output scaling.
-      uint64_t bits = rocjitsu::arith::double_bits(value);
+                  Op == rocjitsu::arith::Fp64::Floor || Op == rocjitsu::arith::Fp64::Rndne ||
+                  Op == rocjitsu::arith::Fp64::Fract) {
+      // Integral rounding and FRACT return a NaN source, quieted unless quiet_snan is clear,
+      // before output scaling.
+      uint64_t bits = rocjitsu::arith::double_bits(x);
       if ((bits & 0x7fffffffffffffffULL) > 0x7ff0000000000000ULL) {
-        value = rocjitsu::arith::as_double(bits | 0x0008000000000000ULL);
+        value = rocjitsu::arith::as_double(bits | (quiet_snan ? 0x0008000000000000ULL : 0));
       }
     }
     const bool preserve_nan =
