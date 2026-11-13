@@ -3,14 +3,17 @@
 
 #include "parser/config_store.hpp"
 #include "parser/schema.hpp"
+#include "parser/value_text.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -85,6 +88,14 @@ make_store()
 {
     return config_store{ make_schema() };
 }
+
+/// The slot stored for @p param_id, or nullptr.
+const config_slot*
+find_slot(const std::vector<config_slot>& slots, std::string_view param_id)
+{
+    const auto found = std::ranges::find(slots, param_id, &config_slot::id);
+    return found == slots.end() ? nullptr : &*found;
+}
 }  // namespace
 
 TEST(parser_config_store, stores_and_reads_values)
@@ -134,6 +145,34 @@ TEST(parser_config_store, rejects_unknown_and_invalid_values)
                  std::runtime_error);
     EXPECT_EQ(store.get("sampling_freq"), "2");
     EXPECT_EQ(store.source_of("sampling_freq"), config_source::default_value);
+}
+
+TEST(parser_config_store, set_value_stores_a_parsed_value)
+{
+    auto store = make_store();
+    store.set_value("sampling_freq", std::int64_t{ 2 }, config_source::file);
+    store.set_value("components", std::vector<std::string>{ "cpu_clock" },
+                    config_source::environment);
+
+    EXPECT_EQ(store.get_as<std::int64_t>("sampling_freq"), 2);
+    EXPECT_EQ(store.source_of("sampling_freq"), config_source::file);
+    EXPECT_EQ(store.get("components"), "cpu_clock");
+
+    EXPECT_THROW(store.set_value("missing", true, config_source::file),
+                 std::runtime_error);
+    EXPECT_THROW(store.set_value("trace", std::string{ "yes" }, config_source::file),
+                 std::runtime_error);
+    try
+    {
+        store.set_value("sampling_freq", std::int64_t{ 4 }, config_source::preset);
+        ADD_FAILURE() << "a value above the maximum must throw";
+    } catch(const std::runtime_error& error)
+    {
+        EXPECT_STREQ(error.what(), "invalid value '4' for parameter 'sampling_freq'");
+    }
+    EXPECT_EQ(store.get_as<std::int64_t>("sampling_freq"), 2);
+    EXPECT_EQ(store.source_of("sampling_freq"), config_source::file);
+    EXPECT_FALSE(store.contains("trace"));
 }
 
 TEST(parser_config_store, source_changes_without_notifying_when_the_value_is_unchanged)
@@ -207,6 +246,24 @@ TEST(parser_config_store, values_map_contains_stored_entries)
     EXPECT_EQ(stored.at("trace"), "true");
     EXPECT_EQ(stored.at("mode"), "slow");
     EXPECT_EQ(stored.size(), 2U);
+}
+
+TEST(parser_config_store, slots_list_each_value_and_source)
+{
+    auto store = make_store();
+    store.set("trace", "on", config_source::command_line);
+    store.set("scale", "2", config_source::preset);
+
+    const auto  slots = store.slots();
+    const auto* trace = find_slot(slots, "trace");
+    const auto* scale = find_slot(slots, "scale");
+    ASSERT_EQ(slots.size(), 2U);
+    ASSERT_NE(trace, nullptr);
+    ASSERT_NE(scale, nullptr);
+    EXPECT_EQ(trace->value, config_value_t{ true });
+    EXPECT_EQ(trace->source, config_source::command_line);
+    EXPECT_EQ(scale->value, config_value_t{ k_scale });
+    EXPECT_EQ(scale->source, config_source::preset);
 }
 
 TEST(parser_config_store, callback_can_store_another_parameter)
