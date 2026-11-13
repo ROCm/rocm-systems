@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_metadata.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/lds_allocation.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
@@ -103,6 +104,10 @@ struct ImageSampleFootprint {
 struct MemoryAccessObservation {
   /// @brief Instruction mnemonic; points at static storage.
   std::string_view mnemonic;
+  /// @brief Decoded operation identity, independent of its display spelling.
+  Operation operation = Operation::Unknown;
+  /// @brief Decoded addressing family before dynamic aperture resolution.
+  MemoryAddressing addressing = MemoryAddressing::None;
   uint64_t pc = 0;              ///< PC of the issuing wavefront.
   uint32_t compute_unit_id = 0; ///< Component id of the compute unit that issued it.
   uint32_t dispatch_id = 0;

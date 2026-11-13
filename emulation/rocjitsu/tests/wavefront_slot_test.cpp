@@ -20,6 +20,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <string_view>
 #include <utility>
 
 namespace {
@@ -165,6 +166,47 @@ TEST_F(InstructionTimingTest, CountsScalarMessageReturns) {
   EXPECT_EQ(message.counters.types[0], WaitCounterType::KMCNT);
   EXPECT_EQ(message.counters.types[1], WaitCounterType::KMCNT);
   EXPECT_TRUE(message.writes.contains({RegClass::SGPR, 4, 1}));
+}
+
+// Deliberately misleading display names exercise the numeric classification
+// contract without relying on the production generator's mnemonic spelling.
+class TimingMetadataInstruction final : public Instruction {
+public:
+  TimingMetadataInstruction(std::string_view name, uint64_t flags, Operation operation,
+                            MemoryKind kind = MemoryKind::None)
+      : Instruction(name, nullptr) {
+    flags_ = flags;
+    set_amdgpu_operation(operation);
+    if (kind != MemoryKind::None)
+      set_amdgpu_memory(MemoryAddressing::Global, kind);
+  }
+};
+
+TEST(InstructionTimingMetadata, CounterClassificationIgnoresDisplayNames) {
+  const auto store = InstructionTiming::classify(
+      std::make_unique<TimingMetadataInstruction>("display_load", VMEM, Operation::GLOBAL_STORE_B32,
+                                                  MemoryKind::Store),
+      0, 32);
+  ASSERT_TRUE(store);
+  ASSERT_EQ(store->counters.size, 1u);
+  EXPECT_EQ(store->counters.types[0], WaitCounterType::STORECNT);
+
+  const auto load = InstructionTiming::classify(
+      std::make_unique<TimingMetadataInstruction>("global_store_b32", VMEM,
+                                                  Operation::GLOBAL_LOAD_B32, MemoryKind::Load),
+      0, 32);
+  ASSERT_TRUE(load);
+  ASSERT_EQ(load->counters.size, 1u);
+  EXPECT_EQ(load->counters.types[0], WaitCounterType::LOADCNT);
+
+  const auto message =
+      InstructionTiming::classify(std::make_unique<TimingMetadataInstruction>(
+                                      "display_message", SALU, Operation::S_SENDMSG_RTN_B32),
+                                  0, 32);
+  ASSERT_TRUE(message);
+  ASSERT_EQ(message->counters.size, 2u);
+  EXPECT_EQ(message->counters.types[0], WaitCounterType::KMCNT);
+  EXPECT_EQ(message->counters.types[1], WaitCounterType::KMCNT);
 }
 
 class WavefrontSlotsTest : public ::testing::Test {

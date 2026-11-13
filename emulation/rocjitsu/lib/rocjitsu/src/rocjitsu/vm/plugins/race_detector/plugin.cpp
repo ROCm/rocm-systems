@@ -774,7 +774,7 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
   if (supports_counter_capacity(wf.cu().arch())) {
     // FLAT's address-dependent admission is applied after routing. Before its
     // operands are read, neither memory domain is guaranteed to be used.
-    if (inst.is_memory_op() && !inst.mnemonic().starts_with("flat_")) {
+    if (inst.is_memory_op() && inst.amdgpu_memory_addressing() != amdgpu::MemoryAddressing::Flat) {
       const auto *info = inst.amdgpu_memory_issue_info();
       assert(info && "memory instruction reached the race detector without issue metadata");
       if (info && (!info->exec_masked || wf.exec() != 0) &&
@@ -786,7 +786,10 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
 
     // Messages share LGKMCNT on the capacity-modeled targets but are not memory
     // instructions, so they intentionally remain outside memory issue metadata.
-    if (std::string_view(inst.mnemonic()).starts_with("s_sendmsg") &&
+    if ((inst.amdgpu_operation() == amdgpu::Operation::S_SENDMSG ||
+         inst.amdgpu_operation() == amdgpu::Operation::S_SENDMSGHALT ||
+         inst.amdgpu_operation() == amdgpu::Operation::S_SENDMSG_RTN_B32 ||
+         inst.amdgpu_operation() == amdgpu::Operation::S_SENDMSG_RTN_B64) &&
         s->race_state->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT).failed()) {
       report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
       return;

@@ -879,6 +879,7 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
           static_cast<int64_t>(state.desc.global_strides[0] * state.desc.elem_size),
       .tensor_dim1_stride =
           static_cast<int64_t>(state.desc.global_strides[1] * state.desc.elem_size),
+      .operation = inst.amdgpu_operation(),
   };
   wf.cu().report_tensor_dma_memory_access(access);
 }

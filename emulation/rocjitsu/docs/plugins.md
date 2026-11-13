@@ -48,7 +48,7 @@ per-dispatch output and the summary.
 
 Memory instructions take precedence over their scalar or vector encoding. The
 `lds` and `global` families describe the instruction's pre-routing pipeline tag
-or mnemonic fallback: `lds` covers DS/LDS local-memory instructions, while
+or decoded addressing metadata: `lds` covers DS/LDS local-memory instructions, while
 `global` covers global, scalar-memory, flat, buffer, typed-buffer, image,
 tensor, and scratch instructions. A later shared-aperture FLAT-to-LDS remap is
 therefore still reported as `global`. Their `execution_seconds` measure
@@ -58,19 +58,14 @@ includes MFMA, SMFMAC, WMMA, and SWMMAC instructions. Control covers branches,
 waits, barriers, termination, no-ops, sleeps, and delays, including the LDS-pipe
 `ds_nop` and the GWS barrier/semaphore instructions, which move no data.
 
-The mnemonic fallback is not just for synthetic instructions: whole prefix
-families never set the memory-op flag — RDNA4 `ds_direct_load` and `tbuffer_*`,
-RDNA3.5 `lds_direct_load`, the image encodings, the CDNA5 tensor transfers, and
-every scalar-memory encoding, since `smem` stopped setting the flag when the
-decoded memory-issue metadata landed — and some mnemonics carry it on one
-architecture but not another. Classification is by flag *and* by prefix so that
-a mnemonic reports the same family whichever architecture executed it.
-
-Where neither applies, the decoded memory-issue metadata is consulted last: it
-names the completion domain, so an encoding that follows no naming convention
-is still placed. The CDNA5 `cluster_load_*` set is the live case. The metadata
-is checked after the prefix so that generic FLAT, which reports both LDS and
-VMEM obligations, keeps the `global` bucket described above.
+Classification uses numeric operation identity, instruction flags, and decoded
+memory addressing. Addressing metadata covers direct LDS, typed-buffer, image,
+tensor, cluster, and scalar-memory instructions even when they do not set the
+memory-op flag. Generic FLAT keeps the `global` bucket described above, while
+scalar timestamp reads report scalar work. Existing pipeline flags and
+memory-issue completion domains provide a final fallback when addressing
+metadata is absent. Synthetic instructions must supply the same metadata;
+their mnemonic text does not determine their family.
 
 For a machine-readable report:
 

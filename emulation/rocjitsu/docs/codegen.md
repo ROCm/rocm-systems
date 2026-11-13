@@ -23,6 +23,54 @@ layout formulas and a fixed inventory of source/target layout names.
 | `layout_catalog.py` | Matrix lane-layout descriptors and XOR permutation formulas |
 | `codegen/dbt/rule_gen.py` | Derive and emit the matrix lane-conversion catalog |
 
+## Decoded instruction metadata
+
+Instruction constructors resolve semantic facts once. Runtime consumers use
+`InstFlags`, `amdgpu::Operation`, `amdgpu::MemoryAddressing`, and
+`amdgpu::MemoryKind`; mnemonic strings are for disassembly, diagnostics, and
+textual input. `codegen/instruction_metadata.py` owns the generated operation
+catalog and classification rules. Generation may inspect instruction names,
+encoding fields, and semantic classes; execution and analysis must not infer
+those facts by parsing the display name.
+
+The existing metadata has separate responsibilities:
+
+- `InstFlags` contains independent properties, including execution class,
+  matrix arithmetic, PC reads, relative register addressing, packed D16 memory
+  data, and transfers between memory and LDS.
+- `Operation` identifies a canonical operation across encoding decorations.
+  VOPD carries identities for both slots. Exact instruction exceptions use
+  these IDs; IDs do not replace target-qualified encoding IDs or opcodes in
+  translation tables and are not a serialized or stable public ABI.
+- `MemoryAddressing` describes the decoded addressing family. A FLAT
+  instruction stays FLAT when individual lanes route to LDS or scratch;
+  encoded segment and GDS controls are resolved during construction.
+  `MemoryKind` describes the transaction, including loads, stores, atomics,
+  sampling, cache operations, and prefetches. These facts do not promise
+  simulator execution support.
+- Source and destination operands, implicit use/def hooks, and
+  `RegisterModifiers` remain the authority for register effects. Runtime masks,
+  relative indices, register banks, and byte footprints remain dynamic.
+- `MemoryIssueInfo` describes modeled pipeline and completion obligations.
+  Target wait policy and async execution eligibility remain in their existing
+  owners; neither follows automatically from a broad memory or matrix flag.
+
+A direct-to-LDS load remains a load in its source addressing family, with
+`MEMORY_TO_LDS` describing the separate destination. An atomic remains atomic
+whether it returns data or not. Consumers must inspect its decoded operands
+and applicable return controls when that distinction matters.
+
+The shared operation header is generated from the union of the supplied ISA
+specifications, additions, aliases, special generated instructions, and the
+source operations in the fixed matrix-conversion catalog. Run
+`scripts/generate-amdisa.sh` for production updates so the catalog includes
+all supported targets. Focused generation into a separate output directory
+may use a smaller catalog. Decoders generated separately against the stock
+core headers use `Unknown` for operations absent from the core catalog,
+including additions to standard profiles. Synthetic test instructions must set
+their numeric identity and semantic metadata explicitly; the base constructor does not
+classify their mnemonic. Unknown identities conservatively stay `Unknown`.
+
 ## Installation
 
 Create or activate a virtual environment, then install in editable mode from
@@ -221,7 +269,7 @@ layout permutations; adding a row does not implement a translation or establish
 opcode availability. In particular, `V_WMMA_I32_16X16X32_I8` is a historical
 layout-only placeholder absent from the pinned RDNA4 XML, whose 8-bit integer
 WMMA instruction is `V_WMMA_I32_16X16X16_IU8`. The current consumer in
-`cdna4_to_rdna4.cpp` selects a row by source mnemonic and emits a fixed F16 WMMA
+`cdna4_to_rdna4.cpp` selects a row by source operation ID and emits a fixed F16 WMMA
 instruction; it does not validate or select the catalog's destination names.
 
 GPUOpen's public CDNA5 MR ISA uses the architecture name `AMD CDNA 5` and the

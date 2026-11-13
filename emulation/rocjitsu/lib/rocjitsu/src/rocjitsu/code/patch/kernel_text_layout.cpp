@@ -481,14 +481,17 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   return true;
 }
 
-[[nodiscard]] bool conditional_branch_can_invert(std::string_view mnemonic) {
+[[nodiscard]] bool conditional_branch_can_invert(amdgpu::Operation operation) {
   // COND_BRANCH alone includes conditionals without a defined adjacent inverse.
-  // Mnemonic identity is an ISA-wide semantic contract in rocjitsu, so this
+  // Operation identity is an ISA-wide semantic contract in rocjitsu, so this
   // target-independent whitelist is safer than assuming every conditional
   // opcode can be inverted by toggling its low bit.
-  return mnemonic == "s_cbranch_scc0" || mnemonic == "s_cbranch_scc1" ||
-         mnemonic == "s_cbranch_vccz" || mnemonic == "s_cbranch_vccnz" ||
-         mnemonic == "s_cbranch_execz" || mnemonic == "s_cbranch_execnz";
+  return operation == amdgpu::Operation::S_CBRANCH_SCC0 ||
+         operation == amdgpu::Operation::S_CBRANCH_SCC1 ||
+         operation == amdgpu::Operation::S_CBRANCH_VCCZ ||
+         operation == amdgpu::Operation::S_CBRANCH_VCCNZ ||
+         operation == amdgpu::Operation::S_CBRANCH_EXECZ ||
+         operation == amdgpu::Operation::S_CBRANCH_EXECNZ;
 }
 
 uint64_t initial_direct_branch_patch_window_bytes(const Instruction &inst) { return inst.size(); }
@@ -701,7 +704,7 @@ util::Result append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text,
 build_inverted_conditional_skip(const Instruction &inst, uint32_t translated_word,
                                 uint64_t window_offset, uint64_t window_bytes, rj_code_arch_t arch,
                                 const util::DiagnosticEmitter *error = nullptr) {
-  if (!conditional_branch_can_invert(inst.mnemonic()))
+  if (!conditional_branch_can_invert(inst.amdgpu_operation()))
     return std::nullopt;
   const std::optional<int16_t> skip =
       compute_sopp_branch_simm16(window_offset, window_offset + window_bytes);
@@ -714,9 +717,10 @@ build_inverted_conditional_skip(const Instruction &inst, uint32_t translated_wor
   // 38 into invalid opcode 39). Move explicitly to the adjacent inverse while
   // preserving the translated ISA's SOPP opcode numbering.
   const uint32_t op = (translated_word >> 16) & 0x7fu;
-  const std::string_view mnemonic = inst.mnemonic();
-  const bool invert_to_next =
-      mnemonic == "s_cbranch_scc0" || mnemonic == "s_cbranch_vccz" || mnemonic == "s_cbranch_execz";
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  const bool invert_to_next = operation == amdgpu::Operation::S_CBRANCH_SCC0 ||
+                              operation == amdgpu::Operation::S_CBRANCH_VCCZ ||
+                              operation == amdgpu::Operation::S_CBRANCH_EXECZ;
   const util::FailureOr<uint32_t> word = build_sopp_encoding(
       arch, invert_to_next ? op + 1u : op - 1u, static_cast<uint16_t>(*skip), error);
   if (word.failed())
@@ -946,7 +950,7 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
                 fixup.target_window_bytes, chain->front(), arch, &error)) {
           const bool can_grow_conditional_source =
               (fixup.inst->flags() & COND_BRANCH) != 0 &&
-              conditional_branch_can_invert(fixup.inst->mnemonic()) &&
+              conditional_branch_can_invert(fixup.inst->amdgpu_operation()) &&
               fixup.target_window_bytes < 2 * sizeof(uint32_t);
           if (!can_grow_conditional_source) {
             return relocation_error(

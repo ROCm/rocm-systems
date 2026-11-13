@@ -12,7 +12,7 @@
 
 namespace rocjitsu {
 void InstructionBoundaries::record(const Instruction &instruction, uint64_t address_base) {
-  const bool clause = instruction.mnemonic() == "s_clause";
+  const bool clause = instruction.amdgpu_operation() == amdgpu::Operation::S_CLAUSE;
   entries_.push_back({.offset = instruction.src_loc(),
                       .size = static_cast<uint32_t>(instruction.size()),
                       .clause_member = clause_remaining_ != 0,

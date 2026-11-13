@@ -107,8 +107,8 @@ template <typename T>
 
 [[nodiscard]] bool is_call(const Instruction &inst) { return (inst.flags() & INDIRECT_CALL) != 0; }
 // Quick check for explicit scratch access: FLAT scratch_* and SMEM s_scratch_*.
-[[nodiscard]] bool is_scratch_access(std::string_view m) {
-  return m.starts_with("scratch_") || m.starts_with("s_scratch_");
+[[nodiscard]] bool is_scratch_access(const Instruction &inst) {
+  return inst.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Scratch;
 }
 // RDNA4 image instructions (VIMAGE / VSAMPLE). Their decoders do not name every
 // register they access: no address VGPR is reported, vdata is four registers
@@ -116,8 +116,9 @@ template <typename T>
 // an atomic's data is reported only as written, and a tfe status register is not
 // reported. The live-in and clobber analyses would get those registers wrong, so
 // admitting these instructions is deferred until the decoder models the fields.
-[[nodiscard]] bool is_unmodeled_image_access(rj_code_arch_t arch, std::string_view m) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 && m.starts_with("image_");
+[[nodiscard]] bool is_unmodeled_image_access(rj_code_arch_t arch, const Instruction &inst) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+         inst.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Image;
 }
 
 } // namespace
@@ -221,10 +222,9 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     return std::nullopt;
   }
 
-  // Use strings to hold info between iterations (currently deleting inst)
-  std::string_view last_mnemonic;
-  std::string last_src0_name;
-  bool last_has_src0 = false;
+  // Keep value metadata after each decoded instruction is destroyed.
+  amdgpu::Operation last_operation = amdgpu::Operation::Unknown;
+  std::optional<RegisterRef> last_source;
   const std::span<const uint32_t> body(words);
   size_t w = 0;
   while (w < num_words) {
@@ -242,9 +242,10 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     }
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     const size_t inst_words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
-    const std::string_view m = inst->mnemonic();
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-        (m.starts_with("s_setreg") || m.starts_with("s_set_vgpr_msb"))) {
+    const amdgpu::Operation operation = inst->amdgpu_operation();
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && (operation == amdgpu::Operation::S_SETREG_B32 ||
+                                             operation == amdgpu::Operation::S_SETREG_IMM32_B32 ||
+                                             operation == amdgpu::Operation::S_SET_VGPR_MSB)) {
       report(error_out, "probe body may change the VGPR bank state required by its call ABI");
       return std::nullopt;
     }
@@ -252,25 +253,26 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
       report(error_out, "probe body contains a call and is not self-contained");
       return std::nullopt;
     }
-    if (is_scratch_access(m)) {
+    if (is_scratch_access(*inst)) {
       report(error_out, "probe body accesses scratch / private segment");
       return std::nullopt;
     }
-    if (is_unmodeled_image_access(arch, m)) {
+    if (is_unmodeled_image_access(arch, *inst)) {
       report(error_out, "probe body has an RDNA4 image instruction, whose registers the decoder "
                         "does not fully model");
       return std::nullopt;
     }
-    last_mnemonic = m;
+    last_operation = operation;
     const Operand *src0 = inst->src_operand(0);
-    last_has_src0 = src0 != nullptr;
-    last_src0_name = last_has_src0 ? src0->name() : std::string();
+    last_source = src0 != nullptr ? src0->to_register_ref() : std::nullopt;
     w += inst_words;
   }
 
   // Must return through the s[30:31] link pair
-  if ((last_mnemonic != "s_setpc_b64" && last_mnemonic != "s_set_pc_i64") || !last_has_src0 ||
-      last_src0_name != "s[30:31]") {
+  if ((last_operation != amdgpu::Operation::S_SETPC_B64 &&
+       last_operation != amdgpu::Operation::S_SET_PC_I64) ||
+      !last_source || last_source->cls != RegClass::SGPR || last_source->index != 30 ||
+      last_source->width != 2) {
     report(error_out, "probe body does not return via s_setpc_b64 s[30:31]");
     return std::nullopt;
   }

@@ -50,6 +50,8 @@ ImageMsaaLoadVsample::ImageMsaaLoadVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_MSAA_LOAD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -81,6 +83,8 @@ ImageSampleVsample::ImageSampleVsample(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 bool ImageSampleVsample::should_print_src_operand(uint8_t operand_index) const {
@@ -164,6 +168,8 @@ ImageSampleDVsample::ImageSampleDVsample(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 bool ImageSampleDVsample::should_print_src_operand(uint8_t operand_index) const {
@@ -253,6 +259,8 @@ ImageSampleLVsample::ImageSampleLVsample(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 bool ImageSampleLVsample::should_print_src_operand(uint8_t operand_index) const {
@@ -338,6 +346,8 @@ ImageSampleBVsample::ImageSampleBVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -369,6 +379,8 @@ ImageSampleLzVsample::ImageSampleLzVsample(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 bool ImageSampleLzVsample::should_print_src_operand(uint8_t operand_index) const {
@@ -450,6 +462,8 @@ ImageSampleCVsample::ImageSampleCVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -479,6 +493,8 @@ ImageSampleCDVsample::ImageSampleCDVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -508,6 +524,8 @@ ImageSampleCLVsample::ImageSampleCLVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -537,6 +555,8 @@ ImageSampleCBVsample::ImageSampleCBVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -566,6 +586,8 @@ ImageSampleCLzVsample::ImageSampleCLzVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -595,6 +617,8 @@ ImageSampleOVsample::ImageSampleOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -624,6 +648,8 @@ ImageSampleDOVsample::ImageSampleDOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -653,6 +679,8 @@ ImageSampleLOVsample::ImageSampleLOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_L_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -682,6 +710,8 @@ ImageSampleBOVsample::ImageSampleBOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -711,6 +741,8 @@ ImageSampleLzOVsample::ImageSampleLzOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -740,6 +772,8 @@ ImageSampleCOVsample::ImageSampleCOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -769,6 +803,8 @@ ImageSampleCDOVsample::ImageSampleCDOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -798,6 +834,8 @@ ImageSampleCLOVsample::ImageSampleCLOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_L_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -827,6 +865,8 @@ ImageSampleCBOVsample::ImageSampleCBOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -856,6 +896,8 @@ ImageSampleCLzOVsample::ImageSampleCLzOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -885,6 +927,8 @@ ImageGather4Vsample::ImageGather4Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -914,6 +958,8 @@ ImageGather4LVsample::ImageGather4LVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -943,6 +989,8 @@ ImageGather4BVsample::ImageGather4BVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -974,6 +1022,8 @@ ImageGather4LzVsample::ImageGather4LzVsample(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 bool ImageGather4LzVsample::should_print_src_operand(uint8_t operand_index) const {
@@ -1039,6 +1089,8 @@ ImageGather4CVsample::ImageGather4CVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1068,6 +1120,8 @@ ImageGather4CLzVsample::ImageGather4CLzVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_LZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1097,6 +1151,8 @@ ImageGather4OVsample::ImageGather4OVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1126,6 +1182,8 @@ ImageGather4LzOVsample::ImageGather4LzOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1155,6 +1213,8 @@ ImageGather4CLzOVsample::ImageGather4CLzOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_LZ_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1184,6 +1244,8 @@ ImageGetLodVsample::ImageGetLodVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GET_LOD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -1213,6 +1275,8 @@ ImageSampleDG16Vsample::ImageSampleDG16Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1242,6 +1306,8 @@ ImageSampleCDG16Vsample::ImageSampleCDG16Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1271,6 +1337,8 @@ ImageSampleDOG16Vsample::ImageSampleDOG16Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1300,6 +1368,8 @@ ImageSampleCDOG16Vsample::ImageSampleCDOG16Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1329,6 +1399,8 @@ ImageSampleClVsample::ImageSampleClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1358,6 +1430,8 @@ ImageSampleDClVsample::ImageSampleDClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1387,6 +1461,8 @@ ImageSampleBClVsample::ImageSampleBClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1416,6 +1492,8 @@ ImageSampleCClVsample::ImageSampleCClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1445,6 +1523,8 @@ ImageSampleCDClVsample::ImageSampleCDClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1474,6 +1554,8 @@ ImageSampleCBClVsample::ImageSampleCBClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1503,6 +1585,8 @@ ImageSampleClOVsample::ImageSampleClOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1532,6 +1616,8 @@ ImageSampleDClOVsample::ImageSampleDClOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1561,6 +1647,8 @@ ImageSampleBClOVsample::ImageSampleBClOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_B_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1590,6 +1678,8 @@ ImageSampleCClOVsample::ImageSampleCClOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1619,6 +1709,8 @@ ImageSampleCDClOVsample::ImageSampleCDClOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1648,6 +1740,8 @@ ImageSampleCBClOVsample::ImageSampleCBClOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_B_CL_O);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1677,6 +1771,8 @@ ImageSampleCDClG16Vsample::ImageSampleCDClG16Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1706,6 +1802,8 @@ ImageSampleDClOG16Vsample::ImageSampleDClOG16Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1736,6 +1834,8 @@ ImageSampleCDClOG16Vsample::ImageSampleCDClOG16Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_C_D_CL_O_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1766,6 +1866,8 @@ ImageSampleDClG16Vsample::ImageSampleDClG16Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_SAMPLE_D_CL_G16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1795,6 +1897,8 @@ ImageGather4ClVsample::ImageGather4ClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1824,6 +1928,8 @@ ImageGather4BClVsample::ImageGather4BClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1853,6 +1959,8 @@ ImageGather4CClVsample::ImageGather4CClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1882,6 +1990,8 @@ ImageGather4CLVsample::ImageGather4CLVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_L);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1911,6 +2021,8 @@ ImageGather4CBVsample::ImageGather4CBVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_B);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1940,6 +2052,8 @@ ImageGather4CBClVsample::ImageGather4CBClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4_C_B_CL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {
@@ -1969,6 +2083,8 @@ ImageGather4hVsample::ImageGather4hVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GATHER4H);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Sample);
 }
 
 namespace detail {

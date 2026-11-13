@@ -105,11 +105,73 @@ def test_emitted_matrix_header_compiles_standalone(tmp_path):
     source = tmp_path / 'matrix_conversions.cpp'
     source.write_text(
         '#include "matrix_conversions.h"\n'
-        'static_assert(rocjitsu::kMatrixConversionCount == 4);\n',
+        'static_assert(rocjitsu::kMatrixConversionCount == 4);\n'
+        'static_assert(rocjitsu::kMatrixConversions[0].src_operation != '
+        'rocjitsu::amdgpu::Operation::Unknown);\n',
         encoding='utf-8',
     )
     result = subprocess.run(
-        [compiler, '-std=c++20', '-pedantic-errors', '-fsyntax-only', str(source)],
+        [
+            compiler,
+            '-std=c++20',
+            '-pedantic-errors',
+            '-fsyntax-only',
+            '-I',
+            str(_ROCJITSU / 'lib/rocjitsu/src'),
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_focused_rdna_catalog_compiles_with_its_matrix_header(tmp_path):
+    compiler = shutil.which('clang++') or shutil.which('c++')
+    if compiler is None:
+        pytest.skip('C++ compiler is unavailable')
+    include_root = tmp_path / 'include'
+    isa_output = include_root / 'rocjitsu/isa/arch/amdgpu/generated'
+    dbt_output = tmp_path / 'dbt'
+    result = subprocess.run(
+        [
+            sys.executable,
+            '-m',
+            'amdisa',
+            f'rdna1:{_MRISA / "amdgpu_isa_rdna1.xml"}',
+            f'rdna2:{_MRISA / "amdgpu_isa_rdna2.xml"}',
+            '--isa-output',
+            str(isa_output),
+            '--include-root',
+            str(include_root),
+            '--dbt-output',
+            str(dbt_output),
+        ],
+        env={**os.environ, 'PYTHONPATH': str(_ROCJITSU / 'lib' / 'python')},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    source = dbt_output / 'matrix_conversions.cpp'
+    source.write_text(
+        '#include "matrix_conversions.h"\n'
+        'static_assert(rocjitsu::kMatrixConversionCount == 4);\n',
+        encoding='utf-8',
+    )
+    # Deliberately exclude the stock catalog: the focused output must supply
+    # every operation referenced by its own fixed conversion table.
+    result = subprocess.run(
+        [
+            compiler,
+            '-std=c++20',
+            '-pedantic-errors',
+            '-fsyntax-only',
+            '-I',
+            str(include_root),
+            str(source),
+        ],
         capture_output=True,
         text=True,
         timeout=60,

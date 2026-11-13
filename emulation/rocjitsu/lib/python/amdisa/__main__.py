@@ -28,6 +28,8 @@ from amdisa import (
 from amdisa import xml_schema as xs
 from amdisa.cross_isa import CrossIsaAnalyzer
 from amdisa.codegen.dbt.rule_gen import generate_matrix_conversions
+from amdisa.codegen.instruction_metadata import emit_operations
+from amdisa.codegen.async_mma_policy import emit_async_inline_operations
 from amdisa.encoding_translator_codegen import (
     generate_encoding_fields,
     generate_encoding_translators,
@@ -294,6 +296,8 @@ def _run(args) -> None:
     # Generate per-ISA files, accumulating shared execute bodies.
     if args.gen_isas:
         emit_isa_properties(args.isa_output, specs)
+        operations = emit_operations(args.isa_output, specs)
+        emit_async_inline_operations(args.isa_output, operations)
         body_variants = _collect_shared_execute_body_variants(specs, plan)
         unshared_keys = _unshared_execute_keys_from_variants(body_variants)
         config.unshared_execute_keys = unshared_keys

@@ -26,6 +26,9 @@ TensorLoadToLdsVimage::TensorLoadToLdsVimage(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TENSOR_LOAD_TO_LDS);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Tensor, amdgpu::MemoryKind::Load);
+  flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -53,6 +56,9 @@ TensorStoreFromLdsVimage::TensorStoreFromLdsVimage(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TENSOR_STORE_FROM_LDS);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Tensor, amdgpu::MemoryKind::Store);
+  flags_ |= MEMORY_FROM_LDS;
 }
 
 namespace detail {

@@ -122,8 +122,9 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rj_code_arch_t 
     }
   };
 
-  const std::string_view mnemonic = inst.mnemonic();
-  if (mnemonic == "s_wait_idle" || (arch == ROCJITSU_CODE_ARCH_RDNA4 && mnemonic == "s_waitcnt")) {
+  const Operation operation = inst.amdgpu_operation();
+  if (operation == Operation::S_WAIT_IDLE ||
+      (arch == ROCJITSU_CODE_ARCH_RDNA4 && operation == Operation::S_WAITCNT)) {
     // RDNA4's compatibility S_WAITCNT is S_WAIT_IDLE regardless of SIMM16.
     for (size_t counter_idx = 0; counter_idx < kWaitCounterCount; ++counter_idx) {
       const auto counter = static_cast<WaitCounterKind>(counter_idx);
@@ -132,7 +133,7 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rj_code_arch_t 
     }
     return fields;
   }
-  if (uses_legacy_waitcnt(model.value()) && mnemonic == "s_waitcnt") {
+  if (uses_legacy_waitcnt(model.value()) && operation == Operation::S_WAITCNT) {
     const auto value = operand_value(0);
     if (!value)
       return std::nullopt;
@@ -143,8 +144,8 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rj_code_arch_t 
     return fields;
   }
 
-  if ((has_legacy_vscnt(model.value()) && mnemonic == "s_waitcnt_depctr") ||
-      (!uses_legacy_waitcnt(model.value()) && mnemonic == "s_wait_alu")) {
+  if ((has_legacy_vscnt(model.value()) && operation == Operation::S_WAITCNT_DEPCTR) ||
+      (!uses_legacy_waitcnt(model.value()) && operation == Operation::S_WAIT_ALU)) {
     const auto value = operand_value(0);
     if (!value)
       return std::nullopt;
@@ -154,18 +155,19 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rj_code_arch_t 
   }
 
   if (uses_legacy_waitcnt(model.value())) {
-    const bool sopk_wait = mnemonic == "s_waitcnt_vmcnt" || mnemonic == "s_waitcnt_vscnt" ||
-                           mnemonic == "s_waitcnt_expcnt" || mnemonic == "s_waitcnt_lgkmcnt";
+    const bool sopk_wait =
+        operation == Operation::S_WAITCNT_VMCNT || operation == Operation::S_WAITCNT_VSCNT ||
+        operation == Operation::S_WAITCNT_EXPCNT || operation == Operation::S_WAITCNT_LGKMCNT;
     if (!sopk_wait)
       return std::nullopt;
     const auto value = operand_value(1);
     if (!value)
       return std::nullopt;
-    if (mnemonic == "s_waitcnt_vmcnt")
+    if (operation == Operation::S_WAITCNT_VMCNT)
       set_field(WaitCounterKind::Load, *value);
-    else if (mnemonic == "s_waitcnt_vscnt")
+    else if (operation == Operation::S_WAITCNT_VSCNT)
       set_field(WaitCounterKind::Store, *value);
-    else if (mnemonic == "s_waitcnt_expcnt")
+    else if (operation == Operation::S_WAITCNT_EXPCNT)
       set_field(WaitCounterKind::Exp, *value);
     else
       set_field(WaitCounterKind::Ds, *value);
@@ -175,30 +177,30 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rj_code_arch_t 
   const auto value = operand_value(0);
   if (!value)
     return std::nullopt;
-  if (mnemonic == "s_wait_loadcnt")
+  if (operation == Operation::S_WAIT_LOADCNT)
     set_field(WaitCounterKind::Load, *value);
-  else if (mnemonic == "s_wait_storecnt")
+  else if (operation == Operation::S_WAIT_STORECNT)
     set_field(WaitCounterKind::Store, *value);
-  else if (mnemonic == "s_wait_dscnt")
+  else if (operation == Operation::S_WAIT_DSCNT)
     set_field(WaitCounterKind::Ds, *value);
-  else if (mnemonic == "s_wait_kmcnt")
+  else if (operation == Operation::S_WAIT_KMCNT)
     set_field(WaitCounterKind::Km, *value);
-  else if (mnemonic == "s_wait_samplecnt")
+  else if (operation == Operation::S_WAIT_SAMPLECNT)
     set_field(WaitCounterKind::Sample, *value);
-  else if (mnemonic == "s_wait_bvhcnt")
+  else if (operation == Operation::S_WAIT_BVHCNT)
     set_field(WaitCounterKind::Bvh, *value);
-  else if (mnemonic == "s_wait_expcnt")
+  else if (operation == Operation::S_WAIT_EXPCNT)
     set_field(WaitCounterKind::Exp, *value);
-  else if (mnemonic == "s_wait_xcnt")
+  else if (operation == Operation::S_WAIT_XCNT)
     set_field(WaitCounterKind::X, *value);
-  else if (mnemonic == "s_wait_asynccnt")
+  else if (operation == Operation::S_WAIT_ASYNCCNT)
     set_field(WaitCounterKind::Async, *value);
-  else if (mnemonic == "s_wait_tensorcnt")
+  else if (operation == Operation::S_WAIT_TENSORCNT)
     set_field(WaitCounterKind::Tensor, *value);
-  else if (mnemonic == "s_wait_loadcnt_dscnt") {
+  else if (operation == Operation::S_WAIT_LOADCNT_DSCNT) {
     set_field(WaitCounterKind::Load, (*value >> 8u) & 0x3fu);
     set_field(WaitCounterKind::Ds, *value & 0x3fu);
-  } else if (mnemonic == "s_wait_storecnt_dscnt") {
+  } else if (operation == Operation::S_WAIT_STORECNT_DSCNT) {
     set_field(WaitCounterKind::Store, (*value >> 8u) & 0x3fu);
     set_field(WaitCounterKind::Ds, *value & 0x3fu);
   } else {

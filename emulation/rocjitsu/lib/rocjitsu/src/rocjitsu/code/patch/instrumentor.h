@@ -246,7 +246,7 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///   - anchor.raw_encoding() is non-null.
 ///   - anchor is not a branch/cond branch/indirect branch/indirect call/
 ///     program terminator, and branch_offset_bytes() is nullopt.
-///   - anchor.mnemonic() is not in the small PC-relative denylist
+///   - the anchor operation has no prohibited PC-relative semantics
 ///     (s_getpc_b64, s_call_b64, s_setpc_b64, s_swappc_b64, s_rfe_*).
 ///   - anchor is not s_clause. Because this predicate has no surrounding
 ///     instruction-stream context, Instrumentor additionally rejects anchors
