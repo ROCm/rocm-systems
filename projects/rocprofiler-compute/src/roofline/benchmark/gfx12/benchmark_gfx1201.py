@@ -112,19 +112,16 @@ MALL_WORKING_SET_DIVISOR = 2
 # multiProcessorCount GL0 instances. L2_WORKING_SET_BYTES is 4 MB, which
 # still fits a 6 MB GL2. The 32 banks and 128 B/clock are full-chip
 # ceilings used by pipe_bandwidth_gbps. GL1 is a buffer with no tags and no
-# capacity, so a read stream has no GL1-resident roof. The 8 x 128 B GL1
-# port is narrower than the traffic a GL2 hit actually returns, and scoring
-# a GL2-resident kernel against it reports more than 100 percent.
+# capacity, so gfx1201 has no L1 roof.
 GL0_PER_MULTIPROCESSOR = 2
 GL0_READ_BYTES_PER_CLOCK = 128
 GL0_CAPACITY_BYTES = 32 * 1024
 GL2_BANKS = 32
 GL2_HIT_RETURN_BYTES_PER_CLOCK = 128
 
-# L0 is one whole TCP. The 4 MB set misses GL0 and still fits GL2, including
-# a 6 MB GL2. L1 and L2 are GL2-hit roofs. L2 is the larger resident set.
+# L0 is one whole TCP. The 4 MB L2 set misses GL0 and still fits GL2,
+# including a 6 MB GL2.
 L0_WORKING_SET_BYTES = 32 * 1024
-L1_WORKING_SET_BYTES = 1 * 1024 * 1024
 L2_WORKING_SET_BYTES = 4 * 1024 * 1024
 # The counts were chosen so a GL2-resident read approaches the GL2 return
 # and a GL0-resident read stays under the 128 B return.
@@ -133,8 +130,6 @@ CACHE_LOADS_IN_FLIGHT = 4
 L0_WORKGROUPS_PER_CU = 128
 L0_LOADS_IN_FLIGHT = 8
 
-# GL1 has no cache, so L1 is not an 8 x 128 B GL1 roof: the bytes come back on
-# the 32-bank GL2 read return, as they do for L2 over a larger set.
 L0_ROOF = ResidentReadRoof(
     L0_WORKING_SET_BYTES,
     GL0_PER_MULTIPROCESSOR,
@@ -145,8 +140,8 @@ L0_ROOF = ResidentReadRoof(
     "cache_l0_bw",
     instances_per_multiprocessor=True,
 )
-L1_ROOF = ResidentReadRoof(
-    L1_WORKING_SET_BYTES,
+L2_ROOF = ResidentReadRoof(
+    L2_WORKING_SET_BYTES,
     GL2_BANKS,
     GL2_HIT_RETURN_BYTES_PER_CLOCK,
     "GL2 hit return",
@@ -154,7 +149,6 @@ L1_ROOF = ResidentReadRoof(
     CACHE_LOADS_IN_FLIGHT,
     "cache_resident_bw",
 )
-L2_ROOF = L1_ROOF._replace(working_set_bytes=L2_WORKING_SET_BYTES)
 
 # Full 256-bit Navi 48 reference. The stored VRAMBw value is the measured read.
 DRAM_BUS_BITS = 256
@@ -193,7 +187,6 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         # them onto the resident-read roofs. A set larger than GL2 misses
         # into the Infinity Cache. L2_ROOF stays at 4 MB.
         self.tests["L0"] = partial(self.cache_resident_bw, label="L0", roof=L0_ROOF)
-        self.tests["L1"] = partial(self.cache_resident_bw, label="L1", roof=L1_ROOF)
         self.tests["L2"] = partial(self.cache_resident_bw, label="L2", roof=L2_ROOF)
         # The Infinity Cache holds a set that L2 does not.
         self.tests["MALL"] = partial(
@@ -211,6 +204,9 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
             "BF16": "wmma_bf16",
         }
         self.apply_roofline_spec(gpu_arch)
+        # GL1 is a buffer, not a cache, so L1Bw is written as 0 and the plot
+        # draws no L1 roof.
+        self.unsupported_data_types += ("L1",)
 
         # FLOPs per wave per inner iteration, accounting for the WMMA_ACC chains.
         # BF8 is V_WMMA_F32_16X16X16_BF8_BF8: the same 16x16x16 MAC count as FP8.
