@@ -1446,7 +1446,7 @@ void ComputeUnitCore::qualify_cdna4_memory_destination(Instruction &inst, const 
   }
 }
 
-VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> &&inst,
+VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> &inst,
                                                    Wavefront &wf) {
   if (arch() == ROCJITSU_CODE_ARCH_CDNA4)
     qualify_cdna4_memory_destination(*inst, wf);
@@ -1454,7 +1454,7 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> 
     qualify_gfx11_memory(*inst, wf);
   if (arch() == ROCJITSU_CODE_ARCH_RDNA4)
     nullify_unallocated_memory_result(*inst, wf);
-  return route_prepared_memory_inst(std::move(inst), wf);
+  return route_prepared_memory_inst(inst, wf);
 }
 
 // Only gfx1250 partitions the shared aperture into local and distributed LDS.
@@ -1474,7 +1474,7 @@ static bool flat_shared_atomic_misaligned(rj_code_arch_t arch, const VectorMemSt
          shared_offset % state.elem_size != 0;
 }
 
-VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst,
+VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Instruction> &inst,
                                                             Wavefront &wf) {
   if (observes_memory_instruction_routing_)
     plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
@@ -1614,12 +1614,13 @@ VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Inst
 
   switch (route_tag) {
   case SCALAR_MEM:
-    return scalar_mem_pipeline_.issue_deferred(inst.release(), wf);
+    return scalar_mem_pipeline_.issue_deferred(inst, wf);
   case LOCAL_MEM:
-    return local_mem_pipeline_.issue_deferred(inst.release(), wf);
+    return local_mem_pipeline_.issue_deferred(inst, wf);
   case GLOBAL_MEM:
-    return global_mem_pipeline_.issue_deferred(inst.release(), wf);
+    return global_mem_pipeline_.issue_deferred(inst, wf);
   default:
+    inst.reset();
     return VmAccessOutcome::Malformed;
   }
 }
@@ -3142,43 +3143,40 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     }
     return IssueOutcome::Issued;
   }
-  if (inst->is_memory_op()) {
-    if (!inst->data()) {
-      // A memory execute path can intentionally reject an invalid complete
-      // register operand before constructing pipeline state. Treat that as a
-      // fully suppressed instruction: no route callback, wait-counter update,
-      // or memory transaction is permitted.
-      decoded.value().reset();
-    } else {
-      if (inst->data()->tag() == GLOBAL_MEM) {
-        auto *d = inst->data_as<VectorMemState>();
-        d->issue_pc = active->pc;
-      }
-      const VmAccessOutcome memory_outcome = route_memory_inst(std::move(decoded.value()), *active);
-      if (active->instruction_execution_failed()) [[unlikely]] {
-        fail_current_instruction();
+  // Suppressed memory instructions publish no active state. Skip routing and
+  // counter updates while keeping the decoded owner for ScopedReturn, including
+  // a warm LDS-direct entry whose EXEC mask is zero.
+  if (inst->is_memory_op() && inst->data()) {
+    if (inst->data()->tag() == GLOBAL_MEM) {
+      auto *d = inst->data_as<VectorMemState>();
+      d->issue_pc = active->pc;
+    }
+    const VmAccessOutcome memory_outcome = route_memory_inst(decoded.value(), *active);
+    if (active->instruction_execution_failed()) [[unlikely]] {
+      fail_current_instruction();
+      return IssueOutcome::Issued;
+    }
+    if (memory_outcome != VmAccessOutcome::Complete) {
+      if (memory_outcome == VmAccessOutcome::Unavailable) {
+        request_functional_yield();
         return IssueOutcome::Issued;
       }
-      if (memory_outcome != VmAccessOutcome::Complete) {
-        if (memory_outcome == VmAccessOutcome::Unavailable) {
-          request_functional_yield();
-          return IssueOutcome::Issued;
-        }
-        // Ordinary memory instructions may overlap independent matrix work.
-        // Join that work before a terminal fault releases the wave's registers.
-        drain_async_window();
-        util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(DataVmAccess) pc=0x",
-                         std::hex, active->pc, std::dec, " vmid=", vmid,
-                         " outcome=", static_cast<unsigned>(memory_outcome));
-        active->pc += inst_size;
-        handle_memory_access_failure(*active, memory_outcome, issue_pc);
-        return IssueOutcome::Issued;
-      }
-      if (active->state() == WfState::MEMORY_TRAP) {
-        active->pc += inst_size;
-        deliver_memory_trap(*active);
-        return IssueOutcome::Issued;
-      }
+      // Ordinary memory instructions may overlap independent matrix work.
+      // Join that work before a terminal fault releases the wave's registers.
+      drain_async_window();
+      util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(DataVmAccess) pc=0x",
+                       std::hex, active->pc, std::dec, " vmid=", vmid,
+                       " outcome=", static_cast<unsigned>(memory_outcome));
+      active->pc += inst_size;
+      handle_memory_access_failure(*active, memory_outcome, issue_pc);
+      return IssueOutcome::Issued;
+    }
+    if (decoded.succeeded())
+      decoded.value()->retire_data();
+    if (active->state() == WfState::MEMORY_TRAP) {
+      active->pc += inst_size;
+      deliver_memory_trap(*active);
+      return IssueOutcome::Issued;
     }
   }
 

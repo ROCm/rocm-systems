@@ -243,7 +243,7 @@ public:
   static amdgpu::VmAccessOutcome route(amdgpu::ComputeUnitCore &cu,
                                        std::unique_ptr<Instruction> instruction,
                                        amdgpu::Wavefront &wave) {
-    return cu.route_memory_inst(std::move(instruction), wave);
+    return cu.route_memory_inst(instruction, wave);
   }
 
   static void retry(amdgpu::ComputeUnitCore &cu) { cu.global_mem_pipeline_.tick(); }

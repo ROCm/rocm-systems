@@ -87,7 +87,7 @@ public:
   void execute_and_route(std::unique_ptr<Instruction> instruction, amdgpu::Wavefront &wave) {
     EXPECT_TRUE(execute_instruction(instruction.get(), wave).succeeded());
     if (instruction->is_memory_op())
-      route_memory_inst(std::move(instruction), wave);
+      route_memory_inst(instruction, wave);
   }
 };
 

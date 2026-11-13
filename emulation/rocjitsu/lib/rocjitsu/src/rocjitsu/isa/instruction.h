@@ -17,6 +17,7 @@
 
 #include <array>
 #include <cassert>
+#include <concepts>
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
@@ -24,6 +25,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <typeinfo>
 #include <utility>
 #include <vector>
 
@@ -182,8 +184,18 @@ public:
   uint8_t tag() const { return tag_; }
   void set_tag(uint8_t t) { tag_ = t; }
 
+  /// @brief Release operation-scoped ownership after successful completion.
+  /// @details Return true only when this state supports reset_for_reuse() and
+  /// retains no external resources. Instruction hides retired storage until
+  /// the next execution explicitly acquires, resets, and publishes it.
+  virtual bool retire_for_reuse() noexcept { return false; }
+
 protected:
   uint8_t tag_ = 0;
+
+private:
+  friend class Instruction;
+  bool active_ = true;
 };
 
 /// @brief Abstract base class that defines the API for an instruction.
@@ -299,37 +311,73 @@ public:
   /// @details Decoded operands are immutable after construction, except for
   /// temporary read delegation through ScopedOperandDelegate on the execution
   /// thread. The decoded instruction must not execute concurrently while bound.
-  /// Decoded non-memory instructions without DynamicInstState may be
-  /// reused across waves without a reset. Executors must read register values,
+  /// Decoded instructions without active DynamicInstState may be reused across
+  /// waves. Executors must read register values,
   /// EXEC and other execution state from the current context, and restore any
   /// temporary operand delegates before returning. Put persistent per-issue
-  /// state in DynamicInstState; its presence excludes decoded reuse. Any
+  /// state in DynamicInstState; retire_data() must hide completed state before
+  /// reuse, and acquire_data() must reset retained state before preparation. Any
   /// per-execution member flags must be assigned on every execution.
   const ExecuteFn execute;
 
-  /// @brief Access the attached dynamic state, or nullptr if none.
-  /// @returns Pointer to the dynamic state, or nullptr.
-  DynamicInstState *data() { return data_.get(); }
+  /// @brief Access the active dynamic state, or nullptr if none.
+  /// @returns Pointer to the active state; retired storage remains hidden.
+  DynamicInstState *data() { return data_ && data_->active_ ? data_.get() : nullptr; }
   /// @copydoc data()
-  const DynamicInstState *data() const { return data_.get(); }
+  const DynamicInstState *data() const { return data_ && data_->active_ ? data_.get() : nullptr; }
 
   /// @brief Typed convenience accessor (unchecked static_cast).
   /// @tparam T Concrete DynamicInstState subclass.
   /// @returns Pointer to the dynamic state cast to @p T.
   template <typename T> T *data_as() {
-    assert(dynamic_cast<T *>(data_.get()) != nullptr);
-    return static_cast<T *>(data_.get());
+    assert(dynamic_cast<T *>(data()) != nullptr);
+    return static_cast<T *>(data());
   }
   /// @copydoc data_as()
   template <typename T> const T *data_as() const {
-    assert(dynamic_cast<const T *>(data_.get()) != nullptr);
-    return static_cast<const T *>(data_.get());
+    assert(dynamic_cast<const T *>(data()) != nullptr);
+    return static_cast<const T *>(data());
   }
 
   /// @brief Attach dynamic state to this instruction (transfers ownership).
-  /// @details An instruction retaining this state cannot enter a decoded cache.
+  /// @details Published state excludes decoded caching until retire_data().
   /// @param[in] d Dynamic state (ownership transferred).
-  void set_data(std::unique_ptr<DynamicInstState> d) { data_ = std::move(d); }
+  void set_data(std::unique_ptr<DynamicInstState> d) {
+    if (d)
+      d->active_ = true;
+    data_ = std::move(d);
+  }
+
+  /// @brief Acquire exclusively owned state with fresh constructor semantics.
+  /// @details Reusable state types implement reset_for_reuse(args...) to restore
+  /// all defaults while preserving bounded buffers. Exact type matching keeps
+  /// this downcast safe even if callers change the requested state type.
+  /// Preparation can fail before set_data(): the local owner then destroys the
+  /// unpublished state, just as a freshly allocated state would be destroyed.
+  template <typename State, typename... Args>
+    requires std::derived_from<State, DynamicInstState>
+  std::unique_ptr<State> acquire_data(Args &&...args) {
+    DynamicInstState *retained = data_.get();
+    if (retained && !retained->active_ && typeid(*retained) == typeid(State)) {
+      auto state = std::unique_ptr<State>(static_cast<State *>(data_.release()));
+      state->reset_for_reuse(std::forward<Args>(args)...);
+      return state;
+    }
+    return std::make_unique<State>(std::forward<Args>(args)...);
+  }
+
+  /// @brief Hide completed state, retaining only storage that opts into reuse.
+  /// @details Call after successful synchronous writeback and counter release.
+  /// Deferred and retry owners destroy their instructions normally. Retiring
+  /// an already inactive state is harmless, including after an EXEC-zero issue.
+  void retire_data() {
+    if (data_ && data_->active_) {
+      if (data_->retire_for_reuse())
+        data_->active_ = false;
+      else
+        data_.reset();
+    }
+  }
 
   /// @brief Human-readable instruction identity for textual interfaces and diagnostics.
   /// @details Behavior is described by decoded metadata. The spelling can include

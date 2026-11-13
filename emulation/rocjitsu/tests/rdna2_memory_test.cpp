@@ -226,7 +226,17 @@ TEST_F(Rdna2MemoryTest, DsNullifiesTheWholeReturnBeforeChangingStorage) {
     auto *d = inst->data_as<amdgpu::VectorMemState>();
     EXPECT_EQ(d->exec_mask, active ? 1u : 0u);
     EXPECT_EQ(d->lane_mask, active ? 1u : 0u);
-    ASSERT_EQ(local.issue(inst.release(), *wave_), amdgpu::VmAccessOutcome::Complete);
+    ASSERT_EQ(local.issue_deferred(inst, *wave_), amdgpu::VmAccessOutcome::Complete);
+    if (!active) {
+      ASSERT_TRUE(inst);
+      inst->retire_data();
+      EXPECT_EQ(inst->data(), nullptr);
+      ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wave_).succeeded());
+      ASSERT_EQ(inst->data(), d);
+      EXPECT_EQ(d->exec_mask, 0u);
+      EXPECT_EQ(d->lane_mask, 0u);
+      ASSERT_EQ(local.issue_deferred(inst, *wave_), amdgpu::VmAccessOutcome::Complete);
+    }
   };
   write_vector(15, 0xfeedbeef);
   ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsRead2B32, 15, false));
