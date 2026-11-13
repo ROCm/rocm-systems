@@ -11,12 +11,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "TestBed.hpp"
 #include "StandaloneUtils.hpp"
 #include "VerifiableFp8.hpp"
+#include "common/IsolatedChildSkip.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
 namespace RcclUnitTesting
@@ -29,6 +32,24 @@ namespace RcclUnitTesting
   {
     if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr) return false;
     return EnvVars().maxGpus < minGpus;
+  }
+
+  // Names the file an Fp8Validation child writes its skip reason to, since a skipped child scores as a pass.
+  constexpr char kFp8SkipFileEnv[] = "RCCL_UT_FP8_SKIP_FILE";
+  // Names the file an Fp8Validation child writes its generated FP8 bytes to.
+  constexpr char kFp8DumpFileEnv[] = "RCCL_UT_FP8_DUMP_FILE";
+
+  static std::string Fp8TempPath(char const* what)
+  {
+    return "/tmp/rccl_ut_fp8_" + std::string(what) + "_" + std::to_string(getpid());
+  }
+
+  static std::vector<uint8_t> TakeFile(std::string const& path)
+  {
+    std::ifstream in(path, std::ios::binary);
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::remove(path.c_str());
+    return bytes;
   }
 
   // Non-reduce FP8 collectives (e.g. AllToAll) compare against one reference, bit-exactly:
@@ -64,8 +85,17 @@ namespace RcclUnitTesting
     if (ShouldSkipForNoGpu())
       GTEST_SKIP() << "Requires a GPU";
 
-    RUN_ISOLATED_TEST("Fp8Validation_DeviceCompareIsExact", []()
+    std::string const skipFile = Fp8TempPath("device_compare_skip");
+    std::remove(skipFile.c_str());
+    RUN_ISOLATED_TEST_WITH_ENV("Fp8Validation_DeviceCompareIsExact", []()
     {
+      ASSERT_EQ(hipSetDevice(0), hipSuccess);
+      if (!UtDeviceDataEnabled())
+      {
+        SkipOrHandToParent(kFp8SkipFileEnv, "Device-data kernels are disabled or cannot run on this GPU");
+        return;
+      }
+
       for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
       {
         PtrUnion actual;
@@ -88,72 +118,158 @@ namespace RcclUnitTesting
         EXPECT_EQ(actual.FreeGpuMem(), TEST_SUCCESS);
         EXPECT_EQ(expected.FreeGpuMem(), TEST_SUCCESS);
       }
-    });
+    }, {{kFp8SkipFileEnv, skipFile}});
+    std::string const reason = TakeHandedSkip(skipFile);
+    if (!reason.empty())
+    {
+      GTEST_SKIP() << reason;
+    }
   }
 
   // FP8 reductions validate against the verifiable generator's single reference. It must accept
   // its own expected values, report each corrupted element, and give every rank distinct inputs
   // so that a missing or duplicated rank changes the result (for Min/Max too).
+  static void CheckVerifiableReference()
+  {
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    size_t const numElements = 4096;
+    int    const rankCounts[] = {3, 8};
+    uint64_t const seed = 0x5eed;
+    uint8_t* bufGpu = nullptr;
+    uint8_t* otherGpu = nullptr;
+    int64_t* badEltN = nullptr;
+    ASSERT_EQ(hipMalloc(&bufGpu, numElements), hipSuccess);
+    ASSERT_EQ(hipMalloc(&otherGpu, numElements), hipSuccess);
+    ASSERT_EQ(hipHostMalloc((void**)&badEltN, sizeof(int64_t)), hipSuccess);
+    std::vector<uint8_t> rank0(numElements), rank1(numElements);
+
+    for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
+    for (ncclRedOp_t const redOp : {ncclSum, ncclProd, ncclMax, ncclMin})
+    for (int const rankN : rankCounts)
+    {
+      SCOPED_TRACE(std::string(ncclDataTypeNames[dataType]) + " " + ncclRedOpNames[redOp] +
+                   " ranks=" + std::to_string(rankN));
+      auto verify = [&]() {
+        *badEltN = -1;
+        EXPECT_EQ(VerifiableFp8Verify(bufGpu, numElements, dataType, redOp, rankN,
+                                      seed, 0, badEltN, nullptr), hipSuccess);
+        EXPECT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+        return *badEltN;
+      };
+
+      ASSERT_EQ(VerifiableFp8PrepareExpected(bufGpu, numElements, dataType, redOp, rankN,
+                                             seed, 0, nullptr), hipSuccess);
+      EXPECT_EQ(verify(), 0);
+
+      // Flip an exponent bit: the value changes by far more than any tolerance
+      uint8_t byte = 0;
+      ASSERT_EQ(hipMemcpy(&byte, bufGpu + 17, 1, hipMemcpyDeviceToHost), hipSuccess);
+      byte ^= 0x08;
+      ASSERT_EQ(hipMemcpy(bufGpu + 17, &byte, 1, hipMemcpyHostToDevice), hipSuccess);
+      EXPECT_EQ(verify(), 1);
+
+      ASSERT_EQ(VerifiableFp8PrepareInput(bufGpu, numElements, dataType, redOp, rankN, 0,
+                                          seed, 0, nullptr), hipSuccess);
+      ASSERT_EQ(VerifiableFp8PrepareInput(otherGpu, numElements, dataType, redOp, rankN, 1,
+                                          seed, 0, nullptr), hipSuccess);
+      ASSERT_EQ(hipMemcpy(rank0.data(), bufGpu, numElements, hipMemcpyDeviceToHost), hipSuccess);
+      ASSERT_EQ(hipMemcpy(rank1.data(), otherGpu, numElements, hipMemcpyDeviceToHost), hipSuccess);
+      size_t differing = 0;
+      for (size_t i = 0; i < numElements; ++i) differing += (rank0[i] != rank1[i]);
+      EXPECT_GT(differing, numElements / 2);
+    }
+
+    EXPECT_EQ(hipFree(bufGpu), hipSuccess);
+    EXPECT_EQ(hipFree(otherGpu), hipSuccess);
+    EXPECT_EQ(hipHostFree(badEltN), hipSuccess);
+  }
+
   TEST(Fp8Validation, VerifiableReferenceDetectsErrors)
   {
     if (ShouldSkipForNoGpu())
       GTEST_SKIP() << "Requires a GPU";
 
-    RUN_ISOLATED_TEST("Fp8Validation_VerifiableReferenceDetectsErrors", []()
+    // The host-path child runs the fallback used when the test kernels cannot run on the GPU
+    RUN_ISOLATED_TESTS(
+      ProcessIsolatedTestRunner::TestConfig("Fp8Validation_VerifiableReferenceDetectsErrors",
+                                            CheckVerifiableReference),
+      ProcessIsolatedTestRunner::TestConfig("Fp8Validation_VerifiableReferenceDetectsErrors_HostPath",
+                                            CheckVerifiableReference)
+        .withEnvironment({{"UT_DEVICE_DATA", "0"}}));
+  }
+
+  // Writes the verifiable generator's inputs and expected outputs for every supported case to the
+  // file named by kFp8DumpFileEnv, so the parent can compare the device and host paths byte for byte.
+  static void DumpVerifiableFp8()
+  {
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+    char const* path = std::getenv(kFp8DumpFileEnv);
+    ASSERT_NE(path, nullptr);
+
+    size_t   const numElements = 4096;
+    intptr_t const eltIx0 = 1000;
+    uint64_t const seed = 0x5eed;
+    uint8_t* bufGpu = nullptr;
+    ASSERT_EQ(hipMalloc(&bufGpu, numElements), hipSuccess);
+    std::vector<uint8_t> host(numElements);
+    std::ofstream out(path, std::ios::binary);
+
+    for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
+    for (ncclRedOp_t const redOp : {ncclSum, ncclProd, ncclMax, ncclMin, ncclAvg})
+    for (int const rankN : {3, 8})
+    for (int const rankMe : {-1, 0, rankN - 1})
     {
-      ASSERT_EQ(hipSetDevice(0), hipSuccess);
+      SCOPED_TRACE(std::string(ncclDataTypeNames[dataType]) + " " + ncclRedOpNames[redOp] +
+                   " ranks=" + std::to_string(rankN) + " rank=" + std::to_string(rankMe));
+      hipError_t const err = rankMe < 0
+        ? VerifiableFp8PrepareExpected(bufGpu, numElements, dataType, redOp, rankN, seed, eltIx0, nullptr)
+        : VerifiableFp8PrepareInput(bufGpu, numElements, dataType, redOp, rankN, rankMe, seed, eltIx0, nullptr);
+      ASSERT_EQ(err, hipSuccess);
+      ASSERT_EQ(hipMemcpy(host.data(), bufGpu, numElements, hipMemcpyDeviceToHost), hipSuccess);
+      out.write(reinterpret_cast<char const*>(host.data()), numElements);
+    }
+    EXPECT_TRUE(out.good());
+    EXPECT_EQ(hipFree(bufGpu), hipSuccess);
+  }
 
-      size_t const numElements = 4096;
-      int    const rankCounts[] = {3, 8};
-      uint64_t const seed = 0x5eed;
-      uint8_t* bufGpu = nullptr;
-      uint8_t* otherGpu = nullptr;
-      int64_t* badEltN = nullptr;
-      ASSERT_EQ(hipMalloc(&bufGpu, numElements), hipSuccess);
-      ASSERT_EQ(hipMalloc(&otherGpu, numElements), hipSuccess);
-      ASSERT_EQ(hipHostMalloc((void**)&badEltN, sizeof(int64_t)), hipSuccess);
-      std::vector<uint8_t> rank0(numElements), rank1(numElements);
+  // The host fallback must generate the same FP8 bytes as the device kernels, in the device's encoding.
+  TEST(Fp8Validation, HostPathMatchesDevicePath)
+  {
+    if (ShouldSkipForNoGpu())
+      GTEST_SKIP() << "Requires a GPU";
 
-      for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
-      for (ncclRedOp_t const redOp : {ncclSum, ncclProd, ncclMax, ncclMin})
-      for (int const rankN : rankCounts)
+    std::string const skipFile   = Fp8TempPath("host_vs_device_skip");
+    std::string const deviceFile = Fp8TempPath("host_vs_device_device");
+    std::string const hostFile   = Fp8TempPath("host_vs_device_host");
+    for (std::string const& f : {skipFile, deviceFile, hostFile}) std::remove(f.c_str());
+
+    RUN_ISOLATED_TESTS(
+      ProcessIsolatedTestRunner::TestConfig("Fp8Validation_HostPathMatchesDevicePath_Device", []()
       {
-        SCOPED_TRACE(std::string(ncclDataTypeNames[dataType]) + " " + ncclRedOpNames[redOp] +
-                     " ranks=" + std::to_string(rankN));
-        auto verify = [&]() {
-          *badEltN = -1;
-          EXPECT_EQ(VerifiableFp8Verify(bufGpu, numElements, dataType, redOp, rankN,
-                                        seed, 0, badEltN, nullptr), hipSuccess);
-          EXPECT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
-          return *badEltN;
-        };
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        if (!UtDeviceDataEnabled())
+        {
+          SkipOrHandToParent(kFp8SkipFileEnv, "Device-data kernels are disabled or cannot run on this GPU");
+          return;
+        }
+        DumpVerifiableFp8();
+      }).withEnvironment({{kFp8SkipFileEnv, skipFile}, {kFp8DumpFileEnv, deviceFile}}),
+      ProcessIsolatedTestRunner::TestConfig("Fp8Validation_HostPathMatchesDevicePath_Host", DumpVerifiableFp8)
+        .withEnvironment({{kFp8DumpFileEnv, hostFile}, {"UT_DEVICE_DATA", "0"}}));
 
-        ASSERT_EQ(VerifiableFp8PrepareExpected(bufGpu, numElements, dataType, redOp, rankN,
-                                               seed, 0, nullptr), hipSuccess);
-        EXPECT_EQ(verify(), 0);
-
-        // Flip an exponent bit: the value changes by far more than any tolerance
-        uint8_t byte = 0;
-        ASSERT_EQ(hipMemcpy(&byte, bufGpu + 17, 1, hipMemcpyDeviceToHost), hipSuccess);
-        byte ^= 0x08;
-        ASSERT_EQ(hipMemcpy(bufGpu + 17, &byte, 1, hipMemcpyHostToDevice), hipSuccess);
-        EXPECT_EQ(verify(), 1);
-
-        ASSERT_EQ(VerifiableFp8PrepareInput(bufGpu, numElements, dataType, redOp, rankN, 0,
-                                            seed, 0, nullptr), hipSuccess);
-        ASSERT_EQ(VerifiableFp8PrepareInput(otherGpu, numElements, dataType, redOp, rankN, 1,
-                                            seed, 0, nullptr), hipSuccess);
-        ASSERT_EQ(hipMemcpy(rank0.data(), bufGpu, numElements, hipMemcpyDeviceToHost), hipSuccess);
-        ASSERT_EQ(hipMemcpy(rank1.data(), otherGpu, numElements, hipMemcpyDeviceToHost), hipSuccess);
-        size_t differing = 0;
-        for (size_t i = 0; i < numElements; ++i) differing += (rank0[i] != rank1[i]);
-        EXPECT_GT(differing, numElements / 2);
-      }
-
-      EXPECT_EQ(hipFree(bufGpu), hipSuccess);
-      EXPECT_EQ(hipFree(otherGpu), hipSuccess);
-      EXPECT_EQ(hipHostFree(badEltN), hipSuccess);
-    });
+    std::string const reason = TakeHandedSkip(skipFile);
+    std::vector<uint8_t> const deviceBytes = TakeFile(deviceFile);
+    std::vector<uint8_t> const hostBytes   = TakeFile(hostFile);
+    if (!reason.empty())
+    {
+      GTEST_SKIP() << reason;
+    }
+    ASSERT_FALSE(deviceBytes.empty());
+    ASSERT_EQ(deviceBytes.size(), hostBytes.size());
+    size_t mismatches = 0;
+    for (size_t i = 0; i < deviceBytes.size(); ++i) mismatches += (deviceBytes[i] != hostBytes[i]);
+    EXPECT_EQ(mismatches, 0) << "of " << deviceBytes.size() << " bytes";
   }
 
   /**

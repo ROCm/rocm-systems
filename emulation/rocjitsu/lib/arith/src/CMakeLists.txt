@@ -7,8 +7,18 @@
 add_library(
     rj_arith
     STATIC
+    mfma/mfma_half.cpp
+    mfma/mfma_f32.cpp
+    mfma/mfma_fp8.cpp
+    mfma/mfma_mixed.cpp
+    mfma/mfma_f64.cpp
+    mfma/matrix_i8.cpp
+    mfma/sparse_matrix_i8.cpp
+    mfma/smfmac_float.cpp
+    wmma/swmmac_gfx1250_float.cpp
     common/cpu.cpp
     common/cpu_decode.cpp
+    conversion/float16_conversion.cpp
     conversion/byte_conversion.cpp
     conversion/conversion16.cpp
     conversion/conversion32.cpp
@@ -18,6 +28,7 @@ add_library(
     conversion/integer_conversion.cpp
     conversion/normalized.cpp
     conversion/pack.cpp
+    conversion/nibble_pack.cpp
     conversion/packed_conversion.cpp
     compare/class.cpp
     compare/constant_compare.cpp
@@ -43,8 +54,18 @@ add_library(
     fp/half_minmax.cpp
     fp/ldexp.cpp
     fp/minmax.cpp
+    fp/mixed_mad.cpp
+    fp/mixed_bf16.cpp
+    fp/packed_bf16.cpp
     fp/mixed_fma.cpp
+    fp/packed_f32.cpp
     fp/packed_fma.cpp
+    dot/cdna_dot.cpp
+    dot/dot.cpp
+    dot/fp8_dot.cpp
+    dot/half_dot.cpp
+    dot/integer_dot.cpp
+    dot/scalar_repair.cpp
     graphics/cube.cpp
     graphics/interp16.cpp
     graphics/interp32.cpp
@@ -75,7 +96,10 @@ add_library(
     register/ds_swizzle.cpp
     register/lane_transfer.cpp
     register/move.cpp
+    register/pair_move.cpp
+    register/packed_permute.cpp
     register/permlane.cpp
+    register/screen_partition.cpp
     register/relative_move.cpp
     register/swap.cpp
     scalar/guest_mode.cpp
@@ -98,6 +122,10 @@ add_library(
     wmma/swmmac8.cpp
     wmma/swmmac_float.cpp
     wmma/swmmac_integer.cpp
+    wmma/wmma_gfx1250_mixed.cpp
+    wmma/wmma_gfx1250_fp8.cpp
+    wmma/wmma_gfx1250_f32.cpp
+    wmma/wmma_gfx1250_half.cpp
     wmma/wmma.cpp
     wmma/wmma_fp8_integer.cpp
     wmma/wmma_replicated.cpp

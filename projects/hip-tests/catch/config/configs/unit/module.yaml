@@ -3,6 +3,12 @@ module:
   Unit_StatCO_ManagedVarForkAfterRegister_InChildProcess:
     <<: *level_2
     tags: [module]
+  Unit_StatCO_ManagedVarAfterDeviceReset_DeferredLoading:
+    <<: *level_2
+    tags: [module]
+  Unit_StatCO_ManagedVarAfterDeviceReset_EagerLoading:
+    <<: *level_2
+    tags: [module]
   Unit_hipModuleLaunchCooperativeKernel_Positive_Basic:
     <<: *level_default
     disabled:

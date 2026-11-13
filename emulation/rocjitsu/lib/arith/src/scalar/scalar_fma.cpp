@@ -7,18 +7,18 @@
 // Fused rounding and tininess detection follow rocjitsu shared/fp_mode.h.
 // FP16 uses the existing rocjitsu-derived half_fma_value model.
 
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
+#include "common/validation.h"
 #include "fp/fma_scalar.h"
 #include "fp/half_fma_scalar.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 
 namespace {
 
 // Evaluate scalar fused multiply-add. Reject invalid controls before changing outputs.
-template <bool Half, bool Accumulate>
+template <bool Half, bool Accumulate, bool LegacyHalf = false>
 [[gnu::always_inline]] inline int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a,
                                       uint32_t b, uint32_t c) {
   if (int error = rocjitsu::arith::validate(flags, mode,
@@ -62,8 +62,13 @@ template <bool Half, bool Accumulate>
   float z = Half ? rocjitsu::arith::f16_to_float(uint16_t(c)) : rocjitsu::arith::as_float(c);
   uint32_t result;
   if constexpr (Half) {
-    result = rocjitsu::arith::half_fma_value(uint16_t(a), uint16_t(b), uint16_t(c), 0,
-                                             flags & RJ_ARITH_FP16_OVFL);
+    if constexpr (LegacyHalf) {
+      // gfx1250's inherited scalar path rounds once to FP32, then to FP16.
+      result = rocjitsu::arith::float_to_f16(__builtin_fmaf(x, y, z), flags & RJ_ARITH_FP16_OVFL);
+    } else {
+      result = rocjitsu::arith::half_fma_value(uint16_t(a), uint16_t(b), uint16_t(c), 0,
+                                               flags & RJ_ARITH_FP16_OVFL);
+    }
   } else {
     result = rocjitsu::arith::as_bits(__builtin_fmaf(x, y, z));
   }
@@ -87,6 +92,32 @@ template <bool Half, bool Accumulate>
   }
   *d = result;
   return RJ_ARITH_SUCCESS;
+}
+
+// Retain the legacy gfx1250 scalar FMA model without advertising new empirical support.
+// FP32 Compatibility applies guest rounding; FP16 Compatibility ignores guest controls.
+template <bool Half, bool Accumulate>
+int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t b, uint32_t c) {
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, Half ? RJ_ARITH_SEMANTICS_LOOSE : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate(flags, mode,
+                                            RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+                                                (Half ? 0 : RJ_ARITH_FP_ROUND_MASK))) {
+    return error;
+  }
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  if constexpr (Half) {
+    if (semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+      flags &= ~(RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+                 RJ_ARITH_FP16_OVFL);
+    }
+  }
+  return run<Half, Accumulate, Half>(flags, 0, d, a, b, c);
 }
 
 } // namespace
@@ -164,4 +195,30 @@ int rj_arith_s_fmamk_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return run<false, false>(flags, instruction_flags, d, a, literal, c);
+}
+
+// Execute gfx1250 scalar fmac_f16; FP status is unused.
+int rj_arith_s_fmac_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                                uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<true, true>(flags, instruction_flags, d, a, b, 0);
+}
+
+// Execute gfx1250 scalar fmac_f32; FP status is unused.
+int rj_arith_s_fmac_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                                uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<false, true>(flags, instruction_flags, d, a, b, 0);
+}
+
+// Execute gfx1250 scalar fmaak_f32; FP status is unused.
+int rj_arith_s_fmaak_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t b, uint32_t c,
+                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<false, false>(flags, instruction_flags, d, a, b, c);
+}
+
+// Execute gfx1250 scalar fmamk_f32; FP status is unused.
+int rj_arith_s_fmamk_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t b, uint32_t c,
+                                 [[maybe_unused]] uint32_t *excp_flag_user) {
+  return run_gfx1250<false, false>(flags, instruction_flags, d, a, b, c);
 }

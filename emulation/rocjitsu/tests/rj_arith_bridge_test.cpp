@@ -5,6 +5,30 @@
 #include "fixtures/float_dot/gfx1100_cases.h"
 #include "fixtures/float_dot/gfx1201_cases.h"
 #include "rj_arith/rj_arith.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "util/simd_test_hooks.h"
+
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
@@ -18,8 +42,10 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/conversion.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_lane_exec.h"
+#include "util/simd_test_hooks.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
@@ -33,6 +59,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3p.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_division_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_exec.h"
@@ -53,6 +80,15 @@
 #include "util/data_types.h"
 #include "util/simd.h"
 
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -61,6 +97,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <optional>
+
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -97,10 +134,18 @@ class BridgeFixture {
 public:
   explicit BridgeFixture(bool rdna3, uint32_t lanes = 32, ArithmeticPolicy policy = {},
                          uint32_t vgprs = 256)
-      : backend(rdna3 ? &rocjitsu::rdna3::execution_backend()
-                      : &rocjitsu::rdna4::execution_backend()) {
+      : BridgeFixture(rdna3 ? ROCJITSU_CODE_ARCH_RDNA3 : ROCJITSU_CODE_ARCH_RDNA4, lanes, policy,
+                      vgprs) {}
+
+  explicit BridgeFixture(rj_code_arch_t arch, uint32_t lanes = 32, ArithmeticPolicy policy = {},
+                         uint32_t vgprs = 256)
+      : backend(arch == ROCJITSU_CODE_ARCH_RDNA3   ? &rocjitsu::rdna3::execution_backend()
+                : arch == ROCJITSU_CODE_ARCH_CDNA3 ? &rocjitsu::cdna3::execution_backend()
+                : arch == ROCJITSU_CODE_ARCH_CDNA4 ? &rocjitsu::cdna4::execution_backend()
+                : arch == ROCJITSU_CODE_ARCH_CDNA5 ? &rocjitsu::cdna5::execution_backend()
+                                                   : &rocjitsu::rdna4::execution_backend()) {
     ComputeUnitCore::Config config{};
-    config.arch = rdna3 ? ROCJITSU_CODE_ARCH_RDNA3 : ROCJITSU_CODE_ARCH_RDNA4;
+    config.arch = arch;
     config.arithmetic = policy;
     decoder = Decoder::create(config.arch);
     config.num_wf_slots = 1;
@@ -116,6 +161,10 @@ public:
     group->add(std::move(observer));
     cu->set_plugin_group(group);
     wave = cu->dispatch_wf(0, 0, 104, vgprs, lanes);
+    if (!wave) {
+      ADD_FAILURE() << "Could not dispatch fixture wave";
+      return;
+    }
     for (uint32_t reg = 0; reg < 24; ++reg)
       for (uint32_t lane = 0; lane < lanes; ++lane)
         cu->write_vgpr(base() + reg, lane, reg < 16 ? 0x3c003c00u : 0u);
@@ -131,6 +180,150 @@ public:
   WriteRecorder *recorder = nullptr;
 };
 
+// Compare migrated narrowing with the inherited format model, including partial
+// destination preservation, source aliasing, overflow and seed-dependent rounding.
+
+// gfx1250 half sources share FP8 rounding but ignore FP16_OVFL and preserve other D bytes.
+
+// Widening retains inherited format/NaN rules, selectors, aliases and masked stores.
+
+// FP8/BF8-to-half bindings retain selectors, NaN signs, finite saturation and inactive lanes.
+// Mixed gfx1250 forms preserve narrow denormals, inline conversion, aliases and partial writes.
+// PACK retains half bits/NaN policy; byte conversions distinguish MODE rounding from legacy
+// truncation.
+
+// Selected bytes and signed nibbles convert exactly; OMOD gating differs by generation.
+
+// FP16/BF16 migration preserves inherited narrowing and special encodings,
+// selected halves, SDWA placement, aliased operands and EXEC masking.
+
+void check_cdna_float16_conversions(bool bf16) {
+  const uint32_t inputs[] = {0x7f800001U, 0xff800001U, 0x3f801000U, 0x3f803000U,
+                             0x00000001U, 0x80000001U, 0x7f7fffffU, 0xff7fffffU,
+                             0x7f800000U, 0xff800000U, 0x387fffffU, 0xb87fffffU,
+                             0x7fc01234U, 0x80000000U, 0,           0x3f800000U};
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (int op = bf16 ? 0 : 1; op < 3; ++op) {
+        for (int variant = 0; variant < 4; ++variant) {
+          SCOPED_TRACE(::testing::Message() << arch << ":" << op << ":" << variant);
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          int lanes = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
+          BridgeFixture fixture(arch, lanes, policy);
+          fixture.wave->set_exec((lanes == 32 ? 0xffffffffULL : ~0ULL) & ~2ULL);
+          bool sat = variant & 1;
+          fixture.wave->set_mode_raw(0xff | (sat ? Wavefront::FP16_OVFL_BIT : 0));
+          bool sdwa = op == 0 && variant == 2 && arch == ROCJITSU_CODE_ARCH_CDNA4;
+          for (int lane = 0; lane < lanes; ++lane) {
+            fixture.cu->write_vgpr(fixture.base(), lane, inputs[lane % 16]);
+            fixture.cu->write_vgpr(fixture.base() + 1, lane,
+                                   op == 2 && arch == ROCJITSU_CODE_ARCH_CDNA4
+                                       ? (lane & 1 ? ~0U : 0U)
+                                       : inputs[(lane + 3) % 16]);
+            fixture.cu->write_vgpr(fixture.base() + 2, lane, lane & 1 ? ~0U : 0U);
+          }
+          auto nearest = bf16 ? util::f32_to_bf16_rne_mode : util::f32_to_f16_mode;
+          auto stochastic = bf16 ? util::f32_to_bf16_sr_mode : util::f32_to_f16_sr_mode;
+          uint8_t selector = op == 0 ? variant & 1 : op == 2 ? (variant & 1) << 3 : 0;
+          std::vector<uint32_t> words;
+          if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+            if (sdwa) {
+              auto encoded =
+                  cdna4::build_vop1(cdna4::kVCvtF32Bf16Vop1, {.src0 = amdgpu::SRC_SDWA, .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+              words.push_back((5U << 8) | (2U << 11) | (6U << 16));
+            } else {
+              const uint16_t ops[] = {
+                  cdna4::kVCvtF32Bf16Vop3,
+                  (bf16 ? cdna4::kVCvtPkBf16F32Vop3 : cdna4::kVCvtPkF16F32Vop3),
+                  (bf16 ? cdna4::kVCvtSrBf16F32Vop3 : cdna4::kVCvtSrF16F32Vop3)};
+              auto encoded = cdna4::build_vop3(ops[op], {.vdst = 0,
+                                                         .abs = 7,
+                                                         .op_sel = selector,
+                                                         .clamp = 1,
+                                                         .src0 = 256,
+                                                         .src1 = 257,
+                                                         .src2 = 258,
+                                                         .omod = 3,
+                                                         .neg = 7});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          } else {
+            const uint16_t ops[] = {
+                cdna5::kVCvtF32Bf16Vop3,
+                (bf16 ? cdna5::kVCvtPkBf16F32Vop3 : cdna5::kVCvtPkF16F32Vop3),
+                (bf16 ? cdna5::kVCvtSrPkBf16F32Vop3 : cdna5::kVCvtSrPkF16F32Vop3)};
+            auto encoded = cdna5::build_vop3(ops[op], {.vdst = 0,
+                                                       .abs = 7,
+                                                       .opsel = selector,
+                                                       .clamp = 1,
+                                                       .src0 = 256,
+                                                       .src1 = 257,
+                                                       .src2 = 258,
+                                                       .omod = 3,
+                                                       .neg = 7});
+            words.assign(encoded.begin(), encoded.end());
+          }
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          for (int lane = 0; lane < lanes; ++lane) {
+            uint32_t raw = inputs[lane % 16], other = inputs[(lane + 3) % 16],
+                     seed = lane & 1 ? ~0U : 0U;
+            uint32_t expected;
+            if (op == 0) {
+              expected = (raw >> (selector ? 16 : 0)) << 16;
+              if (sdwa) {
+                expected = (expected << 16) | (raw & 0xffff);
+              }
+            } else if (op == 1) {
+              // These encodings request ABS followed by NEG on both float sources.
+              expected = nearest(std::bit_cast<float>(raw | 0x80000000U), sat) |
+                         (uint32_t(nearest(std::bit_cast<float>(other | 0x80000000U), sat)) << 16);
+            } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+              uint32_t lo = stochastic(std::bit_cast<float>(raw | 0x80000000U), seed, sat);
+              int shift = selector ? 16 : 0;
+              expected = (raw & ~(0xffffU << shift)) | (lo << shift);
+            } else {
+              // Packed SR ignores sign modifiers and uses two independent seed halves.
+              auto packed = bf16 ? fp_mode::cvt_sr_pk_bf16_f32 : fp_mode::cvt_sr_pk_f16_f32;
+              expected = packed(raw, uint16_t(seed), sat) |
+                         (uint32_t(packed(other, uint16_t(seed >> 16), sat)) << 16);
+            }
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane), lane == 1 ? raw : expected)
+                << "lane=" << lane;
+          }
+        }
+      }
+    }
+  }
+}
+
+// Check guest rounding, fixed rounding, denormals and SDWA destination placement.
+// Preserve old CDNA zero-extension, newer partial writes, and SDWA prescaling.
+
+// Check guest rounding, fixed rounding, denormals and SDWA destination placement.
+
+// FP64 conversions preserve guest rounding, NaN quieting and split-VGPR aliases.
+
+// CDNA packs saturate full words; gfx1250 extension honors true16 source halves.
+
+// Normalized conversions retain nearest-even rounding, aliases and destination layout.
+
+// Packed conversion ignores guest rounding and output modifiers, preserving masked aliases.
+
+// Older CDNA zero-extends saturated bytes; gfx1250 preserves the other true16 half.
+
+// Integer conversion encodings ignore numerical modifiers except widening OPSEL.
+// Compare whole words so partial source reads, inactive lanes and aliases stay visible.
+
+const uint64_t kExactEmpiricalNoFpStatus = RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+
+// Pair selectors must observe pre-instruction words even when both destination
+// registers alias A. The FMA inline addend must replicate rather than widen.
+// Guest rounding is forwarded while host rounding remains at its default.
 TEST(ArithBridgeTest, WideMadCommitsBothWordsAndCarry) {
   for (uint32_t lanes : {32u, 64u}) {
     for (bool observed : {false, true}) {
@@ -152,7 +345,8 @@ TEST(ArithBridgeTest, WideMadCommitsBothWordsAndCarry) {
                            rj_arith_v_mad_co_u64_u32_w64, 0, 0, d, a, two, zero,
                            [&](uint64_t value) { carry = value; });
       ASSERT_FALSE(fixture.wave->instruction_execution_failed());
-      // (2^32-1)*2 crosses the destination-word boundary without a 65th-bit carry.
+      // (2^32-1)*2 crosses the destination-word boundary without a 65th-bit
+      // carry.
       EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane), 0xfffffffeu);
       EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, lane), 1u);
       EXPECT_EQ(carry, 0u);
@@ -179,7 +373,6 @@ TEST(ArithBridgeTest, NumericWideConstantDoesNotReplicateItsLowWord) {
   }
 }
 
-// Guest rounding is forwarded while host rounding remains at its default.
 TEST(ArithBridgeTest, Fma64DirectedGuestRounding) {
   for (bool rdna3 : {false, true}) {
     for (unsigned lanes : {32u, 64u}) {
@@ -260,7 +453,8 @@ TEST(ArithBridgeTest, DoubleBinaryGuestRounding) {
       for (const auto &sample : samples) {
         BridgeFixture fixture(rdna3, lanes);
         ASSERT_FALSE(::testing::Test::HasFatalFailure());
-        // Round up, flush output denormals; OMOD is enabled on both architectures.
+        // Round up, flush output denormals; OMOD is enabled on both
+        // architectures.
         fixture.wave->set_mode_raw((1u << 2) | (1u << 6));
         fixture.wave->set_exec(1);
         for (unsigned operand = 0; operand < 2; ++operand) {
@@ -420,8 +614,9 @@ TEST(ArithBridgeTest, FloatBinaryPreservesAliasedInputsModifiersAndMasks) {
           fixture.wave->set_exec(exec_mask);
           fixture.wave->set_vgpr_write_mask(~4ULL);
           for (uint32_t lane = 0; lane < lanes; ++lane) {
-            fixture.cu->write_vgpr(fixture.base(), lane, 0xbfa00000u);     // -1.25
-            fixture.cu->write_vgpr(fixture.base() + 1, lane, 0xbe800000u); // -0.25
+            fixture.cu->write_vgpr(fixture.base(), lane, 0xbfa00000u); // -1.25
+            fixture.cu->write_vgpr(fixture.base() + 1, lane,
+                                   0xbe800000u); // -0.25
           }
           rdna3::Operand d3(32, rdna3::OperandType::OPR_VGPR, 0);
           rdna4::Operand d4(32, rdna4::OperandType::OPR_VGPR, 0);
@@ -646,7 +841,8 @@ TEST(ArithBridgeTest, FloatFrexpExponentIgnoresGuestRounding) {
 
 // Compatibility uses the legacy classifier even outside mode 3's reporting domain.
 TEST(ArithBridgeTest, CompatibilityMulDppStatusIncludesWriteSuppressedLanes) {
-  // v_mul_f32 v2, v0, v1 with DPP row_mask:2. Lane 0 overflows but cannot write.
+  // v_mul_f32 v2, v0, v1 with DPP row_mask:2. Lane 0 overflows but cannot
+  // write.
   for (uint64_t exec_mask : {0x10001ULL, 1ULL}) {
     BridgeFixture fixture(false);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -673,6 +869,42 @@ TEST(ArithBridgeTest, CompatibilityMulDppStatusIncludesWriteSuppressedLanes) {
     else {
       ASSERT_EQ(fixture.recorder->writes.size(), 1u);
       EXPECT_EQ(fixture.recorder->writes[0].lanes, 0x10000u);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx12ExceptionalOperandsUpdateUserFlags) {
+  for (const bool report : {true, false}) {
+    BridgeFixture fixture(
+        false, 32,
+        parse_arithmetic_policy(report ? "compatibility" : "bit_exact_empirical_no_fp_status"));
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.wave->set_mode_raw(0xf0);
+    auto check = [&](std::array<uint32_t, 2> words, uint32_t lhs, uint32_t rhs, uint32_t causes) {
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      fixture.cu->write_vgpr(fixture.base() + 1, 0, lhs);
+      fixture.cu->write_vgpr(fixture.base() + 2, 0, rhs);
+      fixture.cu->write_vgpr(fixture.base() + 1, 1, 0);
+      fixture.cu->write_vgpr(fixture.base() + 2, 1, 0);
+      for (uint64_t exec : {1u, 2u}) {
+        fixture.wave->set_exec(exec);
+        fixture.wave->set_trapsts(0x40);
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        EXPECT_EQ(fixture.wave->trapsts(), 0x40u | (report && exec == 1 ? causes : 0u))
+            << instruction.value()->mnemonic();
+      }
+    };
+    check({0xd5080000, 0x00020501}, 0, 0x7f800000, 1);             // MUL of zero and infinity
+    check({0xd5030000, 0x00020501}, 0x7f7fffff, 0x7f7fffff, 0x28); // ADD overflows
+    check({0xd5150000, 0x00020501}, 0x7f800010, 0, 1);             // MIN_NUM with sNaN
+    check({0xd7650000, 0x00020501}, 0x7fc12345, 0xff800010, 1);    // MINIMUM with mixed NaNs
+    check({0xd4128008, 0x00020501}, 0x7fc12345, 0, 1);             // signaling CMP
+    for (uint32_t mode : {0u, 0x10u, 0x20u, 0x30u, 0x31u, 0x32u, 0x33u}) {
+      fixture.wave->set_mode_raw(mode);
+      check({0xc8d00501, 0x00020104}, 0x7f7fffff, 0x40000000, 0x28); // dual MUL in slot X
+      check({0xca060104, 0x00020501}, 0x7f7fffff, 0x40000000, 0x28); // dual MUL in slot Y
     }
   }
 }
@@ -938,25 +1170,33 @@ TEST(ArithBridgeTest, DppCarryDoesNotRestoreSuppressedDestinationBits) {
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(0xffffffffU);
     auto base = fixture.wave->sgpr_alloc().base;
-    fixture.cu->write_sgpr(base + 4, ~0U);
-    for (unsigned lane = 0; lane < 32; ++lane)
+    for (unsigned lane = 0; lane < 32; ++lane) {
       fixture.cu->write_vgpr(fixture.base(), lane, ~0U);
+      fixture.cu->write_vgpr(fixture.base() + 1, lane, 1);
+    }
     rdna4::Vop3SdstEncVopDpp16MachineInst raw{};
     raw.encoding = 0x35;
     raw.op = gfx11 ? rdna3::kVAddCoU32Vop3SdstEnc : rdna4::kVAddCoU32Vop3SdstEnc;
     raw.vdst = 2;
     raw.sdst = 4;
     raw.src0 = SRC_DPP;
-    raw.src1 = 129;
     raw.dpp_ctrl = dpp::ROW_SHL1;
     raw.fi = 1;
     raw.row_mask = raw.bank_mask = 0xf;
-    auto words = std::bit_cast<std::array<uint32_t, 3>>(raw);
-    auto instruction = fixture.decoder->decode_window(words);
-    ASSERT_TRUE(instruction.succeeded());
-    ASSERT_TRUE(
-        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
-    EXPECT_EQ(fixture.cu->read_sgpr(base + 4), 0x7fff7fffU);
+    for (auto src1 : {257, 129}) { // v1 and inline constant 1
+      raw.src1 = src1;
+      auto words = std::bit_cast<std::array<uint32_t, 3>>(raw);
+      auto instruction = fixture.decoder->decode_window(words);
+      if (gfx11 && src1 == 129) {
+        EXPECT_FALSE(instruction.succeeded());
+        continue;
+      }
+      ASSERT_TRUE(instruction.succeeded());
+      fixture.cu->write_sgpr(base + 4, ~0U);
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_sgpr(base + 4), 0x7fff7fffU);
+    }
   }
 }
 
@@ -1003,7 +1243,8 @@ TEST(ArithBridgeTest, VectorCarryZeroExecClearsScalarResultWithoutVectorAccess) 
       const auto base = fixture.wave->sgpr_alloc().base;
       fixture.cu->write_sgpr(base + 12, ~0u);
       fixture.cu->write_sgpr(base + 13, ~0u);
-      // Both data sources are scalar, including one overlapping the carry result.
+      // Both data sources are scalar, including one overlapping the carry
+      // result.
       const auto words = rdna3 ? rdna3::build_vop3_sdst_enc(
                                      rdna3::kVAddCoU32Vop3SdstEnc,
                                      {.vdst = 4, .sdst = 12, .clamp = 1, .src0 = 12, .src1 = 8})
@@ -1139,8 +1380,9 @@ TEST(ArithBridgeTest, DecodedWideMadCommitsPairAndExtendedCarryAcrossWaveWidths)
     uint64_t c, wrapped, saturated;
     bool carry;
   };
-  // Signed cases inherit the existing rj-arith Mad64.SignedScalarOutputIsTheExtendedSign
-  // fixtures, validated against its gfx1201 hardware corpus: bit 64, not overflow.
+  // Signed cases inherit the existing rj-arith
+  // Mad64.SignedScalarOutputIsTheExtendedSign fixtures, validated against its
+  // gfx1201 hardware corpus: bit 64, not overflow.
   const Case cases[] = {
       {true, 0, 0, ~0ULL, ~0ULL, ~0ULL, true},
       {true, 0x80000000u, 0x80000000u, 0x7fffffffffffffffULL, 0xbfffffffffffffffULL,
@@ -1566,8 +1808,9 @@ TEST(ArithBridgeTest, TrigDppFilteredLanesDoNotReportExceptions) {
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec((1u << 0) | (1u << 16) | (1u << 17));
   fixture.wave->set_mode_raw(0xf0);
-  fixture.cu->write_vgpr(fixture.base(), 0, 0x7f800001);  // Disabled row.
-  fixture.cu->write_vgpr(fixture.base(), 15, 0x7f800001); // Invalid shift source.
+  fixture.cu->write_vgpr(fixture.base(), 0, 0x7f800001); // Disabled row.
+  fixture.cu->write_vgpr(fixture.base(), 15,
+                         0x7f800001); // Invalid shift source.
   fixture.cu->write_vgpr(fixture.base(), 16, 0);
   rdna4::Vop1VopDpp16MachineInst raw{};
   raw.src0 = SRC_DPP;
@@ -1774,7 +2017,8 @@ TEST(ArithBridgeTest, HalfLdexpGuestRoundingSelectorsAndIntegerExponent) {
                 std::array<uint32_t, 2> words{};
                 if (vop3) {
                   const uint8_t opsel = uint8_t((halves & 3) | ((halves & 4) << 1));
-                  // B is a signed integer: its ABS/NEG encoding bits are ignored.
+                  // B is a signed integer: its ABS/NEG encoding bits are
+                  // ignored.
                   words = rdna3 ? rdna3::build_vop3(rdna3::kVLdexpF16Vop3, {.vdst = 1,
                                                                             .abs = 2,
                                                                             .op_sel = opsel,
@@ -1894,6 +2138,9 @@ TEST(ArithBridgeTest, DoubleUnaryEncodingsPairAliasesAndState) {
   struct Case {
     uint16_t op3[2], op4[2];
     double result;
+    // Compatibility selects the TRANS-unit model for RCP/RSQ/SQRT; nonzero
+    // encodings are the gfx1201/gfx1100 results for 1.5.
+    uint64_t compatibility = 0;
   };
   const Case cases[] = {
       {{rdna3::kVTruncF64Vop1, rdna3::kVTruncF64Vop3},
@@ -1916,13 +2163,16 @@ TEST(ArithBridgeTest, DoubleUnaryEncodingsPairAliasesAndState) {
        0.75},
       {{rdna3::kVRcpF64Vop1, rdna3::kVRcpF64Vop3},
        {rdna4::kVRcpF64Vop1, rdna4::kVRcpF64Vop3},
-       1.0 / 1.5},
+       1.0 / 1.5,
+       0x3fe5555554000000ULL},
       {{rdna3::kVRsqF64Vop1, rdna3::kVRsqF64Vop3},
        {rdna4::kVRsqF64Vop1, rdna4::kVRsqF64Vop3},
-       1.0 / std::sqrt(1.5)},
+       1.0 / std::sqrt(1.5),
+       0x3fea20bd74000000ULL},
       {{rdna3::kVSqrtF64Vop1, rdna3::kVSqrtF64Vop3},
        {rdna4::kVSqrtF64Vop1, rdna4::kVSqrtF64Vop3},
-       std::sqrt(1.5)},
+       std::sqrt(1.5),
+       0x3ff3988e14000000ULL},
   };
   for (bool rdna3 : {false, true})
     for (unsigned lanes : {32u, 64u})
@@ -1938,15 +2188,17 @@ TEST(ArithBridgeTest, DoubleUnaryEncodingsPairAliasesAndState) {
                   policy.semantics = ArithmeticSemantics::BitExactEmpirical;
               BridgeFixture fixture(rdna3, lanes, policy);
               ASSERT_FALSE(::testing::Test::HasFatalFailure());
-              // Integral rounding is named; FRACT subtraction and OMOD use guest rounding.
-              // Alternate denormal preservation to exercise RDNA3 OMOD gating.
+              // Integral rounding is named; FRACT subtraction and OMOD use
+              // guest rounding. Alternate denormal preservation to exercise
+              // RDNA3 OMOD gating.
               fixture.wave->set_mode_raw((guest << 2) | ((guest & 1) ? 3u << 6 : 0));
               fixture.wave->set_trapsts(0x10);
               const uint64_t exec_mask = lanes == 32 ? 0x80000003ULL : 0x8000000380000003ULL;
               fixture.wave->set_exec(exec_mask);
               for (unsigned lane = 0; lane < lanes; ++lane) {
                 fixture.cu->write_vgpr(fixture.base(), lane, 0);
-                fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x3ff80000); // 1.5
+                fixture.cu->write_vgpr(fixture.base() + 1, lane,
+                                       0x3ff80000); // 1.5
               }
               std::array<uint32_t, 2> words{};
               const auto *op = rdna3 ? test.op3 : test.op4;
@@ -1971,12 +2223,18 @@ TEST(ArithBridgeTest, DoubleUnaryEncodingsPairAliasesAndState) {
               }
               EXPECT_EQ(written[0], rejected ? 0 : exec_mask);
               EXPECT_EQ(written[1], rejected ? 0 : exec_mask);
-              const double result = test.result * (vop3 && (!rdna3 || !(guest & 1)) ? 2 : 1);
+              const bool doubled = vop3 && (!rdna3 || !(guest & 1));
+              const double result = test.result * (doubled ? 2 : 1);
               for (unsigned lane = 0; lane < lanes; ++lane) {
                 const uint64_t actual =
                     fixture.cu->read_vgpr(fixture.base(), lane) |
                     (uint64_t(fixture.cu->read_vgpr(fixture.base() + 1, lane)) << 32);
-                const double expected = !rejected && ((exec_mask >> lane) & 1) ? result : 1.5;
+                const bool written = !rejected && ((exec_mask >> lane) & 1);
+                if (written && test.compatibility && policy_index == 0) {
+                  EXPECT_EQ(actual, test.compatibility + (doubled ? 1ULL << 52 : 0));
+                  continue;
+                }
+                const double expected = written ? result : 1.5;
                 EXPECT_NEAR(std::bit_cast<double>(actual), expected,
                             1e-12 + 1e-12 * std::abs(expected));
               }
@@ -2087,7 +2345,8 @@ TEST(ArithBridgeTest, FloatLdexpGuestRoundingIntegerExponentAndState) {
               fixture.cu->write_vgpr(fixture.base(), lane, inputs[lane % 4]);
               fixture.cu->write_vgpr(fixture.base() + 1, lane, uint32_t(exponents[lane % 4]));
             }
-            // B is signed integer data; its ABS/NEG bits are ignored. Alias D/B.
+            // B is signed integer data; its ABS/NEG bits are ignored. Alias
+            // D/B.
             const auto words =
                 rdna3
                     ? rdna3::build_vop3(rdna3::kVLdexpF32Vop3,
@@ -2228,8 +2487,8 @@ TEST(ArithBridgeTest, HalfFrexpExponentIntegerOutputAndState) {
                   policy.semantics = ArithmeticSemantics::BitExactEmpirical;
               BridgeFixture fixture(rdna3, lanes, policy);
               ASSERT_FALSE(::testing::Test::HasFatalFailure());
-              // Input flushing makes subnormal exponents zero. Other FP controls
-              // do not modify the integer result.
+              // Input flushing makes subnormal exponents zero. Other FP
+              // controls do not modify the integer result.
               fixture.wave->set_mode_raw(3u << 2);
               fixture.wave->set_trapsts(0x10);
               const uint64_t exec_mask = empty         ? 0
@@ -2370,7 +2629,8 @@ TEST(ArithBridgeTest, HalfUnaryEncodingsSelectorsFixedRoundingAndState) {
                 fixture.wave->set_exec(exec_mask);
                 const unsigned a_shift = halves & 1 ? 16 : 0;
                 const unsigned d_shift = halves & 2 ? 16 : 0;
-                // VOP3 ABS must remove this sign before evaluating the function.
+                // VOP3 ABS must remove this sign before evaluating the
+                // function.
                 const uint32_t raw = c.input | (encoding ? 0x8000 : 0);
                 const uint32_t initial = a_shift ? (raw << 16) | 0xdeadU : 0xdead0000U | raw;
                 for (uint32_t lane = 0; lane < lanes; ++lane)
@@ -2657,7 +2917,8 @@ TEST(ArithBridgeTest, HalfDotInlineReplicationAndRejectedPartialWrites) {
               }
               ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                               .succeeded());
-              // Two largest finite inputs overflow. Only FP16 honors saturation.
+              // Two largest finite inputs overflow. Only FP16 honors
+              // saturation.
               const uint32_t overflow = bf16 ? 0x7f800000u : saturate ? 0x7bff0000u : 0x7c000000u;
               EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), overflow);
             }
@@ -2886,7 +3147,8 @@ TEST(ArithBridgeTest, DecodedPackedSelectionGuestModesAndAliases) {
                                  : ((op & 1 ? a > b : a < b) ? operand[0] : operand[1]);
                       if (clamp)
                         chosen = chosen & 0x8000 ? 0 : std::min(chosen, uint16_t(0x3c00));
-                      // Packed selection preserves denormal outputs (upstream #13898).
+                      // Packed selection preserves denormal outputs (upstream
+                      // #13898).
                       expected |= uint32_t(chosen) << (16 * half);
                     }
                   }
@@ -3042,7 +3304,8 @@ TEST(ArithBridgeTest, PackedBinaryInlineRoundingAndStrictPolicy) {
                                             {.vdst = 1, .src0 = 242, .src1 = 257, .opsel_hi = 3});
           auto instruction = fixture.decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
-          const bool rejected = policy_index == 1 || policy_index == 2;
+          // RDNA3 supports exact semantics without FP status; RDNA4 rejects both.
+          const bool rejected = policy_index == 2 || (policy_index == 1 && !is_rdna3);
           EXPECT_EQ(
               fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
               rejected);
@@ -3893,7 +4156,8 @@ TEST(ArithBridgeTest, IntegerVectorMasksAliasingAndBroadcast) {
       fixture.wave->set_exec(exec_mask);
       rdna4::Operand d(32, rdna4::OperandType::OPR_VGPR, 0);
       rdna4::Operand a(32, rdna4::OperandType::OPR_SRC_VGPR, 256);
-      rdna4::Operand b(32, rdna4::OperandType::OPR_SRC, 129); // Inline integer 1.
+      rdna4::Operand b(32, rdna4::OperandType::OPR_SRC,
+                       129); // Inline integer 1.
       arith::execute_binary32(*fixture.wave, rj_arith_v_add_nc_u32_w32, rj_arith_v_add_nc_u32_w64,
                               cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 0, d, a,
                               b);
@@ -4224,7 +4488,8 @@ TEST(ArithBridgeTest, PendingRegisterErrorPreventsCompareMaskAndStatusCommit) {
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec(1);
   fixture.wave->set_trapsts(0x80000000U);
-  fixture.cu->write_vgpr(fixture.base(), 0, 0x7f800001U); // Would raise invalid.
+  fixture.cu->write_vgpr(fixture.base(), 0,
+                         0x7f800001U); // Would raise invalid.
   rdna4::Operand a(32, rdna4::OperandType::OPR_SRC_VGPR, 256);
   fixture.wave->report_instruction_execution_error(
       InstructionExecutionError::InvalidRegisterAccess);
@@ -4253,7 +4518,8 @@ TEST(ArithBridgeTest, ClassCompare64ReadsOneClassMaskWordAtTheAllocationBoundary
     fixture.cu->write_vgpr(fixture.base() + 1, 2, 0x80000000); // Negative zero.
     if (lanes == 64) {
       fixture.cu->write_vgpr(fixture.base(), 32, 0);
-      fixture.cu->write_vgpr(fixture.base() + 1, 32, 0x7ff00000); // Positive infinity.
+      fixture.cu->write_vgpr(fixture.base() + 1, 32,
+                             0x7ff00000); // Positive infinity.
     }
     for (uint32_t lane = 0; lane < lanes; ++lane)
       fixture.cu->write_vgpr(fixture.base() + 255, lane,
@@ -4281,7 +4547,8 @@ TEST(ArithBridgeTest, ClassCompareUsesRawHalfClassesAndIndependentHalfSelectors)
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec(1);
   fixture.wave->set_mode_raw(0); // Classification must not flush subnormals.
-  fixture.cu->write_vgpr(fixture.base(), 0, 0x80013c00); // High half: negative subnormal.
+  fixture.cu->write_vgpr(fixture.base(), 0,
+                         0x80013c00); // High half: negative subnormal.
   fixture.cu->write_vgpr(fixture.base() + 1, 0, RJ_ARITH_CLASS_NEG_SUBNORMAL << 16);
   rdna4::Operand a(16, rdna4::OperandType::OPR_SRC, 256);
   rdna4::Operand b(16, rdna4::OperandType::OPR_SRC, 257);
@@ -4383,7 +4650,8 @@ TEST(ArithBridgeTest, FloatCompareDppFilteredLanesCannotRaiseExceptions) {
   fixture.wave->set_mode_raw(0xf0);
   fixture.cu->write_vgpr(fixture.base(), 0, 0x7f800001); // Disabled row.
   fixture.cu->write_vgpr(fixture.base(), 16, 0x3f800000);
-  fixture.cu->write_vgpr(fixture.base() + 1, 16, 0x7f800001); // Invalid DPP source lane.
+  fixture.cu->write_vgpr(fixture.base() + 1, 16,
+                         0x7f800001); // Invalid DPP source lane.
   fixture.cu->write_vgpr(fixture.base() + 1, 17, 0x3f800000);
   rdna4::VopcVopDpp16MachineInst raw{};
   raw.src0 = SRC_DPP;
@@ -4758,7 +5026,8 @@ TEST(ArithBridgeTest, ScalarFloatBinaryOperationsHonorSemanticsAndFailureBoundar
       const auto words = rdna4::build_sop2(test.opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0});
       auto instruction = fixture.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
-      // Reporting requires exact support; loose/fallback modes can use the loose implementation.
+      // Reporting requires exact support; loose/fallback modes can use the
+      // loose implementation.
       const bool supported = semantics == ArithmeticSemantics::Loose ||
                              semantics == ArithmeticSemantics::BitExactEmpiricalAllowLoose ||
                              semantics == ArithmeticSemantics::Compatibility;
@@ -4908,7 +5177,8 @@ TEST(ArithBridgeTest, ScalarFloatComparisonsCoverEveryPredicateAndReportingPolic
        rdna4::kSCmpLgF16Sopc, rdna4::kSCmpGeF16Sopc, rdna4::kSCmpOF16Sopc, rdna4::kSCmpUF16Sopc,
        rdna4::kSCmpNgeF16Sopc, rdna4::kSCmpNlgF16Sopc, rdna4::kSCmpNgtF16Sopc,
        rdna4::kSCmpNleF16Sopc, rdna4::kSCmpNeqF16Sopc, rdna4::kSCmpNltF16Sopc}};
-  // Raw IEEE witnesses; relation bits are the ISA truth table's LT/EQ/GT/UNORDERED.
+  // Raw IEEE witnesses; relation bits are the ISA truth table's
+  // LT/EQ/GT/UNORDERED.
   struct Sample {
     uint32_t a32, b32, a16, b16, relation, causes;
     bool denormal;
@@ -4942,7 +5212,8 @@ TEST(ArithBridgeTest, ScalarFloatComparisonsCoverEveryPredicateAndReportingPolic
             for (const auto &sample : samples) {
               SCOPED_TRACE(testing::Message() << "half=" << half << " predicate=" << predicate
                                               << " loose=" << loose << " flush=" << flush);
-              // Opposite policies for FP16 and FP32 detect use of the wrong MODE field.
+              // Opposite policies for FP16 and FP32 detect use of the wrong
+              // MODE field.
               fixture.wave->set_mode_raw((flush ? 0u : 1u) << (half ? 6 : 4) |
                                          (flush ? 1u : 0u) << (half ? 4 : 6));
               fixture.wave->set_trapsts(0x80000010u);
@@ -5055,8 +5326,6 @@ TEST(ArithBridgeTest, ScalarCompareObservesBothRegisterPairsWithoutWritingThem) 
     EXPECT_FALSE(fixture.wave->read_scc());
   }
 }
-
-const uint64_t kExactEmpiricalNoFpStatus = RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
 
 TEST(ArithBridgeTest, MatrixIgnoresExecAndPreservesAliasedInputsUntilCommit) {
   BridgeFixture fixture(false);
@@ -5248,7 +5517,8 @@ TEST(ArithBridgeTest, DecodedSparseIu4NormalizesSelectorAndObservesConsumedLanes
                              sample == 3 && lane >= 32 ? 0x4444eeeeu : 0xeeee4444u);
     }
     // V_SWMMAC_I32_16X16X32_IU4: A=v0, B=v8, index=v12, C/D=v16.
-    // Only selector bit zero is meaningful; the higher bit aliases the same set.
+    // Only selector bit zero is meaningful; the higher bit aliases the same
+    // set.
     const uint32_t words[] = {0xcc554010u | (selector << 11), 0x04321100u, 0, 0};
     auto decoded = fixture.decoder->decode(words);
     ASSERT_TRUE(decoded.succeeded());
@@ -5264,7 +5534,8 @@ TEST(ArithBridgeTest, DecodedSparseIu4NormalizesSelectorAndObservesConsumedLanes
         results[sample][(reg - 16) * 64 + lane] = fixture.cu->read_vgpr(fixture.base() + reg, lane);
   }
   EXPECT_EQ(results[1], results[2]);
-  EXPECT_EQ(results[1], results[3]); // Unconsumed A/index lanes cannot affect arithmetic.
+  EXPECT_EQ(results[1],
+            results[3]); // Unconsumed A/index lanes cannot affect arithmetic.
   EXPECT_NE(results[0], results[1]);
 }
 
@@ -5337,9 +5608,11 @@ TEST(ArithBridgeTest, DoubleBinaryPairAliasesAndPolicies) {
               fixture.wave->set_exec(exec_mask);
               for (unsigned lane = 0; lane < lanes; ++lane) {
                 fixture.cu->write_vgpr(fixture.base(), lane, 0);
-                fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x3ff80000); // 1.5
+                fixture.cu->write_vgpr(fixture.base() + 1, lane,
+                                       0x3ff80000); // 1.5
                 fixture.cu->write_vgpr(fixture.base() + 2, lane, 0);
-                fixture.cu->write_vgpr(fixture.base() + 3, lane, 0x40040000); // 2.5
+                fixture.cu->write_vgpr(fixture.base() + 3, lane,
+                                       0x40040000); // 2.5
               }
               const uint16_t ops3[] = {rdna3::kVMinF64Vop3, rdna3::kVMaxF64Vop3,
                                        rdna3::kVAddF64Vop3, rdna3::kVMulF64Vop3};
@@ -5676,7 +5949,8 @@ TEST(ArithBridgeTest, Fp8NarrowPartialWritesModifiersAndSeeds) {
                 fixture.wave->set_mode_raw(Wavefront::FP16_OVFL_BIT);
                 const uint64_t exec_mask = lanes == 32 ? 0x80000005ULL : 0x8000000580000005ULL;
                 fixture.wave->set_exec(exec_mask);
-                // Midpoint above +1: RNE rounds to even, SR distinguishes seed extremes.
+                // Midpoint above +1: RNE rounds to even, SR distinguishes seed
+                // extremes.
                 const uint32_t a = std::bit_cast<uint32_t>(kind ? 1.125f : 1.0625f);
                 const uint32_t b = stochastic ? (seed_high ? 0xffffffffu : 0u) : a | 0x80000000u;
                 for (unsigned lane = 0; lane < lanes; ++lane) {
@@ -5703,7 +5977,8 @@ TEST(ArithBridgeTest, Fp8NarrowPartialWritesModifiersAndSeeds) {
                         .succeeded());
                 uint64_t read_lanes[2] = {}, written = 0;
                 for (const auto &read : fixture.recorder->reads) {
-                  ASSERT_LT(read.reg, 2u); // No preservation read of old destination.
+                  ASSERT_LT(read.reg,
+                            2u); // No preservation read of old destination.
                   EXPECT_EQ(read.bytes, 0xf);
                   read_lanes[read.reg] |= read.lanes;
                 }
@@ -6094,7 +6369,8 @@ TEST(ArithBridgeTest, HalfConversionsSelectedBytesModesAndPolicies) {
                         fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                             .succeeded(),
                         !required);
-                    // Packed E32 halves must use one bulk read, not a per-lane fallback.
+                    // Packed E32 halves must use one bulk read, not a per-lane
+                    // fallback.
                     EXPECT_EQ(fixture.recorder->reads.size(), 1u);
                     uint64_t read_lanes = 0, written = 0;
                     for (const auto &read : fixture.recorder->reads) {
@@ -6350,7 +6626,8 @@ TEST(ArithBridgeTest, NormalizedConversionsLayoutsRoundingAndPolicies) {
                             value = util::f16_to_f32(util::f32_to_f16(value));
                           if (form && modifiers)
                             value = operand ? -value : -std::abs(value);
-                          // Inherited scalar model: multiply in double, then round once.
+                          // Inherited scalar model: multiply in double, then
+                          // round once.
                           double scaled =
                               std::isnan(value)
                                   ? 0.0
@@ -6391,8 +6668,8 @@ TEST(ArithBridgeTest, BitPackingSelectorsAliasingAndPolicies) {
                   policy.semantics = ArithmeticSemantics::BitExactEmpirical;
                 BridgeFixture fixture(rdna3, lanes, policy);
                 ASSERT_FALSE(::testing::Test::HasFatalFailure());
-                fixture.wave->set_mode_raw(
-                    0x3ff); // Byte conversion uses RTZ; halfword packing ignores rounding.
+                fixture.wave->set_mode_raw(0x3ff); // Byte conversion uses RTZ; halfword packing
+                                                   // ignores rounding.
                 const uint64_t exec_mask = lanes == 32 ? 0x800000ffULL : 0x800000ff800000ffULL;
                 fixture.wave->set_exec(exec_mask);
                 uint32_t inputs[3][64];
@@ -6454,8 +6731,9 @@ TEST(ArithBridgeTest, BitPackingSelectorsAliasingAndPolicies) {
                   uint32_t expected = destination < 3 ? inputs[destination][lane] : 0xdeadbeef;
                   if (success && ((exec_mask >> lane) & 1)) {
                     if (half) {
-                      // rj-arith's captured RDNA4 PACK rule quiets signaling NaNs,
-                      // preserving payload/sign after selected-half ABS/NEG.
+                      // rj-arith's captured RDNA4 PACK rule quiets signaling
+                      // NaNs, preserving payload/sign after selected-half
+                      // ABS/NEG.
                       expected = 0;
                       for (unsigned operand = 0; operand < 2; ++operand) {
                         uint16_t value = uint16_t(inputs[operand][lane] >>
@@ -6578,8 +6856,9 @@ TEST(ArithBridgeTest, DoubleFmaPairAliasesModifiersAndPolicies) {
                   }
                   double result = std::fma(operands[0], operands[1], operands[2]);
                   if (!(rdna3 && (preserve_denorm || ieee))) {
-                    // The existing rj-arith OMOD reference flushes zero/subnormal
-                    // intermediates to +0 before scaling, independently of MODE.
+                    // The existing rj-arith OMOD reference flushes
+                    // zero/subnormal intermediates to +0 before scaling,
+                    // independently of MODE.
                     if (std::fabs(result) < 0x1p-1022)
                       result = 0;
                     result *= 2;
@@ -6604,12 +6883,10 @@ TEST(ArithBridgeTest, DoubleFmaPairAliasesModifiersAndPolicies) {
 }
 
 TEST(ArithBridgeTest, TrigPreopArchitectureLiteralsPairsAndPolicies) {
-  // gfx1100/gfx1201 use the same table tail; OMOD flushing still differs.
+  // gfx1100/gfx1201 use the same table tail and flush it before OMOD (hw1100-noieee, MODE 0x00).
   const unsigned exponent[] = {1968, 1091, 1091, 1997};
   const unsigned selector[] = {5, 19, 19, 4};
-  const uint64_t golden[2][4] = {
-      {0, 0x19e839cfbc5294ULL, 0x29e839cfbc5294ULL, 0x11aba10ac06608cULL},
-      {0, 0, 0, 0x11aba10ac06608cULL}};
+  const uint64_t golden[4] = {0, 0, 0, 0x11aba10ac06608cULL};
   for (bool rdna3 : {true, false})
     for (unsigned lanes : {32u, 64u})
       for (unsigned omod = 0; omod < 4; ++omod)
@@ -6688,7 +6965,7 @@ TEST(ArithBridgeTest, TrigPreopArchitectureLiteralsPairsAndPolicies) {
                 const uint64_t before =
                     initial[destination][lane] | (uint64_t(initial[destination + 1][lane]) << 32);
                 const uint64_t expected =
-                    !rejected && ((exec_mask >> lane) & 1) ? golden[rdna3 ? 0 : 1][omod] : before;
+                    !rejected && ((exec_mask >> lane) & 1) ? golden[omod] : before;
                 const uint64_t actual =
                     fixture.cu->read_vgpr(fixture.base() + destination, lane) |
                     (uint64_t(fixture.cu->read_vgpr(fixture.base() + destination + 1, lane)) << 32);
@@ -6946,7 +7223,8 @@ TEST(ArithBridgeTest, MixedFmaDppPreservesSuppressedDestinations) {
     fixture.cu->write_vgpr(fixture.base() + 3, lane, std::bit_cast<uint32_t>(1.0f));
   }
   // v_fma_mix_f32 v1, v1, v2, v3 row_shl:1 row_mask:1 bank_mask:f.
-  // Only lane 0 has both an enabled destination row and an active shifted source.
+  // Only lane 0 has both an enabled destination row and an active shifted
+  // source.
   const std::array<uint32_t, 3> words{0xcc200001, 0x040e04fa, 0x1f010101};
   auto instruction = fixture.decoder->decode_window(words);
   ASSERT_TRUE(instruction.succeeded());
@@ -6962,7 +7240,8 @@ TEST(ArithBridgeTest, MixedFmaDppPreservesSuppressedDestinations) {
 }
 
 TEST(ArithBridgeTest, FmaGuestControlsChangeResults) {
-  // Distinct FP32 and FP16 rounding fields must reach the selected result format.
+  // Distinct FP32 and FP16 rounding fields must reach the selected result
+  // format.
   for (bool rdna3 : {false, true}) {
     for (int kind = 0; kind < 3; ++kind) {
       for (uint32_t mode : {0xf1u, 0xf4u}) {
@@ -7055,7 +7334,8 @@ TEST(ArithBridgeTest, MixedFmaGuestControlsAndReportingPolicy) {
           policy.semantics = ArithmeticSemantics::BitExactEmpirical;
         BridgeFixture fixture(rdna3, 32, policy);
         ASSERT_FALSE(::testing::Test::HasFatalFailure());
-        // Directed rounding; mixed-format input denorm settings; DX10_CLAMP-off.
+        // Directed rounding; mixed-format input denorm settings;
+        // DX10_CLAMP-off.
         const uint32_t modes[] = {0x1f1, 0x1b0, 0xf0};
         fixture.wave->set_mode_raw(modes[control]);
         fixture.wave->set_exec(1);
@@ -7290,7 +7570,8 @@ TEST(ArithBridgeTest, SqrtClassifiesModifiedInputsBeforeAliasedWrites) {
               const unsigned last = lanes - 1;
               const uint64_t exec_mask = 1ULL << last;
               fixture.wave->set_exec(exec_mask);
-              // Preserve guest denormals, with DX10_CLAMP enabled. SQRT still flushes.
+              // Preserve guest denormals, with DX10_CLAMP enabled. SQRT still
+              // flushes.
               fixture.wave->set_mode_raw(0x1f0);
               fixture.wave->set_trapsts(0x80000000);
               fixture.cu->write_vgpr(fixture.base(), 0, 0);
@@ -7375,7 +7656,8 @@ TEST(ArithBridgeTest, MulReportingPolicyPreservesDirectedNumericalExecution) {
             ASSERT_TRUE(instruction.succeeded());
             fixture.recorder->writes.clear();
             // Only gfx12 nearest-even without CLAMP has qualified reporting.
-            // Compatibility retains the legacy classifier in every configuration.
+            // Compatibility retains the legacy classifier in every
+            // configuration.
             const bool reporting_supported = !rdna3 && !rounding && !clamp;
             const bool rejected = policy_kind == 2 && !reporting_supported;
             EXPECT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
@@ -7552,8 +7834,8 @@ TEST(ArithBridgeTest, DivisionDx10ClampAndFixupStatus) {
               fixture.cu->read_vgpr(fixture.base() + 6, 0) |
               (wide ? uint64_t(fixture.cu->read_vgpr(fixture.base() + 7, 0)) << 32 : 0);
           EXPECT_EQ(result, divide_by_zero ? inf : dx10 ? 0 : nan);
-          // Preserve the inherited classifier; gfx1100 review captures also show
-          // DIV0 with DX10_CLAMP clear and suppression with it set.
+          // Preserve the inherited classifier; gfx1100 review captures also
+          // show DIV0 with DX10_CLAMP clear and suppression with it set.
           EXPECT_EQ(fixture.wave->trapsts(), 0x20u | (divide_by_zero && !dx10 ? 4u : 0u));
         }
       }
@@ -7639,7 +7921,8 @@ TEST(ArithBridgeTest, HalfFixupGuestRoundingNanClampAndPartialWrites) {
 }
 
 TEST(ArithBridgeTest, GuestModeInstructionsUpdateOnlyTheirNibbleRegardlessOfExecOrReporting) {
-  for (bool rdna3 : {false, true})
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
     for (uint32_t lanes : {32U, 64U})
       for (bool denorm : {false, true})
         for (bool loose : {false, true})
@@ -7651,14 +7934,20 @@ TEST(ArithBridgeTest, GuestModeInstructionsUpdateOnlyTheirNibbleRegardlessOfExec
 
               if (report && !loose)
                 policy.semantics = ArithmeticSemantics::BitExactEmpirical;
-              BridgeFixture fixture(rdna3, lanes, policy);
+              const bool rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
+              if (arch == ROCJITSU_CODE_ARCH_CDNA5 && lanes != 32)
+                continue;
+              BridgeFixture fixture(arch, lanes, policy);
               ASSERT_FALSE(::testing::Test::HasFatalFailure());
               constexpr uint32_t initial = 0x1234abcfU;
               fixture.wave->set_mode_raw(initial);
               fixture.wave->set_exec(0);
               fixture.wave->write_scc(1);
               const auto words =
-                  rdna3
+                  arch == ROCJITSU_CODE_ARCH_CDNA5
+                      ? cdna5::build_sopp(denorm ? cdna5::kSDenormModeSopp : cdna5::kSRoundModeSopp,
+                                          {.simm16 = immediate})
+                  : rdna3
                       ? rdna3::build_sopp(denorm ? rdna3::kSDenormModeSopp : rdna3::kSRoundModeSopp,
                                           {.simm16 = immediate})
                       : rdna4::build_sopp(denorm ? rdna4::kSDenormModeSopp : rdna4::kSRoundModeSopp,
@@ -7704,15 +7993,21 @@ TEST(ArithBridgeTest, GuestDenormInstructionControlsFollowingArithmetic) {
 }
 
 TEST(ArithBridgeTest, RelativeScalarMovesKeepResolvedSelectorsAndIgnoreExec) {
-  for (bool rdna3 : {false, true})
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA3,
+        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5})
     for (unsigned operation = 0; operation < 5; ++operation)
       for (uint32_t m0 : {0U, 3U, 0x0403U, 0x00040003U})
         for (bool alias : {false, true}) {
+          if (operation == 4 &&
+              (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4))
+            continue;
           const bool wide = operation == 1 || operation == 3;
           const unsigned width = wide ? 2 : 1;
           const unsigned source_base = 4, destination_base = alias ? 4 : 24;
           // Upstream MOVREL uses word offsets (B64 clears bit 0), ten-bit
-          // split offsets, SGPR0 for missing sources and no write for missing destinations.
+          // split offsets, SGPR0 for missing sources and no write for missing
+          // destinations.
           const unsigned source_offset = operation == 4 ? m0 & 1023 : wide ? m0 & ~1U : m0;
           const unsigned destination_offset = operation == 4 ? (m0 >> 16) & 1023 : source_offset;
           const unsigned indexed_source =
@@ -7724,7 +8019,10 @@ TEST(ArithBridgeTest, RelativeScalarMovesKeepResolvedSelectorsAndIgnoreExec) {
           policy.semantics =
               alias ? ArithmeticSemantics::Loose : ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
 
-          BridgeFixture fixture(rdna3, 32, policy);
+          const bool rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
+          BridgeFixture fixture(
+              arch, arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32,
+              policy);
           ASSERT_FALSE(::testing::Test::HasFatalFailure());
           fixture.wave->set_exec(0);
           fixture.wave->set_m0(m0);
@@ -7732,12 +8030,24 @@ TEST(ArithBridgeTest, RelativeScalarMovesKeepResolvedSelectorsAndIgnoreExec) {
           const uint32_t base = fixture.wave->sgpr_alloc().base;
           for (unsigned reg = 0; reg < 64; ++reg)
             fixture.cu->write_sgpr(base + reg, 0xabc00000U + reg);
-          const auto words = rdna3 ? rdna3::build_sop1(rdna3::kSMovrelsB32Sop1 + operation,
-                                                       {.ssrc0 = uint8_t(source_base),
-                                                        .sdst = uint8_t(destination_base)})
-                                   : rdna4::build_sop1(rdna4::kSMovrelsB32Sop1 + operation,
-                                                       {.ssrc0 = uint8_t(source_base),
-                                                        .sdst = uint8_t(destination_base)});
+          const auto words = arch == ROCJITSU_CODE_ARCH_CDNA3
+                                 ? cdna3::build_sop1(cdna3::kSMovrelsB32Sop1 + operation,
+                                                     {.ssrc0 = uint8_t(source_base),
+                                                      .sdst = uint8_t(destination_base)})
+                             : arch == ROCJITSU_CODE_ARCH_CDNA4
+                                 ? cdna4::build_sop1(cdna4::kSMovrelsB32Sop1 + operation,
+                                                     {.ssrc0 = uint8_t(source_base),
+                                                      .sdst = uint8_t(destination_base)})
+                             : arch == ROCJITSU_CODE_ARCH_CDNA5
+                                 ? cdna5::build_sop1(cdna5::kSMovrelsB32Sop1 + operation,
+                                                     {.ssrc0 = uint8_t(source_base),
+                                                      .sdst = uint8_t(destination_base)})
+                             : rdna3 ? rdna3::build_sop1(rdna3::kSMovrelsB32Sop1 + operation,
+                                                         {.ssrc0 = uint8_t(source_base),
+                                                          .sdst = uint8_t(destination_base)})
+                                     : rdna4::build_sop1(rdna4::kSMovrelsB32Sop1 + operation,
+                                                         {.ssrc0 = uint8_t(source_base),
+                                                          .sdst = uint8_t(destination_base)});
           auto instruction = fixture.decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
           ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
@@ -7852,7 +8162,8 @@ TEST(ArithBridgeTest, DppMoveHalfNegatesSelectedHalfAndPreservesTheOther) {
                                     {.src0 = SRC_DPP, .vdst = uint8_t(2 + 128 * high)})
                 : rdna4::build_vop1(rdna4::kVMovB16Vop1,
                                     {.src0 = SRC_DPP, .vdst = uint8_t(2 + 128 * high)});
-      // Identity permutation, NEG, all rows/banks; vsrc0 selects the source half.
+      // Identity permutation, NEG, all rows/banks; vsrc0 selects the source
+      // half.
       const std::array<uint32_t, 2> words{first[0], 0xff10e400U | (128U * high)};
       auto instruction = fixture.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
@@ -7961,7 +8272,8 @@ TEST(ArithBridgeTest, DsPermutationsRespectGroupingCollisionsAliasesAndSourceObs
                   uint64_t consumed = 0;
                   const unsigned group = rdna3 ? 32 : lanes;
                   // Ordered scatter matches the existing collision rule. Gather
-                  // uses original EXEC even when destination stores are suppressed.
+                  // uses original EXEC even when destination stores are
+                  // suppressed.
                   for (unsigned lane = 0; lane < lanes; ++lane) {
                     if (!((exec_mask >> lane) & 1))
                       continue;
@@ -8442,7 +8754,7 @@ TEST(ArithBridgeTest, DppConditionalAppliesIndependentSignsAfterRouting) {
 }
 
 TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinations) {
-  const uint16_t opcodes[2][2][12] = {
+  const uint16_t opcodes[5][2][12] = {
       {{rdna4::kSAndSaveExecB32Sop1, rdna4::kSOrSaveExecB32Sop1, rdna4::kSXorSaveExecB32Sop1,
         rdna4::kSNandSaveExecB32Sop1, rdna4::kSNorSaveExecB32Sop1, rdna4::kSXnorSaveExecB32Sop1,
         rdna4::kSAndNot0SaveExecB32Sop1, rdna4::kSOrNot0SaveExecB32Sop1,
@@ -8462,13 +8774,42 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
         rdna3::kSNandSaveExecB64Sop1, rdna3::kSNorSaveExecB64Sop1, rdna3::kSXnorSaveExecB64Sop1,
         rdna3::kSAndNot0SaveExecB64Sop1, rdna3::kSOrNot0SaveExecB64Sop1,
         rdna3::kSAndNot1SaveExecB64Sop1, rdna3::kSOrNot1SaveExecB64Sop1,
-        rdna3::kSAndNot0WrExecB64Sop1, rdna3::kSAndNot1WrExecB64Sop1}}};
-  for (bool rdna3 : {false, true})
+        rdna3::kSAndNot0WrExecB64Sop1, rdna3::kSAndNot1WrExecB64Sop1}},
+      {{},
+       {cdna3::kSAndSaveExecB64Sop1, cdna3::kSOrSaveExecB64Sop1, cdna3::kSXorSaveExecB64Sop1,
+        cdna3::kSNandSaveExecB64Sop1, cdna3::kSNorSaveExecB64Sop1, cdna3::kSXnorSaveExecB64Sop1,
+        cdna3::kSAndn1SaveExecB64Sop1, cdna3::kSOrn1SaveExecB64Sop1, cdna3::kSAndn2SaveExecB64Sop1,
+        cdna3::kSOrn2SaveExecB64Sop1, cdna3::kSAndn1WrExecB64Sop1, cdna3::kSAndn2WrExecB64Sop1}},
+      {{},
+       {cdna4::kSAndSaveExecB64Sop1, cdna4::kSOrSaveExecB64Sop1, cdna4::kSXorSaveExecB64Sop1,
+        cdna4::kSNandSaveExecB64Sop1, cdna4::kSNorSaveExecB64Sop1, cdna4::kSXnorSaveExecB64Sop1,
+        cdna4::kSAndn1SaveExecB64Sop1, cdna4::kSOrn1SaveExecB64Sop1, cdna4::kSAndn2SaveExecB64Sop1,
+        cdna4::kSOrn2SaveExecB64Sop1, cdna4::kSAndn1WrExecB64Sop1, cdna4::kSAndn2WrExecB64Sop1}},
+      {{cdna5::kSAndSaveExecB32Sop1, cdna5::kSOrSaveExecB32Sop1, cdna5::kSXorSaveExecB32Sop1,
+        cdna5::kSNandSaveExecB32Sop1, cdna5::kSNorSaveExecB32Sop1, cdna5::kSXnorSaveExecB32Sop1,
+        cdna5::kSAndNot0SaveExecB32Sop1, cdna5::kSOrNot0SaveExecB32Sop1,
+        cdna5::kSAndNot1SaveExecB32Sop1, cdna5::kSOrNot1SaveExecB32Sop1,
+        cdna5::kSAndNot0WrExecB32Sop1, cdna5::kSAndNot1WrExecB32Sop1},
+       {cdna5::kSAndSaveExecB64Sop1, cdna5::kSOrSaveExecB64Sop1, cdna5::kSXorSaveExecB64Sop1,
+        cdna5::kSNandSaveExecB64Sop1, cdna5::kSNorSaveExecB64Sop1, cdna5::kSXnorSaveExecB64Sop1,
+        cdna5::kSAndNot0SaveExecB64Sop1, cdna5::kSOrNot0SaveExecB64Sop1,
+        cdna5::kSAndNot1SaveExecB64Sop1, cdna5::kSOrNot1SaveExecB64Sop1,
+        cdna5::kSAndNot0WrExecB64Sop1, cdna5::kSAndNot1WrExecB64Sop1}}};
+  const rj_code_arch_t architectures[] = {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                                          ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
+                                          ROCJITSU_CODE_ARCH_CDNA5};
+  for (int architecture = 0; architecture < 5; ++architecture)
     for (uint32_t lanes : {32U, 64U})
       for (bool wide : {false, true})
         for (bool loose : {false, true})
           for (unsigned op = 0; op < 12; ++op)
             for (uint8_t destination : {uint8_t(0), uint8_t(2), uint8_t(126), uint8_t(127)}) {
+              const auto arch = architectures[architecture];
+              const bool rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
+              if ((architecture == 2 || architecture == 3) && (!wide || lanes != 64))
+                continue;
+              if (architecture == 4 && lanes != 32)
+                continue;
               if (wide && destination == 127)
                 continue;
               SCOPED_TRACE(::testing::Message() << "rdna3=" << rdna3 << " lanes=" << lanes
@@ -8477,11 +8818,10 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
               ArithmeticPolicy policy{};
               policy.semantics = loose ? ArithmeticSemantics::Loose
                                        : ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
-              BridgeFixture fixture(rdna3, lanes, policy);
+              BridgeFixture fixture(arch, lanes, policy);
               ASSERT_FALSE(::testing::Test::HasFatalFailure());
               const uint32_t base = fixture.wave->sgpr_alloc().base;
-              // Alternate zero, high-only and mixed EXEC. Wave32 retains raw high
-              // state; B64 operations still calculate SCC from the whole result.
+              // Alternate zero, high-only and mixed EXEC to exercise the width of SCC.
               const uint64_t old_exec = op % 3 == 0   ? 0
                                         : op % 3 == 1 ? 0xa55a123400000000ULL
                                                       : 0x876543210f0ff0f0ULL;
@@ -8490,13 +8830,20 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
               fixture.wave->write_scc(1);
               fixture.cu->write_sgpr(base, uint32_t(input));
               fixture.cu->write_sgpr(base + 1, uint32_t(input >> 32));
-              const auto words =
-                  rdna3
-                      ? rdna3::build_sop1(opcodes[1][wide][op], {.ssrc0 = 0, .sdst = destination})
-                      : rdna4::build_sop1(opcodes[0][wide][op], {.ssrc0 = 0, .sdst = destination});
+              const auto opcode = opcodes[architecture][wide][op];
+              const auto words = arch == ROCJITSU_CODE_ARCH_CDNA3
+                                     ? cdna3::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                                 : arch == ROCJITSU_CODE_ARCH_CDNA4
+                                     ? cdna4::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                                 : arch == ROCJITSU_CODE_ARCH_CDNA5
+                                     ? cdna5::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                                 : rdna3
+                                     ? rdna3::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                                     : rdna4::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination});
               auto instruction = fixture.decoder->decode_window(words);
               // The SREG destination class excludes EXEC; preserve that decoder
-              // rejection instead of manufacturing an unsupported register alias.
+              // rejection instead of manufacturing an unsupported register
+              // alias.
               if (destination >= 126) {
                 EXPECT_FALSE(instruction.succeeded());
                 continue;
@@ -8545,10 +8892,8 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
                 expected = uint32_t(expected);
               const uint64_t saved = op >= 10 ? expected : wide ? old_exec : uint32_t(old_exec);
               uint64_t expected_raw = expected;
-              if (!wide && lanes == 32) {
-                const uint64_t high = old_exec & 0xffffffff00000000ULL;
-                expected_raw |= high;
-              }
+              if (!wide)
+                expected_raw |= old_exec & 0xffffffff00000000ULL;
               EXPECT_EQ(fixture.wave->exec_raw(), expected_raw);
               EXPECT_EQ(fixture.wave->read_scc(), expected != 0);
               std::vector<uint32_t> reads{base};
@@ -8566,10 +8911,15 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
 }
 
 TEST(ArithBridgeTest, ScalarMovesIgnoreExecAndUntakenMovesHaveNoRegisterAccesses) {
-  for (bool rdna3 : {false, true})
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA3,
+        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5})
     for (unsigned kind = 0; kind < 6; ++kind)
       for (bool scc : {false, true}) {
-        BridgeFixture fixture(rdna3);
+        const bool rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
+        BridgeFixture fixture(
+            arch, arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32,
+            {});
         ASSERT_FALSE(::testing::Test::HasFatalFailure());
         const bool conditional = kind & 1;
         const bool wide = kind == 2 || kind == 3;
@@ -8581,17 +8931,35 @@ TEST(ArithBridgeTest, ScalarMovesIgnoreExecAndUntakenMovesHaveNoRegisterAccesses
         fixture.cu->write_sgpr(base + 1, 0x87654321);
         fixture.cu->write_sgpr(base + 2, 0xabcdef01);
         fixture.cu->write_sgpr(base + 3, 0x98765432);
-        const uint16_t opcodes[2][6] = {
+        const uint16_t opcodes[5][6] = {
             {rdna4::kSMovB32Sop1, rdna4::kSCmovB32Sop1, rdna4::kSMovB64Sop1, rdna4::kSCmovB64Sop1,
              rdna4::kSMovkI32Sopk, rdna4::kSCmovkI32Sopk},
             {rdna3::kSMovB32Sop1, rdna3::kSCmovB32Sop1, rdna3::kSMovB64Sop1, rdna3::kSCmovB64Sop1,
-             rdna3::kSMovkI32Sopk, rdna3::kSCmovkI32Sopk}};
-        const uint16_t opcode = opcodes[rdna3][kind];
-        const auto words = immediate
-                               ? (rdna3 ? rdna3::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0})
-                                        : rdna4::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0}))
-                               : (rdna3 ? rdna3::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0})
-                                        : rdna4::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0}));
+             rdna3::kSMovkI32Sopk, rdna3::kSCmovkI32Sopk},
+            {cdna3::kSMovB32Sop1, cdna3::kSCmovB32Sop1, cdna3::kSMovB64Sop1, cdna3::kSCmovB64Sop1,
+             cdna3::kSMovkI32Sopk, cdna3::kSCmovkI32Sopk},
+            {cdna4::kSMovB32Sop1, cdna4::kSCmovB32Sop1, cdna4::kSMovB64Sop1, cdna4::kSCmovB64Sop1,
+             cdna4::kSMovkI32Sopk, cdna4::kSCmovkI32Sopk},
+            {cdna5::kSMovB32Sop1, cdna5::kSCmovB32Sop1, cdna5::kSMovB64Sop1, cdna5::kSCmovB64Sop1,
+             cdna5::kSMovkI32Sopk, cdna5::kSCmovkI32Sopk}};
+        const uint16_t opcode = opcodes[arch == ROCJITSU_CODE_ARCH_CDNA3   ? 2
+                                        : arch == ROCJITSU_CODE_ARCH_CDNA4 ? 3
+                                        : arch == ROCJITSU_CODE_ARCH_CDNA5 ? 4
+                                                                           : int(rdna3)][kind];
+        const auto words =
+            arch == ROCJITSU_CODE_ARCH_CDNA3
+                ? (immediate ? cdna3::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0})
+                             : cdna3::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0}))
+            : arch == ROCJITSU_CODE_ARCH_CDNA4
+                ? (immediate ? cdna4::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0})
+                             : cdna4::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0}))
+            : arch == ROCJITSU_CODE_ARCH_CDNA5
+                ? (immediate ? cdna5::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0})
+                             : cdna5::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0}))
+            : immediate ? (rdna3 ? rdna3::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0})
+                                 : rdna4::build_sopk(opcode, {.simm16 = 0x8123, .sdst = 0}))
+                        : (rdna3 ? rdna3::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0})
+                                 : rdna4::build_sop1(opcode, {.ssrc0 = 2, .sdst = 0}));
         auto instruction = fixture.decoder->decode_window(words);
         ASSERT_TRUE(instruction.succeeded());
         fixture.recorder->scalar_reads.clear();
@@ -8633,7 +9001,8 @@ TEST(ArithBridgeTest, VectorMovesAndSelectionsPreservePayloadsHalvesAndMaskedAli
                 fixture.cu->write_sgpr(sb + 1, uint32_t(condition >> 32));
                 std::array<uint32_t, 64> a{}, b{};
                 for (unsigned lane = 0; lane < lanes; ++lane) {
-                  // Fixed integer mixing retains NaN payloads and arbitrary raw halves.
+                  // Fixed integer mixing retains NaN payloads and arbitrary raw
+                  // halves.
                   a[lane] = 0xff800001U | ((lane * 0x19660dU) & 0x7fffffU);
                   b[lane] = 0x80001234U ^ (lane * 0x41c64e6dU);
                   fixture.cu->write_vgpr(fixture.base(), lane, a[lane]);
@@ -8690,7 +9059,8 @@ TEST(ArithBridgeTest, VectorMovesAndSelectionsPreservePayloadsHalvesAndMaskedAli
                     const unsigned shift = choose_b ? (high ? 0 : 16) : (high ? 16 : 0);
                     value = (value >> shift) & 0xffff;
                     if (modifiers) {
-                      // MOV/CNDMASK apply ABS/NEG to the selected half's sign bit.
+                      // MOV/CNDMASK apply ABS/NEG to the selected half's sign
+                      // bit.
                       if (absolute)
                         value &= 0x7fff;
                       if (negate)
@@ -8709,6 +9079,10 @@ TEST(ArithBridgeTest, VectorMovesAndSelectionsPreservePayloadsHalvesAndMaskedAli
                 }
               }
 }
+
+// Wave32 VOPD: X moves old v7 into v6, Y reads old v6 and writes v7.
+// Values are exactly representable; the existing rj-arith dual/dot suites cover
+// numerical boundaries. This table checks every decoded slot and operand role.
 
 TEST(ArithBridgeTest, MullitPoliciesNanClampAndMaskedAlias) {
   for (bool rdna3 : {false, true})
@@ -8797,53 +9171,57 @@ TEST(ArithBridgeTest, InterpolationDistinguishesHalfAndFloatDenormalControls) {
 // Captured on gfx1100 and gfx1201. The first NaN wins after source modifiers;
 // narrowing P2 to FP16 always sets the quiet bit.
 TEST(ArithBridgeTest, InterpolationNanPayloadsFollowGuestModes) {
-  for (bool rdna3 : {true, false}) {
-    BridgeFixture fixture(rdna3);
-    ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    fixture.wave->set_exec(1);
-    for (unsigned op = 0; op < 6; ++op) {
-      const bool half = op >= 2, p2 = op & 1;
-      const unsigned coefficient = p2 ? 2 : 1;
-      fixture.cu->write_vgpr(fixture.base(), coefficient, half ? 0x7c15U : 0x7f801abcU);
-      fixture.cu->write_vgpr(fixture.base() + 1, 0, 0xffc00456U);
-      fixture.cu->write_vgpr(fixture.base() + 2, 0, 0x3f803c00U);
-      for (uint32_t denorm : {0U, 0xf0U})
-        for (bool ieee : {false, true})
-          for (bool dx10 : {false, true})
-            for (uint8_t clamp : {0, 1}) {
-              SCOPED_TRACE(::testing::Message() << rdna3 << '/' << op << '/' << denorm << '/'
-                                                << ieee << '/' << dx10 << '/' << +clamp);
-              fixture.wave->set_mode_raw(denorm | (uint32_t(ieee) << 9) | (uint32_t(dx10) << 8));
-              fixture.cu->write_vgpr(fixture.base() + 3, 0, 0xabcd1234U);
-              const auto words = rdna3 ? rdna3::build_vinterp(op, {.vdst = 3,
-                                                                   .clamp = clamp,
-                                                                   .src0 = 256,
-                                                                   .src1 = 257,
-                                                                   .src2 = 258,
-                                                                   .neg = 1})
-                                       : rdna4::build_vinterp(op, {.vdst = 3,
-                                                                   .clamp = clamp,
-                                                                   .src0 = 256,
-                                                                   .src1 = 257,
-                                                                   .src2 = 258,
-                                                                   .neg = 1});
-              auto inst = fixture.decoder->decode_window(words);
-              ASSERT_TRUE(inst.succeeded());
-              ASSERT_TRUE(
-                  fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
-              uint32_t expected = half ? 0xff82a000U : 0xff801abcU;
-              if (ieee || !rdna3)
-                expected |= 0x00400000U;
-              if (half && p2)
-                expected = 0xfe15U;
-              if (clamp && (dx10 || !rdna3))
-                expected = 0;
-              if (half && p2)
-                expected |= 0xabcd0000U;
-              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), expected);
-            }
+  for (auto semantics :
+       {ArithmeticSemantics::Compatibility, ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+        ArithmeticSemantics::BitExactEmpirical})
+    for (bool rdna3 : {true, false}) {
+      BridgeFixture fixture(rdna3, 32, ArithmeticPolicy{semantics});
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      fixture.wave->set_exec(1);
+      for (unsigned op = 0; op < 6; ++op) {
+        const bool half = op >= 2, p2 = op & 1;
+        const unsigned coefficient = p2 ? 2 : 1;
+        fixture.cu->write_vgpr(fixture.base(), coefficient, half ? 0x7c15U : 0x7f801abcU);
+        fixture.cu->write_vgpr(fixture.base() + 1, 0, 0xffc00456U);
+        fixture.cu->write_vgpr(fixture.base() + 2, 0, 0x3f803c00U);
+        for (uint32_t denorm : {0U, 0xf0U})
+          for (bool ieee : {false, true})
+            for (bool dx10 : {false, true})
+              for (uint8_t clamp : {0, 1}) {
+                SCOPED_TRACE(::testing::Message()
+                             << int(semantics) << '/' << rdna3 << '/' << op << '/' << denorm << '/'
+                             << ieee << '/' << dx10 << '/' << +clamp);
+                fixture.wave->set_mode_raw(denorm | (uint32_t(ieee) << 9) | (uint32_t(dx10) << 8));
+                fixture.cu->write_vgpr(fixture.base() + 3, 0, 0xabcd1234U);
+                const auto words = rdna3 ? rdna3::build_vinterp(op, {.vdst = 3,
+                                                                     .clamp = clamp,
+                                                                     .src0 = 256,
+                                                                     .src1 = 257,
+                                                                     .src2 = 258,
+                                                                     .neg = 1})
+                                         : rdna4::build_vinterp(op, {.vdst = 3,
+                                                                     .clamp = clamp,
+                                                                     .src0 = 256,
+                                                                     .src1 = 257,
+                                                                     .src2 = 258,
+                                                                     .neg = 1});
+                auto inst = fixture.decoder->decode_window(words);
+                ASSERT_TRUE(inst.succeeded());
+                ASSERT_TRUE(
+                    fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+                uint32_t expected = half ? 0xff82a000U : 0xff801abcU;
+                if (ieee || !rdna3)
+                  expected |= 0x00400000U;
+                if (half && p2)
+                  expected = 0xfe15U;
+                if (clamp && (dx10 || !rdna3))
+                  expected = 0;
+                if (half && p2)
+                  expected |= 0xabcd0000U;
+                EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), expected);
+              }
+      }
     }
-  }
 }
 
 TEST(ArithBridgeTest, InterpolationCarriesPackedSignalingNanIntoP2) {
@@ -8937,7 +9315,8 @@ TEST(ArithBridgeTest, InterpolationQuadReadsModesAliasesAndPartialWrites) {
               uint8_t dest = alias ? 0 : 3;
               const uint64_t exec_mask = lanes == 32 ? 0x88888888ULL : 0x8888888888888888ULL;
               fixture.wave->set_exec(exec_mask);
-              // These exactly representable operands are unchanged by directed guest rounding.
+              // These exactly representable operands are unchanged by directed
+              // guest rounding.
               fixture.wave->set_mode_raw(0xf);
               fixture.wave->set_trapsts(0x20);
               uint32_t initial[4][64] = {};
@@ -9057,9 +9436,464 @@ TEST(ArithBridgeTest, Dot4DppObservesOnlyWritableLanes) {
   }
 }
 
-// Wave32 VOPD: X moves old v7 into v6, Y reads old v6 and writes v7.
-// Values are exactly representable; the existing rj-arith dual/dot suites cover
-// numerical boundaries. This table checks every decoded slot and operand role.
+TEST(ArithBridgeTest, Fp8SdwaRejectsPendingInputFailure) {
+  BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA4, 64);
+  fixture.wave->set_exec(1);
+  fixture.wave->report_instruction_execution_error(
+      InstructionExecutionError::InvalidRegisterAccess);
+  cdna4::Operand a(32, cdna4::OperandType::OPR_VGPR, 0);
+  cdna4::Operand d(32, cdna4::OperandType::OPR_VGPR, 16);
+  int inst = 0;
+  arith::execute_fp8_widen_sdwa(inst, *fixture.wave, rj_arith_v_cvt_f32_fp8_w32_gfx950,
+                                rj_arith_v_cvt_f32_fp8_w64_gfx950, d, a);
+  EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 16, 0), 0U);
+  EXPECT_TRUE(fixture.recorder->writes.empty());
+}
+
+TEST(ArithBridgeTest, CdnaFp8Widening) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (int op = 0; op < 4; ++op) {
+        for (int form = 0; form < 4; ++form) {
+          if (form == 2 && arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            continue;
+          }
+          SCOPED_TRACE(::testing::Message() << arch << ":" << op << ":" << form);
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          int lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+          BridgeFixture fixture(arch, lanes, policy);
+          fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
+          fixture.wave->set_mode_raw(0xff); // Guest rounding and flushing do not affect widening.
+          constexpr uint32_t input = 0xff7f0180U;
+          for (int lane = 0; lane < lanes; ++lane) {
+            fixture.cu->write_vgpr(fixture.base(), lane, input);
+            fixture.cu->write_vgpr(fixture.base() + 1, lane, 0xdeadbeefU);
+          }
+          bool vop3 = form == 1 || form == 3;
+          bool packed = op >= 2;
+          uint8_t selector = form == 3 ? (packed ? 1 : 3) : 0;
+          uint8_t clamp = arch == ROCJITSU_CODE_ARCH_CDNA5 && op == 0 && form == 3;
+          std::vector<uint32_t> words;
+          if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+            constexpr uint16_t vop1[] = {cdna3::kVCvtF32Fp8Vop1, cdna3::kVCvtF32Bf8Vop1,
+                                         cdna3::kVCvtPkF32Fp8Vop1, cdna3::kVCvtPkF32Bf8Vop1};
+            constexpr uint16_t vop3_ops[] = {cdna3::kVCvtF32Fp8Vop3, cdna3::kVCvtF32Bf8Vop3,
+                                             cdna3::kVCvtPkF32Fp8Vop3, cdna3::kVCvtPkF32Bf8Vop3};
+            if (vop3) {
+              auto encoded = cdna3::build_vop3(
+                  vop3_ops[op], {.vdst = 0, .op_sel = selector, .clamp = clamp, .src0 = 256});
+              words.assign(encoded.begin(), encoded.end());
+            } else {
+              auto encoded = cdna3::build_vop1(
+                  vop1[op], {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+            constexpr uint16_t vop1[] = {cdna4::kVCvtF32Fp8Vop1, cdna4::kVCvtF32Bf8Vop1,
+                                         cdna4::kVCvtPkF32Fp8Vop1, cdna4::kVCvtPkF32Bf8Vop1};
+            constexpr uint16_t vop3_ops[] = {cdna4::kVCvtF32Fp8Vop3, cdna4::kVCvtF32Bf8Vop3,
+                                             cdna4::kVCvtPkF32Fp8Vop3, cdna4::kVCvtPkF32Bf8Vop3};
+            if (vop3) {
+              auto encoded = cdna4::build_vop3(
+                  vop3_ops[op], {.vdst = 0, .op_sel = selector, .clamp = clamp, .src0 = 256});
+              words.assign(encoded.begin(), encoded.end());
+            } else {
+              auto encoded = cdna4::build_vop1(
+                  vop1[op], {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            constexpr uint16_t vop1[] = {cdna5::kVCvtF32Fp8Vop1, cdna5::kVCvtF32Bf8Vop1,
+                                         cdna5::kVCvtPkF32Fp8Vop1, cdna5::kVCvtPkF32Bf8Vop1};
+            constexpr uint16_t vop3_ops[] = {cdna5::kVCvtF32Fp8Vop3, cdna5::kVCvtF32Bf8Vop3,
+                                             cdna5::kVCvtPkF32Fp8Vop3, cdna5::kVCvtPkF32Bf8Vop3};
+            if (vop3) {
+              auto encoded = cdna5::build_vop3(
+                  vop3_ops[op], {.vdst = 0, .opsel = selector, .clamp = clamp, .src0 = 256});
+              words.assign(encoded.begin(), encoded.end());
+            } else {
+              auto encoded = cdna5::build_vop1(
+                  vop1[op], {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          }
+          if (form == 2) {
+            words.push_back((5U << 8) | (2U << 11) | (6U << 16));
+          }
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          auto expected = [&](int byte) -> uint32_t {
+            uint8_t code = uint8_t(input >> (8 * byte));
+            if (clamp) {
+              return 0x7fc00000U;
+            } // Selected 0xff is the sole E5M3 NaN.
+            float value =
+                arch == ROCJITSU_CODE_ARCH_CDNA3
+                    ? (op & 1 ? util::bf8_e5m2_fnuz_to_f32(code) : util::fp8_e4m3_fnuz_to_f32(code))
+                    : (op & 1 ? util::bf8_e5m2_to_f32(code) : util::fp8_e4m3_to_f32(code));
+            return std::bit_cast<uint32_t>(value);
+          };
+          int byte = form == 3 ? (packed ? 2 : 3) : 0;
+          uint32_t low = expected(byte);
+          // CDNA3 FP8/BF8 widening uses SDWA only for source selection;
+          // destination selection is ignored, as in the decoder on develop.
+          if (form == 2 && !packed && arch != ROCJITSU_CODE_ARCH_CDNA3) {
+            low = (low << 16) | (input & 0xffff);
+          }
+          for (int lane : {0, lanes - 1}) {
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane), low);
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, lane),
+                      packed ? expected(byte + 1) : 0xdeadbeefU);
+          }
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 1), input);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, 1), 0xdeadbeefU);
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250Fp8ToF16) {
+  const uint16_t ops[] = {cdna5::kVCvtF16Fp8Vop3, cdna5::kVCvtF16Bf8Vop3, cdna5::kVCvtPkF16Fp8Vop3,
+                          cdna5::kVCvtPkF16Bf8Vop3};
+  const uint16_t vop1_ops[] = {cdna5::kVCvtF16Fp8Vop1, cdna5::kVCvtF16Bf8Vop1,
+                               cdna5::kVCvtPkF16Fp8Vop1, cdna5::kVCvtPkF16Bf8Vop1};
+  for (bool vop1 : {false, true}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (int op = 0; op < 4; ++op) {
+        for (int variant = 0; variant < 4; ++variant) {
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, policy);
+          fixture.wave->set_exec(0xfffffffdU);
+          bool saturate = variant & 1, clamp = !vop1 && (variant & 2), packed = op >= 2;
+          fixture.wave->set_mode_raw(0xff | (saturate ? Wavefront::FP16_OVFL_BIT : 0));
+          int selector = (variant & 1 ? 8 : 0) | variant;
+          if (vop1)
+            selector = (variant & 1) ? (packed ? 1 : 8) : 0;
+          std::vector<uint32_t> words;
+          if (vop1) {
+            auto encoded = cdna5::build_vop1(
+                vop1_ops[op], {.src0 = uint16_t(256 + (packed && (selector & 1) ? 128 : 0)),
+                               .vdst = uint8_t(!packed && (selector & 8) ? 128 : 0)});
+            words.assign(encoded.begin(), encoded.end());
+          } else {
+            auto encoded = cdna5::build_vop3(ops[op], {.vdst = 0,
+                                                       .abs = 1,
+                                                       .opsel = uint8_t(selector),
+                                                       .clamp = uint8_t(clamp),
+                                                       .src0 = 256,
+                                                       .omod = 3,
+                                                       .neg = 1});
+            words.assign(encoded.begin(), encoded.end());
+          }
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          for (int batch = 0; batch < 8; ++batch) {
+            for (int lane = 0; lane < 32; ++lane) {
+              uint32_t code = batch * 32 + lane;
+              fixture.cu->write_vgpr(fixture.base(), lane, (code * 0x01010101U) ^ 0xaa558000U);
+            }
+            ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                            .succeeded());
+            for (int lane = 0; lane < 32; ++lane) {
+              uint32_t input = (uint32_t(batch * 32 + lane) * 0x01010101U) ^ 0xaa558000U;
+              int byte = packed ? 2 * (selector & 1) : 2 * (selector & 1) + ((selector >> 1) & 1);
+              auto half = [&](int index) {
+                uint8_t code = uint8_t(input >> (8 * index));
+                float value = op & 1             ? util::bf8_e5m2_to_f32(code)
+                              : !packed && clamp ? util::fp8_e5m3_to_f32(code)
+                                                 : util::fp8_e4m3_to_f32(code);
+                return uint32_t(util::f32_to_f16_mode(value, saturate));
+              };
+              int shift = selector & 8 ? 16 : 0;
+              uint32_t expected = packed ? half(byte) | (half(byte + 1) << 16)
+                                         : (input & ~(0xffffU << shift)) | (half(byte) << shift);
+              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane), lane == 1 ? input : expected)
+                  << "op=" << op << " variant=" << variant << " code=" << (batch * 32 + lane);
+            }
+          }
+        }
+      }
+    }
+  }
+  // DPP stages the selected high half right-aligned: do not select it twice.
+  BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32);
+  fixture.wave->set_exec(3);
+  fixture.cu->write_vgpr(fixture.base(), 0, 0x40303800);
+  fixture.cu->write_vgpr(fixture.base(), 1, 0xb840b030);
+  const auto first = cdna5::build_vop1(cdna5::kVCvtPkF16Fp8Vop1, {.src0 = SRC_DPP, .vdst = 1});
+  // quad_perm:[1,0,2,3], all rows/banks, source VGPR 0 high half.
+  const std::array<uint32_t, 2> words{first[0], 0xff00e180U};
+  auto instruction = fixture.decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  ASSERT_TRUE(
+      fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+  EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, 0), 0xbc004000U);
+  EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, 1), 0x40003800U);
+}
+
+TEST(ArithBridgeTest, CdnaFp8Narrowing) {
+  const uint32_t inputs[] = {0,           0x80000000U, 0x7f800000U, 0xff800000U,
+                             0x7fc12345U, 0xff800001U, 0x3f880001U, 0xbf980000U,
+                             0x3b000001U, 0x37800001U, 0x43e80000U, 0x47700000U,
+                             0x43780000U, 0x80000001U, 0x3f800000U, 0x7f7fffffU};
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (int op = 0; op < 4; ++op) {
+        for (int variant = 0; variant < 4; ++variant) {
+          SCOPED_TRACE(::testing::Message() << arch << ":" << op << ":" << variant);
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          int lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+          BridgeFixture fixture(arch, lanes, policy);
+          fixture.wave->set_exec((lanes == 32 ? 0xffffffffULL : ~0ULL) & ~(1ULL << 1));
+          bool saturate = variant & 1;
+          fixture.wave->set_mode_raw(0xff | (saturate ? Wavefront::FP16_OVFL_BIT : 0));
+          bool sr = op >= 2, bf8 = op & 1;
+          for (int lane = 0; lane < lanes; ++lane) {
+            fixture.cu->write_vgpr(fixture.base(), lane, inputs[lane % 16]);
+            fixture.cu->write_vgpr(fixture.base() + 1, lane,
+                                   sr ? (lane & 1 ? ~0U : 0U) : inputs[(lane + 5) % 16]);
+          }
+          uint8_t selector = sr ? variant << 2 : (variant & 1) << 3;
+          uint8_t clamp = arch == ROCJITSU_CODE_ARCH_CDNA5 && !bf8 && variant >= 2;
+          std::vector<uint32_t> words;
+          if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+            constexpr uint16_t ops[] = {cdna3::kVCvtPkFp8F32Vop3, cdna3::kVCvtPkBf8F32Vop3,
+                                        cdna3::kVCvtSrFp8F32Vop3, cdna3::kVCvtSrBf8F32Vop3};
+            auto encoded = cdna3::build_vop3(ops[op], {.vdst = 0,
+                                                       .abs = 3,
+                                                       .op_sel = selector,
+                                                       .clamp = clamp,
+                                                       .src0 = 256,
+                                                       .src1 = 257,
+                                                       .omod = 3,
+                                                       .neg = 3});
+            words.assign(encoded.begin(), encoded.end());
+          } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+            constexpr uint16_t ops[] = {cdna4::kVCvtPkFp8F32Vop3, cdna4::kVCvtPkBf8F32Vop3,
+                                        cdna4::kVCvtSrFp8F32Vop3, cdna4::kVCvtSrBf8F32Vop3};
+            auto encoded = cdna4::build_vop3(ops[op], {.vdst = 0,
+                                                       .abs = 3,
+                                                       .op_sel = selector,
+                                                       .clamp = clamp,
+                                                       .src0 = 256,
+                                                       .src1 = 257,
+                                                       .omod = 3,
+                                                       .neg = 3});
+            words.assign(encoded.begin(), encoded.end());
+          } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            constexpr uint16_t ops[] = {cdna5::kVCvtPkFp8F32Vop3, cdna5::kVCvtPkBf8F32Vop3,
+                                        cdna5::kVCvtSrFp8F32Vop3, cdna5::kVCvtSrBf8F32Vop3};
+            auto encoded = cdna5::build_vop3(ops[op], {.vdst = 0,
+                                                       .abs = 3,
+                                                       .opsel = selector,
+                                                       .clamp = clamp,
+                                                       .src0 = 256,
+                                                       .src1 = 257,
+                                                       .omod = 3,
+                                                       .neg = 3});
+            words.assign(encoded.begin(), encoded.end());
+          }
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          auto narrow = [&](uint32_t raw, uint32_t seed) -> uint32_t {
+            float value = std::bit_cast<float>(raw);
+            if (clamp) {
+              return sr ? util::f32_to_fp8_e5m3_sr_mode(value, seed, saturate)
+                        : util::f32_to_fp8_e5m3_rne_mode(value, saturate);
+            }
+            raw = (raw & 0x7fffffffU) | 0x80000000U; // ABS then NEG on each FP source.
+            value = std::bit_cast<float>(raw);
+            if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              if (bf8) {
+                return sr ? conversion::encode_fp8_stochastic<conversion::Bf8>(raw, seed, saturate)
+                          : conversion::encode_fp8<conversion::Bf8>(raw, saturate);
+              }
+              return sr ? conversion::encode_fp8_stochastic<conversion::Fp8>(raw, seed, saturate)
+                        : conversion::encode_fp8<conversion::Fp8>(raw, saturate);
+            }
+            if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+              if (bf8) {
+                return sr ? util::f32_to_bf8_e5m2_fnuz_sr_mode(value, seed, saturate)
+                          : util::f32_to_bf8_e5m2_fnuz_rne_mode(value, saturate);
+              }
+              return sr ? util::f32_to_fp8_e4m3_fnuz_sr_mode(value, seed, saturate)
+                        : util::f32_to_fp8_e4m3_fnuz_rne_mode(value, saturate);
+            }
+            if (bf8) {
+              return sr ? util::f32_to_bf8_e5m2_sr_mode(value, seed, saturate)
+                        : util::f32_to_bf8_e5m2_rne_mode(value, saturate);
+            }
+            return sr ? util::f32_to_fp8_e4m3_sr_mode(value, seed, saturate)
+                      : util::f32_to_fp8_e4m3_rne_mode(value, saturate);
+          };
+          for (int lane = 0; lane < lanes; ++lane) {
+            uint32_t a = inputs[lane % 16];
+            uint32_t b = sr ? (lane & 1 ? ~0U : 0U) : inputs[(lane + 5) % 16];
+            uint32_t value = narrow(a, b);
+            if (!sr) {
+              value |= narrow(b, 0) << 8;
+            }
+            int shift = sr ? variant * 8 : (variant & 1) * 16;
+            uint32_t selected = (sr ? 255U : 65535U) << shift;
+            uint32_t expected = lane == 1 ? a : (a & ~selected) | (value << shift);
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane), expected) << "lane=" << lane;
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250F16ToFp8) {
+  const uint32_t inputs[] = {0x7c017c00U, 0xfc01fc00U, 0x3c403c41U, 0x3c3fbc40U,
+                             0x7bfffbffU, 0x00010000U, 0x03ff8001U, 0x80003c00U};
+  const uint16_t ops[] = {cdna5::kVCvtPkFp8F16Vop3, cdna5::kVCvtPkBf8F16Vop3,
+                          cdna5::kVCvtSrFp8F16Vop3, cdna5::kVCvtSrBf8F16Vop3};
+  for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+    for (int op = 0; op < 4; ++op) {
+      for (int variant = 0; variant < 8; ++variant) {
+        ArithmeticPolicy policy{};
+        policy.semantics = semantics;
+        BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, policy);
+        fixture.wave->set_exec(0xfffffffdU);
+        fixture.wave->set_mode_raw(0xff | (variant & 1 ? Wavefront::FP16_OVFL_BIT : 0));
+        bool sr = op >= 2, bf8 = op & 1, clamp = variant & 4;
+        int selector = sr ? ((variant & 3) << 2) | (variant & 1) : (variant & 1) << 3;
+        for (int lane = 0; lane < 32; ++lane) {
+          fixture.cu->write_vgpr(fixture.base(), lane, inputs[lane % 8]);
+          fixture.cu->write_vgpr(fixture.base() + 1, lane, lane & 1 ? ~0U : 0);
+        }
+        auto words = cdna5::build_vop3(ops[op], {.vdst = 0,
+                                                 .abs = 3,
+                                                 .opsel = uint8_t(selector),
+                                                 .clamp = uint8_t(clamp),
+                                                 .src0 = 256,
+                                                 .src1 = 257,
+                                                 .omod = 3,
+                                                 .neg = 3});
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        for (int lane = 0; lane < 32; ++lane) {
+          uint32_t input = inputs[lane % 8], seed = lane & 1 ? ~0U : 0;
+          auto narrow = [&](int half) -> uint32_t {
+            float value = util::f16_to_f32(uint16_t(input >> (16 * half)));
+            // Packed forms apply SRC0 modifiers to both halves; SR consumes the raw half.
+            if (!sr)
+              value = -std::abs(value);
+            if (clamp && !bf8) {
+              return sr ? util::f32_to_fp8_e5m3_sr(value, seed) : util::f32_to_fp8_e5m3_rne(value);
+            }
+            if (bf8) {
+              return sr ? util::f32_to_bf8_e5m2_sr(value, seed) : util::f32_to_bf8_e5m2_rne(value);
+            }
+            return sr ? util::f32_to_fp8_e4m3_sr(value, seed) : util::f32_to_fp8_e4m3_rne(value);
+          };
+          uint32_t value = sr ? narrow(selector & 1) : narrow(0) | (narrow(1) << 8);
+          int shift = sr ? ((selector >> 2) & 3) * 8 : selector & 8 ? 16 : 0;
+          uint32_t expected = (input & ~((sr ? 0xffU : 0xffffU) << shift)) | (value << shift);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane), lane == 1 ? input : expected)
+              << "op=" << op << " variant=" << variant << " lane=" << lane;
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, DoubleReciprocalFlushesSubnormalInput) {
+  for (bool rdna3 : {false, true}) {
+    BridgeFixture fixture(rdna3);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.wave->set_mode_raw(0x80); // FP64 input flush, output preservation.
+    fixture.wave->set_exec(1);
+    fixture.cu->write_vgpr(fixture.base(), 0, 0xffffffff);
+    fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x000fffff);
+    const auto words = rdna3 ? rdna3::build_vop3(rdna3::kVRcpF64Vop3, {.vdst = 2, .src0 = 256})
+                             : rdna4::build_vop3(rdna4::kVRcpF64Vop3, {.vdst = 2, .src0 = 256});
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), 0U);
+    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), 0x7ff00000U);
+  }
+}
+
+TEST(ArithBridgeTest, InterpolationRtzOverridesGuestNearest) {
+  for (bool rdna3 : {false, true}) {
+    for (bool p2 : {false, true}) {
+      BridgeFixture fixture(rdna3);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      fixture.wave->set_exec(1);
+      fixture.wave->set_mode_raw(0);
+      fixture.cu->write_vgpr(fixture.base(), p2 ? 2 : 1, 0x3c00);
+      fixture.cu->write_vgpr(fixture.base() + 1, 0, p2 ? 0x3a400000 : 0x33c00000);
+      fixture.cu->write_vgpr(fixture.base() + 2, 0, p2 ? 0x3f800000 : 0x3c00);
+      auto words = rdna3 ? rdna3::build_vinterp(p2 ? rdna3::kVInterpP2RtzF16F32Vinterp
+                                                   : rdna3::kVInterpP10RtzF16F32Vinterp,
+                                                {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258})
+                         : rdna4::build_vinterp(p2 ? rdna4::kVInterpP2RtzF16F32Vinterp
+                                                   : rdna4::kVInterpP10RtzF16F32Vinterp,
+                                                {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258});
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0) & (p2 ? 0xffffU : ~0U),
+                p2 ? 0x3c00U : 0x3f800000U);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, DecodedClassCompareStrictStatusIsArchitectureSpecific) {
+  for (bool gfx11 : {false, true}) {
+    BridgeFixture fixture(gfx11, 32, parse_arithmetic_policy("bit_exact_empirical"));
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.wave->set_exec(1);
+    fixture.wave->set_vcc_mask(0x80);
+    fixture.cu->write_vgpr(fixture.base(), 0, 0x7f800001);
+    fixture.cu->write_vgpr(fixture.base() + 1, 0, 1);
+    auto words = gfx11 ? rdna3::build_vopc(rdna3::kVCmpClassF32Vopc, {.src0 = 256, .vsrc1 = 1})
+                       : rdna4::build_vopc(rdna4::kVCmpClassF32Vopc, {.src0 = 256, .vsrc1 = 1});
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    EXPECT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
+              gfx11);
+    EXPECT_EQ(fixture.wave->vcc(), gfx11 ? 0x80U : 1U);
+  }
+}
+
+TEST(ArithBridgeTest, PseudoScalarReciprocalDistinguishesLooseAndEmpirical) {
+  for (auto semantics :
+       {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+        ArithmeticSemantics::Compatibility}) {
+    ArithmeticPolicy policy{};
+    policy.semantics = semantics;
+    BridgeFixture fixture(false, 32, policy);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.wave->set_exec(0);
+    fixture.wave->set_mode_raw(0xff);
+    const auto base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(base, 0x3f803686);
+    auto words = rdna4::build_vop3(rdna4::kVSRcpF32Vop3, {.vdst = 1, .src0 = 0});
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+    EXPECT_EQ(fixture.cu->read_sgpr(base + 1),
+              semantics == ArithmeticSemantics::Loose ? 0x3f7f9322U : 0x3f7f9323U);
+  }
+}
+
 TEST(ArithBridgeTest, DualSlotsMasksAliasesLiteralsAndDots) {
   for (bool rdna3 : {false, true})
     for (bool loose : {false, true})
@@ -9260,11 +10094,6 @@ TEST(ArithBridgeTest, DualSecondSlotRejectionCommitsNeitherResultNorState) {
   }
 }
 
-} // namespace
-} // namespace rocjitsu::amdgpu
-
-namespace rocjitsu::amdgpu {
-namespace {
 TEST(ArithBridgeTest, DualDx9CompatibilityUnderflowBoundary) {
   // gfx1201 flushes before rounding at MODE=0x10; the legacy host multiply
   // rounded up to minimum-normal first. Compatibility follows the GPU here.
@@ -9287,118 +10116,2760 @@ TEST(ArithBridgeTest, DualDx9CompatibilityUnderflowBoundary) {
     }
   }
 }
-} // namespace
-} // namespace rocjitsu::amdgpu
 
-namespace rocjitsu::amdgpu {
-namespace {
-TEST(ArithBridgeTest, DoubleReciprocalFlushesSubnormalInput) {
-  for (bool rdna3 : {false, true}) {
-    BridgeFixture fixture(rdna3);
-    ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    fixture.wave->set_mode_raw(0x80); // FP64 input flush, output preservation.
-    fixture.wave->set_exec(1);
-    fixture.cu->write_vgpr(fixture.base(), 0, 0xffffffff);
-    fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x000fffff);
-    const auto words = rdna3 ? rdna3::build_vop3(rdna3::kVRcpF64Vop3, {.vdst = 2, .src0 = 256})
-                             : rdna4::build_vop3(rdna4::kVRcpF64Vop3, {.vdst = 2, .src0 = 256});
-    auto instruction = fixture.decoder->decode_window(words);
+TEST(ArithBridgeTest, CdnaBf16MfmaFusedCancellation) {
+  for (bool scalar : {false, true}) {
+    struct RestoreScalar {
+      bool previous = util::force_scalar();
+      ~RestoreScalar() { util::set_force_scalar_for_testing(previous); }
+    } restore;
+    util::set_force_scalar_for_testing(scalar);
+    ScopedIsaExecutionBackend backend(&rocjitsu::cdna4::execution_backend());
+    ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 104;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    GpuMemory memory("bf16_cancel");
+    L2Cache l2("bf16_cancel_l2");
+    auto cu = ComputeUnitCore::create("bf16_cancel", config, &memory, &l2);
+    auto *wave = cu->dispatch_wf(0, 0, 104, 256, 64);
+    ASSERT_NE(wave, nullptr);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    const auto base = wave->vgpr_alloc().base;
+    for (int reg = 0; reg < 12; ++reg)
+      for (int lane = 0; lane < 64; ++lane)
+        cu->write_vgpr(base + reg, lane, reg >= 8 ? 0xff7f0000U : 0U);
+    cu->write_vgpr(base, 0, 0x7f7fU);
+    cu->write_vgpr(base + 4, 0, 0x4000U);
+    auto words = rocjitsu::cdna4::build_vop3p_mfma(
+        rocjitsu::cdna4::kVMfmaF3216x16x32Bf16Vop3pMfma,
+        {.vdst = 8, .acc_cd = 0, .src0 = 256, .src1 = 260, .src2 = 264});
+    auto instruction = decoder->decode_window(words);
     ASSERT_TRUE(instruction.succeeded());
-    ASSERT_TRUE(
-        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
-    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), 0U);
-    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), 0x7ff00000U);
+    ASSERT_TRUE(cu->execute_instruction(instruction.value().get(), *wave).succeeded());
+    EXPECT_EQ(cu->read_vgpr(base + 8, 0), 0x7f7f0000U) << scalar;
   }
 }
-} // namespace
-} // namespace rocjitsu::amdgpu
 
-namespace rocjitsu::amdgpu {
-namespace {
-TEST(ArithBridgeTest, InterpolationRtzOverridesGuestNearest) {
-  for (bool rdna3 : {false, true}) {
-    for (bool p2 : {false, true}) {
-      BridgeFixture fixture(rdna3);
-      ASSERT_FALSE(::testing::Test::HasFatalFailure());
-      fixture.wave->set_exec(1);
+TEST(ArithBridgeTest, Gfx1250HalfWmmaUsesLibraryPolicyAndInlineAccumulator) {
+  struct Case {
+    uint16_t opcode;
+    bool bf16;
+    bool packed;
+    bool packed_c;
+  };
+  for (auto test : {Case{cdna5::kVWmmaF3216x16x32F16Vop3p, false, false, false},
+                    Case{cdna5::kVWmmaF3216x16x32Bf16Vop3p, true, false, false},
+                    Case{cdna5::kVWmmaF1616x16x32F16Vop3p, false, true, true},
+                    Case{cdna5::kVWmmaBf1616x16x32Bf16Vop3p, true, true, true},
+                    Case{cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p, true, true, false}}) {
+    for (auto semantics : {ArithmeticSemantics::Loose, ArithmeticSemantics::Compatibility,
+                           ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+      ScopedIsaExecutionBackend backend(&cdna5::execution_backend());
+      ComputeUnitCore::Config config{};
+      config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+      config.arithmetic = {semantics};
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 104;
+      config.vgprs_per_wf = 32;
+      config.lds_size_kb = 64;
+      GpuMemory memory("wmma_bridge_memory");
+      L2Cache l2("wmma_bridge_l2");
+      auto cu = ComputeUnitCore::create("wmma_bridge", config, &memory, &l2);
+      auto *wave = cu->dispatch_wf(0, 0, 104, 32, 32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1); // WMMA still writes the entire wave.
+      const auto base = wave->vgpr_alloc().base;
+      for (uint32_t reg = 0; reg < 24; ++reg) {
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          cu->write_vgpr(base + reg, lane,
+                         reg < 16 ? (test.bf16 ? 0x3f803f80U : 0x3c003c00U) : 0xdeadbeefU);
+        }
+      }
+      auto words = cdna5::build_vop3p(
+          test.opcode, {.vdst = 16, .neg_hi = 4, .src0 = 256, .src1 = 264, .src2 = 244, .neg = 4});
+      auto decoder = Decoder::create(config.arch);
+      auto instruction = decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      const bool exact = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+      EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(), !exact);
+      float value =
+          test.packed_c && semantics == ArithmeticSemantics::Compatibility ? 34.0f : 30.0f;
+      uint32_t expected = std::bit_cast<uint32_t>(value);
+      if (test.packed) {
+        uint32_t half = test.bf16 ? util::f32_to_bf16(value) : util::f32_to_f16(value);
+        expected = half | (half << 16);
+      }
+      for (uint32_t reg = 0; reg < 8; ++reg) {
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          EXPECT_EQ(cu->read_vgpr(base + 16 + reg, lane),
+                    exact || (test.packed && reg >= 4) ? 0xdeadbeefU : expected);
+        }
+      }
+      if (semantics == ArithmeticSemantics::Loose) {
+        // Inline -1 has the sentinel's bits but is still C, never the old
+        // destination.
+        for (uint32_t reg = 0; reg < 16; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0);
+        for (uint32_t reg = 24; reg < 32; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0xffffffffU);
+        uint32_t inline_result = 0;
+        for (uint16_t selector : {193, 280}) {
+          for (uint32_t reg = 16; reg < 24; ++reg)
+            for (uint32_t lane = 0; lane < 32; ++lane)
+              cu->write_vgpr(base + reg, lane, 0x40004000U);
+          auto code = cdna5::build_vop3p(test.opcode,
+                                         {.vdst = 16, .src0 = 256, .src1 = 264, .src2 = selector});
+          auto decoded = decoder->decode_window(code);
+          ASSERT_TRUE(decoded.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+          uint32_t actual = cu->read_vgpr(base + 16, 0);
+          EXPECT_NE(actual, 0x40004000U);
+          if (selector == 193)
+            inline_result = actual;
+          else
+            EXPECT_EQ(actual, inline_result);
+        }
+        if (test.packed && !test.bf16) {
+          // CDNA5 §7.12's WMMA-specific saturation rule, despite §7.7's general
+          // wording.
+          for (uint32_t reg = 0; reg < 16; ++reg)
+            for (uint32_t lane = 0; lane < 32; ++lane)
+              cu->write_vgpr(base + reg, lane,
+                             0x5c005c00U); // 256 in both halves.
+          for (bool saturate : {false, true}) {
+            wave->set_mode_raw(saturate ? Wavefront::FP16_OVFL_BIT : 0);
+            auto code = cdna5::build_vop3p(test.opcode,
+                                           {.vdst = 16, .src0 = 256, .src1 = 264, .src2 = 128});
+            auto decoded = decoder->decode_window(code);
+            ASSERT_TRUE(decoded.succeeded());
+            ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+            EXPECT_EQ(cu->read_vgpr(base + 16, 0), saturate ? 0x7bff7bffU : 0x7c007c00U);
+          }
+        }
+      }
+      if (test.bf16 && test.packed && semantics == ArithmeticSemantics::Loose) {
+        // CDNA5 §7.12: finite BF16 overflow saturates when FP16_OVFL is set.
+        for (uint32_t reg = 0; reg < 24; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0);
+        cu->write_vgpr(base, 0, 0x7b00U);     // 2^119.
+        cu->write_vgpr(base + 8, 0, 0x3f80U); // 1.
+        cu->write_vgpr(base + 24, 0, test.packed_c ? 0x7f7fU : 0x7f7f0000U);
+        for (bool saturate : {false, true}) {
+          wave->set_mode_raw(saturate ? Wavefront::FP16_OVFL_BIT : 0);
+          auto code =
+              cdna5::build_vop3p(test.opcode, {.vdst = 16, .src0 = 256, .src1 = 264, .src2 = 280});
+          auto decoded = decoder->decode_window(code);
+          ASSERT_TRUE(decoded.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+          EXPECT_EQ(cu->read_vgpr(base + 16, 0) & 0xffffU, saturate ? 0x7f7fU : 0x7f80U);
+        }
+        wave->set_mode_raw(0);
+      }
+      if (test.packed_c && semantics == ArithmeticSemantics::Loose) {
+        // Integer selectors are raw half encodings; float selectors are
+        // narrowed to C's element type before matrix arithmetic (CDNA5
+        // section 7.7.2).
+        for (uint32_t reg = 0; reg < 16; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0);
+        for (uint16_t selector : {129, 192, 248}) {
+          auto inline_words = cdna5::build_vop3p(
+              test.opcode, {.vdst = 16, .src0 = 256, .src1 = 264, .src2 = selector});
+          auto inline_instruction = decoder->decode_window(inline_words);
+          ASSERT_TRUE(inline_instruction.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(inline_instruction.value().get(), *wave).succeeded());
+          const uint32_t half = selector == 248 ? (test.bf16 ? 0x3e22U : 0x3118U) : selector - 128;
+          EXPECT_EQ(cu->read_vgpr(base + 16, 0), half | (half << 16));
+        }
+      }
+    }
+  }
+}
+
+// Inline -1 and a register with identical bits must name the same accumulator
+// value.
+TEST(ArithBridgeTest, CdnaMfmaInlineMinusOneIsNotDestination) {
+  for (bool cdna4 : {false, true}) {
+    auto arch = cdna4 ? ROCJITSU_CODE_ARCH_CDNA4 : ROCJITSU_CODE_ARCH_CDNA3;
+    ScopedIsaExecutionBackend backend(cdna4 ? &rocjitsu::cdna4::execution_backend()
+                                            : &rocjitsu::cdna3::execution_backend());
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 104;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    GpuMemory memory("mfma_inline_memory");
+    L2Cache l2("mfma_inline_l2");
+    auto cu = ComputeUnitCore::create("mfma_inline", config, &memory, &l2);
+    auto *wave = cu->dispatch_wf(0, 0, 104, 256, 64);
+    ASSERT_NE(wave, nullptr);
+    auto decoder = Decoder::create(arch);
+    const auto base = wave->vgpr_alloc().base;
+    for (int kind : {0, 1, 2}) {
+      const uint32_t outputs = kind == 2 ? 8 : 4;
+      for (uint32_t reg = 0; reg < 12; ++reg)
+        for (uint32_t lane = 0; lane < 64; ++lane)
+          cu->write_vgpr(base + reg, lane,
+                         reg < 4                     ? 0
+                         : kind == 2 && reg % 2 == 0 ? 0xe0000000U
+                                                     : 0xffffffffU);
+      uint64_t expected = 0;
+      for (uint16_t selector : {260, 193}) {
+        for (uint32_t reg = 8; reg < 8 + outputs; ++reg)
+          for (uint32_t lane = 0; lane < 64; ++lane)
+            cu->write_vgpr(base + reg, lane, 0x40004000U);
+        auto words =
+            cdna4 ? rocjitsu::cdna4::build_vop3p_mfma(
+                        kind == 0   ? rocjitsu::cdna4::kVMfmaF3216x16x16F16Vop3pMfma
+                        : kind == 1 ? rocjitsu::cdna4::kVMfmaI3216x16x32I8Vop3pMfma
+                                    : rocjitsu::cdna4::kVMfmaF6416x16x4F64Vop3pMfma,
+                        {.vdst = 8, .acc_cd = 0, .src0 = 256, .src1 = 258, .src2 = selector})
+                  : rocjitsu::cdna3::build_vop3p_mfma(
+                        kind == 0   ? rocjitsu::cdna3::kVMfmaF3216x16x16F16Vop3pMfma
+                        : kind == 1 ? rocjitsu::cdna3::kVMfmaI3216x16x32I8Vop3pMfma
+                                    : rocjitsu::cdna3::kVMfmaF6416x16x4F64Vop3pMfma,
+                        {.vdst = 8, .acc_cd = 0, .src0 = 256, .src1 = 258, .src2 = selector});
+        auto instruction = decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_TRUE(cu->execute_instruction(instruction.value().get(), *wave).succeeded());
+        uint64_t actual = cu->read_vgpr(base + 8, 0);
+        if (kind == 2)
+          actual |= uint64_t(cu->read_vgpr(base + 9, 0)) << 32;
+        EXPECT_NE(actual, 0x40004000U);
+        if (selector == 260)
+          expected = actual;
+        else
+          EXPECT_EQ(actual, expected);
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaHalfMfmaUsesLibraryPolicyAndAccumulatorBank) {
+  for (bool cdna4 : {false, true}) {
+    for (auto semantics : {ArithmeticSemantics::Loose, ArithmeticSemantics::Compatibility,
+                           ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+      for (uint8_t acc_cd : {uint8_t{0}, uint8_t{1}}) {
+        ScopedIsaExecutionBackend backend(cdna4 ? &rocjitsu::cdna4::execution_backend()
+                                                : &rocjitsu::cdna3::execution_backend());
+        ComputeUnitCore::Config config{};
+        config.arch = cdna4 ? ROCJITSU_CODE_ARCH_CDNA4 : ROCJITSU_CODE_ARCH_CDNA3;
+        config.arithmetic = {semantics};
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 104;
+        config.vgprs_per_wf = 512;
+        config.lds_size_kb = 64;
+        GpuMemory memory("mfma_bridge_memory");
+        L2Cache l2("mfma_bridge_l2");
+        auto cu = ComputeUnitCore::create("mfma_bridge", config, &memory, &l2);
+        auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+        auto observer = std::make_unique<WriteRecorder>();
+        auto *recorder = observer.get();
+        group->add(std::move(observer));
+        cu->set_plugin_group(group);
+        auto *wave = cu->dispatch_wf(0, 0, 104, 512, 64);
+        ASSERT_NE(wave, nullptr);
+        wave->set_exec(1);
+        const auto base = wave->vgpr_alloc().base;
+        const auto dst = base + 16 + (acc_cd ? 256 : 0);
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          uint32_t half = util::f32_to_f16(float(lane + 1));
+          for (uint32_t reg = 0; reg < 2; ++reg) {
+            cu->write_vgpr(base + reg, lane, half | (half << 16));
+            cu->write_vgpr(base + 4 + reg, lane, 0x3c003c00);
+          }
+          for (uint32_t reg = 0; reg < 4; ++reg) {
+            cu->write_vgpr(dst + reg, lane, 0xdeadbeef);
+          }
+        }
+        const auto words =
+            cdna4
+                ? rocjitsu::cdna4::build_vop3p_mfma(rocjitsu::cdna4::kVMfmaF324x4x416bF16Vop3pMfma,
+                                                    {.vdst = 16,
+                                                     .cbsz = 4,
+                                                     .abid = 13,
+                                                     .acc_cd = acc_cd,
+                                                     .src0 = 256,
+                                                     .src1 = 260,
+                                                     .src2 = 128})
+                : rocjitsu::cdna3::build_vop3p_mfma(rocjitsu::cdna3::kVMfmaF324x4x416bF16Vop3pMfma,
+                                                    {.vdst = 16,
+                                                     .cbsz = 4,
+                                                     .abid = 13,
+                                                     .acc_cd = acc_cd,
+                                                     .src0 = 256,
+                                                     .src1 = 260,
+                                                     .src2 = 128});
+        auto decoder = Decoder::create(config.arch);
+        auto instruction = decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        const bool exact = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+        recorder->writes.clear();
+        EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(), !exact);
+        if (exact) {
+          EXPECT_TRUE(recorder->writes.empty());
+        }
+        for (uint32_t reg = 0; reg < 4; ++reg) {
+          for (uint32_t lane = 0; lane < 64; ++lane) {
+            EXPECT_EQ(cu->read_vgpr(dst + reg, lane),
+                      exact ? 0xdeadbeefU : std::bit_cast<uint32_t>(4.0f * float(53 + reg)));
+          }
+        }
+        if (cdna4 && !acc_cd && semantics == ArithmeticSemantics::Loose) {
+          // Broadcast controls must not observe lanes that do not contribute.
+          auto masked_words = rocjitsu::cdna4::build_vop3p_mfma(
+              rocjitsu::cdna4::kVMfmaF3216x16x44bF16Vop3pMfma,
+              {.vdst = 16, .cbsz = 2, .abid = 1, .src0 = 256, .src1 = 260, .src2 = 128, .blgp = 4});
+          auto masked = decoder->decode_window(masked_words);
+          ASSERT_TRUE(masked.succeeded());
+          recorder->reads.clear();
+          ASSERT_TRUE(cu->execute_instruction(masked.value().get(), *wave).succeeded());
+          uint64_t a_lanes = 0, b_lanes = 0;
+          for (auto read : recorder->reads) {
+            if (read.reg == base)
+              a_lanes |= read.lanes;
+            if (read.reg == base + 4)
+              b_lanes |= read.lanes;
+          }
+          EXPECT_NE(a_lanes & (1ULL << 16), 0U);
+          EXPECT_EQ(a_lanes & 1, 0U);
+          EXPECT_NE(b_lanes & (1ULL << 15), 0U);
+          EXPECT_EQ(b_lanes & (1ULL << 63), 0U);
+        }
+      }
+    }
+  }
+}
+
+// Dense gfx1250 decoding preserves inline C, whole-wave writes and the selected
+// semantics.
+TEST(ArithBridgeTest, Gfx1250MatrixUsesLibraryPolicyAndInlineAccumulator) {
+  struct Case {
+    uint16_t opcode;
+    bool bf16;
+    bool packed;
+    bool packed_c;
+    bool integer = false;
+  };
+  for (auto test : {Case{cdna5::kVWmmaI3216x16x64Iu8Vop3p, false, false, false, true},
+                    Case{cdna5::kVWmmaF3216x16x32F16Vop3p, false, false, false},
+                    Case{cdna5::kVWmmaF3216x16x32Bf16Vop3p, true, false, false},
+                    Case{cdna5::kVWmmaF1616x16x32F16Vop3p, false, true, true},
+                    Case{cdna5::kVWmmaBf1616x16x32Bf16Vop3p, true, true, true},
+                    Case{cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p, true, true, false}}) {
+    for (auto semantics : {ArithmeticSemantics::Loose, ArithmeticSemantics::Compatibility,
+                           ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+      ScopedIsaExecutionBackend backend(&cdna5::execution_backend());
+      ComputeUnitCore::Config config{};
+      config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+      config.arithmetic = {semantics};
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 104;
+      config.vgprs_per_wf = 32;
+      config.lds_size_kb = 64;
+      GpuMemory memory("wmma_bridge_memory");
+      L2Cache l2("wmma_bridge_l2");
+      auto cu = ComputeUnitCore::create("wmma_bridge", config, &memory, &l2);
+      auto *wave = cu->dispatch_wf(0, 0, 104, 32, 32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1); // WMMA still writes the entire wave.
+      const auto base = wave->vgpr_alloc().base;
+      for (uint32_t reg = 0; reg < 24; ++reg) {
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          cu->write_vgpr(base + reg, lane,
+                         reg < 16 ? (test.integer ? 0x01010101U
+                                     : test.bf16  ? 0x3f803f80U
+                                                  : 0x3c003c00U)
+                                  : 0xdeadbeefU);
+        }
+      }
+      auto words = cdna5::build_vop3p(
+          test.opcode, {.vdst = 16, .neg_hi = 4, .src0 = 256, .src1 = 264, .src2 = 244, .neg = 4});
+      auto decoder = Decoder::create(config.arch);
+      auto instruction = decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      const bool exact =
+          !test.integer && semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+      EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(), !exact);
+      float value =
+          test.packed_c && semantics == ArithmeticSemantics::Compatibility ? 34.0f : 30.0f;
+      uint32_t expected = test.integer ? 0x40000040U : std::bit_cast<uint32_t>(value);
+      if (test.packed) {
+        uint32_t half = test.bf16 ? util::f32_to_bf16(value) : util::f32_to_f16(value);
+        expected = half | (half << 16);
+      }
+      for (uint32_t reg = 0; reg < 8; ++reg) {
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          EXPECT_EQ(cu->read_vgpr(base + 16 + reg, lane),
+                    exact || (test.packed && reg >= 4) ? 0xdeadbeefU : expected);
+        }
+      }
+      if (semantics == ArithmeticSemantics::Loose) {
+        // Inline -1 has the sentinel's bits but is still C, never the old
+        // destination.
+        for (uint32_t reg = 0; reg < 16; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0);
+        for (uint32_t reg = 24; reg < 32; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0xffffffffU);
+        uint32_t inline_result = 0;
+        for (uint16_t selector : {193, 280}) {
+          for (uint32_t reg = 16; reg < 24; ++reg)
+            for (uint32_t lane = 0; lane < 32; ++lane)
+              cu->write_vgpr(base + reg, lane, 0x40004000U);
+          auto code = cdna5::build_vop3p(test.opcode,
+                                         {.vdst = 16, .src0 = 256, .src1 = 264, .src2 = selector});
+          auto decoded = decoder->decode_window(code);
+          ASSERT_TRUE(decoded.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+          uint32_t actual = cu->read_vgpr(base + 16, 0);
+          EXPECT_NE(actual, 0x40004000U);
+          if (selector == 193)
+            inline_result = actual;
+          else
+            EXPECT_EQ(actual, inline_result);
+        }
+        if (test.packed && !test.bf16) {
+          // CDNA5 §7.12's WMMA-specific saturation rule, despite §7.7's general
+          // wording.
+          for (uint32_t reg = 0; reg < 16; ++reg)
+            for (uint32_t lane = 0; lane < 32; ++lane)
+              cu->write_vgpr(base + reg, lane,
+                             0x5c005c00U); // 256 in both halves.
+          for (bool saturate : {false, true}) {
+            wave->set_mode_raw(saturate ? Wavefront::FP16_OVFL_BIT : 0);
+            auto code = cdna5::build_vop3p(test.opcode,
+                                           {.vdst = 16, .src0 = 256, .src1 = 264, .src2 = 128});
+            auto decoded = decoder->decode_window(code);
+            ASSERT_TRUE(decoded.succeeded());
+            ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+            EXPECT_EQ(cu->read_vgpr(base + 16, 0), saturate ? 0x7bff7bffU : 0x7c007c00U);
+          }
+        }
+      }
+      if (test.bf16 && test.packed && semantics == ArithmeticSemantics::Loose) {
+        // CDNA5 §7.12: finite BF16 overflow saturates when FP16_OVFL is set.
+        for (uint32_t reg = 0; reg < 24; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0);
+        cu->write_vgpr(base, 0, 0x7b00U);     // 2^119.
+        cu->write_vgpr(base + 8, 0, 0x3f80U); // 1.
+        cu->write_vgpr(base + 24, 0, test.packed_c ? 0x7f7fU : 0x7f7f0000U);
+        for (bool saturate : {false, true}) {
+          wave->set_mode_raw(saturate ? Wavefront::FP16_OVFL_BIT : 0);
+          auto code =
+              cdna5::build_vop3p(test.opcode, {.vdst = 16, .src0 = 256, .src1 = 264, .src2 = 280});
+          auto decoded = decoder->decode_window(code);
+          ASSERT_TRUE(decoded.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+          EXPECT_EQ(cu->read_vgpr(base + 16, 0) & 0xffffU, saturate ? 0x7f7fU : 0x7f80U);
+        }
+        wave->set_mode_raw(0);
+      }
+      if (test.packed_c && semantics == ArithmeticSemantics::Loose) {
+        // Integer selectors are raw half encodings; float selectors are
+        // narrowed to C's element type before matrix arithmetic (CDNA5
+        // section 7.7.2).
+        for (uint32_t reg = 0; reg < 16; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0);
+        for (uint16_t selector : {129, 192, 248}) {
+          auto inline_words = cdna5::build_vop3p(
+              test.opcode, {.vdst = 16, .src0 = 256, .src1 = 264, .src2 = selector});
+          auto inline_instruction = decoder->decode_window(inline_words);
+          ASSERT_TRUE(inline_instruction.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(inline_instruction.value().get(), *wave).succeeded());
+          const uint32_t half = selector == 248 ? (test.bf16 ? 0x3e22U : 0x3118U) : selector - 128;
+          EXPECT_EQ(cu->read_vgpr(base + 16, 0), half | (half << 16));
+        }
+      }
+    }
+  }
+}
+
+// The decoded CDNA bridge forwards all ABID bits and accumulator-bank
+// selection.
+TEST(ArithBridgeTest, CdnaMatrixUsesLibraryPolicyAndAccumulatorBank) {
+  for (bool cdna4 : {false, true}) {
+    for (auto semantics : {ArithmeticSemantics::Loose, ArithmeticSemantics::Compatibility,
+                           ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+      for (uint8_t acc_cd : {uint8_t{0}, uint8_t{1}}) {
+        ScopedIsaExecutionBackend backend(cdna4 ? &rocjitsu::cdna4::execution_backend()
+                                                : &rocjitsu::cdna3::execution_backend());
+        ComputeUnitCore::Config config{};
+        config.arch = cdna4 ? ROCJITSU_CODE_ARCH_CDNA4 : ROCJITSU_CODE_ARCH_CDNA3;
+        config.arithmetic = {semantics};
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 104;
+        config.vgprs_per_wf = 512;
+        config.lds_size_kb = 64;
+        GpuMemory memory("mfma_bridge_memory");
+        L2Cache l2("mfma_bridge_l2");
+        auto cu = ComputeUnitCore::create("mfma_bridge", config, &memory, &l2);
+        auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+        auto observer = std::make_unique<WriteRecorder>();
+        auto *recorder = observer.get();
+        group->add(std::move(observer));
+        cu->set_plugin_group(group);
+        auto *wave = cu->dispatch_wf(0, 0, 104, 512, 64);
+        ASSERT_NE(wave, nullptr);
+        wave->set_exec(1);
+        const auto base = wave->vgpr_alloc().base;
+        const auto dst = base + 16 + (acc_cd ? 256 : 0);
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          uint32_t half = util::f32_to_f16(float(lane + 1));
+          for (uint32_t reg = 0; reg < 2; ++reg) {
+            cu->write_vgpr(base + reg, lane, half | (half << 16));
+            cu->write_vgpr(base + 4 + reg, lane, 0x3c003c00);
+          }
+          for (uint32_t reg = 0; reg < 4; ++reg) {
+            cu->write_vgpr(dst + reg, lane, 0xdeadbeef);
+          }
+        }
+        const auto words =
+            cdna4
+                ? rocjitsu::cdna4::build_vop3p_mfma(rocjitsu::cdna4::kVMfmaF324x4x416bF16Vop3pMfma,
+                                                    {.vdst = 16,
+                                                     .cbsz = 4,
+                                                     .abid = 13,
+                                                     .acc_cd = acc_cd,
+                                                     .src0 = 256,
+                                                     .src1 = 260,
+                                                     .src2 = 128})
+                : rocjitsu::cdna3::build_vop3p_mfma(rocjitsu::cdna3::kVMfmaF324x4x416bF16Vop3pMfma,
+                                                    {.vdst = 16,
+                                                     .cbsz = 4,
+                                                     .abid = 13,
+                                                     .acc_cd = acc_cd,
+                                                     .src0 = 256,
+                                                     .src1 = 260,
+                                                     .src2 = 128});
+        auto decoder = Decoder::create(config.arch);
+        auto instruction = decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        const bool exact = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+        recorder->writes.clear();
+        EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(), !exact);
+        if (exact) {
+          EXPECT_TRUE(recorder->writes.empty());
+        }
+        for (uint32_t reg = 0; reg < 4; ++reg) {
+          for (uint32_t lane = 0; lane < 64; ++lane) {
+            EXPECT_EQ(cu->read_vgpr(dst + reg, lane),
+                      exact ? 0xdeadbeefU : std::bit_cast<uint32_t>(4.0f * float(53 + reg)));
+          }
+        }
+        if (cdna4 && !acc_cd && semantics == ArithmeticSemantics::Loose) {
+          // Broadcast controls must not observe lanes that do not contribute.
+          for (auto opcode : {rocjitsu::cdna4::kVMfmaF3216x16x44bF16Vop3pMfma,
+                              rocjitsu::cdna4::kVMfmaI3216x16x44bI8Vop3pMfma}) {
+            auto masked_words = rocjitsu::cdna4::build_vop3p_mfma(opcode, {.vdst = 16,
+                                                                           .cbsz = 2,
+                                                                           .abid = 1,
+                                                                           .src0 = 256,
+                                                                           .src1 = 260,
+                                                                           .src2 = 128,
+                                                                           .blgp = 4});
+            auto masked = decoder->decode_window(masked_words);
+            ASSERT_TRUE(masked.succeeded());
+            recorder->reads.clear();
+            ASSERT_TRUE(cu->execute_instruction(masked.value().get(), *wave).succeeded());
+            uint64_t a_lanes = 0, b_lanes = 0;
+            for (auto read : recorder->reads) {
+              if (read.reg == base)
+                a_lanes |= read.lanes;
+              if (read.reg == base + 4)
+                b_lanes |= read.lanes;
+            }
+            EXPECT_NE(a_lanes & (1ULL << 16), 0U);
+            EXPECT_EQ(a_lanes & 1, 0U);
+            EXPECT_NE(b_lanes & (1ULL << 15), 0U);
+            EXPECT_EQ(b_lanes & (1ULL << 63), 0U);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaF64MfmaInlineAccumulatorPrecision) {
+  for (bool cdna4 : {false, true}) {
+    for (auto semantics :
+         {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+          ArithmeticSemantics::Compatibility, ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+      for (uint8_t acc_cd : {uint8_t{0}, uint8_t{1}}) {
+        ScopedIsaExecutionBackend backend(cdna4 ? &rocjitsu::cdna4::execution_backend()
+                                                : &rocjitsu::cdna3::execution_backend());
+        ComputeUnitCore::Config config{};
+        config.arch = cdna4 ? ROCJITSU_CODE_ARCH_CDNA4 : ROCJITSU_CODE_ARCH_CDNA3;
+        config.arithmetic = {semantics};
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 104;
+        config.vgprs_per_wf = 512;
+        config.lds_size_kb = 64;
+        GpuMemory memory("mfma_bridge_memory");
+        L2Cache l2("mfma_bridge_l2");
+        auto cu = ComputeUnitCore::create("mfma_bridge", config, &memory, &l2);
+        auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+        auto observer = std::make_unique<WriteRecorder>();
+        auto *recorder = observer.get();
+        group->add(std::move(observer));
+        cu->set_plugin_group(group);
+        auto *wave = cu->dispatch_wf(0, 0, 104, 512, 64);
+        ASSERT_NE(wave, nullptr);
+        wave->set_exec(1);
+        const auto base = wave->vgpr_alloc().base;
+        const auto dst = base + 16 + (acc_cd ? 256 : 0);
+        for (uint16_t selector : {244, 248, 288}) {
+          for (uint32_t lane = 0; lane < 64; ++lane) {
+
+            for (uint32_t reg = 0; reg < 2; ++reg) {
+              cu->write_vgpr(base + reg, lane, selector != 244 || reg == 0 ? 0U : 0x3ff00000U);
+              cu->write_vgpr(base + 4 + reg, lane, reg == 0 ? 0U : 0x40000000U);
+            }
+            for (uint32_t reg = 0; reg < 8; ++reg) {
+              cu->write_vgpr(dst + reg, lane, 0xdeadbeef);
+              // The ISA's FP64 encoding of selector 248 (1/(2*pi)).
+              cu->write_vgpr(base + 32 + (acc_cd ? 256 : 0) + reg, lane,
+                             reg % 2 ? 0x3fc45f30U : 0x6dc9c882U);
+            }
+          }
+          const auto words =
+              cdna4
+                  ? rocjitsu::cdna4::build_vop3p_mfma(rocjitsu::cdna4::kVMfmaF6416x16x4F64Vop3pMfma,
+                                                      {.vdst = 16,
+                                                       .cbsz = 0,
+                                                       .abid = 0,
+                                                       .acc_cd = acc_cd,
+                                                       .src0 = 256,
+                                                       .src1 = 260,
+                                                       .src2 = selector,
+                                                       .blgp = uint8_t(selector == 244 ? 7 : 0)})
+                  : rocjitsu::cdna3::build_vop3p_mfma(rocjitsu::cdna3::kVMfmaF6416x16x4F64Vop3pMfma,
+                                                      {.vdst = 16,
+                                                       .cbsz = 0,
+                                                       .abid = 0,
+                                                       .acc_cd = acc_cd,
+                                                       .src0 = 256,
+                                                       .src1 = 260,
+                                                       .src2 = selector,
+                                                       .blgp = uint8_t(selector == 244 ? 7 : 0)});
+          auto decoder = Decoder::create(config.arch);
+          auto instruction = decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          const bool exact = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+          recorder->writes.clear();
+          EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(), !exact);
+          if (exact) {
+            EXPECT_TRUE(recorder->writes.empty());
+          }
+          const uint64_t expected =
+              selector == 244 ? 0x4018000000000000ULL
+              : selector == 248 && semantics == ArithmeticSemantics::Compatibility
+                  ? 0x3fc45f3060000000ULL
+                  : 0x3fc45f306dc9c882ULL;
+          for (uint32_t reg = 0; reg < 8; ++reg) {
+            for (uint32_t lane = 0; lane < 64; ++lane) {
+              EXPECT_EQ(cu->read_vgpr(dst + reg, lane),
+                        exact ? 0xdeadbeefU : uint32_t(expected >> (32 * (reg % 2))));
+            }
+          }
+        }
+      }
+    }
+  }
+}
+TEST(ArithBridgeTest, Fp32MatrixFusedCancellation) {
+  for (bool scalar : {false, true}) {
+    struct RestoreScalar {
+      bool previous = util::force_scalar();
+      ~RestoreScalar() { util::set_force_scalar_for_testing(previous); }
+    } restore;
+    util::set_force_scalar_for_testing(scalar);
+    for (bool gfx1250 : {false, true}) {
+      auto arch = gfx1250 ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA4;
+      ScopedIsaExecutionBackend backend(gfx1250 ? &rocjitsu::cdna5::execution_backend()
+                                                : &rocjitsu::cdna4::execution_backend());
+      ComputeUnitCore::Config config{};
+      config.arch = arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 104;
+      config.vgprs_per_wf = 256;
+      config.lds_size_kb = 64;
+      GpuMemory memory("fp32_cancel");
+      L2Cache l2("fp32_cancel_l2");
+      auto cu = ComputeUnitCore::create("fp32_cancel", config, &memory, &l2);
+      auto *wave = cu->dispatch_wf(0, 0, 104, 256, gfx1250 ? 32 : 64);
+      ASSERT_NE(wave, nullptr);
+      auto decoder = Decoder::create(arch);
+      const auto base = wave->vgpr_alloc().base;
+      for (int reg = 0; reg < 16; ++reg)
+        for (int lane = 0; lane < (gfx1250 ? 32 : 64); ++lane)
+          cu->write_vgpr(base + reg, lane, reg >= 8 ? 0xff7fffffU : 0U);
+      cu->write_vgpr(base, 0, 0x7f7fffffU);
+      cu->write_vgpr(base + 4, 0, 0x40000000U);
+      auto words =
+          gfx1250 ? rocjitsu::cdna5::build_vop3p(rocjitsu::cdna5::kVWmmaF3216x16x4F32Vop3p,
+                                                 {.vdst = 8, .src0 = 256, .src1 = 260, .src2 = 264})
+                  : rocjitsu::cdna4::build_vop3p_mfma(
+                        rocjitsu::cdna4::kVMfmaF324x4x116bF32Vop3pMfma,
+                        {.vdst = 8, .acc_cd = 0, .src0 = 256, .src1 = 260, .src2 = 264});
+      auto instruction = decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(cu->execute_instruction(instruction.value().get(), *wave).succeeded());
+      EXPECT_EQ(cu->read_vgpr(base + 8, 0), 0x7f7fffffU) << scalar << ":" << gfx1250;
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250FloatingWmmaUsesLibraryPolicyAndInlineAccumulator) {
+  struct Case {
+    uint16_t opcode;
+    bool bf16;
+    bool packed;
+    bool packed_c;
+    int k = 32;
+    bool fp8 = false;
+    bool fp32 = false;
+  };
+  for (auto test : {Case{cdna5::kVWmmaF3216x16x4F32Vop3p, false, false, false, 4, false, true},
+                    Case{cdna5::kVWmmaF3216x16x32F16Vop3p, false, false, false},
+                    Case{cdna5::kVWmmaF3216x16x32Bf16Vop3p, true, false, false},
+                    Case{cdna5::kVWmmaF1616x16x32F16Vop3p, false, true, true},
+                    Case{cdna5::kVWmmaBf1616x16x32Bf16Vop3p, true, true, true},
+                    Case{cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p, true, true, false},
+                    Case{cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p, false, false, false, 64, true},
+                    Case{cdna5::kVWmmaF1616x16x128Fp8Fp8Vop3p, false, true, true, 128, true}}) {
+    for (auto semantics : {ArithmeticSemantics::Loose, ArithmeticSemantics::Compatibility,
+                           ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+      ScopedIsaExecutionBackend backend(&cdna5::execution_backend());
+      ComputeUnitCore::Config config{};
+      config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+      config.arithmetic = {semantics};
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 104;
+      config.vgprs_per_wf = 64;
+      config.lds_size_kb = 64;
+      GpuMemory memory("wmma_bridge_memory");
+      L2Cache l2("wmma_bridge_l2");
+      auto cu = ComputeUnitCore::create("wmma_bridge", config, &memory, &l2);
+      auto *wave = cu->dispatch_wf(0, 0, 104, 64, 32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1); // WMMA still writes the entire wave.
+      const auto base = wave->vgpr_alloc().base;
+      uint32_t factors = test.fp32 ? 2 : test.fp8 ? test.k / 8 : 8;
+      for (uint32_t reg = 0; reg < 2 * factors + 8; ++reg) {
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          cu->write_vgpr(base + reg, lane,
+                         reg < 2 * factors ? (test.fp32   ? 0x3f800000U
+                                              : test.fp8  ? 0x38383838U
+                                              : test.bf16 ? 0x3f803f80U
+                                                          : 0x3c003c00U)
+                                           : 0xdeadbeefU);
+        }
+      }
+      auto words = cdna5::build_vop3p(test.opcode, {.vdst = uint8_t(2 * factors),
+                                                    .neg_hi = 4,
+                                                    .src0 = 256,
+                                                    .src1 = uint16_t(256 + factors),
+                                                    .src2 = 244,
+                                                    .neg = 4});
+      auto decoder = Decoder::create(config.arch);
+      auto instruction = decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      const bool exact = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+      EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(), !exact);
+      float value =
+          test.k +
+          (test.packed_c && semantics == ArithmeticSemantics::Compatibility ? 2.0f : -2.0f);
+      uint32_t expected = std::bit_cast<uint32_t>(value);
+      if (test.packed) {
+        uint32_t half = test.bf16 ? util::f32_to_bf16(value) : util::f32_to_f16(value);
+        expected = half | (half << 16);
+      }
+      for (uint32_t reg = 0; reg < 8; ++reg) {
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          EXPECT_EQ(cu->read_vgpr(base + 2 * factors + reg, lane),
+                    exact || (test.packed && reg >= 4) ? 0xdeadbeefU : expected);
+        }
+      }
+      if (semantics == ArithmeticSemantics::Loose) {
+        // Inline -1 has the sentinel's bits but is still C, never the old
+        // destination.
+        for (uint32_t reg = 0; reg < 16; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0);
+        for (uint32_t reg = 24; reg < 32; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0xffffffffU);
+        uint32_t inline_result = 0;
+        for (uint16_t selector : {193, 280}) {
+          for (uint32_t reg = 16; reg < 24; ++reg)
+            for (uint32_t lane = 0; lane < 32; ++lane)
+              cu->write_vgpr(base + reg, lane, 0x40004000U);
+          auto code = cdna5::build_vop3p(test.opcode,
+                                         {.vdst = 16, .src0 = 256, .src1 = 264, .src2 = selector});
+          auto decoded = decoder->decode_window(code);
+          ASSERT_TRUE(decoded.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+          uint32_t actual = cu->read_vgpr(base + 16, 0);
+          EXPECT_NE(actual, 0x40004000U);
+          if (selector == 193)
+            inline_result = actual;
+          else
+            EXPECT_EQ(actual, inline_result);
+        }
+        if (test.packed && !test.bf16 && !test.fp8) {
+          // CDNA5 §7.12's WMMA-specific saturation rule, despite §7.7's general
+          // wording.
+          for (uint32_t reg = 0; reg < 16; ++reg)
+            for (uint32_t lane = 0; lane < 32; ++lane)
+              cu->write_vgpr(base + reg, lane,
+                             0x5c005c00U); // 256 in both halves.
+          for (bool saturate : {false, true}) {
+            wave->set_mode_raw(saturate ? Wavefront::FP16_OVFL_BIT : 0);
+            auto code = cdna5::build_vop3p(test.opcode,
+                                           {.vdst = 16, .src0 = 256, .src1 = 264, .src2 = 128});
+            auto decoded = decoder->decode_window(code);
+            ASSERT_TRUE(decoded.succeeded());
+            ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+            EXPECT_EQ(cu->read_vgpr(base + 16, 0), saturate ? 0x7bff7bffU : 0x7c007c00U);
+          }
+        }
+      }
+      if (test.bf16 && test.packed && semantics == ArithmeticSemantics::Loose) {
+        // CDNA5 §7.12: finite BF16 overflow saturates when FP16_OVFL is set.
+        for (uint32_t reg = 0; reg < 24; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0);
+        cu->write_vgpr(base, 0, 0x7b00U);     // 2^119.
+        cu->write_vgpr(base + 8, 0, 0x3f80U); // 1.
+        cu->write_vgpr(base + 24, 0, test.packed_c ? 0x7f7fU : 0x7f7f0000U);
+        for (bool saturate : {false, true}) {
+          wave->set_mode_raw(saturate ? Wavefront::FP16_OVFL_BIT : 0);
+          auto code =
+              cdna5::build_vop3p(test.opcode, {.vdst = 16, .src0 = 256, .src1 = 264, .src2 = 280});
+          auto decoded = decoder->decode_window(code);
+          ASSERT_TRUE(decoded.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+          EXPECT_EQ(cu->read_vgpr(base + 16, 0) & 0xffffU, saturate ? 0x7f7fU : 0x7f80U);
+        }
+        wave->set_mode_raw(0);
+      }
+      if (test.packed_c && semantics == ArithmeticSemantics::Loose) {
+        // Integer selectors are raw half encodings; float selectors are
+        // narrowed to C's element type before matrix arithmetic (CDNA5
+        // section 7.7.2).
+        for (uint32_t reg = 0; reg < 2 * factors; ++reg)
+          for (uint32_t lane = 0; lane < 32; ++lane)
+            cu->write_vgpr(base + reg, lane, 0);
+        for (uint16_t selector : {129, 192, 248}) {
+          auto inline_words = cdna5::build_vop3p(test.opcode, {.vdst = uint8_t(2 * factors),
+                                                               .src0 = 256,
+                                                               .src1 = uint16_t(256 + factors),
+                                                               .src2 = selector});
+          auto inline_instruction = decoder->decode_window(inline_words);
+          ASSERT_TRUE(inline_instruction.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(inline_instruction.value().get(), *wave).succeeded());
+          const uint32_t half = selector == 248 ? (test.bf16 ? 0x3e22U : 0x3118U) : selector - 128;
+          EXPECT_EQ(cu->read_vgpr(base + 2 * factors, 0), half | (half << 16));
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaFloatingMfmaInlineMinusOneIsNotDestination) {
+  for (bool cdna4 : {false, true}) {
+    auto arch = cdna4 ? ROCJITSU_CODE_ARCH_CDNA4 : ROCJITSU_CODE_ARCH_CDNA3;
+    ScopedIsaExecutionBackend backend(cdna4 ? &rocjitsu::cdna4::execution_backend()
+                                            : &rocjitsu::cdna3::execution_backend());
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 104;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    GpuMemory memory("mfma_inline_memory");
+    L2Cache l2("mfma_inline_l2");
+    auto cu = ComputeUnitCore::create("mfma_inline", config, &memory, &l2);
+    auto *wave = cu->dispatch_wf(0, 0, 104, 256, 64);
+    ASSERT_NE(wave, nullptr);
+    auto decoder = Decoder::create(arch);
+    const auto base = wave->vgpr_alloc().base;
+    for (uint32_t reg = 0; reg < 8; ++reg)
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        cu->write_vgpr(base + reg, lane, reg < 4 ? 0 : 0xffffffffU);
+    const uint32_t opcodes[] = {cdna4 ? rocjitsu::cdna4::kVMfmaF3216x16x16F16Vop3pMfma
+                                      : rocjitsu::cdna3::kVMfmaF3216x16x16F16Vop3pMfma,
+                                cdna4 ? rocjitsu::cdna4::kVMfmaF3216x16x4F32Vop3pMfma
+                                      : rocjitsu::cdna3::kVMfmaF3216x16x4F32Vop3pMfma,
+                                cdna4 ? rocjitsu::cdna4::kVMfmaF3216x16x32Fp8Fp8Vop3pMfma
+                                      : rocjitsu::cdna3::kVMfmaF3216x16x32Fp8Fp8Vop3pMfma,
+                                cdna4 ? rocjitsu::cdna4::kVMfmaF3216x16x32Bf8Bf8Vop3pMfma
+                                      : rocjitsu::cdna3::kVMfmaF3216x16x32Bf8Bf8Vop3pMfma,
+                                cdna4 ? rocjitsu::cdna4::kVMfmaF3216x16x32Fp8Bf8Vop3pMfma
+                                      : rocjitsu::cdna3::kVMfmaF3216x16x32Fp8Bf8Vop3pMfma,
+                                cdna4 ? rocjitsu::cdna4::kVMfmaF3216x16x32Bf8Fp8Vop3pMfma
+                                      : rocjitsu::cdna3::kVMfmaF3216x16x32Bf8Fp8Vop3pMfma,
+                                cdna4 ? rocjitsu::cdna4::kVMfmaF3216x16x4F32Vop3pMfma
+                                      : rocjitsu::cdna3::kVMfmaF3216x16x8Xf32Vop3pMfma};
+    for (auto opcode : opcodes) {
+      SCOPED_TRACE(opcode);
+      uint32_t expected = 0;
+      for (uint16_t selector : {260, 193}) {
+        for (uint32_t reg = 8; reg < 12; ++reg)
+          for (uint32_t lane = 0; lane < 64; ++lane)
+            cu->write_vgpr(base + reg, lane, 0x40004000U);
+        auto words =
+            cdna4
+                ? rocjitsu::cdna4::build_vop3p_mfma(
+                      opcode, {.vdst = 8, .acc_cd = 0, .src0 = 256, .src1 = 258, .src2 = selector})
+                : rocjitsu::cdna3::build_vop3p_mfma(
+                      opcode, {.vdst = 8, .acc_cd = 0, .src0 = 256, .src1 = 258, .src2 = selector});
+        auto instruction = decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_TRUE(cu->execute_instruction(instruction.value().get(), *wave).succeeded());
+        uint32_t actual = cu->read_vgpr(base + 8, 0);
+        EXPECT_NE(actual, 0x40004000U);
+        if (selector == 260)
+          expected = actual;
+        else
+          EXPECT_EQ(actual, expected);
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaFloatingMfmaUsesLibraryPolicyAndAccumulatorBank) {
+  struct Case {
+    bool cdna4, fp8;
+    bool fp32 = false;
+  };
+  for (auto test : {Case{false, false}, Case{true, false}, Case{false, true}, Case{true, true},
+                    Case{false, false, true}, Case{true, false, true}}) {
+    bool cdna4 = test.cdna4;
+    for (auto semantics : {ArithmeticSemantics::Loose, ArithmeticSemantics::Compatibility,
+                           ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+      for (uint8_t acc_cd : {uint8_t{0}, uint8_t{1}}) {
+        ScopedIsaExecutionBackend backend(cdna4 ? &rocjitsu::cdna4::execution_backend()
+                                                : &rocjitsu::cdna3::execution_backend());
+        ComputeUnitCore::Config config{};
+        config.arch = cdna4 ? ROCJITSU_CODE_ARCH_CDNA4 : ROCJITSU_CODE_ARCH_CDNA3;
+        config.arithmetic = {semantics};
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 104;
+        config.vgprs_per_wf = 512;
+        config.lds_size_kb = 64;
+        GpuMemory memory("mfma_bridge_memory");
+        L2Cache l2("mfma_bridge_l2");
+        auto cu = ComputeUnitCore::create("mfma_bridge", config, &memory, &l2);
+        auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+        auto observer = std::make_unique<WriteRecorder>();
+        auto *recorder = observer.get();
+        group->add(std::move(observer));
+        cu->set_plugin_group(group);
+        auto *wave = cu->dispatch_wf(0, 0, 104, 512, 64);
+        ASSERT_NE(wave, nullptr);
+        wave->set_exec(1);
+        const auto base = wave->vgpr_alloc().base;
+        const auto dst = base + 16 + (acc_cd ? 256 : 0);
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          uint32_t half = util::f32_to_f16(float(lane + 1));
+          for (uint32_t reg = 0; reg < 2; ++reg) {
+            cu->write_vgpr(base + reg, lane,
+                           test.fp32  ? std::bit_cast<uint32_t>(float(lane + 1))
+                           : test.fp8 ? 0x40404040U
+                                      : half | (half << 16));
+            cu->write_vgpr(base + 4 + reg, lane,
+                           test.fp32  ? 0x3f800000U
+                           : test.fp8 ? 0x40404040U
+                                      : 0x3c003c00U);
+          }
+          for (uint32_t reg = 0; reg < 4; ++reg) {
+            cu->write_vgpr(dst + reg, lane, 0xdeadbeef);
+          }
+        }
+        const auto words = cdna4
+                               ? rocjitsu::cdna4::build_vop3p_mfma(
+                                     test.fp32  ? rocjitsu::cdna4::kVMfmaF324x4x116bF32Vop3pMfma
+                                     : test.fp8 ? rocjitsu::cdna4::kVMfmaF3216x16x32Fp8Fp8Vop3pMfma
+                                                : rocjitsu::cdna4::kVMfmaF324x4x416bF16Vop3pMfma,
+                                     {.vdst = 16,
+                                      .cbsz = uint8_t(test.fp8 ? 0 : 4),
+                                      .abid = uint8_t(test.fp8 ? 0 : 13),
+                                      .acc_cd = acc_cd,
+                                      .src0 = 256,
+                                      .src1 = 260,
+                                      .src2 = 128})
+                               : rocjitsu::cdna3::build_vop3p_mfma(
+                                     test.fp32  ? rocjitsu::cdna3::kVMfmaF324x4x116bF32Vop3pMfma
+                                     : test.fp8 ? rocjitsu::cdna3::kVMfmaF3216x16x32Fp8Fp8Vop3pMfma
+                                                : rocjitsu::cdna3::kVMfmaF324x4x416bF16Vop3pMfma,
+                                     {.vdst = 16,
+                                      .cbsz = uint8_t(test.fp8 ? 0 : 4),
+                                      .abid = uint8_t(test.fp8 ? 0 : 13),
+                                      .acc_cd = acc_cd,
+                                      .src0 = 256,
+                                      .src1 = 260,
+                                      .src2 = 128});
+        auto decoder = Decoder::create(config.arch);
+        auto instruction = decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        const bool exact = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+        recorder->writes.clear();
+        EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).succeeded(), !exact);
+        if (exact) {
+          EXPECT_TRUE(recorder->writes.empty());
+        }
+        for (uint32_t reg = 0; reg < 4; ++reg) {
+          for (uint32_t lane = 0; lane < 64; ++lane) {
+            EXPECT_EQ(cu->read_vgpr(dst + reg, lane),
+                      exact ? 0xdeadbeefU
+                            : std::bit_cast<uint32_t>(test.fp8 ? (cdna4 ? 128.0f : 32.0f)
+                                                               : (test.fp32 ? 1.0f : 4.0f) *
+                                                                     float(53 + reg)));
+          }
+        }
+        if (cdna4 && !acc_cd && semantics == ArithmeticSemantics::Loose) {
+          // Broadcast controls must not observe lanes that do not contribute.
+          auto masked_words = rocjitsu::cdna4::build_vop3p_mfma(
+              rocjitsu::cdna4::kVMfmaF3216x16x44bF16Vop3pMfma,
+              {.vdst = 16, .cbsz = 2, .abid = 1, .src0 = 256, .src1 = 260, .src2 = 128, .blgp = 4});
+          auto masked = decoder->decode_window(masked_words);
+          ASSERT_TRUE(masked.succeeded());
+          recorder->reads.clear();
+          ASSERT_TRUE(cu->execute_instruction(masked.value().get(), *wave).succeeded());
+          uint64_t a_lanes = 0, b_lanes = 0;
+          for (auto read : recorder->reads) {
+            if (read.reg == base)
+              a_lanes |= read.lanes;
+            if (read.reg == base + 4)
+              b_lanes |= read.lanes;
+          }
+          EXPECT_NE(a_lanes & (1ULL << 16), 0U);
+          EXPECT_EQ(a_lanes & 1, 0U);
+          EXPECT_NE(b_lanes & (1ULL << 15), 0U);
+          EXPECT_EQ(b_lanes & (1ULL << 63), 0U);
+        }
+      }
+    }
+  }
+}
+
+// Compact SMFMAC selects a metadata set; CBSZ low bits select metadata mode.
+TEST(ArithBridgeTest, SparseFloatIndexSelection) {
+  for (bool cdna4 : {false, true}) {
+    const auto arch = cdna4 ? ROCJITSU_CODE_ARCH_CDNA4 : ROCJITSU_CODE_ARCH_CDNA3;
+    ScopedIsaExecutionBackend backend(cdna4 ? &rocjitsu::cdna4::execution_backend()
+                                            : &rocjitsu::cdna3::execution_backend());
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 104;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    GpuMemory memory("sparse_index_memory");
+    L2Cache l2("sparse_index_l2");
+    auto cu = ComputeUnitCore::create("sparse_index", config, &memory, &l2);
+    auto *wave = cu->dispatch_wf(0, 0, 104, 256, 64);
+    ASSERT_NE(wave, nullptr);
+    const auto base = wave->vgpr_alloc().base;
+    auto decoder = Decoder::create(arch);
+    for (int kind = 0; kind < (cdna4 ? 11 : 3); ++kind) {
+      const bool wide = kind >= 3;
+      const bool large = kind == 5 || kind == 6 || kind >= 9;
+      const uint32_t output_regs = large ? 16 : 4;
+      const uint32_t value = (kind == 2 || kind >= 7)                ? 0x403c3834U
+                             : (kind == 1 || kind == 4 || kind == 6) ? 0x40003f80U
+                                                                     : 0x40003c00U;
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        for (uint32_t reg = 0; reg < 16; ++reg)
+          cu->write_vgpr(base + reg, lane, value);
+      for (uint8_t cbsz : {0, 1, 4})
+        for (uint8_t abid : {0, 1, 2, 3, 5}) {
+          uint32_t expected[16][64];
+          for (bool selected : {false, true}) {
+            const int shift = (cbsz & 3) || kind >= 7 ? 0
+                              : (kind == 2 || wide)   ? 16 * (abid & 1)
+                                                      : 8 * (abid & 3);
+            for (uint32_t lane = 0; lane < 64; ++lane) {
+              cu->write_vgpr(base + 64, lane, selected ? 0xdd449988U : 0xdd449988U >> shift);
+              for (uint32_t reg = 32; reg < 32 + output_regs; ++reg)
+                cu->write_vgpr(base + reg, lane, 0);
+            }
+            const auto words =
+                cdna4 ? rocjitsu::cdna4::build_vop3p_mfma(
+                            kind == 7    ? rocjitsu::cdna4::kVSmfmacF3216x16x128Fp8Fp8Vop3pMfma
+                            : kind == 8  ? rocjitsu::cdna4::kVSmfmacF3216x16x128Bf8Bf8Vop3pMfma
+                            : kind == 9  ? rocjitsu::cdna4::kVSmfmacF3232x32x64Fp8Fp8Vop3pMfma
+                            : kind == 10 ? rocjitsu::cdna4::kVSmfmacF3232x32x64Bf8Bf8Vop3pMfma
+                            : kind == 3  ? rocjitsu::cdna4::kVSmfmacF3216x16x64F16Vop3pMfma
+                            : kind == 4  ? rocjitsu::cdna4::kVSmfmacF3216x16x64Bf16Vop3pMfma
+                            : kind == 5  ? rocjitsu::cdna4::kVSmfmacF3232x32x32F16Vop3pMfma
+                            : kind == 6  ? rocjitsu::cdna4::kVSmfmacF3232x32x32Bf16Vop3pMfma
+                            : kind == 0  ? rocjitsu::cdna4::kVSmfmacF3216x16x32F16Vop3pMfma
+                            : kind == 1  ? rocjitsu::cdna4::kVSmfmacF3216x16x32Bf16Vop3pMfma
+                                         : rocjitsu::cdna4::kVSmfmacF3216x16x64Fp8Fp8Vop3pMfma,
+                            {.vdst = 32,
+                             .cbsz = uint8_t(selected ? cbsz : 0),
+                             .abid = uint8_t(selected ? abid : 0),
+                             .acc_cd = 0,
+                             .src0 = 256,
+                             .src1 = 264,
+                             .src2 = 320})
+                      : rocjitsu::cdna3::build_vop3p_mfma(
+                            kind == 0   ? rocjitsu::cdna3::kVSmfmacF3216x16x32F16Vop3pMfma
+                            : kind == 1 ? rocjitsu::cdna3::kVSmfmacF3216x16x32Bf16Vop3pMfma
+                                        : rocjitsu::cdna3::kVSmfmacF3216x16x64Fp8Fp8Vop3pMfma,
+                            {.vdst = 32,
+                             .cbsz = uint8_t(selected ? cbsz : 0),
+                             .abid = uint8_t(selected ? abid : 0),
+                             .acc_cd = 0,
+                             .src0 = 256,
+                             .src1 = 264,
+                             .src2 = 320});
+            auto inst = decoder->decode_window(words);
+            ASSERT_TRUE(inst.succeeded());
+            ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *wave).succeeded());
+            for (uint32_t reg = 0; reg < output_regs; ++reg)
+              for (uint32_t lane = 0; lane < 64; ++lane) {
+                const auto value = cu->read_vgpr(base + 32 + reg, lane);
+                if (selected)
+                  EXPECT_EQ(value, expected[reg][lane]);
+                else
+                  expected[reg][lane] = value;
+              }
+          }
+        }
+    }
+  }
+}
+
+// gfx950 forwards overflow saturation to both integer and floating SMFMAC.
+TEST(ArithBridgeTest, SparseCdnaOverflowModeSaturatesResults) {
+  ScopedIsaExecutionBackend backend(&rocjitsu::cdna4::execution_backend());
+  for (bool integer : {false, true}) {
+    ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    config.arithmetic.semantics =
+        integer ? ArithmeticSemantics::BitExactEmpirical : ArithmeticSemantics::Loose;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 104;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    GpuMemory memory("sparse_overflow_memory");
+    L2Cache l2("sparse_overflow_l2");
+    auto cu = ComputeUnitCore::create("sparse_overflow", config, &memory, &l2);
+    auto *wave = cu->dispatch_wf(0, 0, 104, 256, 64);
+    ASSERT_NE(wave, nullptr);
+    auto decoder = Decoder::create(config.arch);
+    const auto base = wave->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      for (uint32_t reg = 0; reg < 24; ++reg)
+        cu->write_vgpr(base + reg, lane,
+                       integer   ? 0x01010101U
+                       : reg < 8 ? 0x7d007d00U
+                                 : 0x3f803f80U);
+      cu->write_vgpr(base + 32, lane, 0x44444444U);
+    }
+    auto words = cdna4::build_vop3p_mfma(
+        integer ? cdna4::kVSmfmacI3216x16x64I8Vop3pMfma : cdna4::kVSmfmacF3216x16x64Bf16Vop3pMfma,
+        {.vdst = 24, .acc_cd = 0, .src0 = 256, .src1 = 264, .src2 = 288});
+    auto instruction = decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    for (bool saturate : {false, true}) {
+      wave->clear_instruction_execution_error();
+      wave->set_mode_raw(saturate ? Wavefront::FP16_OVFL_BIT : 0);
+      const uint32_t initial = integer ? 0x7fffffffU : 0U;
+      for (uint32_t reg = 24; reg < 28; ++reg)
+        for (uint32_t lane = 0; lane < 64; ++lane)
+          cu->write_vgpr(base + reg, lane, initial);
+      ASSERT_TRUE(cu->execute_instruction(instruction.value().get(), *wave).succeeded());
+      for (uint32_t reg = 24; reg < 28; ++reg)
+        for (uint32_t lane = 0; lane < 64; ++lane)
+          EXPECT_EQ(cu->read_vgpr(base + reg, lane), integer
+                                                         ? (saturate ? 0x7fffffffU : 0x8000001fU)
+                                                         : (saturate ? 0x7f7fffffU : 0x7f800000U));
+    }
+  }
+}
+
+// Reject unsupported CDNA5 half-precision source modifiers without writing outputs.
+TEST(ArithBridgeTest, SparseRejectsUnsupportedControls) {
+  ScopedIsaExecutionBackend backend(&rocjitsu::cdna5::execution_backend());
+  ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 104;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  GpuMemory memory("sparse_neg_memory");
+  L2Cache l2("sparse_neg_l2");
+  auto cu = ComputeUnitCore::create("sparse_neg", config, &memory, &l2);
+  auto *wave = cu->dispatch_wf(0, 0, 104, 256, 32);
+  ASSERT_NE(wave, nullptr);
+  auto decoder = Decoder::create(config.arch);
+  const auto base = wave->vgpr_alloc().base;
+  for (uint32_t reg = 24; reg < 32; ++reg)
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      cu->write_vgpr(base + reg, lane, 0xdeadbeefU);
+  for (uint16_t opcode : {cdna5::kVSwmmacF3216x16x64F16Vop3p, cdna5::kVSwmmacF3216x16x64Bf16Vop3p,
+                          cdna5::kVSwmmacF1616x16x64F16Vop3p, cdna5::kVSwmmacBf1616x16x64Bf16Vop3p,
+                          cdna5::kVSwmmacBf16f3216x16x64Bf16Vop3p}) {
+    for (int modifier : {1, 2, 4, 8}) {
+      wave->clear_instruction_execution_error();
+      auto words = cdna5::build_vop3p(opcode, {.vdst = 24,
+                                               .neg_hi = uint8_t((modifier >> 2) & 3),
+                                               .src0 = 256,
+                                               .src1 = 264,
+                                               .src2 = 288,
+                                               .neg = uint8_t(modifier & 3)});
+      auto instruction = decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      EXPECT_FALSE(cu->execute_instruction(instruction.value().get(), *wave).succeeded());
+      EXPECT_EQ(wave->instruction_execution_error(),
+                InstructionExecutionError::UnsupportedOperandValue);
+      for (uint32_t reg = 24; reg < 32; ++reg)
+        for (uint32_t lane = 0; lane < 32; ++lane)
+          EXPECT_EQ(cu->read_vgpr(base + reg, lane), 0xdeadbeefU);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaPackedFp32SelectorsAndAliases) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      ArithmeticPolicy policy{};
+      policy.semantics = semantics;
+      const unsigned lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+      BridgeFixture fixture(arch, lanes, policy);
+      ASSERT_NE(fixture.wave, nullptr);
+      fixture.wave->set_mode_raw(0xf0);
+      fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
+      for (int operation = 0; operation < 3; ++operation) {
+        for (unsigned lane = 0; lane < lanes; ++lane) {
+          fixture.cu->write_vgpr(fixture.base(), lane, 0x40000000U);
+          fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x40400000U);
+          fixture.cu->write_vgpr(fixture.base() + 2, lane, 0x40800000U);
+          fixture.cu->write_vgpr(fixture.base() + 3, lane, 0x40a00000U);
+        }
+        std::array<uint32_t, 2> words;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+          const uint16_t opcodes[] = {cdna3::kVPkAddF32Vop3p, cdna3::kVPkMulF32Vop3p,
+                                      cdna3::kVPkFmaF32Vop3p};
+          words = cdna3::build_vop3p(opcodes[operation], {.vdst = 0,
+                                                          .neg_hi = 0,
+                                                          .op_sel = 1,
+                                                          .op_sel_hi_2 = 1,
+                                                          .src0 = 256,
+                                                          .src1 = 258,
+                                                          .src2 = 242,
+                                                          .op_sel_hi = 1,
+                                                          .neg = 2});
+        } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+          const uint16_t opcodes[] = {cdna4::kVPkAddF32Vop3p, cdna4::kVPkMulF32Vop3p,
+                                      cdna4::kVPkFmaF32Vop3p};
+          words = cdna4::build_vop3p(opcodes[operation], {.vdst = 0,
+                                                          .neg_hi = 0,
+                                                          .op_sel = 1,
+                                                          .op_sel_hi_2 = 1,
+                                                          .src0 = 256,
+                                                          .src1 = 258,
+                                                          .src2 = 242,
+                                                          .op_sel_hi = 1,
+                                                          .neg = 2});
+        } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          const uint16_t opcodes[] = {cdna5::kVPkAddF32Vop3p, cdna5::kVPkMulF32Vop3p,
+                                      cdna5::kVPkFmaF32Vop3p};
+          words = cdna5::build_vop3p(opcodes[operation], {.vdst = 0,
+                                                          .neg_hi = 0,
+                                                          .opsel = 1,
+                                                          .opsel_hi_2 = 1,
+                                                          .src0 = 256,
+                                                          .src1 = 258,
+                                                          .src2 = 242,
+                                                          .opsel_hi = 1,
+                                                          .neg = 2});
+        }
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_FALSE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed());
+        const uint32_t low[] = {0xbf800000U, 0xc1400000U, 0xc1300000U};
+        const uint32_t high[] = {0x40e00000U, 0x41400000U, 0x41500000U};
+        for (unsigned lane = 0; lane < lanes; ++lane) {
+          const bool active = lane == 0 || lane == lanes - 1;
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane),
+                    active ? low[operation] : 0x40000000U);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, lane),
+                    active ? high[operation] : 0x40400000U);
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaFloatDotPairSumAndAccumulation) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (bool bf16 : {false, true}) {
+      if (bf16 && arch == ROCJITSU_CODE_ARCH_CDNA3) {
+        continue;
+      }
+      for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+        for (int form = 0; form < 3; ++form) {
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          BridgeFixture fixture(arch, 64, policy);
+          fixture.wave->set_exec(0x8000000000000001ULL);
+          fixture.wave->set_mode_raw(0); // Guest denormal controls do not affect DOT.
+          fixture.wave->set_trapsts(0x10);
+          for (int lane = 0; lane < 64; ++lane) {
+            fixture.cu->write_vgpr(fixture.base(), lane, bf16 ? 0x3f803f80U : 0x3c003c00U);
+            fixture.cu->write_vgpr(fixture.base() + 1, lane, bf16 ? 0x3f803f80U : 0x3c003c00U);
+            fixture.cu->write_vgpr(fixture.base() + 2, lane, 0x4b800000U);
+          }
+          std::vector<uint32_t> words;
+          if (form == 0) {
+            const auto encoded =
+                arch == ROCJITSU_CODE_ARCH_CDNA3
+                    ? cdna3::build_vop3p(cdna3::kVDot2F32F16Vop3p, {.vdst = 2,
+                                                                    .clamp = 1,
+                                                                    .src0 = 256,
+                                                                    .src1 = 257,
+                                                                    .src2 = 258,
+                                                                    .op_sel_hi = 3})
+                    : cdna4::build_vop3p(bf16 ? cdna4::kVDot2F32Bf16Vop3p
+                                              : cdna4::kVDot2F32F16Vop3p,
+                                         {.vdst = 2,
+                                          .clamp = 1,
+                                          .src0 = 256,
+                                          .src1 = 257,
+                                          .src2 = 258,
+                                          .op_sel_hi = 3});
+            words.assign(encoded.begin(), encoded.end());
+          } else if (form == 1) {
+            const auto encoded =
+                arch == ROCJITSU_CODE_ARCH_CDNA3
+                    ? cdna3::build_vop2(cdna3::kVDot2cF32F16Vop2,
+                                        {.src0 = 256, .vsrc1 = 1, .vdst = 2})
+                    : cdna4::build_vop2(bf16 ? cdna4::kVDot2cF32Bf16Vop2 : cdna4::kVDot2cF32F16Vop2,
+                                        {.src0 = 256, .vsrc1 = 1, .vdst = 2});
+            words.assign(encoded.begin(), encoded.end());
+          } else {
+            const auto encoded =
+                arch == ROCJITSU_CODE_ARCH_CDNA3
+                    ? cdna3::build_vop3(cdna3::kVDot2cF32F16Vop3,
+                                        {.vdst = 2, .src0 = 256, .src1 = 257})
+                    : cdna4::build_vop3(bf16 ? cdna4::kVDot2cF32Bf16Vop3 : cdna4::kVDot2cF32F16Vop3,
+                                        {.vdst = 2, .src0 = 256, .src1 = 257});
+            words.assign(encoded.begin(), encoded.end());
+          }
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), 0x4b800001U);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 63), 0x4b800001U);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 1), 0x4b800000U);
+          EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaMixedMadRoundingAndAliasing) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (auto semantics : {ArithmeticSemantics::Loose, ArithmeticSemantics::Compatibility}) {
+      for (unsigned rounding = 0; rounding < 4; ++rounding) {
+        for (unsigned output = 0; output < 3; ++output) {
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          BridgeFixture fixture(arch, 64, policy);
+          ASSERT_NE(fixture.wave, nullptr);
+          fixture.wave->set_mode_raw(rounding << 2);
+          fixture.wave->set_exec(0x8000000000000001ULL);
+          for (unsigned lane = 0; lane < 64; ++lane) {
+            fixture.cu->write_vgpr(fixture.base(), lane, 0x3f800000);
+            fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x3f800000);
+            fixture.cu->write_vgpr(fixture.base() + 2, lane, 0x3a000000);
+          }
+          const auto words =
+              arch == ROCJITSU_CODE_ARCH_CDNA3
+                  ? cdna3::build_vop3p(cdna3::kVMadMixF32Vop3p + output, {.vdst = 2,
+                                                                          .op_sel_hi_2 = 0,
+                                                                          .src0 = 256,
+                                                                          .src1 = 257,
+                                                                          .src2 = 258,
+                                                                          .op_sel_hi = 0})
+                  : cdna4::build_vop3p(cdna4::kVMadMixF32Vop3p + output, {.vdst = 2,
+                                                                          .op_sel_hi_2 = 0,
+                                                                          .src0 = 256,
+                                                                          .src1 = 257,
+                                                                          .src2 = 258,
+                                                                          .op_sel_hi = 0});
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          uint32_t expected = output == 0 ? 0x3f801000U : rounding == 1 ? 0x3c01U : 0x3c00U;
+          if (output == 1) {
+            expected |= 0x3a000000U;
+          } else if (output == 2) {
+            expected <<= 16;
+          }
+          for (unsigned lane = 0; lane < 64; ++lane) {
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane),
+                      lane == 0 || lane == 63 ? expected : 0x3a000000U);
+          }
+        }
+      }
+    }
+  }
+}
+
+// CDNA3 specifies fused arithmetic even where legacy SIMD rounded the product first.
+TEST(ArithBridgeTest, MixedHalfFusedCancellationAndBf16Payload) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (unsigned half = 0; half < 2; ++half) {
+      BridgeFixture fixture(arch, arch == ROCJITSU_CODE_ARCH_CDNA3 ? 64 : 32);
+      ASSERT_NE(fixture.wave, nullptr);
       fixture.wave->set_mode_raw(0);
-      fixture.cu->write_vgpr(fixture.base(), p2 ? 2 : 1, 0x3c00);
-      fixture.cu->write_vgpr(fixture.base() + 1, 0, p2 ? 0x3a400000 : 0x33c00000);
-      fixture.cu->write_vgpr(fixture.base() + 2, 0, p2 ? 0x3f800000 : 0x3c00);
-      auto words = rdna3 ? rdna3::build_vinterp(p2 ? rdna3::kVInterpP2RtzF16F32Vinterp
-                                                   : rdna3::kVInterpP10RtzF16F32Vinterp,
-                                                {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258})
-                         : rdna4::build_vinterp(p2 ? rdna4::kVInterpP2RtzF16F32Vinterp
-                                                   : rdna4::kVInterpP10RtzF16F32Vinterp,
-                                                {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258});
+      fixture.wave->set_exec(1);
+      const bool bf16 = arch == ROCJITSU_CODE_ARCH_CDNA5;
+      fixture.cu->write_vgpr(fixture.base(), 0, bf16 ? 0x7fc00001 : 0x47000400);
+      fixture.cu->write_vgpr(fixture.base() + 1, 0, bf16 ? 0x3f800000 : 0x3f7ff800);
+      fixture.cu->write_vgpr(fixture.base() + 2, 0, bf16 ? 0 : 0xc7000000);
+      fixture.cu->write_vgpr(fixture.base() + 3, 0, 0xabcdefff);
+      const auto words =
+          bf16 ? cdna5::build_vop3p(
+                     cdna5::kVFmaMixloBf16Vop3p + half,
+                     {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 0})
+               : cdna3::build_vop3p(cdna3::kVMadMixloF16Vop3p + half, {.vdst = 3,
+                                                                       .op_sel_hi_2 = 0,
+                                                                       .src0 = 256,
+                                                                       .src1 = 257,
+                                                                       .src2 = 258,
+                                                                       .op_sel_hi = 0});
       auto instruction = fixture.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
       ASSERT_TRUE(
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
-      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0) & (p2 ? 0xffffU : ~0U),
-                p2 ? 0x3c00U : 0x3f800000U);
+      const uint32_t result = bf16 ? 0x7fc1 : 0x9000;
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0),
+                half ? (result << 16) | 0xefffU : 0xabcd0000U | result);
     }
   }
 }
-} // namespace
-} // namespace rocjitsu::amdgpu
 
-namespace rocjitsu::amdgpu {
-namespace {} // namespace
-} // namespace rocjitsu::amdgpu
+TEST(ArithBridgeTest, CdnaMixedFma) {
+  const uint16_t opcodes[] = {cdna5::kVFmaMixF32Vop3p, cdna5::kVFmaMixloF16Vop3p,
+                              cdna5::kVFmaMixhiF16Vop3p};
+  struct Sample {
+    uint32_t a, b, result32;
+    uint16_t result16;
+    bool half_a, inline_a;
+  };
+  const Sample samples[] = {{0x00010001, 0x3f800000, 0x33800000, 1, true, false},
+                            {1, 0x7f000000, 0x34800000, 4, false, false},
+                            {0xdeadbeef, 0x3f800000, 0x40000000, 0x4000, true, true}};
+  for (auto semantics : {ArithmeticSemantics::Loose, ArithmeticSemantics::Compatibility}) {
+    const uint32_t lanes = 32; // gfx1250 executes Wave32.
 
-namespace rocjitsu::amdgpu {
-namespace {
-TEST(ArithBridgeTest, DecodedClassCompareStrictStatusIsArchitectureSpecific) {
-  for (bool gfx11 : {false, true}) {
-    BridgeFixture fixture(gfx11, 32, parse_arithmetic_policy("bit_exact_empirical"));
-    ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    fixture.wave->set_exec(1);
-    fixture.wave->set_vcc_mask(0x80);
-    fixture.cu->write_vgpr(fixture.base(), 0, 0x7f800001);
-    fixture.cu->write_vgpr(fixture.base() + 1, 0, 1);
-    auto words = gfx11 ? rdna3::build_vopc(rdna3::kVCmpClassF32Vopc, {.src0 = 256, .vsrc1 = 1})
-                       : rdna4::build_vopc(rdna4::kVCmpClassF32Vopc, {.src0 = 256, .vsrc1 = 1});
-    auto instruction = fixture.decoder->decode_window(words);
-    ASSERT_TRUE(instruction.succeeded());
-    EXPECT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
-              gfx11);
-    EXPECT_EQ(fixture.wave->vcc(), gfx11 ? 0x80U : 1U);
+    for (unsigned operation = 0; operation < 3; ++operation) {
+      for (uint32_t mode : {0u, 0xf0u}) {
+        for (const auto &sample : samples) {
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, lanes, policy);
+          ASSERT_NE(fixture.wave, nullptr);
+          fixture.wave->set_mode_raw(mode);
+          fixture.wave->set_exec((1ULL << (lanes - 1)) | 1);
+          for (unsigned lane = 0; lane < lanes; ++lane) {
+            fixture.cu->write_vgpr(fixture.base(), lane, sample.a);
+            fixture.cu->write_vgpr(fixture.base() + 1, lane, sample.b);
+            fixture.cu->write_vgpr(fixture.base() + 2, lane, 0);
+          }
+          const auto words =
+              cdna5::build_vop3p(opcodes[operation], {.vdst = 0,
+                                                      .src0 = uint16_t(sample.inline_a ? 244 : 256),
+                                                      .src1 = 257,
+                                                      .src2 = 258,
+                                                      .opsel_hi = uint8_t(sample.half_a)});
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          const uint32_t expected =
+              operation == 0   ? (!sample.half_a && mode == 0 ? 0 : sample.result32)
+              : operation == 1 ? (sample.a & 0xffff0000) | sample.result16
+                               : (sample.a & 0xffff) | (uint32_t(sample.result16) << 16);
+          for (unsigned lane = 0; lane < lanes; ++lane) {
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane),
+                      lane == 0 || lane == lanes - 1 ? expected : sample.a)
+                << operation << '/' << mode << '/' << sample.a << '/' << lane;
+          }
+        }
+      }
+    }
   }
 }
-} // namespace
-} // namespace rocjitsu::amdgpu
 
-namespace rocjitsu::amdgpu {
-namespace {} // namespace
-} // namespace rocjitsu::amdgpu
+TEST(ArithBridgeTest, Bf16SdwaRejectsPendingInputFailure) {
+  BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA4, 64);
+  fixture.wave->set_exec(1);
+  fixture.wave->report_instruction_execution_error(
+      InstructionExecutionError::InvalidRegisterAccess);
+  cdna4::Operand a(32, cdna4::OperandType::OPR_VGPR, 0);
+  cdna4::Operand d(32, cdna4::OperandType::OPR_VGPR, 16);
+  int inst = 0;
+  arith::execute_bf16_widen_sdwa(inst, *fixture.wave, rj_arith_v_cvt_f32_bf16_w32,
+                                 rj_arith_v_cvt_f32_bf16_w64, d, a);
+  EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 16, 0), 0U);
+  EXPECT_TRUE(fixture.recorder->writes.empty());
+}
 
-namespace rocjitsu::amdgpu {
-namespace {
-TEST(ArithBridgeTest, PseudoScalarReciprocalDistinguishesLooseAndEmpirical) {
-  for (auto semantics :
-       {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
-        ArithmeticSemantics::Compatibility}) {
-    ArithmeticPolicy policy{};
-    policy.semantics = semantics;
-    BridgeFixture fixture(false, 32, policy);
-    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+TEST(ArithBridgeTest, Gfx1250IntegerConversions) {
+  const uint16_t ops[] = {cdna5::kVCvtI32I16Vop3, cdna5::kVCvtU32U16Vop3, cdna5::kVCvtPkI16I32Vop3,
+                          cdna5::kVCvtPkU16U32Vop3};
+  const uint32_t values[] = {0x80017fffU, 0xffffffffU, 0x7fffffffU, 0x10000U, 0xffff8000U, 0x8000U};
+  for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+                         ArithmeticSemantics::BitExactEmpirical}) {
+    for (int op = 0; op < 4; ++op) {
+      for (int variant = 0; variant < 4; ++variant) {
+        ArithmeticPolicy policy{};
+        policy.semantics = semantics;
+        BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, policy);
+        bool observed = variant < 2;
+        if (!observed) {
+          fixture.cu->set_plugin_group(nullptr);
+          fixture.recorder = nullptr;
+        }
+        uint32_t exec_mask = 0x80000015U;
+        fixture.wave->set_exec(exec_mask);
+        for (int lane = 0; lane < 32; ++lane) {
+          fixture.cu->write_vgpr(fixture.base(), lane, values[lane % 6]);
+          fixture.cu->write_vgpr(fixture.base() + 1, lane, values[(lane + 1) % 6]);
+        }
+        auto words = cdna5::build_vop3(ops[op], {.vdst = 0,
+                                                 .abs = 7,
+                                                 .opsel = uint8_t(variant & 1),
+                                                 .clamp = 1,
+                                                 .src0 = 256,
+                                                 .src1 = uint16_t(op < 2 ? 0 : 257),
+                                                 .omod = 3,
+                                                 .neg = 7});
+        auto inst = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(inst.succeeded());
+        if (observed) {
+          fixture.recorder->reads.clear();
+          fixture.recorder->writes.clear();
+        }
+        ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+        if (observed) {
+          ASSERT_EQ(fixture.recorder->writes.size(), 1U);
+          EXPECT_EQ(fixture.recorder->writes[0].lanes, exec_mask);
+          ASSERT_EQ(fixture.recorder->reads.size(), op < 2 ? 1U : 2U);
+          EXPECT_EQ(fixture.recorder->reads[0].bytes, op < 2 ? (variant & 1 ? 12 : 3) : 15);
+        }
+        for (int lane = 0; lane < 32; ++lane) {
+          uint32_t a = values[lane % 6], b = values[(lane + 1) % 6], expected = a;
+          if ((exec_mask >> lane) & 1) {
+            if (op < 2) {
+              expected = (a >> ((variant & 1) * 16)) & 0xffffU;
+              if (op == 0 && (expected & 0x8000))
+                expected |= 0xffff0000U;
+            } else {
+              auto pack = [&](uint32_t v) {
+                int64_t value =
+                    op == 2 && (v & 0x80000000U) ? int64_t(v) - (1LL << 32) : int64_t(v);
+                return uint32_t(std::clamp<int64_t>(value, op == 2 ? -32768LL : 0LL,
+                                                    op == 2 ? 32767LL : 65535LL)) &
+                       0xffffU;
+              };
+              expected = pack(a) | (pack(b) << 16);
+            }
+          }
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane), expected);
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaSaturatingPackDestinationWidth) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (int form = 0; form < 4; ++form) {
+        if (form == 2 && arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          continue;
+        }
+        SCOPED_TRACE(::testing::Message() << arch << ":" << form);
+        ArithmeticPolicy policy{};
+        policy.semantics = semantics;
+        const int lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+        BridgeFixture fixture(arch, lanes, policy);
+        fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
+        for (int lane = 0; lane < lanes; ++lane) {
+          fixture.cu->write_vgpr(fixture.base(), lane, 0x0101ffffU);
+        }
+        std::vector<uint32_t> words;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+          if (form == 1 || form == 3) {
+            const auto encoded =
+                cdna3::build_vop3(cdna3::kVSatPkU8I16Vop3,
+                                  {.vdst = 0, .op_sel = uint8_t(form == 3 ? 8 : 0), .src0 = 256});
+            words.assign(encoded.begin(), encoded.end());
+          } else {
+            const auto encoded = cdna3::build_vop1(
+                cdna3::kVSatPkU8I16Vop1,
+                {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+            words.assign(encoded.begin(), encoded.end());
+          }
+        } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+          if (form == 1 || form == 3) {
+            const auto encoded =
+                cdna4::build_vop3(cdna4::kVSatPkU8I16Vop3,
+                                  {.vdst = 0, .op_sel = uint8_t(form == 3 ? 8 : 0), .src0 = 256});
+            words.assign(encoded.begin(), encoded.end());
+          } else {
+            const auto encoded = cdna4::build_vop1(
+                cdna4::kVSatPkU8I16Vop1,
+                {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+            words.assign(encoded.begin(), encoded.end());
+          }
+        } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          if (form == 1 || form == 3) {
+            const auto encoded =
+                cdna5::build_vop3(cdna5::kVSatPkU8I16Vop3,
+                                  {.vdst = 0, .opsel = uint8_t(form == 3 ? 8 : 0), .src0 = 256});
+            words.assign(encoded.begin(), encoded.end());
+          } else {
+            const auto encoded = cdna5::build_vop1(
+                cdna5::kVSatPkU8I16Vop1,
+                {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+            words.assign(encoded.begin(), encoded.end());
+          }
+        }
+        if (form == 2) {
+          // Preserve the old low half and place the packed bytes in WORD1.
+          words.push_back((5U << 8) | (2U << 11) | (6U << 16));
+        }
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        const uint32_t expected = (form == 2 || form == 3)           ? 0xff00ffffU
+                                  : arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0x0101ff00U
+                                                                     : 0x0000ff00U;
+        EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), expected);
+        EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lanes - 1), expected);
+        EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 1), 0x0101ffffU);
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaBf16Conversions) { check_cdna_float16_conversions(true); }
+
+TEST(ArithBridgeTest, CdnaF16PackedConversions) { check_cdna_float16_conversions(false); }
+
+TEST(ArithBridgeTest, CdnaPackedConversions) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (int op = 0; op < 3; ++op) {
+        if (op && arch != ROCJITSU_CODE_ARCH_CDNA5) {
+          continue;
+        }
+        for (int destination : {0, 1, 2}) {
+          for (bool vop3 : {false, true}) {
+            if (!vop3 && (op || arch != ROCJITSU_CODE_ARCH_CDNA5)) {
+              continue;
+            }
+            SCOPED_TRACE(::testing::Message()
+                         << arch << ":" << op << ":" << destination << ":" << vop3);
+            ArithmeticPolicy policy{};
+            policy.semantics = semantics;
+            const int lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+            BridgeFixture fixture(arch, lanes, policy);
+            fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
+            fixture.wave->set_mode_raw(0xff); // directed guest rounding, preserved denormals
+            fixture.wave->set_trapsts(0x10);
+            for (int lane = 0; lane < lanes; ++lane) {
+              fixture.cu->write_vgpr(fixture.base(), lane, 0x3f801800);
+              fixture.cu->write_vgpr(fixture.base() + 1, lane, 0xc0700000);
+              fixture.cu->write_vgpr(fixture.base() + 2, lane, 0xdeadbeef);
+            }
+            std::vector<uint32_t> words;
+            if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+              const auto encoded =
+                  cdna3::build_vop3(cdna3::kVCvtPkrtzF16F32Vop3, {.vdst = uint8_t(destination),
+                                                                  .clamp = 1,
+                                                                  .src0 = 256,
+                                                                  .src1 = 257,
+                                                                  .omod = 1,
+                                                                  .neg = 1});
+              words.assign(encoded.begin(), encoded.end());
+            } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+              const auto encoded =
+                  cdna4::build_vop3(cdna4::kVCvtPkrtzF16F32Vop3, {.vdst = uint8_t(destination),
+                                                                  .clamp = 1,
+                                                                  .src0 = 256,
+                                                                  .src1 = 257,
+                                                                  .omod = 1,
+                                                                  .neg = 1});
+              words.assign(encoded.begin(), encoded.end());
+            } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              constexpr uint16_t ops[] = {cdna5::kVCvtPkRtzF16F32Vop3, cdna5::kVCvtPkI16F32Vop3,
+                                          cdna5::kVCvtPkU16F32Vop3};
+              if (!vop3) {
+                const auto encoded =
+                    cdna5::build_vop2(cdna5::kVCvtPkRtzF16F32Vop2,
+                                      {.src0 = 256, .vsrc1 = 1, .vdst = uint8_t(destination)});
+                words.assign(encoded.begin(), encoded.end());
+              } else {
+                const auto encoded = cdna5::build_vop3(ops[op], {.vdst = uint8_t(destination),
+                                                                 .clamp = 1,
+                                                                 .src0 = 256,
+                                                                 .src1 = 257,
+                                                                 .omod = 1,
+                                                                 .neg = 1});
+                words.assign(encoded.begin(), encoded.end());
+              }
+            }
+            auto instruction = fixture.decoder->decode_window(words);
+            ASSERT_TRUE(instruction.succeeded());
+            ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                            .succeeded());
+            const uint32_t expected = op == 0   ? (vop3 ? 0xc380bc00U : 0xc3803c00U)
+                                      : op == 1 ? 0xfffdffffU
+                                                : 0;
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + destination, 0), expected);
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + destination, lanes - 1), expected);
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + destination, 1),
+                      destination == 0   ? 0x3f801800U
+                      : destination == 1 ? 0xc0700000U
+                                         : 0xdeadbeefU);
+            EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaNormalizedConversions) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (int op = 0; op < 6; ++op) {
+        for (int form = 0; form < 3; ++form) {
+          if ((op >= 2 && form != 1) || (form == 2 && arch == ROCJITSU_CODE_ARCH_CDNA5)) {
+            continue;
+          }
+          SCOPED_TRACE(::testing::Message() << arch << ":" << op << ":" << form);
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          const int lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+          BridgeFixture fixture(arch, lanes, policy);
+          fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
+          fixture.wave->set_mode_raw(0xff); // directed guest rounding must not affect NORM
+          const uint32_t input = op < 4 ? 0xdead3800U : 0x3f000000U;
+          const uint32_t other = op < 4 ? 0xdeadbc00U : 0xbf800000U;
+          for (int lane = 0; lane < lanes; ++lane) {
+            fixture.cu->write_vgpr(fixture.base(), lane, input);
+            fixture.cu->write_vgpr(fixture.base() + 1, lane, other);
+          }
+          std::vector<uint32_t> words;
+          if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+            constexpr uint16_t vop3[] = {
+                cdna3::kVCvtNormI16F16Vop3,   cdna3::kVCvtNormU16F16Vop3,
+                cdna3::kVCvtPknormI16F16Vop3, cdna3::kVCvtPknormU16F16Vop3,
+                cdna3::kVCvtPknormI16F32Vop3, cdna3::kVCvtPknormU16F32Vop3};
+            if (form == 1) {
+              const auto encoded =
+                  cdna3::build_vop3(vop3[op], {.vdst = 0, .src0 = 256, .src1 = 257});
+              words.assign(encoded.begin(), encoded.end());
+            } else {
+              const auto encoded = cdna3::build_vop1(
+                  op == 0 ? cdna3::kVCvtNormI16F16Vop1 : cdna3::kVCvtNormU16F16Vop1,
+                  {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+            constexpr uint16_t vop3[] = {cdna4::kVCvtNormI16F16Vop3, cdna4::kVCvtNormU16F16Vop3,
+                                         cdna4::kVCvtPknormI16F16,   cdna4::kVCvtPknormU16F16,
+                                         cdna4::kVCvtPknormI16F32,   cdna4::kVCvtPknormU16F32};
+            if (form == 1) {
+              const auto encoded =
+                  cdna4::build_vop3(vop3[op], {.vdst = 0, .src0 = 256, .src1 = 257});
+              words.assign(encoded.begin(), encoded.end());
+            } else {
+              const auto encoded = cdna4::build_vop1(
+                  op == 0 ? cdna4::kVCvtNormI16F16Vop1 : cdna4::kVCvtNormU16F16Vop1,
+                  {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            constexpr uint16_t vop3[] = {
+                cdna5::kVCvtNormI16F16Vop3,   cdna5::kVCvtNormU16F16Vop3,
+                cdna5::kVCvtPkNormI16F16Vop3, cdna5::kVCvtPkNormU16F16Vop3,
+                cdna5::kVCvtPkNormI16F32Vop3, cdna5::kVCvtPkNormU16F32Vop3};
+            if (form == 1) {
+              const auto encoded =
+                  cdna5::build_vop3(vop3[op], {.vdst = 0, .src0 = 256, .src1 = 257});
+              words.assign(encoded.begin(), encoded.end());
+            } else {
+              const auto encoded = cdna5::build_vop1(
+                  op == 0 ? cdna5::kVCvtNormI16F16Vop1 : cdna5::kVCvtNormU16F16Vop1,
+                  {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          }
+          if (form == 2) {
+            words.push_back((5U << 8) | (2U << 11) | (6U << 16));
+          }
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          uint32_t expected = op & 1 ? 0x8000U : 0x4000U;
+          if (op >= 2) {
+            expected |= op & 1 ? 0 : 0x80010000U;
+          } else if (form == 2) {
+            expected = (expected << 16) | (input & 0xffff);
+          } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            expected |= input & 0xffff0000U;
+          }
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), expected);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lanes - 1), expected);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 1), input);
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaIntegerConversionPackingAndHalves) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (bool is_signed : {false, true}) {
+      for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+        for (bool high : {false, true}) {
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          const bool extend = arch == ROCJITSU_CODE_ARCH_CDNA5;
+          const int lanes = extend ? 32 : 64;
+          BridgeFixture fixture(arch, lanes, policy);
+          fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
+          fixture.wave->set_trapsts(0x10);
+          for (int lane = 0; lane < lanes; ++lane) {
+            fixture.cu->write_vgpr(fixture.base(), lane, extend ? 0x80017fffU : 0xffff0000U);
+            fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x10000U);
+          }
+          std::vector<uint32_t> words;
+          if (extend) {
+            const auto encoded =
+                cdna5::build_vop1(is_signed ? cdna5::kVCvtI32I16Vop1 : cdna5::kVCvtU32U16Vop1,
+                                  {.src0 = uint16_t(256 + (high ? 128 : 0)), .vdst = 0});
+            words.assign(encoded.begin(), encoded.end());
+          } else {
+            const auto encoded = arch == ROCJITSU_CODE_ARCH_CDNA3
+                                     ? cdna3::build_vop3(is_signed ? cdna3::kVCvtPkI16I32Vop3
+                                                                   : cdna3::kVCvtPkU16U32Vop3,
+                                                         {.vdst = 0,
+                                                          .abs = uint8_t(high ? 3 : 0),
+                                                          .clamp = uint8_t(high),
+                                                          .src0 = 256,
+                                                          .src1 = 257,
+                                                          .omod = uint8_t(high ? 3 : 0),
+                                                          .neg = uint8_t(high ? 3 : 0)})
+                                     : cdna4::build_vop3(is_signed ? cdna4::kVCvtPkI16I32Vop3
+                                                                   : cdna4::kVCvtPkU16U32Vop3,
+                                                         {.vdst = 0,
+                                                          .abs = uint8_t(high ? 3 : 0),
+                                                          .clamp = uint8_t(high),
+                                                          .src0 = 256,
+                                                          .src1 = 257,
+                                                          .omod = uint8_t(high ? 3 : 0),
+                                                          .neg = uint8_t(high ? 3 : 0)});
+            words.assign(encoded.begin(), encoded.end());
+          }
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          const uint32_t expected = extend ? (high ? (is_signed ? 0xffff8001U : 0x8001U) : 0x7fffU)
+                                           : (is_signed ? 0x7fff8000U : 0xffffffffU);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), expected);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lanes - 1), expected);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 1), extend ? 0x80017fffU : 0xffff0000U);
+          EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaBitPacking) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (int op = 0; op < 3; ++op) {
+        if (op == 2 && arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          continue;
+        }
+        for (bool ieee : {false, true}) {
+          for (bool modifiers : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << arch << ":" << op << ":" << ieee << ":" << modifiers);
+            ArithmeticPolicy policy{};
+            policy.semantics = semantics;
+            const int lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+            BridgeFixture fixture(arch, lanes, policy);
+            fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
+            fixture.wave->set_mode_raw(0xf1 | (ieee ? 0x200U : 0));
+            fixture.wave->set_trapsts(0x10);
+            for (int lane = 0; lane < lanes; ++lane) {
+              fixture.cu->write_vgpr(fixture.base(), lane, op == 0 ? 0x7c013800 : 0x3fc00000);
+              fixture.cu->write_vgpr(fixture.base() + 1, lane,
+                                     op == 0 ? 0xbc003c00 : uint32_t(lane));
+              fixture.cu->write_vgpr(fixture.base() + 2, lane, 0xabcdef12);
+            }
+            std::vector<uint32_t> words;
+            if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+              constexpr uint16_t ops[] = {cdna3::kVPackB32F16Vop3, cdna3::kVCvtPkU8F32Vop3,
+                                          cdna3::kVCvtPkaccumU8F32Vop3};
+              const auto encoded =
+                  cdna3::build_vop3(ops[op], {.vdst = 2,
+                                              .op_sel = uint8_t(op == 0 ? 1 : 0),
+                                              .clamp = 1,
+                                              .src0 = 256,
+                                              .src1 = 257,
+                                              .src2 = 258,
+                                              .omod = 1,
+                                              .neg = uint8_t(modifiers ? (op == 0 ? 2 : 1) : 0)});
+              words.assign(encoded.begin(), encoded.end());
+            } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+              constexpr uint16_t ops[] = {cdna4::kVPackB32F16Vop3, cdna4::kVCvtPkU8F32Vop3,
+                                          cdna4::kVCvtPkaccumU8F32Vop3};
+              const auto encoded =
+                  cdna4::build_vop3(ops[op], {.vdst = 2,
+                                              .op_sel = uint8_t(op == 0 ? 1 : 0),
+                                              .clamp = 1,
+                                              .src0 = 256,
+                                              .src1 = 257,
+                                              .src2 = 258,
+                                              .omod = 1,
+                                              .neg = uint8_t(modifiers ? (op == 0 ? 2 : 1) : 0)});
+              words.assign(encoded.begin(), encoded.end());
+            } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              constexpr uint16_t ops[] = {cdna5::kVPackB32F16Vop3, cdna5::kVCvtPkU8F32Vop3};
+              const auto encoded =
+                  cdna5::build_vop3(ops[op], {.vdst = 2,
+                                              .opsel = uint8_t(op == 0 ? 1 : 0),
+                                              .clamp = 1,
+                                              .src0 = 256,
+                                              .src1 = 257,
+                                              .src2 = 258,
+                                              .omod = 1,
+                                              .neg = uint8_t(modifiers ? (op == 0 ? 2 : 1) : 0)});
+              words.assign(encoded.begin(), encoded.end());
+            }
+            auto instruction = fixture.decoder->decode_window(words);
+            ASSERT_TRUE(instruction.succeeded());
+            ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                            .succeeded());
+            for (int lane : {0, lanes - 1}) {
+              uint32_t expected;
+              if (op == 0) {
+                expected = (modifiers ? 0xbc000000U : 0x3c000000U) |
+                           ((ieee || arch == ROCJITSU_CODE_ARCH_CDNA5) ? 0x7e01U : 0x7c01U);
+              } else {
+                const int shift = (lane & 3) * 8;
+                const uint32_t byte = op == 2 ? 1 : modifiers ? 0 : 2;
+                expected = (0xabcdef12U & ~(0xffU << shift)) | (byte << shift);
+              }
+              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane), expected);
+            }
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 1), 0xabcdef12U);
+            EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaByteAndNibbleConversions) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (int operation = 0; operation < 5; ++operation) {
+        for (int form = 0; form < 5; ++form) {
+          if (form >= 3 && arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            continue; // SDWA is absent on gfx1250.
+          }
+          SCOPED_TRACE(::testing::Message() << arch << ":" << operation << ":" << form);
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          const int lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+          BridgeFixture fixture(arch, lanes, policy);
+          fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
+          fixture.wave->set_mode_raw(form == 2 ? Wavefront::IEEE_BIT : 0);
+          fixture.wave->set_trapsts(0x10);
+          constexpr uint32_t input = 0x7f8001f9U;
+          for (int lane = 0; lane < lanes; ++lane) {
+            fixture.cu->write_vgpr(fixture.base(), lane, input);
+          }
+          std::vector<uint32_t> words;
+          if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+            constexpr uint16_t vop1[] = {cdna3::kVCvtF32Ubyte0Vop1, cdna3::kVCvtF32Ubyte1Vop1,
+                                         cdna3::kVCvtF32Ubyte2Vop1, cdna3::kVCvtF32Ubyte3Vop1,
+                                         cdna3::kVCvtOffF32I4Vop1};
+            constexpr uint16_t vop3[] = {cdna3::kVCvtF32Ubyte0Vop3, cdna3::kVCvtF32Ubyte1Vop3,
+                                         cdna3::kVCvtF32Ubyte2Vop3, cdna3::kVCvtF32Ubyte3Vop3,
+                                         cdna3::kVCvtOffF32I4Vop3};
+            if (form == 1 || form == 2) {
+              const auto encoded =
+                  cdna3::build_vop3(vop3[operation], {.vdst = 0, .src0 = 256, .omod = 1});
+              words.assign(encoded.begin(), encoded.end());
+            } else {
+              const auto encoded = cdna3::build_vop1(
+                  vop1[operation],
+                  {.src0 = uint16_t(form >= 3 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+            constexpr uint16_t vop1[] = {cdna4::kVCvtF32Ubyte0Vop1, cdna4::kVCvtF32Ubyte1Vop1,
+                                         cdna4::kVCvtF32Ubyte2Vop1, cdna4::kVCvtF32Ubyte3Vop1,
+                                         cdna4::kVCvtOffF32I4Vop1};
+            constexpr uint16_t vop3[] = {cdna4::kVCvtF32Ubyte0Vop3, cdna4::kVCvtF32Ubyte1Vop3,
+                                         cdna4::kVCvtF32Ubyte2Vop3, cdna4::kVCvtF32Ubyte3Vop3,
+                                         cdna4::kVCvtOffF32I4Vop3};
+            if (form == 1 || form == 2) {
+              const auto encoded =
+                  cdna4::build_vop3(vop3[operation], {.vdst = 0, .src0 = 256, .omod = 1});
+              words.assign(encoded.begin(), encoded.end());
+            } else {
+              const auto encoded = cdna4::build_vop1(
+                  vop1[operation],
+                  {.src0 = uint16_t(form >= 3 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            constexpr uint16_t vop1[] = {cdna5::kVCvtF32Ubyte0Vop1, cdna5::kVCvtF32Ubyte1Vop1,
+                                         cdna5::kVCvtF32Ubyte2Vop1, cdna5::kVCvtF32Ubyte3Vop1,
+                                         cdna5::kVCvtOffF32I4Vop1};
+            constexpr uint16_t vop3[] = {cdna5::kVCvtF32Ubyte0Vop3, cdna5::kVCvtF32Ubyte1Vop3,
+                                         cdna5::kVCvtF32Ubyte2Vop3, cdna5::kVCvtF32Ubyte3Vop3,
+                                         cdna5::kVCvtOffF32I4Vop3};
+            if (form == 1 || form == 2) {
+              const auto encoded =
+                  cdna5::build_vop3(vop3[operation], {.vdst = 0, .src0 = 256, .omod = 1});
+              words.assign(encoded.begin(), encoded.end());
+            } else {
+              const auto encoded = cdna5::build_vop1(
+                  vop1[operation],
+                  {.src0 = uint16_t(form >= 3 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          }
+          if (form >= 3) {
+            // Exercise partial destination preservation and source WORD1 selection.
+            const uint32_t destination_selection = form == 3 ? 5 : 6;
+            const uint32_t source_selection = form == 3 ? 6 : 5;
+            words.push_back((destination_selection << 8) | (2U << 11) | (1U << 14) |
+                            (source_selection << 16));
+          }
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          const uint32_t selected = form == 4 ? input >> 16 : input;
+          const int nibble = int(selected & 7) - int(selected & 8);
+          float value =
+              operation == 4 ? float(nibble) / 16.0f : float((selected >> (8 * operation)) & 0xff);
+          if (form == 1 || form >= 3 || (form == 2 && arch == ROCJITSU_CODE_ARCH_CDNA5)) {
+            value *= 2;
+          }
+          uint32_t expected = std::bit_cast<uint32_t>(value);
+          if (form == 3) {
+            expected = (expected << 16) | (input & 0xffff);
+          }
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), expected);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lanes - 1), expected);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 1), input);
+          EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaFp64Conversions) {
+  struct Case {
+    uint64_t input;
+    uint64_t expected;
+    bool wide_output;
+  };
+  const Case cases[] = {
+      {0x80000001U, 0xc1dfffffffc00000ULL, true},  // I32 -> F64, exact.
+      {0xffffffffU, 0x41efffffffe00000ULL, true},  // U32 -> F64, exact.
+      {0x41e0000000000000ULL, 0x7fffffffU, false}, // I32 saturation.
+      {0xfff0000000000000ULL, 0, false},           // Negative infinity -> U32 zero.
+      {0x7f800123U, 0x7ff0002460000000ULL, true},  // Widened signaling NaN.
+      {0x3ff0000010000000ULL, 0x3f800000U, false}, // F32 rounding tie at 1.
+  };
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (int operation = 0; operation < 6; ++operation) {
+        for (int rounding = 0; rounding < 4; ++rounding) {
+          for (bool vop3 : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << arch << ":" << operation << ":" << rounding << ":" << vop3);
+            ArithmeticPolicy policy{};
+            policy.semantics = semantics;
+            const int lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+            BridgeFixture fixture(arch, lanes, policy);
+            const auto &c = cases[operation];
+            fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
+            fixture.wave->set_mode_raw(rounding | (rounding << 2) | (3U << 4) | (3U << 6) |
+                                       (rounding & 1 ? Wavefront::IEEE_BIT : 0));
+            fixture.wave->set_trapsts(0x10);
+            for (int lane = 0; lane < lanes; ++lane) {
+              fixture.cu->write_vgpr(fixture.base(), lane, uint32_t(c.input));
+              fixture.cu->write_vgpr(fixture.base() + 1, lane, uint32_t(c.input >> 32));
+            }
+            std::vector<uint32_t> words;
+            if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+              constexpr uint16_t vop1_ops[] = {cdna3::kVCvtF64I32Vop1, cdna3::kVCvtF64U32Vop1,
+                                               cdna3::kVCvtI32F64Vop1, cdna3::kVCvtU32F64Vop1,
+                                               cdna3::kVCvtF64F32Vop1, cdna3::kVCvtF32F64Vop1};
+              constexpr uint16_t vop3_ops[] = {cdna3::kVCvtF64I32Vop3, cdna3::kVCvtF64U32Vop3,
+                                               cdna3::kVCvtI32F64Vop3, cdna3::kVCvtU32F64Vop3,
+                                               cdna3::kVCvtF64F32Vop3, cdna3::kVCvtF32F64Vop3};
+              if (vop3) {
+                const auto encoded =
+                    cdna3::build_vop3(vop3_ops[operation], {.vdst = 0, .src0 = 256, .omod = 1});
+                words.assign(encoded.begin(), encoded.end());
+              } else {
+                const auto encoded =
+                    cdna3::build_vop1(vop1_ops[operation], {.src0 = 256, .vdst = 0});
+                words.assign(encoded.begin(), encoded.end());
+              }
+            } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+              constexpr uint16_t vop1_ops[] = {cdna4::kVCvtF64I32Vop1, cdna4::kVCvtF64U32Vop1,
+                                               cdna4::kVCvtI32F64Vop1, cdna4::kVCvtU32F64Vop1,
+                                               cdna4::kVCvtF64F32Vop1, cdna4::kVCvtF32F64Vop1};
+              constexpr uint16_t vop3_ops[] = {cdna4::kVCvtF64I32Vop3, cdna4::kVCvtF64U32Vop3,
+                                               cdna4::kVCvtI32F64Vop3, cdna4::kVCvtU32F64Vop3,
+                                               cdna4::kVCvtF64F32Vop3, cdna4::kVCvtF32F64Vop3};
+              if (vop3) {
+                const auto encoded =
+                    cdna4::build_vop3(vop3_ops[operation], {.vdst = 0, .src0 = 256, .omod = 1});
+                words.assign(encoded.begin(), encoded.end());
+              } else {
+                const auto encoded =
+                    cdna4::build_vop1(vop1_ops[operation], {.src0 = 256, .vdst = 0});
+                words.assign(encoded.begin(), encoded.end());
+              }
+            } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              constexpr uint16_t vop1_ops[] = {cdna5::kVCvtF64I32Vop1, cdna5::kVCvtF64U32Vop1,
+                                               cdna5::kVCvtI32F64Vop1, cdna5::kVCvtU32F64Vop1,
+                                               cdna5::kVCvtF64F32Vop1, cdna5::kVCvtF32F64Vop1};
+              constexpr uint16_t vop3_ops[] = {cdna5::kVCvtF64I32Vop3, cdna5::kVCvtF64U32Vop3,
+                                               cdna5::kVCvtI32F64Vop3, cdna5::kVCvtU32F64Vop3,
+                                               cdna5::kVCvtF64F32Vop3, cdna5::kVCvtF32F64Vop3};
+              if (vop3) {
+                const auto encoded =
+                    cdna5::build_vop3(vop3_ops[operation], {.vdst = 0, .src0 = 256, .omod = 1});
+                words.assign(encoded.begin(), encoded.end());
+              } else {
+                const auto encoded =
+                    cdna5::build_vop1(vop1_ops[operation], {.src0 = 256, .vdst = 0});
+                words.assign(encoded.begin(), encoded.end());
+              }
+            }
+            auto instruction = fixture.decoder->decode_window(words);
+            ASSERT_TRUE(instruction.succeeded());
+            ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                            .succeeded());
+            uint64_t expected = c.expected;
+            if (operation == 4 && ((rounding & 1) || arch == ROCJITSU_CODE_ARCH_CDNA5)) {
+              expected |= 0x0008000000000000ULL;
+            }
+            if (operation == 5 && rounding == 1) {
+              ++expected;
+            }
+            // Preserved output denormals gate OMOD off on older CDNA only.
+            if (vop3 && arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              if (operation < 2) {
+                expected += 1ULL << 52;
+              } else if (operation == 5) {
+                expected += 1U << 23;
+              }
+            }
+            for (int lane : {0, lanes - 1}) {
+              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lane), uint32_t(expected));
+              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, lane),
+                        uint32_t(c.wide_output ? expected >> 32 : c.input >> 32));
+            }
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 1), uint32_t(c.input));
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 1, 1), uint32_t(c.input >> 32));
+            EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaE32HalfConversionsKeepFullRegisterIndices) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    BridgeFixture fixture(arch, 64);
+    fixture.wave->set_exec(1);
+    fixture.wave->set_mode_raw(0xf0);
+    fixture.cu->write_vgpr(fixture.base(), 0, 0xdead0000);
+    fixture.cu->write_vgpr(fixture.base() + 128, 0, 0x12343c00);
+    for (bool normalized : {false, true}) {
+      const auto words =
+          cdna3::build_vop1(normalized ? cdna3::kVCvtNormU16F16Vop1 : cdna3::kVCvtU16F16Vop1,
+                            {.src0 = 384, .vdst = 129});
+      auto inst = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 129, 0), normalized ? 65535U : 1U);
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), 0xdead0000U);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250Bf16E32UsesOneBulkHighHalfRead) {
+  BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32);
+  fixture.wave->set_exec(0x5);
+  for (int lane : {0, 2})
+    fixture.cu->write_vgpr(fixture.base(), lane, 0x3f804000);
+  fixture.recorder->reads.clear();
+  const auto words = cdna5::build_vop1(cdna5::kVCvtF32Bf16Vop1, {.src0 = 384, .vdst = 2});
+  auto inst = fixture.decoder->decode_window(words);
+  ASSERT_TRUE(inst.succeeded());
+  ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+  ASSERT_EQ(fixture.recorder->reads.size(), 1U);
+  EXPECT_EQ(fixture.recorder->reads[0].bytes, 0xc);
+  EXPECT_EQ(fixture.recorder->reads[0].lanes, 0x5U);
+  EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0), 0x3f800000U);
+}
+
+TEST(ArithBridgeTest, CdnaHalfConversions) {
+  constexpr uint32_t inputs[] = {0xdead0003U, 0xdead0003U, 0xdead3e00U,
+                                 0xdead3e00U, 0x477fff00U, 0xdead3e00U};
+  constexpr uint32_t outputs[] = {0x4200U, 0x4200U, 1U, 1U, 0x7c00U, 0x3fc00000U};
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (int op = 0; op < 6; ++op) {
+        for (int form = 0; form < 3; ++form) {
+          if (form == 2 && arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            continue;
+          }
+          SCOPED_TRACE(::testing::Message() << arch << ":" << op << ":" << form);
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          const int lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+          BridgeFixture fixture(arch, lanes, policy);
+          fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
+          fixture.wave->set_mode_raw(0); // nearest, flush outputs, OMOD enabled
+          fixture.wave->set_trapsts(0x10);
+          for (int lane = 0; lane < lanes; ++lane) {
+            fixture.cu->write_vgpr(fixture.base(), lane, inputs[op]);
+          }
+          std::vector<uint32_t> words;
+          if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+            constexpr uint16_t vop1[] = {cdna3::kVCvtF16I16Vop1, cdna3::kVCvtF16U16Vop1,
+                                         cdna3::kVCvtI16F16Vop1, cdna3::kVCvtU16F16Vop1,
+                                         cdna3::kVCvtF16F32Vop1, cdna3::kVCvtF32F16Vop1};
+            constexpr uint16_t vop3[] = {cdna3::kVCvtF16I16Vop3, cdna3::kVCvtF16U16Vop3,
+                                         cdna3::kVCvtI16F16Vop3, cdna3::kVCvtU16F16Vop3,
+                                         cdna3::kVCvtF16F32Vop3, cdna3::kVCvtF32F16Vop3};
+            if (form == 1) {
+              const auto encoded = cdna3::build_vop3(vop3[op], {.vdst = 0, .src0 = 256});
+              words.assign(encoded.begin(), encoded.end());
+            } else {
+              const auto encoded = cdna3::build_vop1(
+                  vop1[op], {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+            constexpr uint16_t vop1[] = {cdna4::kVCvtF16I16Vop1, cdna4::kVCvtF16U16Vop1,
+                                         cdna4::kVCvtI16F16Vop1, cdna4::kVCvtU16F16Vop1,
+                                         cdna4::kVCvtF16F32Vop1, cdna4::kVCvtF32F16Vop1};
+            constexpr uint16_t vop3[] = {cdna4::kVCvtF16I16Vop3, cdna4::kVCvtF16U16Vop3,
+                                         cdna4::kVCvtI16F16Vop3, cdna4::kVCvtU16F16Vop3,
+                                         cdna4::kVCvtF16F32Vop3, cdna4::kVCvtF32F16Vop3};
+            if (form == 1) {
+              const auto encoded = cdna4::build_vop3(vop3[op], {.vdst = 0, .src0 = 256});
+              words.assign(encoded.begin(), encoded.end());
+            } else {
+              const auto encoded = cdna4::build_vop1(
+                  vop1[op], {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            constexpr uint16_t vop1[] = {cdna5::kVCvtF16I16Vop1, cdna5::kVCvtF16U16Vop1,
+                                         cdna5::kVCvtI16F16Vop1, cdna5::kVCvtU16F16Vop1,
+                                         cdna5::kVCvtF16F32Vop1, cdna5::kVCvtF32F16Vop1};
+            constexpr uint16_t vop3[] = {cdna5::kVCvtF16I16Vop3, cdna5::kVCvtF16U16Vop3,
+                                         cdna5::kVCvtI16F16Vop3, cdna5::kVCvtU16F16Vop3,
+                                         cdna5::kVCvtF16F32Vop3, cdna5::kVCvtF32F16Vop3};
+            if (form == 1) {
+              const auto encoded = cdna5::build_vop3(vop3[op], {.vdst = 0, .src0 = 256});
+              words.assign(encoded.begin(), encoded.end());
+            } else {
+              const auto encoded = cdna5::build_vop1(
+                  vop1[op], {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+              words.assign(encoded.begin(), encoded.end());
+            }
+          }
+          if (form == 2) {
+            // Full source, OMOD /2, WORD1 destination preserving WORD0.
+            words.push_back((5U << 8) | (2U << 11) | (3U << 14) | (6U << 16));
+          }
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          uint32_t expected = outputs[op];
+          if (form == 2) {
+            if (op < 2) {
+              expected = 0x3e00;
+            }
+            if (op == 4) {
+              expected = 0x7800;
+            }
+            if (op == 5) {
+              expected = 0x3f400000;
+            }
+            expected = (expected << 16) | (inputs[op] & 0xffff);
+          } else if (op < 5 && arch == ROCJITSU_CODE_ARCH_CDNA5) {
+            expected |= inputs[op] & 0xffff0000U;
+          }
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), expected);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lanes - 1), expected);
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 1), inputs[op]);
+          EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaFp32IntegerConversions) {
+  constexpr uint32_t inputs[] = {0xfeffffffU, 0xffffffffU, 0xbfc00000U,
+                                 0x3fc00000U, 0xbfc00000U, 0x80000001U};
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+      for (int operation = 0; operation < 6; ++operation) {
+        for (int rounding = 0; rounding < 4; ++rounding) {
+          for (int form = 0; form < 3; ++form) {
+            if (form == 2 && arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              continue;
+            }
+            SCOPED_TRACE(::testing::Message()
+                         << arch << ":" << operation << ":" << rounding << ":" << form);
+            ArithmeticPolicy policy{};
+            policy.semantics = semantics;
+            const int lanes = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+            BridgeFixture fixture(arch, lanes, policy);
+            fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
+            fixture.wave->set_mode_raw(rounding | ((rounding & 1) ? 3U << 4 : 0));
+            fixture.wave->set_trapsts(0x10);
+            for (int lane = 0; lane < lanes; ++lane) {
+              fixture.cu->write_vgpr(fixture.base(), lane, inputs[operation]);
+            }
+            std::vector<uint32_t> words;
+            if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+              constexpr uint16_t vop1_ops[] = {
+                  cdna3::kVCvtF32I32Vop1, cdna3::kVCvtF32U32Vop1,    cdna3::kVCvtI32F32Vop1,
+                  cdna3::kVCvtU32F32Vop1, cdna3::kVCvtRpiI32F32Vop1, cdna3::kVCvtFlrI32F32Vop1};
+              constexpr uint16_t vop3_ops[] = {
+                  cdna3::kVCvtF32I32Vop3, cdna3::kVCvtF32U32Vop3,    cdna3::kVCvtI32F32Vop3,
+                  cdna3::kVCvtU32F32Vop3, cdna3::kVCvtRpiI32F32Vop3, cdna3::kVCvtFlrI32F32Vop3};
+              if (form == 1) {
+                const auto encoded =
+                    cdna3::build_vop3(vop3_ops[operation], {.vdst = 0, .src0 = 256, .omod = 1});
+                words.assign(encoded.begin(), encoded.end());
+              } else {
+                const auto encoded = cdna3::build_vop1(
+                    vop1_ops[operation],
+                    {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+                words.assign(encoded.begin(), encoded.end());
+              }
+            } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+              constexpr uint16_t vop1_ops[] = {
+                  cdna4::kVCvtF32I32Vop1, cdna4::kVCvtF32U32Vop1,    cdna4::kVCvtI32F32Vop1,
+                  cdna4::kVCvtU32F32Vop1, cdna4::kVCvtRpiI32F32Vop1, cdna4::kVCvtFlrI32F32Vop1};
+              constexpr uint16_t vop3_ops[] = {
+                  cdna4::kVCvtF32I32Vop3, cdna4::kVCvtF32U32Vop3,    cdna4::kVCvtI32F32Vop3,
+                  cdna4::kVCvtU32F32Vop3, cdna4::kVCvtRpiI32F32Vop3, cdna4::kVCvtFlrI32F32Vop3};
+              if (form == 1) {
+                const auto encoded =
+                    cdna4::build_vop3(vop3_ops[operation], {.vdst = 0, .src0 = 256, .omod = 1});
+                words.assign(encoded.begin(), encoded.end());
+              } else {
+                const auto encoded = cdna4::build_vop1(
+                    vop1_ops[operation],
+                    {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+                words.assign(encoded.begin(), encoded.end());
+              }
+            } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              constexpr uint16_t vop1_ops[] = {
+                  cdna5::kVCvtF32I32Vop1,        cdna5::kVCvtF32U32Vop1,
+                  cdna5::kVCvtI32F32Vop1,        cdna5::kVCvtU32F32Vop1,
+                  cdna5::kVCvtNearestI32F32Vop1, cdna5::kVCvtFloorI32F32Vop1};
+              constexpr uint16_t vop3_ops[] = {
+                  cdna5::kVCvtF32I32Vop3,        cdna5::kVCvtF32U32Vop3,
+                  cdna5::kVCvtI32F32Vop3,        cdna5::kVCvtU32F32Vop3,
+                  cdna5::kVCvtNearestI32F32Vop3, cdna5::kVCvtFloorI32F32Vop3};
+              if (form == 1) {
+                const auto encoded =
+                    cdna5::build_vop3(vop3_ops[operation], {.vdst = 0, .src0 = 256, .omod = 1});
+                words.assign(encoded.begin(), encoded.end());
+              } else {
+                const auto encoded = cdna5::build_vop1(
+                    vop1_ops[operation],
+                    {.src0 = uint16_t(form == 2 ? amdgpu::SRC_SDWA : 256), .vdst = 0});
+                words.assign(encoded.begin(), encoded.end());
+              }
+            }
+            if (form == 2) {
+              // Read a full source; place the result in WORD1 and preserve WORD0.
+              words.push_back((5U << 8) | (2U << 11) | (1U << 14) | (6U << 16));
+            }
+            auto instruction = fixture.decoder->decode_window(words);
+            ASSERT_TRUE(instruction.succeeded());
+            ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                            .succeeded());
+            uint32_t expected = operation == 0   ? 0xcb800000U + (rounding == 2)
+                                : operation == 1 ? (rounding < 2 ? 0x4f800000U : 0x4f7fffffU)
+                                : operation == 3 ? 1U
+                                : operation == 5 ? (rounding & 1 ? 0xffffffffU : 0U)
+                                                 : 0xffffffffU;
+            if (operation < 2 && form != 0 &&
+                (arch == ROCJITSU_CODE_ARCH_CDNA5 || !(rounding & 1))) {
+              expected += 1U << 23;
+            }
+            if (form == 2) {
+              expected = (expected << 16) | (inputs[operation] & 0xffff);
+            }
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0), expected);
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), lanes - 1), expected);
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 1), inputs[operation]);
+            EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
+          }
+        }
+      }
+    }
+  }
+}
+
+// Nibble packs select a true16 destination; the other half must survive.
+TEST(ArithBridgeTest, Gfx1250NibblePackDestinationHalf) {
+  BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32);
+  fixture.wave->set_exec(1);
+  fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x7f80ff01U);
+  for (bool is_signed : {false, true}) {
+    for (bool high : {false, true}) {
+      fixture.cu->write_vgpr(fixture.base(), 0, 0xaaaa5555U);
+      auto words = cdna5::build_vop3(is_signed ? cdna5::kVSatPk4I4I8Vop3 : cdna5::kVSatPk4U4U8Vop3,
+                                     {.vdst = 0, .opsel = uint8_t(high ? 8 : 0), .src0 = 257});
+      auto inst = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+      const uint32_t packed = is_signed ? 0x78f1U : 0xfff1U;
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base(), 0),
+                high ? (packed << 16) | 0x5555U : 0xaaaa0000U | packed);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250ScalarConversionCompatibility) {
+  for (bool packed : {false, true}) {
+    BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, {});
     fixture.wave->set_exec(0);
-    fixture.wave->set_mode_raw(0xff);
-    const auto base = fixture.wave->sgpr_alloc().base;
-    fixture.cu->write_sgpr(base, 0x3f803686);
-    auto words = rdna4::build_vop3(rdna4::kVSRcpF32Vop3, {.vdst = 1, .src0 = 0});
+    fixture.wave->set_mode_raw(0);
+    fixture.wave->set_trapsts(0x80000000U);
+    fixture.wave->write_scc(true);
+    auto base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(base, packed ? 0x7f800001U : 0x00010000U);
+    fixture.cu->write_sgpr(base + 1, 0xb3800000U);
+    const auto words =
+        packed ? cdna5::build_sop2(cdna5::kSCvtPkRtzF16F32Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0})
+               : cdna5::build_sop1(cdna5::kSCvtHiF32F16Sop1, {.ssrc0 = 0, .sdst = 0});
     auto instruction = fixture.decoder->decode_window(words);
     ASSERT_TRUE(instruction.succeeded());
     ASSERT_TRUE(
         fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
-    EXPECT_EQ(fixture.cu->read_sgpr(base + 1),
-              semantics == ArithmeticSemantics::Loose ? 0x3f7f9322U : 0x3f7f9323U);
+    EXPECT_EQ(fixture.cu->read_sgpr(base), packed ? 0x80017c01U : 0x33800000U);
+    EXPECT_TRUE(fixture.wave->read_scc());
+    EXPECT_EQ(fixture.wave->exec(), 0U);
+    EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
   }
 }
-} // namespace
-} // namespace rocjitsu::amdgpu
 
-namespace rocjitsu::amdgpu {
-namespace {} // namespace
+// Loose honors overflow control; Compatibility retains gfx1250's legacy fixed narrowing.
+TEST(ArithBridgeTest, Gfx1250ScalarHalfFmacOverflow) {
+  for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+    BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, ArithmeticPolicy{semantics});
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.wave->set_exec(0);
+    const auto base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(base, 0x7bffu);
+    fixture.cu->write_sgpr(base + 1, 0x4000u);
+    const auto words = cdna5::build_sop2(cdna5::kSFmacF16Sop2, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2});
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    for (bool saturate : {false, true}) {
+      // Reset old D: an infinity left by the first call would conceal a missing flag.
+      fixture.cu->write_sgpr(base + 2, 0);
+      fixture.wave->set_mode_raw(saturate ? Wavefront::FP16_OVFL_BIT : 0);
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      const bool clamp = saturate && semantics == ArithmeticSemantics::Loose;
+      EXPECT_EQ(fixture.cu->read_sgpr(base + 2) & 0xffffu, clamp ? 0x7bffu : 0x7c00u);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250ScalarFmaCompatibility) {
+  for (uint32_t rounding = 0; rounding < 4; ++rounding) {
+    BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, {});
+    fixture.wave->set_exec(0);
+    fixture.wave->set_mode_raw(rounding | (3U << 4));
+    fixture.wave->set_trapsts(0x80000000U);
+    fixture.wave->write_scc(true);
+    auto base = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(base, 0x33800000U);
+    fixture.cu->write_sgpr(base + 1, 0x3f800000U);
+    const auto words = cdna5::build_sop2(cdna5::kSFmacF32Sop2, {.ssrc0 = 1, .ssrc1 = 1, .sdst = 0});
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+    EXPECT_EQ(fixture.cu->read_sgpr(base), rounding == 1 ? 0x3f800001U : 0x3f800000U);
+    EXPECT_TRUE(fixture.wave->read_scc());
+    EXPECT_EQ(fixture.wave->exec(), 0U);
+    EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250ScalarBinaryCompatibility) {
+  for (bool half : {false, true}) {
+    for (bool select : {false, true}) {
+      BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, {});
+      fixture.wave->set_exec(0);
+      fixture.wave->set_mode_raw(0);
+      fixture.wave->set_trapsts(0x80000000U);
+      fixture.wave->write_scc(true);
+      const auto base = fixture.wave->sgpr_alloc().base;
+      fixture.cu->write_sgpr(base, 1);
+      fixture.cu->write_sgpr(base + 1, 1);
+      const auto opcode = half ? (select ? cdna5::kSMaxNumF16Sop2 : cdna5::kSAddF16Sop2)
+                               : (select ? cdna5::kSMaxNumF32Sop2 : cdna5::kSAddF32Sop2);
+      const auto words = cdna5::build_sop2(opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0});
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_sgpr(base), select ? 0U : 2U);
+      EXPECT_TRUE(fixture.wave->read_scc());
+      EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
+      EXPECT_EQ(fixture.wave->exec(), 0U);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250ScalarRoundingCompatibility) {
+  for (bool half : {false, true}) {
+    for (uint32_t input : {1U, half ? 0x7c01U : 0x7f800001U}) {
+      BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, {});
+      fixture.wave->set_exec(0);
+      fixture.wave->set_mode_raw(0);
+      fixture.wave->set_trapsts(0x80000000U);
+      fixture.wave->write_scc(true);
+      const auto base = fixture.wave->sgpr_alloc().base;
+      fixture.cu->write_sgpr(base, input);
+      const auto words = cdna5::build_sop1(half ? cdna5::kSCeilF16Sop1 : cdna5::kSCeilF32Sop1,
+                                           {.ssrc0 = 0, .sdst = 0});
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_sgpr(base),
+                input == 1 ? (half ? 0x3c00U : 0x3f800000U) : input | (half ? 0x200U : 0x400000U));
+      EXPECT_TRUE(fixture.wave->read_scc());
+      EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
+      EXPECT_EQ(fixture.wave->exec(), 0U);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaScalarIntegerCarryFieldsAndCounts) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (bool carry : {false, true}) {
+      for (int operation = 0; operation < 4; ++operation) {
+        BridgeFixture fixture(arch, 32, {});
+        fixture.wave->set_exec(0);
+        fixture.wave->write_scc(carry);
+        const auto base = fixture.wave->sgpr_alloc().base;
+        fixture.cu->write_sgpr(base, operation == 0   ? 0xffffffffU
+                                     : operation == 3 ? 0x80000000U
+                                                      : 0xfU);
+        fixture.cu->write_sgpr(base + 1, 0xffffffffU);
+        fixture.cu->write_sgpr(base + 2, operation == 0 ? 0 : operation == 3 ? 1 : 0x00200010U);
+        std::array<uint32_t, 1> words;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+          if (operation == 2) {
+            words = cdna3::build_sop1(cdna3::kSBcnt1I32B64Sop1, {.ssrc0 = 0, .sdst = 0});
+          } else {
+            words = cdna3::build_sop2(operation == 0   ? cdna3::kSAddcU32Sop2
+                                      : operation == 1 ? cdna3::kSBfeU64Sop2
+                                                       : cdna3::kSAbsdiffI32Sop2,
+                                      {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0});
+          }
+        } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+          if (operation == 2) {
+            words = cdna4::build_sop1(cdna4::kSBcnt1I32B64Sop1, {.ssrc0 = 0, .sdst = 0});
+          } else {
+            words = cdna4::build_sop2(operation == 0   ? cdna4::kSAddcU32Sop2
+                                      : operation == 1 ? cdna4::kSBfeU64Sop2
+                                                       : cdna4::kSAbsdiffI32Sop2,
+                                      {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0});
+          }
+        } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          if (operation == 2) {
+            words = cdna5::build_sop1(cdna5::kSBcnt1I32B64Sop1, {.ssrc0 = 0, .sdst = 0});
+          } else {
+            words = cdna5::build_sop2(operation == 0   ? cdna5::kSAddCoCiU32Sop2
+                                      : operation == 1 ? cdna5::kSBfeU64Sop2
+                                                       : cdna5::kSAbsdiffI32Sop2,
+                                      {.ssrc0 = 0, .ssrc1 = 2, .sdst = 0});
+          }
+        }
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        const uint32_t expected = operation == 0   ? (carry ? 0 : 0xffffffffU)
+                                  : operation == 1 ? 0xffff0000U
+                                  : operation == 2 ? 36
+                                                   : 0x7fffffffU;
+        EXPECT_EQ(fixture.cu->read_sgpr(base), expected);
+        EXPECT_EQ(fixture.cu->read_sgpr(base + 1), operation == 1 ? 0 : 0xffffffffU);
+        EXPECT_EQ(fixture.wave->read_scc(), operation == 0 ? carry : true);
+        EXPECT_EQ(fixture.wave->exec(), 0U);
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, CdnaScalarScansPreserveCondition) {
+  struct Case {
+    uint64_t input;
+    uint32_t first, sign;
+  };
+  constexpr Case cases[] = {{0, UINT32_MAX, UINT32_MAX},
+                            {1, 0, 63},
+                            {0x8000000000000000ULL, 63, 1},
+                            {UINT64_MAX, 0, UINT32_MAX}};
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (bool signed_scan : {false, true}) {
+      for (const auto &test : cases) {
+        BridgeFixture fixture(arch, 32, {});
+        fixture.wave->set_exec(0);
+        fixture.wave->write_scc(signed_scan);
+        const auto base = fixture.wave->sgpr_alloc().base;
+        fixture.cu->write_sgpr(base, uint32_t(test.input));
+        fixture.cu->write_sgpr(base + 1, uint32_t(test.input >> 32));
+        std::array<uint32_t, 1> words;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+          words = cdna3::build_sop1(signed_scan ? cdna3::kSFlbitI32I64Sop1 : cdna3::kSFf1I32B64Sop1,
+                                    {.ssrc0 = 0, .sdst = 0});
+        } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+          words = cdna4::build_sop1(signed_scan ? cdna4::kSFlbitI32I64Sop1 : cdna4::kSFf1I32B64Sop1,
+                                    {.ssrc0 = 0, .sdst = 0});
+        } else {
+          words = cdna5::build_sop1(signed_scan ? cdna5::kSClsI32I64Sop1 : cdna5::kSCtzI32B64Sop1,
+                                    {.ssrc0 = 0, .sdst = 0});
+        }
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        EXPECT_EQ(fixture.cu->read_sgpr(base), signed_scan ? test.sign : test.first);
+        EXPECT_EQ(fixture.cu->read_sgpr(base + 1), uint32_t(test.input >> 32));
+        EXPECT_EQ(fixture.wave->read_scc(), signed_scan);
+        EXPECT_EQ(fixture.wave->exec(), 0U);
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250ScalarCompareCompatibility) {
+  for (bool half : {false, true}) {
+    for (uint32_t input : {1U, half ? 0x7c01U : 0x7f800001U}) {
+      BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA5, 32, {});
+      fixture.wave->set_exec(0);
+      fixture.wave->set_mode_raw(0); // Request guest input/output flushing.
+      fixture.wave->set_trapsts(0x80000000U);
+      fixture.cu->write_sgpr(fixture.wave->sgpr_alloc().base, input);
+      fixture.cu->write_sgpr(fixture.wave->sgpr_alloc().base + 1, 0);
+      const auto words = cdna5::build_sopc(half ? cdna5::kSCmpEqF16Sopc : cdna5::kSCmpEqF32Sopc,
+                                           {.ssrc0 = 0, .ssrc1 = 1});
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_FALSE(fixture.wave->read_scc());
+      EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
+      EXPECT_EQ(fixture.wave->exec(), 0U);
+    }
+  }
+}
+
+// RDNA2 constant predicates retain strict-mode support and signaling CLAMP status.
+TEST(ArithBridgeTest, Rdna2TruePredicatesRetainLegacyStatus) {
+  ArithmeticPolicy policy{};
+  policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+  for (bool update_exec : {false, true}) {
+    for (bool clamp : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << update_exec << ":" << clamp);
+      BridgeFixture fixture(ROCJITSU_CODE_ARCH_RDNA2, 32, policy);
+      fixture.wave->set_exec(1);
+      fixture.wave->set_mode_raw(0x200); // IEEE, no DX10 NaN clamping.
+      fixture.wave->set_trapsts(0);
+      fixture.cu->write_vgpr(fixture.base(), 0, clamp ? 0x7fc00000U : 0x3f800000U);
+      auto words = rdna2::build_vop3(update_exec ? rdna2::kVCmpxTruF32Vop3 : rdna2::kVCmpTruF32Vop3,
+                                     {.vdst = uint8_t(update_exec ? 126 : 106),
+                                      .clamp = uint8_t(clamp),
+                                      .src0 = 256,
+                                      .src1 = 256});
+      util::StringDiagnostic diagnostic;
+      auto inst = fixture.decoder->decode_window(words, 0, diagnostic.emitter());
+      ASSERT_TRUE(inst.succeeded()) << diagnostic.message();
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+      if (!update_exec) {
+        EXPECT_EQ(fixture.wave->vcc_mask(), 1U);
+      }
+      EXPECT_EQ(fixture.wave->trapsts() & 1U, uint32_t(clamp));
+      EXPECT_EQ(fixture.wave->exec(), 1U);
+    }
+  }
+}
+
+} // namespace
 } // namespace rocjitsu::amdgpu

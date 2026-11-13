@@ -8,10 +8,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/separately_rounded_mad.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -187,18 +186,7 @@ RJ_NOINLINE void VSubrevF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
 }
 
 void VMacLegacyF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
-        *this, wf, vdst, lane,
-        std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)),
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)),
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vdst, lane)),
-            wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode())));
-  }
+  amdgpu::execute_separately_rounded_mad<true>(*this, wf, vdst, src0, vsrc1, vdst);
 }
 
 void VMulLegacyF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -955,7 +943,7 @@ void VMacF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_mac_f32_vop2(*this, wf);
+  amdgpu::execute_separately_rounded_mad<false>(*this, wf, vdst, src0, vsrc1, vdst);
 }
 
 RJ_NOINLINE void VMacF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -977,16 +965,16 @@ RJ_NOINLINE void VMacF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_mac_f32_vop2(*this, wf);
+  amdgpu::execute_separately_rounded_mad<false>(*this, wf, vdst, src0, vsrc1, vdst);
   dpp_write_mask_scope_.restore();
 }
 
 void VMadmkF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_madmk_f32_vop2(*this, wf);
+  amdgpu::execute_separately_rounded_mad<false>(*this, wf, vdst, src0, simm32, vsrc1);
 }
 
 void VMadakF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_madak_f32_vop2(*this, wf);
+  amdgpu::execute_separately_rounded_mad<false>(*this, wf, vdst, src0, vsrc1, simm32);
 }
 
 void VAddNcU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -1348,6 +1336,8 @@ void VAddF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  CapturedArithmeticSource lhs_input(wf, src0, 0x3);
+  CapturedArithmeticSource rhs_input(wf, vsrc1, 0x3);
   amdgpu::execute_v_add_f16_vop2(*this, wf);
 }
 
@@ -1359,9 +1349,9 @@ RJ_NOINLINE void VAddF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
   if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, wf.exec(), dpp_src0_, wf);
+    amdgpu::dpp::apply_dpp(src0, dpp_plan_, wf.exec(), dpp_src0_, wf, 0x3);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf, 0x3);
   if (inst_.src0 == amdgpu::SRC_SDWA) {
     amdgpu::sdwa::stage_source(src0, sdwa_src0_sel_, sdwa_src0_sext_, sdwa_src0_neg_,
                                sdwa_src0_abs_, amdgpu::sdwa::SourceModifierFormat::F16, dpp_src0_,
@@ -1379,6 +1369,8 @@ RJ_NOINLINE void VAddF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  CapturedArithmeticSource lhs_input(wf, src0, 0x3);
+  CapturedArithmeticSource rhs_input(wf, vsrc1, 0x3);
   amdgpu::execute_v_add_f16_vop2(*this, wf);
   dpp_write_mask_scope_.restore();
 }

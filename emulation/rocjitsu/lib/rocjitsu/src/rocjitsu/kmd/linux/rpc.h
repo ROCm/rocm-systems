@@ -29,12 +29,15 @@ namespace rocjitsu {
 
 /// @brief RPC operation codes.
 enum RpcOpcode : uint16_t {
-  RPC_HANDSHAKE, ///< Initial handshake — response carries topology path.
-  RPC_OPEN,      ///< Open the KFD device.
-  RPC_CLOSE,     ///< Close the client connection.
-  RPC_MMAP,      ///< Map GPU memory — payload is RpcMmapRequest.
-  RPC_MUNMAP,    ///< Unmap GPU memory — payload is RpcMunmapRequest.
-  RPC_IOCTL,     ///< KFD ioctl passthrough — payload is RpcIoctlRequest + args.
+  RPC_HANDSHAKE,         ///< Initial handshake — response carries topology path.
+  RPC_OPEN,              ///< Open the KFD device.
+  RPC_CLOSE,             ///< Close the client connection.
+  RPC_MMAP,              ///< Map GPU memory — payload is RpcMmapRequest.
+  RPC_MUNMAP,            ///< Unmap GPU memory — payload is RpcMunmapRequest.
+  RPC_IOCTL,             ///< KFD ioctl passthrough — payload is RpcIoctlRequest + args.
+  RPC_HOST_VMA_REPLACED, ///< Update SVM policy and USERPTR VMA lifetime.
+  RPC_GEM_VA,            ///< Update a client process's DRM GEM GPU mappings.
+  RPC_QUERY_MTYPE,       ///< Inspect this client's PTE policy for a test assertion.
 };
 
 /// @brief Unified RPC message header (16 bytes, fixed size).
@@ -49,7 +52,7 @@ struct RpcHeader {
 };
 
 /// @brief RPC protocol version. Increment when making breaking changes.
-inline constexpr uint32_t kRpcProtocolVersion = 6;
+inline constexpr uint32_t kRpcProtocolVersion = 8;
 
 /// @brief Largest payload the daemon accepts after an RpcHeader.
 /// @details The daemon rejects — and disconnects — any client whose header
@@ -94,10 +97,52 @@ struct RpcMmapResponse {
   uint64_t mapped_addr; ///< Address the daemon mapped at (informational).
 };
 
-/// @brief munmap request payload (when opcode == RPC_MUNMAP).
+/// @brief munmap request payload.
 struct RpcMunmapRequest {
   uint64_t addr;   ///< Address of the mapping to unmap.
   uint64_t length; ///< Length in bytes to unmap.
+};
+
+/// @brief Retire daemon policy for client host VMA bytes changed by a syscall.
+/// @details Successful destructive MAP_FIXED, munmap, and mremap operations
+/// report ranges that may carry daemon policy; KFD mappings and USERPTR
+/// promotion also report their replaced bytes. The daemon clears per-GPU SVM
+/// access, host-backed tombstones, and stale USERPTR VMA spans, preserving the
+/// promoted USERPTR handle when requested. The client orders the syscall and
+/// this notification with SVM and USERPTR ioctls under its RPC lock; the host
+/// mapping lock covers only the syscall. Both peers must implement this
+/// notification so the daemon cannot retain policy for reused host VAs.
+struct RpcHostVmaReplacedRequest {
+  uint64_t addr;
+  uint64_t length;
+  // USERPTR promotion replaces its source VMA with this allocation's shared
+  // view. Keep only that handle's lifetime tracking while clearing old policy.
+  uint64_t preserve_userptr_handle;
+};
+
+enum RpcGemVaOperation : uint32_t {
+  RPC_GEM_VA_PREFLIGHT,
+  RPC_GEM_VA_MAP,
+  RPC_GEM_VA_UNMAP,
+  RPC_GEM_VA_REPLACE,
+};
+
+/// @brief One GEM page-table operation for the process owning the connection.
+/// @details MAP and REPLACE carry the backing descriptor in SCM_RIGHTS. REPLACE
+/// installs the new backing before retiring overlapping mappings of the same
+/// DRM file. The daemon keeps its own mapping alive until UNMAP or client close;
+/// offsets refer to that backing, never to a client virtual address.
+struct RpcGemVaRequest {
+  uint32_t operation;
+  uint32_t alloc_flags;
+  uint64_t drm_file_id;
+  uint64_t va_address;
+  uint64_t map_size;
+  uint64_t offset_in_bo;
+};
+
+struct RpcQueryMtypeRequest {
+  uint64_t va_address;
 };
 
 static_assert(sizeof(RpcHeader) == 16);
@@ -107,6 +152,9 @@ static_assert(sizeof(RpcIoctlRequest) == 8);
 static_assert(sizeof(RpcMmapRequest) == 32);
 static_assert(sizeof(RpcMmapResponse) == 8);
 static_assert(sizeof(RpcMunmapRequest) == 16);
+static_assert(sizeof(RpcHostVmaReplacedRequest) == 24);
+static_assert(sizeof(RpcGemVaRequest) == 40);
+static_assert(sizeof(RpcQueryMtypeRequest) == 8);
 
 /// @brief Send a message with optional ancillary file descriptors.
 /// @param sock Connected Unix domain socket fd.

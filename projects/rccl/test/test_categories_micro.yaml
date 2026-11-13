@@ -66,6 +66,8 @@ test_categories:
       - "RmaPluginInitTest.*"
       # tuning/tuning_general.cc
       - "TuningGeneralMicrotest.*"
+      # tuning/cost_model.cc
+      - "CostModelMicrotest.*"
       # tuning/tuning.cc
       - "TuningMicrotest.*"
       # plugin/tuner/csv_tuner.cc
@@ -93,6 +95,7 @@ test_categories:
       - "MgmtTaskJobFuncTest.*"
       - "GroupRegisterSymmetricCeInitTest.*"
       - "GroupRegisterSymmetricTest.*"
+      - "GroupRegisterSymmetricDevCommTest.*"
       - "GroupCleanupTest.*"
       - "AsyncJobLaunchDirectTest.*"
       # rccl_wrap.cc
@@ -104,6 +107,7 @@ test_categories:
       - "DvSymbolsTestIsolated.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
+      - "CeInitMicrotest.*"
       - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
       # graph/rccl_graph_gen.cc
       - "GraphGenPermuteTest.*"

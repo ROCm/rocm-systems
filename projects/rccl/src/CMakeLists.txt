@@ -41,6 +41,8 @@ set(SRC_FILES
   algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu
   algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu
   algorithms/dda/alltoall/dda_alltoall_ipc.cu
+  algorithms/dda/broadcast/dda_broadcast_fabric_ll.cu
+  algorithms/dda/broadcast/dda_broadcast_fabric_ll128.cu
   algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu
   algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu
   algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu
@@ -156,12 +158,14 @@ set(SRC_FILES
   algorithms/dda/all_reduce/all_reduce_dda_ll.h
   algorithms/dda/all_reduce/all_reduce_dda_ll128.h
   algorithms/dda/all_reduce/all_reduce_dda_ll128_twoshot.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll_spread.h
   algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h
   algorithms/dda/alltoall/alltoall_dda.h
   algorithms/dda/alltoall/alltoall_dda_fabric.h
   algorithms/dda/alltoall/alltoall_dda_fabric_tdm.h
   algorithms/dda/alltoall/alltoall_dda_fabric_ll.h
   algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h
+  algorithms/dda/broadcast/broadcast_dda_fabric_ll.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
@@ -200,6 +204,7 @@ set(SRC_FILES
   algorithms/dda/all_gather/dda_all_gather.h
   algorithms/dda/all_reduce/dda_all_reduce.h
   algorithms/dda/alltoall/dda_alltoall.h
+  algorithms/dda/broadcast/dda_broadcast.h
   algorithms/dda/dda_init_detail.h
   algorithms/dda/reduce_scatter/dda_reduce_scatter.h
   include/debug.h
@@ -1017,6 +1022,8 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric_ll128\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll128\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_broadcast_fabric_ll\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_broadcast_fabric_ll128\\.cu\\.cpp$")
   # ce_reduce.cc is now pure host code (a dispatcher calling into the
   # per-instantiation launchers generated under gensrc/ce_reduce/, which are
   # excluded above by the "gensrc/.*\\.cpp$" filter and compiled separately
