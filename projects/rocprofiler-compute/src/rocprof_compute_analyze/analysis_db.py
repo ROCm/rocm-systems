@@ -77,12 +77,6 @@ from utils.metrics.aggregation import (
 from utils.metrics.common import EVAL_BUILTINS, ValuDualIssueDetector
 from utils.metrics.expression import build_eval_string, transform_expression
 from utils.metrics.metric_evaluator import counter_table_index, table_holds
-from utils.metrics.noise_clamper import (
-    clear_noise_clamp_warnings,
-    get_noise_clamp_warnings,
-    print_noise_clamp_summary,
-    to_noise_clamp,
-)
 from utils.mi_gpu_spec import mi_gpu_specs, roofline_column
 from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
@@ -1018,7 +1012,6 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df: pd.DataFrame,
         sys_info: dict[str, Any],  # noqa ANN401
         parse: bool = False,
-        emit_variance_warnings: bool = False,
     ) -> Any:  # noqa ANN401
         if parse:
             original_value = value
@@ -1041,7 +1034,6 @@ class db_analysis(OmniAnalyze_Base):
                 value,
             )
         try:
-            prev_noise_clamp_count = get_noise_clamp_warnings()["count"]
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always", RuntimeWarning)
                 eval_result = eval(
@@ -1062,7 +1054,6 @@ class db_analysis(OmniAnalyze_Base):
                         "to_round": to_round,
                         "to_std": to_std,
                         "to_sum": to_sum,
-                        "to_noise_clamp": to_noise_clamp,
                     },
                 )
             # RuntimeWarnings (e.g. divide-by-zero) are surfaced only under --verbose
@@ -1100,11 +1091,6 @@ class db_analysis(OmniAnalyze_Base):
                     )
                 return None
 
-            if (
-                emit_variance_warnings
-                and get_noise_clamp_warnings()["count"] > prev_noise_clamp_count
-            ):
-                console_warning(f"Variance corrected for metric: {name}")
             return eval_result
         except Exception as e:
             record_failed_expression(
@@ -1137,7 +1123,6 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df: pd.DataFrame,
         sys_info: dict,
         expression_df: pd.DataFrame,
-        emit_variance_warnings: bool = False,
         pass_tables: Optional[list[pd.DataFrame]] = None,
     ) -> pd.Series:
         """Evaluate each expression row.
@@ -1174,7 +1159,6 @@ class db_analysis(OmniAnalyze_Base):
                     row.value,
                     tables[index],
                     table_sys_infos[index],
-                    emit_variance_warnings=emit_variance_warnings,
                 )
             )
         return pd.Series(values, index=expression_df.index)
@@ -1289,18 +1273,14 @@ class db_analysis(OmniAnalyze_Base):
             else:
                 kernel_values_data[workload_path] = pd.DataFrame()
 
-            # Variance warnings are emitted at workload-level, not per kernel.
             console_debug(f"Processing workload: {workload_path}")
-            clear_noise_clamp_warnings()
             workload_expression_df = expression_template.copy()
             workload_expression_df["value"] = db_analysis.calc_dataframe_expressions(
                 pmc_df,
                 sys_info.copy(),
                 workload_expression_df,
-                emit_variance_warnings=True,
                 pass_tables=[table.loc[pmc_df.index] for table in pass_tables],
             )
-            print_noise_clamp_summary()
             db_analysis.validate_dual_issue_metrics(
                 pmc_df,
                 sys_info,

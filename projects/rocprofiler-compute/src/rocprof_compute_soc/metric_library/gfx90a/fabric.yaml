@@ -42,11 +42,11 @@ fabric.rd_lat:
 fabric.rd_uncached:
   formula: SUM(TCC_EA_RD_UNCACHED_32B_sum) / SUM($denom)
 fabric.remote_rd:
-  formula: SUM(NOISE_CLAMP(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum, TCC_EA_RDREQ_sum)) / SUM($denom)
+  formula: SUM(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / SUM($denom)
 fabric.remote_rd_traffic:
   formula: 100 * SUM(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / SUM(TCC_EA_RDREQ_sum)
 fabric.remote_wr_atomic:
-  formula: SUM(NOISE_CLAMP(TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum, TCC_EA_WRREQ_sum)) / SUM($denom)
+  formula: SUM(TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / SUM($denom)
 fabric.remote_wr_atomic_traffic:
   formula: 100 * SUM(TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / SUM(TCC_EA_WRREQ_sum)
 fabric.uncached_rd_traffic:
@@ -54,7 +54,7 @@ fabric.uncached_rd_traffic:
 fabric.uncached_wr_atomic_traffic:
   formula: 100 * SUM(TCC_EA_WR_UNCACHED_32B_sum) / SUM(TCC_EA_WRREQ_sum)
 fabric.wr_atomic_32b:
-  formula: AVG(NOISE_CLAMP((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom, TCC_EA_WRREQ_sum))
+  formula: AVG((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom)
 fabric.wr_atomic_64b:
   formula: SUM(TCC_EA_WRREQ_64B_sum) / SUM($denom)
 fabric.wr_atomic_bw:

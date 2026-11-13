@@ -17,10 +17,6 @@ from utils.metrics.evaluation_pipeline import (
     eval_metric,
     validate_dual_issue_metrics,
 )
-from utils.metrics.noise_clamper import (
-    clear_noise_clamp_warnings,
-    get_noise_clamp_warnings,
-)
 
 # =============================================================================
 # Tests for utils.metrics.evaluation_pipeline
@@ -235,54 +231,6 @@ class TestEvaluationPipeline:
                 debug=False,
             )
         assert metric_df.loc["1.1.0", "Average"] == ""
-
-    def test_eval_metric_noise_clamp(self):
-        """eval_metric emits per-metric variance warning + summary on clamp."""
-        # Negative DIFF over a positive REF crosses the 1% threshold and bumps
-        # the noise-clamp counter when to_noise_clamp evaluates the expression.
-        fixture = self._build_eval_metric_inputs(
-            metric_fields={
-                "Value": (
-                    "to_noise_clamp("
-                    "to_min(raw_pmc_df['DIFF']), "
-                    "to_max(raw_pmc_df['REF']))"
-                ),
-            }
-        )
-        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
-        raw_pmc_df = pd.DataFrame({
-            "GRBM_GUI_ACTIVE": [1000],
-            "DIFF": [-100.0],
-            "REF": [1000.0],
-        })
-
-        clear_noise_clamp_warnings()
-        with patch(
-            "utils.utils_counter_defs.Collectables.of_arch", return_value={}
-        ), patch(
-            "utils.metrics.evaluation_pipeline.console_warning"
-        ) as mock_console_warning, patch(
-            "utils.metrics.evaluation_pipeline.print_noise_clamp_summary"
-        ) as mock_print_summary:
-            eval_metric(
-                dfs,
-                dfs_type,
-                dfs_expressions,
-                sys_info,
-                pd.DataFrame(),
-                raw_pmc_df,
-                debug=False,
-            )
-
-        assert get_noise_clamp_warnings()["count"] >= 1
-        variance_calls = [
-            call_args
-            for call_args in mock_console_warning.call_args_list
-            if "Variance corrected for metric:" in call_args.args[0]
-        ]
-        assert len(variance_calls) == 1
-        assert "Test Metric" in variance_calls[0].args[0]
-        mock_print_summary.assert_called_once()
 
     @pytest.mark.parametrize(
         "gui_active_counter",

@@ -27,7 +27,6 @@ from utils.metrics.aggregation import (
 )
 from utils.metrics.common import EVAL_BUILTINS
 from utils.metrics.expression import columns_read
-from utils.metrics.noise_clamper import to_noise_clamp
 
 
 def counter_table_index(
@@ -90,7 +89,6 @@ class MetricEvaluator:
                 "to_quantile": to_quantile,
                 "to_mod": to_mod,
                 "to_concat": to_concat,
-                "to_noise_clamp": to_noise_clamp,
             })
 
             with warnings.catch_warnings(record=True) as caught:

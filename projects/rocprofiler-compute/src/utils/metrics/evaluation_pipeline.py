@@ -20,11 +20,6 @@ from utils.metrics.metric_evaluator import (
     counter_table_index,
     table_holds,
 )
-from utils.metrics.noise_clamper import (
-    clear_noise_clamp_warnings,
-    get_noise_clamp_warnings,
-    print_noise_clamp_summary,
-)
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
 from utils.utils_common import SUPPORTED_FIELD
@@ -176,9 +171,6 @@ def eval_metric(
         merged_values.update(values)
     sys_vars.update(merged_values)
 
-    # Clear any previous noise clamp warnings before this analysis
-    clear_noise_clamp_warnings()
-
     # One evaluator per pass table, with that pass's collectables. The merged
     # table's evaluator comes last.
     evaluators = [
@@ -237,21 +229,7 @@ def eval_metric(
                             df.at[row_id, expr] = ""
 
     for df_id, row_id, col, expr, evaluator in exprs_to_eval:
-        noise_clamp_count_prev = get_noise_clamp_warnings()["count"]
-        eval_result = evaluator.eval_expression(expr)
-        noise_clamp_count_new = get_noise_clamp_warnings()["count"]
-        if (
-            noise_clamp_count_new > noise_clamp_count_prev
-            and "Metric" in dfs[df_id].columns
-        ):
-            metric_name = dfs[df_id].loc[row_id, "Metric"]
-            console_warning(
-                f"Variance corrected for metric: {row_id} {metric_name} {col}"
-            )
-        dfs[df_id].loc[row_id, col] = eval_result
-
-    # Print aggregated summary of any noise clamping warnings
-    print_noise_clamp_summary()
+        dfs[df_id].loc[row_id, col] = evaluator.eval_expression(expr)
 
     # Derive Percent of Peak from evaluated Value and Peak columns
     compute_pct_of_peak(dfs, dfs_type)
