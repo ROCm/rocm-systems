@@ -83,7 +83,7 @@ jobs:
       # Step anchors: steps shared identically with the system-deps job are
       # anchored here (_step-*) and aliased below to avoid duplication.
       - &_step-checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
@@ -140,7 +140,7 @@ jobs:
           fi
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ matrix.ccache_key_distro }}-${{ matrix.image }}-${{ github.job }}-${{ matrix.distro }}-${{ matrix.compiler }}-${{ github.sha }}
@@ -198,7 +198,7 @@ jobs:
           echo "CMake: $(cmake --version | head -n 1)"
           echo "Compiler: $(${{ matrix.compiler }} --version | head -n 1)"
           python3 ./scripts/run-ci.py --stage generate \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             --build-jobs $(nproc) \
             --site GitHub \
             -B build \
@@ -217,7 +217,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage configure \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             -B build
 
       - name: Build
@@ -226,7 +226,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage build \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             -B build
 
       - &_step-cdash-link
@@ -236,7 +236,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage cdash-link \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}"
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}"
 
       - name: Test
         timeout-minutes: 60
@@ -244,13 +244,13 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage test \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             -B build
 
       - &_step-upload-junit-results
         name: Upload JUnit test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: junit-build-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}
           path: projects/rocprofiler-systems/build/test-results.xml
@@ -353,7 +353,7 @@ jobs:
         name: CTest artifacts
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ctest-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}-log
           path: |
@@ -363,7 +363,7 @@ jobs:
         name: Data artifacts
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: data-${{ inputs.group_key }}-${{ github.job }}-${{ strategy.job-index }}-files
           path: |
@@ -479,7 +479,7 @@ jobs:
             dnf clean all
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ matrix.ccache_key_distro }}-${{ matrix.image }}-${{ github.job }}-${{ matrix.compiler }}-${{ github.sha }}
@@ -503,7 +503,7 @@ jobs:
           echo "Compiler: $(${{ matrix.compiler }} --version | head -n 1)"
           echo "Testing build with SYSTEM dependencies (ROCPROFSYS_BUILD_ELFUTILS=OFF) and a from-source libiberty (ROCPROFSYS_BUILD_LIBIBERTY=ON)"
           python3 ./scripts/run-ci.py --stage generate \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             --build-jobs $(nproc) \
             --site GitHub \
             -B build \
@@ -523,7 +523,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage configure \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             -B build
 
       - name: Build
@@ -532,7 +532,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage build \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             -B build
 
       - *_step-cdash-link
@@ -543,7 +543,7 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           python3 ./scripts/run-ci.py --stage test \
-            --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
+            --name "${{ github.repository_owner }}-${GITHUB_REF_NAME}-${{ matrix.cdash_suffix }}" \
             -B build
 
       - *_step-upload-junit-results

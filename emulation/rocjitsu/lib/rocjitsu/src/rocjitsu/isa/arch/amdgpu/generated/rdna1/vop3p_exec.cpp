@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -24,7 +25,26 @@ void VPkMadI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkMulLoU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mul_lo_u16_vop3p(*this, wf);
+  const uint32_t negations = amdgpu::packed_integer_negations(wf.cu().arch(), inst_);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    const uint32_t a =
+        amdgpu::select_packed_halves(raw0, inst_.op_sel, inst_.op_sel_hi, 0, negations);
+    const auto a_lo = static_cast<uint16_t>(a);
+    const auto a_hi = static_cast<uint16_t>(a >> 16);
+    const uint32_t b =
+        amdgpu::select_packed_halves(raw1, inst_.op_sel, inst_.op_sel_hi, 1, negations);
+    const auto b_lo = static_cast<uint16_t>(b);
+    const auto b_hi = static_cast<uint16_t>(b >> 16);
+    uint16_t rlo = static_cast<uint16_t>(amdgpu::vop3_integer_mul<uint16_t, 16>(a_lo, b_lo, false));
+    uint16_t rhi = static_cast<uint16_t>(amdgpu::vop3_integer_mul<uint16_t, 16>(a_hi, b_hi, false));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
+  }
 }
 
 void VPkAddI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {

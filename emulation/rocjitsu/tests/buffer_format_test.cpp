@@ -67,6 +67,7 @@
 #include <memory>
 
 namespace {
+constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
 using namespace rocjitsu;
 constexpr uint32_t identity = 4 | (5 << 3) | (6 << 6) | (7 << 9);
 constexpr uint32_t bgra = 6 | (5 << 3) | (4 << 6) | (7 << 9);
@@ -1877,11 +1878,13 @@ TEST_P(RdnaLegacyFormatDecodeTest, Gfx10BoundsUseElementStartsAndLaneAdjustedInd
     bool swizzle, add_tid;
     std::array<uint32_t, 3> first, second;
   };
-  constexpr Case cases[] = {
-      // Mode 0 accepts the first dword start at byte 12 of a 16-byte record.
-      {12, 0, 0, 4, false, false, {103, 103, 103}, {0, 0, 0}},
+  const bool inclusive_stride = GetParam() == ROCJITSU_CODE_ARCH_RDNA1;
+  const uint32_t boundary = inclusive_stride ? 104u : 0u;
+  const Case cases[] = {
+      // The second dword starts exactly at the stride, accepted on GFX10.1.
+      {12, 0, 0, 4, false, false, {103, 103, 103}, {boundary, boundary, boundary}},
       // Modes 0 and 1 check the ADD_TID-adjusted index even with IDXEN clear.
-      {12, 0, 0, 1, false, true, {103, 0, 0}, {0, 0, 0}},
+      {12, 0, 0, 1, false, true, {103, 0, 0}, {boundary, 0, 0}},
       {0, 0, 1, 1, false, true, {100, 0, 0}, {101, 0, 0}},
       // Swizzled mode 3 checks a per-row payload and reduces the record
       // limit by SOFFSET before index checking. This is the modeled policy.
@@ -1892,7 +1895,7 @@ TEST_P(RdnaLegacyFormatDecodeTest, Gfx10BoundsUseElementStartsAndLaneAdjustedInd
     SCOPED_TRACE(testing::Message() << test.mode << ':' << test.records << ':' << test.offset);
     cu->write_sgpr(sb + 1, (16u << 16) | (test.swizzle ? 1u << 31 : 0));
     cu->write_sgpr(sb + 2, test.records);
-    cu->write_sgpr(sb + 3, (test.mode << 28) | (test.add_tid ? 1u << 23 : 0));
+    cu->write_sgpr(sb + 3, (test.mode << 28) | (test.add_tid ? 1u << 23 : 0) | kRdnaFormat32);
     const auto words =
         GetParam() == ROCJITSU_CODE_ARCH_RDNA1
             ? rdna1::build_mubuf(rdna1::kBufferLoadDwordx2,

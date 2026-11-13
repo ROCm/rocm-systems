@@ -3571,7 +3571,7 @@
       "num_gpus": 1,
       "timeout": 600,
       "env_variables": {
-        "ARCH": "gfx1250"
+        "ARCH": "gfx942"
       },
       "tests": [
         {
