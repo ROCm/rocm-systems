@@ -472,7 +472,13 @@ class MemChart:
     def render(self, chart_title: str) -> str:
         """The chart as text with terminal colors."""
         buf = StringIO()
-        console = Console(file=buf, force_terminal=True, width=_MAX_CONSOLE_WIDTH)
+        # Rich ignores width alone under TERM=dumb and falls back to 80 columns
+        console = Console(
+            file=buf,
+            force_terminal=True,
+            width=_MAX_CONSOLE_WIDTH,
+            height=_MAX_CONSOLE_WIDTH,
+        )
         console.print(self._renderable(chart_title))
         return buf.getvalue()
 

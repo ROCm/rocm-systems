@@ -61,6 +61,7 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
+      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -154,6 +155,7 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
+      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -261,6 +263,7 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
+      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -368,6 +371,7 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
+      - test_sdk_config
       - test-pc-sampling-collector
       - test-compression
       - test-csv

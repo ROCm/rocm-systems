@@ -1,0 +1,23 @@
+Panel Config:
+  id: 1700
+  alias: grbm
+  title: Graphics Register Bus Manager (GRBM)
+  data source:
+  - metric_table:
+      id: 1701
+      title: GRBM Metrics
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GPU Busy:
+          avg: 100 * SUM(GRBM_GUI_ACTIVE) / SUM(GRBM_COUNT)
+          min: MIN(100 * GRBM_GUI_ACTIVE / GRBM_COUNT)
+          max: MAX(100 * GRBM_GUI_ACTIVE / GRBM_COUNT)
+          unit: Percent
+  metrics_description:
+    GPU Busy: >-
+      Percentage of GRBM counted cycles with the GPU active.

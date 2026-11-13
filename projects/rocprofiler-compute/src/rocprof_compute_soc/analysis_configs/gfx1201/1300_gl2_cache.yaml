@@ -1,0 +1,91 @@
+Panel Config:
+  id: 1300
+  alias: gl2
+  title: GL2 Cache (L2)
+  data source:
+  - metric_table:
+      id: 1310
+      title: GL2 Cache Request Statistics
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Total Requests:
+          avg: SUM(GL2C_REQ_sum) / SUM($denom)
+          min: MIN(GL2C_REQ_sum / $denom)
+          max: MAX(GL2C_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+        Read Requests:
+          avg: SUM(GL2C_READ_sum) / SUM($denom)
+          min: MIN(GL2C_READ_sum / $denom)
+          max: MAX(GL2C_READ_sum / $denom)
+          unit: (Count + $normUnit)
+        Write Requests:
+          avg: SUM(GL2C_WRITE_sum) / SUM($denom)
+          min: MIN(GL2C_WRITE_sum / $denom)
+          max: MAX(GL2C_WRITE_sum / $denom)
+          unit: (Count + $normUnit)
+        Atomic Requests:
+          avg: SUM(GL2C_ATOMIC_sum) / SUM($denom)
+          min: MIN(GL2C_ATOMIC_sum / $denom)
+          max: MAX(GL2C_ATOMIC_sum / $denom)
+          unit: (Count + $normUnit)
+        EA Read Requests (Memory):
+          avg: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
+          min: MIN(GL2C_EA_RDREQ_DRAM_sum / $denom)
+          max: MAX(GL2C_EA_RDREQ_DRAM_sum / $denom)
+          unit: (Count + $normUnit)
+        EA Write Requests (Memory):
+          avg: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
+          min: MIN(GL2C_EA_WRREQ_DRAM_sum / $denom)
+          max: MAX(GL2C_EA_WRREQ_DRAM_sum / $denom)
+          unit: (Count + $normUnit)
+  - metric_table:
+      id: 1311
+      title: GL2 Cache Performance
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GL2 Cache Hit Rate:
+          avg: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
+          min: MIN(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
+          max: MAX(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
+          unit: Percent
+        GL2 Cache Hits:
+          avg: SUM(GL2C_HIT_sum) / SUM($denom)
+          min: MIN(GL2C_HIT_sum / $denom)
+          max: MAX(GL2C_HIT_sum / $denom)
+          unit: (Count + $normUnit)
+        GL2 Cache Misses:
+          avg: SUM(GL2C_MISS_sum) / SUM($denom)
+          min: MIN(GL2C_MISS_sum / $denom)
+          max: MAX(GL2C_MISS_sum / $denom)
+          unit: (Count + $normUnit)
+  metrics_description:
+    Total Requests: >-
+      L2 requests, normalized by the chosen unit.
+    Read Requests: >-
+      L2 read requests, normalized by the chosen unit.
+    Write Requests: >-
+      L2 write requests, normalized by the chosen unit.
+    Atomic Requests: >-
+      L2 atomic requests, normalized by the chosen unit.
+    EA Read Requests (Memory): >-
+      L2 read requests over EA destined for memory. Infinity Cache can serve
+      these requests before they reach VRAM.
+    EA Write Requests (Memory): >-
+      L2 write requests over EA destined for memory. Infinity Cache can absorb
+      these requests before they reach VRAM.
+    GL2 Cache Hit Rate: >-
+      Percentage of L2 lookups that hit.
+    GL2 Cache Hits: >-
+      L2 lookups that hit, normalized by the chosen unit.
+    GL2 Cache Misses: >-
+      L2 lookups that miss, normalized by the chosen unit.

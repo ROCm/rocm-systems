@@ -1,0 +1,33 @@
+sets:
+- title: Compute Throughput FLOPS
+  set_option: compute_thruput_flops
+  description: >-
+    Compute throughput metrics: VALU and FP64 instruction issue rates, estimated
+    FP16 WMMA throughput, and IPC. VALU issue rates are not FLOP rates.
+  metric:
+  - 2.1.0: VALU Issue Rate
+  - 2.1.1: WMMA FLOPs (F16->F32 16x16x16)
+  - 2.1.2: FP64 VALU Issue Rate
+  - 2.1.3: IPC
+- title: Memory Throughput
+  set_option: mem_thruput
+  description: >-
+    GL2 and GL0 cache hit rates, LDS bank conflicts, and LDS bandwidth.
+  metric:
+  - 2.1.6: LDS Bank Conflicts
+  - 3.4.3: LDS Bandwidth
+  - 2.1.5: GL2 Cache Hit Rate
+  - 2.1.7: GL0 Cache Hit Rate (TCP Cache)
+- title: Launch Stats
+  set_option: launch_stats
+  description: >-
+    Kernel launch and resource utilization statistics: grid size, workgroup
+    size, VGPR/SGPR register usage, LDS allocation.
+  metric:
+  - 7.2.0: Grid Size
+  - 7.2.1: Workgroup Size
+  - 7.3.0: Dispatched Waves
+  - 7.2.2: VGPRs
+  - 7.2.3: SGPRs
+  - 7.2.4: LDS Allocation
+  - 7.2.5: Scratch Allocation

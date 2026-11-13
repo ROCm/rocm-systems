@@ -13,7 +13,7 @@ import utils.specs as specs
 from utils.specs import (
     MachineSpecs,
     MachineSpecsCDNA,
-    MachineSpecsRDNA35,
+    MachineSpecsRDNA,
     _detect_arch,
     generate_machine_specs,
     spec_family_for_arch,
@@ -161,11 +161,12 @@ def test_kw_only_rejects_positional_arguments():
 @pytest.mark.parametrize(
     "series, expected_cls",
     [
-        ("RDNA3.5", MachineSpecsRDNA35),
+        ("RDNA3.5", MachineSpecsRDNA),
+        ("RDNA4", MachineSpecsRDNA),
         ("mi300", MachineSpecsCDNA),
         (None, MachineSpecsCDNA),
     ],
-    ids=["rdna35", "cdna", "unknown"],
+    ids=["rdna35", "rdna4", "cdna", "unknown"],
 )
 def test_spec_family_for_arch_dispatch(series, expected_cls):
     with patch.object(specs.mi_gpu_specs, "get_gpu_series", return_value=series):
@@ -188,7 +189,7 @@ def test_rdna35_finalize_soc_fields(
     """RDNA 3.5 derives num_gl1c from SE*SA and num_memory_channels from the
     VRAM bus width, falling back to total_l2_chan when width is unavailable.
     """
-    spec = MachineSpecsRDNA35(
+    spec = MachineSpecsRDNA(
         gpu_arch="gfx1151",
         gpu_model="rdna35_halo",
         se_per_gpu=se_per_gpu,
@@ -258,7 +259,7 @@ def test_reconstruct_specs_from_sysinfo_round_trip():
     ), patch.object(specs.mi_gpu_specs, "get_gpu_series", return_value="RDNA3.5"):
         spec = generate_machine_specs(None, sysinfo)
 
-    assert isinstance(spec, MachineSpecsRDNA35)
+    assert isinstance(spec, MachineSpecsRDNA)
     assert spec.num_gl1c == "8"
     assert spec.num_memory_channels == "8"
 
