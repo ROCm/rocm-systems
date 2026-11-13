@@ -162,11 +162,11 @@ class hipGraphNodeDOTAttribute {
     label_ = node.label_;
   }
 
-  virtual const char* GetShape(hipGraphDebugDotFlags flag) { return shape_; }
+  virtual const char* GetShape(hipGraphDebugDotFlags /*flag*/) { return shape_; }
 
-  virtual std::string GetLabel(hipGraphDebugDotFlags flag) { return label_; }
+  virtual std::string GetLabel(hipGraphDebugDotFlags /*flag*/) { return label_; }
 
-  virtual void PrintAttributes(std::ostream& out, hipGraphDebugDotFlags flag) {}
+  virtual void PrintAttributes(std::ostream& /*out*/, hipGraphDebugDotFlags /*flag*/) {}
 };
 
 class GraphKernelArgManager : public amd::ReferenceCountedObject,
@@ -443,7 +443,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   /// Return graph node children
   const std::vector<Node>& GetEdges() const { return edges_; }
   /// Get topological sort of the nodes embedded as part of the graphnode(e.g. ChildGraph)
-  virtual bool TopologicalOrder(std::vector<Node>& TopoOrder) { return true; }
+  virtual bool TopologicalOrder(std::vector<Node>& /*TopoOrder*/) { return true; }
   /// Update waitlist of the nodes embedded as part of the graphnode(e.g. ChildGraph)
   virtual void UpdateEventWaitLists(const amd::Command::EventWaitList& waitList) {
     eventWaitList_ = waitList;
@@ -481,14 +481,14 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   void SetNeedsRecapture(bool needsRecapture) { needsRecapture_ = needsRecapture; }
   virtual Graph* GetChildGraph() { return nullptr; }
   void SetParentGraph(Graph* graph) { parentGraph_ = graph; }
-  virtual hipError_t SetParams(GraphNode* node) { return hipSuccess; }
+  virtual hipError_t SetParams(GraphNode* /*node*/) { return hipSuccess; }
   // Default true: only child-graph nodes carry nested topology to compare.
-  virtual bool HasSameTopology(const GraphNode* node) const { return true; }
+  virtual bool HasSameTopology(const GraphNode* /*node*/) const { return true; }
   // Default false: conservatively forces SetParams for node types without an override.
-  virtual bool HasSameParams(const GraphNode* node) const { return false; }
+  virtual bool HasSameParams(const GraphNode* /*node*/) const { return false; }
   virtual GraphMemcpyNodeKind GetMemcpyNodeKind() const { return GraphMemcpyNodeKind::None; }
-  virtual void SetCapturedPriority(int priority) {}
-  virtual void GenerateDOT(std::ostream& fout, hipGraphDebugDotFlags flag) {}
+  virtual void SetCapturedPriority(int /*priority*/) {}
+  virtual void GenerateDOT(std::ostream& /*fout*/, hipGraphDebugDotFlags /*flag*/) {}
   virtual void GenerateDOTNode(size_t graphId, std::ostream& fout, hipGraphDebugDotFlags flag) {
     fout << "\n";
     std::string nodeName = "graph_" + std::to_string(graphId) + "_node_" + std::to_string(GetID());
@@ -497,7 +497,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     fout << "\n";
   }
   virtual void GenerateDOTNodeEdges(size_t graphId, std::ostream& fout,
-                                    hipGraphDebugDotFlags flag) {
+                                    hipGraphDebugDotFlags /*flag*/) {
     for (auto node : edges_) {
       std::string toNodeName =
           "graph_" + std::to_string(graphId) + "_node_" + std::to_string(node->GetID());
@@ -506,7 +506,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       fout << "\"" << fromNodeName << "\" -> \"" << toNodeName << "\"" << std::endl;
     }
   }
-  virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
+  virtual std::string GetLabel(hipGraphDebugDotFlags /*flag*/) override {
     return (std::to_string(id_) + "\n" + label_);
   }
   unsigned int GetEnabled() const { return isEnabled_; }
@@ -630,7 +630,7 @@ class GraphEventWaitNode : public GraphNode {
     return status;
   }
 
-  hipError_t EnqueueCommands(hip::Stream* stream) override {
+  hipError_t EnqueueCommands(hip::Stream* /*stream*/) override {
     if (!commands_.empty()) {
       commands_[0]->enqueue();
       commands_[0]->release();
@@ -1187,14 +1187,15 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   virtual hipError_t Init() = 0;
   virtual hipError_t Run(hip::Stream* stream) = 0;
   // AQL packet update — no-op on the classic path (PAL has no AQL capture).
-  virtual hipError_t UpdateAQLPacket(hip::GraphNode* node) { return hipSuccess; }
-  virtual void BeginAQLPacketUpdates(bool allowKernargReuse = true) {}
+  virtual hipError_t UpdateAQLPacket(hip::GraphNode* /*node*/) { return hipSuccess; }
+  virtual void BeginAQLPacketUpdates(bool /*allowKernargReuse*/ = true) {}
   virtual void EndAQLPacketUpdates() {}
-  virtual hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) {
+  virtual hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* /*node*/,
+                                                             bool /*isEnabled*/) {
     return hipSuccess;
   }
   //! Recycle HW event signals borrowed for a launch. No-op on classic path.
-  virtual void RecycleLaunchSignals(amd::Device* device, std::vector<void*>& signal_set) {}
+  virtual void RecycleLaunchSignals(amd::Device* /*device*/, std::vector<void*>& /*signal_set*/) {}
 
  protected:
   uint64_t flags_ = 0;
@@ -1592,7 +1593,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
     return HasSameTopology(static_cast<const Graph*>(childGraphNode));
   }
 
-  virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
+  virtual std::string GetLabel(hipGraphDebugDotFlags /*flag*/) override {
     return std::to_string(GraphNode::GetID()) + "\n" + "graph_" + std::to_string(Graph::GetID());
   }
 
@@ -2532,7 +2533,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     }
   }
   GraphMemcpyNode1D(void* dst, const void* src, size_t count, hipMemcpyKind kind,
-                    hipGraphNodeType type = hipGraphNodeTypeMemcpy)
+                    hipGraphNodeType /*type*/ = hipGraphNodeTypeMemcpy)
       : GraphMemcpyNode(nullptr), dst_(dst), src_(src), count_(count), kind_(kind) {
     copyParams_.srcPtr.ptr = const_cast<void*>(src);
     copyParams_.dstPtr.ptr = dst;
@@ -3421,12 +3422,12 @@ class GraphHostNode : public GraphNode {
     return hipSuccess;
   }
 
-  static void Callback(cl_event event, cl_int command_exec_status, void* user_data) {
+  static void Callback(cl_event /*event*/, cl_int /*command_exec_status*/, void* user_data) {
     hipHostNodeParams* NodeParams = reinterpret_cast<hipHostNodeParams*>(user_data);
     NodeParams->fn(NodeParams->userData);
   }
 
-  hipError_t EnqueueCommands(hip::Stream* stream) override {
+  hipError_t EnqueueCommands(hip::Stream* /*stream*/) override {
     if (!commands_.empty()) {
       if (!commands_[0]->setCallback(CL_COMPLETE, GraphHostNode::Callback, &NodeParams_)) {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed during setCallback");
@@ -3740,7 +3741,7 @@ class GraphMemAllocNode final : public GraphNode {
     return error;
   }
 
-  hipError_t EnqueueCommands(hip::Stream* stream) final {
+  hipError_t EnqueueCommands(hip::Stream* /*stream*/) final {
     hipError_t status = hipSuccess;
     for (auto& command : commands_) {
       command->enqueue();
@@ -3803,7 +3804,7 @@ class GraphMemFreeNode : public GraphNode {
           graph_(graph),
           device_id_(device_id) {}
 
-    virtual void submit(device::VirtualDevice& device) final {
+    virtual void submit(device::VirtualDevice& /*device*/) final {
       auto vaddr_sub_obj = amd::MemObjMap::FindMemObj(ptr());
       assert(vaddr_sub_obj != nullptr);
       amd::Memory* phys_mem_obj = vaddr_sub_obj->getUserData().phys_mem_obj;

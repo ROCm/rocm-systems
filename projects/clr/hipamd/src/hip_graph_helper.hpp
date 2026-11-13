@@ -145,13 +145,13 @@ hipError_t ihipMemcpyAtoHValidate(hipArray_t srcArray, void* dstHost, amd::Coord
 
 hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams);
 
-constexpr hip::MemcpyType ihipGetMemcpyType(const void* src, void* dst) {
+constexpr hip::MemcpyType ihipGetMemcpyType(const void* /*src*/, void* /*dst*/) {
   return hipHostToHost;
 }
-constexpr hip::MemcpyType ihipGetMemcpyType(const void* src, amd::Memory* dst) {
+constexpr hip::MemcpyType ihipGetMemcpyType(const void* /*src*/, amd::Memory* /*dst*/) {
   return hipWriteBuffer;
 }
-constexpr hip::MemcpyType ihipGetMemcpyType(amd::Memory* src, void* dst) {
+constexpr hip::MemcpyType ihipGetMemcpyType(amd::Memory* /*src*/, void* /*dst*/) {
   return hipReadBuffer;
 }
 hip::MemcpyType ihipGetMemcpyType(amd::Memory* src, amd::Memory* dst, hipMemcpyKind kind);
