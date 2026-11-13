@@ -9,6 +9,7 @@
 #include "algorithms/dda/broadcast/dda_broadcast.h"
 
 #include "algorithms/dda/broadcast/broadcast_dda_fabric_ll128_twoshot.h"
+#include "algorithms/dda/broadcast/broadcast_dda_fabric_ll128_dpx_twoshot.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -32,6 +33,8 @@ namespace {
 using dda::common::ddaBankSize;
 using dda::common::ddaLL128BcTwoShotChunkSlices;
 using dda::common::ddaLL128BcTwoShotSlotSlices;
+using dda::common::ddaLL128BcDpxChunkSlices;
+using dda::common::ddaLL128BcDpxSlotSlices;
 using dda::common::ddaLL128Slices;
 using dda::common::kDdaLL128DataBytesPerSlice;
 using dda::common::kDdaLL128Warp;
@@ -50,6 +53,22 @@ unsigned ddaLL128BcBlocksPerPeer(size_t chunkSlices, size_t warps, int nPeers, s
   size_t bpp = (chunkSlices + warps - 1) / warps;
   if (bpp > cap) bpp = cap;
   return bpp < 1 ? 1u : (unsigned)bpp;
+}
+
+static inline std::pair<dim3, dim3> ddaBroadcastFabricLL128DpxGeom(ncclComm* comm, size_t totalBytes) {
+  const int archThreadsRaw = rcclDdaFabricBcLL128Threads(comm);
+  const unsigned archThreads = archThreadsRaw > 0 ? (unsigned)archThreadsRaw : 0;
+  const bool envSet = (getenv("RCCL_DDA_LL128_BC_THREADS") != nullptr);
+  const unsigned threads = envSet ? ddaLL128BcThreads()
+                         : (archThreads > 0 ? archThreads : kDdaLL128BcDefaultThreads);
+  const size_t warps   = threads / (unsigned)kDdaLL128Warp;
+  const int nNonRoot   = comm->nRanks - 2;
+  int nBlocksMax       = (int)ncclBroadcastDdaBlockBudget(comm);
+
+  const size_t slices = ddaLL128Slices(totalBytes);
+  const size_t cs     = ddaLL128BcDpxChunkSlices(slices, comm->nRanks);
+  const unsigned bpp  = ddaLL128BcBlocksPerPeer(cs, warps, nNonRoot, (size_t)nBlocksMax);
+  return std::make_pair(dim3((unsigned)nNonRoot, bpp), dim3(threads));
 }
 
 static inline std::pair<dim3, dim3> ddaBroadcastFabricLL128Geom(ncclComm* comm, size_t totalBytes) {
@@ -100,16 +119,77 @@ bool ncclBroadcastDdaFabricLL128Eligible(ncclComm* comm, size_t count, ncclDataT
   return true;
 }
 
+bool ncclBroadcastDdaFabricLL128DpxEligible(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  if (!ncclBroadcastDdaFabricLL128Eligible(comm, count, datatype))
+    return false;
+  if (comm->ddaFabricScaleInSize != 2)
+    return false;
+  if (comm->nRanks < 4 || comm->nRanks % 2 != 0)
+    return false;
+
+  const size_t bytes  = count * ncclTypeSize(datatype);
+  const size_t bank   = ddaBankSize(comm->ddaScratchBytes);
+  const size_t slices = ddaLL128Slices(bytes);
+  if (ddaLL128BcDpxSlotSlices(bank, comm->nRanks, slices) == 0)
+    return false;
+
+  return true;
+}
+
 uint32_t ncclBroadcastDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
   const size_t bytes = count * ncclTypeSize(datatype);
   const auto grid = ddaBroadcastFabricLL128Geom(comm, bytes).first;
   return grid.x * grid.y;
 }
 
+static ncclResult_t ncclBroadcastDdaFabricLL128DpxLaunch(
+    const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    int root, ncclComm* comm, cudaStream_t stream) {
+  const size_t bytes  = count * ncclTypeSize(datatype);
+  const size_t slices = ddaLL128Slices(bytes);
+  const size_t cs     = ddaLL128BcDpxChunkSlices(slices, comm->nRanks);
+  const size_t bank   = ddaBankSize(comm->ddaScratchBytes);
+
+  auto [grid, block] = ddaBroadcastFabricLL128DpxGeom(comm, bytes);
+
+  int8_t** peers     = reinterpret_cast<int8_t**>(comm->ddaPeerPtrsDev);
+  uint32_t* epochDev = comm->ddaLLEpochDev;
+  const int epochLen = comm->ddaLLEpochLen;
+  const int nRanks   = comm->nRanks;
+
+  INFO(NCCL_COLL,
+       "DDA fabric Broadcast LL128 DPX two-shot: nRanks=%d root=%d bytes=%zu slices=%zu "
+       "chunkSlices=%zu grid=%ux%u block=%u bankSize=%zu scaleInSize=%d fanOut=%d",
+       nRanks, root, bytes, slices, cs, grid.x, grid.y, block.x, bank,
+       comm->ddaFabricScaleInSize, (int)rcclParamDdaLL128BcFanOut());
+
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+
+  hipExtLaunchKernelGGL(
+    (dda::common::ddaBroadcastFabricLL128DpxTwoShot<0>),
+    grid, block, 0, stream,
+    /*startEvent=*/nullptr, stopEvent, /*flags=*/0,
+    peers,
+    static_cast<int8_t*>(recvbuff),
+    static_cast<const int8_t*>(sendbuff),
+    bytes,
+    comm->rank, nRanks, root,
+    epochDev, epochLen,
+    slices, cs, bank, params, (int)rcclParamDdaLL128BcFanOut());
+
+  CUDACHECK(cudaGetLastError());
+  return ncclSuccess;
+}
+
 ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                          int root, ncclComm* comm, cudaStream_t stream) {
   if (!rcclDdaDatatypeSupported(comm, datatype))
     return ncclInvalidArgument;
+
+  // DPX (partition mode): use the 4-phase hierarchical kernel.
+  if (ncclBroadcastDdaFabricLL128DpxEligible(comm, count, datatype))
+    return ncclBroadcastDdaFabricLL128DpxLaunch(sendbuff, recvbuff, count, datatype, root, comm, stream);
 
   const size_t bytes = count * ncclTypeSize(datatype);
   const size_t slices = ddaLL128Slices(bytes);
@@ -141,8 +221,7 @@ ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, s
     bytes,
     comm->rank, nRanks, root,
     epochDev, epochLen,
-    slices, cs, bank, params, (int)rcclParamDdaLL128BcFanOut(),
-    comm->ddaFabricScaleInSize);
+    slices, cs, bank, params, (int)rcclParamDdaLL128BcFanOut(), comm->ddaFabricScaleInSize);
 
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
