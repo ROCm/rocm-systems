@@ -138,6 +138,11 @@ bool Heap::ReleaseAllMemory() {
     if (!use_vm_heap_ && (total_size_ <= release_threshold_)) {
       return true;
     }
+    // Direct allocations cannot be partially released. The map is ordered by
+    // size, so stop when even the smallest remaining block would cross the threshold.
+    if (!use_vm_heap_ && (it->first.first > total_size_ - release_threshold_)) {
+      return true;
+    }
     if (it->second.refcount_ > 0) {
       ++it;
       continue;
@@ -147,6 +152,11 @@ bool Heap::ReleaseAllMemory() {
     } else {
       ++it;
     }
+  }
+  // Lowering the threshold must also trim mappings whose allocation objects
+  // were released at an earlier synchronization.
+  if (vm_heap_.FreeMappedSize() > release_threshold_) {
+    vm_heap_.TrimPhysMemory(release_threshold_);
   }
   return true;
 }
@@ -261,9 +271,10 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, b
 
     // If the free heap grows over the busy heap, then force release
     if (AMD_DIRECT_DISPATCH && (free_heap_.GetTotalSize() > busy_heap_.GetTotalSize())) {
-      // Use event base release to reduce memory pressure
-      constexpr size_t kBytesToHold = 0;
-      free_heap_.ReleaseAllMemory(kBytesToHold);
+      // Ordinary free-time maintenance follows the same retention policy as
+      // synchronization. Explicit trim and low-memory reclamation below can
+      // still request a smaller footprint through the other overload.
+      free_heap_.ReleaseAllMemory();
 
       // If free mmeory is less than 12.5% of total, then force wait release
       size_t free = 0;
