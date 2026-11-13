@@ -370,7 +370,6 @@ Raw performance counter data produced by the underlying
 
 * The rocpd database files are converted to gzip-compressed CSV files (``results_pmc_perf_0.csv.gz``, ``results_pmc_perf_1.csv.gz``, etc.) for each profiling run, after which the database files are removed.
 * These files are merged into a single gzip-compressed ``pmc_perf.csv.gz`` file when running ``rocprof-compute analyze``.
-* ``rocprof-compute analyze`` reads each metric from one run that holds all of its counters. A metric whose counters are spread across runs is left unset and shows ``N/A``.
 * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
 
 .. note::
