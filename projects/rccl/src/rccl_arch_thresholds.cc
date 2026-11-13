@@ -41,7 +41,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
   .ddaLL128Max = {
-    64ULL*1024*1024,     // [0] Broadcast      -- DDA LL128 two-shot through 64M (SPX)
+    32ULL*1024*1024,     // [0] Broadcast      -- DDA LL128 two-shot through 64M (SPX)
     0,                   // [1] Reduce          -- not used
     128ULL*1024*1024,    // [2] AllGather       -- beats Ring at 128M on 8-64 ranks (AICOMRCCL-2876)
     224ULL*1024*1024,    // [3] ReduceScatter   -- LL128 through 224M total below 8 ranks
