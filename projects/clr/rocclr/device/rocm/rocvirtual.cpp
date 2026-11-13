@@ -2538,6 +2538,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   // is an ext dispatch without one (a level-0 segment has no other dependency), else in a
   // barrier ahead of the batch
   hsa_signal_t fork_dep{0};
+  bool forkWaitAhead = false;
   if (pending_fork_wait_ != nullptr) {
     const auto* first =
         reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(flatPacketData.data());
@@ -2549,6 +2550,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       ReleasePendingForkWait();
     } else {
       FlushPendingForkWait();
+      forkWaitAhead = true;
     }
   }
 
@@ -2794,15 +2796,21 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   uint64_t lastIndex = 0;
   bool useLead = numPackets > std::min(kLead, kPeriod);
   if (useLead) {
+    // A batch that starts behind a wait gains nothing from the lead. The fork wait is not in
+    // the flat buffer: it goes in the ring copy of the first packet (fork_dep), or in a barrier
+    // just submitted ahead of the batch. Only format 3 has a dep_signal; format 4 keeps its
+    // launch_descriptor in those dwords.
     const bool firstPacketWaits =
-        firstPacketIsKernel
-            ? (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-               reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(
-                   flatPacketData.data())->dep_signal.handle != 0)
-            : (firstPacketType == HSA_PACKET_TYPE_BARRIER_AND ||
-               firstPacketType == HSA_PACKET_TYPE_BARRIER_OR ||
-               (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-                (firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_BARRIER_VALUE));
+        (fork_dep.handle != 0) || forkWaitAhead ||
+        (firstPacketIsKernel
+             ? (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                (firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH &&
+                reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(
+                    flatPacketData.data())->dep_signal.handle != 0)
+             : (firstPacketType == HSA_PACKET_TYPE_BARRIER_AND ||
+                firstPacketType == HSA_PACKET_TYPE_BARRIER_OR ||
+                (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                 (firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_BARRIER_VALUE)));
     if (firstPacketWaits) {
       useLead = false;
     } else {
