@@ -228,8 +228,7 @@ class TestRocpdValidationRules(RocprofsysTest):
             cursor = connection.cursor()
             cursor.execute("CREATE TABLE rocpd_info_agent (id INTEGER, type TEXT)")
             cursor.execute(
-                "CREATE TABLE rocpd_info_pmc "
-                "(id INTEGER, agent_id INTEGER, name TEXT)"
+                "CREATE TABLE rocpd_info_pmc (id INTEGER, agent_id INTEGER, name TEXT)"
             )
             cursor.execute(
                 "CREATE TABLE rocpd_pmc_event "
