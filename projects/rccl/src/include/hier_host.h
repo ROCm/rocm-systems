@@ -58,6 +58,10 @@ ncclResult_t rcclHostHierEnsure(struct ncclComm* comm);
 // Destroys the child comms. Called from commFree.
 ncclResult_t rcclHostHierTeardown(struct ncclComm* comm);
 
+// Sizes, in bytes, at which host-hierarchical AllReduce beat the default path in
+// gfx1250 fp32 sum measurements with 8 ranks per host. False for unmeasured host counts.
+bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes);
+
 // Whether RCCL_HOST_HIER_ALLREDUCE and the operands allow host-hierarchical
 // AllReduce. The caller also checks the dispatch context: group depth 0, no
 // graph capture, no enqueue-only mode.
