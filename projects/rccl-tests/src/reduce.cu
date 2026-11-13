@@ -334,7 +334,8 @@ testResult_t ReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirement
     }
     default:
       if (is_main_proc && is_main_thread)
-        fprintf(stderr, "Reduce has no -D %d; -D 3 picks the LL, LSA or SDMA tier by message size.\n", deviceImpl);
+        fprintf(stderr, "Reduce has no -D %d; -D 3 picks the LL tier, the tiled kernel or the SDMA tier by message size.
+", deviceImpl);
       return testNotImplemented;
   }
 }
@@ -350,12 +351,9 @@ bool ReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs)
 
   switch(deviceImpl) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-    case 3: { // GinReduceKernel: reduce-scatter-to-root LSA read-reduce (no scratch)
-      reqs->barrierCount = deviceCtaCount;
+    case 3: // GinReduceKernel: reduce-scatter-to-root LSA read-reduce (no scratch)
       reqs->lsaBarrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
       return true;
-    }
 #endif
     default:
       return false;
@@ -961,6 +959,10 @@ testResult_t ReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
           fprintf(stderr, "Reduce -D 3 needs every rank in one LSA team (single node); "
                           "this communicator has %d ranks and an LSA team of %d.\n",
                   devComm->nRanks, devComm->lsaSize);
+          return testInvalidUsage;
+        }
+        if (root < 0 || root >= devComm->nRanks) {
+          fprintf(stderr, "Reduce -D 3 root %d is outside [0, %d).\n", root, devComm->nRanks);
           return testInvalidUsage;
         }
         if (count == 0) return testSuccess;

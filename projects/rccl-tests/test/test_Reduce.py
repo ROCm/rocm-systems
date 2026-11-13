@@ -273,6 +273,8 @@ def _default_ll_cap(nranks):
 @pytest.mark.parametrize("size", ["1MiB", "64MiB", "partial-tile"])
 @pytest.mark.parametrize("dtype, op", [
     ("int32", "sum"),
+    ("int32", "min"),
+    ("int64", "avg"),
     ("float", "sum"),
     ("half", "max"),
     ("bfloat16", "avg"),
@@ -314,6 +316,19 @@ def test_ReduceGinSdmaLL(request, size, dtype, op, root_pos):
                                    xenv=["NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES=1048576"])
     _assert_reduce_ok(rc, out, "-D 3 LL at {} bytes, dtype={}, op={}, root={}".format(
         total_bytes, dtype, op, root), total_bytes, REDUCE_NP, expect_tier="ll")
+
+
+# 2000 back-to-back LL calls with no warmup gap. Without the root's ack, a
+# sender gets two epochs ahead and overwrites slots the root has not read, which
+# shows up as #wrong or a hang.
+@_reduce_gin_skip
+def test_ReduceGinSdmaLLBackToBack(request):
+    total_bytes = REDUCE_NP * 16
+    rc, out = _run_reduce_gin_sdma(request, total_bytes, "float", "sum", REDUCE_NP - 1,
+                                   xenv=["NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES=1048576"],
+                                   extra=["-w", "0", "-n", "2000"])
+    _assert_reduce_ok(rc, out, "-D 3 LL, 2000 back-to-back calls", total_bytes, REDUCE_NP,
+                      expect_tier="ll")
 
 
 # With NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES unset: the printed cap is the
@@ -412,10 +427,13 @@ def test_ReduceGinSdmaDevtime(request, tier, total_bytes, mode):
 # or exiting 0 without results.
 @_reduce_gin_skip
 @pytest.mark.gin_ci
-def test_ReduceGinSdmaRejects(request):
-    case = "mulsum"
-    rc, out = _run_reduce_gin_sdma(request, MiB, "float", "mulsum", 0)
-    message = "no mulsum"
+@pytest.mark.parametrize("case", ["mulsum", "root"])
+def test_ReduceGinSdmaRejects(request, case):
+    op, root, message = {
+        "mulsum": ("mulsum", 0, "no mulsum"),
+        "root": ("sum", REDUCE_NP, "is outside"),
+    }[case]
+    rc, out = _run_reduce_gin_sdma(request, MiB, "float", op, root)
     assert rc != 0, "Reduce {} should fail but exited 0".format(case)
     assert message in (out or ""), "Reduce {} failed without the expected message '{}':\n{}".format(
         case, message, (out or "")[-2000:])
