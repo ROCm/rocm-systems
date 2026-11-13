@@ -91,11 +91,14 @@
  * - 1.36 - hsa_amd_signal_batch_create, hsa_amd_signal_batch_destroy,
  *          HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE,
  *          HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH, HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED,
- *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
+ *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED (removed in 1.37, never released),
  *          hsa_amd_signal_set_hints, hsa_amd_signal_get_hints (inline)
+ * - 1.37 - hsa_amd_agent_aql_properties_t: HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS, which replaces
+ *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED. 1.36 was never in a release, so the
+ *          1.36 query is removed without a deprecation period.
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 36
+#define HSA_AMD_INTERFACE_VERSION_MINOR 37
 
 #ifdef __cplusplus
 extern "C" {
@@ -909,7 +912,11 @@ typedef enum hsa_amd_agent_info_s {
   /**
    * Bit-mask indicating AQL Extensions supported by this agent. An AQL extension is set if the flag
    * bit is set at that position. User may use the hsa_flag_isset64 macro to verify whether a flag
-   * is set. The type of this attribute is uint8_t[8].
+   * is set. The position of an extension is the value of its ::hsa_amd_agent_aql_properties_t
+   * enumerator, a bit index, not a mask.
+   * Some extensions are reported by the CP firmware: the first query on a GPU agent submits one
+   * barrier packet to an internal queue and waits for it to complete.
+   * The type of this attribute is uint8_t[8].
    */
   HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = 0xA115,
   /**
@@ -1031,13 +1038,8 @@ typedef enum hsa_amd_agent_info_s {
    * The type of this attribute is bool.
    */
   HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED = 0xA128,
-  /**
-   * Whether the agent's CP firmware consumes completion signal handle hints
-   * (::hsa_amd_signal_set_hints). Hints may be put in the completion_signal
-   * of an AQL packet only on an agent that reports true. GPU agents only.
-   * The type of this attribute is bool.
-   */
-  HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED = 0xA129,
+  /* 0xA129 is not reused: it was HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
+     replaced by ::HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS. */
 } hsa_amd_agent_info_t;
 
 /**
@@ -1049,6 +1051,12 @@ typedef enum hsa_amd_agent_memory_properties_s {
 
 /**
  * @brief Agent AQL info properties attributes
+ *
+ * Each enumerator's value is the index of its bit in
+ * ::HSA_AMD_AGENT_INFO_AQL_EXTENSIONS, not a mask: test it with
+ * hsa_flag_isset64(value, HSA_AMD_AQL_PROPERTY_*), which is how the runtime
+ * sets it (HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS, 2, is bit 2 of the array).
+ * value[0] & HSA_AMD_AQL_PROPERTY_* tests another bit.
  */
 typedef enum hsa_amd_agent_aql_properties_s {
   /**
@@ -1056,6 +1064,13 @@ typedef enum hsa_amd_agent_aql_properties_s {
    * with CP firmware that reports AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH.
    */
   HSA_AMD_AQL_PROPERTY_EXT_DISPATCH = (1 << 0),
+  /**
+   * The agent's CP firmware consumes completion signal handle hints
+   * (::hsa_amd_signal_set_hints). Hints may be put in the completion_signal
+   * of an AQL packet only on an agent that reports this extension. GPU agents
+   * only.
+   */
+  HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS = (1 << 1),
 } hsa_amd_agent_aql_properties_t;
 
 /**
@@ -2242,8 +2257,8 @@ hsa_status_t HSA_API hsa_amd_signal_batch_destroy(hsa_amd_signal_batch_t batch);
  * @brief Return @p signal with its handle hints replaced by @p hints.
  *
  * @p hints combines ::amd_signal_hint_t values; 0 returns the plain handle.
- * Use hints only on an agent that reports
- * ::HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED: its CP firmware consumes every
+ * Use hints only on an agent that reports ::HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS
+ * in ::HSA_AMD_AGENT_INFO_AQL_EXTENSIONS: its CP firmware consumes every
  * defined hint, while firmware without support takes the hinted handle as the
  * signal address. Bits outside
  * ::AMD_SIGNAL_HINT_MASK are dropped. A hinted handle is only for the

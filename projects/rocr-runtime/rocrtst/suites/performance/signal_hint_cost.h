@@ -18,7 +18,7 @@
 // Measures the CP time per barrier packet that completes a signal, with each completion signal
 // handle hint and with all of them, for signals in host memory, device memory and with
 // interrupt events. Skipped on an agent that does not report
-// HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED.
+// HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS in HSA_AMD_AGENT_INFO_AQL_EXTENSIONS.
 class SignalHintCost : public TestBase {
  public:
   SignalHintCost(void);
