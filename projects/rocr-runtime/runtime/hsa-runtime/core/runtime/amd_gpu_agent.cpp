@@ -2424,6 +2424,10 @@ void GpuAgent::GetAqlInfoProperties(uint8_t value[8]) const {
   // Fill the HSA_AMD_AQL_PROPERTY_EXT_DISPATCH
   if (ExtendedAqlDispatchSupported())
       setFlag(HSA_AMD_AQL_PROPERTY_EXT_DISPATCH);
+
+  // Fill the HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS
+  if (SignalHintsSupported())
+      setFlag(HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS);
 }
 
 
@@ -2860,9 +2864,6 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       break;
     case HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED:
       *static_cast<bool*>(value) = HostAtomicsSupported();
-      break;
-    case HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED:
-      *static_cast<bool*>(value) = SignalHintsSupported();
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;

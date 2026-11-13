@@ -12,9 +12,13 @@ DS_NAMES = {'DS_PERMUTE_B32', 'DS_BPERMUTE_B32', 'DS_BPERMUTE_FI_B32', 'DS_SWIZZ
 def gen_ds(ctx: ExecuteContext) -> str | None:
     arch, mnemonic = ctx.arch_name, ctx.inst.name
     dst, src = ctx.dst_ops, ctx.src_ops
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in DS_NAMES or len(dst) != 1:
+    if (
+        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        or mnemonic not in DS_NAMES
+        or len(dst) != 1
+    ):
         return None
-    if arch == 'rdna3' and mnemonic == 'DS_BPERMUTE_FI_B32':
+    if arch not in ('rdna4', 'cdna5') and mnemonic == 'DS_BPERMUTE_FI_B32':
         return None
     swizzle = mnemonic == 'DS_SWIZZLE_B32'
     if len(src) != (1 if swizzle else 2):
@@ -27,8 +31,9 @@ def gen_ds(ctx: ExecuteContext) -> str | None:
             + f'  amdgpu::arith::execute_ds_swizzle(wf, {flags}, {dst[0]}, {src[0]}, offset);'
         )
     api = 'rj_arith_' + mnemonic.lower()
+    # CDNA and gfx12 route across all 64 lanes; RDNA3 uses two 32-lane groups.
     wave64 = api + (
-        '_gfx12' if arch == 'rdna4' and mnemonic != 'DS_BPERMUTE_FI_B32' else ''
+        '_gfx12' if arch != 'rdna3' and mnemonic != 'DS_BPERMUTE_FI_B32' else ''
     )
     backward = 'BPERMUTE' in mnemonic
     inactive = '_FI_' in mnemonic

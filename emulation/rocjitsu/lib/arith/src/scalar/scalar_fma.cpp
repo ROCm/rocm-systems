@@ -5,7 +5,8 @@
 // Owns public entry points and their validation/dispatch policy.
 
 // Fused rounding and tininess detection follow rocjitsu shared/fp_mode.h.
-// FP16 uses the existing rocjitsu-derived half_fma_value model.
+// FP16 uses the existing rocjitsu-derived half_fma_value model. Exact results
+// match gfx1201 captures in every MODE setting.
 
 #include "common/float_encoding.h"
 #include "common/validation.h"
@@ -18,18 +19,14 @@
 namespace {
 
 // Evaluate scalar fused multiply-add. Reject invalid controls before changing outputs.
-template <bool Half, bool Accumulate, bool LegacyHalf = false>
+template <bool Half, bool Accumulate, bool Legacy = false>
 [[gnu::always_inline]] inline int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a,
                                       uint32_t b, uint32_t c) {
   if (int error = rocjitsu::arith::validate(flags, mode,
                                             RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
-                                                (Half ? 0 : RJ_ARITH_FP_ROUND_MASK))) {
+                                                RJ_ARITH_FP_ROUND_MASK)) {
     return error;
-  }
-  if (!(!Half) &&
-      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   if constexpr (Accumulate) {
     c = *d;
@@ -51,46 +48,47 @@ template <bool Half, bool Accumulate, bool LegacyHalf = false>
       c &= sign;
     }
   }
-  if constexpr (!Half) {
-    if (rocjitsu::arith::is_exact(flags)) {
-      *d = rocjitsu::arith::fma_value_f32(a, b, c, flags, false);
+  // Loose nearest-even FP32 uses the host FMA. gfx1250's inherited model also uses it
+  // for loose FP32 in any rounding mode, and for FP16, which rounds once to FP32 and
+  // then to FP16. The RDNA4 FP16 model rounds, saturates and flushes in every
+  // semantics mode.
+  if constexpr (!Half || Legacy) {
+    if ((Half && Legacy) ||
+        (!rocjitsu::arith::is_exact(flags) && (Legacy || !(flags & RJ_ARITH_FP_ROUND_MASK)))) {
+      float x = Half ? rocjitsu::arith::f16_to_float(uint16_t(a)) : rocjitsu::arith::as_float(a);
+      float y = Half ? rocjitsu::arith::f16_to_float(uint16_t(b)) : rocjitsu::arith::as_float(b);
+      float z = Half ? rocjitsu::arith::f16_to_float(uint16_t(c)) : rocjitsu::arith::as_float(c);
+      uint32_t result =
+          Half ? rocjitsu::arith::float_to_f16(__builtin_fmaf(x, y, z), flags & RJ_ARITH_FP16_OVFL)
+               : rocjitsu::arith::as_bits(__builtin_fmaf(x, y, z));
+      if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
+        uint32_t magnitude = result & (sign - 1);
+        constexpr uint32_t normal = Half ? 0x400 : 0x800000;
+        if (magnitude < normal) {
+          result &= sign;
+        }
+        if (magnitude == normal) {
+          // TwoSum retains tiny addends when deciding which side of the tininess
+          // threshold the exact result occupies. The product is exact in double.
+          double product = double(x) * double(y), sum = product + double(z), part = sum - product;
+          double residual = (product - (sum - part)) + (double(z) - part);
+          double absolute = (result & sign) ? -sum : sum,
+                 tail = (result & sign) ? -residual : residual;
+          constexpr double threshold = Half ? (0x1p-14 - 0x1p-26) : (0x1p-126 - 0x1p-151);
+          if (absolute < threshold || (absolute == threshold && tail < 0)) {
+            result &= sign;
+          }
+        }
+      }
+      *d = result;
       return RJ_ARITH_SUCCESS;
     }
   }
-  float x = Half ? rocjitsu::arith::f16_to_float(uint16_t(a)) : rocjitsu::arith::as_float(a);
-  float y = Half ? rocjitsu::arith::f16_to_float(uint16_t(b)) : rocjitsu::arith::as_float(b);
-  float z = Half ? rocjitsu::arith::f16_to_float(uint16_t(c)) : rocjitsu::arith::as_float(c);
-  uint32_t result;
   if constexpr (Half) {
-    if constexpr (LegacyHalf) {
-      // gfx1250's inherited scalar path rounds once to FP32, then to FP16.
-      result = rocjitsu::arith::float_to_f16(__builtin_fmaf(x, y, z), flags & RJ_ARITH_FP16_OVFL);
-    } else {
-      result = rocjitsu::arith::half_fma_value(uint16_t(a), uint16_t(b), uint16_t(c), 0,
-                                               flags & RJ_ARITH_FP16_OVFL);
-    }
+    *d = rocjitsu::arith::half_fma_value(uint16_t(a), uint16_t(b), uint16_t(c), 0, flags);
   } else {
-    result = rocjitsu::arith::as_bits(__builtin_fmaf(x, y, z));
+    *d = rocjitsu::arith::fma_value_f32(a, b, c, flags, false);
   }
-  if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
-    uint32_t magnitude = result & (sign - 1);
-    constexpr uint32_t normal = Half ? 0x400 : 0x800000;
-    if (magnitude < normal) {
-      result &= sign;
-    }
-    if (magnitude == normal) {
-      // TwoSum retains tiny addends when deciding which side of the tininess
-      // threshold the exact result occupies. The product is exact in double.
-      double product = double(x) * double(y), sum = product + double(z), part = sum - product;
-      double residual = (product - (sum - part)) + (double(z) - part);
-      double absolute = (result & sign) ? -sum : sum, tail = (result & sign) ? -residual : residual;
-      constexpr double threshold = Half ? (0x1p-14 - 0x1p-26) : (0x1p-126 - 0x1p-151);
-      if (absolute < threshold || (absolute == threshold && tail < 0)) {
-        result &= sign;
-      }
-    }
-  }
-  *d = result;
   return RJ_ARITH_SUCCESS;
 }
 
@@ -117,7 +115,7 @@ int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t
                  RJ_ARITH_FP16_OVFL);
     }
   }
-  return run<Half, Accumulate, Half>(flags, 0, d, a, b, c);
+  return run<Half, Accumulate, true>(flags, 0, d, a, b, c);
 }
 
 } // namespace
@@ -146,7 +144,8 @@ int rj_arith_s_fmac_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
 // require it.
 int rj_arith_s_fmac_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                         uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }

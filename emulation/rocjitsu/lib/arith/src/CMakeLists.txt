@@ -96,7 +96,10 @@ add_library(
     register/ds_swizzle.cpp
     register/lane_transfer.cpp
     register/move.cpp
+    register/pair_move.cpp
+    register/packed_permute.cpp
     register/permlane.cpp
+    register/screen_partition.cpp
     register/relative_move.cpp
     register/swap.cpp
     scalar/guest_mode.cpp

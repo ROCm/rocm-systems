@@ -26,6 +26,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
@@ -3301,8 +3304,8 @@ TEST(ArithBridgeTest, PackedBinaryInlineRoundingAndStrictPolicy) {
                                             {.vdst = 1, .src0 = 242, .src1 = 257, .opsel_hi = 3});
           auto instruction = fixture.decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
-          // RDNA3 supports exact semantics without FP status; RDNA4 rejects both.
-          const bool rejected = policy_index == 2 || (policy_index == 1 && !is_rdna3);
+          // RDNA3 and RDNA4 support exact semantics without FP status, not with it.
+          const bool rejected = policy_index == 2;
           EXPECT_EQ(
               fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
               rejected);
@@ -5023,11 +5026,8 @@ TEST(ArithBridgeTest, ScalarFloatBinaryOperationsHonorSemanticsAndFailureBoundar
       const auto words = rdna4::build_sop2(test.opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 0});
       auto instruction = fixture.decoder->decode_window(words);
       ASSERT_TRUE(instruction.succeeded());
-      // Reporting requires exact support; loose/fallback modes can use the
-      // loose implementation.
-      const bool supported = semantics == ArithmeticSemantics::Loose ||
-                             semantics == ArithmeticSemantics::BitExactEmpiricalAllowLoose ||
-                             semantics == ArithmeticSemantics::Compatibility;
+      // Every form supports exact semantics but not FP status.
+      const bool supported = semantics != ArithmeticSemantics::BitExactEmpirical;
       EXPECT_EQ(
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded(),
           supported);
@@ -5059,8 +5059,8 @@ TEST(ArithBridgeTest, ScalarConversionsPreserveOperandFormatsAndRejectedOutputs)
           ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical,
           ArithmeticSemantics::Compatibility}) {
       ArithmeticPolicy policy{semantics};
-      const bool exact = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
-                         semantics == ArithmeticSemantics::BitExactEmpirical;
+      // Every conversion supports exact semantics but not FP status.
+      const bool reporting = semantics == ArithmeticSemantics::BitExactEmpirical;
       BridgeFixture fixture(false, 64, policy);
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_exec(0);
@@ -5078,9 +5078,9 @@ TEST(ArithBridgeTest, ScalarConversionsPreserveOperandFormatsAndRejectedOutputs)
       ASSERT_TRUE(instruction.succeeded());
       EXPECT_EQ(
           fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded(),
-          !exact);
-      EXPECT_EQ(fixture.recorder->scalar_writes.size(), exact ? 0u : 1u);
-      EXPECT_EQ(fixture.cu->read_sgpr(base), exact ? test.a : test.expected);
+          !reporting);
+      EXPECT_EQ(fixture.recorder->scalar_writes.size(), reporting ? 0u : 1u);
+      EXPECT_EQ(fixture.cu->read_sgpr(base), reporting ? test.a : test.expected);
       EXPECT_TRUE(fixture.wave->read_scc());
       EXPECT_EQ(fixture.wave->trapsts(), 0x80000010u);
     }
@@ -5162,6 +5162,56 @@ TEST(ArithBridgeTest, ScalarFmaFormsPreserveAccumulatorLiteralOrderAndGuestRound
         fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
     EXPECT_EQ(fixture.cu->read_sgpr(base + 2), rounding == 1 ? 0x3f800001u : 0x3f800000u);
   }
+}
+
+// gfx1201: FP32 results round by MODE[1:0], FP16 results (S_FMAC_F16 and S_CVT_F16_F32 too)
+// by MODE[3:2], in decoded Compatibility and through rj-arith. Expected values are captures;
+// S_SUB negates a NaN B.
+TEST(ArithBridgeTest, ScalarFloatArithmeticUsesDestinationRoundingField) {
+  struct Case {
+    uint16_t opcode;
+    bool sop1;
+    uint32_t mode, a, b, d, expected;
+  };
+  // d is the S_FMAC_F16 accumulator; other forms overwrite it.
+  const Case cases[] = {{rdna4::kSAddF32Sop2, false, 0xf1, 0x3f800000, 0x1, 0, 0x3f800001},
+                        {rdna4::kSAddF32Sop2, false, 0xf4, 0x3f800000, 0x1, 0, 0x3f800000},
+                        {rdna4::kSSubF16Sop2, false, 0xfc, 0x3c00, 0x1, 0, 0x3bff},
+                        {rdna4::kSSubF16Sop2, false, 0xf3, 0x3c00, 0x1, 0, 0x3c00},
+                        {rdna4::kSSubF32Sop2, false, 0xf0, 0x0, 0x7fc00000, 0, 0xffc00000},
+                        {rdna4::kSFmacF16Sop2, false, 0xf4, 0x3c00, 0x3c00, 0x0c00, 0x3c01},
+                        {rdna4::kSFmacF16Sop2, false, 0xf0, 0x3c00, 0x3c00, 0x0c00, 0x3c00},
+                        {rdna4::kSCvtF32I32Sop1, true, 0xf1, 0x80000001, 0, 0, 0xceffffff},
+                        {rdna4::kSCvtF16F32Sop1, true, 0xf4, 0x40490fdb, 0, 0, 0x4249},
+                        {rdna4::kSCvtF16F32Sop1, true, 0xf1, 0x40490fdb, 0, 0, 0x4248}};
+  for (const auto &test : cases)
+    for (auto semantics :
+         {ArithmeticSemantics::Compatibility, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+          ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+      ArithmeticPolicy policy{semantics};
+      BridgeFixture fixture(false, 32, policy);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      fixture.wave->set_exec(0);
+      fixture.wave->set_mode_raw(test.mode);
+      fixture.wave->set_trapsts(0x80000000u);
+      const auto base = fixture.wave->sgpr_alloc().base;
+      fixture.cu->write_sgpr(base, test.a);
+      fixture.cu->write_sgpr(base + 1, test.b);
+      fixture.cu->write_sgpr(base + 2, test.d);
+      const auto words = test.sop1
+                             ? rdna4::build_sop1(test.opcode, {.ssrc0 = 0, .sdst = 2})
+                             : rdna4::build_sop2(test.opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 2});
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_sgpr(base + 2), test.expected)
+          << std::hex << test.opcode << " mode 0x" << test.mode;
+      // Only Compatibility (decoded RDNA4 scalar path) records FP causes.
+      if (semantics != ArithmeticSemantics::Compatibility) {
+        EXPECT_EQ(fixture.wave->trapsts(), 0x80000000u);
+      }
+    }
 }
 
 TEST(ArithBridgeTest, ScalarFloatComparisonsCoverEveryPredicateAndReportingPolicy) {
@@ -12834,6 +12884,36 @@ TEST(ArithBridgeTest, Gfx1250ScalarCompareCompatibility) {
       EXPECT_FALSE(fixture.wave->read_scc());
       EXPECT_EQ(fixture.wave->trapsts(), 0x80000000U);
       EXPECT_EQ(fixture.wave->exec(), 0U);
+    }
+  }
+}
+
+// RDNA2 constant predicates retain strict-mode support and signaling CLAMP status.
+TEST(ArithBridgeTest, Rdna2TruePredicatesRetainLegacyStatus) {
+  ArithmeticPolicy policy{};
+  policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+  for (bool update_exec : {false, true}) {
+    for (bool clamp : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << update_exec << ":" << clamp);
+      BridgeFixture fixture(ROCJITSU_CODE_ARCH_RDNA2, 32, policy);
+      fixture.wave->set_exec(1);
+      fixture.wave->set_mode_raw(0x200); // IEEE, no DX10 NaN clamping.
+      fixture.wave->set_trapsts(0);
+      fixture.cu->write_vgpr(fixture.base(), 0, clamp ? 0x7fc00000U : 0x3f800000U);
+      auto words = rdna2::build_vop3(update_exec ? rdna2::kVCmpxTruF32Vop3 : rdna2::kVCmpTruF32Vop3,
+                                     {.vdst = uint8_t(update_exec ? 126 : 106),
+                                      .clamp = uint8_t(clamp),
+                                      .src0 = 256,
+                                      .src1 = 256});
+      util::StringDiagnostic diagnostic;
+      auto inst = fixture.decoder->decode_window(words, 0, diagnostic.emitter());
+      ASSERT_TRUE(inst.succeeded()) << diagnostic.message();
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+      if (!update_exec) {
+        EXPECT_EQ(fixture.wave->vcc_mask(), 1U);
+      }
+      EXPECT_EQ(fixture.wave->trapsts() & 1U, uint32_t(clamp));
+      EXPECT_EQ(fixture.wave->exec(), 1U);
     }
   }
 }
