@@ -115,6 +115,23 @@ public:
     }
   }
 
+  // syncOnSameBlockIdx<true, true> with only the n ranks listed. Every listed rank must make the same sequence of
+  // calls with the same list, so every post is matched by one wait.
+  __device__ __forceinline__ void syncWithRanks(const int* ranks, int n) {
+    __syncthreads();
+    FlagType* selfBuf = peerFlags_[selfRank_];
+    bool gaveUp = false;
+    for (int i = threadIdx.x; !aborted_ && i < n; i += blockDim.x) {
+      const int peerRank = ranks[i];
+      if (!putFlag<std::memory_order_release>(peerFlags_[peerRank] + getFlagIdx(selfRank_, blockIdx.x), params_) ||
+          !waitFlag<std::memory_order_acquire>(selfBuf + getFlagIdx(peerRank, blockIdx.x), params_)) {
+        gaveUp = true;
+        break;
+      }
+    }
+    aborted_ = __syncthreads_or(aborted_ || gaveUp);
+  }
+
   // Waits until every store this wave has issued has completed, so a system-scope store has reached its
   // destination and then syncs the block so every wave's stores are done.
   __device__ __forceinline__ void orderDestWrites() {

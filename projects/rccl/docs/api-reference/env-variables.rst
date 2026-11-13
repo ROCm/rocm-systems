@@ -527,11 +527,25 @@ collected in the following table.
           while a backend is forced. The first eligible call splits the
           communicator, so all ranks must use the same value.
       - | ``-1``: Auto (default). On gfx1250, used for ``ncclFloat32``
-          ``ncclSum`` with eight ranks per host and these message sizes: 1 to 2 MiB, 8 to 16 MiB and 128 to 512 MiB on
-          two hosts, 1 MiB to 1 GiB on four hosts, and 1 MiB to 2 GiB on eight
-          hosts. Not used with other host counts.
+          ``ncclSum`` with eight ranks per host and these message sizes: 2 to
+          512 MiB on two hosts, 1 MiB to 1 GiB on four hosts, and 1 MiB to 2 GiB
+          on eight hosts. Not used with other host counts.
         | ``0``: Disabled.
         | ``1``: Enabled for every eligible AllReduce.
+
+    * - | ``RCCL_HOST_HIER_ALLREDUCE_FUSED``
+        | Runs host-hierarchical AllReduce (see ``RCCL_HOST_HIER_ALLREDUCE``) as
+          one DDA fabric kernel instead of three collectives on split
+          communicators. The kernel pushes each stage into peer scratch and
+          needs DDA fabric on the communicator, ``ncclSum`` on
+          ``ncclFloat32``, ``ncclFloat16`` or ``ncclBfloat16``, 16-byte
+          aligned buffers, at most 16 hosts and 16 ranks per host, and a count
+          that splits into 16-byte pieces per local rank. Otherwise the three
+          collectives run. All ranks must use the same value.
+      - | ``-1``: Auto (default). Used on one or two hosts for messages from
+          4 to 128 MiB.
+        | ``0``: Disabled.
+        | ``1``: Used wherever the kernel applies.
 
     * - | ``NCCL_TREE_COMPACT``
         | Builds the inter-node trees with a half-interleave node remapping.

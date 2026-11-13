@@ -71,6 +71,15 @@ ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, s
                                          ncclRedOp_t op, ncclComm* comm, cudaStream_t stream,
                                          rcclDdaLaunchCap cap = {});
 
+// Host-hierarchical sum in one kernel on the fabric path: reduce within the host, across hosts, then gather within the
+// host. intraRanks lists the comm ranks of this host by local rank; interRanks the ranks with this local rank by host.
+bool ncclAllReduceDdaFabricHierEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                        ncclDataType_t datatype, ncclRedOp_t op, int nHosts, int ranksPerHost);
+
+ncclResult_t ncclAllReduceDdaFabricHier(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                        ncclComm* comm, cudaStream_t stream, int nHosts, int ranksPerHost,
+                                        int hostIndex, int localRank, const int* intraRanks, const int* interRanks);
+
 // Total CTAs (grid blocks) each DDA allreduce launcher would use for the given
 // operands. Mirrors the launch grid math so reporting reflects real occupancy.
 uint32_t ncclAllReduceDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);

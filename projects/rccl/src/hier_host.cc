@@ -6,6 +6,7 @@
 
 #include "hier_host.h"
 
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/fabric/fabric_init.h"
 #include "alloc.h"
 #include "archinfo.h"
@@ -20,6 +21,9 @@
 #include <vector>
 
 RCCL_PARAM(HostHierAllReduce, "HOST_HIER_ALLREDUCE", -1);
+// -1 runs host-hierarchical AllReduce in the fused DDA kernel inside rcclHostHierAllReduceFusedWindow, 1 wherever the
+// kernel applies, 0 never.
+RCCL_PARAM(HostHierAllReduceFused, "HOST_HIER_ALLREDUCE_FUSED", -1);
 
 namespace {
 
@@ -99,6 +103,26 @@ bool rcclHostLayoutGet(const struct ncclComm* comm, struct rcclHostLayout* layou
   return true;
 }
 
+namespace {
+
+// Same host numbering as rcclHostLayoutGet.
+void fillHostRanks(const struct ncclComm* comm, const struct rcclHostLayout& layout, int* hostRanks) {
+  std::vector<uint64_t> hosts;
+  std::vector<int> counts;
+  for (int r = 0; r < comm->nRanks; r++) {
+    const uint64_t hash = comm->peerInfo[r].hostHash;
+    size_t idx = 0;
+    while (idx < hosts.size() && hosts[idx] != hash) idx++;
+    if (idx == hosts.size()) {
+      hosts.push_back(hash);
+      counts.push_back(0);
+    }
+    hostRanks[idx * layout.ranksPerHost + counts[idx]++] = r;
+  }
+}
+
+} // namespace
+
 const struct rcclHostLayout* rcclHostHierGetLayout(struct ncclComm* comm) {
   if (comm == nullptr) return nullptr;
   switch (comm->hostHierState) {
@@ -120,6 +144,12 @@ const struct rcclHostLayout* rcclHostHierGetLayout(struct ncclComm* comm) {
     comm->hostHierState = rcclHostHierOff;
     return nullptr;
   }
+  if (ncclCalloc(&h->hostRanks, comm->nRanks) != ncclSuccess) {
+    free(h);
+    comm->hostHierState = rcclHostHierOff;
+    return nullptr;
+  }
+  fillHostRanks(comm, layout, h->hostRanks);
   h->layout = layout;
   comm->hostHier = h;
   comm->hostHierState = rcclHostHierLayout;
@@ -177,6 +207,7 @@ ncclResult_t rcclHostHierTeardown(struct ncclComm* comm) {
   if (h->inter != nullptr) NCCLCHECKGOTO(ncclCommDestroy(h->inter), res, exit);
   if (h->intra != nullptr) NCCLCHECKGOTO(ncclCommDestroy(h->intra), res, exit);
 exit:
+  free(h->hostRanks);
   free(h);
   return res;
 }
@@ -185,8 +216,7 @@ bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes) {
   constexpr size_t MiB = size_t{1} << 20;
   switch (nHosts) {
   case 2:
-    return (bytes >= 1 * MiB && bytes <= 2 * MiB) || (bytes >= 8 * MiB && bytes <= 16 * MiB) ||
-           (bytes >= 128 * MiB && bytes <= 512 * MiB);
+    return bytes >= 2 * MiB && bytes <= 512 * MiB;
   case 4:
     return bytes >= 1 * MiB && bytes <= 1024 * MiB;
   case 8:
@@ -194,6 +224,11 @@ bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes) {
   default:
     return false;
   }
+}
+
+bool rcclHostHierAllReduceFusedWindow(int nHosts, size_t bytes) {
+  constexpr size_t MiB = size_t{1} << 20;
+  return nHosts <= 2 && bytes >= 4 * MiB && bytes <= 128 * MiB;
 }
 
 bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
@@ -214,6 +249,19 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
                                    ncclRedOp_t op, struct ncclComm* comm, cudaStream_t stream) {
   if (comm->hostHierState != rcclHostHierReady) return ncclInternalError;
   struct rcclHostHier* h = comm->hostHier;
+  const struct rcclHostLayout& layout = h->layout;
+  const int64_t fused = rcclParamHostHierAllReduceFused();
+  if ((fused == 1 || (fused == -1 && rcclHostHierAllReduceFusedWindow(layout.nHosts, count * ncclTypeSize(datatype)))) &&
+      ncclAllReduceDdaFabricHierEligible(comm, sendbuff, recvbuff, count, datatype, op, layout.nHosts,
+                                         layout.ranksPerHost)) {
+    std::vector<int> inter(layout.nHosts);
+    for (int host = 0; host < layout.nHosts; host++) {
+      inter[host] = h->hostRanks[host * layout.ranksPerHost + layout.localRank];
+    }
+    return ncclAllReduceDdaFabricHier(sendbuff, recvbuff, count, datatype, comm, stream, layout.nHosts,
+                                      layout.ranksPerHost, layout.hostIndex, layout.localRank,
+                                      h->hostRanks + layout.hostIndex * layout.ranksPerHost, inter.data());
+  }
   const size_t chunk = count / h->layout.ranksPerHost;
   const size_t chunkBytes = chunk * ncclTypeSize(datatype);
   const bool doInter = h->inter != nullptr;
