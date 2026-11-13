@@ -463,3 +463,20 @@ TEST(FpMulF64Gfx11, CapturedNans) {
   check_captured_gfx11<32, 64>(rj_arith_v_mul_f64_w32, mul_f64_lanes);
   check_captured_gfx11<64, 64>(rj_arith_v_mul_f64_w64, mul_f64_lanes);
 }
+
+// Compatibility retains a normal FP16 product recovered by narrowing before OMOD.
+TEST(FpMulF16Cdna, RoundedMinimumNormal) {
+  using namespace rocjitsu::arith::test;
+  for (auto cpu : supported_cpu_levels()) {
+    for (auto call : {rj_arith_v_mul_f16_w32_gfx942, rj_arith_v_mul_f16_w32_gfx1250}) {
+      Registers<3, 32> r;
+      r.v[0][0] = 0x3bff;
+      r.v[1][0] = 0x0400;
+      const uint64_t flags =
+          cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+      ASSERT_EQ(call(flags, 1, RJ_ARITH_ALU_OMOD_2, r.v + 2, r.v, r.v + 1, nullptr),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(r.v[2][0] & 0xffffU, 0x0800U);
+    }
+  }
+}

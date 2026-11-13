@@ -17,12 +17,76 @@
 
 namespace rocjitsu::arith {
 
+namespace {
+
+// SIMD equivalent of half_rounds_below for a positive power-of-two FP32 limit.
+// On the lower side of the boundary, an FP16 ULP is 0x2000 FP32 encodings.
+// The +1 on away rounding includes its boundary in the integer comparison.
+__m256i rounds_below(__m256 value, int limit, unsigned rounding) {
+  auto bits = _mm256_castps_si256(value);
+  auto threshold = _mm256_set1_epi32(limit - (rounding == 0 ? 0x1000 : 0));
+  if (rounding == 1 || rounding == 2) {
+    auto negative = _mm256_srai_epi32(bits, 31);
+    auto away = rounding == 2 ? negative : _mm256_xor_si256(negative, _mm256_set1_epi32(-1));
+    threshold = _mm256_blendv_epi8(threshold, _mm256_set1_epi32(limit - 0x1fff), away);
+  }
+  return _mm256_cmpgt_epi32(threshold, _mm256_and_si256(bits, _mm256_set1_epi32(INT32_MAX)));
+}
+
+// Collapse four 64-bit comparison masks into four 32-bit masks.
+__m128i mask32(__m256d mask) {
+  auto words = _mm256_shuffle_epi32(_mm256_castpd_si256(mask), _MM_SHUFFLE(2, 0, 2, 0));
+  return _mm_unpacklo_epi64(_mm256_castsi256_si128(words), _mm256_extracti128_si256(words, 1));
+}
+
+// Add four widened half operands exactly, then round toward the guest direction in FP32.
+// Correcting at most one FP32 ULP lets the subsequent half conversion use that same direction.
+__m128 add_directed4(__m128 x, __m128 y, unsigned rounding) {
+  auto exact = _mm256_add_pd(_mm256_cvtps_pd(x), _mm256_cvtps_pd(y));
+  auto nearest = _mm256_cvtpd_ps(exact);
+  auto rounded = _mm256_cvtps_pd(nearest);
+  auto above = mask32(_mm256_cmp_pd(rounded, exact, _CMP_GT_OQ));
+  auto below = mask32(_mm256_cmp_pd(rounded, exact, _CMP_LT_OQ));
+  auto bits = _mm_castps_si128(nearest);
+  auto sign = _mm_srai_epi32(bits, 31);
+  auto up = rounding == 1   ? below
+            : rounding == 3 ? _mm_and_si128(below, sign)
+                            : _mm_setzero_si128();
+  auto down = rounding == 2   ? above
+              : rounding == 3 ? _mm_andnot_si128(sign, above)
+                              : _mm_setzero_si128();
+  auto step = _mm_or_si128(sign, _mm_set1_epi32(1));
+  bits = _mm_add_epi32(bits, _mm_and_si128(up, step));
+  bits = _mm_sub_epi32(bits, _mm_and_si128(down, step));
+  if (rounding == 2) {
+    auto zero =
+        _mm_cmpeq_epi32(_mm_and_si128(bits, _mm_set1_epi32(0x7fffffff)), _mm_setzero_si128());
+    auto opposite = _mm_and_si128(_mm_xor_si128(_mm_castps_si128(x), _mm_castps_si128(y)),
+                                  _mm_set1_epi32(int(0x80000000U)));
+    bits = _mm_or_si128(bits, _mm_and_si128(zero, opposite));
+  }
+  return _mm_castsi128_ps(bits);
+}
+
+// Add eight half-derived operands with guest rounding; host controls remain unchanged.
+__m256 add(__m256 x, __m256 y, unsigned rounding) {
+  if (!rounding) {
+    return _mm256_add_ps(x, y);
+  }
+  auto low = add_directed4(_mm256_castps256_ps128(x), _mm256_castps256_ps128(y), rounding);
+  auto high = add_directed4(_mm256_extractf128_ps(x, 1), _mm256_extractf128_ps(y, 1), rounding);
+  return _mm256_insertf128_ps(_mm256_castps128_ps256(low), high, 1);
+}
+
+} // namespace
+
 // Evaluate FP16 binary arithmetic. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 template <Binary Op, bool Packed>
 void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
                            uint32_t *d, const uint32_t *a, const uint32_t *b, bool compatibility,
-                           bool preserve_input_snan) {
+                           bool preserve_input_snan, HalfOutputPolicy output) {
+  const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   constexpr bool arithmetic = rocjitsu::arith::is_arithmetic(Op);
   constexpr bool legacy = Op == Binary::MinLegacy || Op == Binary::MaxLegacy;
   constexpr bool preserve_nan_inputs = legacy || Op == Binary::Minimum || Op == Binary::Maximum;
@@ -55,15 +119,15 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
       }
       __m256 value;
       if constexpr (Op == Binary::Add) {
-        value = _mm256_add_ps(x, y);
+        value = add(x, y, rounding);
       }
       if constexpr (Op == Binary::Sub) {
         y = _mm256_xor_ps(y, _mm256_set1_ps(-0.0f));
-        value = _mm256_add_ps(x, y);
+        value = add(x, y, rounding);
       }
       if constexpr (Op == Binary::Subrev) {
         x = _mm256_xor_ps(x, _mm256_set1_ps(-0.0f));
-        value = _mm256_add_ps(x, y);
+        value = add(x, y, rounding);
       }
       if constexpr (Op == Binary::Mul) {
         value = _mm256_mul_ps(x, y);
@@ -84,15 +148,17 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
         value = minmax<true, true>(x, y);
       }
 
-      // FP16 sums and products are exact in FP32 near the smallest normal. Tininess is
-      // judged after rounding to nearest even at FP16 precision, so a value within half a
-      // unit of 2^-14 is tiny even though subnormal rounding reaches the smallest normal.
+      // Use guest rounding on the unrounded result, before Compatibility narrowing.
       auto tiny = _mm256_setzero_si256();
       if (arithmetic &&
           ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) || (m & RJ_ARITH_ALU_OMOD_MASK))) {
-        tiny = _mm256_cmpgt_epi32(
-            _mm256_set1_epi32(0x387ff000),
-            _mm256_and_si256(_mm256_castps_si256(value), _mm256_set1_epi32(INT32_MAX)));
+        if (output.rounded_tininess) {
+          auto encoded = half_narrow(value, flags & RJ_ARITH_FP16_OVFL, rounding);
+          tiny = _mm256_cmpgt_epi32(_mm256_set1_epi32(0x400),
+                                    _mm256_and_si256(encoded, _mm256_set1_epi32(0x7fff)));
+        } else {
+          tiny = rounds_below(value, 0x38800000, rounding);
+        }
       }
       if (arithmetic && compatibility) {
         // Preserve source priority and the explicit subtraction sign flip on NaNs.
@@ -100,17 +166,26 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
         value = _mm256_blendv_ps(value, x, _mm256_cmp_ps(x, x, _CMP_UNORD_Q));
       }
       if (m & RJ_ARITH_ALU_OMOD_MASK) {
-        if (arithmetic) {
+        if (arithmetic && !output.scale_before_rounding) {
           // OMOD turns a tiny result into +0, before Compatibility rounds the others.
           value = _mm256_andnot_ps(_mm256_castsi256_ps(tiny), value);
         }
-        if (arithmetic && compatibility && !Packed) {
+        if (arithmetic && compatibility && !Packed && !output.scale_before_rounding) {
           // Narrow and widen in registers; ordinary Loose needs neither conversion.
-          auto narrowed = half_narrow(value, flags & RJ_ARITH_FP16_OVFL);
+          auto narrowed = half_narrow(value, flags & RJ_ARITH_FP16_OVFL, rounding);
           value = _mm256_cvtph_ps(_mm_packus_epi32(_mm256_castsi256_si128(narrowed),
                                                    _mm256_extracti128_si256(narrowed, 1)));
         }
-        value = prepare_omod_f16<arithmetic>(value, m);
+        if constexpr (arithmetic) {
+          if (!output.scale_before_rounding &&
+              (m & RJ_ARITH_ALU_OMOD_MASK) == RJ_ARITH_ALU_OMOD_HALF) {
+            auto underflow = rounds_below(value, 0x39000000, rounding);
+            auto sign = _mm256_and_ps(value, _mm256_set1_ps(-0.0f));
+            value = _mm256_blendv_ps(value, sign, _mm256_castsi256_ps(underflow));
+          }
+        } else {
+          value = prepare_omod_f16(value, m);
+        }
         auto scaled = _mm256_mul_ps(value, _mm256_set1_ps(scales[(m >> 6) & 3]));
         if constexpr (arithmetic) {
           value = scaled;
@@ -128,7 +203,8 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
         }
         value = clamped;
       }
-      auto encoded = half_narrow<legacy>(value, flags & RJ_ARITH_FP16_OVFL);
+      auto encoded =
+          half_narrow<legacy>(value, flags & RJ_ARITH_FP16_OVFL, arithmetic ? rounding : 0);
       if constexpr (arithmetic) {
         // DX10_CLAMP off lets a NaN through CLAMP, so the selected sNaN is restored as well.
         if (preserve_input_snan &&
@@ -154,8 +230,17 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
       }
       // Every subnormal result is tiny; OMOD has already zeroed tiny results.
       if (arithmetic && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+        if (output.rounded_tininess) {
+          tiny = _mm256_cmpgt_epi32(_mm256_set1_epi32(0x400),
+                                    _mm256_and_si256(encoded, _mm256_set1_epi32(0x7fff)));
+        }
         auto sign = _mm256_and_si256(encoded, _mm256_set1_epi32(0x8000));
         encoded = _mm256_blendv_epi8(encoded, sign, tiny);
+      }
+      if (output.scale_before_rounding && (m & RJ_ARITH_ALU_OMOD_MASK)) {
+        auto tiny_result = _mm256_cmpgt_epi32(_mm256_set1_epi32(0x400),
+                                              _mm256_and_si256(encoded, _mm256_set1_epi32(0x7fff)));
+        encoded = _mm256_andnot_si256(tiny_result, encoded);
       }
       if constexpr (Packed) {
         result = _mm256_or_si256(result, _mm256_sll_epi32(encoded, _mm_cvtsi32_si128(16 * half)));
@@ -174,54 +259,62 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
 }
 
 template void half_binary_x86_64_v3<Binary::Add>(uint64_t, uint32_t, uint32_t, uint32_t *,
-                                                 const uint32_t *, const uint32_t *, bool, bool);
+                                                 const uint32_t *, const uint32_t *, bool, bool,
+                                                 HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::Sub>(uint64_t, uint32_t, uint32_t, uint32_t *,
-                                                 const uint32_t *, const uint32_t *, bool, bool);
+                                                 const uint32_t *, const uint32_t *, bool, bool,
+                                                 HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::Subrev>(uint64_t, uint32_t, uint32_t, uint32_t *,
-                                                    const uint32_t *, const uint32_t *, bool, bool);
+                                                    const uint32_t *, const uint32_t *, bool, bool,
+                                                    HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::Mul>(uint64_t, uint32_t, uint32_t, uint32_t *,
-                                                 const uint32_t *, const uint32_t *, bool, bool);
+                                                 const uint32_t *, const uint32_t *, bool, bool,
+                                                 HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::MinNum>(uint64_t, uint32_t, uint32_t, uint32_t *,
-                                                    const uint32_t *, const uint32_t *, bool, bool);
+                                                    const uint32_t *, const uint32_t *, bool, bool,
+                                                    HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::MaxNum>(uint64_t, uint32_t, uint32_t, uint32_t *,
-                                                    const uint32_t *, const uint32_t *, bool, bool);
+                                                    const uint32_t *, const uint32_t *, bool, bool,
+                                                    HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::Minimum>(uint64_t, uint32_t, uint32_t, uint32_t *,
-                                                     const uint32_t *, const uint32_t *, bool,
-                                                     bool);
+                                                     const uint32_t *, const uint32_t *, bool, bool,
+                                                     HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::Maximum>(uint64_t, uint32_t, uint32_t, uint32_t *,
-                                                     const uint32_t *, const uint32_t *, bool,
-                                                     bool);
+                                                     const uint32_t *, const uint32_t *, bool, bool,
+                                                     HalfOutputPolicy);
 
 template void half_binary_x86_64_v3<Binary::Add, true>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                        const uint32_t *, const uint32_t *, bool,
-                                                       bool);
+                                                       bool, HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::Mul, true>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                        const uint32_t *, const uint32_t *, bool,
-                                                       bool);
+                                                       bool, HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::MinNum, true>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                           const uint32_t *, const uint32_t *, bool,
-                                                          bool);
+                                                          bool, HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::MaxNum, true>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                           const uint32_t *, const uint32_t *, bool,
-                                                          bool);
+                                                          bool, HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::Minimum, true>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                            const uint32_t *, const uint32_t *, bool,
-                                                           bool);
+                                                           bool, HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::Maximum, true>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                            const uint32_t *, const uint32_t *, bool,
-                                                           bool);
+                                                           bool, HalfOutputPolicy);
 
 template void half_binary_x86_64_v3<Binary::MinLegacy>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                        const uint32_t *, const uint32_t *, bool,
-                                                       bool);
+                                                       bool, HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::MaxLegacy>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                        const uint32_t *, const uint32_t *, bool,
-                                                       bool);
+                                                       bool, HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::MinLegacy, true>(uint64_t, uint32_t, uint32_t,
                                                              uint32_t *, const uint32_t *,
-                                                             const uint32_t *, bool, bool);
+                                                             const uint32_t *, bool, bool,
+                                                             HalfOutputPolicy);
 template void half_binary_x86_64_v3<Binary::MaxLegacy, true>(uint64_t, uint32_t, uint32_t,
                                                              uint32_t *, const uint32_t *,
-                                                             const uint32_t *, bool, bool);
+                                                             const uint32_t *, bool, bool,
+                                                             HalfOutputPolicy);
 
 } // namespace rocjitsu::arith

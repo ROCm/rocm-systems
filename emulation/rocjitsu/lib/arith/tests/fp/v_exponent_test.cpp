@@ -9,6 +9,10 @@
 #include "fp/loose_unary_f64.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
+#include "common/cpu.h"
+#include <algorithm>
+#include <random>
+
 #include <cmath>
 #include <gtest/gtest.h>
 
@@ -350,4 +354,59 @@ TEST(FpFrexpMantF64Gfx11, CapturedSignalingNans) {
   using rocjitsu::arith::test::check_captured_gfx11;
   check_captured_gfx11<32, 64>(rj_arith_v_frexp_mant_f64_w32, frexp_mant_f64_lanes);
   check_captured_gfx11<64, 64>(rj_arith_v_frexp_mant_f64_w64, frexp_mant_f64_lanes);
+}
+
+// SIMD must retain the inherited scalar model across guest modes and exceptional inputs.
+TEST(FpLdexpF16, SimdMatchesInheritedRounding) {
+  const auto levels = rocjitsu::arith::test::supported_cpu_levels();
+  std::minstd_rand random;
+  const uint16_t special[] = {0, 0x8000, 1, 0x83ff, 0x7bff, 0x7c00, 0xfc00, 0x7d23};
+  for (auto call : {rj_arith_v_ldexp_f16_w32, rj_arith_v_ldexp_f16_w32_gfx12}) {
+    for (unsigned rounding = 0; rounding < 4; ++rounding) {
+      for (unsigned control = 0; control < 16; ++control) {
+        const uint64_t flags =
+            RJ_ARITH_SEMANTICS_COMPATIBILITY | (uint64_t(rounding) << 24) |
+            (control & 1 ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0) |
+            (control & 2 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0) |
+            (control & 4 ? RJ_ARITH_FP16_OVFL : 0) |
+            (control & 8 && call == rj_arith_v_ldexp_f16_w32 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
+        for (unsigned variant = 0; variant < 8; ++variant) {
+          const uint32_t modifiers =
+              (variant % 4) * RJ_ARITH_ALU_OMOD_2 |
+              (variant & 4 ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D |
+                                 RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_CLAMP
+                           : 0);
+          for (int batch = 0; batch < 16; ++batch) {
+            uint32_t a[32], b[32], reference[32], actual[32];
+            for (int lane = 0; lane < 32; ++lane) {
+              uint16_t half = lane < 8 ? special[lane] : uint16_t(random() >> 15);
+              uint16_t exponent = batch == 0   ? 0x8000
+                                  : batch == 1 ? 0x7fff
+                                               : uint16_t(int(random() >> 25) - 32);
+              a[lane] = uint32_t(half) * 0x10001U;
+              b[lane] = uint32_t(exponent) * 0x10001U;
+              reference[lane] = actual[lane] = a[lane];
+            }
+            const uint32_t *x = a, *y = b;
+            uint32_t *d = reference, status = 0x80;
+            const uint32_t exec_mask = batch & 1 ? 0xa5555555U : 0xffffffffU;
+            ASSERT_EQ(call(flags, exec_mask, modifiers, &d, &x, &y, &status), RJ_ARITH_SUCCESS);
+            for (uint64_t cpu : levels) {
+              std::copy(a, a + 32, actual);
+              d = actual;
+              x = actual; // Selected input aliases D, with the other half preserved.
+              ASSERT_EQ(call(flags | cpu, exec_mask, modifiers, &d, &x, &y, &status),
+                        RJ_ARITH_SUCCESS);
+              for (int lane = 0; lane < 32; ++lane) {
+                ASSERT_EQ(actual[lane], reference[lane])
+                    << cpu << '/' << rounding << '/' << control << '/' << variant << '/' << batch
+                    << '/' << lane;
+              }
+              EXPECT_EQ(status, 0x80U);
+            }
+          }
+        }
+      }
+    }
+  }
 }
