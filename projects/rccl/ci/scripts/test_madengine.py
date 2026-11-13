@@ -2796,9 +2796,11 @@ def metrics_prove_completion(family: str, phase_results: dict) -> bool:
     parse the output format, even though training ran to completion; passing
     rows with metrics from every phase then outweigh its exit code. Not for
     MaxText: its wrapper parses a crashed run's partial steps too and exits
-    with the training's own code, so metrics do not prove completion.
+    with the training's own code, so metrics do not prove completion. Nor for
+    sglang-disagg: MAD's benchmark keeps the points of the iterations that
+    finished when a later one fails, and its parser marks them SUCCESS.
     """
-    if family == "maxtext" or not phase_results:
+    if family in ("maxtext", "sglang-disagg") or not phase_results:
         return False
     rows = [r for phase_rows in phase_results.values() for r in phase_rows]
     return (
