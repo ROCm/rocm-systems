@@ -3232,6 +3232,8 @@ void hip_capture_init() {
   #else
     // HRR capture is disabled
     // below to avoid -Wunused-function / -Wunused-variable
+    (void)&pinned_wrap_table;
+    (void)&pinned_install_atfork;
     (void)&record_fat_binary;
     (void)&record_registered_var;
     (void)&hrr_install_clr_exception_handler;

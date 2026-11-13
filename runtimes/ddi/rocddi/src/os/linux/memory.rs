@@ -127,6 +127,18 @@ pub(crate) struct HostAllocation {
     source: Option<File>,
 }
 
+fn valid_host_layout(size: usize, alignment: usize, page: usize) -> bool {
+    crate::memory::constraints::AllocationLimits {
+        alignment: page as u64,
+        granularity: page as u64,
+        maximum_size: isize::MAX as u64,
+    }
+    .supports(crate::memory::constraints::AllocationDesc {
+        size: size as u64,
+        alignment: alignment as u64,
+    })
+}
+
 impl HostAllocation {
     /// Validates size and alignment, reserves shared ownership metadata, then
     /// acquires page-aligned host memory. The retained `process` guards later
@@ -145,12 +157,7 @@ impl HostAllocation {
             )
         })?;
         let page = page_size().map_err(|e| native_error("host page size", e))?;
-        if size == 0
-            || size % page != 0
-            || size > isize::MAX as usize
-            || !alignment.is_power_of_two()
-            || alignment < page
-        {
+        if !valid_host_layout(size, alignment, page) {
             return Err(error(
                 ErrorKind::InvalidArgument,
                 "invalid host allocation extent or alignment",
@@ -186,12 +193,7 @@ impl HostAllocation {
             )
         })?;
         let page = page_size().map_err(|source| native_error("host page size", source))?;
-        if size == 0
-            || size % page != 0
-            || size > isize::MAX as usize
-            || !alignment.is_power_of_two()
-            || alignment < page
-        {
+        if !valid_host_layout(size, alignment, page) {
             return Err(error(
                 ErrorKind::InvalidArgument,
                 "invalid host source geometry",
@@ -233,6 +235,10 @@ impl HostAllocation {
             process,
             source: Some(file),
         }))
+    }
+
+    pub(crate) fn is_remappable(&self) -> bool {
+        self.source.is_some()
     }
 
     pub(crate) fn source(&self) -> Option<&File> {
@@ -296,6 +302,29 @@ impl Drop for HostAllocation {
     }
 }
 
+pub(crate) fn host_memory_capabilities()
+-> Result<crate::memory::host::HostMemoryCapabilities, Error> {
+    use crate::memory::constraints::AllocationLimits;
+    use crate::memory::host::{HostMemoryCapabilities, HostReservationCapabilities};
+    let page = host_page_size()?;
+    Ok(HostMemoryCapabilities {
+        allocation: AllocationLimits {
+            alignment: page,
+            granularity: page,
+            maximum_size: isize::MAX as u64,
+        },
+        remappable_backing: true,
+        reservation: Some(HostReservationCapabilities {
+            reservation_granularity: page,
+            mapping_granularity: page,
+            maximum_size: (isize::MAX as u64) & !(page - 1),
+            maximum_alignment: 1_u64 << (usize::BITS - 2),
+            minimum_address: page,
+            maximum_address: usize::MAX as u64,
+        }),
+    })
+}
+
 #[cfg(test)]
 #[allow(unsafe_code, clippy::unwrap_used)]
 mod tests {
@@ -339,7 +368,8 @@ mod tests {
                 .unwrap()
                 .free()
                 .unwrap_err()
-                .native_error_code(),
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code),
             Some(errno::EIO)
         );
         assert_eq!(allocation.extent(), extent);

@@ -10,6 +10,7 @@
 #include "conversion/conversion16_reference.h"
 #include "conversion/conversion32_reference.h"
 #include "conversion/packed_conversion_reference.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 // Check scalar FP results and the expected semantics/status policy.
 TEST(s_cvt_f32_i32, Arithmetic) {

@@ -157,8 +157,14 @@ target_include_directories(hrr-integration-tests PRIVATE
 # hiprtc::hiprtc (hipRTC) is a separate ROCm CMake package from hip::host.
 find_package(hiprtc CONFIG REQUIRED)
 
+# Disable deprecated warnings as it is not relevant
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(hrr-integration-tests PRIVATE -Wno-deprecated-declarations)
+endif()
+
 target_link_libraries(hrr-integration-tests PRIVATE
   hrr::reader
+  hrr::warnings
   hip::host
   hiprtc::hiprtc
   Catch2::Catch2WithMain)
@@ -232,7 +238,7 @@ if(NOT WIN32)
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_VISIBILITY_PRESET hidden)
-  target_link_libraries(hrr-test-dispatch-tool PRIVATE ${CMAKE_DL_LIBS})
+  target_link_libraries(hrr-test-dispatch-tool PRIVATE hrr::warnings ${CMAKE_DL_LIBS})
   find_package(Threads REQUIRED)
   target_link_libraries(hrr-integration-tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
   target_compile_definitions(hrr-integration-tests PRIVATE

@@ -4,10 +4,10 @@
 //! Source-qualified graph of passive topology reports.
 //!
 //! The fact values in `crate::topology` stand alone. This graph associates
-//! them with sources and nodes in one `TopologySnapshot`. Node and source IDs
-//! are indices into that snapshot, never persistent native identities. Native
-//! node IDs are scoped by their source: a KFD node ordinal and a Linux NUMA ID
-//! remain distinct even when their numbers match.
+//! them with sources and nodes in one `TopologyGraphSnapshot`. Node and source
+//! IDs are indices into that snapshot, never persistent native identities.
+//! Native node IDs are scoped by their source: a KFD node ordinal and a Linux
+//! NUMA ID remain distinct even when their numbers match.
 //! `TopologyCache` binds a `CacheInfo` to a node; `ReportedRoute` binds a
 //! `MemoryLinkInfo` to two nodes. The payloads remain reusable without either
 //! association.
@@ -18,7 +18,7 @@
 //! checked native generation; host OS observations are best effort and have
 //! no atomic generation in common with KFD or another driver.
 
-use super::host::HostTopologySnapshot;
+use super::host::HostTopologyGraphSnapshot;
 use super::{CacheInfo, Endpoint, MemoryLinkInfo};
 use crate::driver::DriverInstanceId;
 use crate::memory::storage::TryPush;
@@ -35,7 +35,7 @@ pub struct SourceId(pub usize);
 /// Source of a group of independently observed topology records.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceKind {
-    /// The Linux host OS CPU and NUMA reader.
+    /// The selected host OS CPU and NUMA reader.
     HostOs,
     /// One installed Linux KFD driver instance.
     LinuxKfd,
@@ -62,7 +62,7 @@ pub enum NativeNodeId {
     /// Host-wide CPU/cache observation.
     HostSystem,
     /// OS NUMA node number.
-    LinuxNuma(u32),
+    HostNuma(u32),
     /// KFD topology node ordinal.
     LinuxKfd(u32),
     /// Opaque ordinal reported by another activation driver.
@@ -216,14 +216,15 @@ pub struct MemoryBank {
     pub maximum_clock_mhz: Option<u32>,
 }
 
-/// One source-qualified view of independent passive topology observations.
+/// A captured topology graph assembled from independent source observations.
+/// Generation and completeness are recorded per source.
 /// A session publishes it only after driver contributions validate.
 /// Host facts can be incomplete; their per-source `complete` flag records that.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TopologySnapshot {
+pub struct TopologyGraphSnapshot {
     /// Best-effort OS host observations, retained for CPU identity, CPU sets,
     /// and cache-sharing details beyond the generic node and cache projection.
-    pub host: HostTopologySnapshot,
+    pub host: HostTopologyGraphSnapshot,
     /// Passive activation endpoints discovered by installed drivers.
     pub endpoints: Vec<Endpoint>,
     /// Freshness and completeness of each independent contributor.
@@ -242,8 +243,8 @@ pub struct TopologySnapshot {
     pub memory_banks: Vec<MemoryBank>,
 }
 
-impl TopologySnapshot {
-    pub(crate) fn new(host: HostTopologySnapshot) -> Result<Self, Error> {
+impl TopologyGraphSnapshot {
+    pub(crate) fn new(host: HostTopologyGraphSnapshot) -> Result<Self, Error> {
         let mut result = Self {
             host,
             endpoints: Vec::new(),
@@ -278,7 +279,7 @@ impl TopologySnapshot {
         }
         for domain in &result.host.domains {
             if result.nodes.iter().any(|node| {
-                node.source == source && node.native_id == NativeNodeId::LinuxNuma(domain.numa_node)
+                node.source == source && node.native_id == NativeNodeId::HostNuma(domain.numa_node)
             }) {
                 return Err(Error::Operation {
                     kind: ErrorKind::InvalidData,
@@ -289,7 +290,7 @@ impl TopologySnapshot {
             result.nodes.try_push(TopologyNode {
                 id: node,
                 source,
-                native_id: NativeNodeId::LinuxNuma(domain.numa_node),
+                native_id: NativeNodeId::HostNuma(domain.numa_node),
                 kind: NodeKind::HostNuma,
                 cpu: None,
             })?;
@@ -301,6 +302,33 @@ impl TopologySnapshot {
             }
         }
         Ok(result)
+    }
+
+    /// Adds a provider-observed host locality without inferring an access route.
+    /// Missing host domains remain unknown rather than creating synthetic nodes.
+    pub(crate) fn attach_host_locality(
+        &mut self,
+        endpoint: [u8; 16],
+        driver_instance: DriverInstanceId,
+        numa: u32,
+    ) -> Result<(), Error> {
+        let node = self
+            .nodes
+            .iter()
+            .find(|node| {
+                self.sources[node.source.0].kind == SourceKind::HostOs
+                    && node.native_id == NativeNodeId::HostNuma(numa)
+            })
+            .map(|node| node.id);
+        if let Some(node) = node {
+            self.attach_endpoint(
+                endpoint,
+                driver_instance,
+                node,
+                AttachmentKind::HostLocality,
+            )?;
+        }
+        Ok(())
     }
 
     pub(crate) fn add_source(
@@ -341,7 +369,7 @@ impl TopologySnapshot {
                     NodeKind::HostSystem
                 ) | (
                     SourceKind::HostOs,
-                    NativeNodeId::LinuxNuma(_),
+                    NativeNodeId::HostNuma(_),
                     NodeKind::HostNuma
                 ) | (
                     SourceKind::LinuxKfd,
@@ -644,8 +672,8 @@ mod tests {
         CacheInfo::new(level, 4096, Some(64), CacheKind::Unified)
     }
 
-    fn host() -> HostTopologySnapshot {
-        HostTopologySnapshot {
+    fn host() -> HostTopologyGraphSnapshot {
+        HostTopologyGraphSnapshot {
             memory_bytes: None,
             cpu: None,
             cpu_apic_ids: Vec::new(),
@@ -702,7 +730,7 @@ mod tests {
 
     #[test]
     fn source_qualified_nodes_allow_multiple_endpoints_and_typed_attachments() {
-        let mut snapshot = TopologySnapshot::new(host()).unwrap();
+        let mut snapshot = TopologyGraphSnapshot::new(host()).unwrap();
         let first = endpoint(1);
         let mut second = endpoint(2);
         second.driver_instance = first.driver_instance;
@@ -720,7 +748,7 @@ mod tests {
         let host_numa = snapshot
             .nodes
             .iter()
-            .find(|node| node.native_id == NativeNodeId::LinuxNuma(7))
+            .find(|node| node.native_id == NativeNodeId::HostNuma(7))
             .unwrap()
             .id;
         assert_ne!(gpu, host_numa);
@@ -732,12 +760,7 @@ mod tests {
         snapshot.add_endpoint(first.clone(), gpu).unwrap();
         snapshot.add_endpoint(second.clone(), gpu).unwrap();
         snapshot
-            .attach_endpoint(
-                first.id,
-                first.driver_instance,
-                host_numa,
-                AttachmentKind::HostLocality,
-            )
+            .attach_host_locality(first.id, first.driver_instance, 7)
             .unwrap();
         snapshot.caches.push(TopologyCache {
             node: gpu,
@@ -781,7 +804,7 @@ mod tests {
 
     #[test]
     fn routes_are_directed_reports_with_no_cross_source_inference() {
-        let mut snapshot = TopologySnapshot::new(host()).unwrap();
+        let mut snapshot = TopologyGraphSnapshot::new(host()).unwrap();
         let first = endpoint(1);
         let mut second = endpoint(2);
         second.driver_instance = first.driver_instance;
@@ -821,7 +844,7 @@ mod tests {
 
     #[test]
     fn generic_driver_nodes_keep_host_routes_and_cpu_facts() {
-        let mut snapshot = TopologySnapshot::new(host()).unwrap();
+        let mut snapshot = TopologyGraphSnapshot::new(host()).unwrap();
         let endpoint = endpoint(3);
         let source = snapshot
             .add_source(

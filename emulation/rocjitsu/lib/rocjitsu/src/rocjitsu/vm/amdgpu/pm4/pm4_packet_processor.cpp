@@ -348,7 +348,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
             T value;
             std::memcpy(&value, bytes.data(), sizeof(value));
             value = apply_int_atomic(atomic, value, static_cast<T>(address(3)),
-                                     static_cast<T>(address(5)));
+                                     static_cast<T>(address(5)))
+                        .value();
             std::memcpy(bytes.data(), &value, sizeof(value));
           });
         };
@@ -366,7 +367,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         const uint32_t selection = words[1] >> 29;
         uint64_t value = address(4);
         if (selection == 3)
-          value = hsa_system_timestamp();
+          value = gpu_timestamp(context.arch);
         else if (selection != 0 && selection != 1 && selection != 2)
           return fail("unsupported RELEASE_MEM data source");
         const size_t bytes = selection == 0 ? 0 : selection == 1 ? 4 : 8;
@@ -404,7 +405,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         } else if (source == 5)
           value = address(1);
         else if (source == 9)
-          value = hsa_system_timestamp();
+          value = gpu_timestamp(context.arch);
         else if (source == 1 || source == 2) {
           if (access->read(address(1), {reinterpret_cast<std::byte *>(&value), bytes}) !=
               VmAccessOutcome::Complete)

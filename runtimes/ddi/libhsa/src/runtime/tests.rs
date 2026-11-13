@@ -560,21 +560,39 @@ fn hardware_exception_events_match_the_amd_extension_layout() {
 }
 
 #[test]
-/// Verifies that GPU ticks translate around the correlated system sample.
-fn gpu_ticks_translate_around_the_correlated_system_sample() {
+/// Verifies that GPU ticks translate around the correlated host sample.
+fn gpu_ticks_translate_around_the_correlated_host_sample() {
     let counters = ClockCounters {
         gpu: 100,
-        host: 0,
-        system: 1_000,
-        system_frequency: 1_000_000_000,
-        gpu_frequency: 100_000_000,
+        host: 1_000,
+        system: None,
+        gpu_info: rocddi::host::clock::ClockInfo {
+            frequency_hz: 100_000_000,
+            counter_bit_count: 0,
+        },
     };
+    assert_eq!(
+        translate_gpu_tick(
+            ClockCounters {
+                gpu_info: rocddi::host::clock::ClockInfo {
+                    counter_bit_count: 32,
+                    ..counters.gpu_info
+                },
+                ..counters
+            },
+            110
+        ),
+        Err(NOT_SUPPORTED)
+    );
     assert_eq!(translate_gpu_tick(counters, 110), Ok(1_100));
     assert_eq!(translate_gpu_tick(counters, 90), Ok(900));
     assert_eq!(
         translate_gpu_tick(
             ClockCounters {
-                gpu_frequency: 200_000_000,
+                gpu_info: rocddi::host::clock::ClockInfo {
+                    frequency_hz: 200_000_000,
+                    ..counters.gpu_info
+                },
                 ..counters
             },
             110,
@@ -584,7 +602,10 @@ fn gpu_ticks_translate_around_the_correlated_system_sample() {
     assert_eq!(
         translate_gpu_tick(
             ClockCounters {
-                system_frequency: 0,
+                gpu_info: rocddi::host::clock::ClockInfo {
+                    frequency_hz: 0,
+                    ..counters.gpu_info
+                },
                 ..counters
             },
             100,
@@ -682,20 +703,20 @@ fn cache_handles_and_names_are_stable_runtime_objects() {
 #[test]
 /// Verifies that OS caches are not assigned to an unidentified CPU node.
 fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
-    use rocddi::topology::host::{CpuCache, HostCaches, HostTopologySnapshot};
+    use rocddi::topology::host::{CpuCache, HostCaches, HostTopologyGraphSnapshot};
 
     let cache = |cpu| CpuCache {
         cpu,
         shared_cpus: None,
         info: rocddi::topology::CacheInfo::new(1, 32 * 1024, None, CpuCacheKind::Data),
     };
-    let topology = HostTopologySnapshot {
+    let topology = HostTopologyGraphSnapshot {
         memory_bytes: None,
         cpu: None,
         cpu_apic_ids: Vec::new(),
         online_cpus: None,
         caches: HostCaches {
-            records: vec![cache(7)],
+            records: vec![cache(rocddi::topology::host::CpuId::linux(7))],
             complete: true,
         },
         domains: Vec::new(),
@@ -703,26 +724,27 @@ fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
     };
     assert_eq!(
         host_caches_for_cpu(&topology, None, 1).unwrap().records[0].cpu,
-        7
+        rocddi::topology::host::CpuId::linux(7)
     );
     assert!(host_caches_for_cpu(&topology, None, 2).is_none());
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 /// Verifies separate KFD CPU nodes retain their bank sizes and APU policy.
 fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
-    use rocddi::topology::host::{HostCaches, HostTopologySnapshot};
+    use rocddi::topology::host::{HostCaches, HostTopologyGraphSnapshot};
     use rocddi::topology::{
         CpuNodeInfo, MemoryBank, MemoryBankKind, NativeNodeId, NodeId, NodeKind, SourceId,
         TopologyNode,
     };
 
     let host = CpuInfo {
-        name: "test CPU".into(),
+        name: Some("test CPU".into()),
         compute_units: 12,
     };
-    let topology = TopologySnapshot {
-        host: HostTopologySnapshot {
+    let topology = TopologyGraphSnapshot {
+        host: HostTopologyGraphSnapshot {
             memory_bytes: Some(3 << 30),
             cpu: Some(host.clone()),
             cpu_apic_ids: Vec::new(),
@@ -851,4 +873,16 @@ fn hsa_runtime_reinitializes_after_shutdown() {
         assert_eq!(crate::hsa_init(), SUCCESS);
         assert_eq!(crate::hsa_shut_down(), SUCCESS);
     }
+}
+
+#[test]
+/// Unsupported native services retain an actionable public status.
+fn unsupported_native_services_report_not_supported() {
+    assert_eq!(
+        map_error(rocddi::Error::Operation {
+            kind: rocddi::ErrorKind::Unsupported,
+            detail: "unqualified transport",
+        }),
+        NOT_SUPPORTED
+    );
 }

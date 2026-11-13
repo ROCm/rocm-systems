@@ -8,8 +8,34 @@
 
 #include <stddef.h>
 
+#include <vector>
+
 #include <hip/hip_runtime_api.h>
 #include <resource_guards.hh>
+
+// Returns the node of the given type in graph. Requires the type to be unique within the
+// graph, so a caller relying on it fails loudly if the graph later grows a second one.
+// Useful for reaching nodes of a child graph obtained from hipGraphChildGraphNodeGetGraph,
+// where hipGraphGetNodes returns topological order and node identity is not otherwise known.
+inline hipGraphNode_t GraphGetUniqueNodeOfType(hipGraph_t graph, hipGraphNodeType type) {
+  size_t num_nodes = 0;
+  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &num_nodes));
+  REQUIRE(num_nodes > 0);
+  std::vector<hipGraphNode_t> nodes(num_nodes);
+  HIP_CHECK(hipGraphGetNodes(graph, nodes.data(), &num_nodes));
+
+  hipGraphNode_t found = nullptr;
+  for (size_t i = 0; i < num_nodes; ++i) {
+    hipGraphNodeType node_type;
+    HIP_CHECK(hipGraphNodeGetType(nodes[i], &node_type));
+    if (node_type == type) {
+      REQUIRE(found == nullptr);
+      found = nodes[i];
+    }
+  }
+  REQUIRE(found != nullptr);
+  return found;
+}
 
 template <typename F> void GraphAddNodeCommonNegativeTests(F f, hipGraph_t graph) {
   hipGraphNode_t node = nullptr;
