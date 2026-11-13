@@ -20,33 +20,6 @@ from tests.integration.common import (
     skip_unsupported_roofline_soc,
 )
 
-# Kernel mode shares one pass index per kernel and advances it on every
-# dispatch. Length 11 is coprime with pass counts 4 through 8 and still
-# launches kernel ids 0, 1, and 2, so each launch config receives every pass.
-_STOCHASTIC_LAUNCH_ORDER = [
-    "-o",
-    "11",
-    "0",
-    "1",
-    "2",
-    "0",
-    "1",
-    "2",
-    "0",
-    "1",
-    "2",
-    "0",
-    "1",
-]
-
-
-def _stochastic_profile_config():
-    """Copy the shared app config and append the coprime laplace launch order."""
-    profile_config = dict(config)
-    for app_name in ("app_laplace_eqn", "app_laplace_eqn_iter"):
-        profile_config[app_name] = [*config[app_name], *_STOCHASTIC_LAUNCH_ORDER]
-    return profile_config
-
 
 @pytest.mark.iteration_multiplexing_1
 def test_profiler_options(binary_handler_profile_rocprof_compute):
@@ -204,7 +177,6 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     if not soc or ("MI300" not in soc and "MI350" not in soc):
         pytest.skip("Skipping stochastic iteration multiplexing for non-CDNA socs.")
 
-    profile_config = _stochastic_profile_config()
     workload_dir = common.get_output_dir(param_id="no_iter_mplx")
     workload_dirs = [workload_dir]
     # These metrics should cover the L1 cache stochastic counters
@@ -212,7 +184,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     options = ["--block", "4", "16.1", "16.3"]
     try:
         _ = binary_handler_profile_rocprof_compute(
-            profile_config,
+            config,
             workload_dir,
             options,
             check_success=True,
@@ -233,7 +205,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
         workload_dir = common.get_output_dir(param_id="iter_mplx_kernel")
         workload_dirs.append(workload_dir)
         _ = binary_handler_profile_rocprof_compute(
-            profile_config,
+            config,
             workload_dir,
             options,
             check_success=True,
@@ -254,7 +226,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
         workload_dir_klp = common.get_output_dir(param_id="iter_mplx_params")
         workload_dirs.append(workload_dir_klp)
         _ = binary_handler_profile_rocprof_compute(
-            profile_config,
+            config,
             workload_dir_klp,
             options,
             check_success=True,
