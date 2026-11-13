@@ -258,13 +258,17 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
   if (mode == 0) return false;
   if (count == 0 || !opSplitsAcrossStages(op, datatype)) return false;
   const bool forced = mode == 1;
+  const bool halfType = datatype == ncclFloat16 || datatype == ncclBfloat16;
   // Registered windows are left to the symmetric and CE paths: the child comms do not see the registrations.
-  if (!forced && (registeredBuffers || !(ncclDdaUseFabricPath(comm) && datatype == ncclFloat32 && op == ncclSum))) {
+  if (!forced &&
+      (registeredBuffers || !(ncclDdaUseFabricPath(comm) && (datatype == ncclFloat32 || halfType) && op == ncclSum))) {
     return false;
   }
   const struct rcclHostLayout* layout = rcclHostHierGetLayout(comm);
   if (layout == nullptr || count % layout->ranksPerHost != 0) return false;
   if (forced) return true;
+  // FP16 and BF16 were measured on two hosts only.
+  if (halfType && layout->nHosts != 2) return false;
   return layout->ranksPerHost == 8 && rcclHostHierAllReduceAutoWindow(layout->nHosts, count * ncclTypeSize(datatype));
 }
 
