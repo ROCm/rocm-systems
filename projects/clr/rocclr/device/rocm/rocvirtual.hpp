@@ -953,6 +953,9 @@ class VirtualGPU : public device::VirtualDevice {
   //! Release pinned memory after previously submitted work on the queue has completed.
   void SchedulePinnedMemoryRelease(amd::HostQueue& queue, std::vector<amd::Memory*> pinned_memory);
 
+  //! Apply and consume a pending system-scope request without changing queue fence state.
+  void applySystemScopeRequest(uint16_t& header);
+
   //! Apply fence-scope adjustments to the AQL header (system scope promotion,
   //! consecutive-system-scope optimization, fence_state_ tracking).
   void adjustHeader(uint16_t& header);
