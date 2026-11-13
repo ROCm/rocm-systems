@@ -20,6 +20,7 @@ from rocm_bootstrap.targets import lookup_target
 from rocm_bootstrap.tests.conftest import FakePlatform
 from rocm_bootstrap.variant_provider import AMDVariantPlugin
 
+from bundle_test_utils import make_fatbin
 from rocm_kpack.binutils import Toolchain
 from rocm_kpack.wheel_splitter import (
     DatabaseFileRef,
@@ -31,6 +32,7 @@ from rocm_kpack.wheel_splitter import (
     WheelSplitter,
     WheelSplitError,
     _arch_to_bundle_key,
+    _extract_single_binary,
     _bundle_key_to_dist_name,
     compute_dist_info_name,
     compute_wheel_filename,
@@ -391,6 +393,41 @@ class TestBundleKeyToDistName:
             assert (
                 _bundle_key_to_dist_name("amd-torch-device", bundle_key) == expected
             ), f"Failed for {bundle_key}"
+
+
+class TestExtractSingleBinary:
+    def test_toc_index_is_bundle_index(self, tmp_path: Path):
+        """A TU without code for an arch must not shift later TOC indices.
+
+        The kpack transform writes the wrapper (bundle) index into reserved1
+        and the runtime looks up "<binary>#<index>", so gfx1100's code from
+        bundle 2 must be keyed #2 although bundle 1 has no gfx1100 code.
+        """
+        fatbin = tmp_path / "libmulti.so"
+        fatbin.write_bytes(
+            make_fatbin(
+                [
+                    {"gfx942": b"TU0_942", "gfx1100": b"TU0_1100"},
+                    {"gfx942": b"TU1_942"},
+                    {"gfx942": b"TU2_942", "gfx1100": b"TU2_1100"},
+                ]
+            )
+        )
+        staging = tmp_path / "staging"
+
+        refs = _extract_single_binary(fatbin, "torch/lib/libmulti.so", staging)
+
+        got = {
+            (r.architecture, r.source_binary_relpath): r.kernel_file.read_bytes()
+            for r in refs
+        }
+        assert got == {
+            ("gfx942", "torch/lib/libmulti.so#0"): b"TU0_942",
+            ("gfx1100", "torch/lib/libmulti.so#0"): b"TU0_1100",
+            ("gfx942", "torch/lib/libmulti.so#1"): b"TU1_942",
+            ("gfx942", "torch/lib/libmulti.so#2"): b"TU2_942",
+            ("gfx1100", "torch/lib/libmulti.so#2"): b"TU2_1100",
+        }
 
 
 class TestCreateDeviceWheel:

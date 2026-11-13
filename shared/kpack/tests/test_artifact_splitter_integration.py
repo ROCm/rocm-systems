@@ -19,6 +19,7 @@ from rocm_kpack.artifact_splitter import (
     ExtractedKernel,
     base_arch,
 )
+from bundle_test_utils import make_fatbin
 from elf_test_utils import patch_hip_fatbin_size
 from rocm_kpack.artifact_utils import read_artifact_manifest, write_artifact_manifest
 from rocm_kpack.coff.kpack_transform import HIPF_MAGIC as COFF_HIPF_MAGIC
@@ -1635,6 +1636,55 @@ class TestArtifactSplitterIntegration:
         generic_1100 = generic_dir / rel / "TensileLibrary_lazy_gfx1100-xnack-.hsaco"
         assert not generic_1100.exists(), "filtered gfx1100 kernels should not be kept"
 
+    @pytest.mark.parametrize("gpu_targets", [None, ["gfx1100"]])
+    def test_toc_index_is_bundle_index(self, toolchain, tmp_path, gpu_targets):
+        """A TU without code for an arch must not shift later TOC indices.
+
+        The kpack transform writes the wrapper (bundle) index into reserved1
+        and the runtime looks up "<binary>#<index>", so gfx1100's code from
+        bundle 2 must be keyed #2 although bundle 1 has no gfx1100 code.
+        """
+        prefix = "math-libs/multi/stage"
+        prefix_path = tmp_path / prefix
+        fat_binary = prefix_path / "lib" / "libmulti.so"
+        fat_binary.parent.mkdir(parents=True)
+        fat_binary.write_bytes(
+            make_fatbin(
+                [
+                    {"gfx942": b"TU0_942", "gfx1100": b"TU0_1100"},
+                    {"gfx942": b"TU1_942"},
+                    {"gfx942": b"TU2_942", "gfx1100": b"TU2_1100"},
+                ]
+            )
+        )
+        splitter = ArtifactSplitter(
+            artifact_prefix="multi_lib",
+            toolchain=toolchain,
+            database_handlers=[],
+            gpu_targets=gpu_targets,
+        )
+
+        result = splitter.process_fat_binaries([fat_binary], prefix, prefix_path)
+
+        got = {
+            arch: {(k.source_binary_relpath, k.kernel_data) for k in kernels}
+            for arch, kernels in result.items()
+        }
+        expected = {
+            "gfx942": {
+                ("lib/libmulti.so#0", b"TU0_942"),
+                ("lib/libmulti.so#1", b"TU1_942"),
+                ("lib/libmulti.so#2", b"TU2_942"),
+            },
+            "gfx1100": {
+                ("lib/libmulti.so#0", b"TU0_1100"),
+                ("lib/libmulti.so#2", b"TU2_1100"),
+            },
+        }
+        if gpu_targets is not None:
+            expected = {a: v for a, v in expected.items() if a in gpu_targets}
+        assert got == expected
+
     def test_gpu_targets_filters_fat_binary_kernels(self, toolchain, tmp_path):
         """
         Test that gpu_targets filters code objects extracted from fat binaries.
@@ -1668,6 +1718,7 @@ class TestArtifactSplitterIntegration:
             (),
             {
                 "target_list": mock_targets,
+                "bundle_indices": [0] * len(mock_targets),
                 "dest_dir": mock_dest_dir,
                 "__enter__": lambda s: s,
                 "__exit__": lambda s, *a: None,
@@ -1746,6 +1797,7 @@ class TestArtifactSplitterIntegration:
             (),
             {
                 "target_list": [("hipv4-amdgcn-amd-amdhsa--gfx906", "gfx906.hsaco")],
+                "bundle_indices": [0],
                 "dest_dir": tmp_path / "unbundled",
                 "__enter__": lambda s: s,
                 "__exit__": lambda s, *a: None,

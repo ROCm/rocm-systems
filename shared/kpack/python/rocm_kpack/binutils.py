@@ -185,11 +185,20 @@ class UnbundledContents:
         dest_dir: Path,
         delete_on_close: bool,
         target_list: list[tuple[str, str]],
+        bundle_indices: list[int],
     ):
+        if len(bundle_indices) != len(target_list):
+            raise ValueError(
+                f"{len(bundle_indices)} bundle indices for {len(target_list)} targets"
+            )
         self.source_binary = source_binary
         self.dest_dir = dest_dir
         self.delete_on_close = delete_on_close
         self.target_list = target_list
+        # bundle_indices[i] is the index of the offload bundle (one per
+        # translation unit and fat binary wrapper) that target_list[i] came
+        # from. The kpack transform writes the same index into each wrapper.
+        self.bundle_indices = bundle_indices
 
     def __enter__(self) -> "UnbundledContents":
         return self
@@ -258,7 +267,11 @@ class BundledBinary:
             dest_dir = Path(tempfile.mkdtemp())
 
         contents = UnbundledContents(
-            self, dest_dir, delete_on_close=delete_on_close, target_list=target_list
+            self,
+            dest_dir,
+            delete_on_close=delete_on_close,
+            target_list=target_list,
+            bundle_indices=[obj.bundle_index for obj in code_objects],
         )
         try:
             dest_dir.mkdir(parents=True, exist_ok=True)
