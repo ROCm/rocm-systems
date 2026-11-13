@@ -146,7 +146,14 @@ add_subdirectory(include/cpp)
 
 list(
     APPEND profiler-hub_public_headers
+    ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/reader_types.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/shared_types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/trimmer.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/version.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/writer_types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub.h
     ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub_trim.h
     ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub_types.h

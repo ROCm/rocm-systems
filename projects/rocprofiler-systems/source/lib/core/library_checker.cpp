@@ -5,7 +5,7 @@
 #include "common/defines.h"
 #include "common/version.hpp"
 
-#include <profiler-hub/cpp/storage.hpp>
+#include <profiler-hub/storage.hpp>
 
 #include <fmt/format.h>
 
