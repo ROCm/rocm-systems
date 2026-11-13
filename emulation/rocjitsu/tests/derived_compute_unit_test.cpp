@@ -28,10 +28,10 @@ constexpr uint32_t kMovS5 = 0xBE850087u;  // s_mov_b32 s5, 7
 constexpr uint32_t kEndpgm = 0xBFB00000u; // s_endpgm
 
 /// A clocked CU model: state of its own, built ahead of the ISA parts.
-class ModelCu : public ExecComputeUnit<simdojo::ExecMode::CLOCKED> {
+class ClockedComputeUnit : public ExecComputeUnit<simdojo::ExecMode::CLOCKED> {
 public:
   template <typename... CoreArgs>
-  ModelCu(uint32_t tag, CoreArgs &&...core)
+  ClockedComputeUnit(uint32_t tag, CoreArgs &&...core)
       : ExecComputeUnit<simdojo::ExecMode::CLOCKED>(std::forward<CoreArgs>(core)...), tag_(tag),
         slots_at_construction_(num_wf_slots()) {}
 
@@ -62,21 +62,21 @@ protected:
 };
 
 TEST_F(DerivedComputeUnitTest, CompletesTheModelWithTheConfiguredIsa) {
-  std::unique_ptr<ModelCu> cu = create_compute_unit<ModelCu>(
-      "model_cu", config_for(ROCJITSU_CODE_ARCH_RDNA4), &memory, &l2, {}, 42u);
+  std::unique_ptr<ClockedComputeUnit> cu = create_compute_unit<ClockedComputeUnit>(
+      "clocked_cu", config_for(ROCJITSU_CODE_ARCH_RDNA4), &memory, &l2, {}, 42u);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->tag(), 42u);
-  // The core is complete before the model's own state is built.
+  // The core is complete before ClockedComputeUnit's own state is built.
   EXPECT_EQ(cu->slots_at_construction(), 2u);
-  EXPECT_EQ(cu->name(), "model_cu");
-  using Rdna4Cu = IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, rdna4::Isa, ModelCu>;
+  EXPECT_EQ(cu->name(), "clocked_cu");
+  using Rdna4Cu = IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, rdna4::Isa, ClockedComputeUnit>;
   EXPECT_NE(dynamic_cast<Rdna4Cu *>(cu.get()), nullptr);
   EXPECT_EQ(cu->wf_size(), rdna4::Isa::WF_SIZE);
 }
 
 TEST_F(DerivedComputeUnitTest, ExecutesThroughTheModelClass) {
-  std::unique_ptr<ModelCu> cu = create_compute_unit<ModelCu>(
-      "model_cu", config_for(ROCJITSU_CODE_ARCH_RDNA4), &memory, &l2, {}, 0u);
+  std::unique_ptr<ClockedComputeUnit> cu = create_compute_unit<ClockedComputeUnit>(
+      "clocked_cu", config_for(ROCJITSU_CODE_ARCH_RDNA4), &memory, &l2, {}, 0u);
   memory.write32(kProgram, kMovS5);
   for (uint32_t i = 1; i <= 4; ++i)
     memory.write32(kProgram + i * 4, kEndpgm);
@@ -92,9 +92,9 @@ TEST_F(DerivedComputeUnitTest, ExecutesThroughTheModelClass) {
 }
 
 TEST_F(DerivedComputeUnitTest, SelectsEachArchitecturesIsa) {
-  std::unique_ptr<ModelCu> cu = create_compute_unit<ModelCu>(
-      "model_cu", config_for(ROCJITSU_CODE_ARCH_CDNA3), &memory, &l2, {}, 0u);
-  using Cdna3Cu = IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, cdna3::Isa, ModelCu>;
+  std::unique_ptr<ClockedComputeUnit> cu = create_compute_unit<ClockedComputeUnit>(
+      "clocked_cu", config_for(ROCJITSU_CODE_ARCH_CDNA3), &memory, &l2, {}, 0u);
+  using Cdna3Cu = IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, cdna3::Isa, ClockedComputeUnit>;
   EXPECT_NE(dynamic_cast<Cdna3Cu *>(cu.get()), nullptr);
   EXPECT_EQ(cu->wf_size(), cdna3::Isa::WF_SIZE);
 }
@@ -102,9 +102,9 @@ TEST_F(DerivedComputeUnitTest, SelectsEachArchitecturesIsa) {
 TEST_F(DerivedComputeUnitTest, ValidatesTheConfigurationLikeCreate) {
   const auto too_many_slots = config_for(ROCJITSU_CODE_ARCH_RDNA4, rdna4::Isa::MAX_WF_SLOTS + 1);
   util::StringDiagnostic derived;
-  EXPECT_EQ(
-      create_compute_unit<ModelCu>("model_cu", too_many_slots, &memory, &l2, derived.emitter(), 0u),
-      nullptr);
+  EXPECT_EQ(create_compute_unit<ClockedComputeUnit>("clocked_cu", too_many_slots, &memory, &l2,
+                                                    derived.emitter(), 0u),
+            nullptr);
   EXPECT_THAT(derived.message(), testing::HasSubstr("num_wf_slots exceeds the ISA maximum"));
   util::StringDiagnostic created;
   EXPECT_EQ(ComputeUnitCore::create("cu", too_many_slots, &memory, &l2,
