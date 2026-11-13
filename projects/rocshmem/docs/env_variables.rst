@@ -239,8 +239,10 @@ control the behavior of rocSHMEM.
         | Number of SDMA channels (ring buffers) allocated per destination PE.
         | More channels reduce CAS contention when many wavefronts submit concurrently,
         | at the cost of additional queue memory and SDMA engine resources.
+        | If any rank on a node sets a value outside 1-8, every rank on that node
+        | aborts during initialization and names the rank(s) with the bad value.
       - ``1``
-      - Number of channels per destination PE.
+      - Number of channels per destination PE (1-8).
 
     * - | ``ROCSHMEM_SDMA_SPREAD_CHANNELS``
         | When enabled, each wavefront within a workgroup selects its SDMA channel
