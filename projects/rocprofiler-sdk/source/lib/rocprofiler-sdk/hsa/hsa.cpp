@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/details/ostream.hpp"
 #include "lib/rocprofiler-sdk/hsa/pc_sampling.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
@@ -587,11 +588,8 @@ hsa_shut_down_refcnt_impl()
             // may survive. On timeout abandon+disable process-wide. No-op with the
             // feature off.
             ::rocprofiler::kfd::signal_less_fence_completions();
+            queue_controller_shutdown();
             dispatch_time_reset();
-            // The completion monitor's thread waits on signals owned by the runtime that
-            // hsa_shut_down_fn tears down below. Stop and join it here, while those
-            // signals are still valid.
-            ::rocprofiler::hsa::queue_interposition::stop_completion_monitor();
         }
         return get_core_table()->hsa_shut_down_fn();
     }

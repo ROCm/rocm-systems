@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
@@ -30,29 +31,33 @@
 
 namespace
 {
-uint64_t           signal_allocations = 0;
-uint64_t           signal_resets      = 0;
-hsa_signal_value_t signal_value       = 0;
+uint64_t           signal_allocations  = 0;
+uint64_t           signal_resets       = 0;
+uint64_t           signal_destructions = 0;
+hsa_signal_value_t signal_value        = 0;
 }  // namespace
 
 TEST(hsa, pooled_signal_reuses_handle_and_resets_value)
 {
     namespace hsa = ::rocprofiler::hsa;
 
-    signal_allocations = 0;
-    signal_resets      = 0;
-    signal_value       = 0;
+    signal_allocations  = 0;
+    signal_resets       = 0;
+    signal_destructions = 0;
+    signal_value        = 0;
 
     auto* core = hsa::get_core_table();
     auto* ext  = hsa::get_amd_ext_table();
     ASSERT_NE(core, nullptr);
     ASSERT_NE(ext, nullptr);
 
-    auto old_create = ext->hsa_amd_signal_create_fn;
-    auto old_store  = core->hsa_signal_store_screlease_fn;
-    auto restore    = ::rocprofiler::common::scope_destructor{[&]() {
+    auto old_create  = ext->hsa_amd_signal_create_fn;
+    auto old_store   = core->hsa_signal_store_screlease_fn;
+    auto old_destroy = core->hsa_signal_destroy_fn;
+    auto restore     = ::rocprofiler::common::scope_destructor{[&]() {
         ext->hsa_amd_signal_create_fn       = old_create;
         core->hsa_signal_store_screlease_fn = old_store;
+        core->hsa_signal_destroy_fn         = old_destroy;
     }};
 
     ext->hsa_amd_signal_create_fn = +[](hsa_signal_value_t initial,
@@ -67,6 +72,11 @@ TEST(hsa, pooled_signal_reuses_handle_and_resets_value)
     core->hsa_signal_store_screlease_fn = +[](hsa_signal_t, hsa_signal_value_t initial) {
         ++signal_resets;
         signal_value = initial;
+    };
+
+    core->hsa_signal_destroy_fn = +[](hsa_signal_t) {
+        ++signal_destructions;
+        return HSA_STATUS_SUCCESS;
     };
 
     ::rocprofiler::common::container::pool<hsa::signal_t> pool{
@@ -86,4 +96,15 @@ TEST(hsa, pooled_signal_reuses_handle_and_resets_value)
     EXPECT_EQ(signal_allocations, 1);
     EXPECT_EQ(last, (hsa_signal_t{.handle = 1}));
     EXPECT_EQ(signal_resets, iterations);
+
+    auto retire_signal = [](auto& signal) { hsa::Queue::destroy_signal(&signal); };
+    pool.clear(retire_signal);
+    EXPECT_EQ(signal_destructions, 1);
+    auto& slot = pool.acquire(hsa::construct_hsa_signal, 9, 0, nullptr, 0);
+    EXPECT_EQ(signal_allocations, 2);
+    EXPECT_NE(slot.get().value, last);
+    EXPECT_EQ(signal_value, 9);
+    EXPECT_TRUE(slot.release());
+    pool.clear(retire_signal);
+    EXPECT_EQ(signal_destructions, 2);
 }
