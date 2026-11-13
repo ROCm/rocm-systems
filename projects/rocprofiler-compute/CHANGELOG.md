@@ -15,6 +15,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed the roofline plotting FP4 and FP6 against separate matrix ceilings on AMD Instinct MI350 Series. One counter counts both, so they now share the `Peak MFMA-F6F4 (FP6/FP4)` ceiling.
+
 ### Upcoming changes
 
 ### Known issues
