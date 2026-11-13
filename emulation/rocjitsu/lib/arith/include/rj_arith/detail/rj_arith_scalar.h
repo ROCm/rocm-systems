@@ -82,13 +82,18 @@ int rj_arith_s_denorm_mode(uint64_t flags, uint64_t instruction_flags, uint16_t 
 // pc is the byte address of this instruction; addition wraps modulo 2^48.
 // No EXEC input or instruction flags. Both semantics are exact. Does not modify
 // the guest PC or host FP state; errors preserve D.
-// GETPC adds four, then exports 48 bits: signed on gfx11, unsigned on gfx12.
+// GETPC adds four, then exports 48 bits: signed on gfx11/gfx942/gfx950, unsigned on gfx12.
 int rj_arith_s_getpc_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t pc);
 int rj_arith_s_getpc_b64_gfx12(uint64_t flags, uint64_t instruction_flags, uint64_t *d,
                                uint64_t pc);
 
-// EXEC Boolean updates shared by RDNA3/RDNA4. SAVEEXEC writes old exec_mask
-// to d; WREXEC writes the new EXEC value to d. EXEC is replaced, not accumulated.
+// gfx1250 spelling: store pc + 4, wrapping and sign-extending from 57 bits.
+// Otherwise the same contract as S_GETPC_B64 above, including unchanged guest PC.
+int rj_arith_s_get_pc_i64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t pc);
+
+// EXEC Boolean updates shared by gfx11/gfx12 and gfx942/gfx950/gfx1250.
+// SAVEEXEC writes old exec_mask to d; WREXEC writes the new EXEC value to d.
+// EXEC is replaced, not accumulated.
 // NOT0 complements a, NOT1 complements exec_mask. SCC is new EXEC != 0.
 // These execute even when exec_mask is zero. Both semantics are exact;
 // instruction_flags must be zero. d and scc are required ordinary results;
@@ -165,6 +170,25 @@ int rj_arith_s_and_not0_wrexec_b64(uint64_t flags, uint64_t instruction_flags, u
 
 int rj_arith_s_and_not1_wrexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d,
                                    uint64_t a, uint64_t exec_mask, uint64_t *exec, uint32_t *scc);
+
+// Older CDNA spellings use operand-one/operand-two numbering.
+int rj_arith_s_andn1_saveexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d,
+                                  uint64_t a, uint64_t exec_mask, uint64_t *exec, uint32_t *scc);
+
+int rj_arith_s_andn2_saveexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d,
+                                  uint64_t a, uint64_t exec_mask, uint64_t *exec, uint32_t *scc);
+
+int rj_arith_s_orn1_saveexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d,
+                                 uint64_t a, uint64_t exec_mask, uint64_t *exec, uint32_t *scc);
+
+int rj_arith_s_orn2_saveexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d,
+                                 uint64_t a, uint64_t exec_mask, uint64_t *exec, uint32_t *scc);
+
+int rj_arith_s_andn1_wrexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t a,
+                                uint64_t exec_mask, uint64_t *exec, uint32_t *scc);
+
+int rj_arith_s_andn2_wrexec_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t a,
+                                uint64_t exec_mask, uint64_t *exec, uint32_t *scc);
 
 // Scalar relative moves shared by RDNA3/RDNA4. Indexed arrays start at SGPR0;
 // indices 0..107 cover SGPRs/VCC and 108..123 cover TTMP0..15. Counts bound
@@ -669,22 +693,40 @@ int rj_arith_s_bcnt1_i32_b64(uint64_t flags, uint64_t instruction_flags, uint32_
 // Count trailing zero bits in 32-bit a; return UINT32_MAX for zero.
 int rj_arith_s_ctz_i32_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a);
 
+// Search bits using the legacy mnemonic; same result and validation as s_ctz_i32_b32.
+int rj_arith_s_ff1_i32_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a);
+
 // Count trailing zero bits in 64-bit a; return UINT32_MAX for zero.
 int rj_arith_s_ctz_i32_b64(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint64_t a);
+
+// Search bits using the legacy mnemonic; same result and validation as s_ctz_i32_b64.
+int rj_arith_s_ff1_i32_b64(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint64_t a);
 
 // Count leading zero bits in 32-bit a; return UINT32_MAX for zero.
 int rj_arith_s_clz_i32_u32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a);
 
+// Search bits using the legacy mnemonic; same result and validation as s_clz_i32_u32.
+int rj_arith_s_flbit_i32_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a);
+
 // Count leading zero bits in 64-bit a; return UINT32_MAX for zero.
 int rj_arith_s_clz_i32_u64(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint64_t a);
+
+// Search bits using the legacy mnemonic; same result and validation as s_clz_i32_u64.
+int rj_arith_s_flbit_i32_b64(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint64_t a);
 
 // Count leading sign bits in 32-bit a, including the sign bit;
 // return UINT32_MAX for zero or all-ones input.
 int rj_arith_s_cls_i32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a);
 
+// Search bits using the legacy mnemonic; same result and validation as s_cls_i32.
+int rj_arith_s_flbit_i32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a);
+
 // Count leading sign bits in 64-bit a, including the sign bit;
 // return UINT32_MAX for zero or all-ones input.
 int rj_arith_s_cls_i32_i64(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint64_t a);
+
+// Search bits using the legacy mnemonic; same result and validation as s_cls_i32_i64.
+int rj_arith_s_flbit_i32_i64(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint64_t a);
 
 // Clear bit b modulo 32 in old *d.
 int rj_arith_s_bitset0_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t b);
@@ -757,17 +799,33 @@ int rj_arith_s_xnor_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d,
 int rj_arith_s_and_not1_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                             uint32_t b, uint32_t *scc);
 
+// Combine a with the complement of b; SCC is result != 0.
+int rj_arith_s_andn2_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                         uint32_t b, uint32_t *scc);
+
 // 64-bit and_not1.
 int rj_arith_s_and_not1_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t a,
                             uint64_t b, uint32_t *scc);
+
+// Combine a with the complement of b; SCC is result != 0.
+int rj_arith_s_andn2_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t a,
+                         uint64_t b, uint32_t *scc);
 
 // 32-bit or_not1.
 int rj_arith_s_or_not1_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t b, uint32_t *scc);
 
+// Combine a with the complement of b; SCC is result != 0.
+int rj_arith_s_orn2_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                        uint32_t b, uint32_t *scc);
+
 // 64-bit or_not1.
 int rj_arith_s_or_not1_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t a,
                            uint64_t b, uint32_t *scc);
+
+// Combine a with the complement of b; SCC is result != 0.
+int rj_arith_s_orn2_b64(uint64_t flags, uint64_t instruction_flags, uint64_t *d, uint64_t a,
+                        uint64_t b, uint32_t *scc);
 
 // 32-bit not.
 int rj_arith_s_not_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
@@ -941,6 +999,10 @@ int rj_arith_s_addk_co_i32(uint64_t flags, uint64_t instruction_flags, uint32_t 
 int rj_arith_s_mulk_i32(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
                         uint16_t immediate);
 
+// Index of the least-significant zero bit, or UINT32_MAX when none exists.
+int rj_arith_s_ff0_i32_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a);
+int rj_arith_s_ff0_i32_b64(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint64_t a);
+
 // Pseudo-scalar transcendental math on raw SGPR values. Executes once regardless
 // of EXEC, including zero. a is a scalar value; d must always be writable.
 // FP16 reads a's low half, ignores its high half, and zeros d's upper half.
@@ -975,6 +1037,153 @@ int rj_arith_v_s_sqrt_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *
                           uint32_t *excp_flag_user);
 int rj_arith_v_s_sqrt_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                           uint32_t *excp_flag_user);
+
+// gfx1250 scalar FP predicates. Compatibility preserves gradual inputs and leaves
+// FP status untouched. Loose/allow-loose may flush inputs when requested. Strict
+// empirical modes are unsupported; errors leave SCC and FP status unchanged.
+int rj_arith_s_cmp_lt_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_lt_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_eq_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_eq_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_le_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_le_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_gt_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_gt_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_lg_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_lg_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_ge_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_ge_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_o_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                 uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_o_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                 uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_u_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                 uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_u_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                 uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_nge_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_nge_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_nlg_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_nlg_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_ngt_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_ngt_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_nle_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_nle_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_neq_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_neq_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_nlt_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_cmp_nlt_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *scc,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+
+// gfx1250 scalar integral rounding, preserving signed zero and quieting NaNs.
+// Compatibility ignores guest flushing and leaves FP status untouched. Loose
+// may flush inputs when requested. Strict empirical modes are unsupported.
+int rj_arith_s_ceil_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                                uint32_t *excp_flag_user);
+int rj_arith_s_ceil_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                                uint32_t *excp_flag_user);
+int rj_arith_s_floor_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_s_floor_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_s_trunc_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_s_trunc_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_s_rndne_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_s_rndne_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user);
+
+// gfx1250 scalar binary FP operations; no FP status is produced. Strict empirical
+// modes are unsupported. Compatibility ADD/SUB/MUL ignore denormal/FP16 saturation
+// controls; selection honors input flushing and preserves its selected result.
+// Loose/allow-loose arithmetic may honor the explicit FP controls.
+int rj_arith_s_add_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_add_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_sub_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_sub_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_mul_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_mul_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                               uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_min_num_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_min_num_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_max_num_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_max_num_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_minimum_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_minimum_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_maximum_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_maximum_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t b, uint32_t *excp_flag_user);
+
+// gfx1250 scalar FMA: FMAC accumulates into *d; FMAAK/FMAMK compute a*b+c,
+// with the literal supplied as c/b respectively. Compatibility FP32 preserves
+// guest rounding/denormals; FP16 uses legacy FP32 FMA then nearest FP16 conversion,
+// ignoring guest controls. FP status is unused; strict empirical modes unsupported.
+int rj_arith_s_fmac_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                                uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_fmac_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                                uint32_t b, uint32_t *excp_flag_user);
+int rj_arith_s_fmaak_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t b, uint32_t c, uint32_t *excp_flag_user);
+int rj_arith_s_fmamk_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t b, uint32_t c, uint32_t *excp_flag_user);
+
+// gfx1250 scalar conversions retain NaN payloads, including signaling NaNs.
+// Compatibility ignores denormal flushing; CVT_F16_F32 honors FP16 overflow
+// saturation. HI selects the upper input half; PK_RTZ packs a low and b high.
+// FP status is unused; strict empirical modes are unsupported.
+int rj_arith_s_cvt_f32_i32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_s_cvt_f32_u32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_s_cvt_i32_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_s_cvt_u32_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_s_cvt_f16_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_s_cvt_f32_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_s_cvt_hi_f32_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                      uint32_t a, uint32_t *excp_flag_user);
+int rj_arith_s_cvt_pk_rtz_f16_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                          uint32_t a, uint32_t b, uint32_t *excp_flag_user);
 
 #ifdef __cplusplus
 } // extern "C"

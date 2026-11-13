@@ -46,7 +46,7 @@ def test_scalar_moves_preserve_conditional_observation(name):
         assert body.index('status != RJ_ARITH_SUCCESS') < body.index(
             'registers.write_scalar'
         )
-    assert gen_scalar(context('cdna5', name, ['d'], ['a'])) is None
+    assert gen_scalar(context('cdna2', name, ['d'], ['a'])) is None
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])

@@ -168,7 +168,8 @@ def test_carry_bindings_keep_decoder_commit_and_snapshot_input(arch, name, vop3)
     dst = ['vdst', 'sdst'] if vop3 else ['vdst']
     src = ['a', 'b', 'cin'] if vop3 and with_carry else ['a', 'b']
     body = gen_carry32(context(arch, name, dst, src, vop3, 'commit_result'))
-    assert f'execute_carry32<{str(with_carry).lower()}>' in body
+    carry_policy = ', false' if arch.startswith('cdna') else ''
+    assert f'execute_carry32<{str(with_carry).lower()}{carry_policy}>' in body
     assert 'rj_arith_' + name.lower() + '_w64' in body
     assert 'input_carry, commit_result' in body
     assert ('inst_.clamp' in body) == vop3
