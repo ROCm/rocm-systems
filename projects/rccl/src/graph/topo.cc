@@ -80,8 +80,10 @@ static ncclResult_t ncclTopoGetInterCpuBw(struct ncclTopoNode* cpu, float* bw) {
                                                             BDW_QPI_BW;
   }
   if (cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_AMD) {
-    // RCCL: AMD_ZEN34_BW/AMD_ZEN5_BW are not yet validated with AMD GPUs; keep one value for every Zen generation.
-    *bw = AMD_ZEN12_BW;
+    // NCCL 2.31.2 modeled inter-socket rates. cpu.model is the Zen generation; Rome-class presets use cpu.rome.
+    *bw = cpu->cpu.model == NCCL_TOPO_CPU_MODEL_AMD_ZEN5  ? AMD_ZEN5_BW :
+          cpu->cpu.model == NCCL_TOPO_CPU_MODEL_AMD_ZEN34 ? AMD_ZEN34_BW :
+                                                            AMD_ZEN12_BW;
   }
   if (cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_ZHAOXIN) {
     *bw = cpu->cpu.model == NCCL_TOPO_CPU_MODEL_YONGFENG ? YONGFENG_ZPI_BW : ZPI_BW;
