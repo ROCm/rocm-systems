@@ -36,6 +36,7 @@ from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     ROOFLINE_PANEL_ID,
     canonical_config_arch,
+    panel_config_paths,
     parse_sets_yaml,
 )
 from utils.utils_counter_defs import get_build_in_vars, metric_value_keys
@@ -291,7 +292,9 @@ def row_peak(row: Row, peak: str) -> str:
 def row_metric_id(row: Row, library: loader.MetricLibrary, arch: str) -> Optional[str]:
     """Return the metric id of row, or None if no metric matches.
 
-    A row with the name of a SHARED_FORMULA_IDS id as its label gets that id.
+    A row with the name of a SHARED_FORMULA_IDS id as its label gets that id. A
+    COLLECT_SUM or COLLECT_RATIO row gets the metric its label names, since the
+    library keeps the combined formula.
     """
     variants = DISPLAY_VARIANTS.get(arch, {})
     if row.legacy_id in variants:
@@ -310,36 +313,16 @@ def row_metric_id(row: Row, library: loader.MetricLibrary, arch: str) -> Optiona
     named_id = names.get(row.label.casefold())
     if metric_id is not None and SHARED_FORMULA_IDS.get(named_id) == metric_id:
         return named_id
+    if metric_id is None and row.equation is not None and "COLLECT_" in row.equation:
+        return named_id or COLLECTED_ROW_IDS.get(row.label.casefold())
     return metric_id
-
-
-def shown_metric_id(
-    row: Row, library: loader.MetricLibrary, arch: str
-) -> Optional[str]:
-    """Return the library metric a row shows.
-
-    A collected row keeps the library metric of its label. The panel equation is
-    the split form, and the library keeps the combined formula.
-    """
-    metric_id = row_metric_id(row, library, arch)
-    if metric_id is not None or row.equation is None or "COLLECT_" not in row.equation:
-        return metric_id
-    names = {
-        metric["name"].casefold(): found_id
-        for found_id, metric in library.metrics.items()
-    }
-    return names.get(row.label.casefold()) or COLLECTED_ROW_IDS.get(
-        row.label.casefold()
-    )
 
 
 def make_soc(arch: str, membw_analysis: bool, filter_blocks: List[str]) -> OmniSoC_Base:
     """Return an OmniSoC_Base for arch, with no GPU needed."""
     args = SimpleNamespace(
-        config_dir=config.analysis_configs_dir,
         filter_blocks=filter_blocks,
         membw_analysis=membw_analysis,
-        roof_only=False,
         set_selected=None,
     )
     machine_specs = SimpleNamespace(
@@ -361,8 +344,7 @@ def shown_blocks(arch: str) -> List[str]:
         return []
     file_ids = {
         path.name.split("_")[0]
-        for path in (config.analysis_configs_dir / arch).glob("*.yaml")
-        if path.name.split("_")[0].isdigit()
+        for path in panel_config_paths(config.analysis_configs_dir / arch)
     }
     return [str(int(file_id) // 100) for file_id in sorted(file_ids - unshown)]
 
@@ -405,8 +387,7 @@ def arch_view(request) -> SimpleNamespace:
 def test_every_row_shows_a_library_formula(arch_view):
     variants = DISPLAY_VARIANTS.get(arch_view.arch, {})
     errors = []
-    for row in arch_view.rows:
-        metric_id = shown_metric_id(row, arch_view.library, arch_view.arch)
+    for row, metric_id in zip(arch_view.rows, arch_view.metric_ids):
         if row.legacy_id in variants:
             label, variant_id, equation = variants[row.legacy_id]
             if row.label != label or variant_id not in arch_view.library.metrics:
@@ -420,8 +401,8 @@ def test_every_row_shows_a_library_formula(arch_view):
 
 def test_every_library_formula_is_shown(arch_view):
     shown = {
-        shown_metric_id(row, arch_view.library, arch_view.arch)
-        for row in arch_view.rows
+        metric_id
+        for row, metric_id in zip(arch_view.rows, arch_view.metric_ids)
         if row.equation is not None
     }
     assert sorted(set(arch_view.library.metrics) - shown) == []
@@ -430,8 +411,7 @@ def test_every_library_formula_is_shown(arch_view):
 def test_row_units_are_metric_units(arch_view):
     unit_variants = UNIT_VARIANTS.get(arch_view.arch, {})
     errors = []
-    for row in arch_view.rows:
-        metric_id = shown_metric_id(row, arch_view.library, arch_view.arch)
+    for row, metric_id in zip(arch_view.rows, arch_view.metric_ids):
         if row.unit is None or metric_id is None:
             continue
         metric_unit = arch_view.library.metrics[metric_id]["unit"]
@@ -454,8 +434,7 @@ def test_row_peaks_are_metric_peaks(arch_view):
     unmeasured = mi_gpu_specs.get_all_roofline_columns() - arch_ceilings(arch_view.arch)
     errors = []
     shown_fields = defaultdict(set)
-    for row in arch_view.rows:
-        metric_id = shown_metric_id(row, arch_view.library, arch_view.arch)
+    for row, metric_id in zip(arch_view.rows, arch_view.metric_ids):
         if row.peak is None or metric_id is None:
             continue
         ceiling = EMPIRICAL_PEAK_RE.search(row.peak)

@@ -27,6 +27,7 @@ from utils.metrics.expression import (
     parse_collect_sum_submetrics,
     split_composite_finish,
 )
+from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.parser import build_dfs
 from vendored import yaml
 
@@ -181,7 +182,9 @@ def test_collect_ratio_minus_negates_the_fragment():
         "num_b": "to_sum(raw_pmc_df['SQ_B'])",
         "den": "to_sum(raw_pmc_df['SQ_C'])",
     }
-    apply_composite_metrics({1: df}, {1: "metric_table"}, raw, {}, {})
+    apply_composite_metrics(
+        {1: df}, {1: "metric_table"}, [MetricEvaluator(raw, {}, {})], {}
+    )
     # (10-4 + 30-6) / (2+4) = 30/6 = 5. Mean of ratios would be (3 + 6) / 2.
     assert df.at["4", "Avg"] == pytest.approx(5.0)
 
@@ -199,7 +202,9 @@ def collect_sum_parent(raw, pieces):
     )
     df.attrs[COLLECT_SUM_SPECS_ATTR] = {parent_id: [name for name, _expr in pieces]}
     df.attrs["collectable_expr_cache"] = cache
-    apply_composite_metrics({1: df}, {1: "metric_table"}, raw, {}, {})
+    apply_composite_metrics(
+        {1: df}, {1: "metric_table"}, [MetricEvaluator(raw, {}, {})], {}
+    )
     return df.at[parent_id, "Avg"]
 
 
@@ -325,7 +330,9 @@ def finished_collect_sum_parent(pieces, finish):
     df.attrs[COLLECT_SUM_SPECS_ATTR] = {parent_id: [name for name, _expr in pieces]}
     df.attrs[COMPOSITE_FINISH_ATTR] = {parent_id: finish}
     df.attrs["collectable_expr_cache"] = dict(pieces)
-    apply_composite_metrics({1: df}, {1: "metric_table"}, raw, {}, {})
+    apply_composite_metrics(
+        {1: df}, {1: "metric_table"}, [MetricEvaluator(raw, {}, {})], {}
+    )
     return df.at[parent_id, "Avg"]
 
 

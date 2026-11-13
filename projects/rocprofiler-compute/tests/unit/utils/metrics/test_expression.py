@@ -12,6 +12,7 @@ from utils.metrics.expression import (
     CodeTransformer,
     InvalidExpressionError,
     build_eval_string,
+    columns_read,
     reject_counter_bearing_composite_extents,
     transform_expression,
     update_denominator_string,
@@ -219,3 +220,15 @@ class TestCompositeExtents:
             reject_counter_bearing_composite_extents("AI L1", body, "MI300")
         assert str(sorted(allocator_counters)) in str(raised.value)
         assert {"SQ_WAVES", "SQ_BUSY_CU_CYCLES"} <= allocator_counters
+
+
+def test_columns_read_follows_built_in_variables():
+    """Columns read through nested built-in variables count too."""
+    build_in_vars = {
+        "numActiveCUs": "SQ_BUSY_CU_CYCLES / $GRBM_GUI_ACTIVE_PER_XCD",
+        "GRBM_GUI_ACTIVE_PER_XCD": "GRBM_GUI_ACTIVE / $num_xcd",
+    }
+
+    assert columns_read(
+        "raw_pmc_df['TCC_HIT[0]'] / ammolite__numActiveCUs", build_in_vars
+    ) == {"TCC_HIT[0]", "SQ_BUSY_CU_CYCLES", "GRBM_GUI_ACTIVE"}

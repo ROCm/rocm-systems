@@ -18,42 +18,50 @@ carries the same numbers in readable form.
 Collect only the roofline block:
 
 ```bash
-rocprof-compute profile --name <workload_name> -b roof -- <application> <args>
+rocprof-compute profile --name <workload_name> --roofline -- <application> <args>
 ```
 
+On ROCm 10.2 and earlier, use `-b roof` instead of `--roofline`.
+
 Collecting it runs microbenchmarks in addition to profiling the application,
-which takes extra time. An existing profile already has roofline unless it was
-collected with `--no-roof`, or with a `-b` list that left out `roof`.
+which takes extra time. They are skipped when `-b` or `--set` selects blocks
+that leave out roofline (block 4), or with the deprecated `--no-roof`, so an
+existing profile collected that way has no roofline data.
 
 MI100 (gfx908) does not support the roofline microbenchmarks. Every other
-supported architecture does. On MI100 the benchmark is skipped and the profile
-still succeeds, so a missing roofline there is not a mistake in how the profile
-was run. Never tell an MI100 user to re-profile without `--no-roof`; use
+supported architecture does. On MI100 a full profile skips the benchmark and
+still succeeds, and selecting roofline fails, so a missing roofline there is not
+a mistake in how the profile was run. Never tell an MI100 user to re-profile to get roofline; use
 Speed-of-Light and the `rocprof-compute-memory` skill instead. Confirm support
 for a new architecture against
 [compatible-accelerators.rst](../../docs/reference/compatible-accelerators.rst).
 
-`--device` selects the GPU for the roofline microbenchmarks. It does not
+`--roofline-device` selects the GPU for the roofline microbenchmarks. It does not
 choose which GPU the application runs on; use `HIP_VISIBLE_DEVICES` for that.
 
-See [standalone roofline](../../docs/how-to/profile/mode.rst) for `--roof-only`
-and `--bench-only`, which run the microbenchmarks without profiling an
-application.
+See [standalone roofline](../../docs/how-to/profile/mode.rst) for two more options:
+
+- `--roofline` selects the roofline block; used alone, it collects only roofline data.
+- `--roofline-bench-only` runs only the microbenchmarks, without an application.
+
+On ROCm 10.2 and earlier, these options are named `--device`, `--roof-only` and
+`--bench-only`.
 
 ### Collect only what the question needs
 
 Never run a full profile. It replays the application once per counter pass and
 also runs the roofline benchmarks.
 
-- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
-  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
-  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
-  Aliases differ by architecture.
+- List what this GPU can collect with `rocprof-compute --list-metrics`, and a
+  block's metrics with `rocprof-compute --list-metrics <alias>`. On ROCm 10.2
+  and earlier, use `--list-blocks <gfx_arch>` and `--list-metrics <gfx_arch>`.
+  Pass `-b` only the block aliases, block ids, or metric ids (for example
+  `2.1.0`) the question needs. Aliases differ by architecture.
 - `--set <set_name>` collects a predefined topic in one pass.
   `rocprof-compute profile --list-sets` lists the sets.
 - Add `-k <kernel_name>` when the user names the kernels that matter.
-- Add `--no-roof` unless the question is about roofline. A `-b` list without
-  block 4 (`roof`) already skips it.
+- Unless the question is about roofline, select blocks with `-b` and leave out
+  block 4 (`roof`), so the roofline benchmark is skipped.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
@@ -64,7 +72,7 @@ also runs the roofline benchmarks.
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> --roofline
 ```
 
 Always pass one kernel id. The table gives the kernel's arithmetic intensity in
@@ -111,8 +119,7 @@ know the intent, the counters know what ran.
 HBM answers "am I limited by main memory", while L2 and vL1D show whether
 caches are absorbing the traffic.
 
-`--view table` prints one table for all kernels together instead of one per
-kernel. To compare many kernels, write the
+To compare many kernels, write the
 [analysis database](../../docs/how-to/analyze/cli.rst) with
 `--output-format db` and query it with SQL.
 
@@ -120,7 +127,7 @@ kernel. To compare many kernels, write the
 
 | Cause | What to do |
 |---|---|
-| Profiled with `--no-roof` | re-profile without it |
+| Profiled with `--no-roof`, or `-b`/`--set` without block 4 | re-profile without `--no-roof`; add `--roofline` to `-b`, or replace `--set` with `-b` blocks plus `--roofline` (no set includes block 4) |
 | Architecture has no microbenchmark support | use Speed-of-Light and the `rocprof-compute-memory` skill instead |
 | `roofline.csv` absent from the workload directory | the benchmark did not complete; check the profile log |
 

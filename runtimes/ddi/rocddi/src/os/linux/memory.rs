@@ -15,9 +15,10 @@ mod reservation;
 pub(crate) use host_reservation::HostReservation;
 pub(crate) use reservation::Reservation;
 
-use super::{invalid_data, process_identity};
+use super::invalid_data;
 use crate::error::error;
 use crate::memory::storage::Shared;
+use crate::os::ProcessIdentity;
 use crate::os::native_error;
 use crate::{Error, ErrorKind};
 use std::ffi::{c_int, c_void};
@@ -120,8 +121,22 @@ pub(crate) struct HostAllocation {
     /// `Some` until the mapping is released successfully. A failed release
     /// leaves the same owner here for a later explicit retry.
     mapping: Option<Reservation>,
+    /// Creating process retained even after the mapping is released.
+    process: ProcessIdentity,
     /// File backing only for allocations requested as remappable sources.
     source: Option<File>,
+}
+
+fn valid_host_layout(size: usize, alignment: usize, page: usize) -> bool {
+    crate::memory::constraints::AllocationLimits {
+        alignment: page as u64,
+        granularity: page as u64,
+        maximum_size: isize::MAX as u64,
+    }
+    .supports(crate::memory::constraints::AllocationDesc {
+        size: size as u64,
+        alignment: alignment as u64,
+    })
 }
 
 impl HostAllocation {
@@ -129,7 +144,6 @@ impl HostAllocation {
     /// acquires page-aligned host memory. The retained `process` guards later
     /// unmapping.
     pub(crate) fn create(size: u64, alignment: u64, process: u32) -> Result<Shared<Self>, Error> {
-        process_identity::prepare_for_hot_checks();
         let size = usize::try_from(size).map_err(|_| {
             error(
                 ErrorKind::InvalidArgument,
@@ -143,12 +157,7 @@ impl HostAllocation {
             )
         })?;
         let page = page_size().map_err(|e| native_error("host page size", e))?;
-        if size == 0
-            || size % page != 0
-            || size > isize::MAX as usize
-            || !alignment.is_power_of_two()
-            || alignment < page
-        {
+        if !valid_host_layout(size, alignment, page) {
             return Err(error(
                 ErrorKind::InvalidArgument,
                 "invalid host allocation extent or alignment",
@@ -158,8 +167,10 @@ impl HostAllocation {
         let mapping =
             Reservation::new_host_in_process(size, alignment, (0, isize::MAX as u64), process)
                 .map_err(|e| native_error("host allocation mmap", e))?;
+        let process = mapping.process_identity();
         Ok(owner.write(Self {
             mapping: Some(mapping),
+            process,
             source: None,
         }))
     }
@@ -169,7 +180,6 @@ impl HostAllocation {
         alignment: u64,
         process: u32,
     ) -> Result<Shared<Self>, Error> {
-        process_identity::prepare_for_hot_checks();
         let size = usize::try_from(size).map_err(|_| {
             error(
                 ErrorKind::InvalidArgument,
@@ -183,12 +193,7 @@ impl HostAllocation {
             )
         })?;
         let page = page_size().map_err(|source| native_error("host page size", source))?;
-        if size == 0
-            || size % page != 0
-            || size > isize::MAX as usize
-            || !alignment.is_power_of_two()
-            || alignment < page
-        {
+        if !valid_host_layout(size, alignment, page) {
             return Err(error(
                 ErrorKind::InvalidArgument,
                 "invalid host source geometry",
@@ -224,14 +229,26 @@ impl HostAllocation {
         mapping
             .map_file_read_write(&file, 0)
             .map_err(|source| native_error("host source mmap", source))?;
+        let process = mapping.process_identity();
         Ok(owner.write(Self {
             mapping: Some(mapping),
+            process,
             source: Some(file),
         }))
     }
 
+    pub(crate) fn is_remappable(&self) -> bool {
+        self.source.is_some()
+    }
+
     pub(crate) fn source(&self) -> Option<&File> {
         self.source.as_ref()
+    }
+
+    /// Rejects an inherited source before its file can be shared with a new
+    /// child-process reservation.
+    pub(crate) fn check_process(&self) -> io::Result<()> {
+        self.process.check()
     }
 
     /// Returns the numeric address and size of the live mapped extent.
@@ -246,6 +263,8 @@ impl HostAllocation {
     /// Releases the mapping once. Native failure leaves ownership available
     /// for retry; repeated successful calls do nothing.
     pub(crate) fn free(&mut self) -> Result<(), Error> {
+        self.check_process()
+            .map_err(|source| native_error("host allocation process identity", source))?;
         if let Some(mapping) = self.mapping.as_mut() {
             mapping
                 .release()
@@ -265,6 +284,12 @@ pub(crate) fn host_page_size() -> Result<u64, Error> {
 
 impl Drop for HostAllocation {
     fn drop(&mut self) {
+        if self.check_process().is_err() {
+            // This copy does not own the parent's VMA. It has no native
+            // rollback to report or reservation to release in the child.
+            std::mem::forget(self.mapping.take());
+            return;
+        }
         if let Err(error) = self.free() {
             let (_, size) = self.extent();
             crate::memory::device::record_rollback(error, size);
@@ -275,6 +300,29 @@ impl Drop for HostAllocation {
             }
         }
     }
+}
+
+pub(crate) fn host_memory_capabilities()
+-> Result<crate::memory::host::HostMemoryCapabilities, Error> {
+    use crate::memory::constraints::AllocationLimits;
+    use crate::memory::host::{HostMemoryCapabilities, HostReservationCapabilities};
+    let page = host_page_size()?;
+    Ok(HostMemoryCapabilities {
+        allocation: AllocationLimits {
+            alignment: page,
+            granularity: page,
+            maximum_size: isize::MAX as u64,
+        },
+        remappable_backing: true,
+        reservation: Some(HostReservationCapabilities {
+            reservation_granularity: page,
+            mapping_granularity: page,
+            maximum_size: (isize::MAX as u64) & !(page - 1),
+            maximum_alignment: 1_u64 << (usize::BITS - 2),
+            minimum_address: page,
+            maximum_address: usize::MAX as u64,
+        }),
+    })
 }
 
 #[cfg(test)]
@@ -320,7 +368,8 @@ mod tests {
                 .unwrap()
                 .free()
                 .unwrap_err()
-                .native_error_code(),
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code),
             Some(errno::EIO)
         );
         assert_eq!(allocation.extent(), extent);

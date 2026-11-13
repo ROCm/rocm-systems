@@ -373,7 +373,9 @@ def _evaluate_kernel_tables(
         workload.roofline_peaks,
         kernel_pmc_df,
         debug=False,
-        pass_layout=getattr(workload, "pmc_pass_layout", None),
+        pass_tables=[
+            table.loc[kernel_pmc_df.index] for table in workload.pass_tables.values()
+        ],
     )
     return kernel_dfs
 

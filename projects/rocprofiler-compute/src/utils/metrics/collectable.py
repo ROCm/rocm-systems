@@ -22,7 +22,7 @@ from utils.metrics.aggregation import merge_dispatch_collect_ratio
 from utils.metrics.expression import (
     is_composite_avg_formula,
 )
-from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.metrics.metric_evaluator import MetricEvaluator, counter_table_index
 from utils.metrics.noise_clamper import to_noise_clamp
 
 # Names recorded while one analyze run is open, then printed once.
@@ -120,7 +120,7 @@ def _metric_column_name(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
-def _avg_column_name(df: pd.DataFrame) -> Optional[str]:
+def avg_column_name(df: pd.DataFrame) -> Optional[str]:
     for candidate in ("Avg", "Average", "Value"):
         if candidate in df.columns:
             return candidate
@@ -232,41 +232,30 @@ def _finish_composite_value(
     return float(to_noise_clamp(value, arg))
 
 
-def _eval_built_expr_on_frame(
-    built_expr: str,
-    frame: pd.DataFrame,
-    sys_vars: Dict[str, Any],
-    empirical_peaks: Dict[str, Any],
-) -> Union[float, str]:
-    if not built_expr:
-        return "N/A"
-    evaluator = MetricEvaluator(frame, sys_vars, empirical_peaks)
-    return evaluator.eval_expression(built_expr)
+def per_dispatch_series(built_expr: str, evaluator: MetricEvaluator) -> pd.Series:
+    """Evaluate built_expr on each dispatch of the evaluator's table.
 
-
-def per_dispatch_ratio_series(
-    built_expr: str,
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: Dict[str, Any],
-    empirical_peaks: Dict[str, Any],
-) -> pd.Series:
-    if raw_pmc_df.empty:
+    Returns the values keyed by Dispatch_ID, without the dispatches that
+    evaluate to N/A. A table without Dispatch_ID gives one value for the whole
+    table.
+    """
+    table = evaluator.raw_pmc_df
+    if table.empty:
         return pd.Series(dtype=float)
-    dispatch_col = "Dispatch_ID" if "Dispatch_ID" in raw_pmc_df.columns else None
-    if dispatch_col is None:
-        scalar = _eval_built_expr_on_frame(
-            built_expr, raw_pmc_df, sys_vars, empirical_peaks
-        )
+    if "Dispatch_ID" not in table.columns:
+        scalar = evaluator.eval_expression(built_expr)
         if scalar == "N/A" or pd.isna(scalar):
             return pd.Series(dtype=float)
         return pd.Series({0: float(scalar)})
 
     values: Dict[Any, float] = {}
-    for dispatch_id, group in raw_pmc_df.groupby(dispatch_col, dropna=False):
-        scoped_vars = _sys_vars_for_rows(sys_vars, group.index)
-        scalar = _eval_built_expr_on_frame(
-            built_expr, group, scoped_vars, empirical_peaks
+    for dispatch_id, group in table.groupby("Dispatch_ID", dropna=False):
+        dispatch_evaluator = MetricEvaluator(
+            group,
+            _sys_vars_for_rows(evaluator.sys_vars, group.index),
+            evaluator.empirical_peaks,
         )
+        scalar = dispatch_evaluator.eval_expression(built_expr)
         if scalar == "N/A" or pd.isna(scalar):
             continue
         values[dispatch_id] = float(scalar)
@@ -279,8 +268,7 @@ def _sys_vars_for_rows(
 ) -> Dict[str, Any]:
     """Keep Series built-ins on the rows of one dispatch.
 
-    A whole-frame Series makes ``SUM($cycles)`` the total of every dispatch.
-    Pass-scoped Series use the same index, so they are sliced the same way.
+    A whole-table Series makes SUM($cycles) the total of every dispatch.
     """
     scoped: Dict[str, Any] = {}
     for key, value in sys_vars.items():
@@ -303,7 +291,7 @@ def cache_collectable_expressions(
         if not graph.collectable_row_names and not graph.composites:
             continue
         name_col = _metric_column_name(df)
-        avg_col = _avg_column_name(df)
+        avg_col = avg_column_name(df)
         if name_col is None or avg_col is None:
             continue
         by_name: Dict[str, str] = {}
@@ -417,41 +405,30 @@ def _lookup_collectable_built_avg(
 def _collect_piece_dispatch_series(
     df: pd.DataFrame,
     piece_name: str,
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: Dict[str, Any],
-    empirical_peaks: Dict[str, Any],
+    evaluators: List[MetricEvaluator],
+    build_in_vars: Dict[str, str],
 ) -> Optional[pd.Series]:
     """Per-dispatch values for one _collect piece, using the COLLECT_SUM lookup.
 
     The built expression is the same string COLLECT_SUM evaluates. It is run
     per dispatch so a later min or max is the extremum of the combined pieces.
-    Returns None when the frame has no Dispatch_ID: only scalar piece averages
+    Returns None when the table has no Dispatch_ID: only scalar piece averages
     exist then, and those averages are not an extent.
     """
-    if "Dispatch_ID" not in raw_pmc_df.columns:
+    if "Dispatch_ID" not in evaluators[-1].raw_pmc_df.columns:
         return None
-    avg_col = _avg_column_name(df)
+    avg_col = avg_column_name(df)
     if avg_col is None:
         return None
-    return _collectable_series(
-        df,
-        piece_name,
-        avg_col,
-        raw_pmc_df,
-        sys_vars,
-        empirical_peaks,
-        "collect extent",
-    )
+    return _collectable_series(df, piece_name, avg_col, evaluators, build_in_vars)
 
 
 def _collectable_series(
     df: pd.DataFrame,
     ref_name: str,
     avg_col: str,
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: Dict[str, Any],
-    empirical_peaks: Dict[str, Any],
-    role: str,
+    evaluators: List[MetricEvaluator],
+    build_in_vars: Dict[str, str],
 ) -> Optional[pd.Series]:
     """Per-dispatch values for one collectable ref, honoring a leading minus."""
     negate = ref_name.startswith("-")
@@ -461,24 +438,36 @@ def _collectable_series(
         state = _collectable_expr_state(df, lookup_name, avg_col)
         _note_collectable_problem(ref_name, "unset" if state == "unset" else "missing")
         return None
-    series = per_dispatch_ratio_series(built, raw_pmc_df, sys_vars, empirical_peaks)
+    series = per_dispatch_series(
+        built, _piece_evaluator(built, evaluators, build_in_vars)
+    )
     if negate:
         return -series
     return series
+
+
+def _piece_evaluator(
+    built: str,
+    evaluators: List[MetricEvaluator],
+    build_in_vars: Dict[str, str],
+) -> MetricEvaluator:
+    """Return the evaluator of the first pass table that holds every counter of
+    built. The merged table's evaluator is last."""
+    tables = [evaluator.raw_pmc_df for evaluator in evaluators]
+    return evaluators[counter_table_index(built, tables, build_in_vars)]
 
 
 def _piece_value_on_dispatch_filter(
     df: pd.DataFrame,
     ref_name: str,
     avg_col: str,
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: Dict[str, Any],
-    empirical_peaks: Dict[str, Any],
+    evaluators: List[MetricEvaluator],
+    build_in_vars: Dict[str, str],
     parent_name: str,
 ) -> Optional[float]:
     """Evaluate one COLLECT_SUM piece once on the dispatch filter.
 
-    ``SUM(numerator) / SUM(denominator)`` stays that pooled ratio. The caller
+    SUM(numerator) / SUM(denominator) stays that pooled ratio. The caller
     adds the piece values.
     """
     negate = ref_name.startswith("-")
@@ -488,7 +477,7 @@ def _piece_value_on_dispatch_filter(
         state = _collectable_expr_state(df, lookup_name, avg_col)
         _note_collectable_problem(ref_name, "unset" if state == "unset" else "missing")
         return None
-    scalar = _eval_built_expr_on_frame(built, raw_pmc_df, sys_vars, empirical_peaks)
+    scalar = _piece_evaluator(built, evaluators, build_in_vars).eval_expression(built)
     if isinstance(scalar, (str, bool)):
         value = None
     else:
@@ -511,11 +500,10 @@ def _piece_value_on_dispatch_filter(
 def _evaluate_collect_sum_composite(
     composite: CompositeDef,
     df: pd.DataFrame,
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: Dict[str, Any],
-    empirical_peaks: Dict[str, Any],
+    evaluators: List[MetricEvaluator],
+    build_in_vars: Dict[str, str],
 ) -> Union[float, str]:
-    avg_col = _avg_column_name(df)
+    avg_col = avg_column_name(df)
     if avg_col is None:
         return "N/A"
 
@@ -526,9 +514,8 @@ def _evaluate_collect_sum_composite(
             df,
             ref_name,
             avg_col,
-            raw_pmc_df,
-            sys_vars,
-            empirical_peaks,
+            evaluators,
+            build_in_vars,
             parent_name,
         )
         if value is None:
@@ -540,11 +527,10 @@ def _evaluate_collect_sum_composite(
 def _evaluate_collect_ratio_composite(
     composite: CompositeDef,
     df: pd.DataFrame,
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: Dict[str, Any],
-    empirical_peaks: Dict[str, Any],
+    evaluators: List[MetricEvaluator],
+    build_in_vars: Dict[str, str],
 ) -> Union[float, str]:
-    avg_col = _avg_column_name(df)
+    avg_col = avg_column_name(df)
     if avg_col is None:
         return "N/A"
 
@@ -564,10 +550,8 @@ def _evaluate_collect_ratio_composite(
             df,
             ref_name,
             avg_col,
-            raw_pmc_df,
-            sys_vars,
-            empirical_peaks,
-            "COLLECT_RATIO numerator",
+            evaluators,
+            build_in_vars,
         )
         if series is None:
             return "N/A"
@@ -577,10 +561,8 @@ def _evaluate_collect_ratio_composite(
             df,
             ref_name,
             avg_col,
-            raw_pmc_df,
-            sys_vars,
-            empirical_peaks,
-            "COLLECT_RATIO denominator",
+            evaluators,
+            build_in_vars,
         )
         if series is None:
             return "N/A"
@@ -595,16 +577,15 @@ def _evaluate_collect_ratio_composite(
 def apply_composite_metrics(
     dfs: Dict[int, pd.DataFrame],
     dfs_type: Dict[int, str],
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: Dict[str, Any],
-    empirical_peaks: Dict[str, Any],
+    evaluators: List[MetricEvaluator],
+    build_in_vars: Dict[str, str],
 ) -> None:
     """Evaluate composite parents after collectable rows (graph order)."""
     own_batch = _collectable_warning_depth == 0
     if own_batch:
         begin_collectable_warnings()
     try:
-        _apply_composite_metrics(dfs, dfs_type, raw_pmc_df, sys_vars, empirical_peaks)
+        _apply_composite_metrics(dfs, dfs_type, evaluators, build_in_vars)
     finally:
         if own_batch:
             flush_collectable_warnings()
@@ -613,9 +594,8 @@ def apply_composite_metrics(
 def _apply_composite_metrics(
     dfs: Dict[int, pd.DataFrame],
     dfs_type: Dict[int, str],
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: Dict[str, Any],
-    empirical_peaks: Dict[str, Any],
+    evaluators: List[MetricEvaluator],
+    build_in_vars: Dict[str, str],
 ) -> None:
     for df_id, df in dfs.items():
         if dfs_type.get(df_id) != "metric_table":
@@ -623,7 +603,7 @@ def _apply_composite_metrics(
         graph = build_metric_eval_graph(df)
         if not graph.composites:
             continue
-        avg_col = _avg_column_name(df)
+        avg_col = avg_column_name(df)
         if avg_col is None:
             continue
 
@@ -641,11 +621,11 @@ def _apply_composite_metrics(
                 continue
             if composite.kind is CompositeKind.COLLECT_SUM:
                 result = _evaluate_collect_sum_composite(
-                    composite, df, raw_pmc_df, sys_vars, empirical_peaks
+                    composite, df, evaluators, build_in_vars
                 )
             elif composite.kind is CompositeKind.COLLECT_RATIO:
                 result = _evaluate_collect_ratio_composite(
-                    composite, df, raw_pmc_df, sys_vars, empirical_peaks
+                    composite, df, evaluators, build_in_vars
                 )
             else:
                 continue
@@ -669,3 +649,29 @@ def composite_parent_ids(df: pd.DataFrame) -> Set[str]:
 
 def collectable_row_names_from_graph(df: pd.DataFrame) -> Set[str]:
     return build_metric_eval_graph(df).collectable_row_names
+
+
+class CollectPieceLookup:
+    """Per-dispatch values of the _collect pieces in one metric table.
+
+    MetricEvaluator calls dispatch_series for each _collect.<piece> that a min
+    or max formula reads.
+    """
+
+    def __init__(
+        self,
+        metric_table: pd.DataFrame,
+        evaluators: List[MetricEvaluator],
+        build_in_vars: Dict[str, str],
+    ) -> None:
+        self.metric_table = metric_table
+        self.evaluators = evaluators
+        self.build_in_vars = build_in_vars
+
+    def dispatch_series(self, piece_name: str) -> pd.Series:
+        """Return the piece's value on each dispatch. An empty Series leaves the
+        min or max that reads it unset."""
+        series = _collect_piece_dispatch_series(
+            self.metric_table, piece_name, self.evaluators, self.build_in_vars
+        )
+        return pd.Series(dtype=float) if series is None else series

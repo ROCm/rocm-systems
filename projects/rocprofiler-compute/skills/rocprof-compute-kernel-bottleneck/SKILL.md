@@ -67,8 +67,10 @@ a timeout; profile mode has no such option.
 Start with Speed-of-Light for the kernels that matter:
 
 ```bash
-rocprof-compute profile --name <workload_name> -b sol -k <kernel_name> -- <application> <args>
+rocprof-compute profile --name <workload_name> --speed-of-light -k <kernel_name> -- <application> <args>
 ```
+
+On ROCm 10.2 and earlier, use `-b sol` instead of `--speed-of-light`.
 
 Drop `-k` when the user has not named kernels. Once Speed-of-Light points at a
 limit, profile again with only the blocks section 5 opens, such as `wavefront`,
@@ -93,15 +95,16 @@ running, see
 Never run a full profile. It replays the application once per counter pass and
 also runs the roofline benchmarks.
 
-- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
-  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
-  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
-  Aliases differ by architecture.
+- List what this GPU can collect with `rocprof-compute --list-metrics`, and a
+  block's metrics with `rocprof-compute --list-metrics <alias>`. On ROCm 10.2
+  and earlier, use `--list-blocks <gfx_arch>` and `--list-metrics <gfx_arch>`.
+  Pass `-b` only the block aliases, block ids, or metric ids (for example
+  `2.1.0`) the question needs. Aliases differ by architecture.
 - `--set <set_name>` collects a predefined topic in one pass.
   `rocprof-compute profile --list-sets` lists the sets.
 - Add `-k <kernel_name>` when the user names the kernels that matter.
-- Add `--no-roof` unless the question is about roofline. A `-b` list without
-  block 4 (`roof`) already skips it.
+- Unless the question is about roofline, select blocks with `-b` and leave out
+  block 4 (`roof`), so the roofline benchmark is skipped.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in
@@ -138,7 +141,7 @@ regex, so `-k gemm` matches every kernel whose name contains `gemm`.
 Get the overview, then open exactly one detailed block:
 
 ```bash
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 -b sol
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 --speed-of-light
 ```
 
 Read the `Percent of Peak` column. The report prints the peak for each metric,
@@ -149,8 +152,8 @@ Resolve block names with aliases, which are stable across releases, instead of
 numeric ids, which are architecture-specific:
 
 ```bash
-rocprof-compute --list-metrics-gfx-id <arch>
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-metrics
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-metrics sol
 ```
 
 Where to go next:

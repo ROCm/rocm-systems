@@ -10,8 +10,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from rocprof_compute_soc.counter_grouping_buckets import counters_fit_one_bucket
 from utils import schema
+from utils.counters.counter_file import CounterFile
 from utils.metrics.aggregation import merge_dispatch_collect_ratio
 from utils.metrics.collectable import (
     COLLECT_RATIO_SPECS_ATTR,
@@ -26,7 +26,7 @@ from utils.metrics.expression import (
     parse_collect_ratio_parts,
     parse_collect_sum_submetrics,
 )
-from utils.metrics.pass_provenance import METRIC_ROW_PASS_ATTR
+from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import build_dfs
 from utils.utils_common import load_collectable_formulas, load_panel_file
@@ -46,6 +46,12 @@ _GFX950 = (
     / "analysis_configs"
     / "gfx950"
 )
+
+
+def fits_one_pass(counters: frozenset, perfmon_config: dict) -> bool:
+    """Return whether every counter fits one empty perfmon pass."""
+    counter_file = CounterFile("0", perfmon_config)
+    return all(counter_file.add(counter) for counter in sorted(counters))
 
 
 def _sys_info() -> pd.Series:
@@ -126,13 +132,14 @@ def test_unset_collectables_are_one_summary(caplog):
         COLLECT_RATIO_SPECS_ATTR,
         _RATIO_SPEC,
         {},
-        ("pmc_perf_0", "pmc_perf_1"),
     )
     table.loc["1", "Avg"] = ""
     table.loc["2", "Avg"] = ""
     raw = pd.DataFrame({"Dispatch_ID": [1], "A": [10.0], "B": [0.0]})
     with caplog.at_level(logging.WARNING):
-        apply_composite_metrics({1: table}, {1: "metric_table"}, raw, {}, {})
+        apply_composite_metrics(
+            {1: table}, {1: "metric_table"}, [MetricEvaluator(raw, {}, {})], {}
+        )
     assert caplog.text.count("were left unset") == 1
     assert "not found" not in caplog.text
 
@@ -232,7 +239,7 @@ def test_gfx950_ipc_fits_one_bucket_and_is_not_rewritten():
     assert ipc["avg"] == "SUM(SQ_INSTS) / SUM(SQ_BUSY_CU_CYCLES)"
     assert not is_composite_avg_formula(ipc["avg"])
     perfmon_config = mi_gpu_specs.get_perfmon_config("gfx950")
-    assert counters_fit_one_bucket(
+    assert fits_one_pass(
         frozenset(["SQ_INSTS", "SQ_BUSY_CU_CYCLES"]),
         perfmon_config,
     )
@@ -242,22 +249,31 @@ def _two_piece_table(
     composite_attr: str,
     composite_spec: object,
     piece_exprs: dict,
-    piece_passes: tuple,
 ) -> pd.DataFrame:
-    """Two collectable rows and one composite parent, with the bound passes."""
+    """Two collectable rows and one composite parent."""
     table = pd.DataFrame(
         {"Metric": ["first", "second", "parent"], "Avg": ["", "", ""]},
         index=["1", "2", "3"],
     )
     table.attrs[composite_attr] = {"3": composite_spec}
     table.attrs[COLLECTABLE_EXPR_CACHE_ATTR] = piece_exprs
-    table.attrs[METRIC_ROW_PASS_ATTR] = {"1": piece_passes[0], "2": piece_passes[1]}
     return table
 
 
-def _evaluate_parent(table: pd.DataFrame) -> object:
-    raw = pd.DataFrame({"Dispatch_ID": [1], "A": [10.0], "B": [5.0]})
-    apply_composite_metrics({1: table}, {1: "metric_table"}, raw, {}, {})
+def _evaluate_parent(table: pd.DataFrame, pass_counters: tuple) -> object:
+    """Evaluate the parent with one pass table per entry of pass_counters.
+
+    A = 10 and B = 5 on the passes. The merged table holds 1 for both, so a
+    piece that read it would change the result.
+    """
+    values = {"A": 10.0, "B": 5.0}
+    pass_tables = [
+        pd.DataFrame({"Dispatch_ID": [1], **{name: [values[name]] for name in names}})
+        for names in pass_counters
+    ]
+    merged = pd.DataFrame({"Dispatch_ID": [1], "A": [1.0], "B": [1.0]})
+    evaluators = [MetricEvaluator(table, {}, {}) for table in [*pass_tables, merged]]
+    apply_composite_metrics({1: table}, {1: "metric_table"}, evaluators, {})
     return table.at["3", "Avg"]
 
 
@@ -274,9 +290,8 @@ def test_collect_ratio_divides_pieces_from_different_passes():
         COLLECT_RATIO_SPECS_ATTR,
         _RATIO_SPEC,
         _ABSOLUTE_PIECES,
-        ("pmc_perf_0", "pmc_perf_1"),
     )
-    assert _evaluate_parent(table) == pytest.approx(2.0)
+    assert _evaluate_parent(table, (("A",), ("B",))) == pytest.approx(2.0)
 
 
 @pytest.mark.misc
@@ -285,9 +300,8 @@ def test_collect_ratio_on_one_pass_evaluates():
         COLLECT_RATIO_SPECS_ATTR,
         _RATIO_SPEC,
         _ABSOLUTE_PIECES,
-        ("pmc_perf_1", "pmc_perf_1"),
     )
-    assert _evaluate_parent(table) == pytest.approx(2.0)
+    assert _evaluate_parent(table, (("A", "B"),)) == pytest.approx(2.0)
 
 
 @pytest.mark.misc
@@ -296,9 +310,8 @@ def test_collect_sum_of_absolute_pieces_across_passes_evaluates():
         COLLECT_SUM_SPECS_ATTR,
         ["first", "second"],
         _ABSOLUTE_PIECES,
-        ("pmc_perf_0", "pmc_perf_1"),
     )
-    assert _evaluate_parent(table) == pytest.approx(15.0)
+    assert _evaluate_parent(table, (("A",), ("B",))) == pytest.approx(15.0)
 
 
 @pytest.mark.misc
@@ -319,9 +332,9 @@ def test_collect_sum_adds_tcp_hit_pieces_that_cannot_share_a_bucket():
         "TCP_TCC_ATOMIC_WITH_RET_REQ_sum",
         "TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum",
     })
-    assert counters_fit_one_bucket(non_rw, perfmon_config)
-    assert counters_fit_one_bucket(atom, perfmon_config)
-    assert not counters_fit_one_bucket(non_rw | atom, perfmon_config)
+    assert fits_one_pass(non_rw, perfmon_config)
+    assert fits_one_pass(atom, perfmon_config)
+    assert not fits_one_pass(non_rw | atom, perfmon_config)
     table = _two_piece_table(
         COLLECT_SUM_SPECS_ATTR,
         ["first", "second"],
@@ -329,9 +342,8 @@ def test_collect_sum_adds_tcp_hit_pieces_that_cannot_share_a_bucket():
             "first": "to_sum(raw_pmc_df['A'])",
             "second": "-100 * to_sum(raw_pmc_df['B'])",
         },
-        ("pmc_perf_0", "pmc_perf_1"),
     )
-    assert _evaluate_parent(table) == pytest.approx(-490.0)
+    assert _evaluate_parent(table, (("A",), ("B",))) == pytest.approx(-490.0)
 
 
 @pytest.mark.misc
@@ -340,9 +352,8 @@ def test_collect_sum_adds_a_negative_piece_from_another_pass():
         COLLECT_SUM_SPECS_ATTR,
         ["first", "second"],
         {"first": "to_sum(raw_pmc_df['A'])", "second": "to_sum(-(raw_pmc_df['B']))"},
-        ("pmc_perf_0", "pmc_perf_1"),
     )
-    assert _evaluate_parent(table) == pytest.approx(5.0)
+    assert _evaluate_parent(table, (("A",), ("B",))) == pytest.approx(5.0)
 
 
 @pytest.mark.misc
@@ -351,6 +362,5 @@ def test_collect_sum_subtracting_on_one_pass_evaluates():
         COLLECT_SUM_SPECS_ATTR,
         ["first", "second"],
         {"first": "to_sum(raw_pmc_df['A'])", "second": "to_sum(-(raw_pmc_df['B']))"},
-        ("pmc_perf_1", "pmc_perf_1"),
     )
-    assert _evaluate_parent(table) == pytest.approx(5.0)
+    assert _evaluate_parent(table, (("A", "B"),)) == pytest.approx(5.0)

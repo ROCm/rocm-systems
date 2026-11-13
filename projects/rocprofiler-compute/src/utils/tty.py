@@ -42,16 +42,11 @@ from utils.utils_analysis import (
 from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     format_table_id,
+    selects_roofline,
     strip_ansi,
 )
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
-
-
-def _tty_view_is_table(args: argparse.Namespace) -> bool:
-    """True when ``--view table`` was given (plain tables; ignore cli_style)."""
-    return getattr(args, "view", None) == "table"
-
 
 KERNEL_NAME_WRAP_WIDTH = 40
 
@@ -216,11 +211,7 @@ def is_roofline_shown(
         for table_type in data_source
     )
 
-    if not has_roofline_style or (
-        args.filter_metrics
-        and "4" not in args.filter_metrics
-        and "roof" not in args.filter_metrics
-    ):
+    if not has_roofline_style or not selects_roofline(args.filter_metrics):
         return False
 
     # Check if any run has valid roofline data (already validated in analysis_base.py)
@@ -957,15 +948,15 @@ def show_all(
     # True if roofline (block 4) is in the active filter
     # or no filter is applied
     roofline_in_filter = (
-        any(str(m).split(".")[0] == "4" for m in args.filter_metrics)
+        selects_roofline(args.filter_metrics)
         if args.filter_metrics
         else (not filter_panel_ids or 400 in filter_panel_ids)
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
         # Handle roofline panel (400) with custom display logic
-        # Skip if --view table is set; tables 401/402 will be rendered as normal tables
-        if panel_id == 400 and not _tty_view_is_table(args):
+        # With --debug-table-view, tables 401/402 render as normal tables.
+        if panel_id == 400 and not args.debug_table_view:
             _ = is_roofline_shown(args, runs, output, panel)
 
         panel_content = ""  # store content of all data_source from one panel
@@ -992,7 +983,7 @@ def show_all(
                         roofline_warning_shown = True
 
                 # Block-filter logic:
-                # - If analysis used --filter-metrics, ignore profiling block filters
+                # - If analysis used -b/--block, ignore profiling block filters
                 # - If profiling had block filters, only show selected tables/panels
                 # - Always show panels with id <= 100
                 if (
@@ -1056,7 +1047,7 @@ def show_all(
                 # normal table output.
                 is_mem_chart = (
                     table_config.get("cli_style") == "mem_chart"
-                    and not _tty_view_is_table(args)
+                    and not args.debug_table_view
                     and Layouts.for_arch(gpu_arch) is not None
                 )
 
@@ -1099,9 +1090,9 @@ def show_all(
                 )
 
         # Roofline printing is handled separately above in is_roofline_shown.
-        # With --view table, roofline tables (401/402) render as normal tables.
+        # With --debug-table-view, roofline tables (401/402) render as normal tables.
         if panel_content and (
-            table_config["id"] not in [401, 402] or _tty_view_is_table(args)
+            table_config["id"] not in [401, 402] or args.debug_table_view
         ):
             if not hasattr(output, "isatty") or not output.isatty():
                 panel_content = strip_ansi(panel_content)

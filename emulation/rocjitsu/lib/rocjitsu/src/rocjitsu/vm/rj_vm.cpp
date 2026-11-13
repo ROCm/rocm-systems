@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
+#include "rocjitsu/vm/gpu_info.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
@@ -108,10 +109,10 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
 
   if (serve) {
     s->engine->register_as_primary();
-    // Legacy replicated-GPU configs keep their existing XGMI discovery
-    // metadata for compatibility. Manifest routes describe topology only;
-    // until peer execution is granted, they must not advertise KFD XGMI
-    // links, hive IDs, or XGMI SDMA engines to ROCr.
+    // Legacy replicated-GPU configs keep their XGMI discovery metadata for
+    // compatibility. Manifest routes can execute local effects through the
+    // VM-owned fabric, but they do not establish native XGMI discovery through
+    // the stock driver. Keep KFD links, hive IDs, and XGMI SDMA counts quiet.
     if (!loaded.devices.empty())
       s->vm->driver()->setup_topology(loaded.devices, num_xcds,
                                       !loaded.system_graph.explicit_manifest,
@@ -282,30 +283,22 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
-  try {
-    util::StringDiagnostic diagnostic;
-    util::FailureOr<std::shared_ptr<ExecutionPluginGroup>> configured =
-        PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "",
-                                             diagnostic.emitter());
-    if (configured.failed()) {
-      util::Logger::warn("rj_vm_load_plugins failed: ", diagnostic.message());
-      return ROCJITSU_STATUS_INVALID_ARGUMENT;
-    }
-    std::shared_ptr<ExecutionPluginGroup> group = std::move(configured).value();
-    // rj_vm_load_plugins() is a pre-run operation, so replacing and initializing
-    // the group cannot overlap simulation callbacks.
-    shutdown_plugin_group(vm);
-    vm->soc->set_plugin_group(group);
-    group->onInit();
-    vm->plugin_group_active.store(true, std::memory_order_release);
-    return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::exception &e) {
-    util::Logger::warn("rj_vm_load_plugins failed: ", e.what());
-    return ROCJITSU_STATUS_ERROR;
-  } catch (...) {
-    util::Logger::warn("rj_vm_load_plugins failed: unknown plugin exception");
-    return ROCJITSU_STATUS_ERROR;
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<std::shared_ptr<ExecutionPluginGroup>> configured =
+      PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "",
+                                           diagnostic.emitter());
+  if (configured.failed()) {
+    util::Logger::warn("rj_vm_load_plugins failed: ", diagnostic.message());
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
+  std::shared_ptr<ExecutionPluginGroup> group = std::move(configured).value();
+  // rj_vm_load_plugins() is a pre-run operation, so replacing and initializing
+  // the group cannot overlap simulation callbacks.
+  shutdown_plugin_group(vm);
+  vm->soc->set_plugin_group(group);
+  group->onInit();
+  vm->plugin_group_active.store(true, std::memory_order_release);
+  return ROCJITSU_STATUS_SUCCESS;
 }
 
 void rj_vm_retain(rj_vm_t *vm) {
@@ -320,13 +313,24 @@ void rj_vm_release(rj_vm_t *vm) {
     delete vm;
 }
 
-void rj_vm_destroy(rj_vm_t *vm) {
+rj_status_t rj_vm_destroy_checked(rj_vm_t *vm) {
   if (!vm)
-    return;
+    return ROCJITSU_STATUS_SUCCESS;
   // The API requires an asynchronous host to stop and join rj_vm_run() first.
+  // Close while the VM still owns the driver, so a refused dirty writeback
+  // leaves the handle, plugins, and reference-count state intact for retry.
+  if (vm->vm && vm->vm->driver() && rj_vm_close_all_devices(vm) != ROCJITSU_STATUS_SUCCESS)
+    return ROCJITSU_STATUS_ERROR;
   shutdown_plugin_group(vm);
   if (vm->destroy())
     delete vm;
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
+void rj_vm_destroy(rj_vm_t *vm) {
+  if (rj_vm_destroy_checked(vm) != ROCJITSU_STATUS_SUCCESS)
+    util::Logger::warn("rj_vm_destroy retained VM after failed process close: ",
+                       std::strerror(errno));
 }
 
 rj_status_t rj_vm_step(rj_vm_t *vm, int *active) {
@@ -478,6 +482,16 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
   return ROCJITSU_STATUS_SUCCESS;
 }
 
+rj_status_t unmap_status(int result) {
+  if (result == 0)
+    return ROCJITSU_STATUS_SUCCESS;
+  if (result < -1)
+    errno = -result;
+  else if (result != -1 || errno == 0)
+    errno = EIO;
+  return ROCJITSU_STATUS_ERROR;
+}
+
 } // namespace
 
 rj_status_t rj_vm_execute(rj_vm_t *vm, rj_vm_cmd_t *cmd) {
@@ -514,18 +528,17 @@ rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_pid, uint32_t 
 rj_status_t rj_vm_device_close(rj_vm_t *vm, uint32_t process_id) {
   if (!vm || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  if (process_id == 0)
-    vm->vm->driver()->close();
-  else
-    vm->vm->driver()->close(process_id);
-  return ROCJITSU_STATUS_SUCCESS;
+  errno = 0;
+  const int result =
+      process_id == 0 ? vm->vm->driver()->close() : vm->vm->driver()->close(process_id);
+  return unmap_status(result);
 }
 
 rj_status_t rj_vm_close_all_devices(rj_vm_t *vm) {
   if (!vm || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  vm->vm->driver()->close_all_processes();
-  return ROCJITSU_STATUS_SUCCESS;
+  errno = 0;
+  return unmap_status(vm->vm->driver()->close_all_processes());
 }
 
 rj_status_t rj_vm_device_map(rj_vm_t *vm, rj_vm_map_t *map) {
@@ -556,17 +569,19 @@ rj_status_t rj_vm_device_map_as(rj_vm_t *vm, uint32_t process_id, rj_vm_map_t *m
 rj_status_t rj_vm_device_unmap(rj_vm_t *vm, rj_vm_unmap_t *unmap) {
   if (!vm || !unmap || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  vm->vm->driver()->munmap(reinterpret_cast<void *>(unmap->addr),
-                           static_cast<size_t>(unmap->length));
-  return ROCJITSU_STATUS_SUCCESS;
+  errno = 0;
+  const int result = vm->vm->driver()->munmap(reinterpret_cast<void *>(unmap->addr),
+                                              static_cast<size_t>(unmap->length));
+  return unmap_status(result);
 }
 
 rj_status_t rj_vm_device_unmap_as(rj_vm_t *vm, uint32_t process_id, rj_vm_unmap_t *unmap) {
   if (!vm || !unmap || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  vm->vm->driver()->munmap(process_id, reinterpret_cast<void *>(unmap->addr),
-                           static_cast<size_t>(unmap->length));
-  return ROCJITSU_STATUS_SUCCESS;
+  errno = 0;
+  const int result = vm->vm->driver()->munmap(process_id, reinterpret_cast<void *>(unmap->addr),
+                                              static_cast<size_t>(unmap->length));
+  return unmap_status(result);
 }
 
 rj_status_t rj_vm_gpu_id(rj_vm_t *vm, uint32_t *gpu_id) {
@@ -615,58 +630,7 @@ rj_status_t rj_vm_gpu_info_at(rj_vm_t *vm, uint32_t ordinal, rj_vm_gpu_info_t *i
   if (!gpu_ptr)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   const auto &gpu = *gpu_ptr;
-  *info = {};
-  info->present = 1;
-  info->gpu_id = gpu.gpu_id;
-  info->gfx_target_version = gpu.gfx_target_version;
-  info->vendor_id = gpu.vendor_id;
-  info->device_id = gpu.device_id;
-  info->family_id = gpu.family_id;
-  info->unique_id = gpu.unique_id;
-  info->location_id = gpu.location_id;
-  info->domain = gpu.domain;
-  info->hive_id = gpu.hive_id;
-  info->drm_render_minor = gpu.drm_render_minor;
-  info->revision_id = gpu.revision_id;
-  info->pci_revision_id = gpu.pci_revision_id;
-  info->simd_count = gpu.simd_count;
-  info->max_waves_per_simd = gpu.max_waves_per_simd;
-  info->num_shader_engines = gpu.num_shader_engines;
-  info->num_shader_arrays_per_engine = gpu.num_shader_arrays_per_engine;
-  info->num_cu_per_sh = gpu.num_cu_per_sh;
-  info->simd_per_cu = gpu.simd_per_cu;
-  info->wave_front_size = gpu.wave_front_size;
-  info->num_xcc = gpu.num_xcc;
-  info->max_slots_scratch_cu = gpu.max_slots_scratch_cu;
-  info->local_mem_size = gpu.local_mem_size;
-  info->visible_vram_size = gpu.visible_vram_size;
-  info->control_stack_size = gpu.control_stack_size;
-  info->context_save_size = gpu.context_save_size;
-  info->vram_type = gpu.vram_type;
-  info->lds_size_kb = gpu.lds_size_kb;
-  info->mem_width = gpu.mem_width;
-  info->mem_clk_max = gpu.mem_clk_max;
-  info->l1_size_kb = gpu.l1_size_kb;
-  info->l1_line_size = gpu.l1_line_size;
-  info->l1_assoc = gpu.l1_assoc;
-  info->l2_size_kb = gpu.l2_size_kb;
-  info->l2_line_size = gpu.l2_line_size;
-  info->l2_assoc = gpu.l2_assoc;
-  info->num_sdma_engines = gpu.num_sdma_engines;
-  info->num_sdma_xgmi_engines = gpu.num_sdma_xgmi_engines;
-  info->num_cp_queues = gpu.num_cp_queues;
-  info->max_engine_clk_fcompute = gpu.max_engine_clk_fcompute;
-  info->capability = gpu.capability;
-  info->capability2 = gpu.capability2;
-  info->debug_prop = gpu.debug_prop;
-  info->fw_version = gpu.fw_version;
-  info->sdma_fw_version = gpu.sdma_fw_version;
-
-  size_t name_len = gpu.marketing_name.size();
-  if (name_len >= sizeof(info->marketing_name))
-    name_len = sizeof(info->marketing_name) - 1;
-  std::memcpy(info->marketing_name, gpu.marketing_name.data(), name_len);
-  info->marketing_name[name_len] = '\0';
+  *info = gpu_info_to_c(gpu);
   return ROCJITSU_STATUS_SUCCESS;
 }
 
@@ -708,4 +672,13 @@ rj_status_t rj_vm_map_shared_mem(rj_handle_t handle, rj_vm_map_t *map) {
   map->map_errno = result == MAP_FAILED ? errno : 0;
   map->mapped_addr = reinterpret_cast<uint64_t>(result);
   return result == MAP_FAILED ? ROCJITSU_STATUS_ERROR : ROCJITSU_STATUS_SUCCESS;
+}
+
+rj_status_t rj_vm_dup_shared_mem_as(rj_vm_t *vm, uint32_t process_id, int64_t offset,
+                                    rj_handle_t *handle) {
+  if (!vm || !handle || !vm->vm || !vm->vm->driver())
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  const auto duplicated = vm->vm->driver()->dup_mmap_memfd(process_id, static_cast<off_t>(offset));
+  *handle = duplicated.value_or(-1);
+  return duplicated && *duplicated < 0 ? ROCJITSU_STATUS_ERROR : ROCJITSU_STATUS_SUCCESS;
 }

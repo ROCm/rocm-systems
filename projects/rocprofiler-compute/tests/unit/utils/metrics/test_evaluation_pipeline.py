@@ -3,6 +3,7 @@
 
 """Unit tests for utils/metrics/evaluation_pipeline.py."""
 
+from typing import List, Optional
 from unittest.mock import patch
 
 import numpy as np
@@ -11,10 +12,9 @@ import pytest
 
 from utils.metrics.collectable import (
     COLLECT_SUM_SPECS_ATTR,
-    per_dispatch_ratio_series,
+    per_dispatch_series,
 )
 from utils.metrics.evaluation_pipeline import (
-    _gui_active_zero_detected,
     calc_builtin_vars,
     compute_pct_of_peak,
     create_empirical_peaks_dict,
@@ -24,6 +24,7 @@ from utils.metrics.evaluation_pipeline import (
     validate_dual_issue_metrics,
 )
 from utils.metrics.expression import build_eval_string
+from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -54,7 +55,9 @@ def _ipc_collect_table() -> pd.DataFrame:
     return table
 
 
-def _eval_ipc_collect_table(raw: pd.DataFrame) -> pd.DataFrame:
+def _eval_ipc_collect_table(
+    raw: pd.DataFrame, pass_tables: Optional[List[pd.DataFrame]] = None
+) -> pd.DataFrame:
     table = _ipc_collect_table()
     sys_info = pd.Series(TestEvaluationPipeline.sys_info_fields)
     expressions = [
@@ -75,6 +78,7 @@ def _eval_ipc_collect_table(raw: pd.DataFrame) -> pd.DataFrame:
             pd.DataFrame(),
             raw,
             debug=False,
+            pass_tables=pass_tables,
         )
     return table
 
@@ -179,6 +183,48 @@ class TestEvaluationPipeline:
         assert call_args.args[0] == "Value"
         assert call_args.kwargs["show_inputs"] is True
         assert metric_df.loc["1.1.0", "Value"] == 450
+
+    @pytest.mark.parametrize(
+        ("pass_counters", "expected"),
+        [
+            ([["SQ_WAVES"], ["SQ_WAVES", "GRBM_GUI_ACTIVE"]], 0.4),
+            ([["SQ_WAVES"], ["GRBM_GUI_ACTIVE"]], 0.1),
+        ],
+        ids=["pass_holds_all", "no_pass_holds_all"],
+    )
+    def test_eval_metric_reads_metric_from_first_pass_holding_it(
+        self, pass_counters, expected
+    ):
+        """A metric reads the first pass that has all its counters, and the
+        merged frame when no pass has them all."""
+        fixture = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": "to_sum(raw_pmc_df['SQ_WAVES']) / "
+                "to_sum(raw_pmc_df['GRBM_GUI_ACTIVE'])",
+            }
+        )
+        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
+        pass_values = {"SQ_WAVES": [10, 20, 30], "GRBM_GUI_ACTIVE": [50, 50, 50]}
+        pass_tables = [
+            pd.DataFrame({name: pass_values[name] for name in counters})
+            for counters in pass_counters
+        ]
+        with patch(
+            "utils.metrics.evaluation_pipeline.get_build_in_vars",
+            return_value={},
+        ):
+            eval_metric(
+                dfs,
+                dfs_type,
+                dfs_expressions,
+                sys_info,
+                pd.DataFrame(),
+                raw_pmc_df,
+                debug=False,
+                pass_tables=pass_tables,
+            )
+
+        assert metric_df.loc["1.1.0", "Value"] == pytest.approx(expected)
 
     def test_eval_metric_computes_value_from_expression(self):
         """eval_metric writes the computed Value back to the metric DataFrame."""
@@ -581,59 +627,6 @@ class TestEvaluationPipeline:
         assert result["ammolite__num_gl1c"] == 8
 
 
-def test_pass_scoped_builtin_is_computed_for_the_used_pass() -> None:
-    from utils.metrics.evaluation_pipeline import _calc_pass_scoped_builtins
-    from utils.metrics.pass_provenance import PassLayout
-
-    layout = PassLayout(
-        pass_keys=("pmc_perf_0", "pmc_perf_1"),
-        counters_by_pass={
-            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE"}),
-            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE", "TA_BUSY"}),
-        },
-        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
-    )
-    raw_pmc_df = pd.DataFrame({
-        "TA_BUSY": [50.0],
-        "GRBM_GUI_ACTIVE": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
-    })
-    result = _calc_pass_scoped_builtins(
-        raw_pmc_df,
-        {"ammolite__num_xcd": 1},
-        "gfx942",
-        layout,
-        {"pmc_perf_1"},
-        ["to_avg(raw_pmc_df['TA_BUSY'] / ammolite__GRBM_GUI_ACTIVE_PER_XCD)"],
-    )
-    value = result["ammolite__GRBM_GUI_ACTIVE_PER_XCD__pass1"]
-    if isinstance(value, pd.Series):
-        value = value.iloc[0]
-    assert float(value) == 200.0
-
-
-def test_gui_active_zero_ignores_shadow_columns() -> None:
-    frame = pd.DataFrame({
-        "GRBM_GUI_ACTIVE_sum": [10],
-        "GRBM_GUI_ACTIVE": [0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [0],
-    })
-    assert _gui_active_zero_detected(frame) is None
-
-    base_only = pd.DataFrame({
-        "GRBM_GUI_ACTIVE": [0],
-        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [5],
-    })
-    assert _gui_active_zero_detected(base_only) == "GRBM_GUI_ACTIVE"
-
-    summed_zero = pd.DataFrame({
-        "GRBM_GUI_ACTIVE_sum": [0],
-        "GRBM_GUI_ACTIVE": [5],
-    })
-    assert _gui_active_zero_detected(summed_zero) == "GRBM_GUI_ACTIVE_sum"
-
-
 @pytest.mark.misc
 def test_evaluate_metric_composites_fills_parent_without_mutating_source():
     raw = pd.DataFrame({
@@ -719,7 +712,37 @@ def test_collect_piece_min_stays_unset_without_dispatch_series() -> None:
 
 
 @pytest.mark.misc
-def test_per_dispatch_ratio_scopes_builtin_series_to_each_dispatch() -> None:
+def test_collect_parts_read_the_pass_that_holds_their_counters() -> None:
+    """Each part reads its own pass table, not the merged table.
+
+    The merged table holds zero instructions, so reading it would give 0.
+    """
+    merged = pd.DataFrame({
+        "Dispatch_ID": [1, 2],
+        "INST_A": [0.0, 0.0],
+        "INST_B": [0.0, 0.0],
+        "CYCLES": [4.0, 4.0],
+    })
+    pass_tables = [
+        pd.DataFrame({
+            "Dispatch_ID": [1, 2],
+            "INST_A": [2.0, 6.0],
+            "CYCLES": [4.0, 4.0],
+        }),
+        pd.DataFrame({
+            "Dispatch_ID": [1, 2],
+            "INST_B": [1.0, 1.0],
+            "CYCLES": [4.0, 4.0],
+        }),
+    ]
+    table = _eval_ipc_collect_table(merged, pass_tables)
+    assert table.at["3", "Avg"] == pytest.approx(1.25)
+    assert table.at["3", "Min"] == pytest.approx(0.75)
+    assert table.at["3", "Max"] == pytest.approx(1.75)
+
+
+@pytest.mark.misc
+def test_per_dispatch_series_scopes_builtin_series_to_each_dispatch() -> None:
     """A whole-frame cycle Series must not be the denominator of every dispatch.
 
     Instructions and cycles are both [10, 30]. Each dispatch is 1, not 0.25/0.75.
@@ -730,11 +753,8 @@ def test_per_dispatch_ratio_scopes_builtin_series_to_each_dispatch() -> None:
     })
     cycles = pd.Series([10.0, 30.0], index=raw.index, name="cycles")
     built = "to_sum(raw_pmc_df['INST']) / to_sum(ammolite__CYCLES)"
-    series = per_dispatch_ratio_series(
-        built,
-        raw,
-        {"ammolite__CYCLES": cycles, "ammolite__CYCLES__pass0": cycles},
-        {},
+    series = per_dispatch_series(
+        built, MetricEvaluator(raw, {"ammolite__CYCLES": cycles}, {})
     )
     assert series.loc[1] == pytest.approx(1.0)
     assert series.loc[2] == pytest.approx(1.0)

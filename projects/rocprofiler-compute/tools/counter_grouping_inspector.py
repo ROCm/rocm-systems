@@ -15,10 +15,8 @@ is stubbed so the tool runs without rocprofiler. Bucket views reuse a second
 `_allocate_perfmon_counter_files` call on the same counter set (same result as
 the coalesce pass).
 
-Each bucket-plan Summary is followed by HW packing limits from the arch's
-`perfmon_config` and notes that CPC/CPF/SQC/SQ table columns are
-display-only name-prefix lanes (SQC remaps to SQ for packing; CPC/CPF keep
-their own caps).
+Each plan summary ends with the arch's counter limits per block and a note on
+which table columns are real packing blocks.
 
 Usage (from the `rocprofiler-compute` project root):
     ./tools/counter_grouping_inspector.py --arch gfx942
@@ -28,14 +26,13 @@ Usage (from the `rocprofiler-compute` project root):
 """
 
 import argparse
-import importlib
 import logging
 import sys
 import tempfile
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Dict, Optional
+from typing import Optional
 
 from rich.console import Console
 
@@ -45,20 +42,21 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 # Import from existing modules to maintain single source of truth
-from rocprof_compute_soc.soc_base import (  # noqa: E402
-    CounterFile,
+import config
+from rocprof_compute_soc.soc_base import (
     OmniSoC_Base,
-    flat_counters_in_perfmon_file,
     is_tcc_channel_counter,
     iter_analysis_config_metrics,
 )
-from utils.logger import console_error  # noqa: E402
-from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
-from utils.utils_common import canonical_config_arch  # noqa: E402
-from utils.utils_counter_defs import (  # noqa: E402
-    BLOCK_REMAP,
-    extract_counters_and_variables,
+from utils.counters.allocator import metric_counter_sets
+from utils.counters.counter_file import (
+    CounterFile,
+    flat_counters_in_perfmon_file,
 )
+from utils.logger import console_error
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import canonical_config_arch
+from utils.utils_counter_defs import BLOCK_REMAP
 
 
 def _counter_display_ip_prefix(counter: str) -> str:
@@ -93,75 +91,48 @@ def _rocprof_supported_superset(counters: set[str]) -> set[str]:
     return out
 
 
-def _build_inspector_soc(
-    arch: str,
-    config_dir: Path,
-    filter_blocks: Optional[list[str]],
-    perfmon_config: dict[str, int],
-    workload_root: Path,
-) -> OmniSoC_Base:
-    # num_xcd=1 is one reported die, not another arch's XCD count.
-    # The arch SoC replaces l2_banks with that chip's own banks.
-    machine_spec = SimpleNamespace(
-        rocminfo_lines=None,
-        num_xcd=1,
-        l2_banks=1,
-        gpu_arch=arch,
-        gpu_series=mi_gpu_specs.get_gpu_series(arch),
-    )
-    filter_block_list = list(filter_blocks) if filter_blocks else []
-    cli_args = argparse.Namespace(
-        output_directory=str(workload_root.resolve()),
-        config_dir=str(config_dir.resolve()),
-        filter_blocks=filter_block_list,
-        membw_analysis=False,
-        set_selected=None,
-        roof_only=False,
-        no_roof=True,
-        device=0,
-    )
-    try:
-        soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
-        soc_class = getattr(soc_module, f"{arch}_soc")
-        soc = soc_class(cli_args, machine_spec)
-    except ModuleNotFoundError:
-        soc = OmniSoC_Base(cli_args, machine_spec)
-        soc.set_arch(arch)
-    soc.set_perfmon_config(perfmon_config)
-    return soc
-
-
 def run_soc_detect_and_coalesce(
     arch: str,
-    config_dir: Path,
     filter_blocks: Optional[list[str]],
     perfmon_config: dict[str, int],
     workload_root: Path,
-) -> tuple[set[str], list[CounterFile], OmniSoC_Base]:
+) -> tuple[set[str], list[CounterFile]]:
     """Run SoC counter detection and perfmon coalesce.
 
     Writes YAML under `workload_root/perfmon/`.
     """
-    soc = _build_inspector_soc(
-        arch, config_dir, filter_blocks, perfmon_config, workload_root
+    machine_spec = SimpleNamespace(
+        rocminfo_lines=None,
+        num_xcd=1,
+        l2_banks=4,
+        gpu_arch=arch,
+        gpu_series=mi_gpu_specs.get_gpu_series(arch),
     )
 
+    filter_block_list = list(filter_blocks) if filter_blocks else []
+    cli_args = argparse.Namespace(
+        output_directory=str(workload_root.resolve()),
+        filter_blocks=filter_block_list,
+        membw_analysis=False,
+        set_selected=None,
+    )
+
+    soc = OmniSoC_Base(cli_args, machine_spec)
+    soc.set_arch(arch)
+    soc.set_perfmon_config(perfmon_config)
+
     counters, _unused_filter_blocks = soc.detect_counters()
-    # Drop legacy SQ_ACCUM_PREV_HIRES if present; rocprofiler-sdk uses named
-    # *_ACCUM counters (accumulate(LEVEL, HIGH_RES) in sdk_config.yaml).
-    counters = counters - {"SQ_ACCUM_PREV_HIRES"}
     if not counters:
-        return set(), [], soc
+        return set(), []
 
     soc.get_rocprof_supported_counters = (  # type: ignore[method-assign]
         lambda c=counters: _rocprof_supported_superset(c)
     )
 
     soc.perfmon_coalesce(counters)
-    perfmon_counter_files, _unused_perfmon_files, _unused_accumulator_files = (
-        soc._allocate_perfmon_counter_files(counters)
-    )
-    return counters, perfmon_counter_files, soc
+
+    perfmon_counter_files = soc._allocate_perfmon_counter_files(counters)
+    return counters, perfmon_counter_files
 
 
 def _global_ip_column_widths(
@@ -224,41 +195,28 @@ def _format_bucket_markdown(
 
 
 def _format_hw_limits_line(perfmon_config: dict[str, int]) -> str:
-    """Format packing slot caps from `perfmon_config` / mi_gpu_spec."""
+    """Format the counter limit of each perfmon block."""
     limits = ", ".join(f"{block}: {cap}" for block, cap in perfmon_config.items())
-    return f"HW counter limits (perfmon_config packing slots): {limits}"
+    return f"Counter limits per block: {limits}"
 
 
 def _format_display_column_comments() -> str:
-    """Clarify name-prefix columns vs real packing blocks / remaps."""
-    remap_bits = ", ".join(f"{src}→{dst}" for src, dst in sorted(BLOCK_REMAP.items()))
+    """Explain which table columns are real packing blocks."""
+    remaps = ", ".join(f"{src}->{dst}" for src, dst in sorted(BLOCK_REMAP.items()))
     return (
-        "Comments: CPC, CPF, SQC, and SQ columns above are for display only "
-        "(name-prefix lanes), not separate perfmon buckets. SQC shares SQ's "
-        f"slot budget via BLOCK_REMAP ({remap_bits}); CPC and CPF each have "
-        "their own caps and do not remap into CP."
-    )
-
-
-def _format_summary_trailer(perfmon_config: dict[str, int]) -> str:
-    """HW limits + display notes appended after each Summary line."""
-    return (
-        f"\n{_format_hw_limits_line(perfmon_config)}\n"
-        f"{_format_display_column_comments()}\n\n"
+        "Note: the table columns group counters by name prefix. Some blocks "
+        f"count against another block's limit ({remaps}); CPC and CPF have "
+        "their own limits."
     )
 
 
 def generate_bucket_plan(
     output_files: list[CounterFile],
     arch: str,
-    *,
-    heading: Optional[str] = None,
-    perfmon_config: Optional[Dict[str, int]] = None,
 ) -> str:
     """Generate the bucket allocation plan as markdown tables."""
     buf = StringIO()
-    title = heading or f"Perfmon bucket allocation plan (architecture: {arch})"
-    buf.write(f"{title}\n\n")
+    buf.write(f"Perfmon bucket allocation plan (architecture: {arch})\n\n")
 
     global_columns, column_widths, sections, total_assignments = _bucket_plan_sections(
         output_files
@@ -278,8 +236,9 @@ def generate_bucket_plan(
         f"Summary: {len(output_files)} bucket(s), "
         f"{total_assignments} counter assignment(s).\n"
     )
-    cfg = perfmon_config or mi_gpu_specs.get_perfmon_config(arch) or {}
-    buf.write(_format_summary_trailer(cfg))
+    perfmon_config = mi_gpu_specs.get_perfmon_config(arch) or {}
+    buf.write(f"\n{_format_hw_limits_line(perfmon_config)}\n")
+    buf.write(f"{_format_display_column_comments()}\n\n")
 
     return buf.getvalue()
 
@@ -290,24 +249,22 @@ def print_bucket_plan(output_files: list[CounterFile], arch: str) -> None:
     print(output, end="")
 
 
-def _counter_to_bucket_map(
+def _bucket_counter_sets(
     output_files: list[CounterFile],
-) -> dict[str, str]:
-    """Map each PMC counter string to its perfmon bucket label."""
-    result: dict[str, str] = {}
-    for counter_file in output_files:
-        label = counter_file.name.replace(".txt", "")
-        for ctr in flat_counters_in_perfmon_file(counter_file):
-            result[ctr] = label
-    return result
+) -> dict[str, set[str]]:
+    """Map each perfmon bucket label to the PMC counters it collects."""
+    return {
+        counter_file.name.replace(".txt", ""): set(
+            flat_counters_in_perfmon_file(counter_file)
+        )
+        for counter_file in output_files
+    }
 
 
 def generate_bucket_metrics(
     output_files: list[CounterFile],
     config_dir: Path,
     arch: str,
-    *,
-    section_heading: Optional[str] = None,
 ) -> str:
     """Generate metrics that span multiple buckets as a string.
 
@@ -315,9 +272,8 @@ def generate_bucket_metrics(
     this function's name reflects the primary bucket analysis use case.
     """
     buf = StringIO()
-    if section_heading:
-        buf.write(f"{section_heading}\n\n")
-    counter_to_bucket = _counter_to_bucket_map(output_files)
+    bucket_counters = _bucket_counter_sets(output_files)
+    plan_counters = set().union(*bucket_counters.values())
 
     multi_rows: list[tuple[str, str, int, str, int, str]] = []
     single_rows: list[tuple[str, str, int, str, str]] = []
@@ -327,46 +283,54 @@ def generate_bucket_metrics(
     config_arch = canonical_config_arch(arch)
     for metric in iter_analysis_config_metrics(config_dir / config_arch, set()):
         total_metrics += 1
-        hardware_counters, _unused_builtin_vars = extract_counters_and_variables(
-            "\n".join(metric.expressions), gpu_series, include_supported_denom=False
+        metric_sets = metric_counter_sets(
+            [metric.expressions], gpu_series, plan_counters
         )
-        buckets: set[str] = set()
-        for formula_counter in hardware_counters:
-            bucket_label = counter_to_bucket.get(formula_counter)
-            if bucket_label is not None:
-                buckets.add(bucket_label)
-
+        if not metric_sets:
+            continue
+        metric_set = metric_sets[0]
         panel_label = str(metric.table_id) if metric.table_id is not None else "-"
-        bucket_count = len(buckets)
-        if bucket_count > 1:
-            multi_rows.append((
-                metric.stem_id,
-                panel_label,
-                metric.metric_idx,
-                metric.metric_name,
-                bucket_count,
-                ", ".join(sorted(buckets)),
-            ))
-        elif bucket_count == 1:
+
+        # A counter can sit in several buckets, so a metric is single-pass
+        # when one bucket holds all of its counters.
+        holders = [
+            label
+            for label, counters in bucket_counters.items()
+            if metric_set <= counters
+        ]
+        if holders:
             single_rows.append((
                 metric.stem_id,
                 panel_label,
                 metric.metric_idx,
                 metric.metric_name,
-                next(iter(buckets)),
+                holders[0],
             ))
+            continue
+        buckets = [
+            label
+            for label, counters in bucket_counters.items()
+            if metric_set & counters
+        ]
+        multi_rows.append((
+            metric.stem_id,
+            panel_label,
+            metric.metric_idx,
+            metric.metric_name,
+            len(buckets),
+            ", ".join(buckets),
+        ))
 
     multi_pct = (100.0 * len(multi_rows) / total_metrics) if total_metrics else 0.0
     single_pct = (100.0 * len(single_rows) / total_metrics) if total_metrics else 0.0
 
     buf.write(
-        f"Metrics with PMC counters assigned to more than one perfmon bucket "
+        f"Multi-pass metrics: no perfmon bucket holds all of their PMC counters "
         f"({len(multi_rows)} of {total_metrics} metrics, {multi_pct:.1f}%)\n"
     )
     buf.write(
-        "All *.yaml under the arch are scanned. Listed rows are metrics where at "
-        "least one formula counter is in this plan's collection and those "
-        "counters map to 2+ buckets in the layout above.\n"
+        "Lists every arch config metric that reads a collected counter. Buckets "
+        "are the ones holding any of its counters.\n"
     )
     buf.write(f"Config tree: {config_dir / config_arch}\n")
 
@@ -397,13 +361,12 @@ def generate_bucket_metrics(
 
     buf.write("\n")
     buf.write(
-        f"Metrics with PMC counters assigned to one perfmon bucket "
+        f"Single-pass metrics: one perfmon bucket holds all of their PMC counters "
         f"({len(single_rows)} of {total_metrics} metrics, {single_pct:.1f}%)\n"
     )
     buf.write(
-        "Listed rows are metrics where at least one formula counter is in this "
-        "plan's collection and every such counter maps to the same single "
-        "bucket above (metrics with no in-collection PMCs are omitted).\n"
+        "Lists every arch config metric that reads a collected counter. Bucket "
+        "is the first one holding all of its counters.\n"
     )
 
     if single_rows:
@@ -510,11 +473,6 @@ def render_perfmon_plan_svg(
     return console.export_svg(title=title)
 
 
-def get_default_config_dir() -> Path:
-    """Get the default analysis configs directory."""
-    return _SRC_DIR / "rocprof_compute_soc" / "analysis_configs"
-
-
 def get_supported_archs() -> list[str]:
     """Get list of supported architectures from mi_gpu_specs."""
     return list(mi_gpu_specs.get_gpu_series_dict().keys())
@@ -552,12 +510,6 @@ Examples:
         help="GPU architecture (e.g., gfx942, gfx950)",
     )
     parser.add_argument(
-        "--config-dir",
-        type=Path,
-        default=None,
-        help="Path to analysis_configs directory (default: auto-detect)",
-    )
-    parser.add_argument(
         "--block",
         "-b",
         nargs="+",
@@ -588,9 +540,7 @@ Examples:
     )
     args = parser.parse_args()
 
-    config_dir = args.config_dir or get_default_config_dir()
-    if not config_dir.is_dir():
-        console_error(f"Error: Config directory not found: {config_dir}")
+    config_dir = config.analysis_configs_dir
 
     arch = args.arch
 
@@ -608,8 +558,8 @@ Examples:
 
     with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
         workload_root = Path(tmpdir)
-        counters, output_files, _soc = run_soc_detect_and_coalesce(
-            arch, config_dir, args.block, perfmon_config, workload_root
+        counters, output_files = run_soc_detect_and_coalesce(
+            arch, args.block, perfmon_config, workload_root
         )
 
         if not counters:

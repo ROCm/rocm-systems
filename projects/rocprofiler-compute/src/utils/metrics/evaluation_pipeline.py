@@ -5,41 +5,39 @@
 
 from __future__ import annotations
 
-from functools import partial
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 
-from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.collectable import (
-    _avg_column_name,
-    _collect_piece_dispatch_series,
+    COLLECTABLE_EXPR_CACHE_ATTR,
+    CollectPieceLookup,
     apply_composite_metrics,
+    avg_column_name,
     begin_collectable_warnings,
-    build_metric_eval_graph,
     cache_collectable_expressions,
+    composite_parent_ids,
     flush_collectable_warnings,
 )
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
-from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.metrics.metric_evaluator import MetricEvaluator, counter_table_index
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
 )
-from utils.metrics.pass_provenance import (
-    PassLayout,
-    bind_metric_tables_to_passes,
-    evaluate_pass_scoped_builtins,
-)
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
 from utils.utils_common import SUPPORTED_FIELD
 from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
+
+# Columns of a composite row that combine its parts on each dispatch
+_EXTENT_COLUMNS = ("Min", "Max", "Minimum", "Maximum")
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
@@ -167,119 +165,36 @@ def calc_builtin_vars(
     return builtin_vars_collection
 
 
-def _series_for_collect_piece(
-    metric_table: pd.DataFrame,
+def pass_evaluators(
     raw_pmc_df: pd.DataFrame,
-    sys_vars: dict[str, Any],
-    empirical_peaks: dict[str, Any],
-    piece_name: str,
-) -> pd.Series:
-    """Resolve one _collect piece to its per-dispatch values.
-
-    Scalar piece averages are not a min or max. When no per-dispatch series
-    is available the empty series leaves that extent unset.
-    """
-    series = _collect_piece_dispatch_series(
-        metric_table,
-        piece_name,
-        raw_pmc_df,
-        sys_vars,
-        empirical_peaks,
-    )
-    if series is None:
-        # Only scalar piece averages exist; do not report their sum as Min/Max.
-        return pd.Series(dtype=float)
-    return series
-
-
-def _bind_collect_piece(
-    metric_evaluator: MetricEvaluator,
-    metric_table: pd.DataFrame,
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: dict[str, Any],
-    empirical_peaks: dict[str, Any],
-) -> None:
-    """Point collect_piece at this metric table's collectable lookup."""
-    metric_evaluator.collect_piece = partial(
-        _series_for_collect_piece,
-        metric_table,
-        raw_pmc_df,
-        sys_vars,
-        empirical_peaks,
-    )
-
-
-def _gui_active_zero_detected(raw_pmc_df: pd.DataFrame) -> Optional[str]:
-    """Return the preferred GUI-active column when it contains a zero.
-
-    Shadow columns are ignored. A zero in one replay must not abort analyze
-    when the summed column, or otherwise the base column, is non-zero.
-    """
-    if "GRBM_GUI_ACTIVE_sum" in raw_pmc_df.columns:
-        column = "GRBM_GUI_ACTIVE_sum"
-    elif "GRBM_GUI_ACTIVE" in raw_pmc_df.columns:
-        column = "GRBM_GUI_ACTIVE"
-    else:
-        return None
-    if (raw_pmc_df[column] == 0).any():
-        return column
-    return None
-
-
-def _calc_pass_scoped_builtins(
-    raw_pmc_df: pd.DataFrame,
+    pass_tables: Optional[list[pd.DataFrame]],
     sys_vars: dict[str, int | float],
     gpu_arch: str,
-    pass_layout: PassLayout,
-    used_passes: set[str],
     expressions: list[str],
-) -> dict[str, Optional[str | float | int]]:
-    """Compute built-ins with duplicated counters bound to each used pass."""
-    return evaluate_pass_scoped_builtins(
-        pass_layout,
-        used_passes,
-        mi_gpu_specs.get_gpu_series(gpu_arch),
-        expressions,
-        partial(_eval_pass_scoped_builtin, raw_pmc_df, sys_vars),
-        key_prefix="ammolite__",
-    )
+    empirical_peaks: dict[str, float],
+) -> list[MetricEvaluator]:
+    """Return one evaluator per pass table, then one for raw_pmc_df.
 
-
-def _eval_pass_scoped_builtin(
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: dict[str, int | float],
-    variable_key: str,
-    eval_string: str,
-    pass_locals: dict[str, object],
-) -> object:
-    try:
-        evaluator = MetricEvaluator(raw_pmc_df, {**sys_vars, **pass_locals}, {})
-        calculation_result = evaluator.eval_expression(eval_string)
-    except (TypeError, NameError, KeyError):
-        console_debug(
-            "pass_provenance",
-            f"builtin {variable_key!r}: pass-bound eval failed, using nan",
-        )
-        return np.nan
-    if np.isscalar(calculation_result) and calculation_result == "N/A":
-        return np.nan
-    return calculation_result
-
-
-def _copy_metric_tables(
-    dfs: dict,
-    dfs_type: dict,
-) -> tuple[dict, dict]:
-    """Copy metric tables so composite eval does not overwrite source formulas."""
-    copies: dict = {}
-    types: dict = {}
-    for table_id, df in dfs.items():
-        if dfs_type.get(table_id) != "metric_table":
-            continue
-        copied = df.copy(deep=True)
-        copies[table_id] = copied
-        types[table_id] = "metric_table"
-    return copies, types
+    Each evaluator has the built-in variables of its own table.
+    """
+    sys_vars = {
+        **sys_vars,
+        **calc_builtin_vars(raw_pmc_df, sys_vars, gpu_arch, expressions),
+    }
+    return [
+        *(
+            MetricEvaluator(
+                table,
+                {
+                    **sys_vars,
+                    **calc_builtin_vars(table, sys_vars, gpu_arch, expressions),
+                },
+                empirical_peaks,
+            )
+            for table in pass_tables or []
+        ),
+        MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks),
+    ]
 
 
 def evaluate_metric_composites(
@@ -288,140 +203,60 @@ def evaluate_metric_composites(
     raw_pmc_df: pd.DataFrame,
     sys_info: pd.Series,
     empirical_peaks_df: pd.DataFrame,
-    pass_layout: Optional[PassLayout] = None,
+    pass_tables: Optional[list[pd.DataFrame]] = None,
 ) -> dict[tuple[object, str], object]:
-    """Evaluate composite parents on copies of the metric tables.
+    """Evaluate the COLLECT_SUM and COLLECT_RATIO metrics on copies of the
+    metric tables that hold them.
 
-    Returns (metric_id, column) -> value for each composite parent. Callers
-    on the analysis-db path overlay these onto exported expressions and the
-    roofline points. Source tables are left unchanged.
+    Returns the value of each (metric_id, column) of those metrics. The
+    analysis-db path writes them into its expressions and roofline points.
     """
-    copies, copy_types = _copy_metric_tables(dfs, dfs_type)
-    if not copies:
-        return {}
-
-    sys_vars = create_sys_vars(sys_info)
-    empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    gpu_arch = str(sys_info.get("gpu_arch", ""))
-    used_passes: set[str] = set()
-    if pass_layout is not None and pass_layout.is_multi_pass and gpu_arch:
-        gpu_series = mi_gpu_specs.get_gpu_series(gpu_arch)
-        used_passes = bind_metric_tables_to_passes(
-            copies,
-            copy_types,
-            pass_layout,
-            gpu_series,
-            frozenset(SUPPORTED_FIELD),
-        )
-
+    copies = {
+        table_id: df.copy(deep=True)
+        for table_id, df in dfs.items()
+        if dfs_type.get(table_id) == "metric_table" and composite_parent_ids(df)
+    }
+    copy_types = dict.fromkeys(copies, "metric_table")
     cache_collectable_expressions(copies, copy_types)
     expressions = [
         built
         for df in copies.values()
-        for built in df.attrs.get("collectable_expr_cache", {}).values()
-        if isinstance(built, str) and built
+        for built in df.attrs.get(COLLECTABLE_EXPR_CACHE_ATTR, {}).values()
     ]
-    if gpu_arch and expressions:
-        sys_vars.update(calc_builtin_vars(raw_pmc_df, sys_vars, gpu_arch, expressions))
-        if pass_layout is not None and used_passes:
-            sys_vars.update(
-                _calc_pass_scoped_builtins(
-                    raw_pmc_df,
-                    sys_vars,
-                    gpu_arch,
-                    pass_layout,
-                    used_passes,
-                    expressions,
-                )
-            )
-
-    apply_composite_metrics(
-        copies,
-        copy_types,
+    empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
+    evaluators = pass_evaluators(
         raw_pmc_df,
-        sys_vars,
+        pass_tables,
+        create_sys_vars(sys_info),
+        sys_info["gpu_arch"],
+        expressions,
         empirical_peaks,
     )
+    build_in_vars = get_build_in_vars(mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"]))
+    apply_composite_metrics(copies, copy_types, evaluators, build_in_vars)
 
     results: dict[tuple[object, str], object] = {}
     for df in copies.values():
-        graph = build_metric_eval_graph(df)
-        avg_col = _avg_column_name(df)
-        if avg_col is None:
-            continue
-        for composite in graph.composites:
-            if composite.metric_id not in df.index:
-                continue
-            cell = df.at[composite.metric_id, avg_col]
-            results[(composite.metric_id, avg_col)] = cell
-            _record_composite_extents(
-                results,
-                df,
-                composite.metric_id,
-                raw_pmc_df,
-                sys_vars,
-                empirical_peaks,
-            )
+        avg_col = avg_column_name(df)
+        piece_evaluator = _collect_piece_evaluator(df, evaluators, build_in_vars)
+        for metric_id in composite_parent_ids(df):
+            results[(metric_id, avg_col)] = df.at[metric_id, avg_col]
+            # Min and max combine the parts on each dispatch
+            for column in _EXTENT_COLUMNS:
+                formula = df.at[metric_id, column] if column in df.columns else ""
+                if isinstance(formula, str) and formula:
+                    results[(metric_id, column)] = piece_evaluator.eval_expression(
+                        formula
+                    )
     return results
-
-
-_EXTENT_COLUMNS = ("Min", "Max", "Minimum", "Maximum")
-
-
-def _extent_eval_string(formula: str) -> str:
-    """Return an eval string for a Min or Max cell.
-
-    Cells already rewritten to ``collect_piece(...)`` are left as they are.
-    ``build_eval_string`` rejects that call, so a second rewrite would drop them.
-    """
-    if "collect_piece(" in formula:
-        return formula
-    return build_eval_string(formula)
-
-
-def _record_composite_extents(
-    results: dict[tuple[object, str], object],
-    metric_table: pd.DataFrame,
-    metric_id: object,
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: dict[str, Any],
-    empirical_peaks: dict[str, Any],
-) -> None:
-    """Evaluate Min/Max with the same collect_piece resolver as analyze."""
-    evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
-    _bind_collect_piece(
-        evaluator,
-        metric_table,
-        raw_pmc_df,
-        sys_vars,
-        empirical_peaks,
-    )
-    for column in _EXTENT_COLUMNS:
-        if column not in metric_table.columns:
-            continue
-        formula = metric_table.at[metric_id, column]
-        if not isinstance(formula, str) or not formula.strip():
-            continue
-        built = _extent_eval_string(formula)
-        if not built:
-            continue
-        try:
-            value = evaluator.eval_expression(built)
-        except (TypeError, NameError, KeyError, AttributeError):
-            continue
-        results[(metric_id, column)] = value
 
 
 def overlay_composite_expression_values(
     expression_df: pd.DataFrame,
     filled: dict[tuple[object, str], object],
 ) -> None:
-    """Replace empty composite expression cells with evaluated parent values."""
+    """Replace the composite expression cells with their evaluated values."""
     if expression_df.empty or not filled:
-        return
-    has_metric_id = "metric_id" in expression_df.columns
-    has_value_name = "value_name" in expression_df.columns
-    if not has_metric_id or not has_value_name:
         return
     for idx, row in expression_df.iterrows():
         value = filled.get((row.metric_id, row.value_name))
@@ -444,14 +279,25 @@ def eval_metric(
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
     debug: bool,
-    pass_layout: Optional[PassLayout] = None,
+    pass_tables: Optional[list[pd.DataFrame]] = None,
 ) -> None:
-    """Execute the expr string for each metric in the df."""
-    # confirm no illogical counter values (only consider non-roofline runs)
-    roof_only_run = sys_info.ip_blocks == "roofline"
-    zero_gui = None if roof_only_run else _gui_active_zero_detected(raw_pmc_df)
-    if zero_gui is not None:
-        console_warning(f"Detected {zero_gui} == 0")
+    """Execute the expr string for each metric in the df.
+
+    A metric reads the first table in pass_tables that has all of its
+    counters. When none has them all, it reads raw_pmc_df. COLLECT_SUM and
+    COLLECT_RATIO metrics combine their parts after the other metrics.
+    """
+    # confirm no illogical counter values
+    gui_active_counter = next(
+        (
+            counter
+            for counter in ("GRBM_GUI_ACTIVE_sum", "GRBM_GUI_ACTIVE")
+            if counter in raw_pmc_df.columns
+        ),
+        None,
+    )
+    if gui_active_counter is not None and (raw_pmc_df[gui_active_counter] == 0).any():
+        console_warning(f"Detected {gui_active_counter} == 0")
         console_error("Halting execution for warning above.")
 
     sys_vars = create_sys_vars(sys_info)
@@ -462,59 +308,94 @@ def eval_metric(
         if dfs_type.get(df_id) == "metric_table"
         for expr in dfs_expressions.get(df_id, [])
     ]
-
-    used_passes: set[str] = set()
-    if pass_layout is not None and pass_layout.is_multi_pass:
-        gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
-        used_passes = bind_metric_tables_to_passes(
-            dfs,
-            dfs_type,
-            pass_layout,
-            gpu_series,
-            frozenset(SUPPORTED_FIELD),
-        )
-
-    # Cache collectable strings after binding so submetrics keep pass scope.
+    # Keep the _collect rows' expressions; evaluation replaces them with values
     cache_collectable_expressions(dfs, dfs_type)
-
-    builtin_vars = calc_builtin_vars(
-        raw_pmc_df, sys_vars, sys_info["gpu_arch"], expressions
-    )
-    sys_vars.update(builtin_vars)
-    if pass_layout is not None and used_passes:
-        sys_vars.update(
-            _calc_pass_scoped_builtins(
-                raw_pmc_df,
-                sys_vars,
-                sys_info["gpu_arch"],
-                pass_layout,
-                used_passes,
-                expressions,
-            )
-        )
 
     # Clear any previous noise clamp warnings before this analysis
     clear_noise_clamp_warnings()
 
-    # Create metric evaluator
-    metric_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
+    evaluators = pass_evaluators(
+        raw_pmc_df,
+        pass_tables,
+        sys_vars,
+        sys_info["gpu_arch"],
+        expressions,
+        empirical_peaks,
+    )
+    tables = [evaluator.raw_pmc_df for evaluator in evaluators]
+    build_in_vars = get_build_in_vars(mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"]))
 
     exprs_to_eval = []
     debug_tracker = DebugRowTracker() if debug else None
+
+    # Hmmm... apply + lambda should just work
+    # df['Value'] = df['Value'].apply(
+    #     lambda s: eval(
+    #         compile(str(s), '<string>', 'eval')
+    #     )
+    # )
+    for df_id, df in dfs.items():
+        if dfs_type[df_id] == "metric_table":
+            # COLLECT_SUM and COLLECT_RATIO rows read their parts per dispatch
+            composite_ids = composite_parent_ids(df)
+            piece_evaluator = _collect_piece_evaluator(df, evaluators, build_in_vars)
+            for row_id, row in df.iterrows():
+                for expr in df.columns:
+                    if expr in SUPPORTED_FIELD and expr.lower() not in {
+                        "alias",
+                        "percent of peak",
+                    }:
+                        if row[expr]:
+                            evaluator = (
+                                piece_evaluator
+                                if row_id in composite_ids
+                                else evaluators[
+                                    counter_table_index(
+                                        row[expr], tables, build_in_vars
+                                    )
+                                ]
+                            )
+                            exprs_to_eval.append((
+                                df_id,
+                                row_id,
+                                expr,
+                                row[expr],
+                                evaluator,
+                            ))
+
+                            if debug:
+                                debug_row_tracker(
+                                    expr,
+                                    row[expr],
+                                    evaluator,
+                                    evaluator.raw_pmc_df,
+                                    show_inputs=debug_tracker.should_show_inputs(
+                                        df_id,
+                                        row_id,
+                                    ),
+                                )
+                        else:
+                            # If not insert nan, the whole col might be treated
+                            # as string but not number if there is NONE
+                            df.at[row_id, expr] = ""
+
+    # One summary of the collectable parts that were unset or missing
     begin_collectable_warnings()
     try:
-        _fill_and_evaluate_metric_rows(
-            dfs,
-            dfs_type,
-            raw_pmc_df,
-            sys_vars,
-            empirical_peaks,
-            metric_evaluator,
-            exprs_to_eval,
-            debug,
-            debug_tracker,
-            pass_layout,
-        )
+        for df_id, row_id, col, expr, evaluator in exprs_to_eval:
+            noise_clamp_count_prev = get_noise_clamp_warnings()["count"]
+            eval_result = evaluator.eval_expression(expr)
+            noise_clamp_count_new = get_noise_clamp_warnings()["count"]
+            if (
+                noise_clamp_count_new > noise_clamp_count_prev
+                and "Metric" in dfs[df_id].columns
+            ):
+                metric_name = dfs[df_id].loc[row_id, "Metric"]
+                console_warning(
+                    f"Variance corrected for metric: {row_id} {metric_name} {col}"
+                )
+            dfs[df_id].loc[row_id, col] = eval_result
+        apply_composite_metrics(dfs, dfs_type, evaluators, build_in_vars)
     finally:
         flush_collectable_warnings()
 
@@ -526,84 +407,6 @@ def eval_metric(
 
     # Check for metrics exceeding theoretical peak due to dual-issue
     validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
-
-
-def _fill_and_evaluate_metric_rows(
-    dfs: dict,
-    dfs_type: dict,
-    raw_pmc_df: pd.DataFrame,
-    sys_vars: dict[str, Any],
-    empirical_peaks: dict[str, Any],
-    metric_evaluator: MetricEvaluator,
-    exprs_to_eval: list,
-    debug: bool,
-    debug_tracker: Optional[DebugRowTracker],
-    pass_layout: Optional[PassLayout],
-) -> None:
-    # Hmmm... apply + lambda should just work
-    # df['Value'] = df['Value'].apply(
-    #     lambda s: eval(
-    #         compile(str(s), '<string>', 'eval')
-    #     )
-    # )
-    for df_id, df in dfs.items():
-        if dfs_type[df_id] == "metric_table":
-            _bind_collect_piece(
-                metric_evaluator, df, raw_pmc_df, sys_vars, empirical_peaks
-            )
-            for row_id, row in df.iterrows():
-                for expr in df.columns:
-                    if expr in SUPPORTED_FIELD and expr.lower() not in {
-                        "alias",
-                        "percent of peak",
-                    }:
-                        if row[expr]:
-                            exprs_to_eval.append((df_id, row_id, expr, row[expr]))
-
-                            if debug:
-                                debug_row_tracker(
-                                    expr,
-                                    row[expr],
-                                    metric_evaluator,
-                                    raw_pmc_df,
-                                    show_inputs=debug_tracker.should_show_inputs(
-                                        df_id,
-                                        row_id,
-                                    ),
-                                )
-                        else:
-                            # If not insert nan, the whole col might be treated
-                            # as string but not number if there is NONE
-                            df.at[row_id, expr] = ""
-
-    for df_id, row_id, col, expr in exprs_to_eval:
-        noise_clamp_count_prev = get_noise_clamp_warnings()["count"]
-        _bind_collect_piece(
-            metric_evaluator,
-            dfs[df_id],
-            raw_pmc_df,
-            sys_vars,
-            empirical_peaks,
-        )
-        eval_result = metric_evaluator.eval_expression(expr)
-        noise_clamp_count_new = get_noise_clamp_warnings()["count"]
-        if (
-            noise_clamp_count_new > noise_clamp_count_prev
-            and "Metric" in dfs[df_id].columns
-        ):
-            metric_name = dfs[df_id].loc[row_id, "Metric"]
-            console_warning(
-                f"Variance corrected for metric: {row_id} {metric_name} {col}"
-            )
-        dfs[df_id].loc[row_id, col] = eval_result
-
-    apply_composite_metrics(
-        dfs,
-        dfs_type,
-        raw_pmc_df,
-        sys_vars,
-        empirical_peaks,
-    )
 
 
 def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
@@ -667,3 +470,24 @@ def validate_dual_issue_metrics(
                 # DB cells may be non-numeric (e.g. "N/A"); skip those.
                 continue
             detector.check(metric_name, value, peak)
+
+
+def _collect_piece_evaluator(
+    metric_table: pd.DataFrame,
+    evaluators: list[MetricEvaluator],
+    build_in_vars: dict[str, str],
+) -> MetricEvaluator:
+    """Return an evaluator that resolves the _collect pieces of metric_table.
+
+    It reads the merged table, since a composite row's own formulas name no
+    counter.
+    """
+    merged = evaluators[-1]
+    return MetricEvaluator(
+        merged.raw_pmc_df,
+        merged.sys_vars,
+        merged.empirical_peaks,
+        collect_piece=CollectPieceLookup(
+            metric_table, evaluators, build_in_vars
+        ).dispatch_series,
+    )

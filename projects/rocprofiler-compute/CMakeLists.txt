@@ -766,6 +766,20 @@ add_test(
 )
 
 add_test(
+    NAME test_allocator
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_allocator.xml ${COV_OPTION}
+        tests/unit/utils/counters/test_allocator.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_counter_file
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_counter_file.xml
+        ${COV_OPTION} tests/unit/utils/counters/test_counter_file.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_utils_counter_defs
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_utils_counter_defs.xml
@@ -1050,36 +1064,9 @@ add_test(
 )
 
 # -----------------------------------
-# Single-pass metric allocator + bucket helper unit tests
+# Collectable unit tests
 # -----------------------------------
 
-add_test(
-    NAME test_counter_grouping_single_pass
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest
-        --junitxml=tests/test_counter_grouping_single_pass.xml ${COV_OPTION}
-        tests/unit/rocprof_compute_soc/test_counter_grouping_single_pass.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_counter_grouping_tcc
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_counter_grouping_tcc.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_soc/test_counter_grouping_tcc.py
-        ${WORKING_DIR_OPTION}
-)
-
-# Same-pass bind (single-pass metric analyze)
-add_test(
-    NAME test_pass_provenance
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_pass_provenance.xml
-        ${COV_OPTION} tests/unit/utils/metrics/test_pass_provenance.py
-        ${WORKING_DIR_OPTION}
-)
-
-# Collectables / WEIGHTED_AVG unit tests (Phase 2)
 add_test(
     NAME test_collectable
     COMMAND
@@ -1092,23 +1079,6 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_collect_ratio.xml
         ${COV_OPTION} tests/unit/utils/metrics/test_collect_ratio.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_debug_row_tracker
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_debug_row_tracker.xml
-        ${COV_OPTION} tests/unit/utils/metrics/test_debug_row_tracker.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_counter_grouping_buckets
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest
-        --junitxml=tests/test_counter_grouping_buckets.xml ${COV_OPTION}
-        tests/unit/rocprof_compute_soc/test_counter_grouping_buckets.py
-        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1222,6 +1192,8 @@ if(${ENABLE_COVERAGE})
         test_expression
         test_evaluation_pipeline
         test_metric_evaluator
+        test_allocator
+        test_counter_file
         test_utils_counter_defs
         test_metric_library_loader
         test_parser
@@ -1281,13 +1253,8 @@ if(${ENABLE_COVERAGE})
         test_rocprof_compute_base
         test_rocprofv3_avail_interface
         test_soc_base
-        test_counter_grouping_single_pass
-        test_counter_grouping_tcc
-        test_pass_provenance
-        test_debug_row_tracker
         test_collect_ratio
         test_collectable
-        test_counter_grouping_buckets
         test_analysis_config_collectables
         test_tty
         test_file_io

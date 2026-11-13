@@ -14,7 +14,7 @@ from utils import file_io
 from utils.file_io import (
     create_df_kernel_top_stats,
     create_df_pmc,
-    is_single_panel_config,
+    create_df_pmc_with_slot_ids,
     load_kernel_short_names,
     load_panel_configs,
     rank_kernels_by_total_duration,
@@ -311,12 +311,40 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
     )
     common.write_gzip_csv(tmp_path / "results_pmc_perf_0.csv.gz", long_form_csv)
 
-    df = create_df_pmc(str(tmp_path), verbose=0)
+    df, _pass_tables = create_df_pmc(str(tmp_path), verbose=0)
 
     assert len(df) == 1
     assert df["SQ_WAVES"].iloc[0] == 4
     assert df["SQ_BUSY_CYCLES"].iloc[0] == 100
     assert "Counter_Name" not in df.columns
+
+
+def test_create_df_pmc_with_slot_ids_returns_pass_tables_in_pass_order(
+    tmp_path,
+) -> None:
+    """Each result file is one pass table. Numbered passes sort by number, and
+    a name without a number still sorts."""
+    for pass_index, counter in (
+        ("SQ_INST_LEVEL_LDS_ACCUM", "SQ_INST_LEVEL_LDS_ACCUM,7\n"),
+        (10, "SQ_BUSY_CYCLES,100\n"),
+        (2, "SQ_WAVES,4\n"),
+    ):
+        common.write_result_csv(
+            tmp_path,
+            ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + counter,
+            pass_index=pass_index,
+        )
+
+    df, _slot_to_id, pass_tables = create_df_pmc_with_slot_ids(str(tmp_path), verbose=0)
+
+    assert list(pass_tables) == [
+        "pmc_perf_2",
+        "pmc_perf_10",
+        "pmc_perf_SQ_INST_LEVEL_LDS_ACCUM",
+    ]
+    assert pass_tables["pmc_perf_2"]["SQ_WAVES"].tolist() == [4]
+    assert "SQ_WAVES" not in pass_tables["pmc_perf_10"].columns
+    assert df[["SQ_WAVES", "SQ_BUSY_CYCLES"]].iloc[0].tolist() == [4, 100]
 
 
 def test_create_df_pmc_numbers_result_gpus_from_zero(tmp_path) -> None:
@@ -329,7 +357,7 @@ def test_create_df_pmc_numbers_result_gpus_from_zero(tmp_path) -> None:
         + "SQ_WAVES,4\n",
     )
 
-    df = create_df_pmc(str(tmp_path), verbose=0)
+    df, _pass_tables = create_df_pmc(str(tmp_path), verbose=0)
 
     assert df["GPU_ID"].tolist() == [0]
 
@@ -345,29 +373,12 @@ def test_create_df_pmc_combines_result_files_of_one_workload(tmp_path) -> None:
         ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_BUSY_CYCLES,100\n",
     )
 
-    df = create_df_pmc(str(tmp_path), verbose=0)
+    df, _pass_tables = create_df_pmc(str(tmp_path), verbose=0)
 
     assert len(df) == 1
     assert df["SQ_WAVES"].iloc[0] == 4
     assert df["SQ_BUSY_CYCLES"].iloc[0] == 100
     assert df["Dispatch_Unit"].iloc[0] == 1
-
-
-def test_create_df_pmc_keeps_the_legacy_frame_shape(tmp_path) -> None:
-    """Legacy callers get last-write base columns and no pass shadows."""
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_0.csv.gz",
-        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_WAVES,4\n",
-    )
-    common.write_gzip_csv(
-        tmp_path / "results_pmc_perf_1.csv.gz",
-        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_WAVES,9\n",
-    )
-
-    df = create_df_pmc(str(tmp_path), verbose=0)
-
-    assert df["SQ_WAVES"].iloc[0] == 9
-    assert not any("@pass:" in column for column in df.columns)
 
 
 def test_create_df_pmc_rejects_wide_result_file(tmp_path) -> None:
@@ -386,7 +397,7 @@ def test_create_df_pmc_rejects_wide_result_file(tmp_path) -> None:
 
 
 def test_create_df_pmc_missing_file_returns_empty(tmp_path) -> None:
-    assert create_df_pmc(str(tmp_path), verbose=0).empty
+    assert create_df_pmc(str(tmp_path), verbose=0)[0].empty
 
 
 def test_create_df_pmc_errors_on_header_only_result_file(tmp_path) -> None:
@@ -432,7 +443,7 @@ def test_create_df_pmc_prefers_native_artifacts_over_result_files(tmp_path) -> N
     )
     write_native_process(tmp_path, "pmc_perf_0", 100, [(1, "SQ_WAVES", 42)], [1])
 
-    df = create_df_pmc(str(tmp_path), verbose=0)
+    df, _pass_tables = create_df_pmc(str(tmp_path), verbose=0)
 
     assert df["SQ_WAVES"].tolist() == [42]
 
@@ -442,7 +453,7 @@ def test_create_df_pmc_lines_native_counter_sets_up_by_dispatch(tmp_path) -> Non
     write_native_process(tmp_path, "pmc_perf_0", 100, [(1, "SQ_WAVES", 4)], [1])
     write_native_process(tmp_path, "pmc_perf_1", 200, [(1, "SQ_BUSY_CYCLES", 100)], [1])
 
-    df = create_df_pmc(str(tmp_path), verbose=0)
+    df, _pass_tables = create_df_pmc(str(tmp_path), verbose=0)
 
     assert len(df) == 1
     assert df["SQ_WAVES"].iloc[0] == 4
@@ -460,7 +471,7 @@ def test_create_df_pmc_keeps_native_dispatch_order_past_nine(tmp_path) -> None:
         dispatch_ids,
     )
 
-    df = create_df_pmc(str(tmp_path), verbose=0)
+    df, _pass_tables = create_df_pmc(str(tmp_path), verbose=0)
 
     assert df["SQ_WAVES"].tolist() == list(dispatch_ids)
 
@@ -478,7 +489,7 @@ def test_create_df_pmc_sums_native_counter_instances_across_chunks(
         [1],
     )
 
-    df = create_df_pmc(str(tmp_path), verbose=0)
+    df, _pass_tables = create_df_pmc(str(tmp_path), verbose=0)
 
     assert df["SQ_WAVES"].tolist() == [42]
     assert df["SQ_BUSY"].tolist() == [5]
@@ -520,7 +531,7 @@ def test_create_df_pmc_gives_processes_on_one_gpu_one_gpu_id(tmp_path) -> None:
         tmp_path, "pmc_perf_0", 200, [(1, "SQ_WAVES", 8)], [1], gpu_id=2
     )
 
-    df = create_df_pmc(str(tmp_path), verbose=0)
+    df, _pass_tables = create_df_pmc(str(tmp_path), verbose=0)
 
     assert df["GPU_ID"].tolist() == [0, 0]
 
@@ -534,7 +545,7 @@ def test_create_df_pmc_numbers_gpus_in_node_order_across_processes(tmp_path) -> 
         tmp_path, "pmc_perf_0", 200, [(1, "SQ_WAVES", 8)], [1], gpu_id=2
     )
 
-    df = create_df_pmc(str(tmp_path), verbose=0)
+    df, _pass_tables = create_df_pmc(str(tmp_path), verbose=0)
 
     assert dict(zip(df["SQ_WAVES"], df["GPU_ID"])) == {4: 1, 8: 0}
 
@@ -551,7 +562,7 @@ def test_create_df_pmc_counts_gpus_that_ran_no_dispatch(tmp_path) -> None:
         agent_node_ids=[2, 3],
     )
 
-    df = create_df_pmc(str(tmp_path), verbose=0)
+    df, _pass_tables = create_df_pmc(str(tmp_path), verbose=0)
 
     assert df["GPU_ID"].tolist() == [1]
 
@@ -667,20 +678,6 @@ def test_load_kernel_short_names_falls_back_past_an_empty_csv(tmp_path):
 def test_load_kernel_short_names_tolerates_a_record_without_symbols(tmp_path):
     """The fallback runs when things went wrong, so a bare record is not fatal."""
     assert load_kernel_short_names(str(tmp_path), [{"metadata": {"pid": 1}}]) == {}
-
-
-@pytest.mark.misc
-def test_is_single_panel_config_accepts_shared_gfx115x_dir(tmp_path):
-    (tmp_path / "gfx115x").mkdir()
-
-    supported_archs = {
-        "gfx1150": "rdna35_point_1",
-        "gfx1151": "rdna35_halo",
-        "gfx1152": "rdna35_point_2",
-        "gfx1153": "rdna35_gorgon_point",
-    }
-
-    assert is_single_panel_config(str(tmp_path), supported_archs) is False
 
 
 @pytest.mark.misc

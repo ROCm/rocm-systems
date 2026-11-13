@@ -369,6 +369,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::buffer_register_modifiers<false, 0x3>(*this, modifiers);
+    modifiers.memory_result_payload_words = 1;
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -385,6 +386,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::buffer_register_modifiers<false, 0xc>(*this, modifiers);
+    modifiers.memory_result_payload_words = 1;
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -401,6 +403,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::buffer_register_modifiers<false, 0x3>(*this, modifiers);
+    modifiers.memory_result_payload_words = 1;
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -417,6 +420,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::buffer_register_modifiers<false, 0xc>(*this, modifiers);
+    modifiers.memory_result_payload_words = 1;
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -433,6 +437,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::buffer_register_modifiers<false, 0x3>(*this, modifiers);
+    modifiers.memory_result_payload_words = 1;
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -449,6 +454,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::buffer_register_modifiers<false, 0xc>(*this, modifiers);
+    modifiers.memory_result_payload_words = 1;
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -465,6 +471,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::buffer_register_modifiers<false, 0xc>(*this, modifiers);
+    modifiers.memory_result_payload_words = 1;
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -1006,6 +1013,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::buffer_register_modifiers<false, 0xf, 0x3>(*this, modifiers);
+    modifiers.memory_result_payload_words = 1;
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;
@@ -1037,6 +1045,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::buffer_register_modifiers<false, 0xf, 0x3>(*this, modifiers);
+    modifiers.memory_result_payload_words = 2;
   }
   void implicit_uses(RegisterSet &uses) const override;
   Operand vdata;

@@ -3,8 +3,9 @@
 
 //! Memory, SVM, interop, and virtual-memory regression tests.
 
-use super::interop::*;
 use super::*;
+#[cfg(target_os = "linux")]
+use crate::platform::{AisOperation, ais_transfer};
 
 #[test]
 /// Verifies that execute access permission matches the native bitmask.
@@ -368,6 +369,7 @@ fn virtual_map_rejects_unaligned_addresses_before_runtime_lookup() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 /// Verifies that AIS transfer preserves offsets partial reads and status.
 fn ais_transfer_preserves_offsets_partial_reads_and_status()
@@ -694,6 +696,7 @@ fn svm_ranges_cover_each_touched_page() {
     assert_eq!(svm_range(page as *mut c_void, 0), Err(INVALID_ARGUMENT));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 /// Verifies that portable close works without an initialized runtime.
 fn portable_close_works_without_an_initialized_runtime() {
