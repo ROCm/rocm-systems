@@ -138,4 +138,6 @@ global:
     clGetHostTimer;
     clGetKernelSubGroupInfo;
     clSetDefaultDeviceCommandQueue;
+    clCreateBufferWithProperties;
+    clCreateImageWithProperties;
 } OPENCL_2.0;
