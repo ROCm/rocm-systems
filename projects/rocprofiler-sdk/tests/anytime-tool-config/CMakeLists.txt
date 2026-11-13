@@ -29,6 +29,33 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
+find_package(Threads REQUIRED)
+
+add_executable(concurrent-finalization)
+target_sources(concurrent-finalization PRIVATE concurrent-finalization.cpp)
+target_link_libraries(
+    concurrent-finalization PRIVATE rocprofiler-sdk::rocprofiler-sdk
+                                    rocprofiler-sdk::tests-build-flags Threads::Threads)
+
+rocprofiler_add_integration_execute_test(
+    concurrent-finalization
+    TARGET concurrent-finalization
+    TIMEOUT 15
+    LABELS "integration-tests;anytime-tool-config"
+    ENVIRONMENT "ROCPROFILER_LIBRARY_CTOR=0"
+    PASS_REGULAR_EXPRESSION "Concurrent finalization waits for the active client"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+rocprofiler_add_integration_execute_test(
+    concurrent-finalization-at-exit
+    TARGET concurrent-finalization
+    ARGS --exit-while-finalizing
+    TIMEOUT 15
+    LABELS "integration-tests;anytime-tool-config"
+    ENVIRONMENT "ROCPROFILER_LIBRARY_CTOR=0"
+    PASS_REGULAR_EXPRESSION "Process exit waited for the active client"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 add_subdirectory(early-hip-late-dispatch)
 add_subdirectory(early-hip-late-memcpy)
 add_subdirectory(early-hip-late-memalloc)
