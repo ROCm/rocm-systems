@@ -31,6 +31,7 @@
 #include "fakes/dev_runtime_fakes.h"
 #include "fakes/enqueue_fakes.h"
 #include "fakes/group_fakes.h"
+#include "fakes/hier_host_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/nccl_stubs.h"
@@ -580,6 +581,9 @@ struct SharedHooks {
   ADDON_OP_HOOK(reduceScatterDdaIpc, "ncclReduceScatterDdaIpc")
   ADDON_ROOT_HOOK(broadcastDdaFabricLL, "ncclBroadcastDdaFabricLL")
   ADDON_ROOT_HOOK(broadcastDdaFabricLL128, "ncclBroadcastDdaFabricLL128")
+
+  // src/hier_host.cc
+  ADDON_OP_HOOK(hostHierAllReduce, "rcclHostHierAllReduce")
 };
 #undef ADDON_HOOK
 #undef ADDON_ROOT_HOOK
@@ -1867,9 +1871,14 @@ TEST_F(CollectivesMicrotest, AllReduce_FabricArmsPassTheDecisionsCap) {
   }
 }
 
+TEST_F(CollectivesMicrotest, AllReduce_HostHierLaunchesAsAddon) {
+  ExpectAddonArms({{RCCL_HOST_HIER_ALLREDUCE, "rcclHostHierAllReduce"}}, [&] { return AllReduce(); }, ncclProd,
+                  "AllReduce");
+}
+
 TEST_F(CollectivesMicrotest, AllReduce_CheckModeDivertsAddons) {
   comm_->checkMode = ncclCheckModeDebugLocal;
-  for (int algo : {RCCL_CE_2SHOT, RCCL_DDA_IPC}) {
+  for (int algo : {RCCL_CE_2SHOT, RCCL_DDA_IPC, RCCL_HOST_HIER_ALLREDUCE}) {
     Decide(algo);
     fake.enqueued.clear();
     EXPECT_EQ(ncclSuccess, AllReduce());

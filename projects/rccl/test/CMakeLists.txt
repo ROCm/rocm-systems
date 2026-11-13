@@ -837,6 +837,7 @@ if(BUILD_TESTS)
       CeAlltoAllvEligibilityTests.cpp
       GinAlltoAllEligibilityTests.cpp
       GinAllReduceEligibilityTests.cpp
+      HostHierAllReduceTests.cpp
       EnqueueTests.cpp
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
@@ -1161,6 +1162,7 @@ if(BUILD_TESTS)
       DdaIpcIndexDataMPITests.cpp
       DdaFp8MPITests.cpp
       DdaAlltoAllInPlaceMPITests.cpp
+      HostHierAllReduceMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 

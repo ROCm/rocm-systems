@@ -52,6 +52,7 @@
 #include "ScopedHook.h"                              // RAII install/restore for g_loadParam et al.
 #include "fakes/dev_runtime_micro_fakes.h"           // g_devrBootstrapAllGather
 #include "fakes/env_fakes.h"                         // SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv
+#include "fakes/hier_host_fakes.h"                   // g_hostHierAllReduceEligible, g_hostHierEnsure
 #include "fakes/hip_fakes.h"                         // g_hipGetLastError
 #include "fakes/wrap_fakes.h"                        // rccl_wrap.cc's dependency seams
 #include "graph/topo.h"                              // ncclTopoSystem/ncclTopoNode (MakeCommWithArch)
@@ -499,6 +500,9 @@ TEST(WrapMicrotest, GetAlgoName_AddonValues_DistinctStrings) {
 
   ASSERT_EQ(ncclSuccess, rcclGetAlgoName(rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, &name));
   EXPECT_STREQ("SymTDM", name);
+
+  ASSERT_EQ(ncclSuccess, rcclGetAlgoName(rcclAddonAlgos_t::RCCL_HOST_HIER_ALLREDUCE, &name));
+  EXPECT_STREQ("HierAR", name);
 
   ASSERT_EQ(ncclSuccess, rcclGetAlgoName(rcclAddonAlgos_t::RCCL_CE_2SHOT, &name));
   EXPECT_STREQ("CE2", name);
@@ -4677,6 +4681,108 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_TdmKernelReportsSymmetricTdmOnlyInQu
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, live.algo);
         DeleteCommWithArch(comm);
       });
+}
+
+namespace {
+struct HostHierCalls {
+  int eligible = 0;
+  int ensure = 0;
+};
+
+// Selects a sum AllReduce of 1024 floats with host-hierarchical eligibility and
+// the child-comm build scripted. Ring is the fallback for MakeSelectComm.
+int SelectHostHier(HostHierCalls* calls, bool query, ncclResult_t ensureResult = ncclSuccess,
+                   bool graphCapturingHint = false, ncclComm* comm = nullptr) {
+  ScopedHook eligible(g_hostHierAllReduceEligible, [calls](ncclComm*, size_t count, ncclDataType_t type,
+                                                           ncclRedOp_t op) {
+    calls->eligible++;
+    EXPECT_EQ(1024u, count);
+    EXPECT_EQ(ncclFloat32, type);
+    EXPECT_EQ(ncclSum, op);
+    return true;
+  });
+  ScopedHook ensure(g_hostHierEnsure, [calls, ensureResult](ncclComm*) {
+    calls->ensure++;
+    return ensureResult;
+  });
+  const bool ownComm = comm == nullptr;
+  if (ownComm) comm = MakeSelectComm();
+  rcclCollDecision decision{};
+  EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32, ncclSum,
+                                              /*stream=*/nullptr, query, graphCapturingHint, &decision));
+  if (ownComm) DeleteCommWithArch(comm);
+  return decision.algo;
+}
+}  // namespace
+
+// A query reports the host-hierarchical path without building the child comms,
+// which is collective and must only happen inside a real AllReduce.
+TEST(WrapMicrotestIsolated, SelectAllReduce_HostHierQueryDoesNotSplit) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_HostHierQueryDoesNotSplit", []() {
+    HostHierCalls calls;
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HOST_HIER_ALLREDUCE, SelectHostHier(&calls, /*query=*/true));
+    EXPECT_EQ(1, calls.eligible);
+    EXPECT_EQ(0, calls.ensure);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_HostHierLiveBuildsChildCommsFirst) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_HostHierLiveBuildsChildCommsFirst", []() {
+    HostHierCalls calls;
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HOST_HIER_ALLREDUCE, SelectHostHier(&calls, /*query=*/false));
+    EXPECT_EQ(1, calls.ensure);
+  });
+}
+
+// A failed split leaves the call on the default path instead of failing it.
+TEST(WrapMicrotestIsolated, SelectAllReduce_HostHierFailedSplitFallsBack) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_HostHierFailedSplitFallsBack", []() {
+    HostHierCalls calls;
+    EXPECT_EQ(NCCL_ALGO_RING, SelectHostHier(&calls, /*query=*/false, ncclSystemError));
+    EXPECT_EQ(1, calls.ensure);
+  });
+}
+
+// The split cannot run inside a group, so eligibility is never consulted there.
+TEST(WrapMicrotestIsolated, SelectAllReduce_HostHierSkippedInsideGroup) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_HostHierSkippedInsideGroup", []() {
+    HostHierCalls calls;
+    ncclGroupDepth = 1;
+    EXPECT_EQ(NCCL_ALGO_RING, SelectHostHier(&calls, /*query=*/false));
+    ncclGroupDepth = 0;
+    EXPECT_EQ(0, calls.eligible);
+    EXPECT_EQ(0, calls.ensure);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_HostHierSkippedUnderCapture) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_HostHierSkippedUnderCapture", []() {
+    HostHierCalls calls;
+    EXPECT_EQ(NCCL_ALGO_RING,
+              SelectHostHier(&calls, /*query=*/true, ncclSuccess, /*graphCapturingHint=*/true));
+    EXPECT_EQ(0, calls.eligible);
+  });
+}
+
+// Check mode, a suspended comm and a revoked comm all divert to enqueue, which
+// the host-hierarchical launch would bypass.
+TEST(WrapMicrotestIsolated, SelectAllReduce_HostHierSkippedOnEnqueueOnlyComm) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_HostHierSkippedOnEnqueueOnlyComm", []() {
+    ScopedHook enqueueOnly(g_collectiveMustUseEnqueuePath, [](ncclComm*) { return true; });
+    HostHierCalls calls;
+    EXPECT_EQ(NCCL_ALGO_RING, SelectHostHier(&calls, /*query=*/false));
+    EXPECT_EQ(0, calls.eligible);
+    EXPECT_EQ(0, calls.ensure);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_HostHierSkippedWhenBackendForced) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_HostHierSkippedWhenBackendForced", []() {
+    ScopedHook loadParam(g_loadParam, ParamOverride({{"RCCL_FORCE_DDA", 1}}));
+    HostHierCalls calls;
+    EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HOST_HIER_ALLREDUCE, SelectHostHier(&calls, /*query=*/true));
+    EXPECT_EQ(0, calls.eligible);
+  });
 }
 
 namespace {
