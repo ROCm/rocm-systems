@@ -14,7 +14,7 @@
 #include "fp/reference.h"
 #include "fp/trans_f64_goldens.h"
 #include "math/omod_reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <algorithm>
 #include <cmath>

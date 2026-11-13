@@ -3,7 +3,7 @@
 
 // GFX9 dense matrix register layout and MFMA source-lane controls.
 #pragma once
-#include "common/isa.h"
+#include "common/bits.h"
 #include <stdint.h>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
@@ -30,7 +30,9 @@ constexpr int mfma_input_index(int index, int k, int batch) {
   return (local / PerWord * 64 + lane) * PerWord + local % PerWord;
 }
 
-// Apply encoded A broadcast; reserved sizes retain the legacy identity behavior.
+// MI300 §7.1.5.1 and CDNA4 §7.1.6.1 give this full-wave A-lane formula.
+// Their §13.3.6.1 ABID tables describe adjacent block groups instead. The
+// reduction follows the formula pending a distinguishing hardware capture.
 inline int mfma_a_lane(int lane, uint64_t controls) {
   int cbsz = int(controls & 7);
   if (!cbsz || cbsz > 4) {
@@ -60,6 +62,26 @@ template <int PerWord> inline int mfma_permute_input(int index, uint64_t control
   int lane = index / PerWord % 64;
   int mapped = a ? mfma_a_lane(lane, controls) : mfma_b_lane(lane, controls);
   return index + PerWord * (mapped - lane);
+}
+
+// A finite-input overflow saturates only if all operands selected by the lane controls are finite.
+template <int M, int K, int Batch, int PerWord>
+inline float mfma_clamp_overflow(float result, float initial, const float *a, const float *b,
+                                 int row, int col, int batch, uint64_t controls) {
+  if (!__builtin_isinf(result) || !__builtin_isfinite(initial)) {
+    return result;
+  }
+  for (int k = 0; k < K; ++k) {
+    const int ai = mfma_permute_input<PerWord>(
+        mfma_input_index<M, K, Batch, PerWord>(row, k, batch), controls, true);
+    const int bi = mfma_permute_input<PerWord>(
+        mfma_input_index<M, K, Batch, PerWord>(col, k, batch), controls, false);
+    if (!__builtin_isfinite(a[ai]) || !__builtin_isfinite(b[bi])) {
+      return result;
+    }
+  }
+  // The adjacent finite encoding preserves the sign of the overflow.
+  return bit_cast<float>(bit_cast<uint32_t>(result) - 1u);
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

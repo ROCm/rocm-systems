@@ -1446,6 +1446,7 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_DeviceCodeVersionAndBackendTyp
     {"gdaki tops out at its last revision", NCCL_GIN_TYPE_GDAKI, NCCL_VERSION(2, 32, 0), 2},
     {"gpi tops out at its last revision", NCCL_GIN_TYPE_GPI, NCCL_VERSION(2, 32, 0), 1},
     {"efa gda at its first revision", NCCL_GIN_TYPE_EFA_GDA, NCCL_VERSION(2, 31, 0), 1},
+    {"efa gda tops out at its last revision", NCCL_GIN_TYPE_EFA_GDA, NCCL_VERSION(2, 32, 0), 2},
     // AMD device-initiated backends ignore the host-provided version entirely.
     {"rocshmem gda is version-less", NCCL_GIN_TYPE_ROCSHMEM_GDA, NCCL_VERSION(2, 32, 0), 0},
     {"anvil sdma is version-less", NCCL_GIN_TYPE_ANVIL_SDMA, NCCL_VERSION(2, 32, 0), 0},

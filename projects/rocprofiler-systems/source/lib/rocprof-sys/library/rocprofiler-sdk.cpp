@@ -941,8 +941,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     using sdk_backend_t    = backends::rocprofiler_sdk::backend<wrapper>;
     using tracing_config_t = tracing_config<sdk_backend_t, default_externals>;
 
-    sdk_backend_t::check_version_compatibility();
-
     auto const _callback_domains = tracing_config_t::get_callback_domains();
     auto const _buffered_domain  = tracing_config_t::get_buffered_domains();
     auto const _counter_events   = config::get_rocm_counter_events();

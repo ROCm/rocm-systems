@@ -33,7 +33,7 @@ inline MfmaNative mfma_multiply_add(MfmaNative a, MfmaNative b, MfmaNative c) {
 // Reduce decoded packed sources with FMA, staging all outputs to preserve overlap.
 template <int M, int K, int Batch, int PerWord>
 void mfma_reduce_simd(uint64_t controls, uint32_t *const *d, const float *left, const float *right,
-                      const uint32_t *const *c) {
+                      const uint32_t *const *c, bool clamp_overflow = false) {
   alignas(64) float result[Batch][M][M];
   for (int batch = 0; batch < Batch; ++batch) {
     alignas(64) float rows[M][K], columns[K][M];
@@ -86,7 +86,12 @@ void mfma_reduce_simd(uint64_t controls, uint32_t *const *d, const float *left, 
     for (int row = 0; row < M; ++row) {
       for (int col = 0; col < M; ++col) {
         auto out = mfma_output<M, Batch>(row, col, batch);
-        words[out.reg][out.lane] = as_bits(result[batch][row][col]);
+        float value = result[batch][row][col];
+        if (clamp_overflow) {
+          value = mfma_clamp_overflow<M, K, Batch, PerWord>(value, as_float(c[out.reg][out.lane]),
+                                                            left, right, row, col, batch, controls);
+        }
+        words[out.reg][out.lane] = as_bits(value);
       }
     }
   }

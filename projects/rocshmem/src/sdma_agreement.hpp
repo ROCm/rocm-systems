@@ -39,6 +39,7 @@ enum SdmaInitStatus : int {
   kSdmaReady = 0,          // every connect() succeeded
   kSdmaDisabledByEnv = 1,  // ROCSHMEM_SDMA_ENABLED=0 on this rank, nothing was wired
   kSdmaConnectFailed = 2,  // a connect() failed on this rank
+  kSdmaBadChannels = 3,    // ROCSHMEM_SDMA_NUM_CHANNELS out of range on this rank, nothing wired
 };
 
 enum class SdmaDecision {
@@ -46,19 +47,28 @@ enum class SdmaDecision {
   kAllDisabled,            // every rank disabled SDMA by env: nothing to undo
   kFallbackConnectFailed,  // a connect failed somewhere: every rank drops SDMA
   kFallbackEnvMismatch,    // only some ranks disabled SDMA by env: every rank drops SDMA
+  kAbortBadChannels,       // a rank has an invalid channel count: every rank aborts
 };
+
+// This rank's status before any queue is wired. Queues are wired only on kSdmaReady. A bad channel
+// count is reported even with SDMA disabled, so the group still aborts on it.
+inline int initialSdmaStatus(bool enabled, int channels) {
+  if (channels < 1 || channels > 8) return kSdmaBadChannels;
+  return enabled ? kSdmaReady : kSdmaDisabledByEnv;
+}
 
 struct SdmaAgreement {
   SdmaDecision decision{SdmaDecision::kCommit};
-  // Comma-separated local ranks that caused a fallback, for the log line every rank prints.
+  // Comma-separated local ranks that caused the fallback or abort, for the line every rank logs.
   std::string ranks;
 };
 
 // Decide from the statuses of all n node-local ranks, indexed by local rank. Any value other than
-// kSdmaReady or kSdmaDisabledByEnv counts as a failed connect, so a garbled exchange falls back
-// instead of committing.
+// the known statuses counts as a failed connect, so a garbled exchange falls back instead of
+// committing.
 inline SdmaAgreement agreeSdmaStatus(const int* statuses, int n) {
   SdmaAgreement out;
+  std::string badChannels;
   std::string failed;
   std::string disabled;
   int numReady = 0;
@@ -71,11 +81,16 @@ inline SdmaAgreement agreeSdmaStatus(const int* statuses, int n) {
       ++numReady;
     } else if (statuses[i] == kSdmaDisabledByEnv) {
       append(disabled, i);
+    } else if (statuses[i] == kSdmaBadChannels) {
+      append(badChannels, i);
     } else {
       append(failed, i);
     }
   }
-  if (!failed.empty()) {
+  if (!badChannels.empty()) {
+    out.decision = SdmaDecision::kAbortBadChannels;
+    out.ranks = badChannels;
+  } else if (!failed.empty()) {
     out.decision = SdmaDecision::kFallbackConnectFailed;
     out.ranks = failed;
   } else if (numReady == n) {

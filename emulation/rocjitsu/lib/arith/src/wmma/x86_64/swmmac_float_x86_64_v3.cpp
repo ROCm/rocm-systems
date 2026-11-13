@@ -6,7 +6,7 @@
 // each DOT4 stage, and packs results into the caller's destination layout.
 
 #include "common/x86_64/half_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/swmmac_float_impl.h"
 
 #include <immintrin.h>
