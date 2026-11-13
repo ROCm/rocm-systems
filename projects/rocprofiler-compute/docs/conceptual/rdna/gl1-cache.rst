@@ -10,7 +10,7 @@ GL1
 ===
 
 **GL1 Cache** is the shared L1 inside each shader array, supplied by GL0 (TCP) and forwarding traffic toward GL2.
-On gfx115x it is a read cache with one GL1 per shader array. On gfx1201 it is the write-combining cache, and the tool counts one GL1 instance per shader array. GL1 has no hit or miss counter on gfx1201, so the System Speed-of-Light ``GL1 Cache Hit Rate`` row shows N/A.
+On gfx115x it is a read cache with one GL1 per shader array. On gfx1201 it is a write-combining buffer rather than a cache, and the tool counts one GL1 instance per shader array. GL1 has no hit or miss counter on gfx1201, so the System Speed-of-Light ``GL1 Cache Hit Rate`` row shows N/A, and the roofline has no ``L1`` roof.
 For GL0 panels and Memory Chart rows through the GL0-GL1 boundary, see
 :doc:`gl0-cache`. For downstream GL2 panels after GL1, see :doc:`gl2-cache`; for the Efficiency Arbiter beyond GL2, see :doc:`gcea`.
 

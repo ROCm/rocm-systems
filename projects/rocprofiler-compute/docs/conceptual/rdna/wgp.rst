@@ -40,10 +40,11 @@ the same 16x16x16 shape as FP8, so it counts 8192 FLOPs per instruction.
   benchmark streams a dataset far larger than the Infinity Cache.
 * ``MALL`` is the measured bandwidth of the Infinity Cache, from a buffer of
   half its reported size that misses in L2 and fits in the Infinity Cache.
-* ``L2``, ``L1``, and ``L0`` are measured with working sets that stay resident
-  in GL2 and GL0. GL1 has no tags, so the ``L1`` roof is the GL2-hit return
-  path for a set that misses GL0. gfx1201 has no ``AI L1`` or ``AI L2`` point,
-  so the ``L1`` and ``L2`` roofs have no kernel point.
+* ``L2`` and ``L0`` are measured with working sets that stay resident in GL2
+  and GL0. gfx1201 has no ``AI L2`` point, so the ``L2`` roof has no kernel
+  point.
+* There is no ``L1`` roof. GL1 is a write-combining buffer, not a cache, so
+  ``L1Bw`` is 0 in ``roofline.csv``.
 
 The ``AI VRAM`` point counts 32-byte GL2C/EA requests destined for memory.
 Infinity Cache can serve those requests, and no counter separates its hits from
@@ -67,8 +68,7 @@ the FP16 WMMA peak.
 
 GL0 bytes count 128 bytes per ``TCP_REQ`` cache-line request. This is an upper
 bound, because a request does not always use the full line, so ``AI L0`` reads
-low. The ``L1`` roof is measured on the same GL2-hit return path as the ``L2``
-roof, so the two can differ by a few percent.
+low.
 
 The WMMA counter needs a ROCprofiler-SDK and aqlprofile installation that
 supports SQ event 233. Check profiling diagnostics before relying on WMMA
