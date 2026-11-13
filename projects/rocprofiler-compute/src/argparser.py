@@ -242,7 +242,7 @@ Examples:
     )
     profile_group.add_argument(
         "--attach-pid",
-        type=str,
+        type=int,
         dest="attach_pid",
         metavar="<pid>",
         default=None,

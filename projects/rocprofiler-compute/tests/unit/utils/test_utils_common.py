@@ -1033,6 +1033,18 @@ def test_resolve_rocm_library_path(tmp_path):
     assert resolve_rocm_library_path(str(missing)) == str(missing)
 
 
+def test_create_temp_rocprofiler_metrics_path_in_parent_dir(tmp_path):
+    metrics_path = Path(
+        utils_common.create_temp_rocprofiler_metrics_path(
+            {"rocprofiler-sdk": {"counters": []}}, tmp_path
+        )
+    )
+
+    assert metrics_path.parent == tmp_path
+    assert (metrics_path / "config.yaml").is_file()
+    assert (metrics_path / "counter_defs.yaml").is_file()
+
+
 # =============================================================================
 # BUILD METRIC DETAILS TESTS
 # =============================================================================
