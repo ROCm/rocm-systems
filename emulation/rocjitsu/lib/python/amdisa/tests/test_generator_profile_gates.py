@@ -9632,8 +9632,8 @@ def test_gfx1250_async_lds_generators_apply_signed_ioffset():
             [], [], global_store
         )
         assert (
-            'const auto source = '
-            f'async_lds_lane_source(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
+            'uint32_t lds_addr = '
+            f'async_lds_lane_address(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
             in global_store_body
         )
 
@@ -9655,71 +9655,6 @@ def test_gfx1250_async_lds_generators_apply_signed_ioffset():
         '    int64_t offset = static_cast<int64_t>('
         'static_cast<int32_t>(inst_.ioffset << 8) >> 8);' in rdna4_addtid_lines
     )
-
-
-@pytest.mark.parametrize(
-    ('name', 'elem_size', 'num_elems'),
-    [
-        ('GLOBAL_STORE_ASYNC_FROM_LDS_B8', 1, 1),
-        ('GLOBAL_STORE_ASYNC_FROM_LDS_B32', 4, 1),
-        ('GLOBAL_STORE_ASYNC_FROM_LDS_B64', 4, 2),
-        ('GLOBAL_STORE_ASYNC_FROM_LDS_B128', 4, 4),
-    ],
-)
-def test_gfx1250_async_store_records_lds_source_addresses(
-    name: str, elem_size: int, num_elems: int
-):
-    codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
-    store = SimpleNamespace(name=name, elem_size=elem_size, num_elems=num_elems)
-
-    body = codegen._gen_global_store_async_from_lds([], [], store)
-
-    assert 'd->lds_src = true;' in body
-    assert 'd->lds_per_lane_addr = true;' in body
-    # Inactive lanes keep the invalid address and read no bytes, so consumers
-    # never see a stale or zero-initialized LDS source.
-    fill = 'd->per_lane_lds_addr.fill(amdgpu::kInvalidLdsAddress);'
-    assert fill in body
-    assert 'd->per_lane_lds_src_bytes.fill(0);' in body
-    assert body.index(fill) < body.index('for (uint32_t lane = 0;')
-    # Each lane reads the in-range bytes of its source, and the rest of its
-    # payload stays zero: a B128 lane at offset 250 of a 256-byte allocation
-    # reads six bytes. The recorded address and byte count are the ones the read
-    # uses, after IOFFSET and the allocation range check.
-    source = (
-        'const auto source = '
-        f'async_lds_lane_source(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
-    )
-    record_address = 'd->per_lane_lds_addr[lane] = source.address;'
-    record_bytes = 'd->per_lane_lds_src_bytes[lane] = source.bytes;'
-    read = (
-        'lds.read(source.address, '
-        f'&d->store_data[lane * {elem_size * num_elems}], source.bytes);'
-    )
-    for line in (source, record_address, record_bytes, read):
-        assert line in body, line
-    assert body.index(source) < body.index(record_address) < body.index(read)
-    assert 'async_lds_lane_address' not in body
-    assert 'd->lds_dst = true;' not in body
-
-
-@pytest.mark.parametrize(
-    'name',
-    [
-        'GLOBAL_LOAD_ASYNC_TO_LDS_B32',
-        'CLUSTER_LOAD_ASYNC_TO_LDS_B32',
-    ],
-)
-def test_gfx1250_async_loads_do_not_mark_an_lds_source(name: str):
-    codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
-    load = SimpleNamespace(name=name, elem_size=4, num_elems=1)
-
-    body = codegen._gen_global_load_async_to_lds([], [], load)
-
-    assert 'd->lds_dst = true;' in body
-    assert 'lds_src' not in body
 
 
 def test_gfx1250_buffer_cmpswap_payload_width_is_independent_of_element_width():

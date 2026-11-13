@@ -220,39 +220,6 @@ races. Some examples:
   other memory instructions are, so an instruction that moves no data still
   occupies its `tensorcnt` slot, and a transfer that waits for memory is pending
   from the moment it issues.
-- **Async copy races** (gfx1250): `global_load_async_to_lds_*` and
-  `cluster_load_async_to_lds_*` writes and `global_store_async_from_lds_*` reads
-  are LDS events on `asynccnt`, one per instruction, with each lane's bytes at
-  its LDS address. Any wave, including the issuing one, that reads a load's
-  destination or overwrites a store's source before `s_wait_asynccnt` is
-  reported; other waves also need an `s_barrier`. Synchronizing other waves
-  through an LDS barrier cell instead is not modeled (see False positives with
-  LDS barrier synchronization). Async copies may access LDS out of order with
-  each other (CDNA5 ISA 10.8), so a store is also reported when it reads bytes
-  of the same wave's pending async load, and an async load when it overwrites
-  the source of the same wave's pending async store. The ISA does not
-  establish the LDS access order of an async copy relative to DS instructions
-  or tensor DMA, so as a conservative rule the detector also
-  reports a store that reads bytes of the same wave's pending DS write or tensor
-  load, until a DS or tensor wait completes it. Compilers can emit such a pair
-  without a DS wait (on gfx1250, Clang places no `s_wait_dscnt` between the
-  `ds_store_b32` of a shared-memory assignment and a following
-  `global_store_async_from_lds_b32` builtin that reads the same bytes), and the
-  detector reports it. Async loads complete in issue order with other async
-  loads and async stores with other async stores, but loads and stores
-  complete out of order with each other, so a partial `s_wait_asynccnt`
-  retires the oldest of each kind only when the count guarantees it: after a
-  load and then a store, `s_wait_asynccnt 1` retires neither. `ds_atomic_async_barrier_arrive_b64` also completes on `asynccnt`, in
-  order with async loads (10.8), so partial waits count it with the loads. The
-  ISA specifies out-of-range LDS behavior for async loads only: their LDS write
-  is dropped (CDNA5 ISA 3.3.3). As modeling choices, a load lane with any byte
-  past the wave's LDS allocation writes nothing and is not tracked, while a
-  store lane reads, and is tracked for, the bytes of its source inside the
-  allocation, and zeros past it, so every byte a store may read is tracked. A
-  copy with no active lanes touches no LDS but issues and counts on
-  `asynccnt`; the hardware may skip it only when no load, store, async or
-  tensor operation is pending (3.2.2.1), and counting it then retires no later
-  copy early. Either way, the instruction occupies its `asynccnt` slot.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
@@ -269,9 +236,7 @@ following lifecycle:
    wait for `vmcnt` before reading the destination bytes. Tensor DMA transfers
    complete in issue order, but as a conservative rule an active tensor load or
    store still conflicts with a later, overlapping transfer in the other
-   direction from the same wave (see Tensor DMA races above). An active async
-   store's LDS source likewise conflicts with any later, overlapping LDS write
-   from the same wave (see Async copy races above).
+   direction from the same wave (see Tensor DMA races above).
 1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
    event. This means the event is no longer in flight from the perspective of
    the wave that issued the operation, but is still in flight from the
@@ -507,7 +472,7 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
 - `execution_plugin_race_test.cpp` — drives the plugin's hooks, including
-  tensor DMA transfers and async copies on gfx1250.
+  tensor DMA transfers on gfx1250.
 - `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
@@ -563,28 +528,22 @@ this source tree. The original
 - **Tensor DMA scope**: only the LDS side of a transfer is tracked. Its global
   memory accesses are not checked.
 
-- **Async copy scope**: only the LDS side of an async copy is tracked. Its
-  global memory accesses are not checked.
+- **Async stores from LDS** (gfx1250): `global_store_async_from_lds_*` is
+  tracked only as a global store; its LDS read is neither checked nor
+  registered. An async store reading a pending tensor load's destination, and
+  a tensor load, DS write or direct-to-LDS write over a pending async store's
+  source, are therefore not reported in either issue order, even with no
+  `s_wait_asynccnt` between them.
 
-- **Async copy LDS alignment**: async copies use their LDS addresses as
-  computed. DS instructions have their LDS address aligned in every alignment
-  mode except unaligned (CDNA5 ISA 3.3.4.1), but the ISA does not say whether
-  async copies follow that rule, so neither the emulator nor the detector
-  applies it to them.
-
-- **False positives with LDS barrier synchronization**: a producer can hand
-  LDS data to another wave through an LDS barrier cell instead of a wait and
-  `s_barrier`. A tensor load can request an arrival on a barrier cell when it
-  completes, and `ds_atomic_async_barrier_arrive_b64` advances a barrier only
-  after the producer's earlier async loads complete (CDNA5 ISA 11.2.2). A
-  consumer wave can then wait for the barrier's phase and read the tile, or
-  copy it out with an async store, without the producer waiting on
-  `s_wait_tensorcnt` or `s_wait_asynccnt` or the workgroup passing `s_barrier`.
+- **False positives with LDS barrier synchronization**: a tensor load can
+  request an arrival on an LDS barrier cell when it completes, and a consumer
+  wave can wait for that barrier's phase and then read the tile, without the
+  producer waiting on `s_wait_tensorcnt` or the workgroup passing `s_barrier`.
   The detector does not observe this synchronization: it retires a transfer
   only through wait-counter instructions and `s_barrier`. A consumer that is
   correctly synchronized through the barrier cell is therefore reported as
-  racing with the tensor or async load. These reports are false positives, not
-  missing coverage.
+  racing with the tensor load. These reports are false positives, not missing
+  coverage.
 
 - **NULL tensor descriptors**: like the emulator, the detector counts a NULL
   descriptor (`count = 0`) on `tensorcnt`. That is an emulator assumption:
