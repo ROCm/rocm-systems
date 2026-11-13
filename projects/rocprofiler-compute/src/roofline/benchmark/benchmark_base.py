@@ -100,7 +100,7 @@ class Bench_base(ABC):
             """
 
         # Kernel source must be set in child classes
-        self.hbm_bw_src: str
+        self.device_memory_bw_src: str
         self.mall_bw_src: str
         self.l2_bw_src: str
         self.l1_bw_src: str
@@ -400,7 +400,7 @@ class Bench_base(ABC):
     # Device-memory bandwidth benchmark. The defaults are the HBM_bw kernel and
     # HBM label that MI and gfx1250 use. gfx1201 passes the DRAM_bw kernel and
     # the VRAM label.
-    def hbm_bw_benchmark(
+    def device_memory_bw_benchmark(
         self, device: int, kernel_name: str = "HBM_bw", label: str = "HBM"
     ) -> float:
         num_experiments = DEFAULT_NUM_EXPERIMENTS
@@ -408,7 +408,7 @@ class Bench_base(ABC):
 
         cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-        prog = self.Program(self.hbm_bw_src)
+        prog = self.Program(self.device_memory_bw_src)
         func = prog.get_kernel(kernel_name)
 
         workgroup_size = DEFAULT_WORKGROUP_SIZE
