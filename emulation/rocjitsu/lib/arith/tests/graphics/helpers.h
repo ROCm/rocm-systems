@@ -16,7 +16,7 @@
 #include "graphics/interp16_reference.h"
 #include "graphics/interp32_reference.h"
 #include "graphics/mullit_reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <bit>
 #include <cmath>
@@ -133,13 +133,11 @@ void check_graphics(Call call, int op, GraphicsFamily family, bool gfx12 = true)
           int error = invoke(cpu | semantics | guest, exec_mask, mode, actual.v + d, actual.v,
                              actual.v + 1, actual.v + 2, &status);
           int expected_error = RJ_ARITH_SUCCESS;
-          if ((lighting || interpolation) &&
-              semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+          if (lighting && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
             expected_error = RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
           }
-          if ((lighting || interpolation) && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
-            expected_error = lighting ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
-                                      : RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+          if (lighting && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+            expected_error = RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
           }
           ASSERT_EQ(error, expected_error);
           EXPECT_EQ(status, 0x80000000U);

@@ -53,6 +53,9 @@ struct SystemLink {
   SystemLinkClass link_class = SystemLinkClass::ScaleUp;
 };
 
+/// Descriptive GPU membership from a manifest. Runtime cache-maintenance
+/// domains are built per SoC; this grouping grants neither cache coherence
+/// nor peer-memory access.
 struct SystemCoherenceDomain {
   std::string id;
   std::vector<std::string> gpus;

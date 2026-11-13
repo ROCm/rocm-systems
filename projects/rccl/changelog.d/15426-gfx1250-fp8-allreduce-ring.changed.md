@@ -1,0 +1,1 @@
+* On gfx1250, a single-node FP8 e4m3 or e5m2 `ncclAllReduce` with more than 8 ranks no longer gets the 1024x ring penalty at or above the DDA LL128 ceiling, so the tuner can select Ring. The penalty stays when that ceiling is zero and for every other FP8 ring above 8 ranks.

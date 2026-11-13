@@ -17,6 +17,7 @@
 // nontemporal system-scope b128 peer stores (the store path LL/host use over xGMI).
 #include "nccl_device/rccl_ptr.h"
 #include "rccl_vector_types.h"
+#include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
 #endif
 
 // LL (low-latency, packed data+flag) small-message Broadcast path. Broadcast is
@@ -219,6 +220,18 @@ testResult_t BroadcastInitData(struct threadArgs* args, ncclDataType_t type, ncc
 testResult_t  BroadcastGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclDataType_t type, int* algo, int* proto, int* nchannels) {
   if(rcclTestsGetAlgoInfo == NULL) return testInternalError;
   NCCLCHECK(rcclTestsGetAlgoInfo(comm, ncclFuncBroadcast , count, type , 0, 0, 1, algo, proto, nchannels));
+  return testSuccess;
+}
+
+extern int nGpus;
+extern int agg_iters;
+
+testResult_t  BroadcastGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
+    const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetCollImplInfo == NULL) return testInternalError;
+  // Grouped broadcasts (AllGatherV mode, -g > 1, -m > 1) always enqueue; let the caller fall back to the enqueue reporter.
+  if (broadcast_grouped || nGpus > 1 || agg_iters > 1) return testNotImplemented;
+  NCCLCHECK(rcclTestsGetCollImplInfo(comm, ncclFuncBroadcast, count, type, op, sendbuff, recvbuff, graphCapturing, algo, proto, nchannels));
   return testSuccess;
 }
 
@@ -584,7 +597,9 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
 
   const int ginContext = 0;
   const unsigned int signalIndex = 0;
-  ncclGin gin { devComm, ginContext };
+  // Only block 0 communicates (commCta below), one thread per peer QP
+  // (single-owner), so THREAD mode drops the SQ lock.
+  ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
 
   // All GIN traffic on this path is confined to block 0, and so are the signal
   // read and wait that bracket it. `bar` synchronizes same-index blocks across
@@ -604,11 +619,16 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
   // receiver-side waitSignal is what makes the payload visible on non-roots.
   const uint64_t signalValue = commCta ? gin.readSignal(signalIndex) : 0;
 
-  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
   // Entry barrier: every rank's recv buffer quiescent before root starts writing.
-  // Every CTA takes part -- this is a cross-rank barrier keyed by blockIdx.x, so
-  // dropping a block here would hang the matching block on every other rank.
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  // Block 0 only: the remote puts and their receiver-side wait are block 0's, so
+  // block 0 carries the one cross-rank edge the puts need; CTAs 1..N only do the
+  // root's LOCAL self-copy, which needs no cross-rank order. Confining it to block
+  // 0 keeps the world barrier single-poster on qps[peer] for THREAD mode (the
+  // barrier signals/flushes those QPs too). Symmetric across ranks, so no hang.
+  if (commCta) {
+    ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, 0 };
+    bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  }
 
   if (devComm.rank == root) {
     // Out-of-place self copy (no-op when in-place: local src == local dst).
@@ -684,7 +704,9 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
   const int tid = threadIdx.x + blockIdx.x * blockDim.x;
   const int nthreads = blockDim.x * gridDim.x;
 
-  ncclGin gin { devComm, /*context=*/0 };
+  // Only block 0 communicates (commCta below), one thread per peer QP in both
+  // phases (single-owner), so THREAD mode drops the SQ lock.
+  ncclGin gin { devComm, /*context=*/0, ginResourceSharingModeDev() };
   const unsigned int sigScatter = 0;
   const unsigned int sigGather = 1;
 
@@ -698,9 +720,14 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
   const uint64_t baseGather = commCta ? gin.readSignal(sigGather) : 0;
 
   // Entry barrier: every rank's recvbuff quiescent before the root scatters.
-  // All CTAs participate; it is keyed by blockIdx.x across ranks.
-  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  // Block 0 only: all GIN (scatter/allgather puts, their waits) is block 0's, so
+  // block 0 carries the cross-rank edge; CTAs 1..N only do the root's LOCAL slice
+  // self-copy, which needs no cross-rank order. Confining it keeps the world
+  // barrier single-poster on qps[peer] for THREAD mode. Symmetric, so no hang.
+  if (commCta) {
+    ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, 0 };
+    bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  }
 
   // --- Phase 1: scatter chunk r -> rank r (root only) ---
   if (rank == root) {
@@ -1110,6 +1137,50 @@ static void bcastReportTier(BcastLaunchTier tier) {
 }
 #endif
 
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+// Single source of truth for the -D 3 broadcast tier thresholds. BroadcastRunColl
+// (dispatch), BroadcastDeviceTime and BroadcastGetDeviceImplInfo (tier report) all
+// call these, so the reported tier cannot drift from the launched kernel. Each is
+// parsed once per process. Mirrors AllGatherResolveSdmaThreshold().
+//
+// LSA<->GIN cutover. Default = 256 KiB (full message): on 8x MI355X
+// (NCCL_GIN_TYPE=6) LSA wins <=256K and GIN wins >=512K (measured 2026-07-24).
+// Override with NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST, or the shared
+// NCCL_GIN_ANVIL_SDMA_THRESHOLD.
+static inline size_t BroadcastResolveSdmaThreshold() {
+  static const size_t v = testResolveSdmaThreshold("NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST", gin_sdma::kBroadcastSdmaThresholdDefault);
+  return v;
+}
+
+// Large-message scatter + in-place allgather (SAG) tier. Distributes egress across
+// all ranks to beat the flat fan-out's root-egress ceiling (busBw = B_root_egress / N).
+// Gated via NCCL_GIN_ANVIL_BCAST_SCATTER_AG_MIN_BYTES (bytes, optional K/M/G suffix;
+// default 2 MiB; 0 = disable, keeping the proven flat path). Crossover measured on
+// 8x MI355X (-V 32, in-place, 2026-07-27): SAG is a slight win at 2M (35.9 vs flat
+// 33.4), decisive >=4M (4M 62 vs 42, 128M 224 vs 60), and loses <2M (1M 19.4 vs 23.7).
+static inline size_t BroadcastResolveSagMin() {
+  static const size_t v = []() {
+    size_t e = testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_SCATTER_AG_MIN_BYTES");
+    return (e == TEST_SDMA_THRESHOLD_UNSET) ? gin_sdma::kBroadcastScatterAgMinDefault : e;
+  }();
+  return v;
+}
+
+// Pipelined-ring large tier: distributes forwarding across all ranks with no serial
+// root-scatter phase, to beat the SAG plateau at very large messages. Enabled by
+// default from 32 MiB (the measured SAG crossover) via
+// NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES, where 0 disables the tier and falls back to
+// SAG; the pipeline depth is NCCL_GIN_ANVIL_BCAST_RING_CHUNKS (else size-derived).
+// Selection also requires the LSA team to cover the world -- see bcastUseRing.
+static inline size_t BroadcastResolveRingMin() {
+  static const size_t v = []() {
+    size_t e = testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES");
+    return (e == TEST_SDMA_THRESHOLD_UNSET) ? gin_sdma::kBroadcastRingMinDefault : e;
+  }();
+  return v;
+}
+#endif
+
 testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
   if (broadcast_grouped) {
     // nranks broadcasts with distinct roots inside one group — fuses into AllGatherV ring kernel
@@ -1146,36 +1217,10 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
     switch(deviceImpl) {
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
       case 3: {
-        // Broadcast-specific LSA<->GIN threshold. Default = 256 KiB (full
-        // message): on 8x MI355X (NCCL_GIN_TYPE=6) LSA wins <=256K and GIN wins
-        // >=512K (measured 2026-07-24). Override with
-        // NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST, or the shared
-        // NCCL_GIN_ANVIL_SDMA_THRESHOLD.
-        static const size_t bcastThr = testResolveSdmaThreshold("NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST", gin_sdma::kBroadcastSdmaThresholdDefault);
-
-        // Large-message tier: scatter + in-place allgather. Distributes
-        // egress across all ranks to beat the flat fan-out's root-egress ceiling
-        // (busBw = B_root_egress / N). Gated to large messages via
-        // NCCL_GIN_ANVIL_BCAST_SCATTER_AG_MIN_BYTES (bytes, optional K/M/G
-        // suffix; default 2 MiB; 0 = disable, keeping the proven flat path).
-        // Crossover measured on 8x MI355X (-V 32, in-place, 2026-07-27): SAG is a
-        // slight win at 2M (35.9 vs flat 33.4), decisive >=4M (4M 62 vs 42, 128M
-        // 224 vs 60), and loses <2M (1M 19.4 vs 23.7). So default 2 MiB.
-        static const size_t bcastSagMin = []() {
-          size_t v = testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_SCATTER_AG_MIN_BYTES");
-          return (v == TEST_SDMA_THRESHOLD_UNSET) ? gin_sdma::kBroadcastScatterAgMinDefault : v;
-        }();
-        // Pipelined-ring large tier: distributes forwarding across
-        // all ranks with no serial root-scatter phase, to beat the SAG plateau at
-        // very large messages. Enabled by default from 32 MiB (the measured SAG
-        // crossover) via NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES, where 0 disables the
-        // tier and falls back to SAG; the pipeline depth is
-        // NCCL_GIN_ANVIL_BCAST_RING_CHUNKS (else size-derived). Selection also
-        // requires the LSA team to cover the world -- see bcastUseRing.
-        static const size_t bcastRingMin = []() {
-          size_t v = testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES");
-          return (v == TEST_SDMA_THRESHOLD_UNSET) ? gin_sdma::kBroadcastRingMinDefault : v;
-        }();
+        // Tier thresholds are shared with the tier report; see BroadcastResolve*().
+        const size_t bcastThr = BroadcastResolveSdmaThreshold();
+        const size_t bcastSagMin = BroadcastResolveSagMin();
+        const size_t bcastRingMin = BroadcastResolveRingMin();
         static const size_t bcastRingChunksEnv =
             testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_RING_CHUNKS");
         // In the -D 3 path `comm` is the ncclDevComm handle (testLaunchDeviceKernel*
@@ -1310,10 +1355,7 @@ testResult_t BroadcastDeviceTime(struct threadArgs* args, ncclDataType_t type, n
     else skip = (skip < 2) ? skip : 2;
   }
 
-  static const size_t bcastRingMin = []() {
-    size_t v = testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES");
-    return (v == TEST_SDMA_THRESHOLD_UNSET) ? gin_sdma::kBroadcastRingMinDefault : v;
-  }();
+  const size_t bcastRingMin = BroadcastResolveRingMin();
   const int nRanks = (int)(args->devComms[0].nRanks);
   const int lsaSize = (int)(args->devComms[0].lsaSize);
   // Only device-time the ring when it is the active tier and its tables are built
@@ -1333,7 +1375,7 @@ testResult_t BroadcastDeviceTime(struct threadArgs* args, ncclDataType_t type, n
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
-        ncclDevComm* devComm = args->devComms + i;
+        ncclDevComm* devComm = testDevComms(args, i);
         ncclWindow_t sendwin = (ncclWindow_t)(in_place ? args->recvRegHandles[i] : args->sendRegHandles[i]);
         ncclWindow_t recvwin = (ncclWindow_t)args->recvRegHandles[i];
         kernel<<<gridCtas, 512, 0, args->streams[i]>>>(sendwin, 0, recvwin, 0, count, root, *devComm,
@@ -1361,6 +1403,45 @@ testResult_t BroadcastDeviceTime(struct threadArgs* args, ncclDataType_t type, n
 }
 #endif
 
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+// Tier report for -D 3. Uses the SAME threshold resolvers as BroadcastRunColl
+// (BroadcastResolve*) and mirrors its precedence:
+//   large tier first -- RING (direct LSA stores) / SAG (gin.put scatter+allgather),
+//   else the hybrid kernel's own LL / LSA-direct / flat-GIN (DIRECT) choice.
+// algo names the movement pattern (T-RING / T-SAG / T-DIRECT; "T-" marks a
+// rccl-Test device kernel), proto the transport (LSA / GIN / LL).
+testResult_t BroadcastGetDeviceImplInfo(int /*deviceImpl*/, size_t count, ncclDataType_t type,
+    int nRanks, int lsaSize, char* algoOut, char* protoOut) {
+  const size_t bcastThr = BroadcastResolveSdmaThreshold();
+  const size_t bcastSagMin = BroadcastResolveSagMin();
+  const size_t bcastRingMin = BroadcastResolveRingMin();
+  const size_t msgBytes = count * wordSize(type);
+  const gin_sdma::BcastLargeTier largeTier =
+      gin_sdma::bcastLargeTier(msgBytes, count, nRanks, lsaSize, bcastRingMin, bcastSagMin);
+  if (largeTier == gin_sdma::BcastLargeTier::Ring) {
+    snprintf(algoOut, 16, "%s", "T-RING");
+    snprintf(protoOut, 16, "%s", "LSA");
+  } else if (largeTier == gin_sdma::BcastLargeTier::ScatterAG) {
+    snprintf(algoOut, 16, "%s", "T-SAG");
+    snprintf(protoOut, 16, "%s", "GIN");
+  } else {
+    snprintf(algoOut, 16, "%s", "T-DIRECT");
+    switch (gin_sdma::bcastKernelTier(msgBytes, bcastThr, g_bcastLLHandle.nSlots, g_bcastLLMaxBytes)) {
+      case gin_sdma::BcastTier::LL:        snprintf(protoOut, 16, "%s", "LL");  break;
+      case gin_sdma::BcastTier::LSADirect: snprintf(protoOut, 16, "%s", "LSA"); break;
+      case gin_sdma::BcastTier::Flat:      snprintf(protoOut, 16, "%s", "GIN"); break;
+    }
+  }
+  return testSuccess;
+}
+#else
+testResult_t BroadcastGetDeviceImplInfo(int, size_t, ncclDataType_t, int, int, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "%s", "T-DIRECT");
+  snprintf(protoOut, 16, "%s", "GIN");
+  return testSuccess;
+}
+#endif
+
 struct testColl broadcastTest = {
   "Broadcast",
   BroadcastGetCollByteCount,
@@ -1369,8 +1450,9 @@ struct testColl broadcastTest = {
   BroadcastRunColl,
   BroadcastGetAlgoProtoChannels,
   NULL,
-  NULL,
-  BroadcastDeviceTime
+  BroadcastGetCollImplInfo,
+  BroadcastDeviceTime,
+  BroadcastGetDeviceImplInfo
 };
 
 void BroadcastGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
@@ -1380,6 +1462,12 @@ void BroadcastGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, in
 
 testResult_t BroadcastRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
   args->collTest = &broadcastTest;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    TESTCHECK(uploadGinResourceSharingMode());
+  }
+#endif
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;

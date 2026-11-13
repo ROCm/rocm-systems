@@ -4,12 +4,14 @@
 #include "multiplexer_fuzz_core.h"
 
 #include "code_object_fuzz_core.h"
+#include "concurrent_dispatch_fuzz_core.h"
 #include "decode_fuzz_core.h"
 #include "execution_fuzz_core.h"
 
 #include "rocjitsu/isa/decoder.h"
 
 #include <array>
+#include <cassert>
 #include <cstdlib>
 #include <memory>
 #include <optional>
@@ -22,6 +24,7 @@ constexpr std::array kTargets = {
     TargetDescriptor{FuzzTarget::Decode, "decode"},
     TargetDescriptor{FuzzTarget::Execution, "execution"},
     TargetDescriptor{FuzzTarget::CodeObject, "code-object"},
+    TargetDescriptor{FuzzTarget::ConcurrentDispatch, "concurrent-dispatch"},
 };
 
 uint64_t run_decode(std::span<const uint8_t> payload) {
@@ -49,8 +52,17 @@ uint64_t run_execution(std::span<const uint8_t> payload) {
 }
 
 uint64_t run_code_object(std::span<const uint8_t> payload) {
-  const code_object_fuzz::RunStats stats = code_object_fuzz::run_input(payload);
+  static_assert(kMaxInputSize - 1 <= code_object_fuzz::kMaxInputSize);
+  const util::FailureOr<code_object_fuzz::RunStats> result = code_object_fuzz::run_input(payload);
+  assert(result.succeeded());
+  const code_object_fuzz::RunStats &stats = result.value();
   return stats.code_objects_valid + stats.executables_valid;
+}
+
+uint64_t run_concurrent_dispatch(std::span<const uint8_t> payload) {
+  if (payload.empty() || payload.size() > concurrent_dispatch_fuzz::kMaxInputSize)
+    return 0;
+  return concurrent_dispatch_fuzz::run_input(payload).instructions;
 }
 
 } // namespace
@@ -79,6 +91,8 @@ std::optional<DispatchResult> run_input(std::span<const uint8_t> input) {
     return DispatchResult{*target, run_execution(payload)};
   case FuzzTarget::CodeObject:
     return DispatchResult{*target, run_code_object(payload)};
+  case FuzzTarget::ConcurrentDispatch:
+    return DispatchResult{*target, run_concurrent_dispatch(payload)};
   }
   throw std::logic_error("multiplexer fuzz target registry is inconsistent");
 }
@@ -107,6 +121,12 @@ std::vector<std::vector<uint8_t>> seed_corpus() {
     code_object_seed.insert(code_object_seed.begin(), static_cast<uint8_t>(FuzzTarget::CodeObject));
     seeds.push_back(std::move(code_object_seed));
   }
+  std::vector<uint8_t> concurrent_seed =
+      concurrent_dispatch_fuzz::seed_corpus()[static_cast<std::size_t>(
+          execution_fuzz::FuzzTarget::Gfx950)];
+  concurrent_seed.insert(concurrent_seed.begin(),
+                         static_cast<uint8_t>(FuzzTarget::ConcurrentDispatch));
+  seeds.push_back(std::move(concurrent_seed));
   return seeds;
 }
 

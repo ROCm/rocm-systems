@@ -287,12 +287,14 @@ if(BUILD_TESTS)
     BroadcastTests.cpp
     CollImplInfoTests.cpp
     DeviceResourceRequirementTests.cpp
+    DiagnosticsTests.cpp
     DoneEventOrderingTests.cpp
     Fp8VerifiableTests.cpp
     GatherTests.cpp
     GraphCaptureStreamOrderingTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    RasDiagnosticsTests.cpp
     RasJsonTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp
@@ -303,6 +305,7 @@ if(BUILD_TESTS)
     PipeUtilsTests.cpp
     VersionGateTests.cpp
     SendRecvTests.cpp
+    SendRecvSingleRankTests.cpp
     StandaloneTests.cpp
     SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
@@ -313,6 +316,9 @@ if(BUILD_TESTS)
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
     ProfilerPluginCloseTests.cpp
+    InspectorRingDropTests.cpp
+    ProfilerApiEventRankTests.cpp
+    TunerPluginConstantsTests.cpp
     CpuAffinityTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
@@ -359,10 +365,12 @@ if(BUILD_TESTS)
     INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/net/example/nccl)
 
   # dlsym(dlopen(NULL), ...) only finds symbols present in the dynamic symbol table;
-  # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
+  # export only the plugin symbols the tests need (narrow, unlike a broad -rdynamic).
   target_link_options(rccl-UnitTests PRIVATE
     "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12"
-    "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13")
+    "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
+    "LINKER:--export-dynamic-symbol=ncclTunerPlugin_v6"
+    "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
 
   # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
   # sources above, overrides librccl.so's own in Debug and silences all library logging. Hidden
@@ -388,6 +396,14 @@ if(BUILD_TESTS)
     LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT tests)
 
+  # InspectorRingDropTests loads the in-tree Inspector plugin; it skips when there is none.
+  # Scoped to that file so the path does not rebuild the rest of rccl-UnitTests.
+  if(TARGET rccl-profiler-inspector)
+    add_dependencies(rccl-UnitTests rccl-profiler-inspector)
+    set_source_files_properties(InspectorRingDropTests.cpp PROPERTIES COMPILE_DEFINITIONS
+      "RCCL_INSPECTOR_PLUGIN_SO=\"$<TARGET_FILE:rccl-profiler-inspector>\"")
+  endif()
+
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
@@ -404,6 +420,7 @@ if(BUILD_TESTS)
       DdaCollCommonTests.cpp
       CheapPostSendFenceTests.cpp
       Gfx1250SendRecvLl128WindowTests.cpp
+      ProfilerOverheadTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/TestFp8Reduce.cpp
@@ -452,6 +469,10 @@ if(BUILD_TESTS)
     endif()
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
+
+    # ProfilerOverheadTests loads its in-binary profiler via NCCL_PROFILER_PLUGIN=STATIC_PLUGIN,
+    # i.e. dlsym(dlopen(NULL), ...), which only sees the dynamic symbol table.
+    target_link_options(rccl-UnitTestsFixtures PRIVATE "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
 
     # Unit tests pass generic hipMalloc pointers into load16global/store16global.
     # The gfx942 b128 global-aperture builtins fault on those pointers; use the
@@ -820,6 +841,7 @@ if(BUILD_TESTS)
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      P2pCeChannelCap_test.cpp
       P2pMaxNchannelsTests.cpp
       TopoNicFusionTests.cpp
       NetSocketTests.cpp
@@ -829,6 +851,7 @@ if(BUILD_TESTS)
       PatAlgorithmTests.cpp
       RcclWrapTests.cpp
       SymkBlockWidthTests.cpp
+      SocketCryptTests.cpp
       SocketPollTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp
@@ -1081,6 +1104,7 @@ if(BUILD_TESTS)
       transport/TransportMPIBase.cpp
       transport/P2pMPITests.cpp
       transport/NetMPITests.cpp
+      transport/NetLl128MPITests.cpp
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/GdrFlushTests.cpp
@@ -1103,6 +1127,8 @@ if(BUILD_TESTS)
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       PatForcedMPITests.cpp
+      BootstrapTlsMPITests.cpp
+      BootstrapStrayPeerMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
       MaxP2pPeersMPITests.cpp
       GdrFlushFlagProtoSwitchMPITests.cpp
@@ -1129,10 +1155,12 @@ if(BUILD_TESTS)
       DdaAllReduceMPITests.cpp
       DdaReduceScatterMPITests.cpp
       DdaReduceScatterLL128MPITests.cpp
+      DdaBroadcastMPITests.cpp
       DdaCollOpCountMPI_test.cpp
       DdaFabricSimpleMPITests.cpp
       DdaIpcIndexDataMPITests.cpp
       DdaFp8MPITests.cpp
+      DdaAlltoAllInPlaceMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 

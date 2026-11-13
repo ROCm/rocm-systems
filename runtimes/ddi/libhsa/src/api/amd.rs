@@ -363,7 +363,7 @@ pub unsafe extern "C" fn hsa_amd_spm_set_dest_buffer(
         let (report, result) = match device.gpu() {
             Err(error) => (
                 SpmDestinationReport {
-                    timeout: timeout_value,
+                    remaining_timeout_milliseconds: timeout_value,
                     ..Default::default()
                 },
                 Err(error),
@@ -387,8 +387,8 @@ pub unsafe extern "C" fn hsa_amd_spm_set_dest_buffer(
         // KFD returns these fields together with the ioctl result, including
         // partial progress when the native call fails.
         unsafe {
-            timeout.write(report.timeout);
-            bytes_copied.write(report.bytes_copied);
+            timeout.write(report.remaining_timeout_milliseconds);
+            bytes_copied.write(report.previous_destination_bytes_copied);
             data_loss.write(report.data_loss);
         }
         result.map_or_else(map_error, |()| SUCCESS)

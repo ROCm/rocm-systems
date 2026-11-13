@@ -66,6 +66,11 @@ extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_reduceScatte
 extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_reduceScatterDdaFabricLLBlocks;
 extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_reduceScatterDdaFabricLL128Blocks;
 
+extern std::function<bool(ncclComm*, size_t, ncclDataType_t)> g_broadcastDdaFabricLLEligible;
+extern std::function<bool(ncclComm*, size_t, ncclDataType_t)> g_broadcastDdaFabricLL128Eligible;
+extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_broadcastDdaFabricLLBlocks;
+extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_broadcastDdaFabricLL128Blocks;
+
 // The launchers. Fail loud until a test installs them.
 using DdaLaunchHook = std::function<ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclComm*, hipStream_t)>;
 using DdaReduceLaunchHook =
@@ -81,5 +86,8 @@ extern DdaCappedReduceLaunchHook g_allReduceDdaFabric, g_allReduceDdaFabricLL;
 extern DdaLL128ReduceLaunchHook g_allReduceDdaFabricLL128;
 extern DdaReduceLaunchHook g_reduceScatterDdaIpc, g_reduceScatterDdaFabric, g_reduceScatterDdaFabricLL,
     g_reduceScatterDdaFabricLL128;
+using DdaRootLaunchHook =
+    std::function<ncclResult_t(const void*, void*, size_t, ncclDataType_t, int, ncclComm*, hipStream_t)>;
+extern DdaRootLaunchHook g_broadcastDdaFabricLL, g_broadcastDdaFabricLL128;
 
 #endif  // RCCL_TEST_HOST_DDA_FAKES_H_

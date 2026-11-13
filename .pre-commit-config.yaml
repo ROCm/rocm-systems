@@ -1,3 +1,4 @@
+# Touched so rocjitsu-formatting creates the required "pre-commit" check-run for therock-pr-bot.
 exclude: |
   (?x)
     third_party/
@@ -10,6 +11,7 @@ exclude: |
     # these projects have their own pre-commit-config.yaml
     | projects/amdsmi/
     | shared/cuid/
+    | projects/rccl/
     | projects/rdc/
     | projects/rocm-smi-lib/
     | projects/rocprofiler-compute/

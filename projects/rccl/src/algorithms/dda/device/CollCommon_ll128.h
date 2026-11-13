@@ -507,4 +507,14 @@ constexpr int ddaLL128SliceBytes(size_t bytes, size_t s) {
   return rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
 }
 
+// Payload a slot of slotWords wire words carries, in whole slices.
+constexpr size_t ddaLL128SlotPayloadBytes(size_t slotWords) {
+  return slotWords / (size_t)kDdaLL128WireWordsPerSlice * (size_t)kDdaLL128DataBytesPerSlice;
+}
+
+// True for a block size the LL128 kernels accept: a multiple of the warp in [warp, 1024].
+constexpr bool ddaLL128ValidThreads(int64_t threads) {
+  return threads >= kDdaLL128Warp && threads <= 1024 && threads % kDdaLL128Warp == 0;
+}
+
 } // namespace dda::common

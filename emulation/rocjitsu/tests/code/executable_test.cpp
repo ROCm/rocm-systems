@@ -158,8 +158,10 @@ TEST(ExecutableInputValidation, RejectsEmptySectionTable) {
   ehdr.e_ehsize = sizeof(ehdr);
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
-  test::ScopedTempFile file("rj-empty-section-table-");
-  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rj-empty-section-table-"));
+  ASSERT_TRUE(
+      file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size())));
 
   const Executable executable(file.path());
   EXPECT_FALSE(executable.is_valid());
@@ -168,8 +170,10 @@ TEST(ExecutableInputValidation, RejectsEmptySectionTable) {
 TEST(ExecutableInputValidation, RejectsImpossibleBundleCountBeforeAllocation) {
   const std::vector<uint8_t> image =
       make_host_elf_with_fatbin(make_fatbin_header(std::numeric_limits<uint64_t>::max()));
-  test::ScopedTempFile file("rj-bundle-count-");
-  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rj-bundle-count-"));
+  ASSERT_TRUE(
+      file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size())));
 
   const Executable executable(file.path());
   EXPECT_FALSE(executable.is_valid());
@@ -221,8 +225,10 @@ TEST(ExecutableInputValidation, RejectsBundlePayloadOutsideItsSection) {
                 sizeof(payload_offset));
     std::memcpy(image.data() + kFatbinOffset + info_offset + sizeof(uint64_t), &payload_size,
                 sizeof(payload_size));
-    test::ScopedTempFile file("rj-bundle-payload-");
-    file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rj-bundle-payload-"));
+    ASSERT_TRUE(
+        file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size())));
     const Executable executable(file.path());
     EXPECT_FALSE(executable.is_valid());
   }
@@ -230,8 +236,10 @@ TEST(ExecutableInputValidation, RejectsBundlePayloadOutsideItsSection) {
 
 TEST(ExecutableInputValidation, LoadsStandaloneDeviceElfByValidatedSegments) {
   const std::vector<uint8_t> image = make_standalone_amdgpu_elf();
-  test::ScopedTempFile file("rj-standalone-device-elf-");
-  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rj-standalone-device-elf-"));
+  ASSERT_TRUE(
+      file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size())));
 
   const Executable executable(file.path());
   ASSERT_TRUE(executable.is_valid());

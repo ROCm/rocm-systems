@@ -97,6 +97,8 @@ extern std::function<bool()> g_rcclDdaArLL128OneShotPinnedByEnv;
 extern std::function<int(const ncclComm*)> g_rcclDdaFabricVmmBlocks;
 extern std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Threads;
 extern std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Blocks;
+extern std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricA2aLL128Threads;
+extern std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricA2aLL128Blocks;
 extern std::function<bool(const ncclComm*, ncclDataType_t)> g_rcclDdaDatatypeSupported;
 
 void ResetDdaCollSeams();

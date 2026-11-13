@@ -10,13 +10,14 @@ Recording and replaying HIP workloads
 HIP Record & Replay (HRR) records the HIP API calls an application makes, together
 with the host buffers and code objects it needs, into an archive that can be
 replayed on a GPU later. The replay does not need the original application, its
-source, or its input data, which makes an archive a practical way to hand a
-failing workload to somebody else.
+source, or its input data. The archive holds the workload's code and data instead,
+so it is confidential: share one only as agreed, after reading the ``NOTICE.txt``
+that capture writes into it (see :ref:`hrr-sharing-an-archive`).
 
 HRR has two halves:
 
-* **Capture** is part of the HIP runtime library. It is off unless you ask for it,
-  and is turned on with a single environment variable.
+* **Capture** is part of the HIP runtime library. It is off unless you ask for it
+  with an environment variable, and records only once you have consented to it.
 * **Replay** is a separate developer tool, ``hrr-playback``, installed into the
   ROCm binary directory by a ROCm build that includes the HRR project.
 
@@ -70,7 +71,28 @@ application as usual:
   HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 
 Capture is off whenever the variable is unset, so nothing changes for an ordinary
-run. The archive is a directory, not a single file, and it holds one
+run. It also needs your consent, given in one of two ways:
+
+* Once per user, with the line ``yes`` in the file
+  ``${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent``. The file covers that user on
+  every host that shares the home directory.
+* With ``HIP_HRR_CAPTURE_CONSENT=yes``, where no such file can be kept, as in CI or
+  a container. The variable applies to every process that inherits it, child
+  processes and MPI ranks included. Any other value, such as ``no``, withholds
+  consent even when the file says yes. An empty value counts as unset, so the
+  file still decides: to turn capture off, unset ``HIP_HRR_CAPTURE_OUTPUT`` or
+  set ``HIP_HRR_CAPTURE_CONSENT=no``.
+
+Without either, the application runs unrecorded and says why in one line on
+stderr. Whoever controls your environment or configuration directory can give
+consent for you. The file counts only if it is a regular file you own, not
+reached through a symbolic link and with no other hard link.
+
+.. code-block:: bash
+
+  d="${XDG_CONFIG_HOME:-$HOME/.config}/hrr" && mkdir -p "$d" && echo yes > "$d/capture-consent"
+
+The archive is a directory, not a single file, and it holds one
 ``pid-<pid>/`` subdirectory per recorded process:
 
 .. code-block:: text
@@ -88,11 +110,23 @@ run. The archive is a directory, not a single file, and it holds one
 Expect the result to be large. It contains the buffers the workload moved, so a
 short run of a big model produces gigabytes.
 
+.. _hrr-sharing-an-archive:
+
+Sharing an archive
+-------------------------------------------------------
+
 .. warning::
 
-  The archive holds the recorded buffers verbatim, so anything the workload had
-  in host memory is readable in it. Treat an archive as you would treat the input
-  data of the run it came from.
+  Capture writes the notice below to ``NOTICE.txt`` at the archive root. Read it
+  before an archive leaves the machine.
+
+.. literalinclude:: ../../../hrr/include/hrr/hrr_archive_notice.h
+   :language: text
+   :start-after: /* hrr-archive-notice-begin */
+   :end-before: /* hrr-archive-notice-end */
+
+The HRR sources explain what the notice covers in
+`Sharing an archive <https://github.com/ROCm/rocm-systems/blob/develop/projects/hrr/PRIVACY.md#sharing-an-archive>`_.
 
 Your first replay
 =======================================================

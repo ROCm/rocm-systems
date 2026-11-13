@@ -9,7 +9,8 @@
 // Implements the SDMA ring's reserve / wrap / in-order commit protocol as free
 // functions over primitive pointers, so the host ring (abce_ring_host.h) and a
 // device-side producer share one implementation. The atomics resolve to
-// __hip_atomic_* under device compilation and __atomic_* on the host.
+// __hip_atomic_* under device compilation and the abce_host_* atomics
+// (abce_config.h) on the host.
 //
 // Where the C++ version took the read-index and publish steps as template
 // parameters instantiated on lambdas, this takes them as function pointers
@@ -38,7 +39,7 @@
 
 #include "abce_config.h"
 
-#if !defined(__HIP_DEVICE_COMPILE__) && !defined(__CUDA_ARCH__)
+#if !defined(__HIP_DEVICE_COMPILE__) && !defined(__CUDA_ARCH__) && !defined(_WIN32)
 #include <sched.h>  // sched_yield() for host spin-waits
 #endif
 
@@ -46,19 +47,25 @@
 extern "C" {
 #endif  // __cplusplus
 
+#if defined(_WIN32) && !defined(__HIP_DEVICE_COMPILE__)
+// Declared here rather than through <windows.h>, which would impose its min/max
+// macros and the rest of the Win32 surface on every includer.
+__declspec(dllimport) int __stdcall SwitchToThread(void);
+#endif  // _WIN32
+
 //===----------------------------------------------------------------------===//
 // System-scope atomics + pause
 //
 // For words the engine shares with a producer: the queue's read/write pointers
 // and doorbell, and the completion signals it retires. Device: __hip_atomic_* /
-// s_sleep. Host: __atomic_* / sched_yield.
+// s_sleep. Host: the abce_host_* atomics / a thread yield.
 //===----------------------------------------------------------------------===//
 
 static inline uint64_t abce_ring_atomic_load_acquire(const uint64_t* ptr) {
 #if defined(__HIP_DEVICE_COMPILE__)
   return __hip_atomic_load(ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
 #else
-  return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
+  return abce_host_load_acquire_u64(ptr);
 #endif  // __HIP_DEVICE_COMPILE__
 }
 
@@ -69,7 +76,7 @@ static inline uint64_t abce_ring_atomic_load_hw(const volatile uint64_t* ptr) {
 #if defined(__HIP_DEVICE_COMPILE__)
   return __hip_atomic_load(stable_ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
 #else
-  return __atomic_load_n(stable_ptr, __ATOMIC_RELAXED);
+  return abce_host_load_relaxed_u64(stable_ptr);
 #endif  // __HIP_DEVICE_COMPILE__
 }
 
@@ -80,7 +87,7 @@ static inline void abce_ring_atomic_store_hw(volatile uint64_t* ptr, uint64_t va
 #if defined(__HIP_DEVICE_COMPILE__)
   __hip_atomic_store(stable_ptr, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
 #else
-  __atomic_store_n(stable_ptr, value, __ATOMIC_RELAXED);
+  abce_host_store_relaxed_u64(stable_ptr, value);
 #endif  // __HIP_DEVICE_COMPILE__
 }
 
@@ -92,7 +99,7 @@ static inline void abce_ring_atomic_fence_release(void) {
 #if defined(__HIP_DEVICE_COMPILE__)
   __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");  // "" is system scope
 #else
-  __atomic_thread_fence(__ATOMIC_RELEASE);
+  abce_host_fence_release();
 #endif  // __HIP_DEVICE_COMPILE__
 }
 
@@ -109,7 +116,7 @@ static inline uint64_t abce_ring_cursor_load(const uint64_t* ptr) {
 #if defined(__HIP_DEVICE_COMPILE__)
   return __hip_atomic_load(ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
 #else
-  return __atomic_load_n(ptr, __ATOMIC_RELAXED);
+  return abce_host_load_relaxed_u64(ptr);
 #endif  // __HIP_DEVICE_COMPILE__
 }
 
@@ -117,7 +124,7 @@ static inline uint64_t abce_ring_cursor_load_acquire(const uint64_t* ptr) {
 #if defined(__HIP_DEVICE_COMPILE__)
   return __hip_atomic_load(ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
 #else
-  return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
+  return abce_host_load_acquire_u64(ptr);
 #endif  // __HIP_DEVICE_COMPILE__
 }
 
@@ -126,8 +133,7 @@ static inline bool abce_ring_cursor_cas(uint64_t* ptr, uint64_t* expected, uint6
   return __hip_atomic_compare_exchange_strong(ptr, expected, desired, __ATOMIC_RELAXED,
                                               __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
 #else
-  return __atomic_compare_exchange_n(ptr, expected, desired, /*weak=*/false, __ATOMIC_RELAXED,
-                                     __ATOMIC_RELAXED);
+  return abce_host_cas_relaxed_u64(ptr, expected, desired);
 #endif  // __HIP_DEVICE_COMPILE__
 }
 
@@ -135,7 +141,7 @@ static inline void abce_ring_cursor_store(uint64_t* ptr, uint64_t value) {
 #if defined(__HIP_DEVICE_COMPILE__)
   __hip_atomic_store(ptr, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
 #else
-  __atomic_store_n(ptr, value, __ATOMIC_RELAXED);
+  abce_host_store_relaxed_u64(ptr, value);
 #endif  // __HIP_DEVICE_COMPILE__
 }
 
@@ -143,7 +149,7 @@ static inline void abce_ring_cursor_store_release(uint64_t* ptr, uint64_t value)
 #if defined(__HIP_DEVICE_COMPILE__)
   __hip_atomic_store(ptr, value, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
 #else
-  __atomic_store_n(ptr, value, __ATOMIC_RELEASE);
+  abce_host_store_release_u64(ptr, value);
 #endif  // __HIP_DEVICE_COMPILE__
 }
 
@@ -181,10 +187,31 @@ static inline void abce_ring_commit_store(uint64_t* commit_cursor, uint64_t valu
 #endif  // __HIP_DEVICE_COMPILE__
 }
 
+// A host producer that finds room through another producer's cached read index
+// reuses ring bytes on the strength of that producer's load of the engine's
+// word, so the cache passes that load's ordering on.
+static inline uint64_t abce_ring_cached_read_load(const uint64_t* cached_read_index) {
+#if defined(__HIP_DEVICE_COMPILE__)
+  return abce_ring_cursor_load(cached_read_index);
+#else
+  return abce_ring_cursor_load_acquire(cached_read_index);
+#endif  // __HIP_DEVICE_COMPILE__
+}
+
+static inline void abce_ring_cached_read_store(uint64_t* cached_read_index, uint64_t read_index) {
+#if defined(__HIP_DEVICE_COMPILE__)
+  abce_ring_cursor_store(cached_read_index, read_index);
+#else
+  abce_ring_cursor_store_release(cached_read_index, read_index);
+#endif  // __HIP_DEVICE_COMPILE__
+}
+
 // Backs off inside a spin-wait: sleeps a wave on device, yields the CPU on host.
 static inline void abce_ring_pause(void) {
 #if defined(__HIP_DEVICE_COMPILE__)
   __builtin_amdgcn_s_sleep(1);
+#elif defined(_WIN32)
+  (void)SwitchToThread();
 #else
   sched_yield();
 #endif  // __HIP_DEVICE_COMPILE__
@@ -331,12 +358,12 @@ static inline abce_status_t abce_ring_reserve_(const abce_ring_producer_t* produ
         fold_padding ? pad_bytes + bytes : (pad_bytes != 0 ? pad_bytes : bytes);
     const uint64_t next = current + reservation_bytes;
     bool has_room = producer->cached_read_index &&
-                    abce_ring_can_write_upto(abce_ring_cursor_load(producer->cached_read_index),
-                                             size, next);
+                    abce_ring_can_write_upto(
+                        abce_ring_cached_read_load(producer->cached_read_index), size, next);
     if (!has_room) {
       const uint64_t read_index = producer->load_read_index(producer->user_data);
       if (producer->cached_read_index)
-        abce_ring_cursor_store(producer->cached_read_index, read_index);
+        abce_ring_cached_read_store(producer->cached_read_index, read_index);
       has_room = abce_ring_can_write_upto(read_index, size, next);
       if (!has_room && !block) return ABCE_STATUS_NOT_READY;
     }
