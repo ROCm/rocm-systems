@@ -159,8 +159,14 @@ rsmi_status_t read_sysfs_value(const std::string& path, T* out) {
     return classify_power_stabilization_errno(errno);
   }
   f >> *out;
-  if (f.fail()) {
+  if (f.bad()) {
     return RSMI_STATUS_FILE_ERROR;
+  }
+  if (f.fail()) {
+    // Non-numeric/empty/out-of-range content failed to extract into *out --
+    // a parse failure, not an I/O failure, so it's classified the same way
+    // as the trailing-content case below, not as RSMI_STATUS_FILE_ERROR.
+    return RSMI_STATUS_UNEXPECTED_DATA;
   }
   f >> std::ws;
   if (!f.eof()) {
@@ -285,6 +291,24 @@ rsmi_status_t rsmi_dev_power_stabilization_info_get(uint32_t dv_ind,
   }
 
   return get_power_stabilization_info_internal(base, info);
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_power_stabilization_check_support(uint32_t dv_ind) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind;
+  LOG_TRACE(ss);
+
+  GET_DEV_FROM_INDX
+
+  DEVICE_MUTEX
+
+  std::string base = dev->get_power_stabilization_root_path();
+  if (!power_stabilization_supported(base)) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 

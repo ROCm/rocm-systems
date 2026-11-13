@@ -853,18 +853,28 @@ class SetValueCommands:
     # small enough to reject a pathological/hostile input before json.loads.
     _JSON_REPLAY_MAX_BYTES = 1024 * 1024
 
-    def _load_gpu_section_from_json_file(self, file_path, gpu_id, gpu_bdf, section_key, label):
+    def _load_gpu_section_from_json_file(
+        self, file_path, gpu_id, gpu_bdf, section_key, label, *, allow_not_applicable=False
+    ):
         """Load+validate an `amd-smi static --<flag> --json`-shaped `@<path>`
         replay file, then look up this GPU's `section_key` entry. Shared by
         the AMPP and Power Stabilization `@<path>` configure handlers so the
         open/parse/shape-check logic can't drift between the two.
 
-        The file is opened with O_NOFOLLOW (reject a symlink) and size-capped
-        before being parsed, and the whole-file parse is cached per
-        `file_path` on this instance: `set_gpu()` calls the per-GPU configure
-        handler once per device in a `--gpu all` run, and without this cache
-        a malformed file would only be discovered after earlier GPUs in that
-        run were already mutated.
+        The file is opened with O_NOFOLLOW (reject a symlink) and
+        O_NONBLOCK (reject blocking on a FIFO), and read with an explicit
+        MAX+1-byte cap enforced against the bytes actually read rather than
+        an earlier fstat() snapshot, before being parsed. The whole-file
+        parse is cached per `file_path` on this instance: `set_gpu()` calls
+        the per-GPU configure handler once per device in a `--gpu all` run,
+        and without this cache a malformed file would only be discovered
+        after earlier GPUs in that run were already mutated.
+
+        If `allow_not_applicable` is set and this GPU's `section_key` entry
+        is the literal string "N/A" (the read-path dump's marker for "not
+        supported on this device"), returns None instead of raising -- lets
+        a `--gpu all` replay of a mixed-node dump skip unsupported GPUs
+        instead of aborting the whole run.
         """
         command = " ".join(sys.argv[1:])
         cli_flag = label.lower().replace(" ", "-")
@@ -875,7 +885,7 @@ class SetValueCommands:
         file_data = cache.get(file_path)
         if file_data is None:
             try:
-                fd = os.open(file_path, os.O_RDONLY | os.O_NOFOLLOW)
+                fd = os.open(file_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
             except OSError as e:
                 raise AmdSmiInvalidFilePathException(
                     command, self.logger.format, f"Unable to read '{file_path}': {e}"
@@ -886,27 +896,41 @@ class SetValueCommands:
                     raise AmdSmiInvalidFilePathException(
                         command, self.logger.format, f"'{file_path}' is not a regular file."
                     )
-                if file_stat.st_size > self._JSON_REPLAY_MAX_BYTES:
-                    raise AmdSmiInvalidFilePathException(
-                        command,
-                        self.logger.format,
-                        f"'{file_path}' exceeds the {self._JSON_REPLAY_MAX_BYTES}-byte limit "
-                        "for a replay file.",
-                    )
-                with os.fdopen(fd, "r", encoding="utf-8") as f:
-                    fd = -1  # fdopen() now owns the descriptor
-                    raw = f.read()
+                read_limit = self._JSON_REPLAY_MAX_BYTES + 1
+                chunks = []
+                total = 0
+                while total < read_limit:
+                    chunk = os.read(fd, read_limit - total)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    total += len(chunk)
+                raw_bytes = b"".join(chunks)
             except OSError as e:
                 raise AmdSmiInvalidFilePathException(
                     command, self.logger.format, f"Unable to read '{file_path}': {e}"
                 ) from e
             finally:
-                if fd != -1:
-                    os.close(fd)
+                os.close(fd)
+
+            if len(raw_bytes) > self._JSON_REPLAY_MAX_BYTES:
+                raise AmdSmiInvalidFilePathException(
+                    command,
+                    self.logger.format,
+                    f"'{file_path}' exceeds the {self._JSON_REPLAY_MAX_BYTES}-byte limit "
+                    "for a replay file.",
+                )
+
+            try:
+                raw = raw_bytes.decode("utf-8")
+            except UnicodeDecodeError as e:
+                raise AmdSmiInvalidFilePathException(
+                    command, self.logger.format, f"'{file_path}' is not valid UTF-8: {e}"
+                ) from e
 
             try:
                 file_data = json.loads(raw)
-            except json.JSONDecodeError as e:
+            except (json.JSONDecodeError, RecursionError, ValueError) as e:
                 raise AmdSmiInvalidFilePathException(
                     command, self.logger.format, f"'{file_path}' is not valid JSON: {e}"
                 ) from e
@@ -940,6 +964,8 @@ class SetValueCommands:
             )
 
         section_entry = gpu_entry.get(section_key)
+        if allow_not_applicable and section_entry == "N/A":
+            return None
         if not isinstance(section_entry, dict):
             raise AmdSmiInvalidFilePathException(
                 command,
@@ -1057,12 +1083,14 @@ class SetValueCommands:
                 if error_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     raise PermissionError("Command requires elevation") from e
                 if error_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
-                    # NOT_SUPPORTED also covers a driver-enforced parameter
+                    # NOT_SUPPORTED covers both "unsupported on this
+                    # device/platform" and a driver-enforced parameter
                     # dependency (e.g. ramp-down requires PS already enabled);
-                    # the CLI does not special-case which dependency failed.
+                    # the CLI does not special-case which one failed.
                     out = (
                         f"[AMDSMI_STATUS_NOT_SUPPORTED] Unable to set {field_name} to "
-                        f"{value}: dependency unmet"
+                        f"{value}: not supported on this device or platform, a "
+                        "dependent setting may be unmet"
                     )
                 elif error_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
                     out = (
@@ -1089,15 +1117,30 @@ class SetValueCommands:
         self.logger.clear_multiple_devices_output()
         return results
 
-    def _parse_power_stabilization_file_tokens(self, file_path, gpu_bdf, gpu_id):
+    def _parse_power_stabilization_file_tokens(
+        self, file_path, gpu_bdf, gpu_id, *, allow_not_applicable=False
+    ):
         # Resolves this GPU's entry from a `--power-stabilization-configure
         # @<path>` file into (param_id, value) tokens, without applying them.
         # Shared by the real apply path and by the `--gpu all` pre-validation
         # pass, so a malformed file or a GPU missing from it is discovered
         # identically by both -- see _prevalidate_power_stabilization_file().
+        #
+        # Returns None (instead of raising) when `allow_not_applicable` is
+        # set and this GPU's entry is "N/A" -- a mixed-node dump (some GPUs
+        # support Power Stabilization, some don't) can then be replayed with
+        # `--gpu all` by skipping the unsupported GPUs rather than aborting
+        # the whole run.
         ps_entry = self._load_gpu_section_from_json_file(
-            file_path, gpu_id, gpu_bdf, "power_stabilization", "Power Stabilization"
+            file_path,
+            gpu_id,
+            gpu_bdf,
+            "power_stabilization",
+            "Power Stabilization",
+            allow_not_applicable=allow_not_applicable,
         )
+        if ps_entry is None:
+            return None
 
         # The read-path dict reports state with stative names
         # (host_control_enabled/enabled/ramp_enabled); the KEY=VALUE setter
@@ -1143,6 +1186,10 @@ class SetValueCommands:
         # entry would otherwise only surface after earlier GPUs were already
         # written. Resolve every target GPU's tokens up front -- without
         # applying them -- so a bad file aborts before any GPU is touched.
+        # `allow_not_applicable=True`: a GPU that doesn't support Power
+        # Stabilization reads back as "N/A" in the dump (not a malformed
+        # entry), so it's skipped here rather than failing the whole
+        # pre-validation pass -- the per-GPU apply step skips it the same way.
         for device_handle in args.gpu:
             try:
                 gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
@@ -1152,7 +1199,9 @@ class SetValueCommands:
                 gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
             except IndexError:
                 gpu_id = f"ID Unavailable for {device_handle}"
-            self._parse_power_stabilization_file_tokens(file_path, gpu_bdf, gpu_id)
+            self._parse_power_stabilization_file_tokens(
+                file_path, gpu_bdf, gpu_id, allow_not_applicable=True
+            )
 
     def _configure_power_stabilization_from_file(self, args, file_path, gpu_bdf, gpu_id):
         # Restores Power Stabilization settings for this GPU's entry from a
@@ -1161,7 +1210,23 @@ class SetValueCommands:
         # `{"gpu_data": [{"gpu": <int>, "power_stabilization": {...}}, ...]}`
         # (see AMDSMILogger.combine_arrays_to_json), so entries are matched by
         # the integer "gpu" index, not by BDF.
-        parsed = self._parse_power_stabilization_file_tokens(file_path, gpu_bdf, gpu_id)
+        parsed = self._parse_power_stabilization_file_tokens(
+            file_path, gpu_bdf, gpu_id, allow_not_applicable=True
+        )
+
+        if parsed is None:
+            # This GPU's entry is "N/A" (Power Stabilization not supported on
+            # it) -- skip it instead of failing, so a mixed-node dump can
+            # still be replayed with `--gpu all`.
+            self.logger.store_output(
+                args.gpu,
+                "power_stabilization_configure",
+                f"Power Stabilization is 'N/A' (not supported) for GPU {gpu_id} in "
+                f"'{file_path}'; skipping.",
+            )
+            self.logger.print_output()
+            self.logger.clear_multiple_devices_output()
+            return
 
         if not parsed:
             self.logger.store_output(

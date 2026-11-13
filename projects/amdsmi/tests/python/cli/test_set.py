@@ -290,9 +290,17 @@ class TestSet(TestCliBase):
             # (enable/ramp_enable). host_control_enabled has no param_id
             # (read-only), so it is never set.
             read_to_write_key = {"enabled": "enable", "ramp_enabled": "ramp_enable"}
+
+            def _token_value(value):
+                # Unit-bearing fields come back from `--json` as
+                # unit_format()'s {"value": ..., "unit": ...} shape; unwrap
+                # to the bare value before building the KEY=VALUE token.
+                if isinstance(value, dict) and "value" in value:
+                    value = value["value"]
+                return int(value) if isinstance(value, bool) else value
+
             restore_tokens = ",".join(
-                f"{read_to_write_key.get(key, key)}="
-                f"{int(value) if isinstance(value, bool) else value}"
+                f"{read_to_write_key.get(key, key)}={_token_value(value)}"
                 for key, value in ps_baseline.items()
                 if key != "host_control_enabled"
             )
@@ -376,9 +384,17 @@ class TestSet(TestCliBase):
             # Restore the shared mock sysfs fixture to its starting values,
             # same idiom as test_power_stabilization_configure above.
             read_to_write_key = {"enabled": "enable", "ramp_enabled": "ramp_enable"}
+
+            def _token_value(value):
+                # Unit-bearing fields come back from `--json` as
+                # unit_format()'s {"value": ..., "unit": ...} shape; unwrap
+                # to the bare value before building the KEY=VALUE token.
+                if isinstance(value, dict) and "value" in value:
+                    value = value["value"]
+                return int(value) if isinstance(value, bool) else value
+
             restore_tokens = ",".join(
-                f"{read_to_write_key.get(key, key)}="
-                f"{int(value) if isinstance(value, bool) else value}"
+                f"{read_to_write_key.get(key, key)}={_token_value(value)}"
                 for key, value in ps_baseline.items()
                 if key != "host_control_enabled"
             )

@@ -369,7 +369,7 @@ class TestApplyPowerStabilizationParamsPrefixMessages(unittest.TestCase):
         self.assertEqual(len(results), 3)
         self.assertIn("[WARNING]", results[0])
         self.assertIn("Successfully set enable to 1", results[1])
-        self.assertIn("dependency unmet", results[2])
+        self.assertIn("a dependent setting may be unmet", results[2])
 
 
 class TestConfigurePowerStabilizationFromFileNpmNote(unittest.TestCase):

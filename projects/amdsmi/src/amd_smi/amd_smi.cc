@@ -9995,10 +9995,13 @@ amdsmi_status_t amdsmi_set_power_stabilization_param(amdsmi_processor_handle pro
   // power_stabilization_param_set. Probe the handle and sysfs support first
   // (matching amdsmi_set_gpu_uma_carveout()'s pattern) so a dry run against
   // an invalid handle or an unsupported device still reports failure
-  // instead of SUCCESS.
+  // instead of SUCCESS. Uses the narrow check_support probe, not
+  // amdsmi_get_power_stabilization_info(): the real write only ever touches
+  // param_id's own sysfs node, so the dry run's validation scope shouldn't
+  // be wider and fail on an unrelated field's malformed sysfs content.
   if (is_dry_run()) {
-    amdsmi_power_stabilization_info_t info_probe;
-    amdsmi_status_t probe_ret = amdsmi_get_power_stabilization_info(processor_handle, &info_probe);
+    amdsmi_status_t probe_ret =
+        rsmi_wrapper(rsmi_dev_power_stabilization_check_support, processor_handle, 0);
     if (probe_ret != AMDSMI_STATUS_SUCCESS) {
       return probe_ret;
     }

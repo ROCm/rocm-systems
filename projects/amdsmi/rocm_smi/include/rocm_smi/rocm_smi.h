@@ -3409,6 +3409,24 @@ rsmi_status_t rsmi_dev_power_stabilization_param_set(uint32_t dv_ind,
                                                      int64_t value);
 
 /**
+ *  @brief Check whether Power Stabilization is supported on a device,
+ *  without reading any parameter value. Narrower than
+ *  rsmi_dev_power_stabilization_info_get(): validates the handle and the
+ *  sysfs directory's existence only, so a probe of this scope can't fail
+ *  due to an unrelated field's malformed sysfs content the way a full
+ *  info read could.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS the device index is valid and Power
+ *  Stabilization is supported
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED Power Stabilization is not implemented
+ *  on this device, or the device is multi-VF
+ *  @retval ::RSMI_STATUS_INVALID_ARGS dv_ind is out of range
+ */
+rsmi_status_t rsmi_dev_power_stabilization_check_support(uint32_t dv_ind);
+
+/**
  *  @brief Get the temperature metric value for the specified metric, from the
  *  specified temperature sensor on the specified device.
  *

@@ -8341,7 +8341,10 @@ def amdsmi_set_power_stabilization_param(
     if not isinstance(param_id, AmdSmiPowerStabilizationParamId):
         raise AmdSmiParameterException(param_id, AmdSmiPowerStabilizationParamId)
 
-    if not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        # bool is a subclass of int; reject it explicitly rather than
+        # silently writing 0/1 (same idiom as amdsmi_configure_ampp_profile's
+        # field_value check).
         raise AmdSmiParameterException(value, Union[int, float])
 
     if isinstance(value, float) and not value.is_integer():
