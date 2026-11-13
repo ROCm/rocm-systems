@@ -3084,6 +3084,13 @@ def main() -> None:
                  phase, lib, builds[phase] or "?", sources[phase]["event"] or "?",
                  sources[phase]["sha"][:12] or "?", fingerprints[phase]["md5"],
                  fingerprints[phase]["version"])
+    # Without a version, verify_rccl_replacement() cannot tell a phase's build
+    # from the image's own RCCL, and that phase would be measured unverified.
+    unreadable = [phase for phase in libs if not fingerprints[phase]["version"]]
+    if unreadable:
+        log.error("Could not read the RCCL version of the %s library, so its "
+                  "phase could not be verified to run it", " and ".join(unreadable))
+        sys.exit(1)
     rccl_fingerprint = fingerprints[CANDIDATE]
     if rccl_fingerprint["md5"] and rccl_fingerprint["md5"] == fingerprints[BASELINE]["md5"]:
         log.info("Both builds carry the same librccl: this run is an A/A")
@@ -3191,8 +3198,6 @@ def main() -> None:
     # own build's library, not the image's bundled copy.
     rccl_verification_failed = False
     for phase, run_dir in phases:
-        if not fingerprints[phase].get("version"):
-            continue
         rccl_ok, rccl_msg = verify_rccl_replacement(
             run_dir, fingerprints[phase], args.nodes,
         )
