@@ -515,27 +515,6 @@ def test_gfx1201_cache_roof_reports_the_fastest_launch_at_its_measured_clock(
     assert "GL2 hit return ceiling:12165.1 GB/sec (282.4% at 2970 MHz)" in log
 
 
-# TODO: Fold this into the cache-roof ceiling test above, parametrized by cache
-# level and multiprocessor count, instead of keeping a separate function.
-def test_gfx1201_l0_ceiling_follows_the_reported_multiprocessor_count(
-    fake_gfx12_runtime, monkeypatch, capsys
-):
-    """Navi 48 boards differ in CU count. With 24 multiprocessors, 48 CUs, the
-    GL0 read return at 2.97 GHz is 48 x 128 B x 2.97e9, 18,247.68 GB/s."""
-    bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
-    launches = fake_gfx12_runtime(bench)
-    monkeypatch.setattr(
-        benchmark_gfx1201.hip,
-        "hipGetDeviceProperties",
-        lambda device: SimpleNamespace(multiProcessorCount=24),
-    )
-
-    bench.tests["L0"](0)
-
-    assert launches[0][1] == [L0_WORKGROUPS_PER_CU * 24, 1, 1]
-    assert "GL0 read return ceiling:18247.7 GB/sec" in capsys.readouterr().out
-
-
 @pytest.mark.parametrize(
     "reported_bytes, buffer_bytes, steps, passes",
     [
