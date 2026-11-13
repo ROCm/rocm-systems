@@ -63,6 +63,7 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -70,6 +71,7 @@
 #include <optional>
 #include <shared_mutex>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -89,11 +91,19 @@ static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
 static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
                   offsetof(hsa_barrier_or_packet_t, completion_signal),
               "unexpected ABI incompatibility");
+static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
+                  offsetof(hsa_agent_dispatch_packet_t, completion_signal),
+              "unexpected ABI incompatibility");
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
 static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
                   offsetof(hsa_amd_ext_kernel_dispatch_packet_t, completion_signal),
               "unexpected ABI incompatibility");
 #endif
+
+#define ROCPROFILER_LIB_ROCPROFILER_HSA_QUEUE_CPP_IMPL 1
+
+// template specializations
+#include "hsa.def.cpp"
 
 namespace rocprofiler
 {
@@ -101,7 +111,304 @@ namespace hsa
 {
 namespace
 {
+class dispatch_time_cache
+{
+    static constexpr size_t shard_count = 64;
+
+public:
+    using query_type          = dispatch_time_query_t;
+    using lifetime_locks_type = std::array<std::unique_lock<std::recursive_mutex>, shard_count>;
+
+    void                        create(hsa_signal_t signal, bool ipc = false);
+    void                        retain(hsa_signal_t signal);
+    void                        release(hsa_signal_t signal);
+    void                        forget(hsa_signal_t signal);
+    void                        track(hsa_signal_t signal, hsa_signal_t pending, hsa_agent_t agent);
+    void                        store(hsa_signal_t signal, hsa_signal_t pending, query_type _query);
+    std::optional<hsa_status_t> query(hsa_agent_t                        agent,
+                                      hsa_signal_t                       signal,
+                                      hsa_amd_profiling_dispatch_time_t* time,
+                                      query_type                         runtime_query) const;
+    void                        clear();
+
+    std::unique_lock<std::recursive_mutex> lock_lifetime(hsa_signal_t signal);
+    lifetime_locks_type                    lock_lifetimes();
+
+private:
+    struct dispatch_time_entry
+    {
+        hsa_signal_t                      pending_signal = {};
+        hsa_agent_t                       agent          = {};
+        hsa_status_t                      status         = HSA_STATUS_ERROR;
+        hsa_amd_profiling_dispatch_time_t time           = {};
+    };
+
+    struct entry
+    {
+        size_t                             references = 1;
+        std::optional<dispatch_time_entry> dispatch   = std::nullopt;
+    };
+
+    using map_type = std::unordered_map<hsa_signal_t, entry>;
+
+    struct shard
+    {
+        common::Synchronized<map_type> data           = {};
+        std::recursive_mutex           lifetime_mutex = {};
+    };
+
+    shard&       get_shard(hsa_signal_t signal);
+    const shard& get_shard(hsa_signal_t signal) const;
+
+    std::array<shard, shard_count> m_shards = {};
+};
+
+hsa_signal_t
+plain_signal(hsa_signal_t signal)
+{
+#if defined(AMD_SIGNAL_HINT_MASK)
+    signal.handle &= ~AMD_SIGNAL_HINT_MASK;
+#endif
+    return signal;
+}
+
+dispatch_time_cache::shard&
+dispatch_time_cache::get_shard(hsa_signal_t signal)
+{
+    return const_cast<shard&>(std::as_const(*this).get_shard(signal));
+}
+
+const dispatch_time_cache::shard&
+dispatch_time_cache::get_shard(hsa_signal_t signal) const
+{
+    auto handle = plain_signal(signal).handle;
+    return m_shards[((handle >> 6) ^ (handle >> 12)) % m_shards.size()];
+}
+
+std::unique_lock<std::recursive_mutex>
+dispatch_time_cache::lock_lifetime(hsa_signal_t signal)
+{
+    return std::unique_lock<std::recursive_mutex>{get_shard(signal).lifetime_mutex};
+}
+
+dispatch_time_cache::lifetime_locks_type
+dispatch_time_cache::lock_lifetimes()
+{
+    auto locks = lifetime_locks_type{};
+    for(size_t i = 0; i < m_shards.size(); ++i)
+        locks[i] = std::unique_lock<std::recursive_mutex>{m_shards[i].lifetime_mutex};
+    return locks;
+}
+
+void
+dispatch_time_cache::create(hsa_signal_t signal, bool ipc)
+{
+    // Registration of a recycled handle must follow the previous owner's destruction.
+    signal    = plain_signal(signal);
+    auto lock = lock_lifetime(signal);
+    get_shard(signal).data.wlock([signal, ipc](map_type& data) {
+        if(ipc)
+            data[signal] = entry{};
+        else
+            data.erase(signal);
+    });
+}
+
+void
+dispatch_time_cache::retain(hsa_signal_t signal)
+{
+    signal = plain_signal(signal);
+    get_shard(signal).data.wlock([signal](map_type& data) {
+        ++data.try_emplace(signal, entry{0, std::nullopt}).first->second.references;
+    });
+}
+
+void
+dispatch_time_cache::release(hsa_signal_t signal)
+{
+    signal = plain_signal(signal);
+    get_shard(signal).data.wlock([signal](map_type& data) {
+        if(auto itr = data.find(signal); itr != data.end())
+        {
+            if(--itr->second.references == 0) data.erase(itr);
+        }
+    });
+}
+
+void
+dispatch_time_cache::forget(hsa_signal_t signal)
+{
+    signal = plain_signal(signal);
+    get_shard(signal).data.ulock(
+        [signal](const map_type& data) {
+            auto itr = data.find(signal);
+            return itr == data.end() || !itr->second.dispatch;
+        },
+        [signal](map_type& data) {
+            if(auto itr = data.find(signal); itr != data.end()) itr->second.dispatch.reset();
+            return true;
+        });
+}
+
+void
+dispatch_time_cache::track(hsa_signal_t signal, hsa_signal_t pending, hsa_agent_t agent)
+{
+    signal  = plain_signal(signal);
+    pending = plain_signal(pending);
+    get_shard(signal).data.wlock([=](map_type& data) {
+        data[signal].dispatch = dispatch_time_entry{pending, agent};
+    });
+}
+
+void
+dispatch_time_cache::store(hsa_signal_t signal, hsa_signal_t pending, query_type _query)
+{
+    signal  = plain_signal(signal);
+    pending = plain_signal(pending);
+    get_shard(signal).data.wlock([=](map_type& data) {
+        auto itr = data.find(signal);
+        if(itr == data.end() || !itr->second.dispatch ||
+           itr->second.dispatch->pending_signal != pending)
+            return;
+
+        auto& value          = *itr->second.dispatch;
+        value.status         = _query(value.agent, pending, &value.time);
+        value.pending_signal = {};
+    });
+}
+
+std::optional<hsa_status_t>
+dispatch_time_cache::query(hsa_agent_t                        agent,
+                           hsa_signal_t                       signal,
+                           hsa_amd_profiling_dispatch_time_t* time,
+                           query_type                         runtime_query) const
+{
+    if(!time) return std::nullopt;
+    signal = plain_signal(signal);
+    return get_shard(signal).data.rlock([=](const map_type& data) -> std::optional<hsa_status_t> {
+        auto itr = data.find(signal);
+        if(itr == data.end() || !itr->second.dispatch) return std::nullopt;
+        const auto& value = *itr->second.dispatch;
+        if(value.agent != agent) return std::nullopt;
+        if(value.pending_signal.handle != 0)
+        {
+            if(registration::get_fini_status() > 0) return std::nullopt;
+            return runtime_query(agent, value.pending_signal, time);
+        }
+        *time = value.time;
+        return value.status;
+    });
+}
+
+void
+dispatch_time_cache::clear()
+{
+    auto locks = lock_lifetimes();
+    for(auto& value : m_shards)
+        value.data.wlock([](map_type& data) { data.clear(); });
+}
+
 constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
+
+dispatch_time_cache*
+get_dispatch_time_cache()
+{
+    static auto*& value = common::static_object<dispatch_time_cache>::construct();
+    return value;
+}
+
+template <size_t TableIdx, size_t OpIdx>
+auto&
+get_next_dispatch()
+{
+    using function_t     = typename hsa_api_meta<TableIdx, OpIdx>::function_type;
+    static function_t _v = nullptr;
+    return _v;
+}
+
+hsa_status_t
+get_dispatch_time_impl(hsa_agent_t                        _agent,
+                       hsa_signal_t                       _signal,
+                       hsa_amd_profiling_dispatch_time_t* _time)
+{
+    if(get_hsa_ref_count() > 0)
+    {
+        auto status = query_dispatch_time(
+            _agent, _signal, _time, get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn);
+        if(status) return *status;
+    }
+
+    return get_next_dispatch<ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                             ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_get_dispatch_time>()(
+        _agent, _signal, _time);
+}
+
+hsa_status_t
+signal_destroy_impl(hsa_signal_t signal)
+{
+    auto& next  = get_next_dispatch<ROCPROFILER_HSA_TABLE_ID_Core,
+                                   ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy>();
+    auto* cache = get_dispatch_time_cache();
+    if(!cache) return next(signal);
+    auto lock   = cache->lock_lifetime(signal);
+    auto status = next(signal);
+    if(status == HSA_STATUS_SUCCESS) release_dispatch_time(signal);
+    return status;
+}
+
+hsa_status_t
+ipc_signal_attach_impl(const hsa_amd_ipc_signal_t* handle, hsa_signal_t* signal)
+{
+    auto& next  = get_next_dispatch<ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                                   ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ipc_signal_attach>();
+    auto* cache = get_dispatch_time_cache();
+    if(!cache) return next(handle, signal);
+    // An IPC attachment's local signal handle is only available after the runtime call.
+    auto locks  = cache->lock_lifetimes();
+    auto status = next(handle, signal);
+    if(status == HSA_STATUS_SUCCESS) retain_dispatch_time(*signal);
+    return status;
+}
+
+template <size_t TableIdx, size_t OpIdx, typename... Args>
+hsa_status_t
+signal_create_impl(Args... args)
+{
+    auto& next  = get_next_dispatch<TableIdx, OpIdx>();
+    auto* cache = get_dispatch_time_cache();
+    if(!cache) return next(args...);
+    auto status = next(args...);
+    if(status == HSA_STATUS_SUCCESS)
+    {
+        bool ipc = false;
+        if constexpr(TableIdx == ROCPROFILER_HSA_TABLE_ID_AmdExt &&
+                     OpIdx == ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_create)
+            ipc = (std::get<3>(std::tie(args...)) & HSA_AMD_SIGNAL_IPC) != 0;
+        create_dispatch_time(*std::get<sizeof...(Args) - 1>(std::tie(args...)), ipc);
+    }
+    return status;
+}
+
+template <size_t TableIdx, size_t OpIdx, typename RetT, typename... Args>
+auto get_signal_create_impl(RetT (*)(Args...))
+{
+    return &signal_create_impl<TableIdx, OpIdx, Args...>;
+}
+
+template <size_t TableIdx, size_t OpIdx, typename TableT, typename FuncT>
+void
+wrap_table_func(TableT* _orig, uint64_t _tbl_instance, FuncT _impl)
+{
+    auto  _meta = hsa_api_meta<TableIdx, OpIdx>{};
+    auto& _func = _meta.get_table_func(_meta.get_table(_orig));
+    auto& _next = get_next_dispatch<TableIdx, OpIdx>();
+
+    if(_func == _impl) return;
+    if(_tbl_instance == 0 && _func != _next) _next = _func;
+
+    CHECK_NOTNULL(_next);
+    _func = _impl;
+}
 
 // A single blocking wait -- Queue::sync(), or the replay drain barrier -- gives up after one slice
 // and reports whether it drained. The replay drain helpers retry for at most max_slices slices and
@@ -282,6 +589,9 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     for(auto& packet : queue_info_session.packet_data)
     {
         auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session, packet);
+        if(packet.orig_completion_signal.handle != 0)
+            store_dispatch_time(packet.orig_completion_signal,
+                                packet.kernel_packet.kernel_dispatch.completion_signal);
         kernel_dispatch::dispatch_complete(queue_info_session, packet, dispatch_time);
 
         // Calls our internal callbacks to callers who need to be notified post
@@ -436,6 +746,17 @@ WriteInterceptor(const void* packets,
                  void*                                 data,
                  hsa_amd_queue_intercept_packet_writer writer)
 {
+    // every packet, traced or not, starts a new use of its completion signal
+    for(size_t i = 0; i < pkt_count; ++i)
+    {
+        const auto& _packet = static_cast<const rocprofiler_packet*>(packets)[i];
+        auto        _type   = bit_extract(_packet.kernel_dispatch.header,
+                                 HSA_PACKET_HEADER_TYPE,
+                                 HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+        if(_type != HSA_PACKET_TYPE_INVALID)
+            forget_dispatch_time(_packet.kernel_dispatch.completion_signal);
+    }
+
     if(registration::get_fini_status() > 0)
     {
         writer(packets, pkt_count);
@@ -669,6 +990,9 @@ WriteInterceptor(const void* packets,
                 bit_extract(original_packet.header,
                             HSA_PACKET_HEADER_TYPE,
                             HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+            // in packet order, so a later packet sharing the signal drops an earlier kernel's time
+            if(packet_type != HSA_PACKET_TYPE_INVALID)
+                forget_dispatch_time(original_packet.completion_signal);
             bool is_kernel_dispatch     = (packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH);
             bool is_ext_kernel_dispatch = false;
 
@@ -999,6 +1323,11 @@ WriteInterceptor(const void* packets,
                 barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
                 barrier.completion_signal = original_completion_signal;
                 transformed_packets.emplace_back(barrier);
+
+                _packet_data.orig_completion_signal = original_completion_signal;
+                track_dispatch_time(original_completion_signal,
+                                    kernel_packet.kernel_dispatch.completion_signal,
+                                    queue.get_agent().get_hsa_agent());
             }
 
             bool injected_end_pkt = false;
@@ -1355,6 +1684,67 @@ WriteInterceptor(const void* packets,
 }
 }  // namespace
 
+void
+create_dispatch_time(hsa_signal_t signal, bool ipc)
+{
+    if(auto* cache = get_dispatch_time_cache()) cache->create(signal, ipc);
+}
+
+void
+retain_dispatch_time(hsa_signal_t signal)
+{
+    if(auto* cache = get_dispatch_time_cache()) cache->retain(signal);
+}
+
+void
+release_dispatch_time(hsa_signal_t signal)
+{
+    if(auto* cache = get_dispatch_time_cache()) cache->release(signal);
+}
+
+void
+forget_dispatch_time(hsa_signal_t signal)
+{
+    if(auto* cache = get_dispatch_time_cache()) cache->forget(signal);
+}
+
+void
+track_dispatch_time(hsa_signal_t signal, hsa_signal_t pending, hsa_agent_t agent)
+{
+    if(auto* cache = get_dispatch_time_cache()) cache->track(signal, pending, agent);
+}
+
+void
+store_dispatch_time(hsa_signal_t signal, hsa_signal_t pending)
+{
+    if(auto* cache = get_dispatch_time_cache())
+        cache->store(signal, pending, get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn);
+}
+
+void
+store_dispatch_time(hsa_signal_t signal, hsa_signal_t pending, dispatch_time_query_t runtime_query)
+{
+    if(auto* cache = get_dispatch_time_cache()) cache->store(signal, pending, runtime_query);
+}
+
+std::optional<hsa_status_t>
+query_dispatch_time(hsa_agent_t                        agent,
+                    hsa_signal_t                       signal,
+                    hsa_amd_profiling_dispatch_time_t* time,
+                    dispatch_time_query_t              runtime_query)
+{
+    if(auto* cache = get_dispatch_time_cache())
+        return cache->query(agent, signal, time, runtime_query);
+    return std::nullopt;
+}
+
+std::unique_lock<std::recursive_mutex>
+lock_dispatch_time_lifetime(hsa_signal_t signal)
+{
+    if(auto* cache = get_dispatch_time_cache()) return cache->lock_lifetime(signal);
+    return {};
+}
+
 Queue::Queue(const AgentCache& agent, CoreApiTable table)
 : _core_api(table)
 , _agent(agent)
@@ -1655,6 +2045,43 @@ void
 queue_fini()
 {
     signal_pool_fini();
+}
+
+void
+dispatch_time_init(HsaApiTable* table, uint64_t tbl_instance)
+{
+    if(!table || !table->amd_ext_ || !table->core_ || !enable_queue_intercept()) return;
+
+    wrap_table_func<ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_get_dispatch_time>(
+        table->amd_ext_, tbl_instance, get_dispatch_time_impl);
+    wrap_table_func<ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy>(
+        table->core_, tbl_instance, signal_destroy_impl);
+    wrap_table_func<ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_create>(
+        table->core_,
+        tbl_instance,
+        get_signal_create_impl<ROCPROFILER_HSA_TABLE_ID_Core,
+                               ROCPROFILER_HSA_CORE_API_ID_hsa_signal_create>(
+            table->core_->hsa_signal_create_fn));
+    wrap_table_func<ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_create>(
+        table->amd_ext_,
+        tbl_instance,
+        get_signal_create_impl<ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                               ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_create>(
+            table->amd_ext_->hsa_amd_signal_create_fn));
+    wrap_table_func<ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ipc_signal_attach>(
+        table->amd_ext_, tbl_instance, ipc_signal_attach_impl);
+}
+
+void
+dispatch_time_reset()
+{
+    if(auto* cache = common::static_object<dispatch_time_cache>::get())
+    {
+        cache->clear();
+    }
 }
 }  // namespace hsa
 }  // namespace rocprofiler

@@ -47,6 +47,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -58,6 +60,38 @@ struct correlation_id;
 }  // namespace context
 namespace hsa
 {
+using dispatch_time_query_t = decltype(&hsa_amd_profiling_get_dispatch_time);
+
+void
+create_dispatch_time(hsa_signal_t signal, bool ipc = false);
+
+void
+retain_dispatch_time(hsa_signal_t signal);
+
+void
+release_dispatch_time(hsa_signal_t signal);
+
+void
+forget_dispatch_time(hsa_signal_t signal);
+
+void
+track_dispatch_time(hsa_signal_t signal, hsa_signal_t pending, hsa_agent_t agent);
+
+void
+store_dispatch_time(hsa_signal_t signal, hsa_signal_t pending);
+
+void
+store_dispatch_time(hsa_signal_t signal, hsa_signal_t pending, dispatch_time_query_t runtime_query);
+
+std::optional<hsa_status_t>
+query_dispatch_time(hsa_agent_t                        agent,
+                    hsa_signal_t                       signal,
+                    hsa_amd_profiling_dispatch_time_t* time,
+                    dispatch_time_query_t              runtime_query);
+
+std::unique_lock<std::recursive_mutex>
+lock_dispatch_time_lifetime(hsa_signal_t signal);
+
 enum class queue_state
 {
     normal       = 0,
@@ -239,6 +273,17 @@ Queue::lock_queue(FuncT&& func)
 
 void
 queue_init();
+
+/**
+ * @brief Wraps dispatch-time queries and signal lifetime APIs so that a caller's completion
+ * signal reports the kernel's dispatch time. Installed when queue interception is enabled,
+ * before the HSA API tracing wrappers.
+ */
+void
+dispatch_time_init(HsaApiTable* table, uint64_t tbl_instance);
+
+void
+dispatch_time_reset();
 
 void
 queue_fini();

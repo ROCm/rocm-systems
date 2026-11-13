@@ -23,13 +23,16 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 
 #include <gtest/gtest.h>
 
 #include <cstddef>
 #include <memory>
+#include <thread>
 
 TEST(hsa, tables)
 {
@@ -107,6 +110,104 @@ TEST(hsa, tables)
     EXPECT_EQ(table.amd_ext_, amd_ext);
     EXPECT_EQ(table.finalizer_ext_, fini_ext);
     EXPECT_EQ(table.image_ext_, img_ext);
+}
+
+TEST(hsa, dispatch_time_signal_lifecycle)
+{
+    namespace hsa = ::rocprofiler::hsa;
+    hsa::dispatch_time_reset();
+    auto cleanup = ::rocprofiler::common::scope_destructor{hsa::dispatch_time_reset};
+    auto signal  = hsa_signal_t{64};
+    auto pending = hsa_signal_t{128};
+    auto agent   = hsa_agent_t{1};
+    auto time    = hsa_amd_profiling_dispatch_time_t{};
+    auto query   = +[](hsa_agent_t, hsa_signal_t value, hsa_amd_profiling_dispatch_time_t* result) {
+        *result = {value.handle, value.handle + 10};
+        return HSA_STATUS_SUCCESS;
+    };
+    hsa::create_dispatch_time(signal);
+    EXPECT_FALSE(hsa::query_dispatch_time(agent, signal, &time, query));
+    hsa::track_dispatch_time(signal, pending, agent);
+    EXPECT_FALSE(hsa::query_dispatch_time({2}, signal, &time, query));
+    EXPECT_FALSE(hsa::query_dispatch_time(agent, signal, nullptr, query));
+    ASSERT_EQ(hsa::query_dispatch_time(agent, signal, &time, query), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(time.start, 128);
+    hsa::store_dispatch_time(signal, pending, query);
+    EXPECT_FALSE(hsa::query_dispatch_time({2}, signal, &time, query));
+
+    hsa::retain_dispatch_time(signal);
+    hsa::release_dispatch_time(signal);
+    ASSERT_EQ(hsa::query_dispatch_time(agent, signal, &time, query), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(time.end, 138);
+    hsa::forget_dispatch_time(signal);
+    hsa::store_dispatch_time(signal, pending, query);
+    EXPECT_FALSE(hsa::query_dispatch_time(agent, signal, &time, query));
+    hsa::track_dispatch_time(signal, {256}, agent);
+    hsa::store_dispatch_time(signal, pending, query);
+    ASSERT_EQ(hsa::query_dispatch_time(agent, signal, &time, query), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(time.end, 266);
+    hsa::store_dispatch_time(signal, {256}, query);
+    hsa::release_dispatch_time(signal);
+    EXPECT_FALSE(hsa::query_dispatch_time(agent, signal, &time, query));
+
+    hsa::retain_dispatch_time(signal);
+    hsa::track_dispatch_time(signal, pending, agent);
+    hsa::create_dispatch_time(signal);
+    EXPECT_FALSE(hsa::query_dispatch_time(agent, signal, &time, query));
+#if defined(AMD_SIGNAL_HINT_MASK)
+    auto hinted = hsa_amd_signal_set_hints(signal, AMD_SIGNAL_HINT_TS_ON);
+    hsa::track_dispatch_time(hinted, pending, agent);
+    hsa::store_dispatch_time(hinted, pending, query);
+    ASSERT_EQ(hsa::query_dispatch_time(agent, signal, &time, query), HSA_STATUS_SUCCESS);
+    hsa::forget_dispatch_time(signal);
+    EXPECT_FALSE(hsa::query_dispatch_time(agent, hinted, &time, query));
+    hsa::track_dispatch_time(hinted, pending, agent);
+    hsa::release_dispatch_time(signal);
+    EXPECT_FALSE(hsa::query_dispatch_time(agent, hinted, &time, query));
+#endif
+    // IPC references can outlive the first local owner before any dispatch is tracked.
+    hsa::create_dispatch_time(signal, true);
+    hsa::retain_dispatch_time(signal);
+    hsa::release_dispatch_time(signal);
+    hsa::track_dispatch_time(signal, pending, agent);
+    hsa::store_dispatch_time(signal, pending, query);
+    ASSERT_EQ(hsa::query_dispatch_time(agent, signal, &time, query), HSA_STATUS_SUCCESS);
+    hsa::release_dispatch_time(signal);
+    EXPECT_FALSE(hsa::query_dispatch_time(agent, signal, &time, query));
+
+    hsa::retain_dispatch_time(signal);
+    hsa::retain_dispatch_time(signal);
+    hsa::track_dispatch_time(signal, pending, agent);
+    hsa::release_dispatch_time(signal);
+    ASSERT_EQ(hsa::query_dispatch_time(agent, signal, &time, query), HSA_STATUS_SUCCESS);
+    hsa::release_dispatch_time(signal);
+    EXPECT_FALSE(hsa::query_dispatch_time(agent, signal, &time, query));
+
+    {
+        auto other = hsa::lock_dispatch_time_lifetime({192});
+        other.unlock();
+        auto        lock = hsa::lock_dispatch_time_lifetime(signal);
+        std::thread worker{[&]() {
+            auto same_locked = lock.mutex()->try_lock();
+            EXPECT_FALSE(same_locked);
+            if(same_locked) lock.mutex()->unlock();
+            auto other_locked = other.mutex()->try_lock();
+            EXPECT_TRUE(other_locked);
+            if(other_locked) other.mutex()->unlock();
+        }};
+        worker.join();
+#if defined(AMD_SIGNAL_HINT_MASK)
+        auto hinted_lock = hsa::lock_dispatch_time_lifetime(
+            hsa_amd_signal_set_hints(signal, AMD_SIGNAL_HINT_TS_ON));
+        EXPECT_EQ(hinted_lock.mutex(), lock.mutex());
+#endif
+    }
+
+    for(uint64_t i = 1; i <= 64; ++i)
+        hsa::track_dispatch_time({i * 64}, pending, agent);
+    hsa::dispatch_time_reset();
+    for(uint64_t i = 1; i <= 64; ++i)
+        EXPECT_FALSE(hsa::query_dispatch_time(agent, {i * 64}, &time, query));
 }
 
 TEST(hsa, high_precision_timestamp_contexts)

@@ -46,6 +46,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -623,6 +624,31 @@ QueueController::destroy_queue(hsa_queue_t* id)
     _queues.wlock([&](auto& map) { map.erase(id); });
 }
 
+void
+QueueController::reset()
+{
+    auto queues = std::vector<hsa_queue_t*>{};
+    _queues.rlock([&](const queue_map_t& map) {
+        queues.reserve(map.size());
+        for(const auto& [id, _] : map)
+            queues.emplace_back(id);
+    });
+
+    _profiler_serializer.wlock([](auto& map) { map.clear(); });
+#if !defined(NDEBUG)
+    _debug_signals.wlock([](auto& map) { map.clear(); });
+#endif
+
+    for(auto* id : queues)
+    {
+        const auto* queue = get_queue(*id);
+        if(!queue) continue;
+        if(queue->ready_signal.handle != 0)
+            get_core_table().hsa_signal_destroy_fn(queue->ready_signal);
+        destroy_queue(id);
+    }
+}
+
 ClientID
 QueueController::add_callback(std::optional<rocprofiler_agent_t> agent, queue_callbacks_t callbacks)
 {
@@ -1151,6 +1177,20 @@ queue_controller_sync()
             [&_drained](const Queue* _queue) { _drained = _queue->sync() && _drained; });
     }
     return _drained;
+}
+
+void
+queue_controller_shutdown()
+{
+    if(auto* controller = common::static_object<QueueController>::get())
+    {
+        while(!queue_controller_sync())
+        {}
+        queue_interposition::stop_completion_monitor();
+        controller->reset();
+        queue_fini();
+        queue_interposition::get_queue_registry().wlock([](auto& map) { map.clear(); });
+    }
 }
 
 void
