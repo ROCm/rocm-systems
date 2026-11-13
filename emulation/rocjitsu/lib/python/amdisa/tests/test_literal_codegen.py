@@ -150,27 +150,6 @@ def test_vop3p_literal64_rejection_uses_complete_encoding_capability():
     assert not CodeGenerator._rejects_unencoded_vop3p_literal64(implied)
 
 
-def test_gfx1250_packed_f32_reader_has_no_unreachable_literal64_branch():
-    codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(
-        inst_encodings=[
-            SimpleNamespace(
-                enc_name='ENC_VOP3P',
-                ucode_fields=[SimpleNamespace(bit_offset=14, name='opsel_hi_2')],
-            )
-        ]
-    )
-    source = codegen._emit_cdna5_matrix_fmt_helpers().execution[0]
-
-    reader_start = source.index('PkF32Words read_pk_f32_words')
-    reader_end = source.index('\n}', reader_start)
-    reader = source[reader_start:reader_end]
-    assert 'literal64_value' not in reader
-    assert 'read_lane_pair32(' in reader
-    assert 'operand, lane, amdgpu::ScalarPairMode::Replicate32' in reader
-    assert 'return {pair.lo, pair.hi};' in reader
-
-
 def test_literal_fixups_require_generated_machine_inst_struct():
     inst = Instruction('V_PK_ADD_I16', 'ENC_VOP3P', opcode=0, operands=[])
 

@@ -511,8 +511,8 @@ def test_gfx1250_pk_f32_uses_literal_aware_pair_helper():
         use_cdna5_helpers=True,
     )
 
-    assert 'const auto s0 = read_pk_f32_words(src0, wf, lane)' in cpp
-    assert 'read_pk_f32_words(src0, wf, lane)' in cpp
+    assert 'const auto s0 = amdgpu::RegisterAccess(wf).read_lane_pair32(' in cpp
+    assert 'src0, lane, amdgpu::ScalarPairMode::Replicate32)' in cpp
     assert 's0_hi_w' not in cpp
     assert 's0.hi' in cpp
     assert 'read_lane64' not in cpp
