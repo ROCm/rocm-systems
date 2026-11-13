@@ -399,18 +399,16 @@ class IpcSdmaImpl : public IpcOnImpl {
   __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
     if (size >= constmem.ipc_sdma_threshold) {
       auto* handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
-      // Every pod slot has a queue once SDMA is agreed, so nullptr is only a safety net.
-      if (handle != nullptr) {
-        if constexpr (is_blocking(Kind)) {
-          handle->quietAll();
-          // SDMA wrote dst to GL2, bypassing L1; device-scope acquire invalidates
-          // stale L1 so the get returns fresh data (partner of sdmaCopy release).
-          if constexpr (!is_put(Kind))
-            atomic::threadfence<atomic::memory_scope::device,
-                                atomic::memory_order::acquire>();
-        }
-        return;
+      assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
+      if constexpr (is_blocking(Kind)) {
+        handle->quietAll();
+        // SDMA wrote dst to GL2, bypassing L1; device-scope acquire invalidates
+        // stale L1 so the get returns fresh data (partner of sdmaCopy release).
+        if constexpr (!is_put(Kind))
+          atomic::threadfence<atomic::memory_scope::device,
+                              atomic::memory_order::acquire>();
       }
+      return;
     }
     memcpy_lane<Kind>(dst, src, size);
   }
