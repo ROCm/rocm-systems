@@ -426,9 +426,19 @@ void GraphExecSegmented::BuildSyncPlan() {
   sync_plan_.seg_to_child_entry_hw_event.assign(segments_.size(), -1);
   sync_plan_.num_hw_events = 0;
   sync_plan_.num_unordered_segments = 0;
-  entry_hw_slot_ = -1;
 
   auto* device = g_devices[captureDeviceId_]->devices()[0];
+
+  // Child graph root off the parent child-node stream: it waits on the parent's entry
+  // signal. Roots on that stream are ordered after the parent's leading batch by the
+  // in-order queue. Like PASS 2, a stream is a (device, stream id) pair.
+  auto waits_on_parent_entry = [this](const Segment& segment) {
+    return inherited_exec_stream_id_ >= 0 && segment.dependency_level == 0 &&
+           (segment.dev_id != inherited_exec_dev_id_ ||
+            segment.stream_id != inherited_exec_stream_id_);
+  };
+  needs_entry_wait_ =
+      std::any_of(segments_.begin(), segments_.end(), waits_on_parent_entry);
 
   // PASS 1: Assign a compact HW-event slot to each signal this graph uses at launch.
   //  - seg_to_hw_event: completion signal of a segment with a successor on another
@@ -439,24 +449,16 @@ void GraphExecSegmented::BuildSyncPlan() {
   //  - seg_to_child_entry_hw_event: for a child-graph segment whose child has a
   //    root off this segment's stream. This segment's leading batch completes it to
   //    release those roots. The child's BuildSyncPlan has already run.
-  //  - entry_hw_slot_: when this graph is itself a child with a root off the parent
-  //    child-node stream. Bound at launch to the parent's signal described above.
+  //    A child's own entry waits take no slot: they name the parent's entry signal.
   for (size_t i = 0; i < segments_.size(); ++i) {
     if (segments_[i].needs_completion_signal) {
       sync_plan_.seg_to_hw_event[i] = sync_plan_.num_hw_events++;
     }
     if (segments_[i].child_graph_ptr != nullptr) {
       auto* child = static_cast<GraphExecSegmented*>(segments_[i].child_graph_ptr);
-      if (child->entry_hw_slot_ >= 0) {
+      if (child->needs_entry_wait_) {
         sync_plan_.seg_to_child_entry_hw_event[i] = sync_plan_.num_hw_events++;
       }
-    }
-  }
-  for (const auto& segment : segments_) {
-    if (inherited_exec_stream_id_ >= 0 && segment.dependency_level == 0 &&
-        segment.stream_id != inherited_exec_stream_id_) {
-      entry_hw_slot_ = sync_plan_.num_hw_events++;
-      break;
     }
   }
 
@@ -635,14 +637,10 @@ void GraphExecSegmented::BuildSyncPlan() {
     for (int dep_id : effective_barrier_deps[segment.id]) {
       wait_slots.push_back(sync_plan_.seg_to_hw_event[dep_id]);
     }
-    // Child graph root off the parent child-node stream: wait on the parent's
-    // entry signal, bound to entry_hw_slot_ at launch. Roots on that stream are
-    // ordered after the parent's leading batch by the in-order queue. Level-0
-    // segments have no in-graph dependencies, so this is the root's only wait.
-    const bool entry_wait = inherited_exec_stream_id_ >= 0 && segment.dependency_level == 0 &&
-                            segment.stream_id != inherited_exec_stream_id_;
-    if (entry_wait) {
-      wait_slots.push_back(entry_hw_slot_);
+    // Level-0 segments have no in-graph dependencies, so the parent's entry signal,
+    // resolved at launch, is the root's only wait.
+    if (waits_on_parent_entry(segment)) {
+      wait_slots.push_back(amd::Device::HwEventPatch::kExternalHwEvent);
     }
 
     auto segBatchIt = segmentBatches_.find(segment.id);
@@ -677,7 +675,7 @@ void GraphExecSegmented::BuildSyncPlan() {
 
       if (use_ext_dep) {
         uint8_t* first_dispatch = firstBatch.dispatchPackets[0];
-        // hw_event_index uses the compact slot; dep producer always has one (PASS 1).
+        // hw_event_index is the producer's compact slot (PASS 1) or kExternalHwEvent.
         const int dep_hw_slot = wait_slots[0];
         sync_plan_.patch_list.push_back(
             {first_dispatch, nullptr, dep_hw_slot,
@@ -694,7 +692,7 @@ void GraphExecSegmented::BuildSyncPlan() {
         firstBatch.fallbackDepBarrier = device->CreateBarrierPacket(num_deps);
         sync_plan_.barrier_packets.push_back(firstBatch.fallbackDepBarrier);
         for (int d = 0; d < num_deps; ++d) {
-          const int dep_hw_slot = sync_plan_.seg_to_hw_event[barrier_dep_indices[d]];
+          const int dep_hw_slot = wait_slots[d];
           sync_plan_.patch_list.push_back({empty_barrier, nullptr, dep_hw_slot, d});
           sync_plan_.patch_list.push_back({firstBatch.fallbackDepBarrier, nullptr, dep_hw_slot, d});
         }
@@ -1529,9 +1527,7 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
     // the same device spread evenly across that device's stream pool.
     std::unordered_map<int, size_t> dev_idx;
     if (level == 0 && inherited_exec_stream_id_ >= 0) {
-      for (int seg_id : it->second) {
-        dev_idx[segments_[seg_id].dev_id] = static_cast<size_t>(inherited_exec_stream_id_);
-      }
+      dev_idx[inherited_exec_dev_id_] = static_cast<size_t>(inherited_exec_stream_id_);
     }
 
     if (priority_declared) {
@@ -1557,6 +1553,7 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
     auto* child = static_cast<GraphExecSegmented*>(segment.child_graph_ptr);
     child->max_streams_dev_ = max_streams_dev_;
     child->inherited_exec_stream_id_ = segment.stream_id;
+    child->inherited_exec_dev_id_ = segment.dev_id;
     child->RoundRobinStreamAssignment();
   }
 }
@@ -1669,6 +1666,7 @@ void GraphExecSegmented::DFSStreamAssignment() {
     auto* child = static_cast<GraphExecSegmented*>(segment.child_graph_ptr);
     child->max_streams_dev_ = max_streams_dev_;
     child->inherited_exec_stream_id_ = segment.stream_id;
+    child->inherited_exec_dev_id_ = segment.dev_id;
     child->DFSStreamAssignment();
   }
 }
@@ -2974,18 +2972,9 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
     }
   }
 
+  // Stream ids index this pool: both assignment modes take them modulo the pool size
   auto resolveSegmentStream = [&](const Segment& seg) -> hip::Stream* {
-    if (!streams.empty()) {
-      const size_t idx = static_cast<size_t>(seg.stream_id);
-      if (idx < streams.size()) {
-        return streams[idx];
-      }
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-              "[hipGraph] EnqueueSegmentedGraph: segment %d stream_id %d out of range (pool %zu)",
-              seg.id, seg.stream_id, streams.size());
-      return launch_stream;
-    }
-    return launch_stream;
+    return streams[seg.stream_id];
   };
 
   // Single AccumulateCommand on launch_stream manages all HW event lifetimes
@@ -3001,22 +2990,18 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
         return resolveSegmentStream(seg) != launch_stream;
       }));
 
-  // Child entry barriers are part of the normal patch list. Bind their child-local
-  // slot to the immediate parent's entry event without changing signal ownership:
-  // segment_hw_events remains the child manager's set for cleanup and recycling.
-  std::vector<void*> patch_hw_events;
-  const std::vector<void*>* hw_events_for_patching = &segment_hw_events;
-  if (entry_hw_slot_ >= 0) {
-    patch_hw_events = segment_hw_events;
-    patch_hw_events[entry_hw_slot_] = (*parent_hw_events)[parent_entry_hw_event_index];
-    hw_events_for_patching = &patch_hw_events;
+  // Child entry waits are part of the normal patch list and name the immediate parent's
+  // entry signal, which stays in the parent's set
+  void* external_hw_event = nullptr;
+  if (needs_entry_wait_) {
+    external_hw_event = (*parent_hw_events)[parent_entry_hw_event_index];
   }
 
   // Apply pre-computed patches -- writes HW events directly into flatPacketData
   // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
   if (!sync_plan_.patch_list.empty()) {
-    device->ApplyHwEventPatches(sync_plan_.patch_list, *hw_events_for_patching,
-                                graph_accumulate->profilingInfo().timed_);
+    device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events,
+                                graph_accumulate->profilingInfo().timed_, external_hw_event);
   }
 
   // Register HW events with graph_accumulate so profiling can read them.
@@ -3652,7 +3637,7 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       // Single-device: pass collision-handled streams_ to EnqueueSegmentedGraph
       last_cmd = EnqueueSegmentedGraph(launch_stream, streams_, &status, &launch_signal_sets);
     } else {
-      // Multi-device: pass empty vector, will use parallel_streams_ internally
+      // No segments (multi-device graphs fail instantiation), so no stream is used
       last_cmd = EnqueueSegmentedGraph(launch_stream, {}, &status, &launch_signal_sets);
     }
   } else {

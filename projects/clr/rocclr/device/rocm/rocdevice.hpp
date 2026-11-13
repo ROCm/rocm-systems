@@ -650,8 +650,8 @@ class Device : public NullDevice {
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
   virtual uint8_t* CreateBarrierPacket(int num_deps) const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events,
-                                   bool profiled) const override;
+                                   const std::vector<void*>& hw_events, bool profiled,
+                                   void* external_hw_event) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 

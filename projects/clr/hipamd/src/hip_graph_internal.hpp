@@ -1433,8 +1433,8 @@ class GraphExecSegmented : public GraphExecBase {
     // completed by its trailing batch after the recursive child enqueue.
     std::vector<int> seg_to_hw_event;
     //! Slot for a child-graph segment's child entry signal. Allocated only when the
-    //! child's entry_hw_slot_ >= 0 (an off-stream child root must wait). This
-    //! segment's leading batch completes it; the child borrows it at launch.
+    //! child's needs_entry_wait_ is set (an off-stream child root must wait). This
+    //! segment's leading batch completes it; the child's waits name it at launch.
     std::vector<int> seg_to_child_entry_hw_event;
 
     std::vector<amd::Device::HwEventPatch> patch_list;
@@ -1453,10 +1453,13 @@ class GraphExecSegmented : public GraphExecBase {
 
   //! Absolute stream in the parent pool for this child graph node (-1 = root exec).
   int inherited_exec_stream_id_ = -1;
-  //! Child-local patch slot bound to the immediate parent's child entry signal at
-  //! launch. -1 when every level-0 segment already runs on inherited_exec_stream_id_
-  //! and in-order queue order is enough. >= 0 means off-stream roots wait on it.
-  int entry_hw_slot_ = -1;
+  //! Device of the parent child-node segment. Stream ids are per device, so a segment
+  //! is on the inherited stream only if both match.
+  int inherited_exec_dev_id_ = -1;
+  //! A level-0 segment runs off inherited_exec_stream_id_ and waits on the immediate
+  //! parent's child entry signal (HwEventPatch::kExternalHwEvent). False when every
+  //! level-0 segment already runs on that stream and in-order queue order is enough.
+  bool needs_entry_wait_ = false;
 };
 
 
