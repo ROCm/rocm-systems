@@ -518,8 +518,14 @@ hipFileError_t hipFileBufDeregister(const void *buffer_base);
  *
  * \max_io_size_note
  *
+ * @note A failed read may leave the HIP Runtime's last error set, even when
+ *       -1 is returned. The return value and `errno` describe the failure.
+ *       Call hipGetLastError() to clear it.
+ *
  * @return if >= 0: Number of bytes read
  * @return if -1:   System error (check `errno` for the specific error)
+ * @return if -hipFileHipDriverError: HIP Runtime error. The hipError_t can
+ *         be retrieved with hipGetLastError() or hipPeekAtLastError().
  * @return else:    Negative value of the related hipFileOpError_t
  */
 HIPFILE_API
@@ -538,8 +544,14 @@ ssize_t hipFileRead(hipFileHandle_t fh, void *buffer_base, size_t size, hoff_t f
  *
  * \max_io_size_note
  *
+ * @note A failed write may leave the HIP Runtime's last error set, even when
+ *       -1 is returned. The return value and `errno` describe the failure.
+ *       Call hipGetLastError() to clear it.
+ *
  * @return if >= 0: Number of bytes written
  * @return if -1:   System error (check `errno` for the specific error)
+ * @return if -hipFileHipDriverError: HIP Runtime error. The hipError_t can
+ *         be retrieved with hipGetLastError() or hipPeekAtLastError().
  * @return else:    Negative value of the related hipFileOpError_t
  */
 HIPFILE_API

@@ -9,10 +9,12 @@
 
 ### Changed
 
+* When a failed fastpath I/O is completed by the compatibility path, `hipFileRead()` and `hipFileWrite()` now clear the HIP Runtime's last error.
+
 ### Fixed
 
-* `hipFileRead()`, `hipFileWrite()`, and the asynchronous and batch I/O APIs now fall back to the compatibility path when the amdgpu kernel driver doesn't support AIS (for example, the inbox Linux driver). Previously, they failed with `ENOTTY` ("Inappropriate ioctl for device"). This requires a ROCr whose libhsakmt reports `ENOTTY` as the AIS status; older versions report an unrelated error code, which hipFile can't distinguish.
-* `hipFileRead()` and `hipFileWrite()` now return `-hipFileHipDriverError` when a HIP runtime call fails. Previously, they returned the negated `hipError_t` (for example, `-999` for `hipErrorUnknown`), which is neither `-1` nor a negated `hipFileOpError_t` as documented. With a HIP runtime that records `hipAmdFileRead()`/`hipAmdFileWrite()` failures as the last HIP error, `hipPeekAtLastError()` returns the underlying `hipError_t`. When such a failure is retried on the compatibility path, `hipFileRead()` and `hipFileWrite()` clear the last HIP error.
+* `hipFileRead()`, `hipFileWrite()`, and the asynchronous and batch I/O APIs now fall back to the compatibility path when the amdgpu kernel driver doesn't support AIS (for example, the inbox Linux driver). Previously, they failed with `ENOTTY` ("Inappropriate ioctl for device") or an unrelated error code.
+* `hipFileRead()` and `hipFileWrite()` now return `-hipFileHipDriverError` when a HIP Runtime call fails. Use `hipGetLastError()` or `hipPeekAtLastError()` to retrieve the `hipError_t`. Previously, they returned the negated `hipError_t` (for example, `-999` for `hipErrorUnknown`), which isn't a documented return value.
 * `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
 * Per-GPU I/O statistics are now attributed to the GPU that owns the I/O buffer instead of the caller's active HIP device. Previously, `hipFileGetStatsL3()` and `ais-stats` could report counters against the wrong GPU when the active device differed from the buffer's device.
 * `hipfile.h` now includes `<time.h>`, which declares the `struct timespec` used by `hipFileBatchIOGetStatus()`. Previously, C code that included `<time.h>` after `hipfile.h` got an incompatible pointer type error or warning when passing a `struct timespec *` to `hipFileBatchIOGetStatus()`.
