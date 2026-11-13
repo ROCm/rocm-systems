@@ -23,6 +23,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/bit.h"
 #include <array>
 #include <bit>
 #include <cassert>
@@ -340,9 +341,9 @@ inline uint64_t dpp_row_bank_mask(uint32_t wf_size, uint32_t row_mask, uint32_t 
   return mask;
 }
 
-inline DppPlan make_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
-                             uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
-                             uint64_t exec_mask, bool inactive_uses_bound_ctrl) {
+inline DppPlan compute_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
+                                uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
+                                uint64_t exec_mask, bool inactive_uses_bound_ctrl) {
   DppPlan plan;
   plan.row_bank_mask = dpp_row_bank_mask(wf_size, row_mask, bank_mask);
   plan.source_lanes.fill(DppPlan::INVALID_LANE);
@@ -364,6 +365,30 @@ inline DppPlan make_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_m
       plan.source_write_mask |= lane_bit;
   }
   return plan;
+}
+
+inline DppPlan make_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
+                             uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
+                             uint64_t exec_mask, bool inactive_uses_bound_ctrl) {
+  const uint64_t full_wave = util::mask<uint64_t>(wf_size);
+  if ((exec_mask & full_wave) != full_wave || row_mask != 0xf || bank_mask != 0xf)
+    return compute_dpp_plan(wf_size, dpp_ctrl, row_mask, bank_mask, bound_ctrl, fi, exec_mask,
+                            inactive_uses_bound_ctrl);
+
+  // With every source active, only the permutation, the wave width and
+  // BOUND_CTRL affect the plan. Lane values are still read for each issue.
+  struct Entry {
+    uint32_t width = 0, control = 0, bound = 0;
+    DppPlan plan;
+  };
+  static thread_local std::array<Entry, 16> entries{};
+  auto &entry = entries[(dpp_ctrl ^ (dpp_ctrl >> 4)) % entries.size()];
+  if (entry.width != wf_size || entry.control != dpp_ctrl || entry.bound != bound_ctrl) {
+    entry = {wf_size, dpp_ctrl, bound_ctrl,
+             compute_dpp_plan(wf_size, dpp_ctrl, row_mask, bank_mask, bound_ctrl, fi, exec_mask,
+                              inactive_uses_bound_ctrl)};
+  }
+  return entry.plan;
 }
 
 inline uint64_t dpp_physical_source_mask(const DppPlan &plan, uint64_t destination_mask,

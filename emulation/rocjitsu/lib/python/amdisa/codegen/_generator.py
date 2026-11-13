@@ -20590,11 +20590,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     'detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)',
                     'resolved_vgpr_offset_exec(wf)',
                 )
-                execution_code += '\n\n' + textwrap.dedent('''\
+                offset_resolver = textwrap.dedent('''\
                     std::optional<uint32_t>
                     Operand::resolved_vgpr_offset_exec(const amdgpu::Wavefront &wf) const {
                       if (!reads_value())
                         return std::nullopt;
+                      {direct_vgpr}
                       auto packed = packed_16bit_vgpr_source(
                           packed_16bit_source_, size_bits_, opr_type_, encoding_value_);
                       if (!packed)
@@ -20605,6 +20606,23 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       return detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this);
                     }
                     ''')
+                direct_vgpr = ''
+                if self.isa_spec.profile.uses_vgpr_msb_indexing:
+                    # The zero bank is common for full-width sources and destinations.
+                    # Packed half selectors and other operand types use the general resolver.
+                    direct_vgpr = textwrap.dedent('''\
+                        if (size_bits_ != 16 && wf.vgpr_msb_mode() == 0) {
+                          if (opr_type_ == OperandType::OPR_VGPR)
+                            return static_cast<uint32_t>(encoding_value_);
+                          if (opr_type_ == OperandType::OPR_SRC && encoding_value_ >= 256 &&
+                              encoding_value_ <= 511)
+                            return static_cast<uint32_t>(encoding_value_ - 256);
+                        }
+                        ''').rstrip()
+                execution_code += '\n\n' + offset_resolver.replace(
+                    '  {direct_vgpr}\n',
+                    textwrap.indent(direct_vgpr, '  ') + '\n' if direct_vgpr else '',
+                )
             execution_code = execution_code.replace(
                 'raw_compute_unit(wf.cu())',
                 'amdgpu::OperandExecutionAccess::raw_compute_unit(wf.cu())',

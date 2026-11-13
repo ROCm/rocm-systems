@@ -26,6 +26,7 @@
 #include <cassert>
 #include <cstdint>
 #include <optional>
+#include <span>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -329,6 +330,26 @@ inline void gfx10_buffer_apply_swizzle(VectorMemState &d, uint32_t srd1, uint32_
   d.scratch_addr_base_offset = (base + soffset) % 4;
 }
 
+/// Address VGPRs selected by a buffer instruction. Read each register once for
+/// the active lanes before calculating their individual addresses.
+struct BufferAddressRegisters {
+  std::span<const uint32_t> indices;
+  std::span<const uint32_t> offsets;
+};
+
+inline BufferAddressRegisters read_buffer_address_registers(RegisterAccess &regs, uint32_t base,
+                                                            bool idxen, bool offen, uint64_t exec) {
+  BufferAddressRegisters result;
+  if (idxen || offen) {
+    const auto region = regs.read_vgpr_region(base, idxen && offen ? 2 : 1, exec);
+    if (idxen)
+      result.indices = region.lanes(0).value();
+    if (offen)
+      result.offsets = region.lanes(idxen ? 1 : 0).value();
+  }
+  return result;
+}
+
 /// @brief Compute per-lane addresses for MUBUF encoding.
 ///
 /// @details Populates d.per_lane_addr, d.lane_mask, d.exec_mask and, on GFX9/CDNA,
@@ -430,24 +451,13 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   else
     rdna_buffer_apply_swizzle(d, srd1, srd3, inst.idxen != 0, exec, base_addr, soffset_val);
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
-  std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
-  if (inst.idxen || inst.offen) {
-    uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;
-    vaddr_region.emplace(regs.read_vgpr_region(vgpr_base, reg_count, exec));
-  }
+  const auto address_regs =
+      read_buffer_address_registers(regs, vgpr_base, inst.idxen, inst.offen, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t index = 0;
-    uint32_t voffset = 0;
-    if (inst.idxen && inst.offen) {
-      index = vaddr_region->lane(0, lane);
-      voffset = vaddr_region->lane(1, lane);
-    } else if (inst.idxen) {
-      index = vaddr_region->lane(0, lane);
-    } else if (inst.offen) {
-      voffset = vaddr_region->lane(0, lane);
-    }
+    const uint32_t index = inst.idxen ? address_regs.indices[lane] : 0;
+    const uint32_t voffset = inst.offen ? address_regs.offsets[lane] : 0;
     uint32_t offset_part = buffer_offset_part(voffset, inst.offset);
     const auto rdna_addr = gfx10 ? gfx10_buffer_address(srd1, srd3, stride, inst.idxen != 0, index,
                                                         offset_part, soffset_val, lane)
@@ -556,24 +566,13 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   else
     rdna_buffer_apply_swizzle(d, srd1, srd3, inst.idxen != 0, exec, base_addr, soffset_val);
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
-  std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
-  if (inst.idxen || inst.offen) {
-    uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;
-    vaddr_region.emplace(regs.read_vgpr_region(vgpr_base, reg_count, exec));
-  }
+  const auto address_regs =
+      read_buffer_address_registers(regs, vgpr_base, inst.idxen, inst.offen, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t index = 0;
-    uint32_t voffset = 0;
-    if (inst.idxen && inst.offen) {
-      index = vaddr_region->lane(0, lane);
-      voffset = vaddr_region->lane(1, lane);
-    } else if (inst.idxen) {
-      index = vaddr_region->lane(0, lane);
-    } else if (inst.offen) {
-      voffset = vaddr_region->lane(0, lane);
-    }
+    const uint32_t index = inst.idxen ? address_regs.indices[lane] : 0;
+    const uint32_t voffset = inst.offen ? address_regs.offsets[lane] : 0;
     uint32_t offset_part = buffer_offset_part(voffset, inst.offset);
     const auto rdna_addr = gfx10 ? gfx10_buffer_address(srd1, srd3, stride, inst.idxen != 0, index,
                                                         offset_part, soffset_val, lane)

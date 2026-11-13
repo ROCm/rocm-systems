@@ -209,6 +209,13 @@ private:
 /// @brief Global memory pipeline (V$ → L2 → HBM).
 class GlobalMemPipeline : public MemoryPipeline {
 public:
+  // May conservatively admit the bounding interval of a vector operation.
+  // Declining leaves exact per-lane classification and ingress to the caller.
+  using LocalRangeHandler = std::function<std::optional<MemoryIngressAdmission>(
+      uint32_t, const GpuVmAccess &, MemoryIngressSpan)>;
+  void set_local_range_handler(LocalRangeHandler handler) {
+    local_range_handler_ = std::move(handler);
+  }
   using PreparedAtomicBoundaryHandler =
       std::function<std::optional<DeviceCacheMaintenanceLease>(uint32_t vmid)>;
 
@@ -240,6 +247,7 @@ private:
   L1VectorCache *l1_;
   L2Cache *l2_;
   PreparedAtomicBoundaryHandler prepared_atomic_boundary_handler_;
+  LocalRangeHandler local_range_handler_;
 };
 
 /// @brief Local memory pipeline (LDS).

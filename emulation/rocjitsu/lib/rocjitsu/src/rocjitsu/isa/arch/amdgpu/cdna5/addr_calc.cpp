@@ -342,11 +342,8 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   uint32_t vbase = 0;
   if (inst.idxen || inst.offen)
     vbase = resolved_vgpr_base(wf, inst.vaddr, amdgpu::VgprMsbRole::Src0);
-  std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;
-  if (inst.idxen || inst.offen) {
-    uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;
-    vaddr_region.emplace(regs.read_vgpr_region(vbase, reg_count, exec));
-  }
+  const auto address_regs =
+      amdgpu::addr_calc::read_buffer_address_registers(regs, vbase, inst.idxen, inst.offen, exec);
   assert(d.elem_size != 0 && d.num_elems != 0);
   d.element_lane_masks.clear();
   if (ioff < 0) {
@@ -365,20 +362,13 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   // are model extensions awaiting gfx1250 qualification. Keep structured
   // accesses on the documented rule until their behavior is measured.
   constexpr uint32_t kDwordBytes = sizeof(uint32_t);
+  const uint32_t access_size = d.elem_size * d.num_elems;
   d.lane_mask = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t index = 0;
-    uint32_t voffset = 0;
-    if (inst.idxen && inst.offen) {
-      index = vaddr_region->lane(0, lane);
-      voffset = vaddr_region->lane(1, lane);
-    } else if (inst.idxen) {
-      index = vaddr_region->lane(0, lane);
-    } else if (inst.offen) {
-      voffset = vaddr_region->lane(0, lane);
-    }
+    const uint32_t index = inst.idxen ? address_regs.indices[lane] : 0;
+    const uint32_t voffset = inst.offen ? address_regs.offsets[lane] : 0;
     if (resource.swizzle_enabled) {
       uint64_t buffer_offset =
           swizzled_buffer_offset(index, resource.stride, voffset, ioff, soffset_val);
@@ -393,9 +383,14 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
 
     int64_t record_offset = static_cast<int64_t>(soffset_val) + voffset + ioff;
     int64_t total_offset = static_cast<int64_t>(soffset_val) + logical_offset;
+    const bool crosses_buffer = byte_range_exceeds(total_offset, access_size, resource.num_records);
+    if (!crosses_buffer && (!resource.oob_select ||
+                            !byte_range_exceeds(record_offset, access_size, resource.stride))) {
+      d.lane_mask |= uint64_t{1} << lane;
+      continue;
+    }
     const bool raw_vector_crosses_bound =
-        !inst.idxen && d.elem_size == kDwordBytes && d.num_elems > 1 &&
-        byte_range_exceeds(total_offset, d.elem_size * d.num_elems, resource.num_records);
+        !inst.idxen && d.elem_size == kDwordBytes && d.num_elems > 1 && crosses_buffer;
     const uint32_t component_bound_size =
         d.elem_size + (raw_vector_crosses_bound ? kDwordBytes : 0);
     for (uint32_t elem = 0; elem < d.num_elems; ++elem) {

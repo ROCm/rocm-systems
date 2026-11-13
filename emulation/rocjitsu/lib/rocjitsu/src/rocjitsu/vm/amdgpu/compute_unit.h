@@ -592,7 +592,9 @@ public:
   const GpuVm *gpu_vm() const { return gpu_vm_; }
 
   /// @brief Gate scalar, vector, and global atomic cache ingress for this CU.
-  void set_memory_ingress_handler(MemoryPipeline::IngressHandler handler) {
+  void set_memory_ingress_handler(MemoryPipeline::IngressHandler handler,
+                                  GlobalMemPipeline::LocalRangeHandler local_range = {}) {
+    global_mem_pipeline_.set_local_range_handler(std::move(local_range));
     scalar_mem_pipeline_.set_ingress_handler(handler);
     global_mem_pipeline_.set_ingress_handler(std::move(handler));
   }
