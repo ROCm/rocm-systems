@@ -127,7 +127,8 @@ drain_signal_less_interceptor();
 void
 drain_signal_less_queues_hw(uint64_t deadline_ns);
 
-// Wait for every already-submitted completion to finish executing.
+// Wait for every already-submitted completion to finish executing. Returns the batches still
+// in flight when the wait expires, so zero means drained.
 uint64_t
 join_signal_less_tasks(const uint64_t timeout_ns = 0);
 
@@ -141,6 +142,7 @@ hand_off_proven(signal_less_hub_t::proven&& p);
 size_t
 flush_deferred_completions();
 
+// Dispatches registered but not yet completed, without waiting.
 uint64_t
 peek_active_signal_less_packets();
 

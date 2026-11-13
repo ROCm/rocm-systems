@@ -1738,8 +1738,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     auto* state_ptr            = state.get();
     auto  deferred_completions = pending_completion_vector_t{};
 
-    // gate_lock serializes doorbell processing. write_interceptor below runs the tool's
-    // dispatch-enqueue callbacks with this lock held, so anything reachable from them must not
+    // gate_lock serializes doorbell processing; producers never take it. write_interceptor below
+    // runs the tool's dispatch-enqueue callbacks with it held, so nothing reachable from them may
     // acquire a queue gate -- a drain that fences every gate self-deadlocks here.
     std::unique_lock<std::mutex> lock{state_ptr->gate_lock};
 
@@ -2510,8 +2510,7 @@ drain_signal_less_queues_hw(uint64_t deadline_ns)
 }
 
 // Waits on the completion monitor's in-flight counter, which counts signal-less completions
-// alongside interposed ones. The wait has no deadline and no return value, so a monitor that
-// never reaches zero is not reported.
+// alongside interposed ones. Returns the batches still outstanding when the wait expires.
 uint64_t
 join_signal_less_tasks(const uint64_t timeout_ns)
 {

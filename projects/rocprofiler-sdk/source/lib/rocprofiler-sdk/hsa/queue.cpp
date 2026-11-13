@@ -158,9 +158,8 @@ replay_wait_or_fatal(TryDrainFn&& try_drain_once, std::string_view what)
 // teardown use (warn once and proceed), a replay pass must NOT proceed while a handler is still
 // running: PASS-EXIT, the tool's continue-decision, restore(), and the next submit would race the
 // handler that is still emitting records, releasing signals, and dropping correlation-id refs.
-// Each sync() call blocks up to one slice and returns the number of kernels still active, so the
-// drained test is `== 0`. Do not hand sync() to a predicate directly: a non-zero count converts to
-// `true` and reads as "drained", which is the inverse of what it means.
+// Each sync() call blocks up to one slice and returns the kernels still active, so the drained
+// test is `== 0` -- handing sync() to a predicate directly reads as the inverse.
 void
 replay_drain_or_fatal(const Queue& queue)
 {
@@ -396,9 +395,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         }
     }
 
-    // Last: this releases the dispatch, and the dispatch-scoped profiling services above extract
-    // their data inline before it. Deferring this call past them, or them past it, drops their
-    // coverage with nothing failing.
+    // Last: this releases the dispatch, and the dispatch-scoped services above extract their
+    // data inline before it. Reordering the two drops their coverage with nothing failing.
     queue_info_session.queue.async_complete();
 
     return false;

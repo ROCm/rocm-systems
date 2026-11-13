@@ -713,8 +713,6 @@ async_copy_handler(hsa_signal_value_t, void* arg)
         return false;
     }
 
-    // Writes the copy record and runs tool callbacks; the scope destructor below releases it.
-
     auto  ts               = common::timestamp_ns();
     auto* _data            = static_cast<async_copy_data*>(arg);
     auto  _lk              = _data->get_lock();

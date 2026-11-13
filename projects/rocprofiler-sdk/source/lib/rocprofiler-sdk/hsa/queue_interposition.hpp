@@ -313,7 +313,7 @@ interposition_fini();
  * Leaves the monitor running, so it is safe on paths where the SDK keeps operating
  * (context stop, code-object unload). Waits on the in-flight counter rather than the monitor
  * state, since batches already handed to the record emitter outlive the monitor thread. Returns
- * remaining records in flight if timeout is hit
+ * the batches still in flight when the wait expires, so zero means drained.
  */
 uint64_t
 interposition_sync(const uint64_t timeout_ns = 0);

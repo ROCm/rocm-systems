@@ -1157,13 +1157,10 @@ queue_controller_sync(const uint64_t timeout_ns)
 uint64_t
 queue_controller_peek_active_async_packets()
 {
-    // sync the queue interceptor
     auto outstanding_records = uint64_t{0};
 
     if(get_queue_controller())
     {
-        // Every queue is synced even after one times out, so a slow queue cannot hide the state of
-        // the ones behind it.
         get_queue_controller()->iterate_queues([&outstanding_records](const Queue* _queue) {
             outstanding_records += _queue->active_async_packets();
         });
