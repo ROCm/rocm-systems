@@ -55,7 +55,7 @@ class BlitManager {
   virtual ~BlitManager() {}
 
   //! Creates HostBlitManager object
-  virtual bool create(amd::Device& device) { return true; }
+  virtual bool create(amd::Device& /*device*/) { return true; }
 
   //! Copies a buffer object to system memory
   virtual bool readBuffer(
@@ -275,7 +275,7 @@ class HostBlitManager : public device::BlitManager {
   virtual ~HostBlitManager() {}
 
   //! Creates HostBlitManager object
-  virtual bool create(amd::Device& device) { return true; }
+  virtual bool create(amd::Device& /*device*/) { return true; }
 
   //! Copies a buffer object to system memory
   virtual bool readBuffer(
