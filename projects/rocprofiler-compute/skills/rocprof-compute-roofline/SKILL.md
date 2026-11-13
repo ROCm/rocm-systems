@@ -15,6 +15,11 @@ carries the same numbers in readable form.
 
 ## 1. Collect
 
+On Navi48 (gfx1201), read the
+[Navi48 (gfx1201)](../rocprof-compute-speed-of-light/SKILL.md#navi48-gfx1201)
+section of the `rocprof-compute-speed-of-light` skill before collecting. It
+explains the `VRAM` and `MALL` roofs and the estimated VALU rows.
+
 Collect only the roofline block:
 
 ```bash
@@ -119,7 +124,8 @@ know the intent, the counters know what ran.
 HBM answers "am I limited by main memory", while L2 and vL1D show whether
 caches are absorbing the traffic.
 
-To compare many kernels, write the
+`--view table` prints one table for all kernels together instead of one per
+kernel. To compare many kernels, write the
 [analysis database](../../docs/how-to/analyze/cli.rst) with
 `--output-format db` and query it with SQL.
 

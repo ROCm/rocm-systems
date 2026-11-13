@@ -49,6 +49,13 @@ Not every feature works on every architecture. Check there before promising a
 result, and let the tool's own error message stand when a feature is
 unavailable.
 
+### Navi48 (gfx1201)
+
+Before profiling Navi48, read the
+[Navi48 (gfx1201)](../rocprof-compute-speed-of-light/SKILL.md#navi48-gfx1201)
+section of the `rocprof-compute-speed-of-light` skill for its release,
+performance-state prerequisite, unsupported modes, and provisional metrics.
+
 ## 2. Collect what you need before profiling
 
 Ask once:
@@ -93,7 +100,7 @@ running, see
 ### Collect only what the question needs
 
 Never run a full profile. It replays the application once per counter pass and
-also runs the roofline benchmarks.
+also runs roofline benchmarks on architectures that support them.
 
 - List what this GPU can collect with `rocprof-compute --list-metrics`, and a
   block's metrics with `rocprof-compute --list-metrics <alias>`. On ROCm 10.2
@@ -237,7 +244,7 @@ disables terminal output, and `--output-name` sets the file name. See
 | Symptom | Likely cause |
 |---|---|
 | No workload data | `--path` is not the directory with `profiling_config.yaml` |
-| Empty or missing panels | those counters were not collected; re-profile |
+| Empty or missing panels | check architecture support and profiling diagnostics, then collect missing supported counters |
 | All metrics zero | kernel too short, or no dispatches were captured |
 | No kernel ids | the application launched no GPU kernels |
 | Roofline missing | not collected, or unsupported on this architecture |

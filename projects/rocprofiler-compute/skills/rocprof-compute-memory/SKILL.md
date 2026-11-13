@@ -19,9 +19,10 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> --m
 
 On ROCm 10.2 and earlier, use `-b memchart` instead of `--memory-chart`.
 
-The Memory Chart shows the whole hierarchy at once: requests issued, what each
-cache level served, and what reached HBM. Read it before opening any single
-cache level, because it tells you which level to open.
+The Memory Chart shows the hierarchy at once: requests issued and what each
+instrumented cache level served. On CDNA GPUs it also reports HBM traffic where
+the required metrics are available. Read it before opening any single cache
+level, because it tells you which level to open.
 
 Always analyze one kernel at a time with `-k`.
 
@@ -34,10 +35,18 @@ rocprof-compute profile --name <workload_name> --memory-chart -b vl1d l2 lds -- 
 The cache aliases differ by architecture; for example, some GPUs name their
 caches `gl0` and `gl2`.
 
+### Navi48 (gfx1201)
+
+Before reading a Navi48 Memory Chart, read the
+[Navi48 (gfx1201)](../rocprof-compute-speed-of-light/SKILL.md#navi48-gfx1201)
+section of the `rocprof-compute-speed-of-light` skill. It covers the GL1, GL2,
+VRAM, and Infinity Cache rows that do not measure what their CDNA counterparts
+do.
+
 ### Collect only what the question needs
 
 Never run a full profile. It replays the application once per counter pass and
-also runs the roofline benchmarks.
+also runs roofline benchmarks on architectures that support them.
 
 - List what this GPU can collect with `rocprof-compute --list-metrics`, and a
   block's metrics with `rocprof-compute --list-metrics <alias>`. On ROCm 10.2
@@ -94,7 +103,9 @@ they mean:
 
 Client APUs use a different hierarchy; see the
 [RDNA performance model](../../docs/conceptual/rdna/rdna-performance-model.rst)
-for GL0, GL1, and GL2.
+for GL0, GL1, and GL2. For Navi48's RDNA4 hierarchy and traffic boundaries, use
+the [Efficiency Arbiter](../../docs/conceptual/rdna/gcea.rst) and the
+[RDNA3-RDNA4 performance model](../../docs/conceptual/rdna/rdna-performance-model.rst).
 
 Read hit rates and utilizations against the `Percent of Peak` and `Peak`
 columns the report prints. Do not apply a remembered cutoff such as "L2 hit

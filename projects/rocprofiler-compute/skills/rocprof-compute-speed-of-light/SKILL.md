@@ -5,9 +5,9 @@ description: Reads the rocprof-compute System Speed-of-Light panel to show how c
 
 # Read System Speed-of-Light
 
-Speed-of-Light is the first panel to read after profiling. It puts every
-headline metric next to the hardware peak for the current GPU, so one table
-says whether a kernel is near any limit at all.
+Speed-of-Light is the first panel to read after profiling. It puts headline
+metrics next to hardware peaks where the architecture provides a meaningful
+peak, so one table shows which measured limits a kernel approaches.
 
 Run `rocprof-compute analyze --help` before choosing flags.
 
@@ -31,10 +31,73 @@ Speed-of-Light alone:
 rocprof-compute profile --name <workload_name> --speed-of-light -- <application> <args>
 ```
 
+### Navi48 (gfx1201)
+
+This section is the one Navi48 reference for the rocprof-compute skills; the
+memory, kernel-bottleneck, and roofline skills point here.
+
+Linux GPU metrics, the Memory Chart, and roofline start with ROCm Compute
+Profiler 3.11 (ROCm 10.3); ROCm 10.2 and 10.1 shipped without gfx1201 support.
+PC sampling is outside Navi48 support in this release. Follow the `STABLE_STD`
+prerequisite and counter limits in the
+[RDNA System Speed-of-Light](../../docs/conceptual/rdna/system-speed-of-light.rst),
+and compare runs only within one performance state. List the Navi48 aliases
+with `rocprof-compute --list-metrics-gfx-id gfx1201`: the cache blocks are
+`gl0`, `gl1`, and `gl2`, and LDS metrics belong to the WGP block, `wgp`.
+
+`VALU Issue Rate` and `FP64 VALU Issue Rate` use `GInstr/s`, with no FLOP peak
+or percentage of a floating-point peak. Do not turn those instruction rates
+into FLOPs or use them to judge distance from a FLOP ceiling.
+`WMMA FLOPs (F16->F32 16x16x16)` assumes that precision and shape; the raw
+counter counts issues per vec32 and cannot distinguish FP16, BF16, FP8, or BF8.
+Present that comparison as approximate. Do not subtract WMMA issues to infer
+FP32 FLOPs from these rows or combine WMMA and VALU into an independent total.
+A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports WMMA inclusion in
+VALU for that instruction; counted population and other variants remain
+unqualified. WGP `SQ_INST_CYCLES_VALU` counts the cycles needed to execute VALU
+operations. It has no peak and is not elapsed time, FLOPs, or utilization.
+
+The WGP Instruction Issue Stalls table, including `Wait for Any`, is
+unavailable, and Speed-of-Light has no wave-wait rows. `Wavefront Occupancy` and
+WGP `Wave Life` remain provisional while living-wave counter units, reduction,
+and wave-count normalization are validated. Treat these values as unknown when
+inferring occupancy limits or quantified scheduler stalls. Restoration is
+tracked under AIPROFCOMP-907.
+
+For memory, read `memchart` first. GL1 is a write-combining stage that reports
+only `Total Requests`; there is no GL1 utilization, stall, bandwidth, or
+GL1-GL2 data, so do not invent a hit rate when the report prints `N/A`. There
+is no GL2 bandwidth row or table, no CPC panel, and no Efficiency Arbiter
+panel. The Memory Chart `Memory Read Bandwidth` and `Memory Write Bandwidth`
+include traffic served or absorbed by the Infinity Cache, so they do not measure physical VRAM bytes
+and have no VRAM peak. `Infinity Cache Hit Rate` and VRAM bandwidth are
+`N/A`; treat them as unknown, not zero. The LDS byte-access rate normalization
+is provisional.
+
+On the roofline, the device-memory roof is `VRAM` and the `MALL` roof is the
+Infinity Cache. The `AI VRAM` point counts GL2C requests destined for
+memory, which the Infinity Cache can also serve, so the plot marks it once, at
+`VRAM`. Compare it with both roofs yourself, because "Limited by" and the hover
+text never name `MALL`. A point above `VRAM` and below `MALL` means the
+Infinity Cache is absorbing the traffic; never call that kernel VRAM-limited.
+There is no `L1` roof, because GL1 is a write-combining buffer, not a cache.
+The `L2` roof has no kernel point, because there is no `AI L2` row.
+Under `STABLE_STD` the measured roofs sit well below the interface peak. The
+VALU roofline rows subtract WMMA issues from all VALU issues and multiply by
+the wave size, validated only for one wave32 FP16 16x16x16 case. They are
+estimates: integer and floating-point instructions both count and an FMA is
+one issue, so they read low for FMA-only loops and high when index arithmetic
+dominates. The WMMA row is compared with the FP16 WMMA peak. WMMA points need
+an SDK that supports SQ event 233; check the profiling warnings.
+
+If a row has no usable peak, report its measured rate and compare like
+workloads in the same performance state instead of inferring a percent of peak
+or a throughput bottleneck.
+
 ### Collect only what the question needs
 
 Never run a full profile. It replays the application once per counter pass and
-also runs the roofline benchmarks.
+also runs roofline benchmarks on architectures that support them.
 
 - List what this GPU can collect with `rocprof-compute --list-metrics`, and a
   block's metrics with `rocprof-compute --list-metrics <alias>`. On ROCm 10.2
@@ -55,8 +118,9 @@ also runs the roofline benchmarks.
 ## 2. Read it
 
 The table has `Metric`, `Avg`, `Unit`, `Peak`, and `Percent of Peak` columns.
-The peak is already computed for the detected architecture. Compare `Avg`
-against the `Peak` in the same row and never calculate a peak yourself.
+Where a peak is available, it is computed for the detected architecture.
+Compare `Avg` against the `Peak` in the same row and never calculate a peak
+yourself. A missing peak does not establish that the metric is far below a limit.
 
 `Percent of Peak` is `N/A` for metrics that are already percentages, such as
 the utilization rows. Read those as the percentage they are.
@@ -83,7 +147,9 @@ Each metric's definition and the counters behind it are in
 [system-speed-of-light.rst](../../docs/conceptual/cdna/system-speed-of-light.rst)
 for CDNA accelerators and
 [the RDNA equivalent](../../docs/conceptual/rdna/system-speed-of-light.rst)
-for client APUs. The whole metric hierarchy is in the
+for client APUs, and
+[the RDNA4 equivalent](../../docs/conceptual/rdna4/system-speed-of-light.rst)
+for RDNA4 Radeon GPUs. The whole metric hierarchy is in the
 [performance model](../../docs/conceptual/performance-model.rst).
 
 ## 4. Compute Speed-of-Light
