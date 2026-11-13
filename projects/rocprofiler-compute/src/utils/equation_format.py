@@ -5,8 +5,9 @@
 
 normalize_equation() parses an equation and writes it back with constants factored out
 of the aggregation functions and only the parentheses it needs. tools/format_yaml.py
-keeps the YAML files in this form. Standard library only: the YAML formatting hook
-runs with only PyYAML installed.
+keeps the YAML files in this form. parse_equation() and format_equation() are its two
+halves, so a caller can change the syntax tree in between. Standard library only: the
+YAML formatting hook runs with only PyYAML installed.
 """
 
 import re
@@ -44,9 +45,17 @@ def normalize_equation(equation: str) -> str:
     ):
         return equation
 
-    tokens = Tokenizer(equation).tokenize()
-    ast = Parser(tokens).parse()
-    return _serialize_ast(_normalize_ast(ast))
+    return format_equation(parse_equation(equation))
+
+
+def parse_equation(equation: str) -> "ASTNode":
+    """Return the syntax tree of an equation; raise ValueError if it does not parse."""
+    return Parser(Tokenizer(equation).tokenize()).parse()
+
+
+def format_equation(node: "ASTNode") -> str:
+    """Write a syntax tree as an equation in the normalized form."""
+    return _serialize_ast(_normalize_ast(node))
 
 
 def _normalize_ast(node: "ASTNode") -> "ASTNode":
