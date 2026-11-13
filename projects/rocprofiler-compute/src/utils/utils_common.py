@@ -37,6 +37,7 @@ from utils.logger import (
     console_log,
     console_warning,
 )
+from utils.mi_gpu_spec import mi_gpu_specs
 from vendored import yaml
 
 # Global constants
@@ -90,6 +91,16 @@ def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
     if is_gfx115x(gpu_arch):
         return "gfx115x"
     return gpu_arch
+
+
+def config_arch_members(config_arch: str) -> List[str]:
+    """Return the GPU archs that share the analysis-config directory config_arch,
+    sorted by name, e.g. gfx1150 to gfx1153 for gfx115x."""
+    return [
+        gpu_arch
+        for gpu_arch in sorted(mi_gpu_specs.get_gpu_series_dict())
+        if canonical_config_arch(gpu_arch) == config_arch
+    ]
 
 
 # Supported expression field names for metric tables
