@@ -655,8 +655,8 @@ HIP_TEST_CASE(Unit_hipMemPoolAttrReleaseThreshold_Positive_RetentionAndTrim) {
     size_t available = 0, total = 0;
     HIP_CHECK(hipMemGetInfo(&available, &total));
     bytes = total / 8 + total / 16;
-    if (bytes > 4096 * MiB || available < bytes + 1024 * MiB) {
-      HIP_SKIP_TEST("Insufficient headroom or allocation exceeds the 4 GiB test budget");
+    if (available < bytes + 1024 * MiB) {
+      HIP_SKIP_TEST("Insufficient free memory for the large allocation and 1 GiB headroom");
       return;
     }
   }
