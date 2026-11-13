@@ -63,8 +63,10 @@ __device__ __forceinline__ uint4 hierSumSlots(const T* first, size_t slotStride,
   return sum;
 }
 
-// A bank holds [P host slots | N inter-host slots | P gathered slots], each `slice` elements. A round's bank is reused
-// two rounds later, after the barriers of the round in between have ordered every reader.
+// A bank holds [P host slots | N inter-host slots | P gathered slots], each `roundCount / P` elements even when the last
+// round is shorter: barriers only order blocks with the same index, so every block must touch the same scratch
+// addresses in every round. A round's bank is reused two rounds later, after the barriers of the round in between have
+// ordered every reader.
 template <typename T, int P_CT, int N_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
@@ -87,6 +89,7 @@ __launch_bounds__(512)
   for (int h = 0; h < kMaxN; h++) inter[h] = h < N ? bufs[lay.inter[h]] : nullptr;
   T* const own = bufs[lay.intra[local]];
 
+  const size_t slot = roundCount / P;
   const size_t bankStride = hierBankElems(roundCount, P, N);
   const size_t start = (static_cast<size_t>(blockDim.x) * blockIdx.x + threadIdx.x) * kVec;
   const size_t stride = static_cast<size_t>(gridDim.x) * blockDim.x * kVec;
@@ -98,8 +101,8 @@ __launch_bounds__(512)
   for (size_t base = 0; base < count; base += roundCount, bank ^= 1) {
     const size_t slice = min(roundCount, count - base) / P;
     const size_t hostSlots = bank * bankStride;
-    const size_t interSlots = hostSlots + P * slice;
-    const size_t gatherSlots = interSlots + N * slice;
+    const size_t interSlots = hostSlots + P * slot;
+    const size_t gatherSlots = interSlots + N * slot;
 
     for (size_t j = start; j < slice; j += stride) {
       uint4 vals[kMaxP];
@@ -109,7 +112,7 @@ __launch_bounds__(512)
       }
 #pragma unroll
       for (int s = 0; s < kMaxP; s++) {
-        if (s < P) hierStore(intra[s] + hostSlots + local * slice + j, vals[s]);
+        if (s < P) hierStore(intra[s] + hostSlots + local * slot + j, vals[s]);
       }
     }
     barrier.orderDestWrites();
@@ -117,10 +120,10 @@ __launch_bounds__(512)
 
     if (N > 1) {
       for (size_t j = start; j < slice; j += stride) {
-        const uint4 sum = hierSumSlots<T, kMaxP>(own + hostSlots + j, slice, P);
+        const uint4 sum = hierSumSlots<T, kMaxP>(own + hostSlots + j, slot, P);
 #pragma unroll
         for (int h = 0; h < kMaxN; h++) {
-          if (h < N) hierStore(inter[h] + interSlots + lay.hostIndex * slice + j, sum);
+          if (h < N) hierStore(inter[h] + interSlots + lay.hostIndex * slot + j, sum);
         }
       }
       barrier.orderDestWrites();
@@ -128,11 +131,11 @@ __launch_bounds__(512)
     }
 
     for (size_t j = start; j < slice; j += stride) {
-      const uint4 sum = N > 1 ? hierSumSlots<T, kMaxN>(own + interSlots + j, slice, N)
-                              : hierSumSlots<T, kMaxP>(own + hostSlots + j, slice, P);
+      const uint4 sum = N > 1 ? hierSumSlots<T, kMaxN>(own + interSlots + j, slot, N)
+                              : hierSumSlots<T, kMaxP>(own + hostSlots + j, slot, P);
 #pragma unroll
       for (int s = 0; s < kMaxP; s++) {
-        if (s < P) hierStore(intra[s] + gatherSlots + local * slice + j, sum);
+        if (s < P) hierStore(intra[s] + gatherSlots + local * slot + j, sum);
       }
     }
     barrier.orderDestWrites();
@@ -142,7 +145,7 @@ __launch_bounds__(512)
       uint4 vals[kMaxP];
 #pragma unroll
       for (int s = 0; s < kMaxP; s++) {
-        if (s < P) vals[s] = hierLoad(own + gatherSlots + s * slice + j);
+        if (s < P) vals[s] = hierLoad(own + gatherSlots + s * slot + j);
       }
 #pragma unroll
       for (int s = 0; s < kMaxP; s++) {
