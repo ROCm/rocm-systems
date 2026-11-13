@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_test_internal.h"
 #include "test_common.h"
 
 namespace {
@@ -292,6 +293,46 @@ TEST(GpuUnit, CuidEntryPointsNotSupportedWithoutTheLibrary) {
     char cuid[AMDSMI_GPU_CUID_SIZE] = {};
     unsigned int length = sizeof(cuid);
     EXPECT_EQ(amdsmi_get_gpu_device_cuid(handle, &length, cuid), AMDSMI_STATUS_NOT_SUPPORTED);
+  }
+}
+
+// One component whose metadata read fails after the listing, as a partition
+// does when its compute mode changes in between, is left out and the rest are
+// listed, as the CUID specification asks. Needs neither a GPU nor libamdcuid.
+TEST(GpuUnit, CuidListingLeavesOutAComponentThatFails) {
+  for (const amdsmi_status_t failure :
+       {AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_FOUND, AMDSMI_STATUS_UNEXPECTED_DATA,
+        AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_FILE_ERROR, AMDSMI_STATUS_FILE_NOT_FOUND,
+        AMDSMI_STATUS_API_FAILED}) {
+    SCOPED_TRACE(failure);
+    std::vector<amdsmi_cuid_component_t> found;
+    const auto fill = [failure](uint32_t i, amdsmi_cuid_component_t* component) {
+      if (i == 1) return failure;
+      component->vendor_id = static_cast<uint16_t>(100 + i);
+      return AMDSMI_STATUS_SUCCESS;
+    };
+    ASSERT_EQ(amdsmi_cuid_collect_components(4, fill, &found), AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(found.size(), 3u);
+    EXPECT_EQ(found[0].vendor_id, 100);
+    EXPECT_EQ(found[1].vendor_id, 102);
+    EXPECT_EQ(found[2].vendor_id, 103);
+  }
+}
+
+// A failure that is no one component's fails the listing rather than leaving
+// out every component one by one: without a machine-id the node has components
+// and cannot name any of them.
+TEST(GpuUnit, CuidListingFailsOnANodeWideStatus) {
+  for (const amdsmi_status_t failure :
+       {AMDSMI_STATUS_NO_DATA, AMDSMI_STATUS_INVAL, AMDSMI_STATUS_INSUFFICIENT_SIZE}) {
+    SCOPED_TRACE(failure);
+    std::vector<amdsmi_cuid_component_t> found;
+    const auto fill = [failure](uint32_t i, amdsmi_cuid_component_t* component) {
+      component->vendor_id = static_cast<uint16_t>(100 + i);
+      return i == 2 ? failure : AMDSMI_STATUS_SUCCESS;
+    };
+    EXPECT_EQ(amdsmi_cuid_collect_components(4, fill, &found), failure);
+    EXPECT_TRUE(found.empty());
   }
 }
 

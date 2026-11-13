@@ -4,8 +4,23 @@
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_TEST_INTERNAL_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_TEST_INTERNAL_H_
 
+#include <cstdint>
+#include <functional>
+#include <vector>
+
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_flags.h"
+
+// The per-component step of amdsmi_get_cuid_components(): fill(i, &component)
+// for each of |total| components, keeping in |found| those it fills. A
+// component whose fill fails is left out; AMDSMI_STATUS_NO_DATA (no
+// machine-id), AMDSMI_STATUS_INVAL and AMDSMI_STATUS_INSUFFICIENT_SIZE fail
+// the call with |found| empty. Declared here so the unit tests can make one
+// component fail, which no fake sysfs tree can do between the listing and the
+// read.
+amdsmi_status_t amdsmi_cuid_collect_components(
+    uint32_t total, const std::function<amdsmi_status_t(uint32_t, amdsmi_cuid_component_t*)>& fill,
+    std::vector<amdsmi_cuid_component_t>* found);
 
 // Internal test-only wrapper around rsmi_test_sleep. Acquires the device mutex
 // for |seconds| seconds and returns an amdsmi_status_t so tests do not need to
