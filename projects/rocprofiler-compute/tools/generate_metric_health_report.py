@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
-# ruff: noqa: E501
 
 """Generate a metric health HTML report from one or two runs.
 
@@ -19,8 +18,8 @@ Values belong to the kernel with the longest total duration, the one
 `analyze -k 0` selects. The primary statistic is Median:
 
 * Use analyze's Median when the table has one.
-* Else recompute it from per-dispatch data with this tree's evaluator.
-  `SUM / SUM`, `AVG` and Min formulas are reduced per dispatch.
+* Else recompute it from per-dispatch data with this repo's analyze code.
+  `SUM / SUM`, `AVG` and Min formulas are evaluated per dispatch.
 * Else, if Min equals Max, use that value.
 * Tables with only a Value column use Value.
 
@@ -40,46 +39,40 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-import config  # noqa: E402
-from utils import file_io, parser, schema  # noqa: E402
-from utils.metrics.evaluation_pipeline import eval_metric  # noqa: E402
-from utils.metrics.expression import build_metric_value_string  # noqa: E402
-from utils.utils_common import canonical_config_arch  # noqa: E402
+import config
+from rocprof_compute_soc.soc_base import iter_analysis_config_metrics
+from utils import file_io, parser, schema
+from utils.metrics.evaluation_pipeline import eval_metric
+from utils.metrics.expression import build_metric_value_string
+from utils.utils_common import canonical_config_arch
 
-ARCH_TITLE: Dict[str, str] = {
-    "gfx908": "MI100 / gfx908",
-    "gfx90a": "MI250 / gfx90a",
-    "gfx942": "MI300 / gfx942",
-    "gfx950": "MI350 / gfx950",
-    "gfx1150": "gfx1150",
-    "gfx1151": "gfx1151 Strix Halo",
-    "gfx1152": "gfx1152",
-    "gfx1153": "gfx1153 Krackan2",
-    "gfx115x": "gfx115x",
-    "gfx1250": "MI450 / gfx1250",
-}
-
-# Relative change |new-old|/|old| above this → include in delta table.
+# Changes at least this large go in the delta table.
 DELTA_REL_THRESHOLD = 0.05
-# |rel| at or above this → highlight the delta row / |rel| cell.
+# Changes at least this large are highlighted.
 DELTA_HIGHLIGHT_THRESHOLD = 1.0
-# Baselines below this make |rel| undefined; those pairs are skipped.
+# A value closer to zero than this counts as zero.
 DELTA_NEAR_ZERO = 1e-12
+# Min and Max closer than this count as equal.
+MIN_MAX_EQUAL_TOLERANCE = 1e-9
+
+# The statistic every value column shows.
+PRIMARY_STAT = "Median"
+
+# Arches where Block 18 has one row per L2 channel ($total_l2_chan).
+L2_CHANNEL_ROW_ARCHES = frozenset({"gfx942"})
 
 DEFAULT_CANDIDATE_LABEL = "this branch"
 DEFAULT_BASELINE_LABEL = "rocprofiler-compute-develop"
 
-# Analyze value columns the report reads, in the order a raw cell is shown.
-# A metric with none of them is skipped.
+# Analyze value columns the report reads. A metric with none of them is skipped.
 STAT_COLUMNS: Tuple[str, ...] = ("Median", "Value", "Min", "Max", "Avg")
-# Expression columns a metric's formula is read from; the first one set wins.
+# Columns that can hold a metric's formula; the first one that is set wins.
 FORMULA_COLUMNS: Tuple[str, ...] = ("Value", "Avg", "Median", "Min", "Max")
 
 LEVEL_COUNTER_RE = re.compile(r"_LEVEL(?:_sum)?|INFLIGHT_LEVEL", re.IGNORECASE)
@@ -164,21 +157,10 @@ WORKLOAD_DESCRIPTIONS: Dict[str, str] = {
 
 
 @dataclass
-class MetricDef:
-    metric_id: str
-    name: str
-    unit: str
-    formula: str
-    panel_block: int
-    uses_level_counter: bool
-
-
-@dataclass
 class MetricValue:
     """Primary health value is Median (never Avg)."""
 
     value: Optional[float]
-    raw: str
     source: str = ""  # median | recomputed | minmax_eq | value
     min_v: Optional[float] = None
     max_v: Optional[float] = None
@@ -245,12 +227,7 @@ def to_float(value: str) -> Optional[float]:
 
 
 def relative_abs_delta(old: float, new: float) -> Optional[float]:
-    """Return |new-old|/|old|, or None when the baseline is ~0 (undefined).
-
-    Health deltas compare Median values. A near-zero baseline must not be
-    replaced with an epsilon — that yields absurd percentages such as 1e18%
-    when old=0 and new is a small nonzero spike.
-    """
+    """Return |new-old|/|old|, or None when the baseline is near zero."""
     if abs(old) < DELTA_NEAR_ZERO:
         return None
     return abs(new - old) / abs(old)
@@ -297,13 +274,12 @@ def metric_value_from_columns(columns: Dict[str, str]) -> MetricValue:
     elif (
         min_v is not None
         and max_v is not None
-        and abs(min_v - max_v) <= max(1e-9, 1e-9 * abs(min_v))
+        and abs(min_v - max_v)
+        <= max(MIN_MAX_EQUAL_TOLERANCE, MIN_MAX_EQUAL_TOLERANCE * abs(min_v))
     ):
         value, source = min_v, "minmax_eq"
-    raw = next((columns[name] for name in STAT_COLUMNS if columns.get(name)), "N/A")
     return MetricValue(
         value=value,
-        raw=raw,
         source=source,
         min_v=min_v,
         max_v=max_v,
@@ -340,13 +316,6 @@ def read_top_kernel_metrics(csv_dir: Path) -> WorkloadMetrics:
         metrics=metrics,
         units={key: units[key] for key in metrics},
     )
-
-
-def _read_csv_rows(path: Path) -> List[Dict[str, str]]:
-    if not path.is_file():
-        raise SystemExit(f"Analyze CSV file not found: {path}")
-    with path.open(encoding="utf-8", newline="") as csv_file:
-        return list(csv.DictReader(csv_file))
 
 
 def min_formula_to_median_expr(min_formula: str) -> Optional[str]:
@@ -387,38 +356,6 @@ def min_formula_to_median_expr(min_formula: str) -> Optional[str]:
     return None
 
 
-def _replace_reducible_aggregates(expression: str) -> str:
-    """Replace every ``to_sum(x)`` or ``to_avg(x)`` with its operand ``(x)``."""
-    pieces: List[str] = []
-    index = 0
-    while index < len(expression):
-        matched = ""
-        for name in ("to_sum", "to_avg"):
-            prefix = f"{name}("
-            if expression.startswith(prefix, index):
-                matched = prefix
-                break
-        if not matched:
-            pieces.append(expression[index])
-            index += 1
-            continue
-        operand_start = index + len(matched)
-        depth = 1
-        operand_end = operand_start
-        while operand_end < len(expression) and depth:
-            if expression[operand_end] == "(":
-                depth += 1
-            elif expression[operand_end] == ")":
-                depth -= 1
-            operand_end += 1
-        if depth:
-            return expression
-        operand = expression[operand_start : operand_end - 1]
-        pieces.append(f"({_replace_reducible_aggregates(operand)})")
-        index = operand_end
-    return "".join(pieces)
-
-
 def aggregator_to_stat(expression: str, replacement: str) -> Optional[str]:
     """Replace exactly one Min or Median aggregation with a statistic."""
     hits = re.findall(r"\b(?:to_median|to_min|MEDIAN|MIN)\(", expression)
@@ -433,11 +370,10 @@ def aggregator_to_stat(expression: str, replacement: str) -> Optional[str]:
 
 
 def per_dispatch_stat_expr(expression: object, statistic: str) -> Optional[str]:
-    """Build Median or Std Dev over values from individual dispatches.
+    """Build a Median or Std Dev expression over per-dispatch values.
 
-    ``to_sum`` and ``to_avg`` (from ``SUM`` and ``AVG`` formulas) are replaced
-    with the per-dispatch operand. A single Min or Median aggregation is
-    renamed. Max and ``COLLECT_SUM`` stay unset.
+    to_sum(x) and to_avg(x) become x for each dispatch. A single Min or Median
+    call becomes the statistic. Max and COLLECT_SUM give None.
     """
     if not isinstance(expression, str):
         return None
@@ -463,84 +399,13 @@ def per_dispatch_stat_expr(expression: object, statistic: str) -> Optional[str]:
     return f"{reducer}({_replace_reducible_aggregates(text)})"
 
 
-def _attach_stat_column(dfs: dict, dfs_type: dict, statistic: str) -> None:
-    """Add a per-dispatch statistic expression when that column is absent."""
-    column = "Median" if statistic == "median" else "Std Dev"
-    for _df_id, frame in dfs.items():
-        if dfs_type.get(_df_id) != "metric_table" or column in frame.columns:
-            continue
-        source_col = next(
-            (
-                name
-                for name in ("Median", "Min", "Avg", "Value")
-                if name in frame.columns
-            ),
-            None,
-        )
-        if source_col is None:
-            continue
-        frame[column] = [
-            per_dispatch_stat_expr(value, statistic) for value in frame[source_col]
-        ]
-
-
-def _read_stat_column(arch_config: object, column: str) -> Dict[str, Optional[float]]:
-    """Read one evaluated statistic column into metric-key → float."""
-    skip_cols = {
-        "Avg",
-        "Min",
-        "Max",
-        "Median",
-        "Std Dev",
-        "Unit",
-        "Peak",
-        "Percent of Peak",
-        "Description",
-        "Value",
-        "Q1",
-        "Q3",
-    }
-    out: Dict[str, Optional[float]] = {}
-    for df_id, frame in arch_config.dfs.items():
-        if arch_config.dfs_type.get(df_id) != "metric_table":
-            continue
-        if column not in frame.columns:
-            continue
-        name_col = "Metric" if "Metric" in frame.columns else None
-        if name_col is None:
-            for col in frame.columns:
-                if col not in skip_cols:
-                    name_col = col
-                    break
-        if name_col is None:
-            continue
-        for row_id, row in frame.iterrows():
-            cell = row.get(column)
-            if cell is None or (isinstance(cell, float) and math.isnan(cell)):
-                out[f"{row_id}|{row[name_col]}"] = None
-            elif isinstance(cell, str):
-                out[f"{row_id}|{row[name_col]}"] = to_float(cell)
-            else:
-                try:
-                    out[f"{row_id}|{row[name_col]}"] = float(cell)
-                except (TypeError, ValueError):
-                    out[f"{row_id}|{row[name_col]}"] = None
-    return out
-
-
 def load_workload_metric_tables(wl_dir: Path) -> Tuple[object, pd.DataFrame]:
     """Build the analyze metric tables for a profiled workload's own arch.
 
     Returns the arch config, with one table per panel, and the sysinfo frame.
     """
-    sys_info = pd.read_csv(wl_dir / "sysinfo.csv")
-    arch = str(sys_info.iloc[0]["gpu_arch"])
-    config_dir = (
-        config.rocprof_compute_home
-        / "rocprof_compute_soc"
-        / "analysis_configs"
-        / (canonical_config_arch(arch) or arch)
-    )
+    sys_info, arch = read_sysinfo(wl_dir)
+    config_dir = config.analysis_configs_dir / (canonical_config_arch(arch) or arch)
     arch_config = schema.ArchConfig()
     arch_config.panel_configs = file_io.load_panel_configs([str(config_dir)])
     parser.build_dfs(
@@ -643,7 +508,7 @@ def compute_dispatch_stats_for_workload(
         str(wl_dir), verbose=0
     )
     filtered = parser.apply_filters(workload, debug=False)
-    # Same dispatches as the analyze CSV values: one kernel's only.
+    # Keep only the dispatches of the kernel analyze reported.
     filtered = filtered[filtered["Kernel_Name"] == kernel_name]
     if filtered.empty:
         raise SystemExit(f"Kernel {kernel_name} has no dispatches in {wl_dir}")
@@ -669,27 +534,22 @@ def apply_recomputed_medians(
     results: Dict[str, WorkloadMetrics],
     profile_dirs: Dict[str, Path],
 ) -> None:
-    """Fill missing Medians and Std Devs from per-dispatch re-eval."""
+    """Fill missing Medians and Std Devs by re-evaluating each dispatch."""
     for wl_name, wl_dir in profile_dirs.items():
         workload_metrics = results[wl_name]
-        try:
-            medians, stddevs = compute_dispatch_stats_for_workload(
-                wl_dir, workload_metrics.kernel_name
-            )
-        except Exception as exc:  # noqa: BLE001 - report soft-fail in HTML
-            print(f"WARN: median recompute failed for {wl_dir}: {exc}")
-            continue
+        medians, stddevs = compute_dispatch_stats_for_workload(
+            wl_dir, workload_metrics.kernel_name
+        )
         for key, med in medians.items():
             if med is None:
                 continue
             existing = workload_metrics.metrics.get(key)
             if existing is None:
                 workload_metrics.metrics[key] = MetricValue(
-                    value=med, raw=f"{med:g}", source="recomputed"
+                    value=med, source="recomputed"
                 )
             elif existing.source != "median":
                 existing.value = med
-                existing.raw = f"{med:g}"
                 existing.source = "recomputed"
         for key, std in stddevs.items():
             if std is None:
@@ -730,22 +590,23 @@ def load_run_metrics(run: RunArtifacts) -> Dict[str, WorkloadMetrics]:
     return results
 
 
-def workload_arch(profile_dir: Path) -> str:
-    """Return the GPU arch a workload was profiled on."""
-    return str(pd.read_csv(profile_dir / "sysinfo.csv").iloc[0]["gpu_arch"])
+def read_sysinfo(profile_dir: Path) -> Tuple[pd.DataFrame, str]:
+    """Return a profiled workload's sysinfo frame and its GPU arch."""
+    sys_info = pd.read_csv(profile_dir / "sysinfo.csv")
+    return sys_info, str(sys_info.iloc[0]["gpu_arch"])
 
 
 def classify_metrics(
     workload_metrics: Dict[str, Dict[str, MetricValue]],
     metric_units: Dict[str, str],
-    metric_formulas: Dict[str, str],
+    formula_by_key: Dict[str, str],
 ) -> None:
     mega = workload_metrics.get("mega_kernel", {})
     for wl_name, wl_metrics in workload_metrics.items():
         for key, mv in wl_metrics.items():
             unit = metric_units.get(key, "")
             name = key.split("|", 1)[1]
-            formula = metric_formulas.get(key, "")
+            formula = formula_by_key.get(key, "")
             if mv.value is None:
                 mega_mv = mega.get(key)
                 if (
@@ -758,25 +619,24 @@ def classify_metrics(
                     mv.cls = "na"
                 continue
             if "percent" in unit.lower() and abs(mv.value) > 100:
-                _name = key.split("|", 1)[1]
-                if _name in COUNTER_SEMANTIC_OVERFLOW_NAMES:
+                if name in COUNTER_SEMANTIC_OVERFLOW_NAMES:
                     mv.cls = "formula_overflow"
                 else:
                     mv.cls = "overflow"
                 continue
             mega_mv = mega.get(key)
             mega_val = mega_mv.value if mega_mv else None
-            if abs(mv.value) < 1e-12:
+            if abs(mv.value) < DELTA_NEAR_ZERO:
                 if (
                     wl_name != "mega_kernel"
                     and mega_val is not None
-                    and abs(mega_val) > 1e-12
+                    and abs(mega_val) > DELTA_NEAR_ZERO
                 ):
                     mv.cls = "workload_zero"
                 elif all(
-                    wl_metrics.get(key, MetricValue(None, "")).value is not None
-                    and abs(wl_metrics.get(key, MetricValue(0.0, "0")).value or 0)
-                    < 1e-12
+                    wl_metrics.get(key, MetricValue(None)).value is not None
+                    and abs(wl_metrics.get(key, MetricValue(0.0)).value or 0)
+                    < DELTA_NEAR_ZERO
                     for wl_metrics in workload_metrics.values()
                 ):
                     mv.cls = classify_all_workload_zero(name, formula)
@@ -790,14 +650,6 @@ def fmt_value(mv: Optional[MetricValue], unit: str = "") -> str:
     if mv is None or mv.value is None:
         return "N/A"
     return _fmt_number(mv.value, unit)
-
-
-def _fmt_number(value: float, unit: str = "") -> str:
-    if "percent" in unit.lower():
-        return f"{value:.2f}".rstrip("0").rstrip(".")
-    if abs(value) >= 1000:
-        return f"{value:,.2f}".rstrip("0").rstrip(".")
-    return f"{value:.2g}"
 
 
 def fmt_std(mv: Optional[MetricValue], unit: str = "") -> str:
@@ -852,30 +704,12 @@ def render_zero_sub_bucket_lines(summary: Dict[str, int]) -> str:
     return "".join(lines)
 
 
-# CDNA3 multi-XCD L2-per-channel expansion ($total_l2_chan) applies here.
-_CDNA3_L2_CHAN_ARCHES = frozenset({"gfx942"})
-
-
 def count_yaml_metric_entries(config_arch: str) -> Tuple[int, int]:
     """Return (metric table entries, unique metric names) for analysis_configs."""
-    config_dir = SRC / "rocprof_compute_soc" / "analysis_configs" / config_arch
-    entries = 0
-    names: Set[str] = set()
-    if not config_dir.is_dir():
-        return 0, 0
-    for yaml_path in sorted(config_dir.glob("*.yaml")):
-        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-        panel = data.get("Panel Config", data)
-        for entry in panel.get("data source", []):
-            if not isinstance(entry, dict):
-                continue
-            table = entry.get("metric_table", entry)
-            if not isinstance(table, dict) or "metric" not in table:
-                continue
-            metrics = table.get("metric") or {}
-            entries += len(metrics)
-            names.update(metrics)
-    return entries, len(names)
+    metrics = list(
+        iter_analysis_config_metrics(config.analysis_configs_dir / config_arch, set())
+    )
+    return len(metrics), len({metric.metric_name for metric in metrics})
 
 
 def build_total_note(
@@ -883,35 +717,34 @@ def build_total_note(
     config_arch: str,
     summary: Dict[str, Dict[str, int]],
     all_keys_count: int,
-    stat_label: str,
 ) -> str:
     """Arch-specific explanation of card Total vs YAML metric definitions."""
     yaml_entries, yaml_unique = count_yaml_metric_entries(config_arch)
     yaml_bit = (
         f"YAML metric definitions (~{yaml_entries} table entries / "
-        f"~{yaml_unique} unique names in <code>analysis_configs/{html.escape(config_arch)}</code>)"
+        f"~{yaml_unique} unique names in "
+        f"<code>analysis_configs/{html.escape(config_arch)}</code>)"
     )
     totals = ", ".join(f"{html.escape(wl)}={s['total']}" for wl, s in summary.items())
     common_tail = (
-        f"Each card Total equals the union of analyze-table rows across workloads "
-        f"(<b>{all_keys_count}</b> here; per-workload "
-        f"{totals}). All-N/A cells are kept and bucketed as N/A / Expected N/A — "
-        f"they are not dropped from Total. "
-        f"Cell values are <b>{html.escape(stat_label)}</b> "
+        f"Each card Total counts every analyze-table row seen in any workload "
+        f"(<b>{all_keys_count}</b> here; per-workload {totals}). "
+        f"A metric with no value counts as N/A or Expected N/A and stays in Total. "
+        f"Cell values are <b>{PRIMARY_STAT}</b> "
         f"(from analyze's Median, or recomputed from per-dispatch data). "
         f"Std Dev is the per-dispatch sample standard deviation. "
         f"CV is Std Dev / |Median|."
     )
 
-    if arch in _CDNA3_L2_CHAN_ARCHES:
+    if arch in L2_CHANNEL_ROW_ARCHES:
         return (
             "<p style='font-size:11px;color:#555;margin:4px 0 10px;max-width:960px'>"
             "<b>Total</b> counts analyze-table rows (from the analyze CSV export), "
             f"not {yaml_bit}. "
-            "Block 18 (L2 Cache per Channel) counts one analyze-table row per "
-            "channel in <code>$total_l2_chan</code> "
-            "(<code>l2_banks × num_xcd</code> from the profile sysinfo). "
-            "The Total is that expanded row count. "
+            "Block 18 (L2 Cache per Channel) has one row per L2 channel: "
+            "<code>$total_l2_chan</code>, which is "
+            "<code>l2_banks × num_xcd</code> from the profile sysinfo. "
+            "Total counts each of those rows. "
             f"{common_tail}"
             "</p>"
         )
@@ -921,9 +754,8 @@ def build_total_note(
             "<p style='font-size:11px;color:#555;margin:4px 0 10px;max-width:960px'>"
             "<b>Total</b> counts analyze-table rows (from the analyze CSV export), "
             f"not {yaml_bit}. "
-            "RDNA3.5 / gfx115x has no CDNA Block-18 "
-            "<code>$total_l2_chan</code> L2-per-channel expansion, so Totals stay near "
-            "the YAML entry count (plus any non-channel table expansion). "
+            "gfx115x has no per-channel Block 18 rows, so Total stays close to "
+            "the YAML entry count. "
             f"{common_tail}"
             "</p>"
         )
@@ -934,55 +766,6 @@ def build_total_note(
         f"not {yaml_bit}. "
         f"{common_tail}"
         "</p>"
-    )
-
-
-def _iteration_banner(
-    iterations: Optional[int],
-    dispatch_counts: Dict[str, Optional[int]],
-    stat_label: str,
-) -> str:
-    """Build the Statistic / iterations header strip.
-
-    Collapses requested iterations and observed top-kernel dispatch counts into
-    one "wl req/disp" pair list when both are available. CLI flag hints
-    (-i / arg2 / -n) are omitted when every pair matches - they only repeat
-    the same number.
-    """
-    parts = [f"<b>Statistic:</b> {html.escape(stat_label)}"]
-    known_dispatches = {
-        wl: count for wl, count in dispatch_counts.items() if count is not None
-    }
-    if iterations is not None and known_dispatches:
-        pair_bits = [
-            f"{html.escape(wl)} {iterations}/{count}"
-            for wl, count in known_dispatches.items()
-        ]
-        parts.append(
-            "<b>Iterations / top-kernel dispatches:</b> " + ", ".join(pair_bits)
-        )
-        if any(count != iterations for count in known_dispatches.values()):
-            parts.append(
-                f"CLI: vcopy <code>-i {iterations}</code>, "
-                f"nbody arg2={iterations}, "
-                f"mega_kernel <code>-n {iterations}</code>"
-            )
-    elif iterations is not None:
-        parts.append(
-            f"<b>Requested iterations:</b> n={iterations} "
-            f"(vcopy <code>-i {iterations}</code>, "
-            f"nbody arg2={iterations}, "
-            f"mega_kernel <code>-n {iterations}</code>)"
-        )
-    elif known_dispatches:
-        count_bits = [
-            f"{html.escape(wl)}={count}" for wl, count in known_dispatches.items()
-        ]
-        parts.append("<b>Top-kernel Count (dispatches):</b> " + ", ".join(count_bits))
-    return (
-        '<p style="margin:2px 0;color:#37474f;font-size:12px">'
-        + " | ".join(parts)
-        + "</p>"
     )
 
 
@@ -998,7 +781,6 @@ def build_report(
     arch: str,
     config_arch: str,
     iterations: Optional[int],
-    stat_label: str,
 ) -> None:
     """Compute the report data, render it, and write the HTML page."""
     data = compute_report(results, baseline_results, formulas)
@@ -1012,7 +794,6 @@ def build_report(
         arch,
         config_arch,
         iterations,
-        stat_label,
     )
     out_path.write_text(page, encoding="utf-8")
 
@@ -1024,11 +805,11 @@ def compute_report(
 ) -> ReportData:
     """Classify metrics, count buckets, and compare against the baseline."""
     metric_units = {k: formulas.get(k, ("", "", False))[1] for k in formulas}
-    metric_formulas = {k: formulas.get(k, ("", "", False))[0] for k in formulas}
+    formula_by_key = {k: formulas.get(k, ("", "", False))[0] for k in formulas}
     metrics: Dict[str, Dict[str, MetricValue]] = {
         wl: result.metrics for wl, result in results.items()
     }
-    classify_metrics(metrics, metric_units, metric_formulas)
+    classify_metrics(metrics, metric_units, formula_by_key)
     data = ReportData(
         wl_names=list(results),
         metrics=metrics,
@@ -1040,7 +821,7 @@ def compute_report(
         base_metrics: Dict[str, Dict[str, MetricValue]] = {
             wl: result.metrics for wl, result in baseline_results.items()
         }
-        classify_metrics(base_metrics, metric_units, metric_formulas)
+        classify_metrics(base_metrics, metric_units, formula_by_key)
         compare_runs(data, base_metrics)
     return data
 
@@ -1061,13 +842,10 @@ def summarize_buckets(
     metrics: Dict[str, Dict[str, MetricValue]],
     all_keys: List[str],
 ) -> Dict[str, Dict[str, int]]:
-    """Count each workload's metrics per bucket over the shared key universe.
+    """Count each workload's metrics per bucket.
 
-    Total counts analyze-table rows read from the analyze CSV export (including
-    all-N/A cells), not YAML metric definitions. On CDNA3, Block 18 expands
-    across $total_l2_chan — see build_total_note(). Missing keys (present in
-    another workload only) count as N/A so each card Total matches the
-    main-table row universe (len(all_keys)).
+    A metric missing from one workload counts as N/A there, so every Total
+    equals len(all_keys).
     """
     summary: Dict[str, Dict[str, int]] = {
         wl: {
@@ -1121,7 +899,7 @@ def compare_runs(
                 data.improvements.append(MetricChange(wl, key, old, new))
             if old.value is None or new.value is None:
                 continue
-            # |rel| with old≈0 is undefined — skip (no huge % highlights).
+            # rel is None when the baseline is near zero.
             rel = relative_abs_delta(old.value, new.value)
             if rel is None or rel < DELTA_REL_THRESHOLD:
                 continue
@@ -1147,7 +925,6 @@ def render_report(
     arch: str,
     config_arch: str,
     iterations: Optional[int],
-    stat_label: str,
 ) -> str:
     """Render computed report data as one self-contained HTML page."""
     wl_names = data.wl_names
@@ -1155,25 +932,23 @@ def render_report(
         _render_card(wl, data.summary[wl], data.dispatch_counts.get(wl))
         for wl in wl_names
     ]
-    total_note = build_total_note(
-        arch, config_arch, data.summary, len(data.all_keys), stat_label
-    )
+    total_note = build_total_note(arch, config_arch, data.summary, len(data.all_keys))
 
     body_rows = [_render_metric_row(data, key, formulas) for key in data.all_keys]
 
     wl_headers = "".join(
-        f"<th>{html.escape(wl)}<br><small>{WORKLOAD_DESCRIPTIONS.get(wl, '')}</small><br>"
-        f"<small>{html.escape(stat_label)}</small><br>"
+        f"<th>{html.escape(wl)}<br>"
+        f"<small>{WORKLOAD_DESCRIPTIONS.get(wl, '')}</small><br>"
+        f"<small>{PRIMARY_STAT}</small><br>"
         "<small>σ Std Dev</small><br><small>CV</small></th>"
         for wl in wl_names
     )
 
-    arch_title = ARCH_TITLE.get(arch, arch)
-    iter_banner = _iteration_banner(iterations, data.dispatch_counts, stat_label)
+    iter_banner = _iteration_banner(iterations, data.dispatch_counts)
     improve_section = ""
     if baseline is not None:
         improve_section = _render_comparison_sections(
-            data, formulas, baseline.label, primary_run.label, stat_label
+            data, formulas, baseline.label, primary_run.label
         )
 
     primary_label = "Candidate" if baseline is not None else "Run"
@@ -1188,14 +963,19 @@ def render_report(
         )
 
     doc = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<title>{html.escape(arch_title)} — Metric Health {html.escape(report_date)}</title>
+<title>{html.escape(arch)} Metric Health {html.escape(report_date)}</title>
 <style>
-body{{font-family:'Segoe UI',Arial,sans-serif;background:#eceff1;margin:0;padding:16px;font-size:13px}}
-h1{{color:#0d47a1;margin-bottom:4px}}h2{{color:#263238;border-bottom:2px solid #1565c0;padding-bottom:4px;margin-top:22px}}
+body{{font-family:'Segoe UI',Arial,sans-serif;background:#eceff1;margin:0;padding:16px;
+font-size:13px}}
+h1{{color:#0d47a1;margin-bottom:4px}}h2{{color:#263238;border-bottom:2px solid #1565c0;
+padding-bottom:4px;margin-top:22px}}
 .cards{{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0}}
-.card{{background:#fff;border-radius:8px;padding:10px 16px;box-shadow:0 2px 6px rgba(0,0,0,.12);min-width:140px}}
-.card h3{{margin:0 0 3px;font-size:13px;color:#555}}.desc{{font-size:10px;color:#888;margin-bottom:4px}}
-.improve-table{{border-collapse:collapse;width:100%;background:#fff;margin-top:6px;font-size:12px}}
+.card{{background:#fff;border-radius:8px;padding:10px 16px;box-shadow:0 2px 6px
+rgba(0,0,0,.12);min-width:140px}}
+.card h3{{margin:0 0 3px;font-size:13px;color:#555}}.desc{{font-size:10px;color:#888;
+margin-bottom:4px}}
+.improve-table{{border-collapse:collapse;width:100%;background:#fff;margin-top:6px;
+font-size:12px}}
 .improve-table th{{background:#1565c0;color:#fff;padding:5px 8px;text-align:left}}
 .improve-table td{{padding:3px 8px;border-bottom:1px solid #eee}}
 .sortable-table th{{cursor:pointer;user-select:none;white-space:nowrap}}
@@ -1205,72 +985,117 @@ h1{{color:#0d47a1;margin-bottom:4px}}h2{{color:#263238;border-bottom:2px solid #
 tr.delta-ge-100 td{{background:#fff8e1}}
 tr.delta-ge-100 td:nth-child(10){{background:#ffe082;font-weight:bold}}
 tr.delta-ge-100:hover td{{filter:brightness(0.96)}}
-.bucket-semantics{{border-collapse:collapse;width:100%;max-width:920px;background:#fff;margin:10px 0 4px;font-size:12px;box-shadow:0 1px 4px rgba(0,0,0,.08)}}
-.bucket-semantics th{{background:#eceff1;color:#37474f;padding:8px 10px;text-align:left;font-weight:600;position:static}}
-.bucket-semantics td{{padding:7px 10px;border-bottom:1px solid #e0e0e0;vertical-align:top}}
+.bucket-semantics{{border-collapse:collapse;width:100%;max-width:920px;background:#fff;
+margin:10px 0 4px;font-size:12px;box-shadow:0 1px 4px rgba(0,0,0,.08)}}
+.bucket-semantics th{{background:#eceff1;color:#37474f;padding:8px 10px;text-align:left;
+font-weight:600;position:static}}
+.bucket-semantics td{{padding:7px 10px;border-bottom:1px solid #e0e0e0;
+vertical-align:top}}
 .bucket-semantics tr:last-child td{{border-bottom:none}}
 .bucket-semantics td:first-child{{font-weight:600;white-space:nowrap}}
 .legend{{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;user-select:none}}
 .filter-note{{font-size:11px;color:#888;margin:-4px 0 4px}}
 .tbl-wrap{{overflow-x:auto;max-height:65vh;overflow-y:auto}}
 table{{border-collapse:collapse;width:100%;background:#fff;font-size:12px}}
-th{{background:#37474f;color:#fff;padding:6px 8px;text-align:left;position:sticky;top:0;z-index:2;white-space:nowrap}}
+th{{background:#37474f;color:#fff;padding:6px 8px;text-align:left;position:sticky;top:0;
+z-index:2;white-space:nowrap}}
 td{{padding:3px 5px;border-bottom:1px solid #e0e0e0;vertical-align:middle}}
 tr:hover td{{filter:brightness(0.91)}}
 .mid{{font-family:monospace;color:#546e7a;font-size:11px}}.mname{{max-width:180px}}
 .unit{{color:#90a4ae;font-style:italic;font-size:10px}}
 tr.row-overflow{{box-shadow:inset 0 0 0 2px #c62828}}
 </style></head><body>
-<h1>{html.escape(arch_title)} — Metric Health Report</h1>
-<p style="margin:2px 0;color:#607d8b;font-size:12px"><b>Date:</b> {html.escape(report_date)}
+<h1>{html.escape(arch)} Metric Health Report</h1>
+<p style="margin:2px 0;color:#607d8b;font-size:12px"><b>Date:</b>
+{html.escape(report_date)}
  | <b>Host:</b> {html.escape(host_label)}
 {runs_html}
  | <b>Arch:</b> {html.escape(arch)}
  | <b>Workloads:</b> {html.escape(", ".join(wl_names))}</p>
 {iter_banner}
-<p style="font-size:11px;color:#555">Analysis configs: <code>{html.escape(config_arch)}</code>.
-All-workload zeros are split into sub-buckets (healthy / optional path / SDK bug suspect / other).
-Expected zero / Expected N/A compare non-mega workloads against mega_kernel when present.</p>
+<p style="font-size:11px;color:#555">Analysis configs: <code>{html.escape(config_arch)}
+</code>.
+All-workload zeros are split into sub-buckets (healthy / optional path / SDK bug suspect
+/ other).
+Expected zero and Expected N/A compare the other workloads with mega_kernel when
+present.</p>
 <h2>Summary</h2>
 {total_note}
 <div class="cards">{"".join(cards)}</div>
 <h2>Bucket semantics</h2>
-<p style="font-size:11px;color:#555;margin:2px 0 6px">Each metric in each workload column is assigned to <b>exactly one</b> bucket; counts on each card sum to Total.</p>
+<p style="font-size:11px;color:#555;margin:2px 0 6px">Each metric in each workload
+column is assigned to <b>exactly one</b> bucket; counts on each card sum to Total.</p>
 <table class="bucket-semantics">
 <thead><tr><th>Bucket</th><th>Meaning</th><th>Healthy?</th></tr></thead>
 <tbody>
-<tr><td>Good</td><td>Value exists; not N/A; not &gt;100% (percent); not classified as zero</td><td>Usually yes</td></tr>
-<tr><td>Zero — healthy (<code>zero_healthy</code>)</td><td>Zero in every workload; metric is a stall/failure/alloc-failure rate where 0% is good</td><td>Yes</td></tr>
-<tr><td>Zero — optional path (<code>zero_optional</code>)</td><td>Zero in every workload; precision or IP path mega_kernel does not exercise (FP64, etc.)</td><td>Usually yes</td></tr>
-<tr><td>Zero — SDK bug suspect (<code>zero_sdk_bug</code>)</td><td>Zero in every workload but mega_kernel exercises the path or counters should fire (VALU FLOPs, DRAM read)</td><td>Investigate — file SDK JIRA</td></tr>
-<tr><td>Zero — other (<code>zero_other</code>)</td><td>Zero in every workload; uncategorized (often low-traffic structural zeros)</td><td>Review case-by-case</td></tr>
-<tr><td>Expected zero (<code>workload_zero</code>)</td><td>Zero here, but non-zero in mega_kernel</td><td>Yes — workload doesn't hit that path</td></tr>
-<tr><td>Expected N/A (<code>expected_na</code>)</td><td>N/A here (formula guard / zero denominator), but mega_kernel has a value</td><td>Yes — workload doesn't hit that path</td></tr>
-<tr><td>N/A</td><td>Analyze couldn't produce a value and mega_kernel also has no value</td><td>Investigate</td></tr>
-<tr><td>&gt;100% formula (<code>formula_overflow</code>)</td><td>Percent &gt;100% from known counter semantics (OR-gate overlap, pipeline slot counting)</td><td>Usually benign — read trend not absolute %</td></tr>
-<tr><td>&gt;100% hardware (<code>overflow</code>)</td><td>Percent &gt;100% not explained by known semantics — likely bad formula or counter bug</td><td>Investigate</td></tr>
+<tr><td>Good</td><td>Value exists; not N/A; not &gt;100% (percent); not classified as
+zero</td><td>Usually yes</td></tr>
+<tr><td>Zero: healthy (<code>zero_healthy</code>)</td><td>Zero in every workload; metric
+is a stall/failure/alloc-failure rate where 0% is good</td><td>Yes</td></tr>
+<tr><td>Zero: optional path (<code>zero_optional</code>)</td><td>Zero in every workload;
+precision or IP path mega_kernel does not exercise (FP64, etc.)</td><td>Usually yes</td>
+</tr>
+<tr><td>Zero: SDK bug suspect (<code>zero_sdk_bug</code>)</td><td>Zero in every workload
+but mega_kernel exercises the path or counters should fire (VALU FLOPs, DRAM read)</td>
+<td>Investigate; report it to the SDK team</td></tr>
+<tr><td>Zero: other (<code>zero_other</code>)</td><td>Zero in every workload; no
+category matched (often paths with little traffic)</td><td>Review case-by-case</td></tr>
+<tr><td>Expected zero (<code>workload_zero</code>)</td><td>Zero here, but non-zero in
+mega_kernel</td><td>Yes; the workload doesn't use that path</td></tr>
+<tr><td>Expected N/A (<code>expected_na</code>)</td><td>N/A here (for example a zero
+denominator), but mega_kernel has a value</td><td>Yes; the workload doesn't use that
+path</td></tr>
+<tr><td>N/A</td><td>Analyze couldn't produce a value and mega_kernel also has no value
+</td><td>Investigate</td></tr>
+<tr><td>&gt;100% formula (<code>formula_overflow</code>)</td><td>Percent &gt;100% that
+the counters' known behavior explains (overlapping busy signals, pipeline slot counting)
+</td><td>Usually benign; read the trend, not the absolute %</td></tr>
+<tr><td>&gt;100% hardware (<code>overflow</code>)</td><td>Percent &gt;100% that known
+behavior does not explain; likely a bad formula or counter bug</td><td>Investigate</td>
+</tr>
 </tbody></table>
 {improve_section}
-<h2>All Metrics — Blocks 2–18</h2>
-<p style="font-size:11px;color:#555;margin:4px 0">Column values are <b>{html.escape(stat_label)}</b>.</p>
+<h2>All metrics: Blocks 2-18</h2>
+<p style="font-size:11px;color:#555;margin:4px 0">Column values are <b>{PRIMARY_STAT}
+</b>.</p>
 <div class="legend">
-<div class="leg" data-cls="good" style="background:#c8e6c9;color:#1b5e20;font-weight:bold;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">▲ Good (real data)</div>
-<div class="leg" data-cls="overflow" style="background:#c62828;color:#fff;font-weight:bold;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">🚨 &gt;100% hardware</div>
-<div class="leg" data-cls="formula_overflow" style="background:#ff8f00;color:#fff;font-weight:bold;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">📐 &gt;100% formula</div>
-<div class="leg" data-cls="zero_healthy" style="background:#e8f5e9;color:#2e7d32;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">✓ Zero — healthy (0% stall)</div>
-<div class="leg" data-cls="zero_optional" style="background:#e3f2fd;color:#1565c0;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">○ Zero — optional path</div>
-<div class="leg" data-cls="zero_sdk_bug" style="background:#ffcdd2;color:#c62828;font-weight:bold;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">❌ Zero — SDK bug suspect</div>
-<div class="leg" data-cls="zero_other" style="background:#f5f5f5;color:#616161;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">⬜ Zero — other</div>
-<div class="leg" data-cls="workload_zero" style="background:#b3e5fc;color:#01579b;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">⚪ Expected zero (non-zero in mega)</div>
-<div class="leg" data-cls="expected_na" style="background:#d1c4e9;color:#4527a0;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">🔹 Expected N/A (valid in mega)</div>
-<div class="leg" data-cls="na" style="background:#e1bee7;color:#6a1b9a;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">⚠️ N/A (investigate)</div>
+<div class="leg" data-cls="good" style="background:#c8e6c9;color:#1b5e20;
+font-weight:bold;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">▲
+Good (real data)</div>
+<div class="leg" data-cls="overflow" style="background:#c62828;color:#fff;
+font-weight:bold;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">🚨
+&gt;100% hardware</div>
+<div class="leg" data-cls="formula_overflow" style="background:#ff8f00;color:#fff;
+font-weight:bold;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">📐
+&gt;100% formula</div>
+<div class="leg" data-cls="zero_healthy" style="background:#e8f5e9;color:#2e7d32;
+padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">✓ Zero: healthy (0%
+stall)</div>
+<div class="leg" data-cls="zero_optional" style="background:#e3f2fd;color:#1565c0;
+padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">○ Zero: optional path
+</div>
+<div class="leg" data-cls="zero_sdk_bug" style="background:#ffcdd2;color:#c62828;
+font-weight:bold;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">❌
+Zero: SDK bug suspect</div>
+<div class="leg" data-cls="zero_other" style="background:#f5f5f5;color:#616161;
+padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">⬜ Zero: other</div>
+<div class="leg" data-cls="workload_zero" style="background:#b3e5fc;color:#01579b;
+padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">⚪ Expected zero
+(non-zero in mega)</div>
+<div class="leg" data-cls="expected_na" style="background:#d1c4e9;color:#4527a0;
+padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px">🔹 Expected N/A (valid
+in mega)</div>
+<div class="leg" data-cls="na" style="background:#e1bee7;color:#6a1b9a;padding:5px 12px;
+border-radius:5px;cursor:pointer;font-size:12px">⚠️ N/A (investigate)</div>
 </div>
 <p class="filter-note">💡 Click legend to show/hide rows by category</p>
 <div class="tbl-wrap"><table id="mt">
-<thead><tr><th>ID</th><th>Metric Name</th><th>Unit</th><th>LEVEL<br><small>if problematic</small></th><th>Formula (scroll →)</th>{wl_headers}</tr></thead>
+<thead><tr><th>ID</th><th>Metric Name</th><th>Unit</th><th>LEVEL<br><small>if
+problematic</small></th><th>Formula (scroll →)</th>{wl_headers}</tr></thead>
 <tbody>{"".join(body_rows)}</tbody></table></div>
 <script>
-const active=new Set(['good','overflow','formula_overflow','zero_healthy','zero_optional','zero_sdk_bug','zero_other','workload_zero','expected_na','na']);
+const active=new
+Set(['good','overflow','formula_overflow','zero_healthy','zero_optional','zero_sdk_bug','zero_other','workload_zero','expected_na','na']);
 document.querySelectorAll('.leg').forEach(el=>{{
   el.addEventListener('click',()=>{{
     const c=el.dataset.cls;
@@ -1318,6 +1143,164 @@ document.querySelectorAll('table.sortable-table').forEach(table=>{{
 </script></body></html>"""
 
     return doc
+
+
+def main() -> None:
+    arg_parser = _build_arg_parser()
+    args = arg_parser.parse_args()
+    paths = [path for path_group in args.paths for path in path_group]
+    if len(paths) > 2:
+        arg_parser.error(
+            "-p/--path accepts at most two paths: baseline first, candidate second"
+        )
+
+    baseline = discover_run(paths[0], args.baseline_label)
+    candidate = (
+        discover_run(paths[1], args.candidate_label) if len(paths) == 2 else None
+    )
+    primary_run = candidate or baseline
+    _sys_info, arch = read_sysinfo(next(iter(primary_run.profile_dirs.values())))
+    if candidate is not None:
+        _sys_info, baseline_arch = read_sysinfo(
+            next(iter(baseline.profile_dirs.values()))
+        )
+        if baseline_arch != arch:
+            raise SystemExit(f"Runs profiled different archs: {baseline_arch}, {arch}")
+
+    results = load_run_metrics(primary_run)
+    formulas = collect_formulas(primary_run, results)
+    baseline_results: Optional[Dict[str, WorkloadMetrics]] = None
+    if candidate is not None:
+        baseline_results = load_run_metrics(baseline)
+        # Baseline-only metrics still need their unit in the missing section.
+        formulas = {**collect_formulas(baseline, baseline_results), **formulas}
+    build_report(
+        primary_run,
+        results,
+        baseline if candidate is not None else None,
+        baseline_results,
+        formulas,
+        args.out,
+        args.date,
+        args.host,
+        arch,
+        canonical_config_arch(arch) or arch,
+        args.iterations,
+    )
+    print(f"Wrote {args.out}")
+
+
+def _read_csv_rows(path: Path) -> List[Dict[str, str]]:
+    if not path.is_file():
+        raise SystemExit(f"Analyze CSV file not found: {path}")
+    with path.open(encoding="utf-8", newline="") as csv_file:
+        return list(csv.DictReader(csv_file))
+
+
+def _replace_reducible_aggregates(expression: str) -> str:
+    """Replace each to_sum(x) or to_avg(x) with (x)."""
+    pieces: List[str] = []
+    index = 0
+    while index < len(expression):
+        matched = ""
+        for name in ("to_sum", "to_avg"):
+            prefix = f"{name}("
+            if expression.startswith(prefix, index):
+                matched = prefix
+                break
+        if not matched:
+            pieces.append(expression[index])
+            index += 1
+            continue
+        operand_start = index + len(matched)
+        depth = 1
+        operand_end = operand_start
+        while operand_end < len(expression) and depth:
+            if expression[operand_end] == "(":
+                depth += 1
+            elif expression[operand_end] == ")":
+                depth -= 1
+            operand_end += 1
+        if depth:
+            return expression
+        operand = expression[operand_start : operand_end - 1]
+        pieces.append(f"({_replace_reducible_aggregates(operand)})")
+        index = operand_end
+    return "".join(pieces)
+
+
+def _attach_stat_column(dfs: dict, dfs_type: dict, statistic: str) -> None:
+    """Add a per-dispatch statistic expression when that column is absent."""
+    column = "Median" if statistic == "median" else "Std Dev"
+    for _df_id, frame in dfs.items():
+        if dfs_type.get(_df_id) != "metric_table" or column in frame.columns:
+            continue
+        source_col = next(
+            (
+                name
+                for name in ("Median", "Min", "Avg", "Value")
+                if name in frame.columns
+            ),
+            None,
+        )
+        if source_col is None:
+            continue
+        frame[column] = [
+            per_dispatch_stat_expr(value, statistic) for value in frame[source_col]
+        ]
+
+
+def _read_stat_column(arch_config: object, column: str) -> Dict[str, Optional[float]]:
+    """Read one evaluated statistic column as a dict from metric key to float."""
+    out: Dict[str, Optional[float]] = {}
+    for df_id, frame in arch_config.dfs.items():
+        if arch_config.dfs_type.get(df_id) != "metric_table":
+            continue
+        if column not in frame.columns or "Metric" not in frame.columns:
+            continue
+        for row_id, row in frame.iterrows():
+            key = f"{row_id}|{row['Metric']}"
+            cell = row[column]
+            if isinstance(cell, str):
+                out[key] = to_float(cell)
+            elif cell is None or (isinstance(cell, float) and math.isnan(cell)):
+                out[key] = None
+            else:
+                try:
+                    out[key] = float(cell)
+                except (TypeError, ValueError):
+                    out[key] = None
+    return out
+
+
+def _fmt_number(value: float, unit: str = "") -> str:
+    if "percent" in unit.lower():
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+    if abs(value) >= 1000:
+        return f"{value:,.2f}".rstrip("0").rstrip(".")
+    return f"{value:.2g}"
+
+
+def _iteration_banner(
+    iterations: Optional[int],
+    dispatch_counts: Dict[str, Optional[int]],
+) -> str:
+    """Build the header line with the statistic, iterations and dispatch counts."""
+    parts = [f"<b>Statistic:</b> {PRIMARY_STAT}"]
+    if iterations is not None:
+        parts.append(f"<b>Requested iterations:</b> {iterations}")
+    count_bits = [
+        f"{html.escape(wl)}={count}"
+        for wl, count in dispatch_counts.items()
+        if count is not None
+    ]
+    if count_bits:
+        parts.append("<b>Top-kernel dispatches:</b> " + ", ".join(count_bits))
+    return (
+        '<p style="margin:2px 0;color:#37474f;font-size:12px">'
+        + " | ".join(parts)
+        + "</p>"
+    )
 
 
 def _metric_id_sort_key(key: str) -> List[int]:
@@ -1391,7 +1374,8 @@ def _render_metric_row(
         f"<td class='mname'>{html.escape(name)}</td>"
         f"<td class='unit'>{html.escape(unit)}</td>"
         f"<td style='text-align:center;font-size:11px'>{level_cell}</td>"
-        f"<td><div style='overflow-x:auto;white-space:nowrap;max-width:600px;font-size:10px;"
+        "<td><div style='overflow-x:auto;white-space:nowrap;max-width:600px;"
+        "font-size:10px;"
         f"font-family:monospace;background:#f0f4f8;color:#1a237e;padding:2px 5px;"
         f"border-radius:3px;border:1px solid #c5cae9'>{formula_html}</div></td>"
         + "".join(wl_cells)
@@ -1404,7 +1388,6 @@ def _render_comparison_sections(
     formulas: Dict[str, Tuple[str, str, bool]],
     baseline_label: str,
     candidate_label: str,
-    stat_label: str,
 ) -> str:
     sections = ""
     if data.improvements:
@@ -1415,13 +1398,13 @@ def _render_comparison_sections(
             f"<h2>Overflow improvements vs {html.escape(baseline_label)} "
             f"({len(improve_rows)} metrics fixed)</h2>"
             "<table class='improve-table'><thead><tr><th>Workload</th><th>ID</th>"
-            f"<th>Metric</th><th>Old ({html.escape(stat_label)})</th>"
-            f"<th>New ({html.escape(stat_label)})</th><th>Unit</th></tr></thead><tbody>"
+            f"<th>Metric</th><th>Old ({PRIMARY_STAT})</th>"
+            f"<th>New ({PRIMARY_STAT})</th><th>Unit</th></tr></thead><tbody>"
             + "".join(improve_rows)
             + "</tbody></table>"
         )
     if data.deltas:
-        sections += _render_delta_section(data, formulas, baseline_label, stat_label)
+        sections += _render_delta_section(data, formulas, baseline_label)
     if data.missing:
         missing_rows = [
             _render_missing_row(change, formulas) for change in data.missing
@@ -1434,7 +1417,7 @@ def _render_comparison_sections(
             "<p class='filter-note'>The baseline reports these metrics for the "
             "workload, but the candidate analyze output has no row for them.</p>"
             "<table class='improve-table'><thead><tr><th>Workload</th><th>ID</th>"
-            f"<th>Metric</th><th>Old ({html.escape(stat_label)})</th>"
+            f"<th>Metric</th><th>Old ({PRIMARY_STAT})</th>"
             "<th>New</th><th>Unit</th></tr></thead><tbody>"
             + "".join(missing_rows)
             + "</tbody></table>"
@@ -1446,15 +1429,13 @@ def _render_delta_section(
     data: ReportData,
     formulas: Dict[str, Tuple[str, str, bool]],
     baseline_label: str,
-    stat_label: str,
 ) -> str:
     delta_rows = [_render_delta_row(change, formulas) for change in data.deltas]
     n_hi = sum(
         1 for change in data.deltas if (change.rel or 0) >= DELTA_HIGHLIGHT_THRESHOLD
     )
     n_delta = len(delta_rows)
-    # Numerator and denominator are both unique analyze-table metrics (same
-    # universe as card Total / main table rows), not metric×workload cells.
+    # Count each metric once, not once per workload.
     n_changed = len({change.key for change in data.deltas})
     n_metrics = len(data.all_keys)
     changed_pct = (100.0 * n_changed / n_metrics) if n_metrics else 0.0
@@ -1466,11 +1447,11 @@ def _render_delta_section(
         f"<h2>Value deltas vs {html.escape(baseline_label)} "
         f"(|rel| ≥ {rel_pct:.0f}%, {counts})</h2>"
         "<p class='filter-note'>Click a column header to sort "
-        "(Kernel name, ID, Metric, |rel|, …). "
-        f"Compared values are <b>{html.escape(stat_label)}</b> from analyze "
-        "the CSV export (or recomputed from per-dispatch "
+        "(Kernel name, ID, Metric, |rel|, and so on). "
+        f"Compared values are <b>{PRIMARY_STAT}</b> from the analyze CSV export "
+        "(or recomputed from per-dispatch "
         "data when the Median column is absent). "
-        "|rel| = |new−old|/|old|. "
+        "|rel| = |new-old|/|old|. "
         "Std Dev is the per-dispatch sample standard deviation. "
         "CV = Std Dev / |Median|. "
         "A dash means Std Dev is missing or the median is near zero.</p>"
@@ -1486,10 +1467,10 @@ def _render_delta_section(
         "<th data-sort='str'>Kernel</th>"
         "<th data-sort='str'>ID</th>"
         "<th data-sort='str'>Metric</th>"
-        f"<th data-sort='num'>Old ({html.escape(stat_label)})</th>"
+        f"<th data-sort='num'>Old ({PRIMARY_STAT})</th>"
         "<th data-sort='num'>Old (Std Dev)</th>"
         "<th data-sort='num'>Old (CV)</th>"
-        f"<th data-sort='num'>New ({html.escape(stat_label)})</th>"
+        f"<th data-sort='num'>New ({PRIMARY_STAT})</th>"
         "<th data-sort='num'>New (Std Dev)</th>"
         "<th data-sort='num'>New (CV)</th>"
         "<th data-sort='num'>|rel|</th>"
@@ -1588,56 +1569,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Requested workload iterations (shown in report header)",
     )
-    arg_parser.add_argument(
-        "--stat",
-        default="Median",
-        help="Primary statistic label for the report (default: Median)",
-    )
     return arg_parser
-
-
-def main() -> None:
-    arg_parser = _build_arg_parser()
-    args = arg_parser.parse_args()
-    paths = [path for path_group in args.paths for path in path_group]
-    if len(paths) > 2:
-        arg_parser.error(
-            "-p/--path accepts at most two paths: baseline first, candidate second"
-        )
-
-    baseline = discover_run(paths[0], args.baseline_label)
-    candidate = (
-        discover_run(paths[1], args.candidate_label) if len(paths) == 2 else None
-    )
-    primary_run = candidate or baseline
-    arch = workload_arch(next(iter(primary_run.profile_dirs.values())))
-    if candidate is not None:
-        baseline_arch = workload_arch(next(iter(baseline.profile_dirs.values())))
-        if baseline_arch != arch:
-            raise SystemExit(f"Runs profiled different archs: {baseline_arch}, {arch}")
-
-    results = load_run_metrics(primary_run)
-    formulas = collect_formulas(primary_run, results)
-    baseline_results: Optional[Dict[str, WorkloadMetrics]] = None
-    if candidate is not None:
-        baseline_results = load_run_metrics(baseline)
-        # Baseline-only metrics still need their unit in the missing section.
-        formulas = {**collect_formulas(baseline, baseline_results), **formulas}
-    build_report(
-        primary_run,
-        results,
-        baseline if candidate is not None else None,
-        baseline_results,
-        formulas,
-        args.out,
-        args.date,
-        args.host,
-        arch,
-        canonical_config_arch(arch) or arch,
-        args.iterations,
-        args.stat,
-    )
-    print(f"Wrote {args.out}")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for the two-directory metric health report."""
+"""Unit tests for the metric health report."""
 
 import csv
 import shutil
@@ -16,7 +16,7 @@ from tools import generate_metric_health_report as report
 
 ARCH = "gfx942"
 MI300X_WORKLOAD = (
-    Path(__file__).resolve().parents[1] / "workloads" / "path" / "MI300X_A1"
+    Path(__file__).resolve().parents[1] / "tests" / "workloads" / "path" / "MI300X_A1"
 )
 # The only kernel in the MI300X fixture.
 FIXTURE_KERNEL = "vecCopy(double*, double*, double*, int, int) (.kd)"
@@ -39,12 +39,7 @@ METRIC_COLUMNS = [
 def make_metrics(values: Dict[str, Optional[float]]) -> report.WorkloadMetrics:
     """Build one workload's metrics from metric key -> Median value."""
     return report.WorkloadMetrics(
-        metrics={
-            key: report.MetricValue(
-                value=value, raw="N/A" if value is None else f"{value:g}"
-            )
-            for key, value in values.items()
-        }
+        metrics={key: report.MetricValue(value=value) for key, value in values.items()}
     )
 
 
@@ -64,7 +59,6 @@ def render(data: report.ReportData, tmp_path: Path) -> str:
         ARCH,
         ARCH,
         None,
-        "Median",
     )
 
 
@@ -278,23 +272,12 @@ def test_report_rejects_more_than_two_paths(
 @pytest.mark.parametrize("arch", ["gfx942"])
 def test_cdna3_total_note_counts_reported_channels(arch: str) -> None:
     """The CDNA3 total note describes the counted channel expansion."""
-    note = report.build_total_note(
-        arch,
-        arch,
-        {"vcopy": {"total": 12}},
-        12,
-        "Median",
-    )
+    note = report.build_total_note(arch, arch, {"vcopy": {"total": 12}}, 12)
 
     assert "<code>$total_l2_chan</code>" in note
     assert "l2_banks × num_xcd" in note
     assert "profile sysinfo" in note
-    assert "expanded row count" in note
-    lowered = note.lower()
-    assert "reconcil" not in lowered
-    assert "16 channel" not in lowered
-    assert "cpx" not in lowered
-    assert "cu_per_gpu" not in lowered
+    assert "Total counts each of those rows" in note
 
 
 def test_formulas_use_expanded_channel_names() -> None:
@@ -437,7 +420,7 @@ def test_sum_ratio_uses_per_dispatch_median_and_std() -> None:
 
 
 def test_avg_formula_uses_per_dispatch_median_and_std() -> None:
-    """AVG(SQC_LDS_BANK_CONFLICT) becomes to_avg(...) and still reduces."""
+    """AVG(SQC_LDS_BANK_CONFLICT) becomes to_avg(...) and gets per-dispatch stats."""
     expression = "to_avg(raw_pmc_df['SQC_LDS_BANK_CONFLICT'])"
 
     assert report.per_dispatch_stat_expr(expression, "median") == (
@@ -462,13 +445,13 @@ def test_mixed_sum_and_min_has_no_per_dispatch_std() -> None:
 
 
 def test_cv_is_stddev_over_absolute_median() -> None:
-    metric = report.MetricValue(value=0.072, raw="0.072", std_v=0.055)
+    metric = report.MetricValue(value=0.072, std_v=0.055)
 
     assert report.fmt_cv(metric) == "76.4%"
 
 
 def test_cv_is_blank_when_median_is_near_zero() -> None:
-    metric = report.MetricValue(value=0.0, raw="0", std_v=1.0)
+    metric = report.MetricValue(value=0.0, std_v=1.0)
 
     assert report.fmt_cv(metric) == "—"
 
@@ -476,8 +459,8 @@ def test_cv_is_blank_when_median_is_near_zero() -> None:
 def test_delta_row_shows_stddev_and_cv(tmp_path: Path) -> None:
     key = "2.1.21|L2-Fabric Write BW"
     workloads = ["vcopy", "nbody", "mega_kernel"]
-    old = report.MetricValue(value=0.072, raw="0.072", source="median", std_v=0.055)
-    new = report.MetricValue(value=0.036, raw="0.036", source="median", std_v=0.018)
+    old = report.MetricValue(value=0.072, source="median", std_v=0.055)
+    new = report.MetricValue(value=0.036, source="median", std_v=0.018)
     data = report.compute_report(
         {wl: report.WorkloadMetrics(metrics={key: new}) for wl in workloads},
         {wl: report.WorkloadMetrics(metrics={key: old}) for wl in workloads},
