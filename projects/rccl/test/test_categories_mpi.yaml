@@ -499,11 +499,32 @@ test_categories:
     env_variables:
       - "NCCL_DEBUG=INFO"
       - "RCCL_DDA_LL=0"
+      - "RCCL_DDA_LL128=0"
       - "RCCL_DDA_THRESHOLD=67108864"
-  # DDA fabric AllToAll SIMPLE kernels, one category per kernel choice. The gfx1250 SPX table leaves the AllToAll
-  # SIMPLE tier off (DPX enables it up to 256 MiB), so RCCL_DDA_THRESHOLD turns it on; RCCL_PARAM caches it and the
-  # RCCL_DDA_A2A_* kernel choice for the process lifetime, so they are set before launch. Outside these categories the
-  # tests skip on SPX; on DPX only the ones that need a non-default kernel choice skip.
+  # The gfx1250 tables can leave no SIMPLE window for these collectives under the default tiers (SPX keeps the
+  # AllGather VMM tier off, and below 8 ranks its AllReduce LL tier reaches past the VMM tier), so the cases skip there.
+  # LL off and RCCL_DDA_THRESHOLD give every rank count a window; both are cached per process, so they are set before launch.
+  standard_env_dda_simple:
+    description: "DDA fabric AllReduce, AllGather and ReduceScatter SIMPLE kernels with LL off, including the barrier stress cases."
+    test_patterns:
+      - "DdaFabricSimple.AllReduce*"
+      - "DdaFabricSimple.AllGather*"
+      - "DdaFabricSimple.ReduceScatter*"
+      - "DdaFabricSimple.RepeatedAllReduce"
+      - "DdaFabricSimple.RepeatedReduceScatter"
+      - "DdaFabricSimple.AlternatingCollectivesOnSameCommunicator"
+      - "DdaFabricBarrierStress.AllReduceSmallBuffer"
+      - "DdaFabricBarrierStress.ReduceScatterSmallBuffer"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_DDA_LL=0"
+      - "RCCL_DDA_THRESHOLD=67108864"
+  # DDA fabric AllToAll SIMPLE kernels, one category per kernel choice. The gfx1250 DPX and SPX tables enable the
+  # AllToAll SIMPLE tier up to 256 MiB; RCCL_DDA_THRESHOLD pins it for tables that leave it off. RCCL_PARAM caches it and
+  # the RCCL_DDA_A2A_* kernel choice for the process lifetime, so they are set before launch. Outside these categories
+  # only the tests that need a non-default kernel choice skip.
   standard_env_dda_a2a_push:
     description: "DDA fabric AllToAll with the default push settings: peer-major TDM push (alternating with LL, and with chunks that are not a multiple of 256 B) and the all-peer vector push in place."
     test_patterns:
