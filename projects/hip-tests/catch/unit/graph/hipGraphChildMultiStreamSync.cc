@@ -5,23 +5,21 @@
  */
 
 /**
- * Deterministic correctness tests for multi-stream child graphs on the segmented
- * HIP path. Scheduling flags must be set before HIP init (see CMake add_test).
+ * Correctness tests for multi-stream child graphs on the segmented HIP path.
+ * Scheduling flags must be set before HIP init (see CMake add_test).
  *
- * Producers and selected child leaves block on host-released gates. A consumer
- * that is not ordered after a gated kernel runs while that kernel is still held,
- * so a missing parent->child or child->parent barrier fails independently of
- * kernel duration or of which queue the CP services first.
+ * Producers and selected child leaves spin on the device clock before writing.
+ * A consumer that is not ordered after a delayed kernel runs while it is still
+ * spinning and stores a wrong value. Correct ordering passes regardless of the
+ * spin length; it only makes a missing barrier likely to be observed.
  */
 
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
-#include <chrono>
 #include <fstream>
 #include <regex>
 #include <set>
 #include <string>
-#include <thread>
 #if HT_WIN
 #include <process.h>
 #else
@@ -29,22 +27,19 @@
 #endif
 
 #if HT_AMD  // relies on DEBUG_HIP_GRAPH_* flags that are hipamd-only
-// Host-coherent gate state shared with gated kernels. A gated kernel gives up
-// after timeout_ticks of wall clock and sets timed_out instead of hanging.
-struct GateState {
-  static constexpr int kNumGates = 2;
-  int gate[kNumGates];
-  int timed_out;
-  long long timeout_ticks;
-};
+// Delay of each delayed kernel, far longer than another queue needs to dispatch
+constexpr long long kSpinMs = 5;
 
-__device__ void wait_gate(GateState* gs, int gate) {
-  const long long start = wall_clock64();
-  while (__hip_atomic_load(&gs->gate[gate], __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM) == 0) {
-    if (wall_clock64() - start > gs->timeout_ticks) {
-      __hip_atomic_store(&gs->timed_out, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-      return;
-    }
+// Ticks of wall_clock64() in kSpinMs
+static long long SpinTicks() {
+  int rate_khz = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&rate_khz, hipDeviceAttributeWallClockRate, 0));
+  return static_cast<long long>(rate_khz) * kSpinMs;
+}
+
+__device__ void Spin(long long ticks) {
+  const long long t0 = wall_clock64();
+  while (wall_clock64() - t0 < ticks) {
     __builtin_amdgcn_s_sleep(8);
   }
 }
@@ -55,28 +50,27 @@ __global__ void write_val(int* dst, int v) {
   }
 }
 
-__global__ void gated_write(GateState* gs, int gate, int* dst, int v) {
+__global__ void delayed_write(int* dst, int v, long long spin) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
-    wait_gate(gs, gate);
+    Spin(spin);
     *dst = v;
   }
 }
 
-// Reads |src| when the kernel starts, then holds on |gate|. The early read
-// catches a missing wait on the producer of |src|; the hold keeps this kernel
-// unfinished so a consumer that does not wait for it reads a stale |dst|.
-__global__ void gated_check_write(GateState* gs, int gate, int* src, int expected, int* dst,
-                                  int v) {
+// Reads |src| when the kernel starts, then spins. The early read catches a
+// missing wait on the producer of |src|; the spin keeps this kernel unfinished
+// so a consumer that does not wait for it reads a stale |dst|.
+__global__ void delayed_check_write(int* src, int expected, int* dst, int v, long long spin) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     const int seen = __hip_atomic_load(src, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
-    wait_gate(gs, gate);
+    Spin(spin);
     *dst = (seen == expected) ? v : -1;
   }
 }
 
-__global__ void gated_zero3(GateState* gs, int gate, int* a, int* b, int* c) {
+__global__ void delayed_zero3(int* a, int* b, int* c, long long spin) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
-    wait_gate(gs, gate);
+    Spin(spin);
     *a = 0;
     *b = 0;
     *c = 0;
@@ -106,42 +100,6 @@ __global__ void parent_consumer(int* data, int slot) {
     data[slot] = (data[1] == 2 && data[2] == 3) ? 1 : -1;
   }
 }
-
-class HostGates {
- public:
-  static constexpr auto kHold = std::chrono::milliseconds(50);
-  static constexpr int kTimeoutSeconds = 10;
-
-  HostGates() {
-    HIP_CHECK(hipHostMalloc(&state_, sizeof(GateState), hipHostMallocCoherent));
-    int rate_khz = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&rate_khz, hipDeviceAttributeWallClockRate, 0));
-    state_->timeout_ticks = static_cast<long long>(rate_khz) * 1000 * kTimeoutSeconds;
-    Reset();
-  }
-  ~HostGates() { static_cast<void>(hipHostFree(state_)); }
-
-  GateState* get() { return state_; }
-
-  // Only call while no gated kernel is in flight.
-  void Reset() {
-    for (int& gate : state_->gate) {
-      __atomic_store_n(&gate, 0, __ATOMIC_RELAXED);
-    }
-    __atomic_store_n(&state_->timed_out, 0, __ATOMIC_RELAXED);
-  }
-
-  // Holds the gate closed long enough for any unsynchronized consumer to run.
-  void Release(int gate) {
-    std::this_thread::sleep_for(kHold);
-    __atomic_store_n(&state_->gate[gate], 1, __ATOMIC_RELEASE);
-  }
-
-  bool TimedOut() const { return __atomic_load_n(&state_->timed_out, __ATOMIC_ACQUIRE) != 0; }
-
- private:
-  GateState* state_ = nullptr;
-};
 
 static void add_kernel_node(hipGraph_t g, hipGraphNode_t* out, hipGraphNode_t* deps, size_t ndeps,
                             void* func, void** args) {
@@ -203,11 +161,7 @@ TEST_CASE("Unit_hipGraphChildMultiStream_ParentChildBoundarySync",
           "[graph][child][multistream][level_2]") {
   const int child_stream = GENERATE(0, 1, 2);
   INFO("child node on parent stream " << child_stream);
-  constexpr int kProducerGate = 0;
-  constexpr int kChildLeafGate = 1;
-
-  HostGates gates;
-  GateState* gs = gates.get();
+  long long spin = SpinTicks();
   int* data = nullptr;
   int* update_scratch = nullptr;
   int* initial_update_source = nullptr;
@@ -224,12 +178,11 @@ TEST_CASE("Unit_hipGraphChildMultiStream_ParentChildBoundarySync",
   HIP_CHECK(hipGraphCreate(&updated_child, 0));
   HIP_CHECK(hipGraphCreate(&parent, 0));
 
-  int producer_gate = kProducerGate;
   int one = 1;
   int* data0 = data;
-  void* producer_args[] = {&gs, &producer_gate, &data0, &one};
+  void* producer_args[] = {&data0, &one, &spin};
   hipGraphNode_t producer = nullptr;
-  add_kernel_node(parent, &producer, nullptr, 0, reinterpret_cast<void*>(gated_write),
+  add_kernel_node(parent, &producer, nullptr, 0, reinterpret_cast<void*>(delayed_write),
                   producer_args);
 
   int filler_value = 7;
@@ -247,19 +200,18 @@ TEST_CASE("Unit_hipGraphChildMultiStream_ParentChildBoundarySync",
 
   // branch_a runs on the child node's stream; branch_b and the update memcpy
   // are off-stream roots that must wait on the child entry signal. branch_b is
-  // also a gated leaf, so consumers must wait for the whole child.
-  int leaf_gate = kChildLeafGate;
+  // also a delayed leaf, so consumers must wait for the whole child.
   int three = 3;
   int* data2 = data + 2;
   void* branch_a_args[] = {&data};
-  void* branch_b_args[] = {&gs, &leaf_gate, &data0, &one, &data2, &three};
+  void* branch_b_args[] = {&data0, &one, &data2, &three, &spin};
   auto addChildRoots = [&](hipGraph_t graph, const void* update_source, hipMemcpyKind update_kind) {
     hipGraphNode_t branch_a = nullptr;
     hipGraphNode_t branch_b = nullptr;
     hipGraphNode_t update_memcpy = nullptr;
     add_kernel_node(graph, &branch_a, nullptr, 0, reinterpret_cast<void*>(child_branch_a),
                     branch_a_args);
-    add_kernel_node(graph, &branch_b, nullptr, 0, reinterpret_cast<void*>(gated_check_write),
+    add_kernel_node(graph, &branch_b, nullptr, 0, reinterpret_cast<void*>(delayed_check_write),
                     branch_b_args);
     HIP_CHECK(hipGraphAddMemcpyNode1D(&update_memcpy, graph, nullptr, 0, update_scratch,
                                       update_source, sizeof(int), update_kind));
@@ -293,14 +245,11 @@ TEST_CASE("Unit_hipGraphChildMultiStream_ParentChildBoundarySync",
 
   for (int iteration = 0; iteration < 2; ++iteration) {
     INFO("iteration " << iteration);
-    gates.Reset();
     HIP_CHECK(hipMemset(data, 0, 5 * sizeof(int)));
     // Unsynchronized work queued before hipGraphLaunch must be visible to every
     // graph queue before the parent producer and child roots execute.
     HIP_CHECK(hipMemsetAsync(update_scratch, 0, sizeof(int), stream));
     HIP_CHECK(hipGraphLaunch(exec, stream));
-    gates.Release(kProducerGate);
-    gates.Release(kChildLeafGate);
 
     int result[5] = {};
     int scratch = 0;
@@ -309,7 +258,6 @@ TEST_CASE("Unit_hipGraphChildMultiStream_ParentChildBoundarySync",
                              stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
-    REQUIRE_FALSE(gates.TimedOut());
     REQUIRE(result[0] == 1);  // parent producer completed
     REQUIRE(result[1] == 2);  // on-stream child root observed the producer
     REQUIRE(result[2] == 3);  // off-stream child root observed the producer
@@ -331,16 +279,12 @@ TEST_CASE("Unit_hipGraphChildMultiStream_ParentChildBoundarySync",
 
 /**
  * Three sibling child graphs on parent streams 0, 1 and 2, joined by a sum on
- * stream 0. Gated work queued on the launch stream before the graph launch
+ * stream 0. Delayed work queued on the launch stream before the graph launch
  * zeroes the child outputs, so children on streams 1 and 2 must wait for it.
- * child2 is gated, so the sum must wait for that child to finish.
+ * child2 is delayed, so the sum must wait for that child to finish.
  */
 TEST_CASE("Unit_hipGraphChildMultiStream_SiblingChildren", "[graph][child][multistream][level_2]") {
-  constexpr int kPreLaunchGate = 0;
-  constexpr int kChildGate = 1;
-
-  HostGates gates;
-  GateState* gs = gates.get();
+  long long spin = SpinTicks();
   int *d_a, *d_b, *d_c, *d_sum;
   HIP_CHECK(hipMalloc(&d_a, sizeof(int)));
   HIP_CHECK(hipMalloc(&d_b, sizeof(int)));
@@ -353,13 +297,12 @@ TEST_CASE("Unit_hipGraphChildMultiStream_SiblingChildren", "[graph][child][multi
   HIP_CHECK(hipGraphCreate(&child3, 0));
 
   int v1 = 10, v2 = 20, v3 = 30;
-  int child_gate = kChildGate;
   void* c1_args[] = {&d_a, &v1};
-  void* c2_args[] = {&gs, &child_gate, &d_b, &v2};
+  void* c2_args[] = {&d_b, &v2, &spin};
   void* c3_args[] = {&d_c, &v3};
   hipGraphNode_t c1, c2, c3;
   add_kernel_node(child1, &c1, nullptr, 0, reinterpret_cast<void*>(write_val), c1_args);
-  add_kernel_node(child2, &c2, nullptr, 0, reinterpret_cast<void*>(gated_write), c2_args);
+  add_kernel_node(child2, &c2, nullptr, 0, reinterpret_cast<void*>(delayed_write), c2_args);
   add_kernel_node(child3, &c3, nullptr, 0, reinterpret_cast<void*>(write_val), c3_args);
 
   hipGraph_t parent;
@@ -382,16 +325,13 @@ TEST_CASE("Unit_hipGraphChildMultiStream_SiblingChildren", "[graph][child][multi
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  hipLaunchKernelGGL(gated_zero3, dim3(1), dim3(1), 0, stream, gs, kPreLaunchGate, d_a, d_b, d_c);
+  hipLaunchKernelGGL(delayed_zero3, dim3(1), dim3(1), 0, stream, d_a, d_b, d_c, spin);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipGraphLaunch(exec, stream));
-  gates.Release(kPreLaunchGate);
-  gates.Release(kChildGate);
   HIP_CHECK(hipStreamSynchronize(stream));
 
   int sum = 0;
   HIP_CHECK(hipMemcpy(&sum, d_sum, sizeof(int), hipMemcpyDeviceToHost));
-  REQUIRE_FALSE(gates.TimedOut());
   REQUIRE(sum == 60);
   const std::set<int> expected_streams{0, 1, 2};
   REQUIRE(ParseTopLevelSegmentStreams(dot_path) == expected_streams);
@@ -415,14 +355,10 @@ TEST_CASE("Unit_hipGraphChildMultiStream_SiblingChildren", "[graph][child][multi
  *
  * iy is an off-stream root of the inner child. It must wait on the producer
  * through two levels of child entry signals, and oz must wait for iy, which is
- * held on a gate.
+ * delayed.
  */
 TEST_CASE("Unit_hipGraphChildMultiStream_NestedChild", "[graph][child][multistream][level_2]") {
-  constexpr int kProducerGate = 0;
-  constexpr int kInnerLeafGate = 1;
-
-  HostGates gates;
-  GateState* gs = gates.get();
+  long long spin = SpinTicks();
   hipGraph_t inner, outer, parent;
   HIP_CHECK(hipGraphCreate(&inner, 0));
   HIP_CHECK(hipGraphCreate(&outer, 0));
@@ -440,24 +376,22 @@ TEST_CASE("Unit_hipGraphChildMultiStream_NestedChild", "[graph][child][multistre
   HIP_CHECK(hipMemset(d_zero, 0, sizeof(int)));
 
   int one = 1, five = 5, seven = 7;
-  int producer_gate = kProducerGate;
-  int inner_leaf_gate = kInnerLeafGate;
-  void* producer_args[] = {&gs, &producer_gate, &d_p, &one};
+  void* producer_args[] = {&d_p, &one, &spin};
   void* ix_args[] = {&d_x, &five};
-  void* iy_args[] = {&gs, &inner_leaf_gate, &d_p, &one, &d_y, &seven};
+  void* iy_args[] = {&d_p, &one, &d_y, &seven, &spin};
   void* oz_args[] = {&d_z, &d_x, &d_y};
   void* consumer_args[] = {&d_final, &d_z, &d_zero};
 
   hipGraphNode_t ix, iy;
   add_kernel_node(inner, &ix, nullptr, 0, reinterpret_cast<void*>(write_val), ix_args);
-  add_kernel_node(inner, &iy, nullptr, 0, reinterpret_cast<void*>(gated_check_write), iy_args);
+  add_kernel_node(inner, &iy, nullptr, 0, reinterpret_cast<void*>(delayed_check_write), iy_args);
 
   hipGraphNode_t o_child, oz;
   HIP_CHECK(hipGraphAddChildGraphNode(&o_child, outer, nullptr, 0, inner));
   add_kernel_node(outer, &oz, &o_child, 1, reinterpret_cast<void*>(add_vals), oz_args);
 
   hipGraphNode_t producer, p_child, p_consumer;
-  add_kernel_node(parent, &producer, nullptr, 0, reinterpret_cast<void*>(gated_write),
+  add_kernel_node(parent, &producer, nullptr, 0, reinterpret_cast<void*>(delayed_write),
                   producer_args);
   HIP_CHECK(hipGraphAddChildGraphNode(&p_child, parent, &producer, 1, outer));
   add_kernel_node(parent, &p_consumer, &p_child, 1, reinterpret_cast<void*>(add_vals),
@@ -469,13 +403,10 @@ TEST_CASE("Unit_hipGraphChildMultiStream_NestedChild", "[graph][child][multistre
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipGraphLaunch(exec, stream));
-  gates.Release(kProducerGate);
-  gates.Release(kInnerLeafGate);
   HIP_CHECK(hipStreamSynchronize(stream));
 
   int final = 0;
   HIP_CHECK(hipMemcpy(&final, d_final, sizeof(int), hipMemcpyDeviceToHost));
-  REQUIRE_FALSE(gates.TimedOut());
   REQUIRE(final == 12);
 
   HIP_CHECK(hipGraphExecDestroy(exec));
