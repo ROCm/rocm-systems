@@ -8,8 +8,9 @@ name: RCCL coco PR
 #
 # Setting the repository variable RCCL_PR_FREEZE to a reason freezes RCCL
 # PRs: the gate fails and cluster jobs do not start. The label
-# rccl-pr-freeze-exempt lets a PR through; it must be on the PR before the
-# push that should run.
+# rccl-pr-freeze-exempt lets a PR through when the person who last added it
+# is in @ROCm/rocm-systems-tls; it must be on the PR before the push that
+# should run.
 #
 # One job per cluster: `needs` on a matrix waits for every leg, so sharing a
 # job would let a slow cluster hold up the others.
@@ -84,20 +85,67 @@ jobs:
           BASE_BRANCH: ${{ github.base_ref }}
         run: python3 .github/scripts/rccl_detect_coco_changes.py --base-ref HEAD^ --base-branch "$BASE_BRANCH"
 
+  # Anyone with triage access can add a label, so the exemption counts only
+  # when the person who last added it is in the team. Reading team membership
+  # needs the app token; GITHUB_TOKEN cannot. Checks out no PR code.
+  freeze-exempt:
+    name: Check RCCL freeze exemption
+    if: >-
+      github.event_name == 'pull_request'
+      && vars.RCCL_PR_FREEZE != ''
+      && !github.event.pull_request.head.repo.fork
+      && contains(github.event.pull_request.labels.*.name, 'rccl-pr-freeze-exempt')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      exempt: ${{ steps.check.outputs.exempt }}
+    steps:
+      - name: Mint a token that can read team membership
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-members: read
+
+      - name: Check who added the label
+        id: check
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          ORG: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          labeler=$(gh api --paginate "repos/${REPO}/issues/${PR_NUMBER}/events" \
+            --jq '.[] | select(.event == "labeled" and .label.name == "rccl-pr-freeze-exempt") | .actor.login' | tail -n 1)
+          state=$(gh api "orgs/${ORG}/teams/rocm-systems-tls/memberships/${labeler}" --jq .state 2>/dev/null || true)
+          if [[ -n "${labeler}" && "${state}" == "active" ]]; then
+            echo "rccl-pr-freeze-exempt was added by ${labeler}, who is in @${ORG}/rocm-systems-tls."
+            echo "exempt=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::error::rccl-pr-freeze-exempt was added by ${labeler:-an unknown user}, who is not in @${ORG}/rocm-systems-tls, so it does not exempt this PR."
+            echo "exempt=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   # Must resolve once for all clusters, or a moving coco_ref pins a different commit per cluster.
   # Dependabot runs, re-runs included, get Dependabot secrets rather than
   # Actions secrets, so APP_ID is empty there just as on a fork.
   setup:
     name: Setup
-    needs: changes
+    needs: [changes, freeze-exempt]
+    # freeze-exempt is usually skipped; !cancelled() keeps that from skipping setup too.
     if: >-
-      needs.changes.outputs.rccl == 'true'
+      !cancelled()
+      && needs.changes.result == 'success'
+      && needs.changes.outputs.rccl == 'true'
       && (github.event_name != 'pull_request'
           || (!github.event.pull_request.head.repo.fork
               && !github.event.pull_request.draft
               && github.actor != 'dependabot[bot]'
               && (vars.RCCL_PR_FREEZE == ''
-                  || contains(github.event.pull_request.labels.*.name, 'rccl-pr-freeze-exempt'))))
+                  || needs.freeze-exempt.outputs.exempt == 'true')))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -216,7 +264,7 @@ jobs:
   pr-gate:
     name: RCCL PR gate
     if: always() && github.event_name == 'pull_request'
-    needs: [changes, setup, gate]
+    needs: [changes, freeze-exempt, setup, gate]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -229,7 +277,7 @@ jobs:
           IS_DRAFT: ${{ github.event.pull_request.draft }}
           IS_DEPENDABOT: ${{ github.actor == 'dependabot[bot]' }}
           FREEZE: ${{ vars.RCCL_PR_FREEZE }}
-          FREEZE_EXEMPT: ${{ contains(github.event.pull_request.labels.*.name, 'rccl-pr-freeze-exempt') }}
+          FREEZE_EXEMPT: ${{ needs.freeze-exempt.outputs.exempt }}
           GATE_RESULT: ${{ needs.gate.result }}
         run: |
           set -euo pipefail
@@ -246,7 +294,7 @@ jobs:
             exit 0
           fi
           if [[ -n "${FREEZE}" && "${FREEZE_EXEMPT}" != "true" ]]; then
-            echo "::error::RCCL PRs are frozen: ${FREEZE} To merge anyway, add the rccl-pr-freeze-exempt label and push."
+            echo "::error::RCCL PRs are frozen: ${FREEZE} To merge anyway, someone in @ROCm/rocm-systems-tls must add the rccl-pr-freeze-exempt label, then push."
             exit 1
           fi
           if [[ "${IS_FORK}" == "true" ]]; then
