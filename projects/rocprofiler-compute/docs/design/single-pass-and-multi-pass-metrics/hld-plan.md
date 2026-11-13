@@ -19,7 +19,7 @@ Older planning drafts are on branch `users/feizheng10/aiprofcomp-865-docs-backup
 
 `rocprof-compute profile` replays a kernel once per perfmon pass. Each hardware block in a pass has its own counter limit (`perfmon_config` on `CounterFile` in `src/rocprof_compute_soc/soc_base.py`). A pass can hold GRBM and SQ together, because each counter is charged only to its own block. The pass cannot hold more SQ counters than the SQ limit, even when GRBM still has room.
 
-On gfx1250, `SP_VALU_*` and `SQ_VMEM_*` both charge that SQ block. They do not share a pass. The SP FLOP counters return zero when they do, and free SQ slots do not prevent that. The packer rejects the mix before it treats a PMC set as a single-pass metric set, and again when it places a set, merges passes, and places leftover counters. An extra pass is acceptable.
+On gfx1250, `SP_VALU_*` and `SQ_VMEM_*` both charge that SQ block. They do not share a pass. The SP FLOP counters return zero when they do, and free SQ slots do not prevent that. The packer rejects the mix before it treats a PMC set as a single-pass metric set, and again when it places a set and places leftover counters. An extra pass is acceptable.
 
 gfx942, the reference architecture, is one example from `src/utils/mi_gpu_spec.yaml`:
 
@@ -172,7 +172,7 @@ In an ordinary profile the workload runs once per pass, and each pass writes its
 
 `$denom` is replaced at analyze time from `--normal-unit`, before the pass is chosen. `per_kernel` (the default) uses a per-dispatch unit column, and `per_second` uses that pass's duration. Neither adds a hardware counter. `per_wave` uses `SQ_WAVES`, and `per_cycle` uses `GRBM_GUI_ACTIVE`. Packing does not add those counters because an expression contains `$denom`. Kernel-launch fields — grid size, workgroup size, LDS and scratch allocation, and VGPR, AGPR, and SGPR counts — are dispatch-record columns, not perfmon counters, and do not select or reject a pass.
 
-TCC needs a short-term extra rule. An L2 channel map can change between replays, so counters one expression joins share a pass. A `_LEVEL` counter adds up the outstanding requests every cycle. Dividing it by the request count gives latency, so each `_LEVEL` counter must share a pass with its request counter. Table 1805 (L2-Fabric Requests), in the L2 Cache per Channel panel, reads read, write, and atomic request counts in one row. Analyze uses the lowest-numbered pass that holds all three. That pass is not chosen because it holds `ATOMIC_LEVEL`. Extra `RDREQ` and `WRREQ` copies may remain on passes that hold a `_LEVEL` counter but not `ATOMIC`. gfx942 stays at 14 passes. Details are in the grouping note.
+TCC: an L2 channel map can change between replays, so the counters one expression joins share a pass, and every channel of a TCC counter goes into the same pass. Each latency row names its `_LEVEL` counter with its request counter, and table 1805 (L2-Fabric Requests) names read, write, and atomic requests in one row, so the general packing keeps each of them in one pass. Details are in the grouping note.
 
 ### Phase 2 — splitting multi-pass metrics into single-pass parts
 
@@ -224,7 +224,7 @@ After Phase 2 YAML, the gfx942 allocator gate is `single_pass_metric_sets_withou
 | Phase 2 only for the 16 multi-pass metrics | Those sets do not fit one pass after placement. None of them include GRBM | `WEIGHTED_AVG` for metrics whose set fits one pass |
 | A Phase 2 parent adds finished parts, including a negative part, or divides the pooled numerator by the pooled denominator | Each part is still one pass. The parts may come from different passes | Leaving a subtracted sum, or a ratio of parts, unset |
 | Largest-first greedy placement | It meets the gfx942 gates (`single_pass_metric_sets_without_pass == 0`, 14 passes). A solver on the allocate path is harder to explain when a metric is split | Using an optimization solver (OR-Tools CP-SAT) to allocate. That solver is no longer on the allocate path |
-| Table 1805's read, write, and atomic counters stay one PMC set | Those three request columns are one execution. Analyze uses the lowest-numbered pass that holds all three. That pass is not chosen because it holds `ATOMIC_LEVEL`. gfx942 stays at 14 passes | Giving read, write, and atomic each their own PMC set |
+| Table 1805's read, write, and atomic counters stay one PMC set | Those three request columns are one execution, and the row names all three, so packing keeps them in one pass. gfx942 stays at 14 passes | Giving read, write, and atomic each their own PMC set |
 
 ---
 
@@ -236,7 +236,7 @@ On gfx942, single-pass metric coverage is `single_pass_metric_sets_without_pass 
 
 | Layer | What it shows | Tied to |
 |-------|----------------|---------|
-| Unit | Packing (`test_counter_grouping_single_pass`, buckets, `soc_base`), reading each metric from one pass (`test_utils_analysis`, `test_metric_evaluator`, CLI and database analyze), multi-pass metrics (`test_collectable`, `test_weighted_avg*`, `test_collect_ratio`) | FR-1, FR-2, FR-6, FR-7 |
+| Unit | Packing (`test_allocator`, `test_counter_file`, `soc_base`), reading each metric from one pass (`test_utils_analysis`, `test_metric_evaluator`, CLI and database analyze), multi-pass metrics (`test_collectable`, `test_weighted_avg*`, `test_collect_ratio`) | FR-1, FR-2, FR-6, FR-7 |
 | Offline | After Phase 2 YAML, `tools/eval_single_pass_metrics.py --arch gfx942`: `single_pass_metric_sets_without_pass == 0`, **14** passes, `multi_pass_additional_passes == 0`, `multi_pass_metric_count == 0`. Those fields are defined under Design. A run before that YAML still reports `multi_pass_metric_count == 16` | FR-1, FR-5, NFR-1, NFR-2 |
 | End to end | Three workloads — `vcopy`, `nbody` (`mini-nbody`), `mega_kernel` — on gfx908, gfx90a, gfx942, gfx950, and gfx115x, including gfx1151. Not gfx1250. CPX is a host precondition for the gfx942 run. The baseline is a separate run of `rocprofiler-compute-develop` on the same workloads | FR-2, NFR-4, the tickets in System Context |
 | Phase 2 only | The 16 multi-pass metrics: each part fits one pass, and the parent adds those parts or divides the pooled numerator by the pooled denominator | FR-6, FR-7, FR-8 |

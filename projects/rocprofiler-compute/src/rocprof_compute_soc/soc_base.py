@@ -21,23 +21,13 @@ from typing import (
 )
 
 import config
-from rocprof_compute_soc.counter_file import (
-    CounterFile,
-    flat_counters_in_perfmon_file,
-)
-from rocprof_compute_soc.counter_file import (
-    LimitedSet as LimitedSet,
-)
-from rocprof_compute_soc.counter_grouping_buckets import iter_metric_groups
-from rocprof_compute_soc.counter_grouping_single_pass import (
-    try_allocate_single_pass_metrics,
-)
-from rocprof_compute_soc.counter_grouping_tcc import (
-    collectable_tcc_channel_count,
-    tcc_channel_definition,
-)
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils import amdsmi_interface, rocprofv3_avail_interface
+from utils.counters.allocator import (
+    allocate_single_pass_metrics,
+    metric_counter_sets,
+)
+from utils.counters.counter_file import CounterFile, flat_counters_in_perfmon_file
 from utils.logger import (
     console_debug,
     console_error,
@@ -387,20 +377,6 @@ class OmniSoC_Base:
         policy_arch = canonical_config_arch(arch)
         return _load_same_bucket_priority_policy_map().get(policy_arch, ())
 
-    def metric_groups(
-        self, profile_counters: set[str]
-    ) -> list[tuple[tuple[Any, ...], frozenset[str], str]]:
-        """Metric PMC groups for already expanded profile_counters.
-
-        Rows are in priority-tier order. See iter_metric_groups.
-        """
-        return iter_metric_groups(
-            self._same_bucket_priority_metric_ids(),
-            self._iter_arch_analysis_yaml_metrics(),
-            self._mspec.gpu_series,
-            profile_counters,
-        )
-
     def _metric_aware_coalesce_pass(
         self,
         work_set: Set[str],
@@ -547,18 +523,14 @@ class OmniSoC_Base:
         counters, matching perfmon allocation.
         """
         out = set(counters)
-        banks_per_die = int(self._mspec.l2_banks)
-        reported_dies = getattr(self._mspec, "num_xcd", 1) or 1
-        channel_count = collectable_tcc_channel_count(
-            self.get_arch() or "",
-            banks_per_die,
-            int(reported_dies),
-        )
+        # num_xcd is absent on single-die gfx115x; default to 1.
+        num_xcd = int(getattr(self._mspec, "num_xcd", 1) or 1)
+        l2_banks = int(self._mspec.l2_banks)
         for counter_name in counters.copy():
             if counter_name.startswith("TCC") and counter_name.endswith("["):
                 out.discard(counter_name)
                 base = counter_name.split("[")[0]
-                out.update(f"{base}[{i}]" for i in range(channel_count))
+                out.update(f"{base}[{i}]" for i in range(num_xcd * l2_banks))
         return out
 
     @demarcate
@@ -578,45 +550,34 @@ class OmniSoC_Base:
 
         return filter_blocks
 
-    def _allocate_perfmon_counter_files(
-        self,
-        counters: set[str],
-    ) -> tuple[list[CounterFile], int, int]:
+    def _allocate_perfmon_counter_files(self, counters: Set[str]) -> List[CounterFile]:
         """Bin-pack counters into perfmon buckets.
 
-        Named *_ACCUM counters from rocprofiler-sdk (accumulate(BASE, HIGH_RES)
-        in sdk_config.yaml) always cost two block slots. A named BASE next to
-        its ACCUM costs one more, so the pair uses three registers and leaves
-        headroom in an 8-deep SQ bucket. Legacy SQ_ACCUM_PREV_HIRES pairing
-        and dedicated accum buckets are not used.
-
-        The path handles single-pass metrics: every metric whose PMC set fits one
-        CounterFile gets a full-bucket collection (counters may be duplicated
-        across passes), then multi-pass metric PMCs are filled into existing
-        buckets. If that allocation returns nothing, the priority coalesce and
-        first-fit path places the remaining counters.
-
-        Returns:
-            output_files, file_count, and accu_file_count.
+        Each metric whose counters fit one bucket gets a bucket that holds all
+        of them. If that packing fails, a metric-aware greedy pass, when the
+        arch has priority metrics in profiling_counter_grouping_policy.yaml,
+        and a per-counter first-fit place the counters instead.
         """
-        output_files: list[CounterFile] = []
-        # Kept for call-site compatibility; dedicated accum files are gone.
-        accu_file_count = 0
-        work_set = set(counters)
+        output_files = allocate_single_pass_metrics(
+            counters,
+            metric_counter_sets(
+                (
+                    metric.expressions
+                    for metric in self._iter_arch_analysis_yaml_metrics()
+                ),
+                self._mspec.gpu_series,
+                counters,
+            ),
+            self.__perfmon_config,
+        )
+        if output_files is not None:
+            return output_files
+
+        output_files = []
         file_count = 0
         tcc_channel_counter_file_map: Dict[str, CounterFile] = {}
 
-        single_pass = try_allocate_single_pass_metrics(
-            self,
-            work_set,
-            self.__perfmon_config,
-            file_count_start=file_count,
-        )
-        if single_pass is not None:
-            output_files, file_count, _stats = single_pass
-            return output_files, file_count, accu_file_count
-
-        # Legacy path: priority coalesce, then first-fit.
+        work_set = set(counters)
         if self._same_bucket_priority_metric_ids():
             work_set, output_files, file_count = self._metric_aware_coalesce_pass(
                 work_set, output_files, file_count
@@ -644,7 +605,7 @@ class OmniSoC_Base:
                 file_count += 1
                 output_files[-1].add(ctr)
 
-        return output_files, file_count, accu_file_count
+        return output_files
 
     def _iter_arch_analysis_yaml_metrics(self) -> Iterator[AnalysisConfigMetric]:
         """Iterate the metrics of this arch's analysis configs.
@@ -734,9 +695,9 @@ class OmniSoC_Base:
 
         console_debug(f"Collecting following counters: {', '.join(counters)} ")
 
-        output_files, file_count, _ = self._allocate_perfmon_counter_files(counters)
+        output_files = self._allocate_perfmon_counter_files(counters)
 
-        console_debug("profiling", f"perfmon_coalesce file_count {file_count}")
+        console_debug("profiling", f"perfmon_coalesce file_count {len(output_files)}")
 
         # Output to files
         for f in output_files:
@@ -753,12 +714,16 @@ class OmniSoC_Base:
                 # Add TCC channel counters definitions
                 if is_tcc_channel_counter(ctr):
                     counter_name = ctr.split("[")[0]
-                    channel_index = int(ctr.split("[")[1].split("]")[0])
-                    description, expression = tcc_channel_definition(
-                        self.get_arch() or "",
-                        counter_name,
-                        channel_index,
-                        int(self._mspec.l2_banks),
+                    idx = int(ctr.split("[")[1].split("]")[0])
+                    xcd_idx = idx // int(self._mspec.l2_banks)
+                    channel_idx = idx % int(self._mspec.l2_banks)
+                    expression = (
+                        f"select({counter_name},"
+                        f"[DIMENSION_XCC=[{xcd_idx}], "
+                        f"DIMENSION_INSTANCE=[{channel_idx}]])"
+                    )
+                    description = (
+                        f"{counter_name} on {xcd_idx}th XCC and {channel_idx}th channel"
                     )
                     counter_def = add_counter_extra_config_input_yaml(
                         counter_def,
@@ -875,7 +840,7 @@ def _rebuild_tcc_channel_file_map(
     return result
 
 
-def _table_expressions(table: dict[str, Any]) -> list[str]:
+def _table_expressions(table: Dict[str, Any]) -> List[str]:
     """Expressions of every metric in one metric_table."""
     return [
         expression

@@ -103,10 +103,10 @@ DISPLAY_VARIANTS = {
         "16.3.5": (
             "Cache Hit Rate",
             "vl1d.hit_rate",
-            "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - "
-            "(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + "
-            "TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), "
-            "TCP_TOTAL_CACHE_ACCESSES_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
+            "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum"
+            " + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+            "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), TCP_TOTAL_CACHE_ACCESSES_sum)) "
+            "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
         ),
     },
     "gfx950": {
@@ -209,24 +209,6 @@ def row_forms(table: Dict[str, Any], row: Dict[str, Any]) -> List[str]:
     ]
 
 
-# Panel labels that show one library metric through a COLLECT_SUM or COLLECT_RATIO.
-# The library keeps the combined formula; the panel splits it across collectables.
-COLLECTED_ROW_IDS = {
-    "vl1 hit": "vl1d.hit_rate",
-    "hit rate": "vl1d.hit_rate",
-    "cache hit rate": "vl1d.hit_rate",
-    "read instructions": "td.rd_insts",
-    "cache hits": "vl1d.cache_hits",
-    "ai hbm": "fabric.ai_hbm",
-    "ai l2": "l2.ai",
-    "ai l1": "vl1d.ai",
-    "ai lds": "lds.ai",
-    "gl2 cache bw": "gl1.gl2_bw",
-    "ai gl2": "l2.ai",
-    "ai gl0": "gl0.ai",
-}
-
-
 def read_rows(arch: str) -> List[Row]:
     """Return every row equation in the analysis configs of arch.
 
@@ -236,8 +218,6 @@ def read_rows(arch: str) -> List[Row]:
     for item in iter_analysis_config_metrics(
         config.analysis_configs_dir / arch, unshown_file_ids(arch)
     ):
-        if item.metric_name.startswith("_collect."):
-            continue
         legacy_id = f"{item.table_id // 100}.{item.table_id % 100}.{item.metric_idx}"
         rows.extend(
             Row(
@@ -257,19 +237,6 @@ def in_seconds(row: Row) -> bool:
     return row.equation is not None and row.equation.endswith(SECONDS_SCALE)
 
 
-def scales_as_seconds(row: Row) -> bool:
-    """Return True if row shows a GB/s library formula in Bytes/s.
-
-    A collected bandwidth keeps the pieces' Bytes/s equation, which does not end
-    with the kernel-time divisor the other Bytes/s rows use.
-    """
-    return in_seconds(row) or (
-        row.unit == "Bytes/s"
-        and row.equation is not None
-        and "COLLECT_" in row.equation
-    )
-
-
 def gb_per_second(row: Row) -> Optional[str]:
     """Return the equation of row in GB/s, with the kernel time in nanoseconds."""
     if in_seconds(row):
@@ -283,7 +250,7 @@ def row_peak(row: Row, peak: str) -> str:
     A Bytes/s row writes "<MHz term> / 1000" as "<MHz term> * 1e6", and a measured peak
     "$<ceiling>_empirical_peak" as "$<ceiling>_empirical_peak * 1e9".
     """
-    if not scales_as_seconds(row):
+    if not in_seconds(row):
         return peak
     if peak.endswith("/1000"):
         return peak[: -len("/1000")] + "*1e6"
@@ -315,26 +282,6 @@ def row_metric_id(row: Row, library: loader.MetricLibrary, arch: str) -> Optiona
     return metric_id
 
 
-def shown_metric_id(
-    row: Row, library: loader.MetricLibrary, arch: str
-) -> Optional[str]:
-    """Return the library metric a row shows.
-
-    A collected row keeps the library metric of its label. The panel equation is
-    the split form, and the library keeps the combined formula.
-    """
-    metric_id = row_metric_id(row, library, arch)
-    if metric_id is not None or row.equation is None or "COLLECT_" not in row.equation:
-        return metric_id
-    names = {
-        metric["name"].casefold(): found_id
-        for found_id, metric in library.metrics.items()
-    }
-    return names.get(row.label.casefold()) or COLLECTED_ROW_IDS.get(
-        row.label.casefold()
-    )
-
-
 def make_soc(arch: str, membw_analysis: bool, filter_blocks: List[str]) -> OmniSoC_Base:
     """Return an OmniSoC_Base for arch, with no GPU needed."""
     args = SimpleNamespace(
@@ -362,7 +309,6 @@ def shown_blocks(arch: str) -> List[str]:
     file_ids = {
         path.name.split("_")[0]
         for path in (config.analysis_configs_dir / arch).glob("*.yaml")
-        if path.name.split("_")[0].isdigit()
     }
     return [str(int(file_id) // 100) for file_id in sorted(file_ids - unshown)]
 
@@ -405,8 +351,7 @@ def arch_view(request) -> SimpleNamespace:
 def test_every_row_shows_a_library_formula(arch_view):
     variants = DISPLAY_VARIANTS.get(arch_view.arch, {})
     errors = []
-    for row in arch_view.rows:
-        metric_id = shown_metric_id(row, arch_view.library, arch_view.arch)
+    for row, metric_id in zip(arch_view.rows, arch_view.metric_ids):
         if row.legacy_id in variants:
             label, variant_id, equation = variants[row.legacy_id]
             if row.label != label or variant_id not in arch_view.library.metrics:
@@ -420,8 +365,8 @@ def test_every_row_shows_a_library_formula(arch_view):
 
 def test_every_library_formula_is_shown(arch_view):
     shown = {
-        shown_metric_id(row, arch_view.library, arch_view.arch)
-        for row in arch_view.rows
+        metric_id
+        for row, metric_id in zip(arch_view.rows, arch_view.metric_ids)
         if row.equation is not None
     }
     assert sorted(set(arch_view.library.metrics) - shown) == []
@@ -430,8 +375,7 @@ def test_every_library_formula_is_shown(arch_view):
 def test_row_units_are_metric_units(arch_view):
     unit_variants = UNIT_VARIANTS.get(arch_view.arch, {})
     errors = []
-    for row in arch_view.rows:
-        metric_id = shown_metric_id(row, arch_view.library, arch_view.arch)
+    for row, metric_id in zip(arch_view.rows, arch_view.metric_ids):
         if row.unit is None or metric_id is None:
             continue
         metric_unit = arch_view.library.metrics[metric_id]["unit"]
@@ -441,7 +385,7 @@ def test_row_units_are_metric_units(arch_view):
         elif row.label != label:
             errors.append(f"{row.legacy_id} is now {row.label!r}; update UNIT_VARIANTS")
         else:
-            if scales_as_seconds(row):
+            if in_seconds(row):
                 unit = SECONDS_SCALE_UNITS.get(unit, unit)
             if UNIT_ALIASES.get(row.unit, row.unit) != unit:
                 errors.append(f"{row.legacy_id}: {row.unit!r} is not {unit!r}")
@@ -454,8 +398,7 @@ def test_row_peaks_are_metric_peaks(arch_view):
     unmeasured = mi_gpu_specs.get_all_roofline_columns() - arch_ceilings(arch_view.arch)
     errors = []
     shown_fields = defaultdict(set)
-    for row in arch_view.rows:
-        metric_id = shown_metric_id(row, arch_view.library, arch_view.arch)
+    for row, metric_id in zip(arch_view.rows, arch_view.metric_ids):
         if row.peak is None or metric_id is None:
             continue
         ceiling = EMPIRICAL_PEAK_RE.search(row.peak)

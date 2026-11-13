@@ -23,7 +23,6 @@ Usage (from the ``rocprofiler-compute`` project root):
 """
 
 import argparse
-import importlib
 import logging
 import sys
 import tempfile
@@ -42,11 +41,13 @@ if str(_SRC_DIR) not in sys.path:
 # Import from existing modules to maintain single source of truth
 import config  # noqa: E402
 from rocprof_compute_soc.soc_base import (  # noqa: E402
-    CounterFile,
     OmniSoC_Base,
-    flat_counters_in_perfmon_file,
     is_tcc_channel_counter,
     iter_analysis_config_metrics,
+)
+from utils.counters.counter_file import (  # noqa: E402
+    CounterFile,
+    flat_counters_in_perfmon_file,
 )
 from utils.logger import console_error  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
@@ -93,17 +94,15 @@ def run_soc_detect_and_coalesce(
     filter_blocks: Optional[list[str]],
     perfmon_config: dict[str, int],
     workload_root: Path,
-) -> tuple[set[str], list[CounterFile], OmniSoC_Base]:
+) -> tuple[set[str], list[CounterFile]]:
     """Run SoC counter detection and perfmon coalesce.
 
     Writes YAML under ``workload_root/perfmon/``.
     """
-    # num_xcd=1 is one reported die, not another arch's XCD count.
-    # The arch SoC replaces l2_banks with that chip's own banks.
     machine_spec = SimpleNamespace(
         rocminfo_lines=None,
         num_xcd=1,
-        l2_banks=1,
+        l2_banks=4,
         gpu_arch=arch,
         gpu_series=mi_gpu_specs.get_gpu_series(arch),
     )
@@ -116,18 +115,13 @@ def run_soc_detect_and_coalesce(
         set_selected=None,
     )
 
-    try:
-        soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
-        soc_class = getattr(soc_module, f"{arch}_soc")
-        soc = soc_class(cli_args, machine_spec)
-    except ModuleNotFoundError:
-        soc = OmniSoC_Base(cli_args, machine_spec)
-        soc.set_arch(arch)
+    soc = OmniSoC_Base(cli_args, machine_spec)
+    soc.set_arch(arch)
     soc.set_perfmon_config(perfmon_config)
 
     counters, _unused_filter_blocks = soc.detect_counters()
     if not counters:
-        return set(), [], soc
+        return set(), []
 
     soc.get_rocprof_supported_counters = (  # type: ignore[method-assign]
         lambda c=counters: _rocprof_supported_superset(c)
@@ -135,10 +129,8 @@ def run_soc_detect_and_coalesce(
 
     soc.perfmon_coalesce(counters)
 
-    perfmon_counter_files, _unused_perfmon_files, _unused_accumulator_files = (
-        soc._allocate_perfmon_counter_files(counters)
-    )
-    return counters, perfmon_counter_files, soc
+    perfmon_counter_files = soc._allocate_perfmon_counter_files(counters)
+    return counters, perfmon_counter_files
 
 
 def _global_ip_column_widths(
@@ -533,7 +525,7 @@ Examples:
 
     with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
         workload_root = Path(tmpdir)
-        counters, output_files, _soc = run_soc_detect_and_coalesce(
+        counters, output_files = run_soc_detect_and_coalesce(
             arch, args.block, perfmon_config, workload_root
         )
 
