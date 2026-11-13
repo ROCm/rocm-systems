@@ -82,6 +82,17 @@ storage_t::impl::get_storage_version() const
         return m_version.value();
     }
 
+    // rocprofiler-systems constructs storage_t{ "", "" } and reads this to
+    // learn which profiler-hub library was loaded. There is no trace schema
+    // to report, and a failed read must not look like library version 0.0.0.
+    if(m_database_path.empty())
+    {
+        m_version = profiler_hub::version_t{ .major = PROFILER_HUB_VERSION_MAJOR,
+                                             .minor = PROFILER_HUB_VERSION_MINOR,
+                                             .patch = PROFILER_HUB_VERSION_PATCH };
+        return m_version.value();
+    }
+
     auto backend = create_database(storage_type_t::read);
 
     const auto table = fmt::format("rocpd_metadata_{}", backend->get_uuid());

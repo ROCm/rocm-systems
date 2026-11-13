@@ -32,6 +32,8 @@ struct storage_t::impl
 
     // Reads the schema version stamped into the trace's rocpd_metadata
     // table on first call, then caches it (immutable for a trace's lifetime).
+    // An empty database path has no trace, so the version compiled into the
+    // loaded library is returned instead.
     [[nodiscard]] profiler_hub::version_t get_storage_version() const;
 
     std::shared_ptr<data_storage::sqlite_backend> create_database(

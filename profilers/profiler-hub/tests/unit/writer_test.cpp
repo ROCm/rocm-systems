@@ -93,6 +93,16 @@ TEST_F(writer_test, register_node_info_is_readable_after_flush)
     EXPECT_EQ(nodes[0]->machine_id, "machine-1");
 }
 
+TEST(storage_version_test, empty_path_reports_loaded_library_version)
+{
+    const storage_t storage{ "", "" };
+    const auto      version = storage.get_storage_version();
+
+    EXPECT_EQ(version.major, PROFILER_HUB_VERSION_MAJOR);
+    EXPECT_EQ(version.minor, PROFILER_HUB_VERSION_MINOR);
+    EXPECT_EQ(version.patch, PROFILER_HUB_VERSION_PATCH);
+}
+
 TEST_F(writer_test, get_storage_version_reads_schema_version_from_trace)
 {
     auto writer = make_writer();
