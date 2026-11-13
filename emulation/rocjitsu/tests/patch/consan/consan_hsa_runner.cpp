@@ -167,8 +167,7 @@ int run(int argc, char **argv) {
       threads > 1024 || workgroups == 0 || workgroups > 32)
     return 3;
   const uint32_t wave_count = (threads + wave_size - 1) / wave_size;
-  const uint32_t output_words =
-      std::max((wide_width ? 4u : 1u) * wave_count * (grouped ? workgroups : 1u), 2u);
+  const uint32_t output_words = std::max((wide_width ? 4u : 1u) * wave_count * workgroups, 2u);
   const size_t output_bytes = output_words * sizeof(uint32_t);
   if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics || barrier_type))
     return 3;
@@ -219,6 +218,7 @@ int run(int argc, char **argv) {
   void *arguments = nullptr, *output = nullptr;
   int result = 0;
   uint32_t completed = 0;
+  size_t output_allocation_bytes = 0;
   int64_t dispatch_wall_ns = 0, drain_wall_ns = 0;
   int profiling_status = 0;
   std::vector<uint32_t> last_output(output_words);
@@ -272,6 +272,16 @@ int run(int argc, char **argv) {
                                  &queue),
                 "controlled queue")))
     result = 20;
+  if (result == 0) {
+    hsa_amd_pointer_info_t output_info = {};
+    output_info.size = sizeof(output_info);
+    if (!require(hsa_amd_pointer_info(output, &output_info, nullptr, nullptr, nullptr),
+                 "output allocation info") ||
+        output_info.type != HSA_EXT_POINTER_TYPE_HSA)
+      result = 20;
+    else
+      output_allocation_bytes = output_info.sizeInBytes;
+  }
   if (result == 0 && profiling) {
     profiling_status = hsa_amd_profiling_set_profiler_enabled(queue, 1);
     if (profiling_status == HSA_STATUS_SUCCESS)
@@ -474,7 +484,9 @@ int run(int argc, char **argv) {
   if (plugin)
     ::dlclose(plugin);
   std::cout << "{\"app_status\":" << result << ",\"finish_status\":" << finish_status
-            << ",\"completed\":" << completed << ",\"dispatch_wall_ns\":" << dispatch_wall_ns
+            << ",\"completed\":" << completed
+            << ",\"output_allocation_bytes\":" << output_allocation_bytes
+            << ",\"dispatch_wall_ns\":" << dispatch_wall_ns
             << ",\"drain_wall_ns\":" << drain_wall_ns << ",\"finish_wall_ns\":" << finish_wall_ns;
   if (barrier_type)
     std::cout << ",\"barrier_completion\":" << barrier_completion;
