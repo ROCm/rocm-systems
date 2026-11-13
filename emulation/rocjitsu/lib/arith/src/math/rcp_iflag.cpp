@@ -9,11 +9,11 @@
 // raise INT_DIV0, while CLAMP suppresses a new cause (not an existing flag).
 
 #include "math/rcp_iflag.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "math/unary_exact.h"
 #include "math/x86_64/rcp_exact.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 #include <stdint.h>
 
@@ -37,9 +37,9 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
     return error;
   }
   if constexpr (Rdna3) {
-    // RDNA3 OMOD is disabled with preserved output denormals or IEEE mode.
-    // The reciprocal's forced flushing does not change that guest-mode test.
-    if (!(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) || (flags & RJ_ARITH_FP_IEEE_MODE)) {
+    // gfx1100 IEEE=0 captures apply RCP_IFLAG OMOD even with output denormals kept
+    // (MODE 0xf0 mul:2: 1.0 -> 2.0), so only IEEE mode disables it.
+    if (flags & RJ_ARITH_FP_IEEE_MODE) {
       mode &= ~uint64_t(RJ_ARITH_ALU_OMOD_MASK);
     }
   }

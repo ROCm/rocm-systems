@@ -15,6 +15,7 @@
 #include "common/base_rocr_utils.h"
 #include "common/common.h"
 #include "gtest/gtest.h"
+#include "hsa/amd_hsa_queue.h"
 #include "hsa/amd_hsa_signal.h"
 #include "hsa/hsa_ext_amd.h"
 
@@ -42,6 +43,24 @@ hsa_signal_t CreateHostSignal(hsa_signal_value_t initial_value) {
   EXPECT_EQ(hsa_amd_signal_create(initial_value, 0, nullptr, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &signal),
             HSA_STATUS_SUCCESS);
   return signal;
+}
+
+// Whether the CP reports AMD_QUEUE_CAPS_CP_SIGNAL_HINTS in a queue's caps, which it writes once it
+// has processed a packet on the queue
+bool CpReportsSignalHints(hsa_agent_t agent) {
+  hsa_queue_t* queue = nullptr;
+  EXPECT_EQ(rocrtst::CreateQueue(agent, &queue, kQueueSize), HSA_STATUS_SUCCESS);
+  if (queue == nullptr) return false;
+  const hsa_signal_t completion = CreateHostSignal(1);
+  RingDoorbell(queue, rocrtst::WriteBarrierAndToQueue(queue, hsa_signal_t{0}, completion));
+  EXPECT_EQ(hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
+                                      HSA_WAIT_STATE_ACTIVE),
+            0);
+  // The queue is the hsa_queue_t at the start of the runtime's amd_queue_t
+  const uint32_t caps = reinterpret_cast<const amd_queue_t*>(queue)->caps;
+  EXPECT_EQ(hsa_signal_destroy(completion), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+  return (caps & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
 }
 
 hsa_signal_t CreateDeviceSignal(hsa_amd_memory_pool_t pool, hsa_signal_value_t initial_value) {
@@ -73,12 +92,15 @@ void SignalHintsTest::SetUp(void) {
   if (test_skipped_) return;
 
   ASSERT_EQ(rocrtst::SetDefaultAgents(this), HSA_STATUS_SUCCESS);
-  bool hints_supported = false;
+  uint8_t aql_extensions[8] = {};
   ASSERT_EQ(hsa_agent_get_info(*gpu_device1(),
-                               static_cast<hsa_agent_info_t>(
-                                   HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED),
-                               &hints_supported),
+                               static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
+                               aql_extensions),
             HSA_STATUS_SUCCESS);
+  const bool hints_supported = hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS);
+  // ROCr sets the bit from the same caps, at the index hsa_flag_isset64 reads
+  EXPECT_EQ(hints_supported, CpReportsSignalHints(*gpu_device1()))
+      << "AQL_EXTENSIONS bytes " << std::hex << static_cast<uint32_t>(aql_extensions[0]);
   if (!hints_supported) {
     markAsSkip();
     std::cout << "Test not applicable as the GPU's CP does not support signal hints. Skipping."
