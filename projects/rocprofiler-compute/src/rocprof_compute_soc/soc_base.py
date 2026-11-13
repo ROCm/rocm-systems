@@ -23,6 +23,11 @@ from typing import (
 import config
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils import amdsmi_interface, rocprofv3_avail_interface
+from utils.counters.allocator import (
+    allocate_single_pass_metrics,
+    metric_counter_sets,
+)
+from utils.counters.counter_file import CounterFile, flat_counters_in_perfmon_file
 from utils.logger import (
     console_debug,
     console_error,
@@ -48,7 +53,6 @@ from utils.utils_common import (
     validate_roofline_csv,
 )
 from utils.utils_counter_defs import (
-    counter_to_block,
     extract_counters_and_variables,
     metric_expressions,
 )
@@ -546,35 +550,32 @@ class OmniSoC_Base:
 
         return filter_blocks
 
-    def _allocate_perfmon_counter_files(
-        self, counters: Set[str]
-    ) -> Tuple[List["CounterFile"], int, int]:
-        """Bin-pack counters into perfmon buckets.
+    def _allocate_perfmon_counter_files(self, counters: Set[str]) -> List[CounterFile]:
+        """Pack counters into perfmon passes.
 
-        Returns (output_files, file_count, accu_file_count).
-
-        Accumulator counters (ending with _ACCUM) get dedicated files first.
-        If the arch has priority metrics in profiling_counter_grouping_policy.yaml,
-        a metric-aware greedy pass runs before the final per-counter first-fit.
+        Use single-pass packing. If it fails, use the older greedy packing.
         """
-        output_files: List[CounterFile] = []
-        accu_file_count = 0
-        work = sorted(list(counters))
-        for counter in work.copy():
-            if counter.endswith("_ACCUM") and not is_tcc_channel_counter(counter):
-                work.remove(counter)
-                output_files.append(CounterFile(counter, self.__perfmon_config))
-                output_files[-1].add(counter)
-                # Paired level-event slot: hardware programs the level counter
-                # alongside its accumulator, so hold one extra slot in the
-                # same block.
-                output_files[-1].reserve(counter, 1)
-                accu_file_count += 1
+        output_files = allocate_single_pass_metrics(
+            counters,
+            metric_counter_sets(
+                (
+                    metric.expressions
+                    for metric in self._iter_arch_analysis_yaml_metrics()
+                ),
+                self._mspec.gpu_series,
+                counters,
+            ),
+            self.__perfmon_config,
+        )
+        if output_files is not None:
+            return output_files
 
+        output_files = []
         file_count = 0
         tcc_channel_counter_file_map: Dict[str, CounterFile] = {}
 
-        work_set = set(work)
+        # Counters not placed in a pass yet
+        work_set = set(counters)
         if self._same_bucket_priority_metric_ids():
             work_set, output_files, file_count = self._metric_aware_coalesce_pass(
                 work_set, output_files, file_count
@@ -602,7 +603,7 @@ class OmniSoC_Base:
                 file_count += 1
                 output_files[-1].add(ctr)
 
-        return output_files, file_count, accu_file_count
+        return output_files
 
     def _iter_arch_analysis_yaml_metrics(self) -> Iterator[AnalysisConfigMetric]:
         """Iterate the metrics of this arch's analysis configs.
@@ -692,9 +693,9 @@ class OmniSoC_Base:
 
         console_debug(f"Collecting following counters: {', '.join(counters)} ")
 
-        output_files, file_count, _ = self._allocate_perfmon_counter_files(counters)
+        output_files = self._allocate_perfmon_counter_files(counters)
 
-        console_debug("profiling", f"perfmon_coalesce file_count {file_count}")
+        console_debug("profiling", f"perfmon_coalesce file_count {len(output_files)}")
 
         # Output to files
         for f in output_files:
@@ -803,48 +804,6 @@ class OmniSoC_Base:
             )
 
 
-# Set with limited size
-class LimitedSet:
-    def __init__(self, maxsize: int) -> None:
-        self.avail: int = maxsize
-        self.elements: List[str] = []
-
-    def add(self, element: str) -> bool:
-        if element in self.elements:
-            return True
-        # Store all channels for a TCC channel counter in the same file
-        if element.split("[")[0] in {elem.split("[")[0] for elem in self.elements}:
-            self.elements.append(element)
-            return True
-        if self.avail > 0:
-            self.avail -= 1
-            self.elements.append(element)
-            return True
-        return False
-
-    def reserve(self, n: int) -> bool:
-        if self.avail < n:
-            return False
-        self.avail -= n
-        return True
-
-
-# Represents a file that lists PMC counters. Number of counters for each
-# block limited according to perfmon config.
-class CounterFile:
-    def __init__(self, name: str, perfmon_config: Dict[str, int]) -> None:
-        self.name: str = name
-        self.blocks: Dict[str, LimitedSet] = {
-            block: LimitedSet(capacity) for block, capacity in perfmon_config.items()
-        }
-
-    def add(self, counter: str) -> bool:
-        return self.blocks[counter_to_block(counter)].add(counter)
-
-    def reserve(self, counter: str, n: int) -> bool:
-        return self.blocks[counter_to_block(counter)].reserve(n)
-
-
 def _trial_counter_file_with_extra(
     basis: CounterFile,
     perfmon_config: Dict[str, int],
@@ -877,15 +836,6 @@ def _rebuild_tcc_channel_file_map(
             if is_tcc_channel_counter(ctr):
                 result[ctr.split("[")[0]] = bucket
     return result
-
-
-def flat_counters_in_perfmon_file(counter_file: CounterFile) -> List[str]:
-    """Ordered list of PMC counter names assigned to one perfmon bucket file."""
-    return [
-        ctr
-        for block_name in counter_file.blocks
-        for ctr in counter_file.blocks[block_name].elements
-    ]
 
 
 def _table_expressions(table: Dict[str, Any]) -> List[str]:

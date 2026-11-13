@@ -7,6 +7,8 @@ test_categories:
       - test_expression
       - test_evaluation_pipeline
       - test_metric_evaluator
+      - test_allocator
+      - test_counter_file
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
@@ -90,6 +92,8 @@ test_categories:
       - test_expression
       - test_evaluation_pipeline
       - test_metric_evaluator
+      - test_allocator
+      - test_counter_file
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
@@ -197,6 +201,8 @@ test_categories:
       - test_expression
       - test_evaluation_pipeline
       - test_metric_evaluator
+      - test_allocator
+      - test_counter_file
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
@@ -304,6 +310,8 @@ test_categories:
       - test_expression
       - test_evaluation_pipeline
       - test_metric_evaluator
+      - test_allocator
+      - test_counter_file
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync

@@ -154,7 +154,9 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
         "rocprof_compute_analyze.analysis_cli.cli_analysis.load_pc_sampling_tool_data",
         lambda self, _path: None,
     )
-    monkeypatch.setattr("utils.file_io.create_df_pmc", lambda *a, **kw: pd.DataFrame())
+    monkeypatch.setattr(
+        "utils.file_io.create_df_pmc", lambda *a, **kw: (pd.DataFrame(), {})
+    )
     monkeypatch.setattr(
         "utils.file_io.create_df_kernel_top_stats",
         lambda *a, **kw: (pd.DataFrame(), pd.DataFrame()),
@@ -330,7 +332,9 @@ def test_pre_processing_lists_operators_for_every_path(monkeypatch):
         "rocprof_compute_analyze.analysis_cli.cli_analysis.load_pc_sampling_tool_data",
         lambda self, _path: None,
     )
-    monkeypatch.setattr("utils.file_io.create_df_pmc", lambda *a, **kw: pd.DataFrame())
+    monkeypatch.setattr(
+        "utils.file_io.create_df_pmc", lambda *a, **kw: (pd.DataFrame(), {})
+    )
     monkeypatch.setattr(
         "utils.file_io.create_df_kernel_top_stats",
         lambda *a, **kw: (pd.DataFrame(), pd.DataFrame()),

@@ -15,7 +15,7 @@ from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
-from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.metrics.metric_evaluator import MetricEvaluator, counter_table_index
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -161,8 +161,13 @@ def eval_metric(
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
     debug: bool,
+    pass_tables: Optional[list[pd.DataFrame]] = None,
 ) -> None:
-    """Execute the expr string for each metric in the df."""
+    """Execute the expr string for each metric in the df.
+
+    A metric reads the first table in pass_tables that has all of its
+    counters. When none has them all, it reads raw_pmc_df.
+    """
     # confirm no illogical counter values
     gui_active_counter = next(
         (
@@ -192,8 +197,26 @@ def eval_metric(
     # Clear any previous noise clamp warnings before this analysis
     clear_noise_clamp_warnings()
 
-    # Create metric evaluator
-    metric_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
+    # One evaluator per pass table, with that pass's built-in variables. The
+    # merged table's evaluator comes last.
+    evaluators = [
+        *(
+            MetricEvaluator(
+                table,
+                {
+                    **sys_vars,
+                    **calc_builtin_vars(
+                        table, sys_vars, sys_info["gpu_arch"], expressions
+                    ),
+                },
+                empirical_peaks,
+            )
+            for table in pass_tables or []
+        ),
+        MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks),
+    ]
+    tables = [evaluator.raw_pmc_df for evaluator in evaluators]
+    build_in_vars = get_build_in_vars(mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"]))
 
     exprs_to_eval = []
     debug_tracker = DebugRowTracker() if debug else None
@@ -213,14 +236,23 @@ def eval_metric(
                         "percent of peak",
                     }:
                         if row[expr]:
-                            exprs_to_eval.append((df_id, row_id, expr, row[expr]))
+                            evaluator = evaluators[
+                                counter_table_index(row[expr], tables, build_in_vars)
+                            ]
+                            exprs_to_eval.append((
+                                df_id,
+                                row_id,
+                                expr,
+                                row[expr],
+                                evaluator,
+                            ))
 
                             if debug:
                                 debug_row_tracker(
                                     expr,
                                     row[expr],
-                                    metric_evaluator,
-                                    raw_pmc_df,
+                                    evaluator,
+                                    evaluator.raw_pmc_df,
                                     show_inputs=debug_tracker.should_show_inputs(
                                         df_id,
                                         row_id,
@@ -231,9 +263,9 @@ def eval_metric(
                             # as string but not number if there is NONE
                             df.at[row_id, expr] = ""
 
-    for df_id, row_id, col, expr in exprs_to_eval:
+    for df_id, row_id, col, expr, evaluator in exprs_to_eval:
         noise_clamp_count_prev = get_noise_clamp_warnings()["count"]
-        eval_result = metric_evaluator.eval_expression(expr)
+        eval_result = evaluator.eval_expression(expr)
         noise_clamp_count_new = get_noise_clamp_warnings()["count"]
         if (
             noise_clamp_count_new > noise_clamp_count_prev

@@ -128,6 +128,48 @@ class TestEvaluationPipeline:
         assert call_args.kwargs["show_inputs"] is True
         assert metric_df.loc["1.1.0", "Value"] == 450
 
+    @pytest.mark.parametrize(
+        ("pass_counters", "expected"),
+        [
+            ([["SQ_WAVES"], ["SQ_WAVES", "GRBM_GUI_ACTIVE"]], 0.4),
+            ([["SQ_WAVES"], ["GRBM_GUI_ACTIVE"]], 0.1),
+        ],
+        ids=["pass_holds_all", "no_pass_holds_all"],
+    )
+    def test_eval_metric_reads_metric_from_first_pass_holding_it(
+        self, pass_counters, expected
+    ):
+        """A metric reads the first pass that has all its counters, and the
+        merged frame when no pass has them all."""
+        fixture = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": "to_sum(raw_pmc_df['SQ_WAVES']) / "
+                "to_sum(raw_pmc_df['GRBM_GUI_ACTIVE'])",
+            }
+        )
+        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
+        pass_values = {"SQ_WAVES": [10, 20, 30], "GRBM_GUI_ACTIVE": [50, 50, 50]}
+        pass_tables = [
+            pd.DataFrame({name: pass_values[name] for name in counters})
+            for counters in pass_counters
+        ]
+        with patch(
+            "utils.metrics.evaluation_pipeline.get_build_in_vars",
+            return_value={},
+        ):
+            eval_metric(
+                dfs,
+                dfs_type,
+                dfs_expressions,
+                sys_info,
+                pd.DataFrame(),
+                raw_pmc_df,
+                debug=False,
+                pass_tables=pass_tables,
+            )
+
+        assert metric_df.loc["1.1.0", "Value"] == pytest.approx(expected)
+
     def test_eval_metric_computes_value_from_expression(self):
         """eval_metric writes the computed Value back to the metric DataFrame."""
         fixture = self._build_eval_metric_inputs(

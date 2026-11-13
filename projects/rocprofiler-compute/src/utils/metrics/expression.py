@@ -10,7 +10,9 @@ import re
 
 from utils.logger import console_warning
 from utils.utils_common import SUPPORTED_FIELD
-from utils.utils_counter_defs import SUPPORTED_DENOM
+from utils.utils_counter_defs import AMMOLITE_VAR_RE, SUPPORTED_DENOM
+
+RAW_PMC_COLUMN_RE = re.compile(r"raw_pmc_df\[['\"]([^'\"]+)['\"]\]")
 
 
 class InvalidExpressionError(ValueError):
@@ -229,6 +231,23 @@ def build_eval_string(equation: str) -> str:
     equation_string = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", equation_string)
 
     return equation_string
+
+
+def columns_read(eval_string: str, build_in_vars: dict[str, str]) -> set[str]:
+    """Return the raw_pmc_df columns an eval string reads. Columns that its
+    built-in variables read count too."""
+    columns = set(RAW_PMC_COLUMN_RE.findall(eval_string))
+    pending = set(AMMOLITE_VAR_RE.findall(eval_string))
+    seen: set[str] = set()
+    while pending:
+        name = pending.pop()
+        seen.add(name)
+        if name not in build_in_vars:
+            continue
+        builtin_string = build_eval_string(build_in_vars[name])
+        columns.update(RAW_PMC_COLUMN_RE.findall(builtin_string))
+        pending.update(set(AMMOLITE_VAR_RE.findall(builtin_string)) - seen)
+    return columns
 
 
 def update_denominator_string(equation: str, normal_unit: str) -> str:

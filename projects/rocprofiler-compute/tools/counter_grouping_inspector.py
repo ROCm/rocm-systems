@@ -41,11 +41,13 @@ if str(_SRC_DIR) not in sys.path:
 # Import from existing modules to maintain single source of truth
 import config  # noqa: E402
 from rocprof_compute_soc.soc_base import (  # noqa: E402
-    CounterFile,
     OmniSoC_Base,
-    flat_counters_in_perfmon_file,
     is_tcc_channel_counter,
     iter_analysis_config_metrics,
+)
+from utils.counters.counter_file import (  # noqa: E402
+    CounterFile,
+    flat_counters_in_perfmon_file,
 )
 from utils.logger import console_error  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
@@ -127,9 +129,7 @@ def run_soc_detect_and_coalesce(
 
     soc.perfmon_coalesce(counters)
 
-    perfmon_counter_files, _unused_perfmon_files, _unused_accumulator_files = (
-        soc._allocate_perfmon_counter_files(counters)
-    )
+    perfmon_counter_files = soc._allocate_perfmon_counter_files(counters)
     return counters, perfmon_counter_files
 
 
