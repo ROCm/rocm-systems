@@ -3831,6 +3831,14 @@
           "test_filter": "DdaIpcMPI_IndexData.ReduceScatter*"
         },
         {
+          "name": "DDA_IpcCommLifecycle_8Ranks",
+          "description": "DDA IPC must come up, with no HIP error pending, on communicators created after another one is destroyed; needs cuMem, which is cached per process",
+          "test_filter": "DdaIpcMPI_CommLifecycle.*",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
           "name": "HostApi_DenseAllToAllPutSignal_8Ranks",
           "description": "Dense all-to-all put/signal over the copy engine on 8 ranks; the uneven profile can split batches into chunks, which the 2-rank Host API suites never reach",
           "test_filter": "HostApiTest.DenseAllToAllPutSignal",

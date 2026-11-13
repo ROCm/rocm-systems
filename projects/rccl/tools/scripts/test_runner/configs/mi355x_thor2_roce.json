@@ -4056,6 +4056,14 @@
           "name": "DDA_IpcReduceScatterIndexData_8Ranks",
           "description": "DDA IPC ReduceScatter with rank- and index-dependent fp32/bf16 data: every rank must receive its own reduced slice",
           "test_filter": "DdaIpcMPI_IndexData.ReduceScatter*"
+        },
+        {
+          "name": "DDA_IpcCommLifecycle_8Ranks",
+          "description": "DDA IPC must come up, with no HIP error pending, on communicators created after another one is destroyed; needs cuMem, which is cached per process",
+          "test_filter": "DdaIpcMPI_CommLifecycle.*",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
         }
       ]
     },
