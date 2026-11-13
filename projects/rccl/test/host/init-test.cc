@@ -2599,6 +2599,16 @@ TEST_F(InitMicrotest, CommAlloc_MemPoolCreateFails_ReturnsError) {
   EXPECT_NE(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
 }
 
+// A device that reports no memory-pool support skips pool creation and leaves comm->memPool unset.
+TEST_F(InitMicrotest, CommAlloc_MemPoolsUnsupported_SkipsPoolCreate) {
+  InstallCommAllocSuccess();
+  g_hipMemPoolResult = hipErrorNotSupported;  // would fail init if commAlloc still created the pool
+  g_hipMemoryPoolsSupported = 0;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
+  EXPECT_EQ(nullptr, comm->memPool);
+}
+
 namespace {
 // void + out-param, not a return value: gtest's ASSERT_* only unwinds a void-returning function.
 void AllocedComm(AllocedCommPtr& comm, int ndev = 8, int rank = 0) {

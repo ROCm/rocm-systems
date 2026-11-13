@@ -6589,6 +6589,20 @@ TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
   EXPECT_EQ(ncclCommQueryProperties(comm, &raw), ncclInvalidUsage);
 }
 
+// nLsaTeams comes from the topology, so a property query leaves device-runtime state (bigSize) untouched.
+TEST_F(CommQueryPropertiesTest, NLsaTeams_DoesNotInitialiseDeviceRuntime) {
+  ScopedHook granularity(g_hipMemGetAllocationGranularity,
+                         [](size_t* g, const hipMemAllocationProp*, hipMemAllocationGranularity_flags) {
+                           *g = 4096;
+                           return hipSuccess;
+                         });
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.nLsaTeams, 1);  // all 8 ranks on node 0
+  EXPECT_EQ(granularity.calls, 0);
+  EXPECT_EQ(comm->devrState.bigSize, 0u);
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevrGetLsaTeamPtrMC resolves an offset to its multicast address for a
