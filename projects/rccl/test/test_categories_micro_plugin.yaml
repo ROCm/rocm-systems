@@ -7,10 +7,11 @@ test_categories:
     description: "Smoke - host-only src/plugin/ micro-tests, sub-second."
     test_patterns:
       - "CsvTuner*"
+      - "Env*"
       - "Gin*"  # gin.cc's GinPluginInitTest and GinFinalizeTest
       - "Plugin*"
       - "Profiler*"
-      - "Rma*"  # rma.cc's RmaPluginInitTest
+      - "Rma*"  # rma.cc's RmaPluginInitTest and rma/rma_v<N>.cc
     exclude_windows:
       - "*"
     labels:
