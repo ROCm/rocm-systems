@@ -111,7 +111,7 @@ bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device,
   return true;
 }
 
-void dissociateD3D10Device(const Device* device, void* const gfxDevice[], void* gfxContext) {
+void dissociateD3D10Device(const Device* /*device*/, void* const gfxDevice[], void* gfxContext) {
   if (!gfxDevice || !gfxContext) return;
   void* d3d10Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D10DeviceKhrIdx];
   if (!d3d10Device) return;

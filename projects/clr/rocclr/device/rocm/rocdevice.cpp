@@ -374,7 +374,7 @@ bool NullDevice::init() {
 
 NullDevice::~NullDevice() {}
 
-hsa_status_t Device::iterateAgentCallback(hsa_agent_t agent, void* data) {
+hsa_status_t Device::iterateAgentCallback(hsa_agent_t agent, void* /*data*/) {
   hsa_device_type_t dev_type = HSA_DEVICE_TYPE_CPU;
 
   hsa_status_t stat = Hsa::agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &dev_type);
@@ -811,7 +811,7 @@ bool Device::create() {
 }
 
 // ================================================================================================
-device::Program* NullDevice::createProgram(amd::Program& owner, amd::option::Options* options) {
+device::Program* NullDevice::createProgram(amd::Program& owner, amd::option::Options* /*options*/) {
   device::Program* program = new roc::Program(*this, owner);
 
   if (program == nullptr) {
@@ -847,7 +847,7 @@ bool Device::createBlitProgram() {
   return result;
 }
 
-device::Program* Device::createProgram(amd::Program& owner, amd::option::Options* options) {
+device::Program* Device::createProgram(amd::Program& owner, amd::option::Options* /*options*/) {
   device::Program* program = new roc::Program(*this, owner);
 
   if (program == nullptr) {
@@ -2347,7 +2347,7 @@ device::Memory* Device::createMemory(
 }
 
 // ================================================================================================
-device::Memory* Device::createMemory(size_t size, size_t alignment) const {
+device::Memory* Device::createMemory(size_t size, size_t /*alignment*/) const {
   auto buffer = new roc::Buffer(*this, size);
   static constexpr bool LocalAlloc = true;
   if ((buffer == nullptr) || !buffer->create(LocalAlloc, nullptr)) {
@@ -2399,7 +2399,7 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
 }
 
 // ================================================================================================
-void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
+void* Device::hostAlloc(size_t size, size_t /*alignment*/, MemorySegment mem_seg,
                         const void* agentInfo, bool allowAllAgentsAccess) const {
   void* ptr = nullptr;
   uint32_t memFlags = 0;
@@ -2723,7 +2723,7 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags, bool a
   return ptr;
 }
 
-void Device::memFree(void* ptr, size_t size) const {
+void Device::memFree(void* ptr, size_t /*size*/) const {
   hsa_status_t stat = Hsa::memory_pool_free(ptr);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Free hsa memory %p", ptr);
   if (stat != HSA_STATUS_SUCCESS) {
@@ -2769,8 +2769,8 @@ void Device::updateFreeMemory(size_t size, bool free) {
 }
 
 // ================================================================================================
-void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
-                       void* svmPtr) const {
+void* Device::svmAlloc(amd::Context& context, size_t size, size_t /*alignment*/,
+                       cl_svm_mem_flags flags, void* svmPtr) const {
   amd::Memory* mem = nullptr;
   void* svmPtrUsed = reinterpret_cast<void*>(amd::Memory::MemoryType::kSvmMemoryPtr);
 
@@ -2814,7 +2814,7 @@ void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_
   return mem->getSvmPtr();
 }
 
-void* Device::virtualAlloc(void* req_addr, size_t size, size_t alignment) {
+void* Device::virtualAlloc(void* req_addr, size_t size, size_t /*alignment*/) {
   void* vptr = nullptr;
   // Reserves the address using HSA APIs, with requested address.
   // There is no guarantee that we will get the requested address.
@@ -3145,7 +3145,7 @@ bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryA
 
 // ================================================================================================
 bool Device::SetSvmAttributes(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
-                              bool use_cpu, int numa_id) const {
+                              bool use_cpu, int /*numa_id*/) const {
   constexpr bool kFirstAlloc = false;
   return SetSvmAttributesInt(dev_ptr, count, advice, kFirstAlloc, use_cpu);
 }
@@ -3512,8 +3512,8 @@ VirtualGPU* Device::coopQueue() const {
 }
 
 // ================================================================================================
-bool Device::SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
-                          cl_set_device_clock_mode_output_amd* pSetClockModeOutput) {
+bool Device::SetClockMode(const cl_set_device_clock_mode_input_amd /*setClockModeInput*/,
+                          cl_set_device_clock_mode_output_amd* /*pSetClockModeOutput*/) {
   bool result = true;
   return result;
 }
@@ -3684,7 +3684,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                                   amd::CommandQueue::Priority priority, bool managed,
                                   bool dedicated_queue, hsa_queue_t* preferred,
                                   const std::unordered_set<uint64_t>* excluded_ids,
-                                  void** metadata_ring_buffer) {
+                                  void** /*metadata_ring_buffer*/) {
   // App-thread context: flush queues deferred from the async thread once they
   // reach the batch threshold, bounding live deferred queues.
   if (DeferredQueueCount() >= kDeferredQueueDrainThreshold) {
@@ -4219,7 +4219,7 @@ static std::string GetLocalHostName() {
 }
 
 // ================================================================================================
-hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, void* data) {
+hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, void* /*data*/) {
   cl_int gpu_error = CL_SUCCESS;
   switch (event->event_type) {
     case HSA_AMD_GPU_MEMORY_FAULT_EVENT: {
@@ -4661,7 +4661,7 @@ bool Device::IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer
 }
 
 // ================================================================================================
-void Device::HiddenHeapAlloc(const VirtualGPU& gpu) {
+void Device::HiddenHeapAlloc(const VirtualGPU& /*gpu*/) {
   auto HeapAllocOnly = [this]() -> bool {
     // Allocate initial heap for device memory allocator
     static constexpr size_t HeapBufferSize = 128 * Ki;

@@ -204,7 +204,7 @@ static inline uint32_t metadataPreloadDword(
   return meta->kernarg_preload_30_31[dword_idx - kSection0Dwords - kSection1Dwords];
 }
 
-static inline void logAqlMetadataPacket(const Device& dev, const hsa_queue_t* queue,
+static inline void logAqlMetadataPacket(const Device& /*dev*/, const hsa_queue_t* queue,
                                         const hsa_amd_metadata_kernel_dispatch_packet_t* meta,
                                         uint64_t wptr, AqlLogSink sink = AqlLogSink::kLog) {
   if (meta == nullptr) {
@@ -2940,7 +2940,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
 // ================================================================================================
 bool VirtualGPU::dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet,
                                           const uint32_t gfxVersion, bool blocking,
-                                          const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi) {
+                                          const hsa_ven_amd_aqlprofile_1_00_pfn_t* /*extApi*/) {
   // PM4 IB packet submission is different between GFX8 and GFX9:
   //  In GFX8 the PM4 IB packet blob is writing directly to AQL queue
   //  In GFX9 the PM4 IB is submitting by AQL Vendor Specific packet and
@@ -5650,7 +5650,7 @@ hsa_amd_packet_type8_t VirtualGPU::SelectExtDispatchAmdFormat(
 
 // ================================================================================================
 bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const amd::Kernel& kernel,
-                                      const_address parameters, void* event_handle,
+                                      const_address parameters, void* /*event_handle*/,
                                       uint32_t sharedMemBytes, amd::NDRangeKernelCommand* vcmd,
                                       hsa_kernel_dispatch_packet_t* aql_packet,
                                       bool attach_signal) {
@@ -6210,7 +6210,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
 }
 
 // ================================================================================================
-void VirtualGPU::submitNativeFn(amd::NativeFnCommand& cmd) {}
+void VirtualGPU::submitNativeFn(amd::NativeFnCommand& /*cmd*/) {}
 
 // ================================================================================================
 void VirtualGPU::submitMarker(amd::Marker& vcmd) {
@@ -6444,7 +6444,7 @@ void VirtualGPU::submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& vcmd) {
 }
 
 // ================================================================================================
-void VirtualGPU::flush(amd::Command* list, bool wait) {
+void VirtualGPU::flush(amd::Command* list, bool /*wait*/) {
   // If barrier is requested, then wait for everything, otherwise
   // a per disaptch wait will occur later in updateCommandsState()
   releaseGpuMemoryFence();

@@ -204,7 +204,7 @@ bool DmaBlitManager::writeImage(const void* srcHost, device::Memory& dstMemory,
 // ================================================================================================
 bool DmaBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstMemory,
                                 const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
-                                const amd::Coord3D& size, bool entire,
+                                const amd::Coord3D& size, bool /*entire*/,
                                 amd::CopyMetadata copyMetadata) const {
   // When FFM/DTIF fast-copy is enabled, plain device allocations are marked
   // HostMemoryDirectAccess so HtoD/DtoH can short-circuit to a host memcpy. DtoD
@@ -2615,7 +2615,7 @@ static inline FillPatternPayload buildTilePattern(const void* pattern, size_t pa
 
 // ================================================================================================
 bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern,
-                                     size_t patternSize, const amd::Coord3D& surface,
+                                     size_t patternSize, const amd::Coord3D& /*surface*/,
                                      const amd::Coord3D& origin, const amd::Coord3D& size,
                                      bool entire, bool forceBlit) const {
   std::scoped_lock k(lockXferOps_);
@@ -2855,10 +2855,10 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
 }
 
 // ================================================================================================
-bool KernelBlitManager::fillBuffer3D(device::Memory& memory, const void* pattern,
-                                     size_t patternSize, const amd::Coord3D& surface,
-                                     const amd::Coord3D& origin, const amd::Coord3D& size,
-                                     bool entire, bool forceBlit) const {
+bool KernelBlitManager::fillBuffer3D(device::Memory& /*memory*/, const void* /*pattern*/,
+                                     size_t /*patternSize*/, const amd::Coord3D& /*surface*/,
+                                     const amd::Coord3D& /*origin*/, const amd::Coord3D& /*size*/,
+                                     bool /*entire*/, bool /*forceBlit*/) const {
   ShouldNotReachHere();
   return false;
 }
@@ -2866,8 +2866,9 @@ bool KernelBlitManager::fillBuffer3D(device::Memory& memory, const void* pattern
 // ================================================================================================
 bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Coord3D& dstOrigin,
                                          const amd::Coord3D& srcOrigin, const amd::Coord3D& sizeIn,
-                                         bool entire, const uint32_t blitWg,
-                                         amd::CopyMetadata copyMetadata, bool attachSignal) const {
+                                         bool /*entire*/, const uint32_t blitWg,
+                                         amd::CopyMetadata /*copyMetadata*/,
+                                         bool attachSignal) const {
   constexpr uint32_t kBlitType = BlitCopyBuffer;
   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
   amd::Coord3D size(sizeIn[0]);
@@ -3917,7 +3918,7 @@ address KernelBlitManager::captureArguments(const amd::Kernel* kernel) const {
   return kernel->parameters().values();
 }
 
-void KernelBlitManager::releaseArguments(address args) const {}
+void KernelBlitManager::releaseArguments(address /*args*/) const {}
 
 // ================================================================================================
 bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue, uint threads,
