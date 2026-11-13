@@ -69,7 +69,8 @@ typedef enum hipArray_Format {
   HIP_AD_FORMAT_SIGNED_INT16 = 0x09,    ///< Signed 16-bit array format
   HIP_AD_FORMAT_SIGNED_INT32 = 0x0a,    ///< Signed 32-bit array format
   HIP_AD_FORMAT_HALF = 0x10,            ///< Half array format
-  HIP_AD_FORMAT_FLOAT = 0x20            ///< Float array format
+  HIP_AD_FORMAT_FLOAT = 0x20,           ///< Float array format
+  HIP_AD_FORMAT_NV12 = 0xb0             ///< NV12 multiplanar; access planes via hipArrayGetPlane
 } hipArray_Format;
 /**
  * HIP array descriptor

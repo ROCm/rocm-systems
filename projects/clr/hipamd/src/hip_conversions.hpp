@@ -14,6 +14,10 @@ inline cl_channel_type getCLChannelType(const hipArray_Format hipFormat,
                                         const hipTextureReadMode hipReadMode) {
   if (hipReadMode == hipReadModeElementType) {
     switch (hipFormat) {
+      // NV12 has no single channel type. Parents never reach here, and the planes are created
+      // directly as UNSIGNED_INT8; fall through to the error return below.
+      case HIP_AD_FORMAT_NV12:
+        break;
       case HIP_AD_FORMAT_UNSIGNED_INT8:
         return CL_UNSIGNED_INT8;
       case HIP_AD_FORMAT_SIGNED_INT8:
@@ -33,6 +37,8 @@ inline cl_channel_type getCLChannelType(const hipArray_Format hipFormat,
     }
   } else if (hipReadMode == hipReadModeNormalizedFloat) {
     switch (hipFormat) {
+      case HIP_AD_FORMAT_NV12:
+        break;
       case HIP_AD_FORMAT_UNSIGNED_INT8:
         return CL_UNORM_INT8;
       case HIP_AD_FORMAT_SIGNED_INT8:
@@ -188,6 +194,10 @@ inline size_t getElementSize(const hipArray_const_t array) {
     case HIP_AD_FORMAT_SIGNED_INT32:
     case HIP_AD_FORMAT_FLOAT:
       return 4 * array->NumChannels;
+    case HIP_AD_FORMAT_NV12:
+      // A multiplanar parent has no single element size. Callers reject it before using this, but
+      // several of them divide by the result, so return 1 rather than the 0 below.
+      return 1;
   }
 
   // error scenario
@@ -268,6 +278,10 @@ inline hipChannelFormatDesc getChannelFormatDesc(int numChannels, hipArray_Forma
         case 4:
           return {32, 32, 32, 32, hipChannelFormatKindFloat};
       }
+    case HIP_AD_FORMAT_NV12:
+      // 8-bit luma plus two interleaved 8-bit chroma components; reported on the parent so
+      // hipArrayGetInfo does not return a zeroed descriptor.
+      return {8, 8, 8, 0, hipChannelFormatKindUnsigned};
   }
 
   // error scenario

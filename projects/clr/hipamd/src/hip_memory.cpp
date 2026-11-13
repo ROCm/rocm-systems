@@ -967,12 +967,26 @@ hipError_t ihipArrayDestroy(hipArray_t array) {
   if (array == nullptr) {
     return hipErrorInvalidValue;
   }
+  hipArray* planes[2] = {nullptr, nullptr};
   {
     amd::ScopedLock lock(hipArraySetLock);
     if (hip::hipArraySet.find(array) == hip::hipArraySet.end()) {
       return hipErrorContextIsDestroyed;
-    } else {
-      hip::hipArraySet.erase(array);
+    }
+    // A plane is owned by its parent, so destroying one releases nothing and must leave the plane
+    // registered and queryable. CUDA accepts this call, so returning an error here would break
+    // ports that clean up planes before the parent.
+    if (array->isPlane) {
+      ClPrint(amd::LOG_INFO, amd::LOG_RESOURCE,
+              "hipArrayDestroy on NV12 plane %p is a no-op; the parent owns it", array);
+      return hipSuccess;
+    }
+    hip::hipArraySet.erase(array);
+    // Children are erased under the same lock as the parent, so a concurrent hipArrayGetPlane
+    // cannot hand out a plane that is about to be freed.
+    for (unsigned int i = 0; i < array->numPlanes; ++i) {
+      planes[i] = array->planes[i];
+      hip::hipArraySet.erase(planes[i]);
     }
   }
   cl_mem memObj = reinterpret_cast<cl_mem>(array->data);
@@ -983,6 +997,14 @@ hipError_t ihipArrayDestroy(hipArray_t array) {
   auto image = as_amd(memObj);
   // Wait on the device, associated with the current memory object during allocation
   g_devices[image->getUserData().deviceId]->SyncAllStreams();
+
+  // Release the plane images before the shared buffer they view.
+  for (hipArray* plane : planes) {
+    if (plane != nullptr) {
+      as_amd(reinterpret_cast<cl_mem>(plane->data))->release();
+      delete plane;
+    }
+  }
   image->release();
 
   delete array;
@@ -1247,10 +1269,128 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
   return image;
 }
 
+// NV12 is one pitched allocation: a full-size Y plane followed by a half-size interleaved UV
+// plane. Both planes share the same byte pitch, because a Y row is W bytes (W px x 1 channel) and
+// a UV row is also W bytes (W/2 px x 2 channels).
+static hipError_t ihipArrayCreateNV12(hipArray_t* array,
+                                      const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray,
+                                      unsigned int numMipmapLevels) {
+  // PAL's image-buffer path overwrites the child's origin instead of adding it, which would alias
+  // the UV plane onto Y. Gate NV12 off until that is fixed and testable on Windows.
+  if (GPU_ENABLE_PAL != 0) {
+    return hipErrorNotSupported;
+  }
+
+  // Mirrors CUDA's measured creation contract: NumChannels is exactly 3, the video flag is
+  // mandatory, dimensions are even and 2D only.
+  if ((pAllocateArray->NumChannels != 3) || (numMipmapLevels > 1)) {
+    return hipErrorInvalidValue;
+  }
+  constexpr unsigned int kNV12Flags = hipArrayVideoEncodeDecode | hipArraySurfaceLoadStore;
+  if (((pAllocateArray->Flags & ~kNV12Flags) != 0) ||
+      ((pAllocateArray->Flags & hipArrayVideoEncodeDecode) == 0)) {
+    return hipErrorInvalidValue;
+  }
+  const size_t width = pAllocateArray->Width;
+  const size_t height = pAllocateArray->Height;
+  if ((width == 0) || (height == 0) || ((width & 1) != 0) || ((height & 1) != 0) ||
+      (pAllocateArray->Depth != 0)) {
+    return hipErrorInvalidValue;
+  }
+
+  amd::Device* device = hip::getCurrentDevice()->devices()[0];
+  if (width > (std::numeric_limits<size_t>::max() - device->info().imagePitchAlignment_)) {
+    return hipErrorInvalidValue;
+  }
+  const size_t pitch = amd::alignUp(width, device->info().imagePitchAlignment_);
+  if (height > ((std::numeric_limits<size_t>::max() / pitch) / 2)) {
+    return hipErrorInvalidValue;
+  }
+  const size_t ySize = pitch * height;
+  const size_t totalSize = ySize + (pitch * (height / 2));
+  if (device->info().maxMemAllocSize_ < totalSize) {
+    return hipErrorOutOfMemory;
+  }
+
+  amd::Context& context = *hip::getCurrentDevice()->asContext();
+  amd::Memory* buffer = new (context) amd::Buffer(context, CL_MEM_READ_WRITE, totalSize);
+  if (buffer == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+  if (!buffer->create(nullptr, false, false, false)) {
+    buffer->release();
+    LogPrintfError("Cannot allocate NV12 backing buffer of size: %zu", totalSize);
+    return hipErrorOutOfMemory;
+  }
+  // ihipArrayDestroy syncs the device recorded here before releasing.
+  buffer->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
+
+  hipError_t status = hipSuccess;
+  amd::Image* yImage =
+      ihipImageCreate(CL_R, CL_UNSIGNED_INT8, CL_MEM_OBJECT_IMAGE2D, width, height, 0,
+                      0 /* array size */, pitch, 0 /* slice pitch */, 1, 0 /* offset */, buffer,
+                      status);
+  if (yImage == nullptr) {
+    buffer->release();
+    return status;
+  }
+  amd::Image* uvImage =
+      ihipImageCreate(CL_RG, CL_UNSIGNED_INT8, CL_MEM_OBJECT_IMAGE2D, width / 2, height / 2, 0,
+                      0 /* array size */, pitch, 0 /* slice pitch */, 1, ySize /* offset */, buffer,
+                      status);
+  if (uvImage == nullptr) {
+    yImage->release();
+    buffer->release();
+    return status;
+  }
+
+  // The parent holds the Buffer; only the children hold Images.
+  hipArray* parent = new hipArray{reinterpret_cast<void*>(as_cl<amd::Memory>(buffer))};
+  hipArray* yPlane = new hipArray{reinterpret_cast<void*>(as_cl<amd::Memory>(yImage))};
+  hipArray* uvPlane = new hipArray{reinterpret_cast<void*>(as_cl<amd::Memory>(uvImage))};
+
+  // CUDA reports the parent's flags on both planes, not 0.
+  auto initPlane = [&](hipArray* plane, size_t w, size_t h, unsigned int channels) {
+    plane->desc = hip::getChannelFormatDesc(channels, HIP_AD_FORMAT_UNSIGNED_INT8);
+    plane->width = w;
+    plane->height = h;
+    plane->depth = 0;
+    plane->Format = HIP_AD_FORMAT_UNSIGNED_INT8;
+    plane->NumChannels = channels;
+    plane->flags = pAllocateArray->Flags;
+    plane->isPlane = true;
+  };
+  initPlane(yPlane, width, height, 1);
+  initPlane(uvPlane, width / 2, height / 2, 2);
+
+  parent->desc = hip::getChannelFormatDesc(pAllocateArray->NumChannels, HIP_AD_FORMAT_NV12);
+  parent->width = width;
+  parent->height = height;
+  parent->depth = 0;
+  parent->Format = HIP_AD_FORMAT_NV12;
+  parent->NumChannels = pAllocateArray->NumChannels;
+  parent->flags = pAllocateArray->Flags;
+  parent->planes[0] = yPlane;
+  parent->planes[1] = uvPlane;
+  parent->numPlanes = 2;
+
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    hip::hipArraySet.insert(parent);
+    hip::hipArraySet.insert(yPlane);
+    hip::hipArraySet.insert(uvPlane);
+  }
+  *array = parent;
+  return hipSuccess;
+}
+
 hipError_t ihipArrayCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray,
                            unsigned int numMipmapLevels) {
   if (!array || !pAllocateArray) {
     return hipErrorInvalidValue;
+  }
+  if (pAllocateArray->Format == HIP_AD_FORMAT_NV12) {
+    return ihipArrayCreateNV12(array, pAllocateArray, numMipmapLevels);
   }
   // NumChannels specifies the number of packed components per HIP array element; it may be 1, 2, or
   // 4;
@@ -2211,6 +2351,11 @@ hipError_t validateImageObject(hipArray_t array, amd::Coord3D& origin, amd::Coor
   }
 
   image = as_amd(memObj)->asImage();
+  // Null for a multiplanar parent, whose data is a Buffer. Every array copy funnels through here,
+  // so this one check covers the whole hipMemcpy*Array* family and the graph memcpy nodes.
+  if (image == nullptr) {
+    return hipErrorInvalidValue;
+  }
   if (!image->validateRegion(origin, copyRegion)) {
     return hipErrorInvalidValue;
   }
@@ -2275,6 +2420,12 @@ hipError_t ihipDrvMemcpy3D_validate(const HIP_MEMCPY3D* pCopy, amd::Coord3D& src
   if (pCopy->srcMemoryType == hipMemoryTypeArray || pCopy->dstMemoryType == hipMemoryTypeArray) {
     void* arr = pCopy->srcMemoryType == hipMemoryTypeArray ? pCopy->srcArray : pCopy->dstArray;
     if (arr == nullptr) {
+      return hipErrorInvalidValue;
+    }
+    // Reject a multiplanar parent here rather than at validateImageObject below, because the
+    // element-size division happens first. Both operands are checked: AtoA copies set two arrays.
+    if (((pCopy->srcMemoryType == hipMemoryTypeArray) && isMultiplanarParent(pCopy->srcArray)) ||
+        ((pCopy->dstMemoryType == hipMemoryTypeArray) && isMultiplanarParent(pCopy->dstArray))) {
       return hipErrorInvalidValue;
     }
     auto element_size = hip::getElementSize((hipArray_const_t)arr);
@@ -2547,6 +2698,10 @@ hipError_t hipMemcpy2DValidateArray(hipArray_const_t arr, size_t wOffset, size_t
                                     size_t width, size_t height) {
   if (arr == nullptr) {
     return hipErrorInvalidHandle;
+  }
+  // A multiplanar parent is not copyable; callers must use its planes.
+  if (isMultiplanarParent(arr)) {
+    return hipErrorInvalidValue;
   }
 
   int FormatSize = hip::getElementSize(arr);
@@ -4361,7 +4516,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
           return hipErrorInvalidValue;
         }
         amd::Image* dstImage = as_amd(arrayData)->asImage();
-        if (dstImage) {
+        // A multiplanar parent is still an array even though its data is a Buffer, not an Image.
+        if (dstImage || isMultiplanarParent(arr)) {
           *reinterpret_cast<uint32_t*>(data) = hipMemoryTypeArray;
         } else {
           *reinterpret_cast<uint32_t*>(data) = 0;

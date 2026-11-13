@@ -220,6 +220,10 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
         return hipErrorInvalidValue;
       }
       image = as_amd(memObj)->asImage();
+      // Null for a multiplanar parent, which cannot back a texture; bind one of its planes.
+      if (image == nullptr) {
+        return hipErrorInvalidValue;
+      }
 
       hipTextureReadMode readMode = pTexDesc->readMode;
       // 32-bit integer format will not be promoted, regardless of whether or not
@@ -262,6 +266,9 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
         return hipErrorInvalidValue;
       }
       image = as_amd(memObj)->asImage();
+      if (image == nullptr) {
+        return hipErrorInvalidValue;
+      }
 
       hipTextureReadMode readMode = pTexDesc->readMode;
       // 32-bit integer format will not be promoted, regardless of whether or not

@@ -1096,6 +1096,8 @@ enum hipLimit_t {
 #define hipArraySurfaceLoadStore 0x02
 #define hipArrayCubemap 0x04
 #define hipArrayTextureGather 0x08
+/** Array is a video encode/decode surface. Required for #HIP_AD_FORMAT_NV12, matching CUDA. */
+#define hipArrayVideoEncodeDecode 0x100
 #define hipOccupancyDefault 0x00
 #define hipOccupancyDisableCachingOverride 0x01
 #define hipCooperativeLaunchMultiDeviceNoPreSync 0x01
