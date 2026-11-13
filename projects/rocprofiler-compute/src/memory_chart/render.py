@@ -10,7 +10,7 @@ without a GPU or a profile.
 from collections import defaultdict
 from dataclasses import dataclass
 from io import StringIO
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Union
 
 from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
@@ -186,16 +186,11 @@ class MemChart:
         A region shows " label " with at least one dash on each side. A region that
         ends in a panel column widens every panel, so panels keep one width.
         """
-        split = self.blocks[self.layout.scope_split].column
-        left, right = self.layout.scope_labels
-        for label, column in ((left, split - 1), (right, len(self.layout.columns) - 1)):
-            widths = self._column_widths()
-            split_x = sum(widths[: 2 * split])
-            span = split_x - 1 if column < split else sum(widths) - split_x - 2
-            deficit = len(label) + 4 - span
+        for index, scope in enumerate(self.layout.scopes):
+            deficit = len(scope.label) + 4 - self._scope_spans()[index]
             if deficit <= 0:
                 continue
-            last = self.layout.columns[column]
+            last = self.layout.columns[scope.last_column]
             widened = self.panels if last[0] in self.panels else last
             for block in widened:
                 self._assign_width(
@@ -428,6 +423,13 @@ class MemChart:
             widths.append(self.text_width[column[0].id] + _PANEL_FRAME)
         return widths
 
+    def _scope_spans(self) -> List[int]:
+        """Cells between the bars that bound each scope region."""
+        widths = self._column_widths()
+        bars = [sum(widths[: 2 * s.first_column]) for s in self.layout.scopes]
+        bars.append(sum(widths) - 1)
+        return [end - start - 1 for start, end in zip(bars, bars[1:])]
+
     def _column_left_edge(self, block_id: str) -> int:
         """Left edge of a column block."""
         return sum(self._column_widths()[: 2 * self.blocks[block_id].column])
@@ -462,12 +464,12 @@ class MemChart:
         connector.add_row("", Text.from_markup("\n".join(lines)))
         return Group(panel, connector) if above else Group(connector, panel)
 
-    def _scope_bar(self, total_width: int) -> str:
-        split = self._column_left_edge(self.layout.scope_split)
-        left, right = self.layout.scope_labels
-        left_part = _scope_section(left, split - 1)
-        right_part = _scope_section(right, total_width - split - 2)
-        return f"|{left_part}|{right_part}|"
+    def _scope_bar(self) -> str:
+        sections = [
+            _scope_section(scope.label, span)
+            for scope, span in zip(self.layout.scopes, self._scope_spans())
+        ]
+        return f"|{'|'.join(sections)}|"
 
     def render(self, chart_title: str) -> str:
         """The chart as text with terminal colors."""
@@ -493,7 +495,7 @@ class MemChart:
         sections: list[RenderableType] = [f"[bold]{chart_title}[/bold]"]
         if self.layout.above is not None:
             sections.append(self._attached(self.layout.above, above=True))
-        sections += [self._scope_bar(sum(widths)), "", grid]
+        sections += [self._scope_bar(), "", grid]
         if self.layout.below is not None:
             sections += ["", self._attached(self.layout.below, above=False)]
 
