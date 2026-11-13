@@ -26,6 +26,7 @@ on:
           - gfx94X
           - gfx90a
           - gfx1151
+          - gfx120X
       os-release:
         description: 'Ubuntu release to run'
         required: false
@@ -96,6 +97,7 @@ jobs:
       gfx950_runner: ${{ steps.runner.outputs.gfx950_runner }}
       gfx90a_runner: ${{ steps.runner.outputs.gfx90a_runner }}
       gfx1151_runner: ${{ steps.runner.outputs.gfx1151_runner }}
+      gfx120x_runner: ${{ steps.runner.outputs.gfx120x_runner }}
     steps:
       - name: Checkout workflow actions
         uses: actions/checkout@v6
@@ -129,6 +131,7 @@ jobs:
           GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
           GFX90A_RUNNER: ${{ needs.ci_config.outputs.gfx90a_runner }}
           GFX1151_RUNNER: ${{ needs.ci_config.outputs.gfx1151_runner }}
+          GFX120X_RUNNER: ${{ needs.ci_config.outputs.gfx120x_runner }}
           EVENT_NAME: ${{ github.event_name }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_ARCH: ${{ inputs.arch }}
@@ -175,6 +178,7 @@ jobs:
             ["gfx94X"]="$GFX94X_RUNNER"
             ["gfx90a"]="$GFX90A_RUNNER"
             ["gfx1151"]="$GFX1151_RUNNER"
+            ["gfx120X"]="$GFX120X_RUNNER"
           )
           for arch in "${!RUNNER_MAP[@]}"; do
             runner="${RUNNER_MAP[$arch]}"
