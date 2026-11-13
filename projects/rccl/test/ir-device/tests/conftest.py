@@ -145,9 +145,7 @@ def _missing_static_prerequisite():
     """
     if not os.path.isfile(IR_IMPL_SRC):
         return f"nccl_device_wrapper__impl.h not found at {IR_IMPL_SRC}"
-    if not os.path.isfile(AMDCLANGPP):
-        return f"amdclang++ not found at {AMDCLANGPP} (set ROCM_PATH)"
-    for tool in ("llvm-dis", "opt", "llvm-nm"):
+    for tool in ("clang++", "opt", "llvm-dis", "llvm-as", "llvm-nm"):
         path = os.path.join(LLVM_BIN, tool)
         if not os.path.isfile(path):
             return f"{tool} not found at {path} (install the ROCm LLVM tools)"
