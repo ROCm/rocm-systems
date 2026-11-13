@@ -1387,8 +1387,12 @@ def stage_rccl_overlay(
     """
     rccl_commit = get_rccl_commit(rccl_lib)
     # The run token is this test run's, shared by both phases; the phase keeps
-    # their tags apart.
-    tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}-{phase}"
+    # their tags apart. The library's hash keeps apart one phase's builds that
+    # share the token: on Saturdays the nightly and weekly jobs run in one
+    # workflow run with different baselines, and a node that kept the
+    # nightly's image would otherwise serve it to the weekly as its own.
+    lib_id = hashlib.sha256(rccl_lib.read_bytes()).hexdigest()[:12]
+    tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}-{phase}-{lib_id}"
     if from_ref:
         # The run id alone survives a re-run, so without this a phase could hit
         # the previous attempt's image and skip its build while the other was
