@@ -8,7 +8,6 @@
 
 #include <fmt/format.h>
 
-#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -51,28 +50,10 @@ config_store::config_store(schema config_schema)
 {}
 
 void
-config_store::reset(schema config_schema)
-{
-    auto replacement = std::make_shared<const schema>(std::move(config_schema));
-    const std::unique_lock<std::shared_mutex> lock{ m_mutex };
-    m_schema = std::move(replacement);
-    m_values.clear();
-    m_callbacks.clear();
-}
-
-std::shared_ptr<const schema>
-config_store::locked_schema() const
-{
-    const std::shared_lock<std::shared_mutex> lock{ m_mutex };
-    return m_schema;
-}
-
-void
 config_store::set(std::string_view param_id, std::string_view value, config_source source)
 {
-    const auto  config_schema = locked_schema();
-    const auto& param         = require_param(*config_schema, param_id);
-    const auto  parsed        = parse_value(param, value);
+    const auto& param  = require_param(*m_schema, param_id);
+    const auto  parsed = parse_value(param, value);
     if(!parsed)
     {
         throw std::runtime_error(invalid_value_message(value, param_id));
@@ -84,8 +65,7 @@ void
 config_store::set_value(std::string_view param_id, config_value_t value,
                         config_source source)
 {
-    const auto  config_schema = locked_schema();
-    const auto& param         = require_param(*config_schema, param_id);
+    const auto& param = require_param(*m_schema, param_id);
     if(!accepts_value(param, value))
     {
         throw std::runtime_error(invalid_value_message(format_value(value), param_id));
@@ -101,7 +81,6 @@ config_store::store_parsed(std::string_view param_id, config_value_t value,
     std::vector<change_callback_t> callbacks;
     {
         const std::unique_lock<std::shared_mutex> lock{ m_mutex };
-        static_cast<void>(require_param(*m_schema, param_id));
 
         const auto key           = std::string{ param_id };
         auto [entry, inserted]   = m_values.try_emplace(key);
@@ -152,28 +131,6 @@ config_store::source_of(std::string_view param_id) const
     return entry == m_values.end() ? std::nullopt : std::optional{ entry->second.source };
 }
 
-template <config_value ValueT>
-std::optional<ValueT>
-config_store::get_as(std::string_view param_id) const
-{
-    const auto stored = lookup(param_id);
-    if(!stored)
-    {
-        return std::nullopt;
-    }
-    const auto* value = std::get_if<ValueT>(&stored->value);
-    return value == nullptr ? std::nullopt : std::optional<ValueT>{ *value };
-}
-
-template std::optional<bool>         config_store::get_as<bool>(std::string_view) const;
-template std::optional<std::int64_t> config_store::get_as<std::int64_t>(
-    std::string_view) const;
-template std::optional<double>      config_store::get_as<double>(std::string_view) const;
-template std::optional<std::string> config_store::get_as<std::string>(
-    std::string_view) const;
-template std::optional<std::vector<std::string>>
-    config_store::get_as<std::vector<std::string>>(std::string_view) const;
-
 std::vector<std::string>
 config_store::ids_in_category(std::string_view category_id) const
 {
@@ -210,7 +167,8 @@ config_store::slots() const
     result.reserve(m_values.size());
     for(const auto& [param_id, stored] : m_values)
     {
-        result.push_back(config_slot{ param_id, stored.value, stored.source });
+        result.push_back(config_slot{
+            .id = param_id, .value = stored.value, .source = stored.source });
     }
     return result;
 }
@@ -233,7 +191,7 @@ config_store::clear()
 std::shared_ptr<const schema>
 config_store::config_schema() const
 {
-    return locked_schema();
+    return m_schema;
 }
 
 }  // namespace rocprofsys::parser
