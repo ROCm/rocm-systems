@@ -29,10 +29,13 @@ RE_INC_FEATURE_HINT = re.compile(
     r'Builtin::Info\{[^}]*?/\*\s*(__builtin_amdgcn_[A-Za-z0-9_]+)\s*\*/[^}]*?/\*\s*([a-z0-9_,+-]+)\s*\*/'
 )
 
+# Builtin names as they appear in a clang executable's embedded string table
+RE_BIN_NAME = re.compile(rb"__builtin_amdgcn_[A-Za-z0-9_]+")
+
 FP8_NAME = re.compile(r"(fp8|bf8)", re.IGNORECASE)
 
 
-def find_builtins_file(rocm_path: Path) -> Path:
+def find_builtins_file(rocm_path: Path) -> Path | None:
     candidates = [
         rocm_path / "lib/llvm/include/clang/Basic/BuiltinsAMDGPU.def",
         rocm_path / "lib/llvm/include/clang/Basic/BuiltinsAMDGPU.inc",
@@ -43,10 +46,34 @@ def find_builtins_file(rocm_path: Path) -> Path:
     for c in candidates:
         if c.is_file():
             return c
-    raise FileNotFoundError(
-        "Could not find BuiltinsAMDGPU.def/.inc under "
-        f"{rocm_path}. Set --rocm-path to your ROCm install."
-    )
+    return None
+
+
+def find_clang_binary(rocm_path: Path) -> Path | None:
+    for sub in ("llvm/bin", "lib/llvm/bin"):
+        matches = sorted((rocm_path / sub).glob("clang-[0-9]*"))
+        for c in matches:
+            if c.is_file() and c.suffix != ".cfg":
+                return c
+    return None
+
+
+def group_label(short: str) -> str:
+    """Display grouping derived from the builtin name.
+
+    Used when the target-feature string is unrecoverable (binary extraction),
+    so output stays organised instead of collapsing into one block.
+    """
+    cat = categorize(short)
+    if cat != "cvt":
+        return cat
+    if "fp8" in short and "bf8" in short:
+        tag = "fp8/bf8"
+    elif "bf8" in short:
+        tag = "bf8"
+    else:
+        tag = "fp8"
+    return f"{tag} {'scale convert' if 'scale' in short else 'convert'}"
 
 
 def categorize(short: str) -> str:
@@ -113,14 +140,59 @@ def parse_inc(text: str) -> list[dict]:
     return sorted(by_name.values(), key=lambda r: r["short"])
 
 
+def parse_clang_binary(path: Path) -> list[dict]:
+    """Recover builtin names from a clang executable's string table.
+
+    Runtime-only ROCm installs ship no clang/Basic headers, but the driver
+    binary still carries every builtin name. Target-feature strings are not
+    recoverable this way, so they are reported as unknown.
+    """
+    chunk = 1 << 22
+    overlap = 128  # exceeds the longest builtin name, so matches never split
+    names: set[str] = set()
+    tail = b""
+    with path.open("rb") as f:
+        while True:
+            buf = f.read(chunk)
+            final = len(buf) < chunk
+            window = tail + buf
+            for m in RE_BIN_NAME.finditer(window):
+                # A match touching the window edge may be truncated; the next
+                # window re-scans it via the overlap.
+                if not final and m.end() == len(window):
+                    continue
+                names.add(m.group(0).decode("ascii"))
+            if final:
+                break
+            tail = window[-overlap:]
+
+    rows = []
+    for full in sorted(names):
+        short = full.replace("__builtin_amdgcn_", "")
+        if not FP8_NAME.search(short):
+            continue
+        rows.append(
+            {
+                "full": full,
+                "short": short,
+                "type": "",
+                "feature": "unknown",
+                "category": categorize(short),
+            }
+        )
+    return rows
+
+
 def parse_builtins(path: Path) -> list[dict]:
-    text = path.read_text(errors="replace")
-    if path.suffix == ".def":
-        rows = parse_def(text)
+    if path.suffix in (".def", ".inc"):
+        text = path.read_text(errors="replace")
+        rows = parse_def(text) if path.suffix == ".def" else parse_inc(text)
     else:
-        rows = parse_inc(text)
-    # Stable order: category then name
-    rows.sort(key=lambda r: (r["category"], r["short"]))
+        rows = parse_clang_binary(path)
+    for r in rows:
+        r["group"] = group_label(r["short"])
+    # Stable order: category, then group so sections stay contiguous, then name
+    rows.sort(key=lambda r: (r["category"], r["group"], r["short"]))
     return rows
 
 
@@ -145,6 +217,7 @@ def generate_header(rows: list[dict], source: Path, rocm_path: Path) -> str:
     lines.append("  const char* name;")
     lines.append("  const char* feature;")
     lines.append("  const char* category;")
+    lines.append("  const char* group;")
     lines.append("};")
     lines.append("")
     lines.append("struct Fp8AutoProbeResult {")
@@ -155,7 +228,7 @@ def generate_header(rows: list[dict], source: Path, rocm_path: Path) -> str:
     for r in rows:
         lines.append(
             f'  {{"{c_escape(r["short"])}", "{c_escape(r["feature"])}", '
-            f'"{c_escape(r["category"])}"}},'
+            f'"{c_escape(r["category"])}", "{c_escape(r["group"])}"}},'
         )
     lines.append("};")
     lines.append("")
@@ -202,7 +275,20 @@ def main() -> int:
     args = ap.parse_args()
 
     rocm_path = Path(args.rocm_path).resolve()
-    src = Path(args.builtins).resolve() if args.builtins else find_builtins_file(rocm_path)
+    if args.builtins:
+        src = Path(args.builtins).resolve()
+    else:
+        # Runtime-only installs ship no clang/Basic headers; fall back to the
+        # builtin names embedded in the clang executable itself.
+        src = find_builtins_file(rocm_path) or find_clang_binary(rocm_path)
+    if src is None:
+        print(
+            f"error: found neither BuiltinsAMDGPU.def/.inc nor a clang binary under "
+            f"{rocm_path}. Set --rocm-path, or pass --builtins explicitly.",
+            file=sys.stderr,
+        )
+        return 1
+
     rows = parse_builtins(src)
     if not rows:
         print(f"error: no FP8/BF8 builtins found in {src}", file=sys.stderr)

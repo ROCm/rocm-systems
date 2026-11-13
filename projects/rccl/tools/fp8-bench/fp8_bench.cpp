@@ -98,25 +98,32 @@ static void probeAuto(int device) {
   std::printf("Auto-discovered from BuiltinsAMDGPU (%d builtins)\n\n",
               FP8_AUTO_NUM_INTRINSICS);
 
-  // Group by feature string for readable output.
-  std::vector<std::string> features;
+  // Prefer the toolchain's target-feature string; binary extraction cannot
+  // recover it, so fall back to the name-derived group.
+  auto keyOf = [](int i) {
+    const Fp8AutoBuiltin& b = kFp8AutoBuiltins[i];
+    return std::strcmp(b.feature, "unknown") ? b.feature : b.group;
+  };
+  const bool haveFeatures = std::strcmp(kFp8AutoBuiltins[0].feature, "unknown");
+
+  std::vector<std::string> groups;
   for (int i = 0; i < FP8_AUTO_NUM_INTRINSICS; ++i) {
-    const char* feat = kFp8AutoBuiltins[i].feature;
+    const char* key = keyOf(i);
     bool seen = false;
-    for (const auto& f : features) {
-      if (f == feat) {
+    for (const auto& g : groups) {
+      if (g == key) {
         seen = true;
         break;
       }
     }
-    if (!seen) features.emplace_back(feat);
+    if (!seen) groups.emplace_back(key);
   }
 
   int nYes = 0, nNa = 0;
-  for (const auto& feat : features) {
-    std::printf("Feature: %s\n", feat.c_str());
+  for (const auto& group : groups) {
+    std::printf("%s: %s\n", haveFeatures ? "Feature" : "Group", group.c_str());
     for (int i = 0; i < FP8_AUTO_NUM_INTRINSICS; ++i) {
-      if (feat != kFp8AutoBuiltins[i].feature) continue;
+      if (group != keyOf(i)) continue;
       const char* st = hResult.invocable[i] ? "yes" : "n/a ";
       if (hResult.invocable[i])
         ++nYes;
