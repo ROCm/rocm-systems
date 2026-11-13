@@ -169,6 +169,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   uint64_t* barriers;
   uint64_t barrier_next = 0;
   bool skip_fence = false;
+  bool fifoSend = false;
 #if TDM_LL128_ON
   // Read from shmem once here, not per slice: the hot path tests a register.
   bool tdmEnable = false;
@@ -185,6 +186,23 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #else
     barrier_sync(15 - group, nthreads);
 #endif
+  }
+
+  // Each LL128 line carries its step's flag, so a step's stores to the peer need not complete before the next step;
+  // waiting for them costs a fabric round trip per step. A connFifo send is read by the proxy once the tail is
+  // posted, so it keeps the full fence.
+  inline __device__ void stepBarrier() {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+    if (!fifoSend) {
+      if (nthreads != WARP_SIZE) {
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+        barrier_generic(__atomic_signal_fence(__ATOMIC_SEQ_CST), nthreads, barrier_next, barriers);
+        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+      }
+      return;
+    }
+#endif
+    barrier();
   }
 
   int abort = 0;
@@ -535,7 +553,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     nelem = nelem < 0 ? 0 : nelem;
 
     if (SEND) waitSend(divUp(nelem, DataEltPerSlice) * WireWordPerSlice * sizeof(uint64_t));
-    barrier();
+    stepBarrier();
 
     sqtt_marker_enter("PRIM_LL128_DATA_PROCESS");
     nelem -= DataEltPerSlice * warp;
@@ -582,7 +600,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     tdmDrain();
 #endif
 
-    barrier();
+    stepBarrier();
 
     sqtt_marker_exit("PRIM_LL128_DATA_PROCESS");
 
@@ -676,6 +694,7 @@ public:
     loadRecvSync();
     // coverity[var_deref_model:FALSE]
     loadSendSync();
+    for (int i = 0; i < nsend; i++) fifoSend |= channel->peers[sendPeers[i]]->send[connIndexSend].connFifo != nullptr;
     userRegUsed = (e != nullptr) && (e->regUsed || e->netRegUsed);
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
 #if TDM_LL128_ON
