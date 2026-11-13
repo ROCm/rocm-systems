@@ -105,8 +105,7 @@ TEST(FpPackedBinaryF16, TinyAfterRounding) {
   }
 }
 
-// gfx11 packed arithmetic retains input sNaNs unless IEEE requests quieting;
-// ordinary FP16 arithmetic always quiets them in Compatibility.
+// gfx11 packed and ordinary FP16 arithmetic retain input sNaNs unless IEEE requests quieting.
 TEST(FpPackedBinaryF16, CompatibilityNaNs) {
   using namespace rocjitsu::arith::test;
   for (uint64_t cpu : supported_cpu_levels()) {
@@ -131,7 +130,7 @@ TEST(FpPackedBinaryF16, CompatibilityNaNs) {
           ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | rounding | ieee, 1, 0, r.v + 2,
                          r.v, r.v + 1, nullptr),
                     RJ_ARITH_SUCCESS);
-          EXPECT_EQ(r.v[2][0] & 0xffffU, 0x7e01U);
+          EXPECT_EQ(r.v[2][0] & 0xffffU, ieee ? 0x7e01U : 0x7c01U);
         }
       }
     }
