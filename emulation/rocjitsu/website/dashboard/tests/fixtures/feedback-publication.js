@@ -26,13 +26,15 @@ export function createFeedbackPublication() {
   run.publication.source = { branch: 'users/RattataKing/test-branch', message: 'FICTIONAL RattataKing test branch',
     base: { branch: 'develop', commit: publication.runs.find((run) => run.publication.id === 'fictional-develop-20').provenance.rocjitsu.rocjitsu_commit_sha },
   };
-  run.execution_summary.finished_at = '2026-10-05T11:20:00.000Z';
+  run.execution_summary.timestamp = '2026-10-05T11:20:00.000Z';
   publication.runs.push(run);
   publication.index.runFiles.push(fixtureRunPath(run));
 
   const unfinished = structuredClone(publication.runs.find((run) => run.publication.id === 'fictional-develop-00'));
   unfinished.publication.id = 'fictional-unfinished-develop';
   unfinished.publication.source.message = 'FICTIONAL interrupted develop run with unexecuted cases';
+  // A killed harness never writes finished_at; the run is still dated by its start timestamp.
+  unfinished.execution_summary.finished_at = null;
   for (const result of unfinished.benchmark_results.slice(1)) {
     Object.assign(result, { status: 'failed', exit_code: null, error: 'run interrupted before completion', timing_results_s: [] });
   }

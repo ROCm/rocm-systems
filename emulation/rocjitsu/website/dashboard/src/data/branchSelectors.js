@@ -7,7 +7,8 @@ export function selectAutomaticReference(data, candidate) {
     const exact = develop.filter((run) => commitShaFor(run) === candidate.sourceBase.commit).sort(compareRunExecution).at(-1);
     if (exact) return { run: exact, reason: 'exact-base', description: `Exact develop base ${commitShaFor(exact)} · attempt ${exact.runId}` };
   }
-  const earlier = candidate ? develop.filter((run) => Date.parse(run.timestamp) < Date.parse(candidate.timestamp)).sort(compareRunExecution).at(-1) : null;
+  // A run with no finish record (killed harness, checkpoint) is a partial result, never a baseline.
+  const earlier = candidate ? develop.filter((run) => run.finishedAt != null && Date.parse(run.timestamp) < Date.parse(candidate.timestamp)).sort(compareRunExecution).at(-1) : null;
   return earlier ? { run: earlier, reason: 'earlier-develop', description: `Latest develop execution completed before this candidate · attempt ${earlier.runId}` }
     : { run: null, reason: 'unavailable', description: 'No published develop reference is available for this candidate.' };
 }

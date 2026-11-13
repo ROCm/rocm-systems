@@ -34,6 +34,21 @@ test('all qualifying branches are returned without a twenty-branch cap, newest e
   expect(branches[0].branch).toBe('fictional/branch-34');
 });
 
+test('automatic reference never picks a run with no finish record, even one that started later than a finished run', () => {
+  const candidate = data.allRuns.find(({ runId }) => runId === 'fictional-branch-01');
+  const base = data.runs.find(({ runId }) => runId === 'fictional-develop-20');
+  const earlier = Date.parse(candidate.timestamp);
+  const finished = { ...base, runId: 'finished-earlier', timestamp: new Date(earlier - 7_200_000).toISOString(), finishedAt: new Date(earlier - 6_000_000).toISOString() };
+  const checkpoint = { ...base, runId: 'checkpoint-later', timestamp: new Date(earlier - 3_600_000).toISOString(), finishedAt: null };
+  const noExactBase = { ...candidate, sourceBase: undefined };
+  const picked = selectors.selectAutomaticReference({ ...data, runs: [finished, checkpoint] }, noExactBase);
+  expect(picked).toMatchObject({ reason: 'earlier-develop', run: { runId: 'finished-earlier' } });
+  expect(selectors.selectAutomaticReference({ ...data, runs: [checkpoint] }, noExactBase)).toMatchObject({ run: null, reason: 'unavailable' });
+  // An exact recorded develop base is the branch's own base, so it is still used when it is a checkpoint.
+  const exact = { ...checkpoint, runId: 'checkpoint-exact-base', provenance: { ...candidate.provenance, rocjitsuCommitSha: candidate.sourceBase.commit } };
+  expect(selectors.selectAutomaticReference({ ...data, runs: [finished, exact] }, candidate)).toMatchObject({ reason: 'exact-base', run: { runId: 'checkpoint-exact-base' } });
+});
+
 test('automatic reference prefers the latest exact develop-base attempt and otherwise uses strictly earlier execution', () => {
   const candidate = data.allRuns.find(({ runId }) => runId === 'fictional-branch-01');
   const base = data.runs.find(({ runId }) => runId === 'fictional-develop-20');

@@ -28,7 +28,7 @@ export default function BranchEnvironment({ candidate, reference, selection }) {
       ['baseBranch', 'Recorded base branch', (run) => run?.sourceBase?.branch], ['baseCommit', 'Recorded base SHA', (run) => run?.sourceBase?.commit],
     ]],
     ['Execution', [
-      ['committedAt', 'Commit time', (run) => run?.commitTimestamp, formatFullDate], ['completedAt', 'Execution completed', (run) => run?.timestamp, formatFullDate],
+      ['committedAt', 'Commit time', (run) => run?.commitTimestamp, formatFullDate], ['startedAt', 'Execution started', (run) => run?.timestamp, formatFullDate],
       ['machine', 'Machine', (run) => run?.machineId], ['trigger', 'Trigger', (run) => run?.trigger],
     ]],
   ].map(([label, fields]) => ({ label, facts: fields.map(([key, label, value, format]) => ({ key, label, format, baseline: value(reference), candidate: value(candidate) })) }));
