@@ -7,10 +7,10 @@
 // Quad broadcasts follow both RDNA3 and RDNA4 ISA guides, section 12.3.
 
 #include "common/alu.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "graphics/interp.h"
 #include "graphics/interp_guest.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_graphics.h"
 
 #include <stdint.h>
 

@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "util/log.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
@@ -32,6 +33,23 @@ RJ_DIAGNOSTIC_POP
 #include <vector>
 
 namespace rocjitsu {
+
+uint32_t Sysfs::GpuInfo::clock_frequency_mhz() const {
+  switch (gfx_target_version) {
+  case 90008:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA1);
+  case 90010:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA2);
+  case 90400:
+  case 90401:
+  case 90402:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA3);
+  case 90500:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_CDNA4);
+  default:
+    return amdgpu::gpu_clock_mhz(ROCJITSU_CODE_ARCH_INVALID);
+  }
+}
 
 namespace fs = std::filesystem;
 
