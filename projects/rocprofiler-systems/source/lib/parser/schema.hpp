@@ -33,6 +33,8 @@ enum class param_level : std::uint8_t
 
 using value_map_t = std::map<std::string, std::string, std::less<>>;
 
+/// One allowed value. An alias is accepted and stored as value, so code that reads
+/// the parameter compares one spelling.
 struct choice
 {
     std::string              value;
@@ -41,25 +43,45 @@ struct choice
 
 struct schema_param
 {
-    std::string                id;
-    std::string                description;
-    std::string                category;
-    param_level                level = param_level::basic;
-    param_type                 type  = param_type::string;
+    /// Unique key, used by get() and as the key in a configuration file.
+    std::string id;
+    /// One line of help text.
+    std::string description;
+    /// Help heading, and the configuration-file section that holds the parameter.
+    std::string category;
+    /// basic rows are shown in help by default; advanced rows only when asked for.
+    param_level level = param_level::basic;
+    /// How a value is parsed and checked.
+    param_type type = param_type::string;
+    /// Value when no source sets the parameter.
     std::optional<std::string> default_value;
-    std::optional<double>      min;
-    std::optional<double>      max;
-    std::vector<choice>        choices;
-    bool                       allow_custom = false;
-    bool                       flag         = false;
+    /// Inclusive bounds of an integer or number.
+    std::optional<double> min;
+    std::optional<double> max;
+    /// Allowed values of an enumeration or enumeration_list.
+    std::vector<choice> choices;
+    /// Accept a value that is not one of choices.
+    bool allow_custom = false;
+    /// A command-line switch that takes no value. Present means true.
+    bool flag = false;
+    /// Environment variable that sets the parameter.
     std::optional<std::string> env;
+    /// Command-line spelling, such as "--output-format". Help and errors use it.
     std::optional<std::string> arg;
+    /// Other command-line spellings of arg, such as "-f".
+    std::vector<std::string> arg_aliases;
+    /// How many tokens follow the option. Unset means one, or none for a flag.
     std::optional<std::size_t> arg_min_count;
     std::optional<std::size_t> arg_max_count;
+    /// Name of the backend that lists the allowed values at run time.
     std::optional<std::string> backend;
-    std::vector<std::string>   conflicts;
-    std::vector<std::string>   required;
-    value_map_t                assigns;
+    /// Parameters that cannot be set together with this one.
+    std::vector<std::string> conflicts;
+    /// Parameters that must also be set when this one is.
+    std::vector<std::string> required;
+    /// Parameter id to the value it takes when this parameter is set by a source
+    /// other than its default. A target set by a higher source keeps its value.
+    value_map_t assigns;
 };
 
 /// Separator between elements of an enumeration_list value.
@@ -80,7 +102,7 @@ canonical_choice(const schema_param& param, std::string_view value);
  * Parameters for one catalog.
  *
  * Parameters keep insertion order and are indexed by id, environment variable,
- * and command-line spelling.
+ * and every command-line spelling (arg and its aliases).
  */
 class schema
 {
@@ -89,9 +111,10 @@ public:
 
     /**
      * @return false, leaving the schema unchanged, if the id is empty or already
-     *         registered, the environment variable or command-line spelling is already
-     *         registered, or backend is empty or set on a type other than string,
-     *         enumeration, or enumeration_list.
+     *         registered, the environment variable is already registered, a
+     *         command-line spelling (arg or an alias) is already registered, repeated,
+     *         or empty, aliases are given without arg, or backend is empty or set on a
+     *         type other than string, enumeration, or enumeration_list.
      */
     [[nodiscard]] bool add_param(schema_param param);
 

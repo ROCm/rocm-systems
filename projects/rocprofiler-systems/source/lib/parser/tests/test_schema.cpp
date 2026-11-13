@@ -30,6 +30,23 @@ make_param(std::string param_id, std::string env_name = {}, std::string arg_name
     }
     return param;
 }
+
+/// Whether a row spelled @p arg_name and @p aliases is accepted after a row spelled
+/// "--first" and "-f".
+bool
+accepts_second_row(std::string arg_name, std::vector<std::string> aliases)
+{
+    schema value{};
+    auto   first      = make_param("first", "", "--first");
+    first.arg_aliases = { "-f" };
+    if(!value.add_param(std::move(first)))
+    {
+        return false;
+    }
+    auto second        = make_param("second", "", std::move(arg_name));
+    second.arg_aliases = std::move(aliases);
+    return value.add_param(std::move(second));
+}
 }  // namespace
 
 TEST(parser_schema, empty_schema)
@@ -95,6 +112,34 @@ TEST(parser_schema, rejects_duplicate_arg_name)
 
     EXPECT_EQ(value.find_param("second"), nullptr);
     EXPECT_EQ(value.find_param_by_arg("--shared"), value.find_param("first"));
+}
+
+TEST(parser_schema, finds_param_by_an_arg_alias)
+{
+    schema value{};
+    auto   param      = make_param("output_format", "", "--output-format");
+    param.arg_aliases = { "-f" };
+    ASSERT_TRUE(value.add_param(std::move(param)));
+
+    const auto* by_id = value.find_param("output_format");
+    ASSERT_NE(by_id, nullptr);
+    EXPECT_EQ(value.find_param_by_arg("--output-format"), by_id);
+    EXPECT_EQ(value.find_param_by_arg("-f"), by_id);
+}
+
+TEST(parser_schema, rejects_a_spelling_another_row_uses)
+{
+    EXPECT_TRUE(accepts_second_row("--second", { "-s" }));
+    EXPECT_FALSE(accepts_second_row("--second", { "-f" }));
+    EXPECT_FALSE(accepts_second_row("--second", { "--first" }));
+    EXPECT_FALSE(accepts_second_row("-f", {}));
+}
+
+TEST(parser_schema, rejects_a_repeated_empty_or_orphan_alias)
+{
+    EXPECT_FALSE(accepts_second_row("--second", { "--second" }));
+    EXPECT_FALSE(accepts_second_row("--second", { "" }));
+    EXPECT_FALSE(accepts_second_row("", { "-s" }));
 }
 
 TEST(parser_schema, indexes_stay_valid_after_growth)

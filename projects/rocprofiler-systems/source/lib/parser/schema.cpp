@@ -32,6 +32,31 @@ accepts_backend(const schema_param& param)
     return type == param_type::string || type == param_type::enumeration ||
            type == param_type::enumeration_list;
 }
+
+/// arg and its aliases, or nullopt when a spelling is empty or repeated, or aliases
+/// are given without arg.
+std::optional<std::vector<std::string_view>>
+arg_spellings(const schema_param& param)
+{
+    std::vector<std::string_view> spellings;
+    if(param.arg && !param.arg->empty())
+    {
+        spellings.emplace_back(*param.arg);
+    }
+    else if(!param.arg_aliases.empty())
+    {
+        return std::nullopt;
+    }
+    for(const auto& alias : param.arg_aliases)
+    {
+        if(alias.empty() || std::ranges::find(spellings, alias) != spellings.end())
+        {
+            return std::nullopt;
+        }
+        spellings.emplace_back(alias);
+    }
+    return spellings;
+}
 }  // namespace
 
 std::string_view
@@ -138,10 +163,13 @@ schema::set_version(std::string version)
 bool
 schema::add_param(schema_param param)
 {
+    const auto spellings = arg_spellings(param);
     const bool env_taken =
         param.env && !param.env->empty() && m_env_index.contains(*param.env);
     const bool arg_taken =
-        param.arg && !param.arg->empty() && m_arg_index.contains(*param.arg);
+        !spellings || std::ranges::any_of(*spellings, [this](std::string_view spelling) {
+            return m_arg_index.contains(spelling);
+        });
     if(param.id.empty() || m_param_index.contains(param.id) || env_taken || arg_taken ||
        !accepts_backend(param))
     {
@@ -154,9 +182,9 @@ schema::add_param(schema_param param)
     {
         m_env_index.emplace(*param.env, position);
     }
-    if(param.arg && !param.arg->empty())
+    for(const auto spelling : *spellings)
     {
-        m_arg_index.emplace(*param.arg, position);
+        m_arg_index.emplace(spelling, position);
     }
     m_params.push_back(std::move(param));
     return true;
