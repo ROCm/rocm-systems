@@ -54,7 +54,26 @@ set(HIPFILE_THIRD_PARTY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third-party")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipFileDeprecatedAISOptions.cmake")
 
 set(HIPFILE_CXX_STANDARD "20" CACHE STRING "C++ standard to build with")
-set_property(CACHE HIPFILE_CXX_STANDARD PROPERTY STRINGS "20" "23" "26")
+set(HIPFILE_CXX_STANDARDS "20" "23" "26")
+set_property(CACHE HIPFILE_CXX_STANDARD PROPERTY STRINGS ${HIPFILE_CXX_STANDARDS})
+
+# The STRINGS property only fills the drop-down list in ccmake and the CMake
+# GUI, so check the value here. hipFile is written to C++20, so nothing older
+# will compile it.
+if(NOT HIPFILE_CXX_STANDARD IN_LIST HIPFILE_CXX_STANDARDS)
+    list(JOIN HIPFILE_CXX_STANDARDS ", " _hipfile_cxx_standards)
+    message(FATAL_ERROR
+        "HIPFILE_CXX_STANDARD='${HIPFILE_CXX_STANDARD}' is not one of "
+        "${_hipfile_cxx_standards}")
+endif()
+
+# CMake knows how to ask Clang for C++26 from 3.27 on, and GCC from 3.30,
+# both newer than the version hipFile otherwise needs
+if(HIPFILE_CXX_STANDARD STREQUAL "26" AND CMAKE_VERSION VERSION_LESS 3.30)
+    message(FATAL_ERROR
+        "HIPFILE_CXX_STANDARD=26 needs CMake 3.30 or later, but this is "
+        "CMake ${CMAKE_VERSION}")
+endif()
 
 # Set the list of build types for ccmake/CMake GUI
 #

@@ -8,6 +8,23 @@ include(HipFileClangCompilerOptions)
 include(HipFileGNUCompilerOptions)
 include(HipFileSanitizers)
 
+# Build a target's C++ and HIP sources with exactly the standard in
+# HIPFILE_CXX_STANDARD, without GNU extensions.
+#
+# A cxx_std_<N> compile feature would only set a minimum, which a compiler
+# whose default standard is newer would meet without the -std flag, so the
+# target would be built with the newer standard.
+function(hipfile_set_cxx_standard target)
+    set_target_properties(${target} PROPERTIES
+        CXX_STANDARD ${HIPFILE_CXX_STANDARD}
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+        HIP_STANDARD ${HIPFILE_CXX_STANDARD}
+        HIP_STANDARD_REQUIRED ON
+        HIP_EXTENSIONS OFF
+    )
+endfunction()
+
 function(hipfile_set_compiler_flags target)
     get_target_property(sources ${target} SOURCES)
     foreach(source IN LISTS sources)
