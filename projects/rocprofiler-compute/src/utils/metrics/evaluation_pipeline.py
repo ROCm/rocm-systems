@@ -101,16 +101,18 @@ def calc_builtin_vars(
 ) -> dict[str, Optional[str | float | int]]:
     """Evaluate the collectables that expressions use, on raw_pmc_df.
 
-    They are evaluated in file order, so each one sees those above it. A
-    collectable whose counters raw_pmc_df does not hold is left out.
+    Each one is evaluated after the collectables it uses. A collectable whose
+    counters raw_pmc_df does not hold is left out.
     """
     # TODO: fix all $normUnit in Unit column or title
     collectables = Collectables.of_arch(gpu_arch)
     _, used = extract_counters_and_variables("\n".join(expressions), collectables)
     values: dict[str, Any] = {}
     for name, formula in collectables.items():
+        if name not in used:
+            continue
         eval_string = build_eval_string(formula)
-        if name not in used or not table_holds(eval_string, raw_pmc_df, collectables):
+        if not table_holds(eval_string, raw_pmc_df, collectables):
             continue
         result = MetricEvaluator(
             raw_pmc_df, {**sys_vars, **values}, {}

@@ -1105,9 +1105,9 @@ class db_analysis(OmniAnalyze_Base):
         sys_info: dict,
         expressions: list[str],
     ) -> None:
-        """Evaluate the collectables that expressions use, on pmc_df, in file
-        order. A collectable whose counters pmc_df does not hold is left out.
-        Mutates sys_info in place."""
+        """Evaluate the collectables that expressions use, on pmc_df, each after
+        the collectables it uses. A collectable whose counters pmc_df does not
+        hold is left out. Mutates sys_info in place."""
         collectables = Collectables.of_arch(sys_info["gpu_arch"])
         _, used = extract_counters_and_variables("\n".join(expressions), collectables)
         for name, formula in collectables.items():

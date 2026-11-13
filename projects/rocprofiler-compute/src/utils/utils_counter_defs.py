@@ -36,7 +36,7 @@ VARIABLE_RE = re.compile(r"\$([0-9A-Za-z_]*[0-9A-Za-z])")
 AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
 
 # ---------------------------------------------------------------------------
-# Built-in variable and denominator definitions
+# Collectables and denominator definitions
 # ---------------------------------------------------------------------------
 
 # Per-arch files of named formulas, written $name in metric formulas
@@ -125,20 +125,20 @@ def extract_counters_and_variables(
             hw.update(hw_d)
             variables.update(var_d)
 
-    builtin_vars: set[str] = set()
+    collectable_names: set[str] = set()
     seen: set[str] = set()
     while variables - seen:
         new_vars: set[str] = set()
         for var in variables - seen:
             seen.add(var)
             if var in collectables:
-                builtin_vars.add(var)
+                collectable_names.add(var)
                 hw_v, var_v = parse_counters_text(collectables[var])
                 hw.update(hw_v)
                 new_vars.update(var_v)
         variables.update(new_vars)
 
-    return hw, builtin_vars
+    return hw, collectable_names
 
 
 def counter_to_block(counter: str) -> str:

@@ -789,6 +789,40 @@ def test_calc_dataframe_expressions_reads_each_row_from_its_pass():
     assert pd.isna(result.iloc[2])
 
 
+def test_calc_dataframe_expressions_reads_each_collectable_from_its_own_pass():
+    """A row that reads only collectables takes each one from the pass that
+    holds its counters, not from pmc_df."""
+    pmc_df = pd.DataFrame({"SQ_WAVES": [100, 200], "SQ_BUSY_CYCLES": [100, 200]})
+    pass_tables = [
+        pd.DataFrame({"SQ_WAVES": [1, 2]}),
+        pd.DataFrame({"SQ_BUSY_CYCLES": [10, 20]}),
+    ]
+    collectables = {
+        "a": "SUM(SQ_WAVES)",
+        "b": "SUM(SQ_BUSY_CYCLES)",
+        "a_per_dispatch": "SQ_WAVES",
+        "b_per_dispatch": "SQ_BUSY_CYCLES",
+    }
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Min"],
+        "value": [
+            "ammolite__a + ammolite__b",
+            "to_min(ammolite__a_per_dispatch + ammolite__b_per_dispatch)",
+        ],
+    })
+
+    with patch(
+        "utils.utils_counter_defs.Collectables.of_arch", return_value=collectables
+    ):
+        result = db_analysis.calc_dataframe_expressions(
+            pmc_df, {"gpu_arch": "gfx942"}, expression_df, pass_tables=pass_tables
+        )
+
+    assert result.iloc[0] == 3 + 30
+    assert result.iloc[1] == 1 + 10
+
+
 def test_calc_dataframe_expressions_empty_returns_assignable_series():
     """An empty expression_df returns an empty Series, not a DataFrame."""
     expression_df = pd.DataFrame(columns=["metric_id", "value_name", "value"])

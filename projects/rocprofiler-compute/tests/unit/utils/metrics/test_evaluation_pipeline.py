@@ -166,6 +166,44 @@ class TestEvaluationPipeline:
 
         assert metric_df.loc["1.1.0", "Value"] == pytest.approx(expected)
 
+    def test_eval_metric_reads_each_collectable_from_its_own_pass(self):
+        """A metric that reads only collectables takes each one from the pass
+        that holds its counters, not from the merged frame."""
+        fixture = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": "ammolite__a + ammolite__b",
+                "Min": "to_min(ammolite__a_per_dispatch + ammolite__b_per_dispatch)",
+            }
+        )
+        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
+        pass_tables = [
+            pd.DataFrame({"SQ_WAVES": [1, 2, 3]}),
+            pd.DataFrame({"GRBM_GUI_ACTIVE": [10, 20, 30]}),
+        ]
+        collectables = {
+            "a": "SUM(SQ_WAVES)",
+            "b": "SUM(GRBM_GUI_ACTIVE)",
+            "a_per_dispatch": "SQ_WAVES",
+            "b_per_dispatch": "GRBM_GUI_ACTIVE",
+        }
+        with patch(
+            "utils.utils_counter_defs.Collectables.of_arch",
+            return_value=collectables,
+        ):
+            eval_metric(
+                dfs,
+                dfs_type,
+                dfs_expressions,
+                sys_info,
+                pd.DataFrame(),
+                raw_pmc_df,
+                debug=False,
+                pass_tables=pass_tables,
+            )
+
+        assert metric_df.loc["1.1.0", "Value"] == 6 + 60
+        assert metric_df.loc["1.1.0", "Min"] == 1 + 10
+
     def test_eval_metric_computes_value_from_expression(self):
         """eval_metric writes the computed Value back to the metric DataFrame."""
         fixture = self._build_eval_metric_inputs(
