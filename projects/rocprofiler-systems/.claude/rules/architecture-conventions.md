@@ -124,6 +124,19 @@ switch(kind)
 
 The same applies to any branch that the code's invariants say is impossible.
 
+## No fake or dead code in production
+
+Production code contains only code the program really uses. Never add a
+stand-in, a stub, or a second implementation to get past a wiring problem. For
+example, never implement a backend and inject it into a service only to make
+the service work. Fakes and mocks live only under `tests/`.
+
+- A service uses the same object, the same instance, that the rest of the
+  program uses. Share that instance instead of creating another one.
+- If sharing is impossible or too much work for the current change, do not
+  work around it. Mark it as something to fix in a separate PR before the work
+  continues.
+
 ## Documentation
 
 Write Doxygen (`/** @brief ... */` or `///`) on public API declared in headers:
