@@ -49,11 +49,8 @@ class Plan(unittest.TestCase):
         self.assertEqual([leg["label"] for leg in legs],
                          ["release-10.1.0", "nightly-10.1.0a20260822",
                           "run-42346792638", "run-7"])
-        self.assertEqual(legs[0], {"baseline": "release:10.1.0", "label": "release-10.1.0",
-                                   "baseline_artifact_run_id": "",
-                                   "baseline_rccl_source": "release:10.1.0"})
-        self.assertEqual(legs[3]["baseline_artifact_run_id"], "7")
-        self.assertEqual(legs[3]["baseline_rccl_source"], "")
+        self.assertEqual(legs[0], {"baseline": "release:10.1.0", "label": "release-10.1.0"})
+        self.assertEqual(legs[3], {"baseline": "7", "label": "run-7"})
 
     def test_a_url_label_is_unique_and_safe(self):
         url = "url:https://repo.amd.com/a/rocm_sdk_libraries-7.14.1-py3-none-linux_x86_64.whl"
@@ -87,8 +84,7 @@ class Plan(unittest.TestCase):
             self.plan("800", " , ")
 
     def test_stdout_carries_only_the_outputs(self):
-        legs = [{"baseline": "release:10.1.0", "label": "release-10.1.0",
-                 "baseline_artifact_run_id": "", "baseline_rccl_source": "release:10.1.0"}]
+        legs = [{"baseline": "release:10.1.0", "label": "release-10.1.0"}]
         out = io.StringIO()
         with mock.patch.object(rh, "plan", return_value=("800", legs)), \
              mock.patch.object(sys, "argv", ["rccl_history.py", "plan",
@@ -153,7 +149,7 @@ class Workflows(unittest.TestCase):
         self.assertFalse(ab["strategy"]["fail-fast"])
         self.assertIs(ab["with"]["report_only"], True)
         self.assertEqual(ab["with"]["run_label"], "${{ matrix.label }}")
-        self.assertEqual(ab["with"]["baseline_rccl_source"], "${{ matrix.baseline_rccl_source }}")
+        self.assertEqual(ab["with"]["baseline_artifact_run_id"], "${{ matrix.baseline }}")
 
     def test_no_dispatch_input_reaches_a_run_block(self):
         for job in self.history["jobs"].values():
@@ -163,20 +159,24 @@ class Workflows(unittest.TestCase):
     def test_the_new_inputs_are_call_only(self):
         call = self.reusable[True]["workflow_call"]["inputs"]
         dispatch = self.reusable[True]["workflow_dispatch"]["inputs"]
-        for name in ("baseline_rccl_source", "run_label", "report_only"):
+        for name in ("run_label", "report_only"):
             self.assertIn(name, call)
             self.assertNotIn(name, dispatch)
         self.assertLessEqual(len(dispatch), 10)
 
-    def test_a_published_baseline_replaces_the_run_lookup(self):
+    def test_the_resolved_baseline_picks_how_it_is_fetched(self):
         steps = {s["name"]: s for s in self.reusable["jobs"]["test_madengine"]["steps"]}
-        for name in ("Resolve the A/B baseline build", "Fetch baseline RCCL artifacts"):
-            self.assertEqual(steps[name]["if"], "${{ !inputs.baseline_rccl_source }}")
+        self.assertNotIn("if", steps["Resolve the A/B baseline build"])
+        self.assertEqual(steps["Fetch baseline RCCL artifacts"]["if"],
+                         "${{ steps.baseline.outputs.artifact_run_id != '' }}")
         fetch = steps["Fetch published baseline RCCL"]
-        self.assertEqual(fetch["if"], "${{ inputs.baseline_rccl_source }}")
+        self.assertEqual(fetch["if"], "${{ steps.baseline.outputs.rccl_source != '' }}")
+        self.assertEqual(fetch["env"]["BASELINE_RCCL_SOURCE"],
+                         "${{ steps.baseline.outputs.rccl_source }}")
         self.assertIn('--output-dir "${BASELINE_ARTIFACTS_DIR}"', fetch["run"])
         run = steps["Run MADEngine workload"]
-        self.assertEqual(run["env"]["BASELINE_RCCL_SOURCE"], "${{ inputs.baseline_rccl_source }}")
+        self.assertEqual(run["env"]["BASELINE_RCCL_SOURCE"],
+                         "${{ steps.baseline.outputs.rccl_source }}")
         self.assertIn('"${REPORT_ARGS[@]}"', run["run"])
 
     def test_the_run_label_keeps_legs_apart(self):

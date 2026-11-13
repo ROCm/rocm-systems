@@ -82,8 +82,7 @@ jobs:
       artifact_group: gfx950-dcgpu
       test_runs_on: ruby-linux-slurm-scale-runner
       artifact_run_id: ${{ needs.plan.outputs.candidate }}
-      baseline_artifact_run_id: ${{ matrix.baseline_artifact_run_id }}
-      baseline_rccl_source: ${{ matrix.baseline_rccl_source }}
+      baseline_artifact_run_id: ${{ matrix.baseline }}
       run_label: ${{ matrix.label }}
       report_only: true
       workload: ${{ inputs.workload }}

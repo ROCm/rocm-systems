@@ -39,21 +39,23 @@ def _label(text: str) -> str:
 
 
 def plan_leg(spec: str, family: str, repo: str) -> dict:
-    """The matrix entry of one baseline; raises if it cannot be fetched."""
+    """The matrix entry of one baseline; raises if it cannot be fetched.
+
+    ``baseline`` is what the leg passes as baseline_artifact_run_id: a run
+    ID, or the spec of a published build.
+    """
     run_id = spec[len("run:"):] if spec.startswith("run:") else spec
     if run_id.isdigit():
         if not test_madengine.rccl_artifact_exists(
                 run_id, fetch_rccl_build.gpu_target(family), repo):
             raise RuntimeError(f"{spec}: its RCCL is not in the bucket (expired?)")
-        return {"baseline": run_id, "label": f"run-{run_id}",
-                "baseline_artifact_run_id": run_id, "baseline_rccl_source": ""}
+        return {"baseline": run_id, "label": f"run-{run_id}"}
     plan = fetch_rccl_build.resolve(spec, family)
     kind = spec.partition(":")[0]
     label = f"{kind}-{plan['version']}"
     if kind == "url":
         label += "-" + hashlib.sha256(spec.encode()).hexdigest()[:8]
-    return {"baseline": spec, "label": _label(label),
-            "baseline_artifact_run_id": "", "baseline_rccl_source": spec}
+    return {"baseline": spec, "label": _label(label)}
 
 
 def plan(candidate: str, baselines: str, family: str, env: dict) -> tuple[str, list[dict]]:

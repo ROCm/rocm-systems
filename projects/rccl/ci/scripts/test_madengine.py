@@ -51,6 +51,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
 
+import fetch_rccl_build
 from rccl_ci_utils import (
     find_rccl_library,
     send_email_report,
@@ -2954,6 +2955,23 @@ def generate_summary_report(
     return "\n".join(lines)
 
 
+def baseline_source(env: dict | None = None) -> str:
+    """The published build this run's baseline is, as a fetch_rccl_build spec, or ''.
+
+    BASELINE_ARTIFACT_RUN_ID carries one in place of a run ID. Raises
+    RuntimeError on a spec fetch_rccl_build.py does not take.
+    """
+    env = os.environ if env is None else env
+    chosen = env.get("BASELINE_ARTIFACT_RUN_ID", "").strip()
+    if ":" not in chosen:
+        return ""
+    try:
+        fetch_rccl_build.parse_source(chosen)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    return chosen
+
+
 def resolve_baseline(
     workload_name: str,
     gpu_target: str,
@@ -3033,10 +3051,11 @@ def main() -> None:
     parser.add_argument(
         "--resolve-baseline",
         action="store_true",
-        help="Print the baseline build as artifact_run_id=<id>, for "
-             "$GITHUB_OUTPUT, and exit. BASELINE_ARTIFACT_RUN_ID, when set, "
-             "is taken as is; otherwise the previous scheduled build of the "
-             "workload's schedule.",
+        help="Print the baseline build as artifact_run_id=<id> and "
+             "rccl_source=<spec>, for $GITHUB_OUTPUT, and exit. "
+             "BASELINE_ARTIFACT_RUN_ID, when set, is taken as is: a run ID, "
+             "or a fetch_rccl_build.py spec of a published build; otherwise "
+             "the previous scheduled build of the workload's schedule.",
     )
     parser.add_argument(
         "--workload",
@@ -3136,19 +3155,21 @@ def main() -> None:
     results_dir = args.results_dir or Path(cluster_config["results_base"])
     if args.resolve_baseline:
         try:
-            build = resolve_baseline(args.workload, cluster_config["gpu_target"])
+            source = baseline_source()
+            build = "" if source else resolve_baseline(args.workload, cluster_config["gpu_target"])
         except RuntimeError as exc:
             fail_before_run(args, scale, f"No A/B baseline: {exc}")
         print(f"artifact_run_id={build}")
+        print(f"rccl_source={source}")
         # Looked up here: the run step installs and runs third-party code, so
         # it gets no GITHUB_TOKEN and reads these from the env instead.
         for prefix, looked_up in (
             ("artifact", os.environ.get("ARTIFACT_RUN_ID", "")),
             ("baseline_artifact", build),
         ):
-            source = artifact_build(looked_up)
-            print(f"{prefix}_event={source['event']}")
-            print(f"{prefix}_sha={source['sha']}")
+            found = artifact_build(looked_up)
+            print(f"{prefix}_event={found['event']}")
+            print(f"{prefix}_sha={found['sha']}")
         sys.exit(0)
     if not (args.artifact_dir and args.baseline_artifact_dir):
         parser.error("--artifact-dir and --baseline-artifact-dir are required")
@@ -3162,10 +3183,10 @@ def main() -> None:
     libs = {BASELINE: baseline_lib, CANDIDATE: rccl_lib}
     rccl_commit = get_rccl_commit(rccl_lib)
     log.info("Run token: %s", rccl_commit)
-    baseline_source = os.environ.get("BASELINE_RCCL_SOURCE", "")
+    published_baseline = os.environ.get("BASELINE_RCCL_SOURCE", "")
     builds = {
         CANDIDATE: os.environ.get("ARTIFACT_RUN_ID", ""),
-        BASELINE: os.environ.get("BASELINE_ARTIFACT_RUN_ID", "") or baseline_source,
+        BASELINE: os.environ.get("BASELINE_ARTIFACT_RUN_ID", "") or published_baseline,
     }
     sources = {
         phase: {"event": os.environ.get(f"{prefix}_EVENT", ""),
@@ -3391,7 +3412,7 @@ def main() -> None:
         "rccl_md5": rccl_fingerprint["md5"],
         "rccl_version": rccl_fingerprint["version"],
         "baseline_artifact_run_id": os.environ.get("BASELINE_ARTIFACT_RUN_ID", ""),
-        "baseline_rccl_source": baseline_source,
+        "baseline_rccl_source": published_baseline,
         "baseline_artifact_sha": sources[BASELINE]["sha"],
         "baseline_rccl_md5": fingerprints[BASELINE]["md5"],
         "baseline_rccl_version": fingerprints[BASELINE]["version"],
