@@ -138,7 +138,7 @@ class TestBuffer:
 
 
 # ---------------------------------------------------------------------------
-# MemoryResource (3 tests)
+# MemoryResource (4 tests)
 # ---------------------------------------------------------------------------
 
 
@@ -164,6 +164,29 @@ class TestMemoryResource:
         b = Buffer.allocate(256)
         b.close()
         b.close()  # must not raise
+
+    def test_close_passes_stream_by_keyword(self):
+        # nccl.core.NcclMemoryResource.deallocate takes stream keyword-only.
+        freed = []
+
+        class KeywordStreamResource(MemoryResource):
+            def __init__(self):
+                pass
+
+            def allocate(self, size, stream=None):
+                raise NotImplementedError
+
+            def deallocate(self, ptr, size, *, stream=None):
+                freed.append((int(ptr), size, stream))
+
+            is_device_accessible = True
+            is_host_accessible = False
+            device_id = 0
+
+        b = Buffer.from_handle(ptr=0xBEEF, size=64, mr=KeywordStreamResource())
+        b.close()
+        b.close()
+        assert freed == [(0xBEEF, 64, None)]
 
     def test_deallocate_zero_pointer_is_noop(self):
         from nccl._hip_compat.cuda_core_shim._memory import _HipMallocResource

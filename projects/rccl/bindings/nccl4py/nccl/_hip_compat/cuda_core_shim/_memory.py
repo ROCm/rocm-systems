@@ -54,7 +54,7 @@ class Buffer:
 
         def close(self, stream=None):
             if self.ptr and self.mr is not None:
-                self.mr.deallocate(self.ptr, self.size, stream)
+                self.mr.deallocate(self.ptr, self.size, stream=stream)
                 self.ptr = 0
                 self.mr = None
 
