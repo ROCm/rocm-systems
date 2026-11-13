@@ -122,3 +122,27 @@ TEST(s_getpc_b64_gfx12, Arithmetic) {
     }
   }
 }
+
+// Signed57 export includes high addresses, sign-boundary carry and wraparound.
+TEST(s_get_pc_i64, Arithmetic) {
+  rocjitsu::arith::test::check_scalar_integer<uint64_t>(
+      [](uint64_t f, uint64_t m, uint64_t *d, uint64_t a, uint64_t, uint32_t, uint32_t *) {
+        return rj_arith_s_get_pc_i64(f, m, d, a);
+      },
+      [](uint64_t a, uint64_t, uint32_t cc) {
+        const uint64_t next = (a + 4) & 0x01ffffffffffffffULL;
+        return std::make_pair(next & 0x0100000000000000ULL ? next | 0xfe00000000000000ULL : next,
+                              cc);
+      },
+      false);
+  for (auto semantics : rocjitsu::arith::test::semantics_modes()) {
+    for (const auto &test :
+         {std::array<uint64_t, 2>{0x00fffffffffffffcULL, 0xff00000000000000ULL},
+          std::array<uint64_t, 2>{0x01fffffffffffffcULL, 0},
+          std::array<uint64_t, 2>{0xffff800012345000ULL, 0xffff800012345004ULL}}) {
+      uint64_t result = 123;
+      ASSERT_EQ(rj_arith_s_get_pc_i64(semantics, 0, &result, test[0]), RJ_ARITH_SUCCESS);
+      EXPECT_EQ(result, test[1]);
+    }
+  }
+}

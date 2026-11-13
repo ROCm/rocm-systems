@@ -433,6 +433,14 @@ bool ranges_overlap(const void *lhs, size_t lhs_size, const void *rhs, size_t rh
   return lhs_base <= rhs_base ? rhs_base - lhs_base < lhs_size : lhs_base - rhs_base < rhs_size;
 }
 
+// ROCr reserves a CPU VA and maps the VRAM memfd there. The same bytes
+// already have a driver-owned mapping for GPUs, independent of CPU protection.
+bool has_local_vram_cpu_alias(const KfdProcess::GpuAllocation &alloc) {
+  return alloc.local_backing_owner && !alloc.backing_owner && alloc.user_va &&
+         alloc.host_mapping_kind == KfdProcess::GpuAllocation::HostMappingKind::CallerMapped &&
+         reinterpret_cast<uintptr_t>(alloc.host_ptr) == alloc.gpu_va;
+}
+
 std::vector<GpuAliasIngressGate::Key>
 allocation_alias_keys(const KfdProcess &proc, const KfdProcess::GpuAllocation &alloc,
                       std::vector<KfdProcess::GpuAliasRecord> *records = nullptr) {
@@ -1865,9 +1873,137 @@ SimulatedKfd::GpuAliasJoin SimulatedKfd::join_gpu_aliases_impl(
   return result;
 }
 
+std::optional<amdgpu::MemoryIngressAdmission>
+SimulatedKfd::try_local_gpu_alias_ingress(uint32_t process_id, uint32_t gpu_id,
+                                          const amdgpu::GpuVmAccess &expected,
+                                          std::span<const amdgpu::MemoryIngressSpan> spans) {
+  using amdgpu::VmAccessOutcome;
+  if (!expected.info().legacy_cache_compatible || spans.empty())
+    return std::nullopt;
+  uint64_t begin = UINT64_MAX, end = 0;
+  for (const auto &span : spans) {
+    if (span.size == 0 || span.size > UINT64_MAX - span.address ||
+        span.access == amdgpu::VmAccessKind::Execute)
+      return std::nullopt;
+    begin = std::min(begin, span.address);
+    end = std::max(end, span.address + span.size);
+  }
+
+  // The expected snapshot retains its translator and the process that owns its
+  // publication counter. Cache only pointers owned by that exact binding.
+  struct LocalBinding {
+    uint64_t identity = 0;
+    uint32_t process_id = 0, gpu_id = 0;
+    std::weak_ptr<CuIngressAccess> driver;
+    const KfdProcess *process = nullptr;
+    uint64_t live_identity = 0;
+    const GpuDevice *gpu = nullptr;
+    amdgpu::AddressSpaceHandle handle;
+  };
+  static thread_local LocalBinding binding;
+  if (binding.identity != expected.cache_identity() || binding.process_id != process_id ||
+      binding.gpu_id != gpu_id || binding.driver.owner_before(cu_ingress_access_) ||
+      cu_ingress_access_.owner_before(binding.driver)) {
+    std::lock_guard lock(process_mutex_);
+    const auto it = processes_.find(process_id);
+    const auto *gpu = find_gpu(gpu_id);
+    if (it == processes_.end() || !gpu || !gpu->soc || !gpu->legacy_vm)
+      return std::nullopt;
+    const auto &process = it->second;
+    const auto handle = process->gpu(gpu_ordinal(gpu_id)).address_space;
+    if (!handle || handle != expected.cache_namespace().address_space ||
+        !expected.uses_local_grants(process->gpu_grant_publication()))
+      return std::nullopt;
+    auto live = gpu->soc->gpu_vm().snapshot(handle);
+    if (!live || live->cache_namespace() != expected.cache_namespace() ||
+        !live->same_root_lineage(expected))
+      return std::nullopt;
+    binding = {expected.cache_identity(), process_id, gpu_id, cu_ingress_access_, process.get(),
+               live->cache_identity(),    gpu,        handle};
+  }
+  const auto *process = binding.process;
+  struct LocalAlias {
+    uint64_t identity = 0, publication = 0, begin = 0, end = 0;
+    std::optional<GpuAliasIngressGate::Key> key;
+  };
+  static thread_local std::array<LocalAlias, 8> entries;
+  static thread_local unsigned next = 0;
+  const auto &publication = process->gpu_grant_publication();
+  const auto epoch = publication.load(std::memory_order_acquire);
+  if (epoch == UINT64_MAX)
+    return std::nullopt;
+  // The process grants contain disjoint allocations. An isolated grant can
+  // have one local alias or no aliases. Generic joins handle everything else.
+  auto it = std::ranges::find_if(entries, [&](const auto &entry) {
+    return entry.identity == expected.cache_identity() && entry.publication == epoch &&
+           begin >= entry.begin && end <= entry.end;
+  });
+  if (it == entries.end()) {
+    std::pair<uint64_t, uint64_t> bounds{};
+    const auto grant = process->gpu_access_grant_bounds(gpu_id, begin, end - begin, bounds);
+    if (!grant.allowed || !grant.cacheable || grant.peer_candidate ||
+        !grant.direct_backing_write_allowed || bounds.second == 0)
+      return std::nullopt;
+    const auto aliases = process->gpu_alias_snapshots();
+    const auto overlaps = [&](const auto &alias) {
+      return alias.gpu_id == gpu_id && alias.gpu_va < bounds.second &&
+             bounds.first < alias.gpu_va + alias.extent;
+    };
+    if (std::ranges::any_of(*aliases.canonical, overlaps))
+      return std::nullopt;
+    std::optional<GpuAliasIngressGate::Key> key;
+    for (const auto &alias : *aliases.local) {
+      if (!overlaps(alias))
+        continue;
+      if (key || alias.gpu_va != bounds.first || alias.extent != bounds.second - bounds.first ||
+          alias.admission_generation != grant.generation)
+        return std::nullopt;
+      key = GpuAliasIngressGate::key(alias);
+    }
+    if (process->gpu_grant_publication().load(std::memory_order_acquire) != epoch)
+      return std::nullopt;
+    it = entries.begin() + next++ % entries.size();
+    *it = {expected.cache_identity(), epoch, bounds.first, bounds.second, key};
+  }
+
+  amdgpu::MemoryIngressPermit permit;
+  if (it->key) {
+    auto admitted = alias_ingress_gate_->try_acquire_local(*it->key);
+    if (!admitted)
+      return amdgpu::MemoryIngressAdmission{.outcome = VmAccessOutcome::Unavailable, .permit = {}};
+    permit = std::move(*admitted);
+    if (!expected.local_ingress_mapped(spans, begin, end))
+      return std::nullopt;
+  }
+  const auto &vm = binding.gpu->soc->gpu_vm();
+  std::optional<amdgpu::GpuVmAccess> standalone;
+  const amdgpu::GpuVmAccess *live;
+  if (amdgpu::GpuVmAccessBatchGuard::active()) {
+    live = vm.borrow_snapshot(binding.handle);
+  } else {
+    standalone = vm.snapshot(binding.handle);
+    live = standalone ? &*standalone : nullptr;
+  }
+  if (!live || live->revoked() || expected.revoked() || process->open_ref_count() == 0 ||
+      live->cache_namespace() != expected.cache_namespace() ||
+      live->info().vmid != expected.info().vmid)
+    return amdgpu::MemoryIngressAdmission{.outcome = VmAccessOutcome::Revoked, .permit = {}};
+  if (binding.live_identity != live->cache_identity()) {
+    binding = {};
+    return std::nullopt;
+  }
+  if (process->gpu_grant_publication().load(std::memory_order_acquire) != epoch)
+    return std::nullopt;
+  return amdgpu::MemoryIngressAdmission{.outcome = VmAccessOutcome::Complete,
+                                        .permit = std::move(permit)};
+}
+
 amdgpu::MemoryIngressAdmission SimulatedKfd::admit_gpu_alias_ingress(
     uint32_t process_id, uint32_t gpu_id, const amdgpu::GpuVmAccess &expected,
     std::span<const amdgpu::MemoryIngressSpan> spans, bool peer_cache_read) {
+  if (!peer_cache_read)
+    if (auto local = try_local_gpu_alias_ingress(process_id, gpu_id, expected, spans))
+      return std::move(*local);
   GpuAliasJoin joined = peer_cache_read
                             ? join_gpu_aliases_for_peer_read(process_id, gpu_id, expected, spans)
                             : join_gpu_aliases(process_id, gpu_id, expected, spans);
@@ -2712,8 +2848,12 @@ const SimulatedKfd::GpuDevice *SimulatedKfd::find_gpu(uint32_t gpu_id) const {
 
 SimulatedKfd::~SimulatedKfd() {
   {
-    std::unique_lock lock(cu_ingress_access_->mutex);
+    // Revoke both kinds of callback before waiting for outstanding effects.
+    std::scoped_lock locks(cu_ingress_access_->mutex, cu_ingress_access_->admission_mutex);
     cu_ingress_access_->driver = nullptr;
+  }
+  {
+    std::unique_lock lock(cu_ingress_access_->mutex);
     cu_ingress_access_->effects_drained.wait(
         lock, [&] { return cu_ingress_access_->active_effect_callbacks == 0; });
   }
@@ -2813,14 +2953,7 @@ void SimulatedKfd::setup_topology(const std::vector<config::KfdDeviceConfig> &de
   for (auto &dev : devs) {
     if (!dev.present)
       continue;
-    auto info = gpu_info_from_config(dev, num_xcc, pci);
-    if (!publish_peer_links) {
-      // Executable manifest routes model local effects, but they do not
-      // establish native XGMI discovery through the stock driver. Keep the
-      // KFD metadata that ROCr uses to infer that path conservative.
-      info.hive_id = 0;
-      info.num_sdma_xgmi_engines = 0;
-    }
+    auto info = gpu_info_from_config(dev, num_xcc, pci, publish_peer_links);
     infos.push_back(std::move(info));
   }
   if (infos.empty())
@@ -3136,19 +3269,24 @@ void SimulatedKfd::init_command_processors_locked() {
         cu->set_doorbell_resolver(
             [this](const amdgpu::Wavefront &wf) { return wave_doorbell_id(wf); });
         const std::weak_ptr<CuIngressAccess> ingress_access = cu_ingress_access_;
-        cu->set_memory_ingress_handler([ingress_access, gpu_id = gpus_[i].gpu_id](
-                                           uint32_t process_id, const amdgpu::GpuVmAccess &expected,
-                                           std::span<const amdgpu::MemoryIngressSpan> spans) {
-          const auto access = ingress_access.lock();
-          if (!access)
-            return amdgpu::MemoryIngressAdmission{.outcome = amdgpu::VmAccessOutcome::Revoked,
-                                                  .permit = {}};
-          std::lock_guard lock(access->mutex);
-          if (!access->driver)
-            return amdgpu::MemoryIngressAdmission{.outcome = amdgpu::VmAccessOutcome::Revoked,
-                                                  .permit = {}};
-          return access->driver->admit_gpu_alias_ingress(process_id, gpu_id, expected, spans);
-        });
+        cu->set_memory_ingress_handler(
+            [access = cu_ingress_access_,
+             gpu_id = gpus_[i].gpu_id](uint32_t process_id, const amdgpu::GpuVmAccess &expected,
+                                       std::span<const amdgpu::MemoryIngressSpan> spans) {
+              std::shared_lock lock(access->admission_mutex);
+              if (!access->driver)
+                return amdgpu::MemoryIngressAdmission{.outcome = amdgpu::VmAccessOutcome::Revoked,
+                                                      .permit = {}};
+              return access->driver->admit_gpu_alias_ingress(process_id, gpu_id, expected, spans);
+            },
+            [owner = cu_ingress_access_, gpu_id = gpus_[i].gpu_id](
+                uint32_t pid, const amdgpu::GpuVmAccess &vm,
+                amdgpu::MemoryIngressSpan range) -> std::optional<amdgpu::MemoryIngressAdmission> {
+              std::shared_lock lock(owner->admission_mutex);
+              return owner->driver
+                         ? owner->driver->try_local_gpu_alias_ingress(pid, gpu_id, vm, {&range, 1})
+                         : std::nullopt;
+            });
         const auto make_peer_read =
             [ingress_access, gpu_id = gpus_[i].gpu_id, cu,
              soc = gpus_[i].soc](bool scalar) -> amdgpu::MemoryPipeline::PeerCacheReadHandler {
@@ -3283,6 +3421,16 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
                    .generation = grant.generation,
                    .cacheable = grant.cacheable,
                    .direct_backing_write_allowed = grant.direct_backing_write_allowed};
+             },
+         .local_grant_epoch = {proc, &proc->gpu_grant_publication()},
+         .local_grant =
+             [proc, gpu_id = gpu.gpu_id](uint64_t address, size_t size) {
+               std::pair<uint64_t, uint64_t> bounds{};
+               const auto grant = proc->gpu_access_grant_bounds(gpu_id, address, size, bounds);
+               if (!grant.allowed || !grant.cacheable || grant.peer_candidate ||
+                   !grant.direct_backing_write_allowed)
+                 return amdgpu::VmLocalGrant{};
+               return amdgpu::VmLocalGrant{bounds.first, bounds.second, grant.generation};
              },
          .raw_write_gate = proc->raw_write_gate_,
          .data_route =
@@ -5703,7 +5851,8 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         std::max(alloc.page_table_mapped_bytes, static_cast<uint64_t>(mapped_bytes));
     const auto gpu_backing = alloc.backing_owner ? alloc.backing_owner : alloc.local_backing_owner;
     const bool private_gpu_view =
-        gpu_backing && (prot & (PROT_READ | PROT_WRITE)) != (PROT_READ | PROT_WRITE);
+        gpu_backing && (has_local_vram_cpu_alias(alloc) ||
+                        (prot & (PROT_READ | PROT_WRITE)) != (PROT_READ | PROT_WRITE));
     void *gpu_ptr = private_gpu_view ? gpu_backing->data() : host_ptr;
     if (map_to_gpu(proc, alloc.gpu_va, gpu_ptr, mapped_bytes, mtype,
                    private_gpu_view ? KfdProcess::HostExtentOwner::Driver
@@ -7145,7 +7294,8 @@ int SimulatedKfd::map_memory_ioctl(KfdProcess &proc, void *arg) {
     const auto gpu_backing = alloc.backing_owner ? alloc.backing_owner : alloc.local_backing_owner;
     const bool private_gpu_view =
         gpu_backing &&
-        (alloc.host_view_prot & (PROT_READ | PROT_WRITE)) != (PROT_READ | PROT_WRITE);
+        (has_local_vram_cpu_alias(alloc) ||
+         (alloc.host_view_prot & (PROT_READ | PROT_WRITE)) != (PROT_READ | PROT_WRITE));
     if (alloc.host_ptr && (alloc.page_table_mapped_bytes < available_bytes || private_gpu_view)) {
       const amdgpu::Mtype mtype =
           alloc.cacheable_peer_for_testing

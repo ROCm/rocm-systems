@@ -98,8 +98,9 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
   sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
   sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
   numChannels = static_cast<int>(envvar::sdma::num_channels);
-  if (numChannels < 1 || numChannels > 8) {
-    LOG_ERROR_ABORT("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);
+  int status = initialSdmaStatus(sdmaEnabled, numChannels);
+  if (status == kSdmaBadChannels) {
+    LOG_ERROR("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);
   }
 
   // Get current device
@@ -132,7 +133,6 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
     // Initialize the Anvil library
     sdma_anvil::anvil.init();
     queuesBefore = sdma_anvil::anvil.queuesUsed();
-    status = kSdmaReady;
 
     int numDevices = 0;
     CHECK_HIP(hipGetDeviceCount(&numDevices));
@@ -179,6 +179,10 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
   const SdmaAgreement agreed = agreeSdmaStatus(statuses.data(), shm_size);
 
   switch (agreed.decision) {
+    case SdmaDecision::kAbortBadChannels:
+      LOG_ERROR_ABORT("SDMA: ROCSHMEM_SDMA_NUM_CHANNELS is out of range [1, 8] on local rank(s) "
+                      "%s of %d", agreed.ranks.c_str(), shm_size);
+      return;
     case SdmaDecision::kCommit:
       sdmaPublishHandles(true);
       return;

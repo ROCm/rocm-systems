@@ -17,7 +17,6 @@ use std::cell::Cell;
 use std::ffi::c_void;
 use std::fmt::Arguments;
 use std::io::Write;
-use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
@@ -432,8 +431,8 @@ impl HsaState {
                 cleanup_failed: !pending.cleanup(),
             });
         }
-        let host = topology.host.cpu.clone().unwrap_or_else(|| CpuInfo {
-            name: "CPU".to_owned(),
+        let host = topology.host.cpu.clone().unwrap_or(CpuInfo {
+            name: None,
             compute_units: 0,
         });
         match Self::create_with_session(
@@ -465,7 +464,7 @@ impl HsaState {
         let endpoints = topology
             .endpoints
             .iter()
-            .filter(|endpoint| endpoint.gpu().is_some_and(|gpu| gpu.queues.aql))
+            .filter(|endpoint| endpoint.gpu().is_some_and(|gpu| gpu.queues.aql.is_some()))
             .cloned()
             .collect::<Vec<_>>();
         if endpoints.is_empty() {
@@ -592,7 +591,7 @@ impl HsaState {
             });
         }
         let gpus = std::mem::take(&mut pending.gpus);
-        let signal_state = SignalState::new(pending.session.as_ref().ok_or(ERROR)?);
+        let signal_state = SignalState::new(pending.session.as_ref().ok_or(ERROR)?)?;
         let session = pending.session.take().ok_or(ERROR)?;
         let health = Arc::new(GenerationHealth::new());
         Ok(Self {

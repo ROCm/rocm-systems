@@ -285,8 +285,17 @@ VmAccessAdmission L1VectorCache::admit_access(uint64_t addr, uint32_t size, uint
 }
 
 VmAccessOutcome L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid,
-                                           uint64_t admission_generation, bool fetch_on_miss) {
-  const uint64_t cache_identity = current_cache_identity(vmid);
+                                           uint64_t admission_generation, bool fetch_on_miss,
+                                           const VmLocalGrantView *local) {
+  const uint64_t line_addr = CacheStore::line_address(addr);
+  const uint64_t cache_identity = local ? local->identity() : current_cache_identity(vmid);
+  const auto still_admitted = [&] {
+    if (local && local->covers(line_addr, LINE_SIZE))
+      return true;
+    const auto current = admit_access(line_addr, LINE_SIZE, vmid, VmAccessKind::Read, false);
+    return current && current.cacheable && current.generation == admission_generation &&
+           current_cache_identity(vmid) == cache_identity;
+  };
   simdojo::CacheTag *resident = nullptr;
   if (cache_.lookup(addr, &resident, vmid)) {
     if (resident->admission_generation != admission_generation ||
@@ -301,14 +310,10 @@ VmAccessOutcome L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid,
       return VmAccessOutcome::Complete;
 
     uint8_t line_buf[LINE_SIZE];
-    const VmAccessOutcome outcome = l2_->fetch_line(CacheStore::line_address(addr), line_buf, vmid);
+    const VmAccessOutcome outcome = l2_->fetch_line(line_addr, line_buf, vmid, local);
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
-    const VmAccessAdmission current =
-        admit_access(CacheStore::line_address(addr), LINE_SIZE, vmid, VmAccessKind::Read,
-                     /*report_fault=*/false);
-    if (!current || !current.cacheable || current.generation != admission_generation ||
-        current_cache_identity(vmid) != cache_identity) {
+    if (!still_admitted()) {
       cache_.invalidate(addr, vmid);
       return VmAccessOutcome::Unavailable;
     }
@@ -316,35 +321,28 @@ VmAccessOutcome L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid,
     return VmAccessOutcome::Complete;
   }
 
-  uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
-  simdojo::CacheTag *allocated = cache_.allocate(addr, vmid, &evicted, nullptr);
-  allocated->admission_generation = admission_generation;
-  allocated->cache_identity = cache_identity;
-
+  const auto allocation = cache_.allocate_with_data(addr, vmid, &evicted);
+  allocation.tag->admission_generation = admission_generation;
+  allocation.tag->cache_identity = cache_identity;
   assert(!evicted.dirty && "L1 V$ is write-through; lines should never be dirty");
 
   // A store supplies only its architectural byte range. Keep all other bytes
   // absent so the store never speculatively reads backing memory.
   if (!fetch_on_miss) {
-    CacheStore::clear_valid_bytes(*allocated);
+    CacheStore::clear_valid_bytes(*allocation.tag);
     return VmAccessOutcome::Complete;
   }
 
-  uint8_t line_buf[LINE_SIZE];
-  const VmAccessOutcome outcome = l2_->fetch_line(line_addr, line_buf, vmid);
+  const VmAccessOutcome outcome = l2_->fetch_line(line_addr, allocation.data, vmid, local);
   if (outcome != VmAccessOutcome::Complete) {
     cache_.invalidate(addr, vmid);
     return outcome;
   }
-  const VmAccessAdmission current =
-      admit_access(line_addr, LINE_SIZE, vmid, VmAccessKind::Read, /*report_fault=*/false);
-  if (!current || !current.cacheable || current.generation != admission_generation ||
-      current_cache_identity(vmid) != cache_identity) {
+  if (!still_admitted()) {
     cache_.invalidate(addr, vmid);
     return VmAccessOutcome::Unavailable;
   }
-  cache_.fill_line(addr, line_buf, vmid);
   return VmAccessOutcome::Complete;
 }
 
@@ -381,9 +379,6 @@ void L1VectorCache::cache_partial_bytes(uint64_t addr, const uint8_t *src, uint3
 VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size,
                                           bool non_temporal, bool request_l1_bypass, uint32_t vmid,
                                           RequestMtypeResolver &mtypes) {
-  const VmAccessAdmission admission = admit_access(addr, size, vmid, VmAccessKind::Read);
-  if (!admission)
-    return admission.outcome;
   util::Logger::cp([&](auto &os) {
     const Mtype effective = mtypes.at(addr);
     static thread_local uint64_t mtype_counts[5] = {};
@@ -399,6 +394,40 @@ VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t 
     }
   });
 
+  // A resident read within one line needs one current allocation generation.
+  // The request's VM snapshot also supplies the cache identity and page MTYPE.
+  const uint32_t offset = CacheStore::line_offset(addr);
+  if (size && size <= LINE_SIZE - offset && transactions_.chunk_size(addr, size) == size &&
+      !non_temporal && !request_l1_bypass) {
+    const uint64_t line_addr = CacheStore::line_address(addr);
+    if (const auto *grant = mtypes.local_grant(line_addr, LINE_SIZE)) {
+      const auto policy = mtypes.at(addr);
+      if (policy != Mtype::UC && policy != Mtype::CC) {
+        const auto *line = cache_.line_data_for_read_if(addr, vmid, 0, [&](const auto &tag) {
+          return tag.cache_identity == grant->identity() &&
+                 tag.admission_generation == grant->generation() &&
+                 CacheStore::bytes_valid(tag, offset, size) && grant->covers(line_addr, LINE_SIZE);
+        });
+        if (line) {
+          std::memcpy(dst, line + offset, size);
+          return VmAccessOutcome::Complete;
+        }
+        // The whole line is local. A fill still checks backing coverage and
+        // revalidates the grant and VM identity after reading from L2.
+        if (grant->covers(line_addr, LINE_SIZE) &&
+            l2_->can_fetch_range(line_addr, LINE_SIZE, vmid)) {
+          const auto outcome = ensure_line(addr, vmid, grant->generation(), true, grant);
+          if (outcome != VmAccessOutcome::Complete)
+            return outcome;
+          cache_.read_line(addr, dst, offset, size, vmid);
+          return VmAccessOutcome::Complete;
+        }
+      }
+    }
+  }
+  const VmAccessAdmission admission = admit_access(addr, size, vmid, VmAccessKind::Read);
+  if (!admission)
+    return admission.outcome;
   uint32_t copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
@@ -474,6 +503,7 @@ VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t 
 VmAccessOutcome L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size,
                                            bool non_temporal, uint32_t vmid,
                                            RequestMtypeResolver &mtypes) {
+  const auto *access = mtypes.access();
   const VmAccessAdmission admission = admit_access(addr, size, vmid, VmAccessKind::Write);
   if (!admission)
     return admission.outcome;
@@ -500,12 +530,19 @@ VmAccessOutcome L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, ui
     const uint32_t line_offset = CacheStore::line_offset(ea);
     const uint32_t chunk = transactions_.chunk_size(ea, size - copied);
     const Mtype chunk_mtype = mtypes.at(ea);
-    const VmAccessAdmission chunk_admission = admit_access(ea, chunk, vmid, VmAccessKind::Write);
+    // One isolated grant covers both the chunk and its cache line. The
+    // architecture's write was counted above. A failed optional lookup still
+    // uses the original fault reporting and partial-line policy.
+    const auto local =
+        access ? access->local_admission(CacheStore::line_address(ea), LINE_SIZE) : std::nullopt;
+    const VmAccessAdmission chunk_admission =
+        local ? *local : admit_access(ea, chunk, vmid, VmAccessKind::Write);
     if (!chunk_admission)
       return chunk_admission.outcome;
     const VmAccessAdmission line_admission =
-        admit_access(CacheStore::line_address(ea), LINE_SIZE, vmid, VmAccessKind::Write,
-                     /*report_fault=*/false);
+        local ? *local
+              : admit_access(CacheStore::line_address(ea), LINE_SIZE, vmid, VmAccessKind::Write,
+                             false);
     const bool cache_line = line_admission && line_admission.cacheable &&
                             line_admission.generation == chunk_admission.generation;
 
@@ -536,16 +573,21 @@ VmAccessOutcome L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, ui
     // from different CUs sharing the same L2 are properly merged at byte
     // granularity via L2::write(), rather than full-line replacement via
     // writeback_line() during L1 eviction/flush.
-    const VmAccessOutcome write_outcome = l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
+    const VmAccessOutcome write_outcome =
+        local ? l2_->write_from_l1(*access, ea, src + copied, chunk, chunk_mtype, vmid)
+              : l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
     if (write_outcome != VmAccessOutcome::Complete)
       return write_outcome;
 
     simdojo::CacheTag *tag = nullptr;
     cache_.lookup(ea, &tag, vmid);
     assert(tag != nullptr && "ensure_line must guarantee hit");
-    const VmAccessAdmission current =
-        admit_access(CacheStore::line_address(ea), LINE_SIZE, vmid, VmAccessKind::Write,
-                     /*report_fault=*/false);
+    const auto refreshed =
+        local ? access->local_admission(CacheStore::line_address(ea), LINE_SIZE) : std::nullopt;
+    const VmAccessAdmission current = refreshed
+                                          ? *refreshed
+                                          : admit_access(CacheStore::line_address(ea), LINE_SIZE,
+                                                         vmid, VmAccessKind::Write, false);
     if (!current || !current.cacheable || current.generation != chunk_admission.generation ||
         tag->cache_identity != current_cache_identity(vmid)) {
       cache_.invalidate(ea, vmid);

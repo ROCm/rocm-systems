@@ -11,6 +11,7 @@ from rj_arith_headers import public_headers
 import pytest
 
 from amdisa.codegen.execute.rj_arith_vector import (
+    ACCUMULATOR_MOVES,
     BINARY32,
     UNARY32,
     TERNARY32,
@@ -84,7 +85,10 @@ def test_unmigrated_architectures_and_operand_shapes_keep_existing_path():
 
 @pytest.mark.parametrize(
     'name,count,kind',
-    [(name, 1, 'unary') for name in sorted(UNARY32)]
+    [
+        (name, 1, 'unary')
+        for name in sorted(UNARY32 - ACCUMULATOR_MOVES - {'V_SCREEN_PARTITION_4SE_B32'})
+    ]
     + [(name, 2, 'binary') for name in sorted(BINARY32)]
     + [(name, 3, 'ternary') for name in sorted(TERNARY32)],
 )
@@ -146,6 +150,14 @@ def test_generated_rj_arith_bodies_cannot_be_bypassed_by_legacy_simd(arch):
             instruction = re.sub(r'Vop[123](?:SdstEnc)?$', '', match[1])
             if instruction not in expected:
                 continue
+            if expected[instruction] == 'V_ACCVGPR_MOV_B32' or (
+                expected[instruction] == 'V_MOV_B32' and match[1].endswith('Vop1')
+            ):
+                # Moves use a bit-preserving adapter rather than numeric source acquisition.
+                assert 'arith::execute_move32(' in body
+                assert 'amdgpu::execute_v_' not in body
+                assert 'try_execute_' not in body
+                continue
             assert kind is not None, (path.name, match[1])
             mnemonic = expected[instruction]
             api = 'rj_arith_' + mnemonic.lower()
@@ -168,7 +180,8 @@ def test_carry_bindings_keep_decoder_commit_and_snapshot_input(arch, name, vop3)
     dst = ['vdst', 'sdst'] if vop3 else ['vdst']
     src = ['a', 'b', 'cin'] if vop3 and with_carry else ['a', 'b']
     body = gen_carry32(context(arch, name, dst, src, vop3, 'commit_result'))
-    assert f'execute_carry32<{str(with_carry).lower()}>' in body
+    carry_policy = ', false' if arch.startswith('cdna') else ''
+    assert f'execute_carry32<{str(with_carry).lower()}{carry_policy}>' in body
     assert 'rj_arith_' + name.lower() + '_w64' in body
     assert 'input_carry, commit_result' in body
     assert ('inst_.clamp' in body) == vop3
@@ -271,7 +284,16 @@ def test_integer16_bindings_own_arithmetic_but_not_dpp_routing(arch):
             for index, selector in enumerate('ABC'):
                 assert (f'RJ_ARITH_ALU_HIGH_{selector}' in body) == (index < count)
             assert 'RJ_ARITH_DPP' not in body
-            assert gen_integer16(context('cdna4', name, ['d'], sources, True)) is None
+            unmigrated_archs = (
+                ('cdna3', 'cdna4')
+                if name == 'V_MOV_B16'
+                else ('cdna3', 'cdna4', 'cdna5')
+            )
+            for unmigrated in unmigrated_archs:
+                assert (
+                    gen_integer16(context(unmigrated, name, ['d'], sources, True))
+                    is None
+                )
             assert (
                 gen_integer16(context(arch, name, ['d'], sources + ['extra'], True))
                 is None
@@ -514,3 +536,21 @@ def test_gfx1250_nibble_pack_placement(name, vop3):
         assert 'dst.encoding_value() & 0x80' in body
     for arch in ('rdna3', 'rdna4', 'cdna3', 'cdna4'):
         assert gen_vector32(context(arch, name, ['dst'], ['src'], vop3)) is None
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize('name', ['V_CVT_I32_I16', 'V_CVT_U32_U16', 'V_SAT_PK_U8_I16'])
+def test_routing_migration_preserves_integer_conversions(arch, name):
+    for vop3 in (False, True):
+        body = gen_vector32(context(arch, name, ['dst'], ['src'], vop3))
+        if name == 'V_SAT_PK_U8_I16' or arch == 'cdna5':
+            assert 'rj_arith_' + name.lower() + '_w32' in body
+        else:
+            assert body is None
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
+def test_vop3_move_source_modifiers_follow_architecture(arch):
+    body = gen_vector32(context(arch, 'V_MOV_B32', ['dst'], ['a'], True))
+    for modifier in ('RJ_ARITH_ALU_ABS_A', 'RJ_ARITH_ALU_NEG_A'):
+        assert (modifier in body) == (arch.startswith('rdna') or arch == 'cdna5')

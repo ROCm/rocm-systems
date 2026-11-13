@@ -18,6 +18,7 @@
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -111,6 +112,83 @@ struct Fixture {
     return out;
   }
 };
+
+TEST(Cdna4CvtScaleTest, PackingWithUnitScaleMatchesRegisterScale) {
+  Fixture fx;
+  ASSERT_TRUE(fx.wf);
+  const auto base = fx.wf->vgpr_alloc().base;
+  const std::array<uint32_t, 16> inputs{0,          0x80000000, 1,          0x807fffff,
+                                        0x00800000, 0x3f880000, 0xbf980000, 0x3a800000,
+                                        0x43e00000, 0x47700000, 0x7f7fffff, 0x7f800000,
+                                        0xff800000, 0x7f800001, 0xffc12345, 0x3b400000};
+  for (const auto op : {cdna4::kVCvtScalef32PkFp8F32Vop3, cdna4::kVCvtScalef32PkBf8F32Vop3}) {
+    for (unsigned high : {0u, 1u}) {
+      uint32_t words[4]{};
+      vop3_encode(op, 0, 256, words);
+      words[0] |= high << 14;
+      words[1] |= (257u << 9) | (242u << 18);
+      std::unique_ptr<Instruction> fast(decode_valid(*fx.decoder, words));
+      words[0] |= 4u;
+      words[1] = 256u | (257u << 9) | (258u << 18);
+      std::unique_ptr<Instruction> reference(decode_valid(*fx.decoder, words));
+      ASSERT_TRUE(fast && reference);
+      for (unsigned mode = 0; mode < 8; ++mode) {
+        fx.wf->set_mode_raw(((mode & 3u) << 4) | ((mode & 4u) ? fx.wf->FP16_OVFL_BIT : 0u));
+        fx.wf->set_exec(0x5555555555555555ULL);
+        for (unsigned lane = 0; lane < WF_SIZE; ++lane) {
+          const auto x = inputs[(lane / 2) % inputs.size()];
+          fx.cu->write_vgpr(base, lane, x);
+          fx.cu->write_vgpr(base + 4, lane, x);
+          fx.cu->write_vgpr(base + 1, lane, inputs[(lane / 2 + 7) % inputs.size()]);
+          fx.cu->write_vgpr(base + 2, lane, 0x3f800000u);
+        }
+        ASSERT_TRUE(fx.cu->execute_instruction(reference.get(), *fx.wf).succeeded());
+        ASSERT_TRUE(fx.cu->execute_instruction(fast.get(), *fx.wf).succeeded());
+        for (unsigned lane = 0; lane < WF_SIZE; ++lane)
+          EXPECT_EQ(fx.cu->read_vgpr(base, lane), fx.cu->read_vgpr(base + 4, lane)) << lane;
+      }
+    }
+  }
+}
+
+TEST(Cdna4CvtScaleTest, PackedInlineUnitScaleMatchesRegisterScaleForEveryByte) {
+  Fixture fx;
+  ASSERT_TRUE(fx.wf);
+  const auto base = fx.wf->vgpr_alloc().base;
+  for (const auto op : {cdna4::kVCvtScalef32PkF32Fp8Vop3, cdna4::kVCvtScalef32PkF32Bf8Vop3}) {
+    for (unsigned high : {0u, 1u}) {
+      uint32_t words[4]{};
+      vop3_encode(op, 2, 256, words);
+      words[0] |= high << 11;
+      words[1] |= 242u << 9; // Inline 1.0.
+      std::unique_ptr<Instruction> fast(decode_valid(*fx.decoder, words));
+      words[0] = (words[0] & ~0xFFu) | 4u;
+      words[1] = 256u | (257u << 9); // v1 holds the same E8M0 scale.
+      std::unique_ptr<Instruction> reference(decode_valid(*fx.decoder, words));
+      ASSERT_TRUE(fast && reference);
+      for (uint32_t block = 0; block < 4; ++block) {
+        for (auto mask : {UINT64_MAX, uint64_t{0x5a5a5a5a5a5a5a5a}}) {
+          fx.wf->set_exec(mask);
+          for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+            const uint32_t byte = block * WF_SIZE + lane;
+            const auto packed = (byte * 0x01010101u) ^ 0xAA55FF00u;
+            fx.cu->write_vgpr(base, lane, packed);
+            fx.cu->write_vgpr(base + 1, lane, 0x3f800000u);
+            for (unsigned reg = 2; reg <= 5; ++reg)
+              fx.cu->write_vgpr(base + reg, lane, DST_SENTINEL);
+          }
+          ASSERT_TRUE(fx.cu->execute_instruction(fast.get(), *fx.wf).succeeded());
+          ASSERT_TRUE(fx.cu->execute_instruction(reference.get(), *fx.wf).succeeded());
+          for (unsigned word = 0; word < 2; ++word)
+            for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+              EXPECT_EQ(fx.cu->read_vgpr(base + 2 + word, lane),
+                        (mask >> lane & 1) ? fx.cu->read_vgpr(base + 4 + word, lane)
+                                           : DST_SENTINEL);
+        }
+      }
+    }
+  }
+}
 
 // Restores the process force-scalar gate on scope exit so flipping it for an
 // in-process A/B comparison cannot leak into later tests in the same process.
