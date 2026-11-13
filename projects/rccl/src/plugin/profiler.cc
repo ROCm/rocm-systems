@@ -542,22 +542,22 @@ ncclResult_t ncclProfilerStopCollApiEvent() {
   return ncclSuccess;
 }
 
-// Read once: these run per proxy op.
-static bool acclCountersRequested() {
-  static const bool on = [] {
-    const char* e = getenv("ACCL_NET_COUNTERS");
-    return e && strcmp(e, "1") == 0;
-  }();
-  return on;
+// Read once (-1: not yet): these run per proxy op.
+static int acclCountersEnv = -1;
+static int acclStrictEnv = -1;
+
+static bool acclEnvIsOne(int* cache, const char* name) {
+  int v = COMPILER_ATOMIC_LOAD(cache, std::memory_order_relaxed);
+  if (v < 0) {
+    const char* e = ncclGetEnv(name);
+    v = e && strcmp(e, "1") == 0;
+    COMPILER_ATOMIC_STORE(cache, v, std::memory_order_relaxed);
+  }
+  return v;
 }
 
-static bool acclStrictRequested() {
-  static const bool on = [] {
-    const char* e = getenv("ACCL_NET_STRICT");
-    return e && strcmp(e, "1") == 0;
-  }();
-  return on;
-}
+static bool acclCountersRequested() { return acclEnvIsOne(&acclCountersEnv, "ACCL_NET_COUNTERS"); }
+static bool acclStrictRequested() { return acclEnvIsOne(&acclStrictEnv, "ACCL_NET_STRICT"); }
 
 // The protocol ids ride on NetPlugin events: only the ACCL plugin knows them.
 static bool acclPluginLoaded() {
@@ -624,7 +624,7 @@ ncclResult_t ncclProfilerStartKernelLaunchEvent(struct ncclKernelPlan* plan, cud
   startKernelLaunchEvent:
     if ((eActivationMask_ & ncclProfileKernelLaunch) && acclCountersRequested() && acclPluginLoaded()) {
       auto* first = ncclIntruQueueHead(&plan->collTaskQueue);
-      const char* oob = getenv("NCCL_OOB_NET_ENABLE");
+      const char* oob = ncclGetEnv("NCCL_OOB_NET_ENABLE");
       // supported is rank-local (e.g. isHostCbEnq), so it is a vote, never a
       // reason to skip the exchange. Every rank of the comm launches each
       // collective plan; P2P-only plans are not launched on every rank, so
