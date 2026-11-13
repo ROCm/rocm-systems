@@ -472,16 +472,6 @@ __device__ void GDAContext::broadcastmem_linear_thread_puts_wg(rocshmem_team_t t
       qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
       qps[dest_pe].atomic_add_single(&pSync[ROCSHMEM_BCAST_SYNC_SIZE - 1], 1);
     }
-    // Unlike the wave variant (covered by sync_wave's completion fence),
-    // this function returns as soon as thread zero observes its own
-    // signal, which can land before the root's sends to slower peers
-    // finish. Above the provider's inline threshold, put_nbi_single's
-    // WQE reads src asynchronously, so without this the caller could
-    // overwrite src before those sends are done, racing the NIC read.
-    for (int j = tid; j < pe_size; j += step_size) {
-      int dest_pe = team_obj->get_pe_in_world(j);
-      qps[dest_pe].quiet_single();
-    }
   }
 
   __syncthreads();
@@ -491,13 +481,11 @@ __device__ void GDAContext::broadcastmem_linear_thread_puts_wg(rocshmem_team_t t
     team_obj->bcast_sequence_number++;
   }
 
-  // A plain __syncthreads() only releases this workgroup once its own
-  // poll is satisfied, but the shared counter is not tagged by root or
-  // call: a later root's signal to a peer can satisfy an earlier call's
-  // wait before that earlier root's own puts have landed. sync_wg(team)
-  // is a real team-wide barrier (like the wave variant's sync_wave), so
-  // no PE can start a second broadcast until every PE has observed this
-  // one's completion.
+  // sync_wg(team) is a real team-wide barrier: no PE can pass it until
+  // every PE (root included) has observed this call's completion, which
+  // only happens after root's quiet of each dest PE's QP as part of the
+  // barrier protocol itself. That makes root's puts to every dest PE
+  // complete before this call returns, with no separate quiet needed here.
   sync_wg(team);
 }
 
