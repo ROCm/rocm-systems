@@ -47,9 +47,7 @@ constexpr size_t ddaLL128ArSlotWords(size_t bankSize, int nRanks) {
 // Self does not round-trip through scratch; its contribution is packed straight
 // from sendbuff. Scratch is double buffered: bank = flag & 1.
 template <typename T, int NRANKS_CT>
-#if defined(USE_ROCM)
 __launch_bounds__(512)
-#endif
   __global__ void ddaAllReduceFlatLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
                                         T* __restrict__ recvbuff, // local user output
                                         const T* __restrict__ sendbuff, // local user input

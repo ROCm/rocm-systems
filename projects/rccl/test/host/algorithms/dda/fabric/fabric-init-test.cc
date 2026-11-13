@@ -203,11 +203,14 @@ class FabricInitMicrotest : public FabricLedgerTest {
     return HostClean();
   }
 
-  // Peers report these caps; this rank's own slot is ignored.
+  // Peers report these caps on the first sizeof(int) gather; this rank's own slot is ignored.
   void SetPeerBlockCaps(std::vector<int> caps) {
     auto homogeneous = g_bootstrapAllGather;
-    g_bootstrapAllGather = [this, caps, homogeneous](void* state, void* allData, int size) {
-      if (size != static_cast<int>(sizeof(int))) return homogeneous(state, allData, size);
+    auto capsSent = std::make_shared<bool>(false);
+    g_bootstrapAllGather = [this, caps, homogeneous, capsSent](void* state, void* allData, int size) {
+      if (size != static_cast<int>(sizeof(int)) || std::exchange(*capsSent, true)) {
+        return homogeneous(state, allData, size);
+      }
       auto* slots = static_cast<int*>(allData);
       for (int r : PeerRanks(comm_->nRanks, comm_->rank)) slots[r] = caps[r];
       return ncclSuccess;
@@ -468,6 +471,15 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_BarrierUsesCommGeometry)
   EXPECT_EQ(barrier.nRanks, kNRanks);
   EXPECT_EQ(barrier.peerFlags, state->resources->peerFlagsDev->get());
   EXPECT_EQ(barrier.params.flag, comm_->abortFlagDev);
+  EXPECT_TRUE(barrier.useEpoch);
+}
+
+TEST_F(FabricInitCommInitMicrotest, CommInit_PushPeerEpochOff_BarrierUsesCasFlags) {
+  ScopedHook epochOff(g_loadParam, [](const char* name, int64_t deftVal) {
+    return std::string(name) == "RCCL_DDA_A2A_PUSH_PEER_EPOCH" ? 0 : deftVal;
+  });
+  ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+  EXPECT_FALSE(StateOf(comm_->ddaFabricBarrierState->barrierHost).useEpoch);
 }
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_WithManager_TracksAndUntracksEveryAllocationInIt) {
@@ -561,8 +573,8 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_PublishesLocalCapForThePeers) {
   int published = -1;
   auto homogeneous = g_bootstrapAllGather;
   ScopedHook gather(g_bootstrapAllGather, [&published, homogeneous](void* state, void* allData, int size) {
-    // The block cap is the first sizeof(int) exchange. A later one carries each
-    // rank's LL-buffer ready flag, which is 0 or 1, not the cap.
+    // The block cap is the first sizeof(int) exchange. Later ones carry ready
+    // flags, which are 0 or 1, not the cap.
     if (published < 0 && size == static_cast<int>(sizeof(int))) published = static_cast<int*>(allData)[kRank];
     return homogeneous(state, allData, size);
   });
@@ -595,15 +607,18 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_RanksAtCap_SetsUpFabricPath) {
 }
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_PeerNotReady_FallsBackWithoutFabricState) {
-  // MirrorAllGather copies this rank's slot to every peer. On the ready
-  // exchange, the second sizeof(int) gather, one peer reports 0.
+  // MirrorAllGather copies this rank's slot to every peer. The sizeof(int)
+  // gathers are the block cap, the scratch and barrier handle-exchange votes,
+  // then the LL-buffer ready flag, where one peer reports 0.
+  constexpr int kLLReadyGather = 4;
   int intGathers = 0;
   int readyFlag = -1;
   auto mirror = g_bootstrapAllGather;
   ScopedHook gather(g_bootstrapAllGather,
                     [this, &intGathers, &readyFlag, mirror](void* state, void* allData, int size) {
                       ncclResult_t result = mirror(state, allData, size);
-                      if (result == ncclSuccess && size == static_cast<int>(sizeof(int)) && ++intGathers == 2) {
+                      if (result == ncclSuccess && size == static_cast<int>(sizeof(int)) &&
+                          ++intGathers == kLLReadyGather) {
                         auto* slots = static_cast<int*>(allData);
                         readyFlag = slots[comm_->rank];
                         slots[PeerRanks(comm_->nRanks, comm_->rank)[0]] = 0;
@@ -613,7 +628,7 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_PeerNotReady_FallsBackWithoutFabric
 
   EXPECT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
 
-  EXPECT_EQ(intGathers, 2);
+  EXPECT_EQ(intGathers, kLLReadyGather);
   EXPECT_EQ(readyFlag, 1);
   ExpectNoFabricState(*comm_);
   EXPECT_TRUE(AllReleased());

@@ -4,9 +4,9 @@
 // ISA-local FP64 register decoding, rounding, and output modifier helpers.
 #pragma once
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/fp64.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
@@ -41,6 +41,33 @@ inline double fp64_flush_denorm(double value) {
   return (raw & 0x7fffffffffffffffULL) < 0x0010000000000000ULL
              ? as_double(raw & 0x8000000000000000ULL)
              : value;
+}
+
+// FP64 ADD/MUL/FMA return the first NaN source in operand order, quieted unless quiet_snan is
+// clear. An invalid FMA product (0 * infinity) gives the default NaN even when the addend is a NaN.
+// Host arithmetic may commute its operands, so its NaN choice is replaced; other results are kept.
+template <bool Fma>
+inline double fp64_nan_priority(double value, double x, double y, double z = 0,
+                                bool quiet_snan = true) {
+  const uint64_t xb = double_bits(x), yb = double_bits(y), zb = double_bits(z);
+  const uint64_t xm = xb & 0x7fffffffffffffffULL, ym = yb & 0x7fffffffffffffffULL;
+  constexpr uint64_t infinity = 0x7ff0000000000000ULL;
+  const uint64_t quiet = quiet_snan ? 0x0008000000000000ULL : 0;
+  if (xm > infinity) {
+    return as_double(xb | quiet);
+  }
+  if (ym > infinity) {
+    return as_double(yb | quiet);
+  }
+  if constexpr (Fma) {
+    if ((xm == 0 && ym == infinity) || (xm == infinity && ym == 0)) {
+      return as_double(0xfff8000000000000ULL);
+    }
+    if ((zb & 0x7fffffffffffffffULL) > infinity) {
+      return as_double(zb | quiet);
+    }
+  }
+  return value;
 }
 
 // Round to an integral FP64 value, ties to even, preserving signed zero and

@@ -6,7 +6,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 
 #include <algorithm>
@@ -67,17 +67,19 @@ public:
   static_assert(GpuMemory::PAGE_SIZE % kLineSize == 0,
                 "an aligned line must fall inside one page, so a fill is one page chunk");
 
-  /// @brief Read @ref kFetchBytes at @p pc, filling from @p memory on a miss.
+  /// @brief Read @p byte_count at @p pc, filling from @p memory on a miss.
   /// @param memory Backing GPU memory.
   /// @param pc Program counter; four-byte aligned.
-  /// @param[out] dst Buffer of at least @ref kFetchBytes bytes.
-  void fetch(const GpuMemory &memory, uint64_t pc, uint8_t *dst) {
+  /// @param[out] dst Buffer of at least @p byte_count bytes.
+  /// @param byte_count Number of bytes to read, at most one cache line.
+  void fetch(const GpuMemory &memory, uint64_t pc, uint8_t *dst,
+             uint32_t byte_count = kFetchBytes) {
     synchronize_coherence_epoch();
     const uint32_t offset = static_cast<uint32_t>(pc) & (kLineSize - 1);
     const uint8_t *line = line_for(memory, pc);
 
-    if (offset + kFetchBytes <= kLineSize) {
-      std::memcpy(dst, line + offset, kFetchBytes);
+    if (offset + byte_count <= kLineSize) {
+      std::memcpy(dst, line + offset, byte_count);
       return;
     }
 
@@ -87,7 +89,7 @@ public:
     const uint32_t head = kLineSize - offset;
     std::memcpy(dst, line + offset, head);
     const uint64_t next = (pc & ~uint64_t{kLineSize - 1}) + kLineSize;
-    std::memcpy(dst + head, line_for(memory, next), kFetchBytes - head);
+    std::memcpy(dst + head, line_for(memory, next), byte_count - head);
   }
 
   /// @brief Fetch through a retained VM binding and generation-safe namespace.
@@ -95,22 +97,74 @@ public:
   /// This path is used by translated PCI/VFIO address spaces.  Lines from a
   /// replaced root or a reused address-space slot cannot alias because both
   /// the handle generation and translation epoch participate in the tag.
-  [[nodiscard, gnu::always_inline]] VmAccessOutcome fetch(const GpuVmAccess &access, uint64_t pc,
-                                                          uint8_t *dst) {
+  [[nodiscard, gnu::always_inline]] VmAccessOutcome
+  fetch(const GpuVmAccess &access, uint64_t pc, uint8_t *dst, uint32_t byte_count = kFetchBytes) {
     synchronize_coherence_epoch();
-    const uint32_t offset = static_cast<uint32_t>(pc) & (kLineSize - 1);
-    const uint64_t line_address = pc & ~uint64_t{kLineSize - 1};
-    const Line &line = lines_[(line_address / kLineSize) & (kNumLines - 1)];
-    if (offset + kFetchBytes <= kLineSize &&
-        is_translated_hit(line, line_address, access.cache_namespace())) {
+    const uint32_t line_offset = static_cast<uint32_t>(pc) & (kLineSize - 1);
+    if (access.execute_admission_is_fixed() && byte_count <= kLineSize - line_offset) {
+      // PCI/VFIO bindings have no live execute grant to recheck. A resident
+      // line still belongs to its original VM generation and may not survive
+      // revocation or an instruction-cache maintenance event.
+      if (access.revoked())
+        return VmAccessOutcome::Revoked;
+      const uint64_t line_address = pc & ~uint64_t{kLineSize - 1};
+      const Line &line = lines_[(line_address / kLineSize) & (kNumLines - 1)];
+      if (line.valid && line.translated && line.addr == line_address &&
+          line.cache_namespace == access.cache_namespace() && line.admission_generation == 0) {
+        std::memcpy(dst, line.data + line_offset, byte_count);
+        return VmAccessOutcome::Complete;
+      }
+    }
+    const VmAccessAdmission admission = access.admit_access(pc, byte_count, VmAccessKind::Execute);
+    if (!admission)
+      return admission.outcome;
+    uint32_t copied = 0;
+    while (copied < byte_count) {
       // A translated hit otherwise bypasses GpuVmAccess entirely and could
       // continue executing cached code after its snapshot was revoked.
       if (access.revoked())
         return VmAccessOutcome::Revoked;
-      std::memcpy(dst, line.data + offset, kFetchBytes);
-      return VmAccessOutcome::Complete;
+      const uint64_t address = pc + copied;
+      const uint64_t line_address = address & ~uint64_t{kLineSize - 1};
+      const uint32_t line_offset = static_cast<uint32_t>(address) & (kLineSize - 1);
+      const uint32_t chunk = std::min(byte_count - copied, kLineSize - line_offset);
+      const VmAccessAdmission chunk_admission =
+          copied == 0 && chunk == byte_count
+              ? admission
+              : access.admit_access(address, chunk, VmAccessKind::Execute);
+      if (!chunk_admission)
+        return chunk_admission.outcome;
+      const VmAccessAdmission line_admission =
+          access.admit_access(line_address, kLineSize, VmAccessKind::Execute,
+                              /*report_fault=*/false);
+      const bool cache_line = line_admission && line_admission.cacheable &&
+                              line_admission.generation == chunk_admission.generation;
+      const VmCacheNamespace cache_namespace = access.cache_namespace();
+      Line &line = lines_[(line_address / kLineSize) & (kNumLines - 1)];
+
+      if (cache_line && line.valid && line.translated && line.addr == line_address &&
+          line.cache_namespace == cache_namespace &&
+          line.admission_generation == chunk_admission.generation) {
+        std::memcpy(dst + copied, line.data + line_offset, chunk);
+      } else if (!cache_line ||
+                 access.query_access(line_address, kLineSize, VmAccessKind::Execute) !=
+                     VmAccessOutcome::Complete) {
+        const VmAccessOutcome outcome = access.read(
+            address, std::span<std::byte>(reinterpret_cast<std::byte *>(dst + copied), chunk),
+            VmAccessKind::Execute);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
+      } else {
+        const uint8_t *line_data = nullptr;
+        const VmAccessOutcome outcome =
+            line_for(access, address, chunk_admission.generation, line_data);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
+        std::memcpy(dst + copied, line_data + line_offset, chunk);
+      }
+      copied += chunk;
     }
-    return fetch_chunks(access, pc, dst);
+    return VmAccessOutcome::Complete;
   }
 
   /// @brief Bind instruction invalidation to the same domain as the CU's L2.
@@ -130,6 +184,27 @@ public:
       has_cached_lines_ = false;
     }
     coherence_epoch_ = coherence_->current_instruction_epoch();
+  }
+
+  /// @brief Discard translated instructions belonging to one VM root.
+  /// @details Completion advances the public epoch even if no matching line
+  /// is resident. Other namespaces and legacy lines stay cached. A pending
+  /// device-wide instruction invalidation still discards every line first.
+  void invalidate_for_completion(const VmCacheNamespace &cache_namespace) {
+    synchronize_coherence_epoch();
+    ++epoch_;
+    if (!has_cached_lines_)
+      return;
+    bool retained_line = false;
+    for (Line &line : lines_) {
+      if (!line.valid)
+        continue;
+      if (line.translated && line.cache_namespace == cache_namespace)
+        line.valid = false;
+      else
+        retained_line = true;
+    }
+    has_cached_lines_ = retained_line;
   }
 
   uint64_t epoch() const { return epoch_; }
@@ -153,7 +228,8 @@ public:
   bool peek_word(const GpuVmAccess &access, uint64_t pc, uint32_t &word) const {
     const uint64_t addr = pc & ~uint64_t{kLineSize - 1};
     const auto &line = lines_[(addr / kLineSize) & (kNumLines - 1)];
-    if ((pc & 3) || !is_translated_hit(line, addr, access.cache_namespace()))
+    if ((pc & 3) || !line.valid || !line.translated || line.addr != addr ||
+        line.cache_namespace != access.cache_namespace())
       return false;
     std::memcpy(&word, line.data + (pc & (kLineSize - 1)), sizeof(word));
     return true;
@@ -168,54 +244,13 @@ private:
 
   struct Line {
     uint64_t addr = 0;
+    uint64_t admission_generation = 0;
     uint32_t vmid = 0;
     VmCacheNamespace cache_namespace;
     bool translated = false;
     bool valid = false;
     uint8_t data[kLineSize] = {};
   };
-
-  static bool is_translated_hit(const Line &line, uint64_t line_addr,
-                                VmCacheNamespace cache_namespace) {
-    return line.valid && line.translated && line.addr == line_addr &&
-           line.cache_namespace == cache_namespace;
-  }
-
-  // Keep permission queries, backing reads and straddling copies off the resident-line hit.
-  RJ_NOINLINE VmAccessOutcome fetch_chunks(const GpuVmAccess &access, uint64_t pc, uint8_t *dst) {
-    uint32_t copied = 0;
-    while (copied < kFetchBytes) {
-      // A translated hit otherwise bypasses GpuVmAccess entirely and could
-      // continue executing cached code after its snapshot was revoked.
-      if (access.revoked())
-        return VmAccessOutcome::Revoked;
-      const uint64_t address = pc + copied;
-      const uint64_t line_address = address & ~uint64_t{kLineSize - 1};
-      const uint32_t line_offset = static_cast<uint32_t>(address) & (kLineSize - 1);
-      const uint32_t chunk = std::min(kFetchBytes - copied, kLineSize - line_offset);
-      const VmCacheNamespace cache_namespace = access.cache_namespace();
-      Line &line = lines_[(line_address / kLineSize) & (kNumLines - 1)];
-
-      if (is_translated_hit(line, line_address, cache_namespace)) {
-        std::memcpy(dst + copied, line.data + line_offset, chunk);
-      } else if (access.query_access(line_address, kLineSize, VmAccessKind::Execute) !=
-                 VmAccessOutcome::Complete) {
-        const VmAccessOutcome outcome = access.read(
-            address, std::span<std::byte>(reinterpret_cast<std::byte *>(dst + copied), chunk),
-            VmAccessKind::Execute);
-        if (outcome != VmAccessOutcome::Complete)
-          return outcome;
-      } else {
-        const uint8_t *line_data = nullptr;
-        const VmAccessOutcome outcome = line_for(access, address, line_data);
-        if (outcome != VmAccessOutcome::Complete)
-          return outcome;
-        std::memcpy(dst + copied, line_data + line_offset, chunk);
-      }
-      copied += chunk;
-    }
-    return VmAccessOutcome::Complete;
-  }
 
   const uint8_t *line_for(const GpuMemory &memory, uint64_t addr) {
     const uint64_t line_addr = addr & ~uint64_t{kLineSize - 1};
@@ -227,17 +262,21 @@ private:
     line.addr = line_addr;
     line.vmid = 0;
     line.cache_namespace = {};
+    line.admission_generation = 0;
     line.translated = false;
     line.valid = true;
     has_cached_lines_ = true;
     return line.data;
   }
 
-  VmAccessOutcome line_for(const GpuVmAccess &access, uint64_t addr, const uint8_t *&data) {
+  VmAccessOutcome line_for(const GpuVmAccess &access, uint64_t addr, uint64_t admission_generation,
+                           const uint8_t *&data) {
     const uint64_t line_addr = addr & ~uint64_t{kLineSize - 1};
     const VmCacheNamespace cache_namespace = access.cache_namespace();
     Line &line = lines_[(line_addr / kLineSize) & (kNumLines - 1)];
-    if (is_translated_hit(line, line_addr, cache_namespace)) {
+    if (line.valid && line.translated && line.addr == line_addr &&
+        line.cache_namespace == cache_namespace &&
+        line.admission_generation == admission_generation) {
       data = line.data;
       return VmAccessOutcome::Complete;
     }
@@ -253,6 +292,7 @@ private:
     line.addr = line_addr;
     line.vmid = 0;
     line.cache_namespace = cache_namespace;
+    line.admission_generation = admission_generation;
     line.translated = true;
     line.valid = true;
     has_cached_lines_ = true;
