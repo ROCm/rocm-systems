@@ -29,7 +29,7 @@
 namespace amd::roc {
 class Device;
 class Memory;
-struct ProfilingSignal;
+class ProfilingSignal;
 class Timestamp;
 
 constexpr static uint64_t kInvalidAqlSlot = std::numeric_limits<uint64_t>::max();
@@ -373,6 +373,9 @@ class VirtualGPU : public device::VirtualDevice {
     //! True if the GPU may still be working on the last use of the signal
     virtual bool IsBusy(const ProfilingSignal* signal) const = 0;
 
+    //! The signal's last use is known complete from host bookkeeping, without reading it
+    virtual bool IsKnownRetired(const ProfilingSignal* signal) const { return false; }
+
     //! The operations consuming the waits of the previous WaitingSignal call have been submitted
     virtual void NoteWaitsSubmitted() {}
 
@@ -436,6 +439,7 @@ class VirtualGPU : public device::VirtualDevice {
     hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
+    bool IsKnownRetired(const ProfilingSignal* signal) const override;
     void NoteWaitsSubmitted() override;
     void NoteGpuWait(ProfilingSignal* signal) override;
 
@@ -756,17 +760,17 @@ class VirtualGPU : public device::VirtualDevice {
 
   void updateCommandsState(amd::Command* list) const;
 
-  void submitReadMemory(amd::ReadMemoryCommand& cmd);
-  void submitWriteMemory(amd::WriteMemoryCommand& cmd);
-  void submitCopyMemory(amd::CopyMemoryCommand& cmd);
-  void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd);
-  void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd);
-  void SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd);
-  void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd);
-  void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd);
-  void submitMapMemory(amd::MapMemoryCommand& cmd);
-  void submitUnmapMemory(amd::UnmapMemoryCommand& cmd);
-  void submitKernel(amd::NDRangeKernelCommand& cmd);
+  void submitReadMemory(amd::ReadMemoryCommand& cmd) override;
+  void submitWriteMemory(amd::WriteMemoryCommand& cmd) override;
+  void submitCopyMemory(amd::CopyMemoryCommand& cmd) override;
+  void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) override;
+  void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) override;
+  void SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd) override;
+  void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) override;
+  void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) override;
+  void submitMapMemory(amd::MapMemoryCommand& cmd) override;
+  void submitUnmapMemory(amd::UnmapMemoryCommand& cmd) override;
+  void submitKernel(amd::NDRangeKernelCommand& cmd) override;
   bool submitKernelInternal(
       const amd::NDRangeContainer& sizes,                  //!< Workload sizes
       const amd::Kernel& kernel,                           //!< Kernel for execution
@@ -776,34 +780,34 @@ class VirtualGPU : public device::VirtualDevice {
       amd::NDRangeKernelCommand* vcmd = nullptr,           //!< Original launch command
       hsa_kernel_dispatch_packet_t* aql_packet = nullptr,  //!< Scheduler launch
       bool attach_signal = false);
-  void submitNativeFn(amd::NativeFnCommand& cmd);
-  void submitMarker(amd::Marker& cmd);
+  void submitNativeFn(amd::NativeFnCommand& cmd) override;
+  void submitMarker(amd::Marker& cmd) override;
   void CompleteCpuWait(amd::Command& cmd) override;
-  void submitAccumulate(amd::AccumulateCommand& cmd);
-  void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd);
-  void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd);
-  void submitPerfCounter(amd::PerfCounterCommand& cmd);
+  void submitAccumulate(amd::AccumulateCommand& cmd) override;
+  void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd) override;
+  void submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& cmd) override;
+  void submitPerfCounter(amd::PerfCounterCommand& cmd) override;
 
-  void flush(amd::Command* list = nullptr, bool wait = false);
-  void submitFillMemory(amd::FillMemoryCommand& cmd);
-  void submitStreamOperation(amd::StreamOperationCommand& cmd);
-  void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd);
-  void submitVirtualMap(amd::VirtualMapCommand& cmd);
-  void submitMigrateMemObjects(amd::MigrateMemObjectsCommand& cmd);
+  void flush(amd::Command* list = nullptr, bool wait = false) override;
+  void submitFillMemory(amd::FillMemoryCommand& cmd) override;
+  void submitStreamOperation(amd::StreamOperationCommand& cmd) override;
+  void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd) override;
+  void submitVirtualMap(amd::VirtualMapCommand& cmd) override;
+  void submitMigrateMemObjects(amd::MigrateMemObjectsCommand& cmd) override;
 
-  void submitSvmFreeMemory(amd::SvmFreeMemoryCommand& cmd);
-  void submitSvmCopyMemory(amd::SvmCopyMemoryCommand& cmd);
-  void submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd);
-  void submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd);
-  void submitSvmUnmapMemory(amd::SvmUnmapMemoryCommand& cmd);
-  void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd);
-  void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd);
-  void SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd);
-  virtual void submitSignal(amd::SignalCommand& cmd) {}
-  virtual void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) {}
+  void submitSvmFreeMemory(amd::SvmFreeMemoryCommand& cmd) override;
+  void submitSvmCopyMemory(amd::SvmCopyMemoryCommand& cmd) override;
+  void submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd) override;
+  void submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd) override;
+  void submitSvmUnmapMemory(amd::SvmUnmapMemoryCommand& cmd) override;
+  void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) override;
+  void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd) override;
+  void SubmitSvmDiscardBatchAsync(amd::SvmDiscardBatchAsyncCommand& cmd) override;
+  void submitSignal(amd::SignalCommand& cmd) override {}
+  void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) override {}
 
-  void submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& cmd) {}
-  void submitThreadTrace(amd::ThreadTraceCommand& vcmd) {}
+  void submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& cmd) override {}
+  void submitThreadTrace(amd::ThreadTraceCommand& vcmd) override {}
 
   virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) override;
 
@@ -819,6 +823,13 @@ class VirtualGPU : public device::VirtualDevice {
    * @return bool true if Wait returned successfully, false otherwise
    */
   bool releaseGpuMemoryFence(bool skip_copy_wait = false);
+  //! An armed gate signal for a graph end marker (DEBUG_CLR_GRAPH_FAST_LAUNCH) from the device's
+  //! pool, nullptr if none
+  ProfilingSignal* AcquireGateSignal();
+  //! Issues the pending fork wait (DEBUG_CLR_GRAPH_FAST_LAUNCH) as a barrier without signal
+  void FlushPendingForkWait();
+  //! Drops the pending fork wait and its reference
+  void ReleasePendingForkWait();
 
   hsa_agent_t gpu_device() const { return gpu_device_; }
   hsa_queue_t* gpu_queue() { return gpu_queue_; }
@@ -888,12 +899,12 @@ class VirtualGPU : public device::VirtualDevice {
   void* allocKernArg(size_t size, size_t alignment);
   //! Returns the size of one managed kernarg pool chunk.
   size_t KernArgPoolChunkSize() const;
-  bool isFenceDirty() const { return fence_dirty_.load(std::memory_order_acquire); }
+  bool isFenceDirty() const override { return fence_dirty_.load(std::memory_order_acquire); }
   void setFenceDirty(bool state) { fence_dirty_.store(state, std::memory_order_release); }
   void WaitCompleteSignal(hsa_signal_t signal);
 
-  void HiddenHeapInit();
-  uint64_t getQueueID();
+  void HiddenHeapInit() override;
+  uint64_t getQueueID() override;
 
   //! Add completion signal to the scheduler queue thread's event list.
   //! Wakes the scheduler queue thread if it's sleeping.
@@ -962,6 +973,7 @@ class VirtualGPU : public device::VirtualDevice {
                                                        bool attach_signal = false);
 
   //! Fast-path dispatch: pre-built flat contiguous buffer
+  bool dispatchGraphForkWait(amd::Command* wait_cmd, amd::AccumulateCommand* anchor) override;
   bool dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>& flatPacketData,
                                   const std::vector<uint32_t>& validFullHeaders,
                                   amd::AccumulateCommand* vcmd = nullptr,
@@ -977,7 +989,7 @@ class VirtualGPU : public device::VirtualDevice {
   bool dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet, const uint32_t gfxVersion,
                                 bool blocking, const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi);
   void dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal = false,
-                             hsa_signal_t signal = hsa_signal_t{0});
+                             hsa_signal_t signal = hsa_signal_t{0}, bool depSignalsSet = false);
   void dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveDepSignal = false,
                                   hsa_signal_t signal = hsa_signal_t{0},
                                   hsa_signal_value_t value = 0, hsa_signal_value_t mask = 0,
@@ -1133,6 +1145,10 @@ class VirtualGPU : public device::VirtualDevice {
   //! Retained ProfilingSignal of that last barrier; a coalesced record reuses it
   //! as its HwEvent so query/sync observe correct readiness. Released on reset.
   void* last_barrier_hw_event_ = nullptr;
+  //! DEBUG_CLR_GRAPH_FAST_LAUNCH: a fork wait of the launch whose end marker is
+  //! pending_fork_anchor_, held for that launch's first ext dispatch on this queue
+  ProfilingSignal* pending_fork_wait_ = nullptr;
+  const amd::Command* pending_fork_anchor_ = nullptr;
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;                //!< Active queue associated with a vgpu
   bool device_mem_ring_buf_ = false;           //!< Queue ring buffer is in device memory

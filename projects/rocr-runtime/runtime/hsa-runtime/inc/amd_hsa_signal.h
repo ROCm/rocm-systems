@@ -81,8 +81,8 @@ typedef struct AMD_SIGNAL_ALIGN amd_signal_s {
 // completion signal without loading it. Hints live only in the handle, never
 // in the signal, so they may differ per use. Zero is today's behaviour.
 // Hints are gated on a CP capability and binding once advertised: a producer
-// may set them only on an agent that reports
-// HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED, and its CP firmware consumes every
+// may set them only on an agent that reports HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS
+// in HSA_AMD_AGENT_INFO_AQL_EXTENSIONS, and its CP firmware consumes every
 // defined hint. Firmware without support takes the handle as the signal
 // address. Reserved hint bits must be zero.
 typedef enum {

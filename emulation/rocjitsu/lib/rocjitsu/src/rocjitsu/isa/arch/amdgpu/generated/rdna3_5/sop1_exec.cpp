@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/sop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_fp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -340,63 +341,71 @@ void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCeilF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ceil_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Ceil>(wf, sdst,
+                                                                                         ssrc0);
 }
 
 void SFloorF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_floor_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Floor>(wf, sdst,
+                                                                                          ssrc0);
 }
 
 void STruncF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_trunc_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Trunc>(wf, sdst,
+                                                                                          ssrc0);
 }
 
 void SRndneF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_rndne_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Rndne>(wf, sdst,
+                                                                                          ssrc0);
 }
 
 void SCvtF32I32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_f32_i32_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::I32, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0);
 }
 
 void SCvtF32U32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_f32_u32_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::U32, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0);
 }
 
 void SCvtI32F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_i32_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::I32>(wf, sdst, ssrc0);
 }
 
 void SCvtU32F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_u32_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::U32>(wf, sdst, ssrc0);
 }
 
 void SCvtF16F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_f16_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::F16>(wf, sdst, ssrc0);
 }
 
 void SCvtF32F16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_f32_f16_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0);
 }
 
 void SCvtHiF32F16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_hi_f32_f16_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0, true);
 }
 
 void SCeilF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ceil_f16_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Ceil>(wf, sdst,
+                                                                                         ssrc0);
 }
 
 void SFloorF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_floor_f16_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Floor>(wf, sdst,
+                                                                                          ssrc0);
 }
 
 void STruncF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_trunc_f16_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Trunc>(wf, sdst,
+                                                                                          ssrc0);
 }
 
 void SRndneF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_rndne_f16_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Rndne>(wf, sdst,
+                                                                                          ssrc0);
 }
 
 } // namespace rdna3_5

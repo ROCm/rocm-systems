@@ -11,7 +11,7 @@ namespace {
 using namespace rocjitsu::arith::test;
 
 // Check scalar-result special functions and semantics support for the supplied entry point.
-template <bool Half, typename Call> void check_pseudo(Call call, int op) {
+template <bool Half, bool Gfx1250 = false, typename Call> void check_pseudo(Call call, int op) {
   bool exact = !Half || (op >= 4 && op <= 6);
   for (auto cpu : supported_cpu_levels()) {
     for (auto semantics : semantics_modes()) {
@@ -21,7 +21,8 @@ template <bool Half, typename Call> void check_pseudo(Call call, int op) {
           uint32_t a =
               Half ? uint32_t(random_f16_bits(random)) | (uint32_t(random_f16_bits(random)) << 16)
                    : random_f32_bits(random);
-          bool precise = exact && semantics != RJ_ARITH_SEMANTICS_LOOSE;
+          bool precise = exact && semantics != RJ_ARITH_SEMANTICS_LOOSE &&
+                         (!Gfx1250 || semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY);
           if (!Half && precise) {
             a = unary_inputs[sample % 32];
           }
@@ -39,7 +40,10 @@ template <bool Half, typename Call> void check_pseudo(Call call, int op) {
             mode |= RJ_ARITH_ALU_CLAMP;
           }
           uint32_t d = 123, status = 0x80000000U;
-          int wanted = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+          int wanted = Gfx1250 && (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+                                   semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS)
+                           ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
+                       : semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
                            ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
                        : !exact && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
                            ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
@@ -120,3 +124,17 @@ TEST(v_s_rsq_f16, Arithmetic) { check_pseudo<true>(rj_arith_v_s_rsq_f16, 6); }
 
 // Check scalar-result special functions and semantics support.
 TEST(v_s_sqrt_f16, Arithmetic) { check_pseudo<true>(rj_arith_v_s_sqrt_f16, 4); }
+
+// gfx1250 preserves inherited models but does not advertise new exact support.
+TEST(PseudoGfx1250, Arithmetic) {
+  check_pseudo<true, true>(rj_arith_v_s_exp_f16_gfx1250, 7);
+  check_pseudo<false, true>(rj_arith_v_s_exp_f32_gfx1250, 7);
+  check_pseudo<true, true>(rj_arith_v_s_log_f16_gfx1250, 8);
+  check_pseudo<false, true>(rj_arith_v_s_log_f32_gfx1250, 8);
+  check_pseudo<true, true>(rj_arith_v_s_rcp_f16_gfx1250, 5);
+  check_pseudo<false, true>(rj_arith_v_s_rcp_f32_gfx1250, 5);
+  check_pseudo<true, true>(rj_arith_v_s_rsq_f16_gfx1250, 6);
+  check_pseudo<false, true>(rj_arith_v_s_rsq_f32_gfx1250, 6);
+  check_pseudo<true, true>(rj_arith_v_s_sqrt_f16_gfx1250, 4);
+  check_pseudo<false, true>(rj_arith_v_s_sqrt_f32_gfx1250, 4);
+}
