@@ -34,7 +34,7 @@ import tempfile
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Dict, Optional
+from typing import Optional
 
 from rich.console import Console
 
@@ -224,14 +224,10 @@ def _format_summary_trailer(perfmon_config: dict[str, int]) -> str:
 def generate_bucket_plan(
     output_files: list[CounterFile],
     arch: str,
-    *,
-    heading: Optional[str] = None,
-    perfmon_config: Optional[Dict[str, int]] = None,
 ) -> str:
     """Generate the bucket allocation plan as markdown tables."""
     buf = StringIO()
-    title = heading or f"Perfmon bucket allocation plan (architecture: {arch})"
-    buf.write(f"{title}\n\n")
+    buf.write(f"Perfmon bucket allocation plan (architecture: {arch})\n\n")
 
     global_columns, column_widths, sections, total_assignments = _bucket_plan_sections(
         output_files
@@ -251,8 +247,8 @@ def generate_bucket_plan(
         f"Summary: {len(output_files)} bucket(s), "
         f"{total_assignments} counter assignment(s).\n"
     )
-    cfg = perfmon_config or mi_gpu_specs.get_perfmon_config(arch) or {}
-    buf.write(_format_summary_trailer(cfg))
+    perfmon_config = mi_gpu_specs.get_perfmon_config(arch) or {}
+    buf.write(_format_summary_trailer(perfmon_config))
 
     return buf.getvalue()
 
@@ -279,8 +275,6 @@ def generate_bucket_metrics(
     output_files: list[CounterFile],
     config_dir: Path,
     arch: str,
-    *,
-    section_heading: Optional[str] = None,
 ) -> str:
     """Generate metrics that span multiple buckets as a string.
 
@@ -288,8 +282,6 @@ def generate_bucket_metrics(
     this function's name reflects the primary bucket analysis use case.
     """
     buf = StringIO()
-    if section_heading:
-        buf.write(f"{section_heading}\n\n")
     bucket_counters = _bucket_counter_sets(output_files)
     plan_counters = set().union(*bucket_counters.values())
 
