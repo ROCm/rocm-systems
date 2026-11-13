@@ -774,7 +774,7 @@ TEST_F(PathsMicrotest, CheckNet_OnlyWhenBothGpusReachFasterNicsAndIntraNetIsAllo
 
   g_params["NET_DISABLE_INTRA"] = 0;
   ASSERT_EQ(ncclSuccess, ncclTopoCheckNet(pcie.get(), 0, 1, &net));
-  EXPECT_EQ(1, net);  // 48 GB/s to a NIC beats the 16 GB/s inter-socket path
+  EXPECT_EQ(1, net);  // 48 GB/s to a NIC beats the 32 GB/s Turin inter-socket path
   ASSERT_EQ(ncclSuccess, ncclTopoCheckNet(pcie.get(), 0, 9, &net));
   EXPECT_EQ(1, net);
 
