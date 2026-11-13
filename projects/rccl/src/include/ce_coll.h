@@ -47,7 +47,7 @@
 #endif
 
 #ifndef NCCL_CE_REDUCE_PER_CHUNK_SLOTS
-#define NCCL_CE_REDUCE_PER_CHUNK_SLOTS 12
+#define NCCL_CE_REDUCE_PER_CHUNK_SLOTS 2
 #endif
 
 // Block width of the CE local reduce kernel (ce_reduce_launcher.cpp.in, ce_reduce_impl.h.in).
@@ -122,13 +122,21 @@ inline bool ncclCeReduceScatterPerChunkReduce(size_t totalSteps, int perChunkPar
   return totalSteps > 1 && perChunkParam > 0;
 }
 
+// Resolve RCCL_CE_REDUCE_PER_CHUNK_SLOTS. Non-positive keeps the compile-time
+// default; values below NCCL_CE_NUM_SLOTS are raised so the pool is never smaller
+// than the double-buffered path.
+inline size_t ncclCeResolvePerChunkSlots(int64_t requested) {
+  if (requested <= 0) return (size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS;
+  if (requested < (int64_t)NCCL_CE_NUM_SLOTS) return (size_t)NCCL_CE_NUM_SLOTS;
+  return (size_t)requested;
+}
+
 // Staging-slot count reserved at CE init. Per-chunk mode needs the larger
 // pool so more chunks land on fresh slots before reuse.
-inline size_t ncclCeReduceScatterNumStagingSlots(bool ceReduceScatterEnabled, int perChunkParam) {
+inline size_t ncclCeReduceScatterNumStagingSlots(bool ceReduceScatterEnabled, int perChunkParam,
+                                                 int64_t perChunkSlotsParam) {
   if (ceReduceScatterEnabled && perChunkParam > 0) {
-    return NCCL_CE_REDUCE_PER_CHUNK_SLOTS > NCCL_CE_NUM_SLOTS
-             ? (size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS
-             : (size_t)NCCL_CE_NUM_SLOTS;
+    return ncclCeResolvePerChunkSlots(perChunkSlotsParam);
   }
   return (size_t)NCCL_CE_NUM_SLOTS;
 }

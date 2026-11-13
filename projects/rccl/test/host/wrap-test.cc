@@ -10280,11 +10280,20 @@ TEST(WrapMicrotest, CeReduceScatterPerChunkHostDecisions) {
   EXPECT_TRUE(ncclCeReduceScatterPerChunkReduce(/*totalSteps=*/4, /*perChunkParam=*/1));
 
   EXPECT_EQ((size_t)NCCL_CE_NUM_SLOTS,
-            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/false, /*perChunkParam=*/1));
+            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/false, /*perChunkParam=*/1,
+                                              /*perChunkSlotsParam=*/NCCL_CE_REDUCE_PER_CHUNK_SLOTS));
   EXPECT_EQ((size_t)NCCL_CE_NUM_SLOTS,
-            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/true, /*perChunkParam=*/0));
+            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/true, /*perChunkParam=*/0,
+                                              /*perChunkSlotsParam=*/NCCL_CE_REDUCE_PER_CHUNK_SLOTS));
   EXPECT_EQ((size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS,
-            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/true, /*perChunkParam=*/1));
+            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/true, /*perChunkParam=*/1,
+                                              /*perChunkSlotsParam=*/NCCL_CE_REDUCE_PER_CHUNK_SLOTS));
+  EXPECT_EQ((size_t)8,
+            ncclCeReduceScatterNumStagingSlots(/*ceReduceScatterEnabled=*/true, /*perChunkParam=*/1,
+                                              /*perChunkSlotsParam=*/8));
+  EXPECT_EQ((size_t)NCCL_CE_NUM_SLOTS, ncclCeResolvePerChunkSlots(/*requested=*/1));
+  EXPECT_EQ((size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS, ncclCeResolvePerChunkSlots(/*requested=*/0));
+  EXPECT_EQ((size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS, ncclCeResolvePerChunkSlots(/*requested=*/-1));
 }
 
 // Pins the runtime block-cap clamp at both ends. CI uses 64 (strictly inside

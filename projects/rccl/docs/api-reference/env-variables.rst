@@ -1621,9 +1621,20 @@ threshold table introduced for gfx1250.
           keeping a persistent reduction grid resident across the pipeline. The
           reduction stream waits on GPU doorbells before each launch, so reducer
           blocks do not occupy compute units while SDMA is still staging data.
-          This mode reserves 12 staging slots rather than the default 2.
+          This mode reserves ``RCCL_CE_REDUCE_PER_CHUNK_SLOTS`` staging slots
+          (default 2, same as the persistent path unless raised).
       - | ``0``: Use the persistent pipelined reducer (default).
         | ``1``: Launch one finite reducer per chunk.
+
+    * - | ``RCCL_CE_REDUCE_PER_CHUNK_SLOTS``
+        | Number of CE staging slots reserved when
+          ``RCCL_CE_REDUCE_PER_CHUNK=1``. Larger values let more ReduceScatter
+          chunks land on fresh slots before reuse, at the cost of more GPU memory
+          (``slots × nRanks × RCCL_CE_AR_STAGING_BYTES``). Values below the
+          double-buffered pool size (2) are raised to 2; non-positive values keep
+          the compile-time default.
+      - | ``2``: Default per-chunk staging-slot count.
+        | ``N``: Reserve ``N`` slots (at least 2).
 
     * - | ``RCCL_CE_REDUCE_MAX_BLOCKS``
         | Caps the local CE reduction grid. The runtime value is clamped to the
@@ -1660,7 +1671,8 @@ threshold table introduced for gfx1250.
           constant ``NCCL_CE_AR_STAGING_BYTES`` (256 MiB). Increasing this reduces
           pipelining overhead for large messages but raises per-rank GPU memory
           usage. The default path reserves 2 slots (512 MiB at the default);
-          ``RCCL_CE_REDUCE_PER_CHUNK=1`` reserves 12 slots (3 GiB at the default).
+          ``RCCL_CE_REDUCE_PER_CHUNK=1`` reserves ``RCCL_CE_REDUCE_PER_CHUNK_SLOTS``
+          slots (512 MiB at the defaults of 2 × 256 MiB).
           This variable sizes the buffer only; the non-forced selector cap is
           controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
       - | ``-1``: Use the compile-time default of 256 MiB (default).

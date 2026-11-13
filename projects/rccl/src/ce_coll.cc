@@ -46,6 +46,7 @@ RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
 RCCL_PARAM(CeCoopLaunch, "CE_COOP_LAUNCH", 0);
 RCCL_PARAM(CeReducePerChunk, "CE_REDUCE_PER_CHUNK", 0);
+RCCL_PARAM(CeReducePerChunkSlots, "CE_REDUCE_PER_CHUNK_SLOTS", NCCL_CE_REDUCE_PER_CHUNK_SLOTS);
 RCCL_PARAM_DECLARE(CeReduceScatter);
 
 #ifdef CE_BATCH_ASYNC_SUPPORTED
@@ -182,8 +183,8 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
 #ifdef ENABLE_FAULT_INJECTION
   NCCLCHECK(ceFaultCheck(comm, CE_FAULT_INIT, "ncclCeInit"));
 #endif
-  const size_t NUM_SLOTS =
-      ncclCeReduceScatterNumStagingSlots(rcclParamCeReduceScatter() != 0, (int)rcclParamCeReducePerChunk());
+  const size_t NUM_SLOTS = ncclCeReduceScatterNumStagingSlots(
+      rcclParamCeReduceScatter() != 0, (int)rcclParamCeReducePerChunk(), rcclParamCeReducePerChunkSlots());
   comm->ceColl.numStagingSlots = NUM_SLOTS;
 
   // Declare every variable that is live at a goto-target label up-front, so no
@@ -3283,7 +3284,8 @@ ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
   if (comm->ceColl.ceARTmpBuf != nullptr) return ncclSuccess;
   if (!rcclParamCeAllReduce() && !rcclParamCeReduceScatter()) return ncclSuccess;
 
-  // Size from the latched slot count so RCCL_CE_REDUCE_PER_CHUNK can reserve 12 slots.
+  // Size from the latched slot count so RCCL_CE_REDUCE_PER_CHUNK can reserve
+  // RCCL_CE_REDUCE_PER_CHUNK_SLOTS (default 2; raise via env for a deeper pool).
   ceARTmpBufSize = alignUp(NUM_SLOTS * (size_t)comm->nRanks *
                              ncclCeAllReduceMaxChunkBytes(comm->nRanks, comm->ceColl.ceArStagingBytes),
                            (size_t)16);
