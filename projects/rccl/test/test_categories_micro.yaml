@@ -12,7 +12,7 @@ test_categories:
   quick: &micro_quick
     description: "Smoke — host-only micro-tests, sub-second."
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
-    # ("Devcomm*" matches all five Devcomm suites).
+    # ("Group*" matches all eight Group* suites).
     test_patterns:
       # rma/rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"

@@ -19,21 +19,13 @@
 #include <type_traits>
 #include <vector>
 
-#include "../common/LogCapture.hpp"
+#include "../../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/devcomm_fakes.h"
 
 #include "comm.h"
 #include "dev_runtime.h"
 #include "nccl.h"
-
-// ncclDevCommCopyLsaData is defined for real by dev_runtime.cc, which is now
-// compiled into this same binary by dev-runtime-test.cc. devcomm_fakes.cc can
-// therefore no longer define it, but these tests still need to observe and
-// suppress the copy -- so route this TU's call sites through the hook instead,
-// the same shim p2p-test.cc uses for p2p.cc's HIP calls. The real definition
-// stays available to everyone else.
-#define ncclDevCommCopyLsaData(dst, src) g_ncclDevCommCopyLsaData((dst), (src))
 
 // The units under test. v22902 is hipified (one line prepended); v22907 is
 // copied verbatim, so its hipified line numbers match src/ exactly.

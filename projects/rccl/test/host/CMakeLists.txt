@@ -386,7 +386,6 @@ function(rccl_define_micro_source_lists)
     group-test.cc
     comm-dump-test.cc                    # src/commDump.cc
     timer-test.cc                        # src/include/timer.h
-    devcomm-test.cc
     wrap-test.cc
     dev-runtime-test.cc
     nccl-utility-test.cc                 # src/include/nccl_device/utility.h (header-only, no fakes)
@@ -400,6 +399,9 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     # real ncclP2pImportShareableBuffer, for dev-runtime-test.cc's cuMem window import.
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc
+    # real devcomm compat tables, for dev_runtime.cc's getNcclVersionCompat.
+    ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc
     fakes/amdsmi_fakes.cc
     fakes/channel_fakes.cc
     fakes/argcheck_fakes.cc
@@ -515,15 +517,6 @@ function(rccl_define_micro_source_lists)
     fakes/strongstream_stubs.cc
     fakes/sym_kernels_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroOnerank -- src/device/onerank.cu. Own binary: fakes/sched_stubs.cc fakes
-  # ncclLaunchOneRank.
-  set(TEST_MICRO_ONERANK_SOURCE_FILES
-    onerank-test.cc
-    fakes/hip_fakes.cc
-    fakes/nccl_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -715,39 +708,6 @@ function(rccl_define_micro_source_lists)
     fakes/profiler_fakes.cc
     fakes/strongstream_stubs.cc
     fakes/recorder_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroNcclDevice -- src/nccl_device/ requirement builders. Own binary:
-  # fakes/dev_runtime_micro_fakes.cc fakes three of them in rccl-UnitTestsMicro.
-  set(TEST_MICRO_NCCL_DEVICE_SOURCE_FILES
-    nccl-device-requirements-test.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroCore -- src/nccl_device/core.cc. Own binary:
-  # dev_runtime_micro_fakes.cc and devcomm_fakes.cc fake five of its seven functions.
-  set(TEST_MICRO_CORE_SOURCE_FILES
-    core-test.cc
-    fakes/bootstrap_stubs.cc
-    fakes/topo_stubs.cc
-    fakes/transport_stubs.cc
-    fakes/nccl_stubs.cc
-    fakes/channel_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/hip_fakes.cc
-    fakes/collectives_fakes.cc
-    fakes/comm_fakes.cc
-    fakes/dev_runtime_fakes.cc
-    fakes/env_fakes.cc
-    fakes/mgmt_task_enq_fakes.cc
-    fakes/os_fakes.cc
-    fakes/recorder_fakes.cc
-    fakes/strongstream_stubs.cc
-    fakes/tuning_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
@@ -1498,6 +1458,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicroBootstrap
 # ---------------------------------------------------------------------------
 set_source_files_properties(
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc
   PROPERTIES GENERATED TRUE)
 rccl_add_micro_binary(rccl-UnitTestsMicro
   SOURCES ${TEST_MICRO_SOURCE_FILES}
@@ -1521,8 +1483,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # rma_ce.cc has no basename collision, so it keeps its own name.
     RMA_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc"
     GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
-    DEVCOMM_V22902_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
-    DEVCOMM_V22907_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
     WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
     REGISTER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/register.cc"
     COLL_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/coll_reg.cc"
@@ -1555,21 +1515,7 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary" "")
 target_compile_options(rccl-UnitTestsMicroCollectives PRIVATE
   "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
 
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroOnerank
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroOnerank
-  SOURCES ${TEST_MICRO_ONERANK_SOURCE_FILES}
-  EXTRA_INCLUDES
-    ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # device/op128.h includes rccl_ptr.h unqualified
-    ${RCCL_HOST_HIPIFY_DIR}/src/device               # common_kernel.h includes "tdm/tdmCopy.h"
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    ONERANK_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/device/onerank.cu.cpp"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_onerank.yaml")
-# onerank.cu defines kernels too; see rccl-UnitTestsMicroCollectives.
-target_compile_options(rccl-UnitTestsMicroOnerank PRIVATE
-  "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
+include("${CMAKE_CURRENT_LIST_DIR}/device/host_tests.cmake")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCpuset
@@ -1719,29 +1665,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicroAlloc
 
 include("${CMAKE_CURRENT_LIST_DIR}/enqueue/host_tests.cmake")
 
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroNcclDevice
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroNcclDevice
-  SOURCES ${TEST_MICRO_NCCL_DEVICE_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    CFT_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/cft_barrier.cc"
-    GIN_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/gin_barrier.cc"
-    GIN_SCRATCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/gin_scratch.cc"
-    LL_A2A_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/ll_a2a.cc"
-    LSA_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/lsa_barrier.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_nccl_device.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroCore
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroCore
-  SOURCES ${TEST_MICRO_CORE_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_core.yaml")
+include("${CMAKE_CURRENT_LIST_DIR}/nccl_device/host_tests.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/devcomm/host_tests.cmake")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCftDevRuntime

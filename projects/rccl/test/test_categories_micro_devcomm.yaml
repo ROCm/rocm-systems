@@ -1,12 +1,11 @@
-# rccl-UnitTestsMicroCore — shared/ctest schema.
-# Host-only micro-tests for src/nccl_device/core.cc (no GPU, no librccl).
-# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
-
+# CTest categories for host-only src/devcomm/ microtests.
+#
+# Suites start with the directory name: the units are versioned devcomm_v*.cc shims.
 test_categories:
-  quick: &micro_core_quick
-    description: "Smoke — host-only nccl_device/core.cc team-helper micro-tests, sub-second."
+  quick: &micro_devcomm_quick
+    description: "Smoke - host-only src/devcomm/ micro-tests, sub-second."
     test_patterns:
-      - "Core*"
+      - "Devcomm*"
     exclude_windows:
       - "*"
     labels:
@@ -16,21 +15,21 @@ test_categories:
       - "precheck"
       - "microtest"
   standard:
-    <<: *micro_core_quick
+    <<: *micro_devcomm_quick
     labels:
       - "rccl"
       - "standard"
       - "regression"
       - "microtest"
   comprehensive:
-    <<: *micro_core_quick
+    <<: *micro_devcomm_quick
     labels:
       - "rccl"
       - "comprehensive"
       - "comprehensive_regression"
       - "microtest"
   full:
-    <<: *micro_core_quick
+    <<: *micro_devcomm_quick
     labels:
       - "rccl"
       - "full"
