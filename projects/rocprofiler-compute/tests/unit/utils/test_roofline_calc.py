@@ -343,7 +343,7 @@ def test_gfx1201_dram_destined_rows_compare_one_value_with_both_roofs() -> None:
     """The DRAM-destined bandwidth is shown against the VRAM and Infinity Cache
     peaks, since no counter separates the two."""
     rates = gfx1201_roofline_metrics("Roofline Performance Rates")
-    dram = rates["VRAM BW"]
+    dram = rates["L2 to Memory BW"]
     infinity_cache = rates["L2 to Memory BW (Infinity Cache Peak)"]
 
     assert dram["value"] == infinity_cache["value"]
@@ -369,7 +369,7 @@ def test_gfx1201_dram_rate_counts_32_byte_requests_per_second() -> None:
         {},
     )
 
-    for row in ("VRAM BW", "L2 to Memory BW (Infinity Cache Peak)"):
+    for row in ("L2 to Memory BW", "L2 to Memory BW (Infinity Cache Peak)"):
         expression = build_eval_string(rates[row]["value"])
         assert evaluator.eval_expression(expression) == pytest.approx(4.8e7), row
 
@@ -400,7 +400,7 @@ def test_extract_ai_metrics_reads_the_vram_point_into_its_own_field() -> None:
 def test_gfx1201_roofline_fp32_excludes_wmma_instructions() -> None:
     """Roofline FP32 subtracts WMMA instructions and uses the measured peak."""
     metrics = gfx1201_roofline_metrics("Roofline Performance Rates")
-    fp32 = metrics["VALU FLOPs (FP32)"]
+    fp32 = metrics["VALU FLOPs"]
     assert fp32["peak"] == "$FP32Flops_empirical_peak"
     evaluator = MetricEvaluator(
         pd.DataFrame({
