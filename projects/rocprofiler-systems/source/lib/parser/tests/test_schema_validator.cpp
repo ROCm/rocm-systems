@@ -132,7 +132,7 @@ TEST(parser_schema_validator, boolean_values)
     {
         EXPECT_TRUE(is_valid_value(param, value)) << value;
     }
-    for(const auto* value : { "", "truthy", " true", "+" })
+    for(const auto* value : { "", "truthy", "+" })
     {
         EXPECT_FALSE(is_valid_value(param, value)) << value;
     }
@@ -144,7 +144,7 @@ TEST(parser_schema_validator, integer_values)
     EXPECT_TRUE(is_valid_value(param, "42"));
     EXPECT_TRUE(is_valid_value(param, "-7"));
     for(const auto* value :
-        { "", "1.5", "12abc", " 12", "12 ", "0x10", "1e3", "99999999999999999999" })
+        { "", "1.5", "12abc", "1 2", "0x10", "1e3", "99999999999999999999" })
     {
         EXPECT_FALSE(is_valid_value(param, value)) << value;
     }
@@ -167,7 +167,7 @@ TEST(parser_schema_validator, number_values)
     EXPECT_TRUE(is_valid_value(param, "3.14"));
     EXPECT_TRUE(is_valid_value(param, "-2"));
     EXPECT_TRUE(is_valid_value(param, "1e3"));
-    for(const auto* value : { "", "1.5x", " 1.5", "nan", "NaN", "inf", "-inf", "1e999" })
+    for(const auto* value : { "", "1.5x", "1. 5", "nan", "NaN", "inf", "-inf", "1e999" })
     {
         EXPECT_FALSE(is_valid_value(param, value)) << value;
     }
@@ -225,6 +225,21 @@ TEST(parser_schema_validator, enumeration_list_values)
 
     param.allow_custom = true;
     EXPECT_TRUE(is_valid_value(param, "alpha,custom"));
+}
+
+TEST(parser_schema_validator, ignores_whitespace_around_a_value_and_a_default)
+{
+    EXPECT_TRUE(is_valid_value(make_param(param_type::boolean), " true "));
+    EXPECT_TRUE(is_valid_value(make_param(param_type::integer), " 12 "));
+    EXPECT_TRUE(is_valid_value(make_param(param_type::number), " 1.5 "));
+    EXPECT_TRUE(is_valid_value(make_enum(), " alpha "));
+    EXPECT_FALSE(is_valid_value(make_param(param_type::path), "  "));
+
+    auto padded          = make_enum();
+    padded.default_value = " alpha ";
+    schema value{};
+    add_checked(value, std::move(padded));
+    EXPECT_TRUE(validate_schema(value).empty());
 }
 
 TEST(parser_schema_validator, accepts_defaults_and_valid_values)

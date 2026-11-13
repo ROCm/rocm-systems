@@ -103,6 +103,17 @@ TEST(parser_value_text, parse_value_returns_the_typed_value)
     EXPECT_EQ(parse_value(make_list(), "alpha,gamma"), std::nullopt);
 }
 
+TEST(parser_value_text, parse_value_ignores_surrounding_whitespace)
+{
+    EXPECT_EQ(parse_value(make_param(param_type::integer), " 42 "),
+              config_value_t{ k_small_integer });
+    EXPECT_EQ(parse_value(make_param(param_type::string), " text "),
+              config_value_t{ std::string{ "text" } });
+    EXPECT_EQ(parse_value(make_list(), "  "),
+              (config_value_t{ std::vector<std::string>{} }));
+    EXPECT_EQ(parse_value(make_param(param_type::path), "  "), std::nullopt);
+}
+
 TEST(parser_value_text, accepts_value_checks_the_type_and_the_rules)
 {
     auto bounded = make_param(param_type::integer);

@@ -53,8 +53,9 @@ using typed_values_t = std::map<std::string, config_value_t, std::less<>>;
 [[nodiscard]] bool
 accepts_value(const schema_param& param, const config_value_t& value);
 
-/// Parse @p text once as @p param. Returns nullopt when the text is not a value
-/// the parameter accepts.
+/// Parse @p text once as @p param. Surrounding whitespace is ignored, so " 2 " is the
+/// integer 2 and text that is only whitespace reads as empty text. Returns nullopt
+/// when the text is not a value the parameter accepts.
 [[nodiscard]] std::optional<config_value_t>
 parse_value(const schema_param& param, std::string_view text);
 

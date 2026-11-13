@@ -245,23 +245,24 @@ accepts_value(const schema_param& param, const config_value_t& value)
 std::optional<config_value_t>
 parse_value(const schema_param& param, std::string_view text)
 {
+    const auto                    trimmed = utility::string::trim(text);
     std::optional<config_value_t> candidate;
     switch(param.type)
     {
         case param_type::boolean:
-            if(const auto parsed = parse_boolean(text))
+            if(const auto parsed = parse_boolean(trimmed))
             {
                 candidate = config_value_t{ *parsed };
             }
             break;
         case param_type::integer:
-            if(const auto parsed = parse_integer(text))
+            if(const auto parsed = parse_integer(trimmed))
             {
                 candidate = config_value_t{ *parsed };
             }
             break;
         case param_type::number:
-            if(const auto parsed = parse_number(text))
+            if(const auto parsed = parse_number(trimmed))
             {
                 candidate = config_value_t{ *parsed };
             }
@@ -269,10 +270,10 @@ parse_value(const schema_param& param, std::string_view text)
         case param_type::string:
         case param_type::path:
         case param_type::enumeration:
-            candidate = config_value_t{ std::string{ text } };
+            candidate = config_value_t{ std::string{ trimmed } };
             break;
         case param_type::enumeration_list:
-            if(auto parts = split_list(text, list_separator(param)))
+            if(auto parts = split_list(trimmed, list_separator(param)))
             {
                 candidate = config_value_t{ std::move(*parts) };
             }

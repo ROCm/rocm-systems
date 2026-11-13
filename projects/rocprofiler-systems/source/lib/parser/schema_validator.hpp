@@ -15,7 +15,8 @@ namespace rocprofsys::parser
 /**
  * Check whether @p value is an acceptable textual value for @p param.
  *
- * The whole string must parse as the parameter's type. Numbers must be finite and
+ * Surrounding whitespace is ignored, then the whole string must parse as the
+ * parameter's type. Numbers must be finite and
  * within min/max, and enumerations must name a choice unless custom values are
  * allowed. An enumeration_list is split on list_separator(); each trimmed element
  * must be a valid choice, and an empty string is the empty list. Boolean tokens
