@@ -13,11 +13,18 @@
  * SIMPLE kernel. Each test checks both output data and the COLL log so a
  * correct fallback cannot hide a DDA regression.
  *
+ * AllReduce, AllGather and ReduceScatter size their payload from the comm's
+ * tiers: above the LL tier, up to the VMM tier. The gfx1250 tables can leave
+ * that window empty (SPX keeps the AllGather VMM tier off, and below 8 ranks
+ * its AllReduce LL tier reaches past the VMM tier), so these cases skip unless
+ * the binary is launched with RCCL_DDA_LL=0 and RCCL_DDA_THRESHOLD covering
+ * the payload.
+ *
  * AllToAll is the exception: AllToAllOutOfPlace, RepeatedAllToAll, the AllToAll
  * step of AlternatingCollectivesOnSameCommunicator and the AllToAll barrier
  * stress run its LL tier. The AllToAll SIMPLE kernel tests need the DDA SIMPLE
- * tier to cover their payload: the gfx1250 DPX table enables it up to 256 MiB,
- * while the SPX table leaves it off, so there they skip unless
+ * tier to cover their payload: the gfx1250 DPX and SPX tables enable it up to
+ * 256 MiB, and on a table that leaves it off they skip unless
  * RCCL_DDA_THRESHOLD covers it. Their kernel is chosen by RCCL_DDA_A2A_PUSH,
  * RCCL_DDA_A2A_PUSH_PEER and RCCL_DDA_A2A_TDM, which are cached per process, so
  * the peer-major vector push, all-peer TDM push and pull tests also skip unless
@@ -38,6 +45,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <memory>
@@ -54,17 +62,20 @@ RCCL_PARAM_DECLARE(DdaA2ATdm);
 
 namespace
 {
+// Preferred payloads; simpleBytes() moves them into the comm's SIMPLE window.
 constexpr size_t kAllReduceCount     = 8 * 1024 * 1024 + 1;
+constexpr size_t kAllGatherBytes     = 8 * 1024 * 1024;  // total
 constexpr size_t kReduceScatterCount = 32 * 1024;       // 1 MiB input at 8 ranks
 constexpr int    kAllToAllAlternatingRounds = 10;
 constexpr int    kRepeatedIterations = 10;
 
-// AllReduce exceeds its 16 MiB LL two-shot threshold; the fixture pins LL128 off.
+// The fabric AllReduce SIMPLE launcher runs its flat kernel up to this size.
+constexpr size_t kAllReduceFlatMaxBytes = 256 * 1024;
+
 constexpr size_t kAllReduceBarrierStressCount = kAllReduceCount;
 
-// A shard just above the 512 KiB LL128 hard cap remains small enough to expose
-// publication races in ReduceScatter. AllToAll payloads are capped at 4 MiB in
-// total.
+// A ReduceScatter shard 16 B above 512 KiB, small enough to expose publication
+// races. AllToAll payloads are capped at 4 MiB in total.
 constexpr size_t kBarrierStressCount      = 128 * 1024 + 4;
 constexpr int    kBarrierStressIterations = 100;
 constexpr size_t kAllToAllMaxTotalBytes   = 4 * 1024 * 1024;
@@ -165,7 +176,7 @@ protected:
         return desired < alignedMaxCount ? desired : alignedMaxCount;
     }
 
-    // The largest count under kAllToAllMaxTotalBytes: above the AllToAll LL tier on SPX (64 KiB) and DPX (2 MiB), so
+    // The largest count under kAllToAllMaxTotalBytes: above the AllToAll LL tier on SPX (128 KiB) and DPX (2 MiB), so
     // the SIMPLE kernels run.
     size_t simpleAllToAllCount() const
     {
@@ -180,13 +191,40 @@ protected:
         return allToAllCount(count - count % (16 / sizeof(float)));
     }
 
+    // Total bytes for a func call on its SIMPLE kernel: desired rounded up to align, raised above the LL tier and
+    // minBytes and lowered to the VMM tier. 0 when that window is empty, with why set. Every rank sees the same
+    // tiers, so they all skip together.
+    size_t simpleBytes(const char* name, ncclFunc_t func, size_t desired, size_t minBytes, size_t align,
+                       std::string& why)
+    {
+        const size_t ll     = rcclDdaLLThreshold(getActiveCommunicator(), func);
+        const size_t vmm    = rcclDdaVmmThreshold(getActiveCommunicator(), func);
+        const size_t lowest = (std::max(ll, minBytes) / align + 1) * align;
+        const size_t highest = vmm - vmm % align;
+        if(lowest > highest)
+        {
+            why = std::string(name) + " has no DDA SIMPLE window on this comm (LL to " + std::to_string(ll)
+                  + " bytes, VMM to " + std::to_string(vmm)
+                  + "); launch with RCCL_DDA_LL=0 and RCCL_DDA_THRESHOLD >= " + std::to_string(lowest);
+            return 0;
+        }
+        return std::clamp((desired + align - 1) / align * align, lowest, highest);
+    }
+
+    // AllReduce SIMPLE bytes, above the flat kernel so the tree kernel runs.
+    size_t allReduceBytes(size_t desiredCount, std::string& why)
+    {
+        return simpleBytes("AllReduce", ncclFuncAllReduce, desiredCount * sizeof(float), kAllReduceFlatMaxBytes,
+                           static_cast<size_t>(nRanks_) * 16, why);
+    }
+
     void runAllReduce(bool inPlace, int iterations = 1)
     {
-        const size_t countAlignment =
-            static_cast<size_t>(nRanks_) * (16 / sizeof(float));
-        const size_t count =
-            ((kAllReduceCount + countAlignment - 1) / countAlignment) * countAlignment;
-        const size_t bytes = count * sizeof(float);
+        std::string why;
+        const size_t bytes = allReduceBytes(kAllReduceCount, why);
+        if(bytes == 0)
+            GTEST_SKIP() << why;
+        const size_t count = bytes / sizeof(float);
         void* sendBuf = nullptr;
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
         DeviceBufferAutoGuard sendGuard(sendBuf);
@@ -228,19 +266,15 @@ protected:
 
     void runAllGather(bool inPlace)
     {
-        // AllGather's LL128 predicate uses total bytes and RCCL_DDA_LL128 (default off).
-        // Exceed the configured threshold while retaining 16-byte alignment.
-        constexpr size_t countAlignment = 16 / sizeof(float);
-        const size_t ll128ThresholdBytes =
-            static_cast<size_t>(rcclParamDdaLL128Threshold());
-        const size_t count =
-            (ll128ThresholdBytes
-             / (static_cast<size_t>(nRanks_) * sizeof(float) * countAlignment)
-             + 1)
-            * countAlignment;
+        // Each rank's block keeps 16-byte alignment.
+        std::string why;
+        const size_t totalBytes = simpleBytes("AllGather", ncclFuncAllGather, kAllGatherBytes, 0,
+                                              static_cast<size_t>(nRanks_) * 16, why);
+        if(totalBytes == 0)
+            GTEST_SKIP() << why;
+        const size_t totalCount = totalBytes / sizeof(float);
+        const size_t count = totalCount / static_cast<size_t>(nRanks_);
         const size_t sendBytes = count * sizeof(float);
-        const size_t totalCount = count * static_cast<size_t>(nRanks_);
-        const size_t totalBytes = totalCount * sizeof(float);
 
         void* recvBuf = nullptr;
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, totalBytes));
@@ -281,16 +315,22 @@ protected:
 
     void runReduceScatter(bool inPlace, int iterations = 1)
     {
-        const size_t totalCount = kReduceScatterCount * static_cast<size_t>(nRanks_);
-        const size_t sendBytes = totalCount * sizeof(float);
-        const size_t recvBytes = kReduceScatterCount * sizeof(float);
+        std::string why;
+        const size_t sendBytes = simpleBytes("ReduceScatter", ncclFuncReduceScatter,
+                                             kReduceScatterCount * static_cast<size_t>(nRanks_) * sizeof(float), 0,
+                                             static_cast<size_t>(nRanks_) * 16, why);
+        if(sendBytes == 0)
+            GTEST_SKIP() << why;
+        const size_t totalCount = sendBytes / sizeof(float);
+        const size_t recvCount = totalCount / static_cast<size_t>(nRanks_);
+        const size_t recvBytes = recvCount * sizeof(float);
 
         void* sendBuf = nullptr;
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, sendBytes));
         DeviceBufferAutoGuard sendGuard(sendBuf);
 
         void* recvBuf = static_cast<float*>(sendBuf)
-                      + static_cast<size_t>(rank_) * kReduceScatterCount;
+                      + static_cast<size_t>(rank_) * recvCount;
         void* separateRecvBuf = nullptr;
         if(!inPlace)
         {
@@ -311,7 +351,7 @@ protected:
             ASSERT_MPI_EQ(ncclSuccess,
                           ncclReduceScatter(sendBuf,
                                             recvBuf,
-                                            kReduceScatterCount,
+                                            recvCount,
                                             ncclFloat32,
                                             ncclSum,
                                             getActiveCommunicator(),
@@ -321,9 +361,9 @@ protected:
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
         const float rankSum = static_cast<float>(nRanks_ * (nRanks_ + 1) / 2);
         ASSERT_MPI_TRUE(verifyBufferData<float>(
-            recvBuf, kReduceScatterCount, [this, rankSum](size_t i) {
+            recvBuf, recvCount, [this, rankSum, recvCount](size_t i) {
                 const size_t globalIdx =
-                    static_cast<size_t>(rank_) * kReduceScatterCount + i;
+                    static_cast<size_t>(rank_) * recvCount + i;
                 return rankSum
                      + static_cast<float>(nRanks_ * static_cast<int>(globalIdx % 17));
             }));
@@ -618,12 +658,11 @@ class DdaFabricBarrierStress : public DdaFabricSimpleMPITest
 protected:
     void runBarrierStressAllReduce()
     {
-        const size_t countAlignment =
-            static_cast<size_t>(nRanks_) * (16 / sizeof(float));
-        const size_t count =
-            ((kAllReduceBarrierStressCount + countAlignment - 1) / countAlignment)
-            * countAlignment;
-        const size_t bytes = count * sizeof(float);
+        std::string why;
+        const size_t bytes = allReduceBytes(kAllReduceBarrierStressCount, why);
+        if(bytes == 0)
+            GTEST_SKIP() << why;
+        const size_t count = bytes / sizeof(float);
 
         void* sendBuf = nullptr;
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
@@ -711,6 +750,10 @@ protected:
         const size_t totalCount = recvCount * static_cast<size_t>(nRanks_);
         const size_t sendBytes = totalCount * sizeof(float);
         const size_t recvBytes = recvCount * sizeof(float);
+        // The odd shard is the point of this test, so skip rather than resize it.
+        std::string why;
+        if(simpleBytes("ReduceScatter", ncclFuncReduceScatter, sendBytes, 0, 16, why) != sendBytes)
+            GTEST_SKIP() << (why.empty() ? "the odd ReduceScatter shard is outside the DDA SIMPLE window" : why);
 
         void* sendBuf = nullptr;
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, sendBytes));

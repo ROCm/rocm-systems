@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu: eligibility against the fixed LL
-// slot stride, the block-per-peer grid, and the launch.
+// Host-only microtests for src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu: eligibility against the
+// bank-sized LL slot, the block-per-peer grid, and the launch.
 
 #include <gtest/gtest.h>
 
@@ -27,9 +27,10 @@ void* const kSendbuff = reinterpret_cast<void*>(0x1000);
 void* const kRecvbuff = reinterpret_cast<void*>(0x2000);
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
 const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
-// Two banks of nRanks slots, each 32 MiB of 16 B packets carrying 16 MiB of payload.
+// A 16 B packet carries 8 B, so the LL staging cap of 32 MiB per chunk leaves 16 MiB of payload.
 constexpr size_t kMaxPerPeerBytes = 16u << 20;
-constexpr size_t kScratchPerRank = 64u << 20;
+// 8 ranks, bank of 8 * 32 packets: a slot of 32 packets carries 256 B per peer.
+constexpr size_t kSlotScratch = 2 * 8 * 32 * 16;
 
 template <int N>
 const void* Kernel() {
@@ -119,19 +120,27 @@ TEST_F(DdaAlltoallFabricLLMicrotest, Eligible_PerPeerBytesMustBeMultipleOf16) {
   EXPECT_TRUE(Eligible(16, ncclBfloat16));
 }
 
-TEST_F(DdaAlltoallFabricLLMicrotest, Eligible_PerPeerBytesUpToHalfTheSlot) {
+TEST_F(DdaAlltoallFabricLLMicrotest, Eligible_PerPeerBytesUpToHalfTheStagingCap) {
   EXPECT_TRUE(Eligible(kMaxPerPeerBytes / 4));
   EXPECT_FALSE(Eligible(kMaxPerPeerBytes / 4 + 4));
 }
 
-TEST_F(DdaAlltoallFabricLLMicrotest, Eligible_ScratchMustHoldBothBanksOfFixedSlots) {
-  comm().ddaScratchBytes = 8 * kScratchPerRank;
-  EXPECT_TRUE(Eligible(4));
-  comm().ddaScratchBytes = 8 * kScratchPerRank - 1;
-  EXPECT_FALSE(Eligible(4));
+TEST_F(DdaAlltoallFabricLLMicrotest, Eligible_PerPeerPacketsMustFitTheSlot) {
+  comm().ddaScratchBytes = kSlotScratch;
+  EXPECT_TRUE(Eligible(64));
+  EXPECT_FALSE(Eligible(68));
+  // The same bank over 4 ranks doubles the slot to 64 packets, 512 B per peer.
   comm().nRanks = 4;
-  comm().ddaScratchBytes = 4 * kScratchPerRank;
-  EXPECT_TRUE(Eligible(4));
+  EXPECT_TRUE(Eligible(128));
+  EXPECT_FALSE(Eligible(132));
+  comm().nRanks = 8;
+  // 31 packets per peer in the bank floor to a 16-packet slot.
+  comm().ddaScratchBytes = 2 * 8 * 31 * 16;
+  EXPECT_TRUE(Eligible(32));
+  EXPECT_FALSE(Eligible(36));
+  // A bank under one 16-packet granule per peer leaves no slot at all.
+  comm().ddaScratchBytes = 2 * 8 * 15 * 16;
+  EXPECT_FALSE(Eligible(4));
 }
 
 TEST_F(DdaAlltoallFabricLLMicrotest, Launch_UnsupportedDatatypeReturnsInvalidArgument) {
@@ -155,7 +164,8 @@ TEST_F(DdaAlltoallFabricLLMicrotest, Launch_FourAndEightRanksUnrolledOthersRunti
   }
 }
 
-TEST_F(DdaAlltoallFabricLLMicrotest, Launch_PassesBuffersPerPeerBytesAndEpoch) {
+TEST_F(DdaAlltoallFabricLLMicrotest, Launch_PassesBuffersPerPeerBytesEpochAndBank) {
+  comm().ddaScratchBytes = 4096 + 40;
   ASSERT_EQ(Run(8, ncclFloat16), ncclSuccess);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
   const DdaLaunch& launch = g_ddaLaunches[0];
@@ -167,7 +177,7 @@ TEST_F(DdaAlltoallFabricLLMicrotest, Launch_PassesBuffersPerPeerBytesAndEpoch) {
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
-  ASSERT_EQ(launch.args.size(), 9u);
+  ASSERT_EQ(launch.args.size(), 10u);
   EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const int8_t*>(2), kSendbuff);
@@ -175,7 +185,9 @@ TEST_F(DdaAlltoallFabricLLMicrotest, Launch_PassesBuffersPerPeerBytesAndEpoch) {
   EXPECT_EQ(launch.Arg<int>(4), 1);
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
-  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(8).flag, comm().abortFlagDev);
+  // Bank 1 starts at half the scratch floored to 128 B, the offset every DDA LL/LL128 tier uses.
+  EXPECT_EQ(launch.Arg<size_t>(8), 2048u);
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(9).flag, comm().abortFlagDev);
 }
 
 // One block per peer up to 256 packets (2 KiB) per peer, then one per 256 packets, at most 8 per peer.
@@ -189,6 +201,19 @@ TEST_F(DdaAlltoallFabricLLMicrotest, Launch_BlocksPerPeerFollowPacketCountCapped
     EXPECT_EQ(g_ddaLaunches[0].grid.x, 4u);
     EXPECT_EQ(g_ddaLaunches[0].grid.y, bpp) << "count " << count;
     EXPECT_EQ(ncclAllToAllDdaFabricLLBlocks(mock_.get(), count, ncclFloat32), 4 * bpp);
+  }
+}
+
+// The whole grid must be co-resident, so blocks per peer are also capped at the comm block budget / nRanks.
+TEST_F(DdaAlltoallFabricLLMicrotest, Launch_BlocksPerPeerCappedByTheCuBudget) {
+  comm().nRanks = 4;
+  const std::pair<int, unsigned> cases[] = {{256, 8}, {20, 5}, {4, 1}, {3, 1}};
+  for (const auto& [budget, bpp] : cases) {
+    comm().ddaFabricMaxBlocks = budget;
+    g_ddaLaunches.clear();
+    ASSERT_EQ(Run(4096), ncclSuccess);
+    ASSERT_EQ(g_ddaLaunches.size(), 1u);
+    EXPECT_EQ(g_ddaLaunches[0].grid.y, bpp) << "budget " << budget;
   }
 }
 

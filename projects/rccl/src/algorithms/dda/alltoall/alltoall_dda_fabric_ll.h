@@ -30,8 +30,11 @@
 
 namespace dda::common {
 
-// LL is for small-message, so the full payload is well under the staging cap.
-constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
+// Per-peer slot in 16-byte packets, carved from the scratch bank as AllGather LL does so bank 1
+// sits at the offset every DDA LL/LL128 tier uses. Kernel and eligibility both call this.
+constexpr size_t ddaLLA2ASlotPkts(size_t bankSize, int nRanks) {
+  return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks, 16);
+}
 
 // LL all-to-all kernel. 2D grid: grid.x == nRanks selects the peer (column b
 // owns peer b); grid.y == blocksPerPeer splits that peer's packets into gridDim.y
@@ -51,6 +54,7 @@ __launch_bounds__(512)
                                       int selfRank, int nRanksRt,
                                       uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
                                       int epochLen,                          // number of cells in epochDev
+                                      size_t bankSize,                       // scratch bank size (from host)
                                       DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
@@ -61,13 +65,13 @@ __launch_bounds__(512)
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
   const size_t nPk = perChunkBytes >> 3;   // 8 payload bytes per packet
-  const size_t slot = kDdaLLA2ASlotStridePkts;
+  const size_t slot = ddaLLA2ASlotPkts(bankSize, nRanks);
 
-  // On-device, graph-safe flag/bank derivation. bank = flag & 1.
+  // On-device, graph-safe flag/bank derivation. bank = flag & 1, and bank 1 starts at bankSize.
   const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
   const int total = gridDim.x * gridDim.y;
   const uint32_t flag = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
 
   // This block's packet range [pkBegin, pkEnd); [0, nPk) when nChunks == 1.
   const size_t pkPerChunk = (nPk + (size_t)nChunks - 1) / (size_t)nChunks;

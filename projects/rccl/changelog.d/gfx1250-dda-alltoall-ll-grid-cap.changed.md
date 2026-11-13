@@ -1,0 +1,1 @@
+* The gfx1250 DDA fabric AllToAll LL kernel caps its grid at the communicator's CU budget, as the AllToAll LL128 kernel does, so every block is co-resident. The grid is unchanged at the default thresholds.

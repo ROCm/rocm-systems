@@ -25,15 +25,10 @@
 
 namespace {
 
-using dda::common::kDdaLLA2ASlotStridePkts;
+using dda::common::ddaBankSize;
+using dda::common::ddaLLA2ASlotPkts;
 using dda::common::kDdaLLMaxBytes;
-using dda::common::LLPacket16;
 using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
-
-// LL scratch: 2 banks * nRanks slots * kDdaLLA2ASlotStridePkts * 16B.
-static inline size_t ddaLLA2AScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLLA2ASlotStridePkts * sizeof(LLPacket16);
-}
 
 // Adaptive block-per-peer fan-out. One block per peer for small chunks; larger
 // ones split a peer's packet range across blocksPerPeer blocks. 256 pkts/block
@@ -56,7 +51,11 @@ static inline int ddaLLA2ABlocksPerPeer(size_t perChunkBytes) {
 // per-peer packet split; 256 threads/block.
 static inline std::pair<dim3, dim3> ddaAllToAllFabricLLGeom(ncclComm* comm, size_t perChunkBytes) {
   const unsigned threads = 256;
-  const int blocksPerPeer = ddaLLA2ABlocksPerPeer(perChunkBytes);
+  int blocksPerPeer = ddaLLA2ABlocksPerPeer(perChunkBytes);
+  // A gather block polls a slot written by a peer block of another index, so the whole grid must be
+  // co-resident: cap it at the comm-wide CU budget.
+  const int cap = comm->ddaFabricMaxBlocks / comm->nRanks;
+  if (blocksPerPeer > cap) blocksPerPeer = cap < 1 ? 1 : cap;
   return std::make_pair(dim3((unsigned)comm->nRanks, (unsigned)blocksPerPeer), dim3(threads));
 }
 
@@ -76,6 +75,7 @@ static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
+  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
   INFO(NCCL_COLL, "DDA fabric AllToAll LL: nRanks=%d perChunkBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
        nRanks, perChunkBytes, grid.x, grid.y, block.x, blocksPerPeer);
@@ -86,17 +86,17 @@ static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, params);
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, params);
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, params);
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
     break;
   }
 
@@ -136,7 +136,8 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   if (perChunkBytes * 2 > kDdaLLMaxBytes) {
     return false;
   }
-  if (ddaLLA2AScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
+  // One packet carries 8B of payload, so each peer's chunk has to fit the slot the bank gives it.
+  if ((perChunkBytes >> 3) > ddaLLA2ASlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
     return false;
   }
 
