@@ -122,13 +122,18 @@ noop_dispatch_cb(rocprofiler_agent_id_t,
 void noop_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {}
 
 rocprofiler_context_id_t
-make_att_context(rocprofiler_agent_id_t agent_id)
+make_att_context(rocprofiler_agent_id_t agent_id, bool device_mode = false)
 {
     auto ctx = rocprofiler_context_id_t{0};
     EXPECT_EQ(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_EQ(rocprofiler_configure_dispatch_thread_trace_service(
-                  ctx, agent_id, nullptr, 0, noop_dispatch_cb, noop_shader_cb, nullptr),
-              ROCPROFILER_STATUS_SUCCESS);
+    if(device_mode)
+        EXPECT_EQ(rocprofiler_configure_device_thread_trace_service(
+                      ctx, agent_id, nullptr, 0, noop_shader_cb, {}),
+                  ROCPROFILER_STATUS_SUCCESS);
+    else
+        EXPECT_EQ(rocprofiler_configure_dispatch_thread_trace_service(
+                      ctx, agent_id, nullptr, 0, noop_dispatch_cb, noop_shader_cb, nullptr),
+                  ROCPROFILER_STATUS_SUCCESS);
     return ctx;
 }
 
@@ -168,14 +173,16 @@ TEST(thread_trace_per_agent, disjoint_agent_contexts_can_be_active_together)
     auto agents = get_two_agents();
     if(!agents.second) GTEST_SKIP() << "fewer than two GPU agents available";
 
-    auto ctx_a = make_att_context(agents.first->get_rocp_agent()->id);
-    auto ctx_b = make_att_context(agents.second->get_rocp_agent()->id);
-
-    EXPECT_EQ(rocprofiler_start_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_EQ(rocprofiler_start_context(ctx_b), ROCPROFILER_STATUS_SUCCESS);
-
-    EXPECT_EQ(rocprofiler_stop_context(ctx_b), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_EQ(rocprofiler_stop_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
+    for(bool device_a : {false, true})
+        for(bool device_b : {false, true})
+        {
+            auto ctx_a = make_att_context(agents.first->get_rocp_agent()->id, device_a);
+            auto ctx_b = make_att_context(agents.second->get_rocp_agent()->id, device_b);
+            EXPECT_EQ(rocprofiler_start_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
+            EXPECT_EQ(rocprofiler_start_context(ctx_b), ROCPROFILER_STATUS_SUCCESS);
+            EXPECT_EQ(rocprofiler_stop_context(ctx_b), ROCPROFILER_STATUS_SUCCESS);
+            EXPECT_EQ(rocprofiler_stop_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
+        }
 }
 
 // The HSA write interceptor gates on is_active_on_agent(), so this is what decides whether a
@@ -218,12 +225,15 @@ TEST(thread_trace_per_agent, overlapping_agent_contexts_still_conflict)
     if(!agents.first) GTEST_SKIP() << "no GPU agent available";
 
     auto agent_a = agents.first->get_rocp_agent()->id;
-    auto ctx_a   = make_att_context(agent_a);
-    auto ctx_b   = make_att_context(agent_a);
-
-    ASSERT_EQ(rocprofiler_start_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_EQ(rocprofiler_start_context(ctx_b), ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
-    ASSERT_EQ(rocprofiler_stop_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
+    for(bool device_a : {false, true})
+        for(bool device_b : {false, true})
+        {
+            auto ctx_a = make_att_context(agent_a, device_a);
+            auto ctx_b = make_att_context(agent_a, device_b);
+            ASSERT_EQ(rocprofiler_start_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
+            EXPECT_EQ(rocprofiler_start_context(ctx_b), ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
+            ASSERT_EQ(rocprofiler_stop_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
+        }
 }
 
 TEST(thread_trace_per_agent, serialization_is_scoped_to_the_contexts_agents)

@@ -1312,17 +1312,11 @@ write_interceptor(Queue*                                queue,
         };
         auto _dispatch_pkt_index = std::vector<dispatch_pkt_ref>{};
 
-        auto create_signal = [](auto* signal) -> common::container::pool_object<signal_t>* {
-            if(auto* pool = get_signal_pool(); pool && signal->handle == 0)
-            {
-                auto& _signal = pool->acquire(construct_hsa_signal, 0, 0, nullptr, 0);
-                ROCP_FATAL_IF(!_signal.in_use()) << "Acquired signal from pool that is not in use";
-                ROCP_FATAL_IF(_signal.get().value == null_signal)
-                    << "Acquired signal from pool that has invalid handle";
-                *CHECK_NOTNULL(signal) = _signal.get().value;
-                return &_signal;
-            }
-            return nullptr;
+        auto create_signal = [](auto* signal) -> pooled_signal_ptr_t {
+            if(signal->handle != 0) return {};
+            auto pooled = Queue::create_signal(0, signal, true);
+            get_core_table()->hsa_signal_store_screlease_fn(*signal, 0);
+            return pooled;
         };
 
         // The three signal-path steps, factored so the normal !_signal_less_batch

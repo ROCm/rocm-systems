@@ -59,7 +59,7 @@ struct packet_data_t
     hsa_signal_t            interrupt_signal        = {.handle = 0};
     callback_record_t       callback_record         = {};
     rocprofiler_user_data_t user_data               = {.value = 0};
-    pooled_signal_t*        pooled_signal           = nullptr;
+    pooled_signal_ptr_t     pooled_signal           = {};
     bool                    is_serialized           = false;
 };
 

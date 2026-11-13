@@ -23,12 +23,10 @@
 // Implements the core coordination logic for thread trace start/stop, buffer
 // iteration, and integration with the public API surface.
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
-#include "lib/rocprofiler-sdk/kfd/resource.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 
 #include "lib/common/container/stable_vector.hpp"
-#include "lib/common/environment.hpp"
-#include "lib/common/filesystem.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -39,10 +37,6 @@
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-
-#ifndef _WIN32
-#    include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
-#endif
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
@@ -170,39 +164,20 @@ ThreadTracerAgent::initialize_resources()
     num_shader_engines = agent->num_shader_banks;
     params.shader_engine_mask &= (uint64_t{1} << num_shader_engines) - 1;
 
-    const bool   multi_buffer = params.num_buffers > 1;
-    const size_t staging_n    = multi_buffer ? params.num_buffers : 0;
+    // All contexts targeting an agent retain the same resource handle. It owns the
+    // memory backend, submission queue, staging allocations, and GPU output slots for
+    // their full lifetime; only the packets below are context-specific.
+    if(register_shared_trace_requirements(
+           agent_id, params.buffer_size, params.num_buffers, params.shader_engine_mask) !=
+       ROCPROFILER_STATUS_SUCCESS)
+        throw std::runtime_error{"ATT resource requirements exceed registered capacity"};
+    auto new_resources = acquire_shared_trace_resources(agent_id);
 
-    std::shared_ptr<kfd_memory_pool_t> memory;
-#ifndef _WIN32
-    if(!common::get_env("ROCPROFILER_SQTT_FORCE_HSA", false))
-    {
-        const auto& gpu = *CHECK_NOTNULL(agent::get_agent(agent_id));
-        if(kfd_copy_queue_t::is_supported(gpu.gfx_target_version) &&
-           common::filesystem::exists("/dev/kfd"))
-        {
-            memory = kfd_memory_pool_t::create(gpu);
-            if(!memory) throw std::runtime_error{"Could not create KFD thread-trace memory pool"};
-        }
-        else if(!platform::wsl::is_available())
-        {
-            static auto once = std::once_flag{};
-            std::call_once(once, []() {
-                ROCP_CI_LOG(WARNING)
-                    << "Direct KFD thread trace is unavailable or unsupported for this "
-                       "GPU; using the ROCr/HSA thread-trace backend";
-            });
-        }
-    }
-#endif
-
-    auto new_queue = make_att_queue(agent_id, params.buffer_size, staging_n, memory);
-    if(!new_queue) throw std::runtime_error{"Could not create thread-trace queue"};
-    auto new_factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
-        agent_id, params, memory, new_queue->kfd_copy_queue);
+    auto new_factory =
+        std::make_unique<aql::ThreadTraceAQLPacketFactory>(agent_id, params, new_resources);
     auto new_control_packet = new_factory->construct_control_packet();
 
-    queue          = std::move(new_queue);
+    resources      = std::move(new_resources);
     factory        = std::move(new_factory);
     control_packet = std::move(new_control_packet);
 }
@@ -214,7 +189,7 @@ ThreadTracerAgent::~ThreadTracerAgent()
     codeobj_reg.reset();
     signal_ptr_t completion;
 
-    if(active_traces.load() > 0)
+    if(device_lease)
     {
         completion = stop_thread_trace();
         if(completion)
@@ -223,9 +198,6 @@ ThreadTracerAgent::~ThreadTracerAgent()
             iterate_data();
         }
     }
-    // Packet/marker destructors share the pool. Close the engines while all
-    // command, signal and trace allocations are still owned.
-    if(queue && queue->kfd_copy_queue) queue->kfd_copy_queue->close();
 }
 
 /**
@@ -250,7 +222,11 @@ ThreadTracerAgent::get_start_packet()
 {
     auto lock = std::unique_lock{trace_resources_mut};
     if(!control_packet) return nullptr;
-    return get_control(true);
+    auto lease = resources->acquire_dispatch_trace();
+    if(!lease) return nullptr;
+    auto packet = get_control(true);
+    packet->SetTraceLease(std::move(lease));
+    return packet;
 }
 
 void
@@ -286,6 +262,7 @@ ThreadTracerAgent::iterate_data()
     auto lock = std::unique_lock{trace_resources_mut};
     if(!control_packet) return;
     iterate_data(control_packet->GetHandle(), params.callback_userdata);
+    device_lease.reset();
 }
 
 void
@@ -293,7 +270,7 @@ ThreadTracerAgent::load_codeobj(code_object_id_t id, uint64_t addr, uint64_t siz
 {
     auto lk = std::unique_lock{trace_resources_mut};
 
-    if(!queue)
+    if(!resources)
     {
         try
         {
@@ -325,7 +302,7 @@ ThreadTracerAgent::load_codeobj(code_object_id_t id, uint64_t addr, uint64_t siz
     }
 
     auto packet = factory->construct_load_marker_packet(id, addr, size);
-    auto sig    = att_queue_submit(*queue, &packet->packet, true);
+    auto sig    = att_queue_submit(resources->queue(), &packet->packet, true);
     if(sig) signal_wait(*sig);
 }
 
@@ -337,19 +314,44 @@ ThreadTracerAgent::unload_codeobj(code_object_id_t id)
     if(!control_packet || !control_packet->remove_codeobj(id)) return;
     // Tear down metadata when code objects disappear to avoid dangling
     // references in the trace stream.
-    if(!queue || active_traces.load() < 1) return;
+    if(active_traces.load() < 1) return;
 
     auto packet = factory->construct_unload_marker_packet(id);
-    auto sig    = att_queue_submit(*queue, &packet->packet, true);
+    auto sig    = att_queue_submit(resources->queue(), &packet->packet, true);
     if(sig) signal_wait(*sig);
+}
+
+rocprofiler_status_t
+ThreadTracerAgent::reserve_device_trace()
+{
+    auto lock = std::unique_lock{trace_resources_mut};
+    if(device_lease) return ROCPROFILER_STATUS_SUCCESS;
+    auto [status, lease] = acquire_device_trace(agent_id, params.context_id);
+    device_lease         = std::move(lease);
+    return status;
+}
+
+void
+ThreadTracerAgent::release_device_trace()
+{
+    auto lock = std::unique_lock{trace_resources_mut};
+    device_lease.reset();
+}
+
+void
+ThreadTracerAgent::adopt_device_trace(trace_lease_ptr_t lease)
+{
+    auto lock    = std::unique_lock{trace_resources_mut};
+    device_lease = std::move(lease);
 }
 
 signal_ptr_t
 ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 {
+    if(reserve_device_trace() != ROCPROFILER_STATUS_SUCCESS) return nullptr;
     auto lock   = std::unique_lock{trace_resources_mut};
     worker_flag = std::move(_flag);
-    if(!queue) return nullptr;
+    if(!resources) return nullptr;
     return start_thread_trace_locked();
 }
 
@@ -357,7 +359,8 @@ signal_ptr_t
 ThreadTracerAgent::start_thread_trace_locked()
 {
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
-    if(!att_queue_enabled(*queue))
+    auto& queue = resources->queue();
+    if(!att_queue_enabled(queue))
     {
         ROCP_WARNING << "Cannot restart thread trace after GPU buffer overflow for agent "
                      << agent_id.handle;
@@ -367,7 +370,7 @@ ThreadTracerAgent::start_thread_trace_locked()
     std::vector<std::unique_ptr<hsa::SQTTBufferingPackets>> buffer_packets;
     if(params.num_buffers > 1)
     {
-        producer_signal = make_signal(*queue);
+        producer_signal = make_signal(queue);
         if(!producer_signal) return nullptr;
         for(uint64_t i = 0; (params.shader_engine_mask >> i) != 0; i++)
         {
@@ -383,19 +386,21 @@ ThreadTracerAgent::start_thread_trace_locked()
     // Warm up the copy backend before tracing starts.
     if(params.num_buffers > 1)
     {
-        auto& buffer = queue->cpu_buffers;
-        if(!att_queue_copy(*queue, buffer.at(0), buffer.at(1), MIN_BUFFER_SIZE))
+        auto& buffer = queue.cpu_buffers;
+        if(!att_queue_copy(queue, buffer.at(0), buffer.at(1), MIN_BUFFER_SIZE))
         {
             active_traces.fetch_sub(1);
+            device_lease.reset();
             return nullptr;
         }
     }
 
     // Submit without waiting so all agents can be started in parallel.
-    auto start_signal = att_queue_submit_signal_last(*queue, control_packet_copy->before_krn_pkt);
+    auto start_signal = att_queue_submit_signal_last(queue, control_packet_copy->before_krn_pkt);
     if(!start_signal)
     {
         active_traces.fetch_sub(1);
+        device_lease.reset();
         return nullptr;
     }
     if(params.num_buffers > 1)
@@ -405,12 +410,12 @@ ThreadTracerAgent::start_thread_trace_locked()
         // producer thread continues the sequence from 1.
 
         auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();
-        worker_data->queue       = queue.get();  // non-owning; ThreadTracerAgent owns queue
+        worker_data->resources   = resources;
         worker_data->num_buffers = params.num_buffers;
 
         // Wire each slot to its CPU staging buffer. Slots default to FREE.
         for(size_t i = 0; i < worker_data->num_buffers; i++)
-            worker_data->buffers[i].memory = worker_data->queue->cpu_buffers.at(i);
+            worker_data->buffers[i].memory = queue.cpu_buffers.at(i);
 
         auto producer_data             = triple_buffer_producer_data_t{};
         producer_data.producer_running = worker_flag;
@@ -421,14 +426,15 @@ ThreadTracerAgent::start_thread_trace_locked()
         // gfx9 restarts the trace after a GPU buffer overflow.
         producer_data.restart_on_gpu_full =
             CHECK_NOTNULL(agent::get_agent(agent_id))->gfx_target_version < 100000;
-        producer_data.buffer_packets = std::move(buffer_packets);
-        producer_data.restart_trace  = [this](auto& snapshot) {
+        producer_data.active_buffer_size = params.buffer_size;
+        producer_data.buffer_packets     = std::move(buffer_packets);
+        producer_data.restart_trace      = [this](auto& snapshot) {
             auto snapshot_lock = std::unique_lock{trace_resources_mut};
             // Keep marker allocations alive in the producer until the next completed stop.
             snapshot = get_control();
             snapshot->populate_before();
             snapshot->populate_after();
-            return att_queue_submit_packets(*queue, snapshot->before_krn_pkt);
+            return att_queue_submit_packets(resources->queue(), snapshot->before_krn_pkt);
         };
 
         // Other call sites (kfd, internal_threading) wrap each std::thread
@@ -464,6 +470,7 @@ ThreadTracerAgent::stop_thread_trace()
 
     if(active_traces.load() == 0)
     {
+        device_lease.reset();
         worker_flag = nullptr;
         return nullptr;
     }
@@ -481,6 +488,7 @@ ThreadTracerAgent::stop_thread_trace()
         lock.lock();
         consumers.clear();
         active_traces.fetch_sub(1);
+        device_lease.reset();
         worker_flag = nullptr;
         return nullptr;
     }
@@ -492,7 +500,7 @@ ThreadTracerAgent::stop_thread_trace()
         // Submit without waiting; DeviceThreadTracer::stop_context fans out
         // submissions across agents and waits on every signal in parallel
         // before calling iterate_data.
-        return att_queue_submit_signal_last(*queue, control_packet->after_krn_pkt);
+        return att_queue_submit_signal_last(resources->queue(), control_packet->after_krn_pkt);
     }
 }
 
@@ -520,7 +528,9 @@ DispatchThreadTracer::resource_init()
                                rocp_agent->name);
             continue;
         }
-        agents[rocp_agent->id] = std::make_unique<ThreadTracerAgent>(it->second, rocp_agent->id);
+        if(agents.count(rocp_agent->id) == 0)
+            agents[rocp_agent->id] =
+                std::make_unique<ThreadTracerAgent>(it->second, rocp_agent->id);
     }
 }
 
@@ -721,7 +731,16 @@ DeviceThreadTracer::resource_init()
             continue;
         }
 
-        agents[it->first] = std::make_unique<ThreadTracerAgent>(it->second, rocp_agent->id);
+        if(agents.count(it->first) == 0)
+        {
+            auto tracer = std::make_unique<ThreadTracerAgent>(it->second, rocp_agent->id);
+            if(auto lease = pending_leases.find(it->first); lease != pending_leases.end())
+            {
+                tracer->adopt_device_trace(std::move(lease->second));
+                pending_leases.erase(lease);
+            }
+            agents[it->first] = std::move(tracer);
+        }
     }
 }
 
@@ -731,11 +750,68 @@ DeviceThreadTracer::resource_deinit()
     ROCP_TRACE << "Clearing agents";
     std::unique_lock<std::mutex> lk(agent_mut);
     agents.clear();
+    pending_leases.clear();
+}
+
+bool
+DeviceThreadTracer::intersects(const DispatchThreadTracer& rhs) const
+{
+    const auto rhs_agents = rhs.configured_agents();
+    auto       lock       = std::lock_guard{agent_mut};
+    for(const auto& id : rhs_agents)
+        if(params.count(id) > 0) return true;
+    return false;
+}
+
+bool
+DeviceThreadTracer::intersects(const DeviceThreadTracer& rhs) const
+{
+    if(this == &rhs)
+    {
+        auto lock = std::lock_guard{agent_mut};
+        return !params.empty();
+    }
+    auto lock = std::scoped_lock{agent_mut, rhs.agent_mut};
+    for(const auto& [id, _] : params)
+        if(rhs.params.count(id) > 0) return true;
+    return false;
+}
+
+rocprofiler_status_t
+DeviceThreadTracer::reserve_context()
+{
+    auto lock = std::lock_guard{agent_mut};
+    for(const auto& [id, pack] : params)
+    {
+        auto status = ROCPROFILER_STATUS_SUCCESS;
+        if(auto tracer = agents.find(id); tracer != agents.end())
+            status = tracer->second->reserve_device_trace();
+        else if(pending_leases.count(id) == 0)
+        {
+            auto [result, lease] = acquire_device_trace(id, pack.context_id);
+            status               = result;
+            if(lease) pending_leases.emplace(id, std::move(lease));
+        }
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            pending_leases.clear();
+            for(auto& [agent_id, reserved] : agents)
+                reserved->release_device_trace();
+            return status;
+        }
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 void
 DeviceThreadTracer::start_context()
 {
+    if(worker_flag->load() == WORKER_FLAG_RUNNING) return;
+    if(reserve_context() != ROCPROFILER_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "ATT device trace resources are unavailable";
+        return;
+    }
     // Per-agent resources don't exist until HSA is registered; the request is
     // cached in the active-context array and replayed by start_active_contexts().
     if(!hsa_inited().load())
@@ -773,7 +849,11 @@ DeviceThreadTracer::stop_context()
 {
     auto lock = std::unique_lock{agent_mut};
 
-    if(agents.empty()) return;
+    if(agents.empty())
+    {
+        pending_leases.clear();
+        return;
+    }
 
     ROCP_INFO << "Stopping device thread trace context";
 
@@ -792,6 +872,7 @@ DeviceThreadTracer::stop_context()
 
     for(auto& [_, tracer] : agents)
         tracer->iterate_data();
+    pending_leases.clear();
 }
 
 void
@@ -841,6 +922,9 @@ finalize()
         if(ctx->device_thread_trace) ctx->device_thread_trace->resource_deinit();
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_deinit();
     }
+
+    // Packets retain their resource owners beyond tracer teardown.
+    free_shared_trace_resources();
 
     code_object::finalize();
 }
