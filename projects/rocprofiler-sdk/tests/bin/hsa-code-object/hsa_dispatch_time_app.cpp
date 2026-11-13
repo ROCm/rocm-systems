@@ -221,8 +221,7 @@ main()
         RET_IF_HSA_ERR(status)
     }
 
-    status = hsa_queue_destroy(queue);
-    RET_IF_HSA_ERR(status)
+    // Final HSA shutdown retires the live queue after its completion handlers drain.
     status = hsa_amd_memory_pool_free(args->a);
     RET_IF_HSA_ERR(status)
     status = hsa_amd_memory_pool_free(args->b);
