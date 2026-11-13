@@ -830,7 +830,12 @@ uint64_t Elf::getElfSize(const void* emi, const size_t buf_size) {
 #endif
   };
 
-  auto ehdr = static_cast<const Elf64_Ehdr*>(emi);
+  // The image may sit at any address inside a larger buffer, so copy each header into an
+  // aligned local rather than reading it in place.
+  const char* base = static_cast<const char*>(emi);
+  Elf64_Ehdr ehdr_copy;
+  std::memcpy(&ehdr_copy, base, sizeof(ehdr_copy));
+  const Elf64_Ehdr* ehdr = &ehdr_copy;
   uint64_t total_size = sizeof(Elf64_Ehdr);
 
   // Validate and bound the section-header table before any dereference.
@@ -845,11 +850,12 @@ uint64_t Elf::getElfSize(const void* emi, const size_t buf_size) {
     }
     if (shtab_end > total_size) total_size = shtab_end;
 
-    auto shdr = reinterpret_cast<const Elf64_Shdr*>(static_cast<const char*>(emi) + ehdr->e_shoff);
     for (uint64_t i = 0; i < ehdr->e_shnum; ++i) {
-      if (SHT_NOBITS == shdr[i].sh_type) continue;
+      Elf64_Shdr shdr;
+      std::memcpy(&shdr, base + ehdr->e_shoff + i * sizeof(Elf64_Shdr), sizeof(shdr));
+      if (SHT_NOBITS == shdr.sh_type) continue;
       uint64_t end;
-      if (!checked_end(shdr[i].sh_offset, shdr[i].sh_size, end)) return 0;
+      if (!checked_end(shdr.sh_offset, shdr.sh_size, end)) return 0;
       if (end > limit) return 0;
       if (end > total_size) total_size = end;
     }
@@ -867,11 +873,12 @@ uint64_t Elf::getElfSize(const void* emi, const size_t buf_size) {
     }
     if (phtab_end > total_size) total_size = phtab_end;
 
-    auto phdr = reinterpret_cast<const Elf64_Phdr*>(static_cast<const char*>(emi) + ehdr->e_phoff);
     for (uint64_t i = 0; i < ehdr->e_phnum; ++i) {
-      if (PT_NULL == phdr[i].p_type) continue;
+      Elf64_Phdr phdr;
+      std::memcpy(&phdr, base + ehdr->e_phoff + i * sizeof(Elf64_Phdr), sizeof(phdr));
+      if (PT_NULL == phdr.p_type) continue;
       uint64_t end;
-      if (!checked_end(phdr[i].p_offset, phdr[i].p_filesz, end)) return 0;
+      if (!checked_end(phdr.p_offset, phdr.p_filesz, end)) return 0;
       if (end > limit) return 0;
       if (end > total_size) total_size = end;
     }
