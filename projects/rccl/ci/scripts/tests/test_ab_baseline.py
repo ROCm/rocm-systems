@@ -146,6 +146,22 @@ class ResolveBaseline(unittest.TestCase):
                 self.resolve(ARTIFACT_RUN_ID=candidate)
 
 
+class BaselineSource(unittest.TestCase):
+    def test_a_run_id_or_nothing_is_no_published_build(self):
+        for chosen in ("", "7", "7; true"):
+            with self.subTest(chosen=chosen):
+                self.assertEqual(tm.baseline_source({"BASELINE_ARTIFACT_RUN_ID": chosen}), "")
+
+    def test_a_spec_is_one(self):
+        self.assertEqual(tm.baseline_source({"BASELINE_ARTIFACT_RUN_ID": " release:10.1.0 "}),
+                         "release:10.1.0")
+
+    def test_a_bad_spec_fails(self):
+        for chosen in ("tag:1", "release:10.1.0;true", "url:https://example.com/x.whl"):
+            with self.subTest(chosen=chosen), self.assertRaises(RuntimeError):
+                tm.baseline_source({"BASELINE_ARTIFACT_RUN_ID": chosen})
+
+
 class ArtifactBuild(unittest.TestCase):
     def test_a_run_knows_its_own_build_without_the_api(self):
         error = urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
@@ -354,16 +370,25 @@ class MainPhaseLibraries(unittest.TestCase):
 
 
 class ResolveBaselineCli(unittest.TestCase):
-    def test_stdout_carries_only_the_output_line(self):
+    def resolve(self, chosen: str) -> subprocess.CompletedProcess:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
-        env["BASELINE_ARTIFACT_RUN_ID"] = "7"
-        script = Path(tm.__file__)
-        out = subprocess.run(
-            [sys.executable, str(script), "--resolve-baseline",
+        env["BASELINE_ARTIFACT_RUN_ID"] = chosen
+        return subprocess.run(
+            [sys.executable, str(Path(tm.__file__)), "--resolve-baseline",
              "--workload", "llama-3.1-70b-training", "--cluster", "ruby"],
-            env=env, capture_output=True, text=True, check=True,
+            env=env, capture_output=True, text=True,
         )
-        self.assertEqual(out.stdout, "artifact_run_id=7\n")
+
+    def test_stdout_carries_only_the_output_lines(self):
+        self.assertEqual(self.resolve("7").stdout, "artifact_run_id=7\nrccl_source=\n")
+
+    def test_a_published_build_is_passed_on_not_looked_up(self):
+        self.assertEqual(self.resolve("release:10.1.0").stdout,
+                         "artifact_run_id=\nrccl_source=release:10.1.0\n")
+
+    def test_a_spec_cannot_add_an_output(self):
+        out = self.resolve("release:10.1.0\nartifact_run_id=1")
+        self.assertEqual((out.returncode, out.stdout), (1, ""))
 
 
 @unittest.skipIf(yaml is None, "PyYAML not installed")

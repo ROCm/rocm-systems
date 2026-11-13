@@ -14,12 +14,9 @@ on:
         required: true
       baseline_artifact_run_id:
         # Empty: the previous scheduled build of the workload's schedule
-        # (WORKLOAD_CONFIGS[...]["schedule"]), nightly or weekly.
-        type: string
-        default: ''
-      baseline_rccl_source:
-        # A baseline from outside CI, in place of baseline_artifact_run_id: a
-        # release:, nightly: or url: spec of fetch_rccl_build.py.
+        # (WORKLOAD_CONFIGS[...]["schedule"]), nightly or weekly. A release:,
+        # nightly: or url: spec of fetch_rccl_build.py names a build
+        # published outside CI instead.
         type: string
         default: ''
       run_label:
@@ -81,7 +78,7 @@ on:
         type: string
         required: true
       baseline_artifact_run_id:
-        description: 'rocm-systems run ID whose RCCL build is the A/B baseline (default: the previous scheduled build of the same schedule as the workload, nightly or weekly)'
+        description: 'rocm-systems run ID whose RCCL build is the A/B baseline, or a published build: release:<version>, nightly:<version>, url:<amd.com wheel or tarball> (default: the previous scheduled build of the same schedule as the workload, nightly or weekly)'
         type: string
         default: ''
       workload:
@@ -256,7 +253,6 @@ jobs:
       # here, not after hours of queueing.
       - name: Resolve the A/B baseline build
         id: baseline
-        if: ${{ !inputs.baseline_rccl_source }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           BASELINE_ARTIFACT_RUN_ID: ${{ inputs.baseline_artifact_run_id }}
@@ -270,7 +266,7 @@ jobs:
             --nodes "${NODES}" >> "$GITHUB_OUTPUT"
 
       - name: Fetch baseline RCCL artifacts
-        if: ${{ !inputs.baseline_rccl_source }}
+        if: ${{ steps.baseline.outputs.artifact_run_id != '' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           BASELINE_ARTIFACT_RUN_ID: ${{ steps.baseline.outputs.artifact_run_id }}
@@ -283,16 +279,11 @@ jobs:
             --rccl
 
       - name: Fetch published baseline RCCL
-        if: ${{ inputs.baseline_rccl_source }}
+        if: ${{ steps.baseline.outputs.rccl_source != '' }}
         env:
-          BASELINE_RCCL_SOURCE: ${{ inputs.baseline_rccl_source }}
-          BASELINE_ARTIFACT_RUN_ID: ${{ inputs.baseline_artifact_run_id }}
+          BASELINE_RCCL_SOURCE: ${{ steps.baseline.outputs.rccl_source }}
           AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
         run: |
-          if [ -n "${BASELINE_ARTIFACT_RUN_ID}" ]; then
-            echo "::error::baseline_artifact_run_id and baseline_rccl_source both name the baseline; set one"
-            exit 1
-          fi
           python3 rocm-systems/projects/rccl/ci/scripts/fetch_rccl_build.py \
             --source "${BASELINE_RCCL_SOURCE}" \
             --amdgpu-family "${AMDGPU_FAMILIES}" \
@@ -306,7 +297,7 @@ jobs:
           # Read-only: looks up the event and commit of each RCCL build's run.
           GITHUB_TOKEN: ${{ github.token }}
           BASELINE_ARTIFACT_RUN_ID: ${{ steps.baseline.outputs.artifact_run_id }}
-          BASELINE_RCCL_SOURCE: ${{ inputs.baseline_rccl_source }}
+          BASELINE_RCCL_SOURCE: ${{ steps.baseline.outputs.rccl_source }}
           REPORT_ONLY: ${{ inputs.report_only }}
           JOB_TIMEOUT_MINUTES: ${{ inputs.job_timeout_minutes }}
           # Nodes to keep out of the allocation, as a SLURM hostlist.

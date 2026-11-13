@@ -140,8 +140,11 @@ def parse_source(spec: str) -> tuple[str, str]:
     kind, sep, value = spec.strip().partition(":")
     if not (sep and value):
         raise ValueError(f"{spec!r}: expected release:<version>, nightly:<version> or url:<url>")
+    # The spec travels through $GITHUB_OUTPUT, where a line break starts another output.
+    if any(c.isspace() or not c.isprintable() for c in value):
+        raise ValueError(f"{spec!r}: whitespace or control characters")
     if kind in CHANNELS:
-        if not VERSION_RE.match(value):
+        if not VERSION_RE.fullmatch(value):
             raise ValueError(f"{spec!r}: not a version")
         return kind, value
     if kind != "url":
@@ -193,7 +196,7 @@ def resolve(spec: str, family: str) -> dict:
                 raise ValueError(f"{spec!r}: not a {family} dist tarball")
             return _tarball_plan(spec, name[len(prefix):-len(".tar.gz")], value)
         lib_url, version = value, name.split("-")[1]
-        if not VERSION_RE.match(version):
+        if not VERSION_RE.fullmatch(version):
             raise ValueError(f"{spec!r}: not a version: {version!r}")
         device_name = _wheel_name(device_project, version)
         # repo.amd.com keeps all wheels in one directory, stable.repo.amd.com

@@ -91,6 +91,8 @@ class ParseSourceTest(unittest.TestCase):
 
     def test_rejects(self):
         for spec in ("10.1.0", "release:", "tag:10.1.0", "release:../10.1.0",
+                     "release:10.1.0\nartifact_run_id=1",
+                     "url:https://repo.amd.com/a\nb/rocm_sdk_libraries-1-x.whl",
                      "url:http://repo.amd.com/rocm_sdk_libraries-1-py3-none-linux_x86_64.whl",
                      "url:https://example.com/rocm_sdk_libraries-1-py3-none-linux_x86_64.whl",
                      "url:https://repo.amd.com.example.com/rocm_sdk_libraries-1-x.whl",
