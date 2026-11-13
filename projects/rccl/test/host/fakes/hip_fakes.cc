@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <mutex>
 #include <set>
 
 #include <cassert>
@@ -1064,11 +1065,16 @@ hipError_t hipMemUnmap(void* ptr, size_t size) { return g_hipMemUnmap(ptr, size)
 
 // The recording stays in the wrapper rather than the default hook, so a test
 // that installs its own copy behaviour still gets the call log p2p-test asserts on.
+// Locked: worker threads may copy concurrently.
 hipError_t hipMemcpyAsync(void* dst, const void* src, size_t bytes, hipMemcpyKind kind,
                           hipStream_t stream)
 {
-    g_hipMemcpyAsyncCalls++;
-    g_hipMemcpyAsyncArgs.push_back({dst, src, bytes, kind, stream});
+    {
+        static std::mutex recordMutex;
+        std::lock_guard<std::mutex> lock(recordMutex);
+        g_hipMemcpyAsyncCalls++;
+        g_hipMemcpyAsyncArgs.push_back({dst, src, bytes, kind, stream});
+    }
     return g_hipMemcpyAsync(dst, src, bytes, kind, stream);
 }
 

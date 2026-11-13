@@ -18,6 +18,7 @@ test_categories:
       - "RasNetMicrotest.*"
       - "RasParamMicrotest.*"
       - "RasPeersMicrotest.*"
+      - "RasProgressMonitorMicrotest.*"
     exclude_windows:
       - "*"
     labels:
