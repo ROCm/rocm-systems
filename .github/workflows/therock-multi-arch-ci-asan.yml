@@ -70,6 +70,7 @@ jobs:
       # Required by TheRock#9887. Without it a pull request clears the test runner.
       pull_request_tests: true
       pull_request_opt_out_label: "ci:no-host-asan"
+      pull_request_opt_in_label: "ci:host-asan"
       build_stages: "compiler-runtime,runtime-tests"
       # Python/PyTorch/JAX builds are not supported with ASAN yet
       build_python_packages: false
