@@ -10,7 +10,7 @@
 #include "fp/float_output.h"
 #include "fp/x86_64/div_fixup_exceptions.h"
 #include "fp/x86_64/div_fixup_half.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>

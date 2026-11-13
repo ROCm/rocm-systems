@@ -15,12 +15,18 @@ near guard.
 
 from types import SimpleNamespace
 
+import pytest
+
+from amdisa.__main__ import _PROFILES
 from amdisa.codegen import CodeGenerator
 
 
-def _body(name: str) -> str:
+def _body(name: str, arch_name: str = 'rdna3') -> str:
     """Emitted execute() body for a sleep op, straight from the generator."""
     generator = CodeGenerator.__new__(CodeGenerator)
+    generator.isa_spec = SimpleNamespace(
+        arch_name=arch_name, profile=_PROFILES[arch_name]()
+    )
     sem = SimpleNamespace(
         name=name,
         semantic_class='true_nop',
@@ -49,6 +55,11 @@ class TestSleepBody:
         assert 'read_scalar(ssrc0)' in body
         assert '0x7Fu' in body
         assert 'wf.set_sleep_cycles(' in body
+
+    @pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
+    def test_gfx12_both_sleep_forms_consume_wakeup_credit(self, arch):
+        for name in ('S_SLEEP', 'S_SLEEP_VAR'):
+            assert 'wf.issue_sleep_with_credit(' in _body(name, arch)
 
     def test_both_still_yield_to_the_event_loop(self):
         """FUNCTIONAL execution has to return so peer CUs can make progress."""

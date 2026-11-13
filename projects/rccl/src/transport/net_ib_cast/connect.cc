@@ -603,7 +603,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   out->isP2p = base->isP2p;
   if (base->isSend) {
     out->maxRecvWorkRequest = 0;
-    out->maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
+    out->maxSendWorkRequest = IbCastDataSendQueueDepth(IbCastMaxPostSendBytes);
   } else {
     IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
     out->maxSendWorkRequest = NET_IB_MAX_REQUESTS;
@@ -1014,9 +1014,11 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // Send requests are sent using at most 2 messages (RDMA Write and RDMA Write with Immediate)
-  qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
   qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
+  // Ionic multiplies this value by depthMult for a shared QP. Amortize the
+  // single split-chain allowance so that it is not multiplied once per comm.
+  qpCreateAttrs.maxSendWorkRequest =
+      IbCastDataSendQueueDepth(IbCastMaxPostSendBytes, qpCreateAttrs.isQpSharingEnabled ? depthMult : 1);
   qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
   qpCreateAttrs.cqDepthMultiplier = depthMult;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
@@ -2632,7 +2634,15 @@ ib_recv:
           hsa_status_t exportStatus =
             pfn_hsa_amd_portable_export_dmabuf(aligned_ptr, alignedSize, &rCommDev->gpuFlush.dmabufFd, &exportOffset);
           if (rCommDev->gpuFlush.dmabufFd < 0 || exportStatus != HSA_STATUS_SUCCESS) {
-            WARN("Failed to export DMA BUF");
+            const char* errStr = nullptr;
+            if (exportStatus != HSA_STATUS_SUCCESS &&
+                hsa_status_string(exportStatus, &errStr) == HSA_STATUS_SUCCESS && errStr != nullptr) {
+              WARN("Failed to export DMA BUF: %s", errStr);
+            } else {
+              WARN("Failed to export DMA BUF");
+            }
+            // Success with a null recv comm means "not connected yet".
+            ret = ncclSystemError;
             goto fail;
           }
           NCCLCHECKGOTO(

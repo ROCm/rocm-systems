@@ -173,7 +173,7 @@ FILTER[carrizo]=\
 FILTER[tonga]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$SDMA_BLACKLIST:"\
-"KFDCWSRTest.BasicTest:"\
+"KFDCWSRTest.BasicTest/*:"\
 "KFDPerfCountersTest.*:"\
 "KFDQMTest.OverSubscribeCpQueues"
 
@@ -200,8 +200,6 @@ FILTER[polaris12]=\
 FILTER[vega10]=\
 "$BLACKLIST_ALL_ASICS:"\
 "KFDIPCTest.BasicTest:"\
-"KFDIPCTest.CMABasicTest:"\
-"KFDIPCTest.CrossMemoryAttachTest:"\
 "KFDQMTest.AllSdmaQueues"
 
 FILTER[vega12]=\
@@ -219,27 +217,27 @@ FILTER[raven_dgpuFallback]=\
 "$SDMA_BLACKLIST:"\
 "KFDEvictTest.*:"\
 "KFDMemoryTest.MemoryRegister:"\
-"KFDSVMRangeTest.BasicSystemMemTest:"\
-"KFDSVMRangeTest.BasicVramTest:"\
-"KFDSVMRangeTest.EvictSystemRangeTest:"\
-"KFDSVMRangeTest.PartialUnmapSysMemTest:"\
-"KFDSVMRangeTest.MigrateTest:"\
-"KFDSVMRangeTest.MigratePolicyTest:"\
-"KFDSVMRangeTest.MigrateGranularityTest:"\
-"KFDSVMRangeTest.MigrateLargeBufTest:"\
-"KFDSVMRangeTest.MultiThreadMigrationTest:"\
-"KFDSVMRangeTest.MigrateAccessInPlaceTest:"\
-"KFDSVMEvictTest.QueueTest"
+"KFDSVMRangeTest.BasicSystemMemTest/*:"\
+"KFDSVMRangeTest.BasicVramTest/*:"\
+"KFDSVMRangeTest.EvictSystemRangeTest/*:"\
+"KFDSVMRangeTest.PartialUnmapSysMemTest/*:"\
+"KFDSVMRangeTest.MigrateTest/*:"\
+"KFDSVMRangeTest.MigratePolicyTest/*:"\
+"KFDSVMRangeTest.MigrateGranularityTest/*:"\
+"KFDSVMRangeTest.MigrateLargeBufTest/*:"\
+"KFDSVMRangeTest.MultiThreadMigrationTest/*:"\
+"KFDSVMRangeTest.MigrateAccessInPlaceTest/*:"\
+"KFDSVMEvictTest.QueueTest/*"
 
 FILTER[raven]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$SDMA_BLACKLIST:"\
 "KFDEvictTest.*:"\
-"KFDSVMRangeTest.EvictSystemRangeTest:"\
-"KFDSVMRangeTest.PartialUnmapSysMemTest:"\
-"KFDSVMRangeTest.PrefetchTest:"\
-"KFDSVMRangeTest.MultiThreadMigrationTest:"\
-"KFDSVMEvictTest.QueueTest:"\
+"KFDSVMRangeTest.EvictSystemRangeTest/*:"\
+"KFDSVMRangeTest.PartialUnmapSysMemTest/*:"\
+"KFDSVMRangeTest.PrefetchTest/*:"\
+"KFDSVMRangeTest.MultiThreadMigrationTest/*:"\
+"KFDSVMEvictTest.QueueTest/*:"\
 "KFDQMTest.MultipleCpQueuesStressDispatch"
 
 FILTER[renoir]=\
