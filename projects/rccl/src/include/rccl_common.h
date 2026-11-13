@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include "core.h"
 #include "rccl_decision.h"
 #include "sym_kernels.h"
+#include "archinfo.h"
 #include <cstdlib>
 #include <cstring>
 #include <strings.h>
@@ -601,4 +602,19 @@ int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMult
                                   int adjustedMaxNchannels, bool userUpdatedMaxChannels);
 int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc);
 #endif
+
+// Ranks at or below this are not penalized. An FP8 ring above it gets 1024 unless exempted.
+constexpr int kFp8RingPenaltyRanks = 8;
+
+// 1024 for an FP8 ring above kFp8RingPenaltyRanks, or 1 when a single-node
+// gfx1250 allreduce above that sentinel is at or above the DDA LL128 ceiling.
+// Callers pass rcclDdaLL128Threshold(). A zero ceiling keeps the penalty, which is
+// what RCCL_IGNORE_ARCH_TABLE and DDA LL128 off produce.
+inline float rcclFp8RingCostFactor(ncclDataType_t dtype, ncclFunc_t func, int nRanks, int nNodes, size_t nBytes,
+                                   size_t ddaLl128Ceiling, const char* arch) {
+  if ((dtype != ncclFloat8e4m3 && dtype != ncclFloat8e5m2) || nRanks <= kFp8RingPenaltyRanks) return 1.0f;
+  const bool exempt = func == ncclFuncAllReduce && nRanks > kFp8RingPenaltyRanks && nNodes == 1 &&
+                      ddaLl128Ceiling != 0 && nBytes >= ddaLl128Ceiling && IsArchMatch(arch, "gfx1250");
+  return exempt ? 1.0f : 1024.0f;
+}
 #endif

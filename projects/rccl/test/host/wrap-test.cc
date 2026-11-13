@@ -3301,6 +3301,20 @@ TEST(WrapMicrotestIsolated, UseReduceScatterDirect_TwoNodesInRangeReturnsTrue) {
       });
 }
 
+// rawTaskAppend posts a useDirect ReduceScatter as a plain collective, so no per-peer transfer fills tempBuff.
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_EnqueueRearchEnabledReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_EnqueueRearchEnabledReturnsFalse",
+      []() {
+        g_loadParam = ForceParam("ENQUEUE_REARCH_ENABLE", int64_t(1));
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        size_t msgSize = 1048576; // the TwoNodesInRangeReturnsTrue case
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, UseReduceScatterDirect_TwoNodesAtUpperBoundReturnsTrue) {
   RUN_ISOLATED_TEST(
       "Wrap_UseReduceScatterDirect_TwoNodesAtUpperBoundReturnsTrue",

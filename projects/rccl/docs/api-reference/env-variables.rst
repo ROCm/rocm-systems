@@ -762,6 +762,23 @@ in the following table.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
 
+    * - | ``RCCL_IB_MAX_MSG_SIZE``
+        | Largest data payload, in bytes, of one work request posted by the
+          ``IB-CAST`` transport. A GIN ``iput``, ``iget``, or ``iputSignal``, or
+          a point-to-point send, that is larger than the cap is posted as
+          several work requests on the same queue pair. Only the last data work
+          request is signaled. For ``iputSignal`` the atomic remains the
+          signaled tail, and for a point-to-point send the tail keeps the
+          write-with-immediate.
+      - | Integer bytes. Default: ``-1`` (unset).
+        | A positive value explicitly sets the cap, overriding the automatic
+          gfx1250 and port limits. The result is raised to at least 1 MiB and
+          rounded down to a multiple of 128 bytes.
+        | When unset, gfx1250 is limited to 256 MiB and every architecture is
+          limited by the smallest non-zero port ``max_msg_sz`` across devices.
+          A port that reports 0 does not participate. The same 1 MiB floor and
+          128-byte rounding apply. ``0`` is treated as unset.
+
     * - | ``RCCL_NET_SHARED_HOST_HUGEPAGES``
         | Backs the host-memory shared P2P network staging pools (used by
           connections without GPU Direct RDMA) with 2 MiB pages, so each
@@ -884,6 +901,34 @@ in the following table.
           across them.
       - | String path to a directory with the same layout as the sysfs tree.
         | Default: unset (falls back silently when sysfs is also absent).
+
+    * - | ``RCCL_P2P_CE_CHANNELS_PER_PEER``
+        | Caps P2P channels per peer on gfx1250 when
+        | ``NCCL_P2P_USE_CUDA_MEMCPY=1`` selects the Copy Engine transport.
+        | Each channel owns a staging buffer and event ring; on gfx1250 the
+        | channels share one non-blocking stream per proxy thread, which
+        | serializes SDMA work. The cap avoids VMM resource exhaustion.
+        | Other architectures and the default kernel P2P path are unchanged.
+        | CE is selected only for direct Send/Recv between fine-grained peers
+        | on the same host; remote, disabled, and indirect paths keep their
+        | normal connector and channel count.
+      - | Positive integer, rounded down to a power of two and bounded by the
+        | P2P channel pool (default: ``16``).
+        | ``0`` or a negative value disables the cap and can substantially
+        | increase staging-buffer and event-ring memory use.
+        | The Copy Engine transport carries send/recv-based operations only;
+        | collectives keep the kernel P2P transport.
+
+    * - | ``NCCL_P2P_CE_CHUNK_SIZE``
+        | Sets the per-channel Copy Engine P2P step size on gfx1250 when
+        | ``NCCL_P2P_USE_CUDA_MEMCPY=1``. The staging buffer contains
+        | ``NCCL_STEPS`` steps of this size.
+        | Other architectures and the default kernel P2P path are unchanged.
+      - | Size in bytes (default: ``4194304``, or 4 MiB).
+        | Values at or below the standard P2P step size keep the standard step;
+        | the effective step is capped to 32 MiB even when ``NCCL_BUFFSIZE``
+        | requests a larger standard step. ``NCCL_CHUNK_SIZE`` is also clamped
+        | to the selected CE connector step.
 
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.

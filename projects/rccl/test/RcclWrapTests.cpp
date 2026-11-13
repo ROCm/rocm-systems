@@ -2568,6 +2568,15 @@ static constexpr size_t kCeAllReduceCount = 4096;
 // still be refused; taking CE there silently drops the bias from the result.
 TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
 {
+    // Without CE support rcclUseCeAr2Shot refuses every call, so the bias case
+    // would pass without the bias check. Skip here, not in the children: a child
+    // skip is not reported as a skip of this test.
+    if(!ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32))
+    {
+        GTEST_SKIP() << "CE not supported on this runtime driver "
+                        "(need ROCm >= 7.12 or 7.0.2.x backport [70051831, 70060000))";
+    }
+
     RUN_ISOLATED_TESTS(
         ProcessIsolatedTestRunner::TestConfig(
             "RcclUseCeAllReduce_BiasBufferRejected",
@@ -3098,7 +3107,7 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
             ASSERT_NE(comm->archThresholds, nullptr);
             // 4 ranks: totals.
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 32 * MiB);
-            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 128 * KiB);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 64 * KiB);
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 4 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), 128 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 224 * MiB);
@@ -3347,6 +3356,9 @@ void InitA2ADecisionComm(ncclComm& comm, ncclTopoSystem& topo, const char* arch,
         reinterpret_cast<nccl_dda_detail::DdaFabricBarrierState*>(0x5);
     comm.ddaLLEpochDev         = reinterpret_cast<uint32_t*>(0x6);
     comm.ddaLLEpochLen         = DDA_FABRIC_MAXBLOCKS;
+    // Non-fabric archs take the DDA IPC branch, whose eligibility check wants the IPC handles.
+    comm.ddaIpcMemHandler      = reinterpret_cast<ncclIpcMemHandler*>(0x7);
+    comm.ddaIpcBarrierState    = reinterpret_cast<nccl_dda_detail::DdaIpcBarrierState*>(0x8);
 }
 
 // Distinct, 256-byte aligned send and receive buffers; selection reads only their addresses.
@@ -3434,7 +3446,8 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx1250", 8);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx1250", 8);
     comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
     ASSERT_NE(comm->archThresholds, nullptr);
     const size_t align = 16u * (size_t)comm->nRanks;
@@ -3455,7 +3468,8 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
 TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx1250", 8);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx1250", 8);
     comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
     ASSERT_NE(comm->archThresholds, nullptr);
     const size_t align = 16u * (size_t)comm->nRanks;
