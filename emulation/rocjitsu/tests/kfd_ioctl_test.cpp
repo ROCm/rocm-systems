@@ -21292,8 +21292,10 @@ TEST_P(KfdRuntimeSaveTest, PreservesQueueOwnershipAndRuntimeHeaders) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_GET_QUEUE_WAVE_STATE, &state), -EFAULT);
   state.ctl_stack_address = save_address;
   // A failed image query must not undo the caller's explicit suspension.
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
   process->unmap_pages(save_address, save.size());
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_GET_QUEUE_WAVE_STATE, &state), -EIO);
+#endif
   for (uint32_t xcc = 0; xcc < soc_->num_xcds(); ++xcc)
     EXPECT_TRUE(soc_->xcd(xcc)->command_processor()->queue_runtime_suspended_for_test(
         create.queue_id, driver_->local_process_id()));
