@@ -1642,6 +1642,11 @@ function(rccl_standalone_setup)
         $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
     endif()
   endforeach()
+  # wrapper_link_stubs.cpp defines int-returning HIP stubs, so it must not see
+  # the hip_runtime.h that the force-included poison_hip_atomics.h pulls in.
+  set_source_files_properties(wrapper_link_stubs.cpp PROPERTIES
+    COMPILE_DEFINITIONS RCCL_POISON_HIP_ATOMICS_NO_HIP_INCLUDES
+  )
   # accl_profiler_wrapper.cc needs the non-hipified profiler headers;
   # scope the extra include to just that file to avoid os.h/rocmwrap.h
   # conflicts with the hipified sources used by other wrappers.
