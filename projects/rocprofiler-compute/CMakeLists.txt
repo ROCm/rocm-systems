@@ -794,7 +794,7 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-# The metric library sync test imports tools/, which an install tree lacks.
+# These tests import tools/, which an install tree lacks.
 if(NOT TEST_FROM_INSTALL)
     add_test(
         NAME test_metric_library_sync
@@ -803,6 +803,14 @@ if(NOT TEST_FROM_INSTALL)
             ${COV_OPTION}
             tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py
             ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_generate_metric_health_report
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_generate_metric_health_report.xml ${COV_OPTION}
+            tests/unit/test_generate_metric_health_report.py ${WORKING_DIR_OPTION}
     )
 endif()
 
