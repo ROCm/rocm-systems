@@ -149,6 +149,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
 
+* Fixed the roofline plotting FP4 and FP6 against separate matrix ceilings on AMD Instinct MI350 Series. One counter counts both, so they now share the `Peak MFMA-F6F4 (FP6/FP4)` ceiling.
+
 ### Upcoming changes
 
 * `--list-blocks` and `--list-available-metrics` will be removed in a future release.
