@@ -3,6 +3,7 @@
 
 #include "library/perf.hpp"
 #include "common/clocks.hpp"
+#include "common/result.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -21,6 +22,8 @@
 #include <cstddef>
 #include <ctime>
 #include <fcntl.h>
+#include <fmt/format.h>
+#include <fstream>
 #include <linux/perf_event.h>
 #include <mutex>
 #include <poll.h>
@@ -33,16 +36,6 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-#if !defined(ROCPROFSYS_RETURN_ERROR_MSG)
-#    define ROCPROFSYS_RETURN_ERROR_MSG(COND, ...)                                       \
-        if((COND))                                                                       \
-        {                                                                                \
-            auto _msg_ss = std::stringstream{};                                          \
-            _msg_ss << __VA_ARGS__;                                                      \
-            return std::optional<std::string>{ _msg_ss.str() };                          \
-        }
-#endif
 
 namespace rocprofsys::perf
 {
@@ -68,6 +61,19 @@ struct size_params
 };
 
 const size_params k_sizes = {};
+
+constexpr const char* k_paranoid_path = "/proc/sys/kernel/perf_event_paranoid";
+
+/// Current perf_event_paranoid value, or the reason it could not be read.
+result<int, std::string>
+read_perf_event_paranoid()
+{
+    auto file  = std::ifstream{ k_paranoid_path };
+    int  value = 0;
+    if(file >> value) return result<int, std::string>{ value };
+    return result<int, std::string>{ failure{
+        fmt::format("could not read {}", k_paranoid_path) } };
+}
 }  // namespace
 
 long
@@ -163,34 +169,22 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
     m_fd = perf_event_open(&_pe, _pid, _cpu, -1, 0);
     if(m_fd == -1)
     {
-        // Read errno before opening the paranoid file; that read overwrites it.
-        const int  open_errno = errno;
-        const bool denied     = open_errno == EACCES || open_errno == EPERM;
+        // Read errno first; any later syscall can overwrite it.
+        const int open_errno = errno;
 
-        if(denied)
+        if(open_errno == EACCES || open_errno == EPERM)
         {
-            constexpr const char* k_paranoid_path =
-                "/proc/sys/kernel/perf_event_paranoid";
-            int  paranoid_value = 4;
-            auto paranoid_file  = std::ifstream{ k_paranoid_path };
-            if(paranoid_file)
-            {
-                paranoid_file >> paranoid_value;
-            }
-
-            ROCPROFSYS_RETURN_ERROR_MSG(
-                true,
-                "Failed to open perf event: "
-                    << strerror(open_errno) << ". Consider tweaking " << k_paranoid_path
-                    << " to 2 or less (current value is " << paranoid_value
-                    << "), or granting rocprof-sys CAP_PERFMON (or CAP_SYS_ADMIN).");
+            const auto paranoid = read_perf_event_paranoid();
+            const auto current =
+                paranoid.is_ok() ? fmt::format("current value is {}", paranoid.value())
+                                 : paranoid.error();
+            return fmt::format(
+                "Failed to open perf event: {}. Consider tweaking {} to 2 or less "
+                "({}), or granting rocprof-sys CAP_PERFMON (or CAP_SYS_ADMIN).",
+                strerror(open_errno), k_paranoid_path, current);
         }
 
-        ROCPROFSYS_RETURN_ERROR_MSG(
-            true,
-            "Failed to open perf event: "
-                << strerror(open_errno)
-                << ". The requested event is unsupported by this CPU/PMU or kernel.");
+        return fmt::format("Failed to open perf event: {}.", strerror(open_errno));
     }
 
     // If sampling, map the perf event file
@@ -199,11 +193,13 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
         void* ring_buffer = mmap(nullptr, k_sizes.mmap, PROT_READ | PROT_WRITE,
                                  MAP_SHARED, static_cast<int>(m_fd), 0);
 
-        ROCPROFSYS_RETURN_ERROR_MSG(
-            ring_buffer == MAP_FAILED,
-            "Mapping perf_event ring buffer failed. Make sure the current user has "
-            "permission to invoke the perf tool, and that the program being profiled "
-            "does not use an excessive number of threads (>1000)");
+        if(ring_buffer == MAP_FAILED)
+        {
+            return fmt::format(
+                "Mapping perf_event ring buffer failed. Make sure the current user "
+                "has permission to invoke the perf tool, and that the program being "
+                "profiled does not use an excessive number of threads (>1000)");
+        }
 
         m_mapping = reinterpret_cast<struct perf_event_mmap_page*>(ring_buffer);
     }
