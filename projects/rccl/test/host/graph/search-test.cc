@@ -21,7 +21,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
-#include "../common/ScopedEnv.hpp"
+#include "../../common/ScopedEnv.hpp"
 #include "fakes/graph_fakes.h"
 #include "fakes/param_redirect.h"
 
