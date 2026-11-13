@@ -100,9 +100,14 @@ for context_name, section_name in cdna_section_map.items():
                 "data": arch_metrics[arch][section_name],
             }
 
-# Load gfx115x (RDNA 3.5) metrics YAML
-with open("data/metrics/gfx115x_metrics.yaml") as f:
-    gfx115x_metrics = yaml.safe_load(f)
+# Load per-arch RDNA metrics YAMLs
+rdna_metrics = {}
+for arch in ["gfx115x", "gfx1201"]:
+    with open(f"data/metrics/{arch}_metrics.yaml") as f:
+        rdna_metrics[arch] = yaml.safe_load(f)
+
+gfx115x_metrics = rdna_metrics["gfx115x"]
+gfx1201_metrics = rdna_metrics["gfx1201"]
 
 # RDNA gfx115x section mapping: jinja context id -> YAML section name
 rdna_gfx115x_section_map = {
@@ -173,6 +178,43 @@ for context_name, section_name in rdna_gfx115x_section_map.items():
     jinja_contexts[context_name] = {
         "data": gfx115x_metrics.get(section_name, {}),
     }
+
+rdna_gfx1201_section_map = {
+    "sys-sol-gfx1201": "System Speed-of-Light",
+    "navi48-memory-chart-instruction-cache-gfx1201": (
+        "Memory chart - Instruction Cache"
+    ),
+    "navi48-memory-chart-scalar-data-cache-gfx1201": (
+        "Memory chart - Scalar Data Cache"
+    ),
+    "navi48-memory-chart-gl0-gfx1201": "Memory chart - GL0 Cache (Vector L0)",
+    "navi48-memory-chart-lds-gfx1201": "Memory chart - LDS (Local Data Share)",
+    "navi48-memory-chart-gl2-gfx1201": "Memory chart - GL2 Cache (L2)",
+    "navi48-memory-chart-ea-to-dram-gfx1201": "Memory chart - L2 to Memory",
+    "navi48-memory-chart-infinity-cache-gfx1201": (
+        "Memory chart - Infinity Cache and VRAM"
+    ),
+    "navi48-memory-chart-wgp-gfx1201": "Memory chart - Workgroup Processors (WGPs)",
+    "navi48-gl2-utilization-gfx1201": "GL2 Cache Request Statistics",
+    "navi48-gl2-lookup-gfx1201": "GL2 Cache Performance",
+    "rdna4-sys-sol-gfx1201": "System Speed-of-Light",
+    "rdna4-roofline-performance-rates-gfx1201": "Roofline Performance Rates",
+    "rdna4-roofline-plot-points-gfx1201": "Roofline Plot Points",
+    "rdna4-memory-chart-instruction-cache-gfx1201": (
+        "Memory chart - Instruction Cache"
+    ),
+    "rdna4-memory-chart-scalar-data-cache-gfx1201": (
+        "Memory chart - Scalar Data Cache"
+    ),
+    "rdna4-memory-chart-gl0-cache-gfx1201": "Memory chart - GL0 Cache (Vector L0)",
+    "rdna4-memory-chart-lds-gfx1201": "Memory chart - LDS (Local Data Share)",
+    "rdna4-memory-chart-gl2-cache-gfx1201": "Memory chart - GL2 Cache (L2)",
+    "rdna4-memory-chart-ea-to-dram-gfx1201": "Memory chart - L2 to Memory",
+    "rdna4-memory-chart-wgps-gfx1201": "Memory chart - Workgroup Processors (WGPs)",
+}
+
+for context_name, section_name in rdna_gfx1201_section_map.items():
+    jinja_contexts[context_name] = {"data": gfx1201_metrics[section_name]}
 
 external_toc_path = "./sphinx/_toc.yml"
 external_projects_current_project = "rocprofiler-compute"

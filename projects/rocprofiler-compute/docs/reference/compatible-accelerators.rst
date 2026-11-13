@@ -53,3 +53,18 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Ins
 
       * - AMD Ryzen AI Max / Ryzen™ AI Max+ 300 and 400 Series integrated graphics (Strix/Halo, Gorgon/Halo, Gorgon/Point gfx1153)
         - Supported ✅ (see :doc:`/conceptual/rdna/rdna-performance-model`)
+
+  .. tab-item:: AMD Radeon GPUs
+
+    .. list-table::
+      :header-rows: 1
+
+      * - Platform
+        - Status
+
+      * - Navi48 (gfx1201), including AMD Radeon RX 9070
+        - GPU metrics, Memory Chart, and roofline on Linux. See
+          :doc:`/conceptual/rdna/rdna-performance-model`.
+
+      * - Navi44 (gfx1200)
+        - Not supported in this release.

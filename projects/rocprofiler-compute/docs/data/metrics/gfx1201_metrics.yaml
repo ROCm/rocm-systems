@@ -1,0 +1,350 @@
+System Speed-of-Light:
+  VALU Issue Rate:
+    rst: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes. No percentage of FP32 peak is reported.
+    unit: GInstructions/s
+  WMMA FLOPs (F16->F32 16x16x16):
+    rst: Achieved FP16 WMMA throughput.
+    unit: GFLOP/s
+  FP64 VALU Issue Rate:
+    rst: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes. No percentage of FP64 peak is reported.
+    unit: GInstructions/s
+  IPC:
+    rst: Instructions issued per busy SQ cycle, excluding internal instructions.
+    unit: Instructions per Cycle
+  Wavefront Occupancy:
+    rst: Average number of wavefronts in flight on GPU.
+    unit: Wavefronts
+  GL2 Cache Hit Rate:
+    rst: Percentage of L2 lookups that hit.
+    unit: Percent
+  LDS Bank Conflicts:
+    rst: Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
+    unit: Cycles
+  GL0 Cache Hit Rate (TCP Cache):
+    rst: Percentage of vector L0 cache line accesses that hit.
+    unit: Percent
+  GL0 Cache BW (TCP Cache):
+    rst: Not available
+    unit: Bytes/s
+  GL1 Cache Hit Rate:
+    rst: Not available
+    unit: Percent
+  Scalar Data Cache Hit Rate:
+    rst: Percentage of scalar data cache requests that hit.
+    unit: Percent
+  Scalar Data Cache BW:
+    rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
+    unit: Bytes/s
+  Instruction Cache Hit Rate:
+    rst: Percentage of instruction cache requests that hit.
+    unit: Percent
+  Instruction Cache BW:
+    rst: Not available
+    unit: Bytes/s
+Memory chart - Instruction Cache:
+  ICache Requests:
+    rst: Instruction cache requests from the SQ, normalized by the chosen unit.
+    unit: Requests per Normalization Unit
+  ICache Hit Rate:
+    rst: Percentage of instruction cache requests that hit. The instruction cache is read-only and shared by the WGPs it serves.
+    unit: Percent
+  ICache-GL1 Read Bandwidth:
+    rst: Not available
+    unit: Bytes/s
+Memory chart - Scalar Data Cache:
+  DCache Requests:
+    rst: Scalar data cache requests after bank serialization, normalized by the chosen unit.
+    unit: Requests per Normalization Unit
+  DCache Hit Rate:
+    rst: Percentage of scalar data cache requests that hit. The scalar data cache is read-only.
+    unit: Percent
+  DCache Load Bandwidth:
+    rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads. Bounds-check reductions are ignored.
+    unit: Bytes/s
+  DCache-GL1 Read Bandwidth:
+    rst: Not available
+    unit: Bytes/s
+Memory chart - GL0 Cache (Vector L0):
+  GL0 Hit Rate:
+    rst: Percentage of vector L0 cache line accesses that hit.
+    unit: Percent
+Memory chart - LDS (Local Data Share):
+  LDS Req:
+    rst: LDS instructions issued, including FLAT instructions that resolve to LDS. This counts instructions, not data, so it does not separate reads from writes.
+    unit: Requests per Normalization Unit
+  LDS Utilization:
+    rst: Percentage of the LDS cycle budget across all CUs spent on indexed (non-direct, non-interpolation) accesses, over GPU-active cycles. Two CUs share a WGP's LDS, so a saturated LDS reads well below 100%.
+    unit: Percent
+  LDS Bank Conflict Rate:
+    rst: LDS cycles stalled by bank conflicts, as a percentage of cycles LDS spent on indexed accesses.
+    unit: Percent
+  LDS Bandwidth:
+    rst: LDS byte-access rate from load, store, and atomic dword counters, using four bytes per dword.
+    unit: Bytes/s
+Memory chart - GL2 Cache (L2):
+  GL2 Hit Rate:
+    rst: Percentage of L2 lookups that hit.
+    unit: Percent
+Memory chart - L2 to Memory:
+  Memory Read Requests:
+    rst: L2 read requests over EA destined for VRAM. Infinity Cache can serve them before they reach VRAM.
+    unit: Requests per Normalization Unit
+  Memory Write Requests:
+    rst: L2 write requests over EA destined for VRAM. Infinity Cache can absorb them before they reach VRAM.
+    unit: Requests per Normalization Unit
+  Memory Read Bandwidth:
+    rst: Bytes L2 read over EA for requests destined for VRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the VRAM bandwidth peak.
+    unit: Bytes/s
+  Memory Write Bandwidth:
+    rst: Bytes L2 wrote over EA for requests destined for VRAM, in 32-byte units. Infinity Cache hits are included.
+    unit: Bytes/s
+Memory chart - Infinity Cache and VRAM:
+  Infinity Cache Hit Rate:
+    rst: Not available
+    unit: Percent
+  VRAM Read Bandwidth:
+    rst: Not available
+    unit: Bytes/s
+  VRAM Write Bandwidth:
+    rst: Not available
+    unit: Bytes/s
+Memory chart - Workgroup Processors (WGPs):
+  Wavefront Occupancy:
+    rst: Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
+    unit: Percent
+  VGPR:
+    rst: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
+    unit: Registers
+  SGPR:
+    rst: 'The number of scalar general-purpose registers allocated for the kernel. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
+    unit: Registers
+  LDS Allocation:
+    rst: 'The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
+    unit: Bytes per Workgroup
+  Scratch Allocation:
+    rst: 'The amount of scratch memory requested per wavefront, in KB: the scratch bytes requested per work-item multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
+    unit: KB per Wave
+  Workgroups:
+    rst: The number of workgroups in the launch divided by the number of WGPs.
+    unit: Workgroups per WGP
+Roofline Performance Rates:
+  VALU FLOPs (FP32):
+    rst: Floating-point operations per second on the VALU, excluding WMMA instructions. Uses the aggregate VALU instruction counter at one FLOP per lane, 32 lanes per wave32 instruction, so it is an estimate rather than a precision-specific FLOP count.
+    unit: GFLOP/s
+  WMMA FLOPs (F16->F32):
+    rst: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only. V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
+    unit: GFLOP/s
+  VALU FLOPs (FP64):
+    rst: 64-bit floating-point operations per second on the VALU.
+    unit: GFLOP/s
+  GL0 Cache BW (TCP Cache):
+    rst: Achieved bandwidth at the GL0 vector cache (TCP Cache). Counts 128 bytes per TCP_REQ cache-line request, an interim upper bound until the TCP_SECTORS counter is defined.
+    unit: Bytes/s
+  LDS BW:
+    rst: Achieved bandwidth for Local Data Share memory operations.
+    unit: Bytes/s
+  VRAM BW:
+    rst: Bandwidth of GL2C/EA read and write requests destined for VRAM, compared with the measured VRAM bandwidth (VRAMBw column of roofline.csv). Counts 32-byte granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte through 128-byte requests, so a fixed 256 bytes per request would overstate them. It includes requests the Infinity Cache serves. The counters cannot separate them, so this can be higher than true VRAM traffic and can exceed the measured VRAM peak.
+    unit: Bytes/s
+  L2 to Memory BW (Infinity Cache Peak):
+    rst: Bandwidth of GL2C/EA read and write requests destined for VRAM, compared with the measured Infinity Cache bandwidth (MALL column of roofline.csv). Uses the same 32-byte request counters as VRAM BW. Requests pass through GL0 (TCP), GL1, the GL2, and the Infinity Cache before VRAM. The measured peak uses the device's reported Infinity Cache size. No counter separates Infinity Cache hits from VRAM traffic.
+    unit: Bytes/s
+Roofline Plot Points:
+  AI L0:
+    rst: Arithmetic intensity relative to GL0 (TCP) requests, at 128 bytes per TCP_REQ as an upper bound on GL0 bytes. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    unit: FLOPs/Byte
+  AI LDS:
+    rst: Arithmetic intensity relative to Local Data Share traffic. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    unit: FLOPs/Byte
+  AI VRAM:
+    rst: Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks the point at the VRAM level. Compare it with both the VRAM roof and the Infinity Cache (MALL) roof. The requests include those the Infinity Cache serves, and the counters cannot separate them, so this intensity can be lower than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    unit: FLOPs/Byte
+  Performance (GFLOPs):
+    rst: Achieved VALU plus WMMA throughput of floating-point operations per second. The FLOP count is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    unit: GFLOP/s
+Wave Dispatch Statistics:
+  Compute Wave Dispatches:
+    rst: Total wavefronts dispatched (SQ_WAVES_sum).
+    unit: Count per Normalization Unit
+  Wave Dispatch Rate:
+    rst: Average wavefronts launched per busy cycle.
+    unit: Wavefronts per Cycle
+WGP Scalar Data Cache:
+  Dcache Hit Rate:
+    rst: Percentage of scalar data-cache requests that hit.
+    unit: Percent
+WGP Wavefront Dispatch:
+  Dispatched Threads:
+    rst: Total work-items dispatched.
+    unit: Threads
+  Dispatched Waves:
+    rst: Total wavefronts dispatched.
+    unit: Wavefronts
+WGP Wavefront Launch Stats:
+  Grid Size:
+    rst: Number of work-items in the dispatch grid, from dispatch metadata.
+    unit: Work-items
+  LDS Allocation:
+    rst: Bytes of LDS allocated per workgroup, from dispatch metadata.
+    unit: Bytes
+  SGPRs:
+    rst: Scalar general-purpose registers allocated for the kernel, from dispatch metadata. Allocation granularity can increase the reported value above the compiler's request.
+    unit: Registers
+  Scratch Allocation:
+    rst: Bytes of scratch memory allocated per work-item, from dispatch metadata.
+    unit: Bytes per Work-item
+  VGPRs:
+    rst: Architectural vector general-purpose registers allocated for the kernel, from dispatch metadata. Allocation granularity can increase the reported value above the compiler's request.
+    unit: Registers
+  Workgroup Size:
+    rst: Number of work-items per workgroup, from dispatch metadata.
+    unit: Work-items
+WGP Instruction Cache:
+  Icache Hit Rate:
+    rst: Percentage of instruction-cache requests that hit.
+    unit: Percent
+WGP VMEM Instruction Mix:
+  Instructions - Flat Load:
+    rst: Issued flat-addressed load instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - Flat Store:
+    rst: Issued flat-addressed store instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - TEX Load:
+    rst: Issued buffer loads, image loads, samples, and atomics with a return value, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - TEX Store:
+    rst: Issued buffer stores, image stores, and atomics without a return value, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - VMEM Flat:
+    rst: Issued flat-addressed vector memory instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+WGP Wavefront Instruction Mix:
+  Instructions - Internal:
+    rst: Issued internal instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - LDS:
+    rst: Issued LDS instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - SALU:
+    rst: Issued scalar arithmetic instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - SMEM:
+    rst: Issued scalar memory instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - Transcendental:
+    rst: Issued transcendental vector arithmetic instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - VALU:
+    rst: Issued vector arithmetic instructions, normalized by the chosen unit. The counter includes integer and floating-point instructions.
+    unit: Count per Normalization Unit
+  Instructions - VMEM:
+    rst: Issued vector memory instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Total Instructions:
+    rst: Total issued instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+WGP LDS Instruction Mix:
+  LDS Direct Load Instructions:
+    rst: Issued LDS direct-load instructions reported by the counter, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  LDS Parameter Load Instructions:
+    rst: Issued LDS parameter-load instructions reported by the counter, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  WAVE32 LDS Parameter Load Instructions:
+    rst: Not available
+    unit: Count per Normalization Unit
+WGP VALU Instruction Mix:
+  SQ_INSTS_VALU:
+    rst: Raw vector arithmetic instruction count. This includes integer and floating-point instructions and is not a FLOP count.
+    unit: Instructions
+  SQ_INST_CYCLES_VALU:
+    rst: Cycles needed to execute VALU operations, counting overlapping V_OP32_1 and V_OP32_T instructions separately.
+    unit: Cycles
+WGP WMMA Instruction FLOPs and IOPs Counting:
+  SQ_INST_CYCLES_VALU_WMMA:
+    rst: Cycles of work sent for WMMA.
+    unit: Cycles
+  SQ_WMMA_VALU_INSTS:
+    rst: Number of WMMA instructions issued.
+    unit: Instructions
+WGP Utilization:
+  WGP Utilization:
+    rst: Percentage of WGP clock cycles at least one wavefront is active.
+    unit: Percent
+WGP Instruction Issue Stalls:
+  Wait for Barrier:
+    rst: Not available
+    unit: Percent
+  Wait for Counter:
+    rst: Not available
+    unit: Percent
+  Wait for Instruction Fetch:
+    rst: Not available
+    unit: Percent
+  Wait for Any:
+    rst: Not available
+    unit: Percent
+WGP Wavefront Life:
+  Wave Life:
+    rst: Average wavefront lifetime in cycles.
+    unit: Cycles
+GL0 Cache Performance:
+  Hit Rate:
+    rst: Percentage of TCP requests that do not miss in the vector GL0 cache.
+    unit: Percent
+GL0 Request Statistics:
+  Miss Requests:
+    rst: Vector GL0 cache requests reported as misses, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Total Requests:
+    rst: Total vector GL0 cache requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+GL0 Stalls:
+  TA Req Stall:
+    rst: TCP request-stall counter toward the texture addresser, normalized by the chosen unit.
+    unit: Cycles per Normalization Unit
+GL1A Processing:
+  Hit Rate:
+    rst: Not available
+    unit: Percent
+GL1 Cache Request Statistics:
+  Miss Requests:
+    rst: Not available
+    unit: Count per Normalization Unit
+  Total Requests:
+    rst: Total GL1 requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+GL2 Cache Request Statistics:
+  Total Requests:
+    rst: L2 requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Read Requests:
+    rst: L2 read requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Write Requests:
+    rst: L2 write requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Atomic Requests:
+    rst: L2 atomic requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  EA Read Requests (Memory):
+    rst: L2 read requests over EA destined for memory. Infinity Cache can serve these requests before they reach VRAM.
+    unit: Count per Normalization Unit
+  EA Write Requests (Memory):
+    rst: L2 write requests over EA destined for memory. Infinity Cache can absorb these requests before they reach VRAM.
+    unit: Count per Normalization Unit
+GL2 Cache Performance:
+  GL2 Cache Hit Rate:
+    rst: Percentage of L2 lookups that hit.
+    unit: Percent
+  GL2 Cache Hits:
+    rst: L2 lookups that hit, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  GL2 Cache Misses:
+    rst: L2 lookups that miss, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+GRBM Metrics:
+  GPU Busy:
+    rst: Percentage of GRBM counted cycles with the GPU active.
+    unit: Percent

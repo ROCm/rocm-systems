@@ -3,17 +3,19 @@
    :keywords: ROCm Compute Profiler, RDNA, gfx115x, shader engine
 
 .. _rdna-shader-engine:
+.. _rdna4-shader-engine:
 
 ===============
 Shader engine
 ===============
 
-On RDNA3 architecture-based GPUs, Shader engines (SEs) partition the programmable graphics and compute array into repeating slices.
+On RDNA3.5 and RDNA4, shader engines (SEs) partition the programmable graphics and compute array into repeating slices.
 Within each SE, the Workgroup Manager (SPI) accepts dispatched kernels and schedules waves onto Workgroup Processors (WGPs).
-Each WGP maps to two Compute Units (CUs) that share execution resources and execute the scheduled waves.
-GL0 cache and GL1 cache implement the per-SE vector cache hierarchy feeding those CUs.
+Each WGP pairs two Compute Units (CUs) that share execution resources and execute the scheduled waves.
+Navi 48 (gfx1201) has four SEs and 64 CUs. Each of its WGPs shares a 128 KB Local Data Share (LDS).
+GL0 is the vector L0 cache. On gfx1201, GL1 is the write-combining cache.
 
-Follow the nested sections under Shader engine in the navigation for gfx115x metric tables:
+Follow the nested sections under Shader engine in the navigation. Each metric table has an RDNA3.5 tab and an RDNA4 tab:
 
 * :doc:`spi`: Utilization and wave dispatch statistics that sit between the command processor and WGP execution.
 

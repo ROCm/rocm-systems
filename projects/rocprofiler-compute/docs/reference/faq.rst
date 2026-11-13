@@ -120,10 +120,12 @@ vLLM V1 runs GPU kernels in a worker process that it terminates with a signal
 on shutdown, and counter data is only written when a process exits normally.
 See :ref:`profile-vllm-workloads` for the workaround and where it applies.
 
+.. _faq-tcp-req-zero:
+
 Why are ``TCP_REQ`` and other PMC counters zero?
 ================================================
 
-On some RDNA GPUs, the default ``AUTO`` performance level can gate the
+On RDNA3.5 and RDNA4 GPUs, the default ``AUTO`` performance level can gate the
 perfmon clock. While that clock is gated, the hardware never increments
 the affected performance counters, so values such as ``TCP_REQ``,
 ``TCP_REQ_READ``, ``TCP_REQ_WRITE``, and ``TCP_REQ_MISS`` -- and the GL0
@@ -134,6 +136,17 @@ This is a hardware power-gating behavior rather than a counter-collection
 defect. It has been observed on gfx115x (RDNA 3.5); the same AUTO
 gating is documented for Navi3x and Navi4x.
 
-For the workaround, see `Setting GPU performance level for PMC profiling
+Setting the performance level requires sudo access. For example, if the target
+GPU is index 0:
+
+.. code-block:: bash
+
+   sudo /opt/rocm/bin/amd-smi set --gpu 0 --perf-level STABLE_STD
+
+Select the GPU index from ``amd-smi list``. Omitting ``--gpu`` changes the
+performance level of every GPU. Use the same performance state when comparing
+runs.
+
+For more detail, see `Setting GPU performance level for PMC profiling
 <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling>`_
 in the ROCprofiler-SDK documentation.

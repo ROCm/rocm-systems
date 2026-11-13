@@ -54,6 +54,17 @@ Run ``rocprof-compute profile -h`` for more details. See
    - Some metrics may show reduced utilization compared to normal execution
      due to the lack of concurrent kernel execution.
 
+.. _profile-rdna-power-gating:
+
+.. warning::
+
+   **Profiling requires power-gating changes.**
+
+   The default ``AUTO`` performance level can gate the perfmon
+   clock. While that clock is gated, counters such as ``TCP_REQ`` report zero
+   even when the kernel issues global memory traffic. For the details and the
+   workaround, see :ref:`faq-tcp-req-zero`.
+
 .. _profile-example:
 
 Profiling example
@@ -725,6 +736,41 @@ that contains both ``roofline.csv`` and application performance counters
 
    * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
    * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
+
+   On gfx1201 (Navi 48, for example the Radeon RX 9070), the roofline has two
+   device-memory roofs:
+
+   * ``VRAM`` is the measured device-memory bandwidth (CSV column ``VRAMBw``).
+     Navi 48 has no HBM. On the Radeon RX 9070 and RX 9070 XT, the 256-bit,
+     20 Gbps VRAM interface peaks at 640 GB/s at the default performance level.
+     The measured roof is lower under ``STABLE_STD``.
+   * ``MALL`` is the measured bandwidth of the Infinity Cache. The benchmark
+     reads a buffer of half the reported Infinity Cache capacity repeatedly,
+     so the reads miss in L2 and hit in the Infinity Cache.
+
+   The ``AI VRAM`` point counts GL2C/EA requests destined for memory. The
+   Infinity Cache serves some of those requests, and no performance counter
+   separates its hits from physical VRAM traffic, so read the point against
+   both roofs. A kernel whose working set fits in the Infinity Cache can sit
+   above the ``VRAM`` roof and below the ``MALL`` roof.
+
+   The gfx1201 WMMA instruction counter requires a ROCprofiler-SDK and
+   aqlprofile installation that supports SQ event 233. Check profiling warnings
+   and counter output before relying on WMMA roofline points. One WMMA counter
+   covers FP16, BF16, FP8, and BF8, so the WMMA row is compared with the FP16
+   WMMA peak. The aggregate VALU instruction counter gives an estimate, not a
+   precision-specific FLOP count. See :ref:`rdna4-roofline`.
+
+   Before a gfx1201 collection, set the performance level as described in
+   :ref:`profiling power-gating requirements <profile-rdna-power-gating>`. Then collect System Speed-of-Light and the Memory Chart for a short workload:
+
+   .. code-block:: bash
+
+      HIP_VISIBLE_DEVICES=0 rocprof-compute profile --name vcopy-gfx1201 \
+          -b sol memchart --no-roof -- ./vcopy -n 1048576 -b 256
+
+   ``HIP_VISIBLE_DEVICES`` selects the GPU used by the HIP application. Discover
+   block aliases with ``rocprof-compute --list-metrics-gfx-id gfx1201``.
 
    CDNA4+ also supports Microscaling formats, which can be identified by the "MX" prefix in datatypes. More details and other resources about MX per CDNA architecture can be found at `AMD CDNA Architecture <https://www.amd.com/en/technologies/cdna.html>`_.
 

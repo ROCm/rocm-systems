@@ -3,14 +3,16 @@
    :keywords: ROCm Compute Profiler, RDNA, gfx115x, GL1, GL1 Cache, GL1C
 
 .. _rdna-gl1:
+.. _rdna4-gl1:
 
 ===
 GL1
 ===
 
-**GL1 Cache** is the shared L1 vector cache inside each shader array on gfx115x (one GL1 per shader array), supplied by GL0 (TCP) and forwarding misses toward GL2.
-For GL0 panels and Memory Chart rows through the TCP-GL1 boundary, see
-:doc:`gl0-cache`. For downstream GL2 panels after GL1, see :doc:`gl2-cache`; for DRAM / GCEA interfaces beyond GL2, see :doc:`gcea`.
+**GL1 Cache** is the shared L1 inside each shader array, supplied by GL0 (TCP) and forwarding traffic toward GL2.
+On gfx115x it is a read cache with one GL1 per shader array. On gfx1201 it is a write-combining buffer rather than a cache, and the tool counts one GL1 instance per shader array. GL1 has no hit or miss counter on gfx1201, so the System Speed-of-Light ``GL1 Cache Hit Rate`` row shows N/A, and the roofline has no ``L1`` roof.
+For GL0 panels and Memory Chart rows through the GL0-GL1 boundary, see
+:doc:`gl0-cache`. For downstream GL2 panels after GL1, see :doc:`gl2-cache`; for the Efficiency Arbiter beyond GL2, see :doc:`gcea`.
 
 .. note::
 
@@ -26,10 +28,14 @@ GL1 Cache utilization
 .. tab-set::
 
    .. tab-item:: RDNA 3.5 (gfx115x)
-      :selected:
 
       .. jinja:: rdna115x-gl1-cache-utilization-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      The gfx1201 GL1 Cache panel reports ``Total Requests`` in GL1 Cache Request Statistics. It has no utilization, request bandwidth, or GL1-GL2 interface table. This page does not publish a separate gfx1201 table.
 
 GL1 Cache request statistics
 ----------------------------
@@ -37,10 +43,14 @@ GL1 Cache request statistics
 .. tab-set::
 
    .. tab-item:: RDNA 3.5 (gfx115x)
-      :selected:
 
       .. jinja:: rdna115x-gl1-cache-request-statistics-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      The gfx1201 GL1 Cache panel reports ``Total Requests`` in GL1 Cache Request Statistics. It has no utilization, request bandwidth, or GL1-GL2 interface table. This page does not publish a separate gfx1201 table.
 
 GL1 Cache performance
 ---------------------
@@ -48,10 +58,14 @@ GL1 Cache performance
 .. tab-set::
 
    .. tab-item:: RDNA 3.5 (gfx115x)
-      :selected:
 
       .. jinja:: rdna115x-gl1-cache-performance-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      The gfx1201 GL1 Cache panel reports ``Total Requests`` in GL1 Cache Request Statistics. It has no utilization, request bandwidth, or GL1-GL2 interface table. This page does not publish a separate gfx1201 table.
 
 GL1-GL2 interface
 -----------------
@@ -59,10 +73,14 @@ GL1-GL2 interface
 .. tab-set::
 
    .. tab-item:: RDNA 3.5 (gfx115x)
-      :selected:
 
       .. jinja:: rdna115x-gl1-gl2-interface-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      The gfx1201 GL1 Cache panel reports ``Total Requests`` in GL1 Cache Request Statistics. It has no utilization, request bandwidth, or GL1-GL2 interface table. This page does not publish a separate gfx1201 table.
 
 GL1 Cache stalls
 ----------------
@@ -70,10 +88,14 @@ GL1 Cache stalls
 .. tab-set::
 
    .. tab-item:: RDNA 3.5 (gfx115x)
-      :selected:
 
       .. jinja:: rdna115x-gl1-cache-stalls-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      The gfx1201 GL1 Cache panel reports ``Total Requests`` in GL1 Cache Request Statistics. It has no utilization, request bandwidth, or GL1-GL2 interface table. This page does not publish a separate gfx1201 table.
 
 Memory chart: GL1 cache and GL1-GL2 interface
 =============================================
@@ -87,10 +109,14 @@ Memory chart - GL1 cache
 .. tab-set::
 
    .. tab-item:: RDNA 3.5 (gfx115x)
-      :selected:
 
       .. jinja:: rdna115x-memory-chart-gl1-cache-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      gfx1201 has no GL1 cache Memory Chart table.
 
 Memory chart - GL1-GL2 interface
 --------------------------------
@@ -98,7 +124,11 @@ Memory chart - GL1-GL2 interface
 .. tab-set::
 
    .. tab-item:: RDNA 3.5 (gfx115x)
-      :selected:
 
       .. jinja:: rdna115x-memory-chart-gl1-gl2-interface-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      gfx1201 has no GL1-GL2 interface Memory Chart table.
