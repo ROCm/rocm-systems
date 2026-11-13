@@ -21,12 +21,21 @@ class ValuDualIssueDetector:
     """Per-workload detector for VALU metrics exceeding theoretical peak.
 
     - check() emits a dual-issue warning above peak and a counter-issue
-      warning above 2x peak on any arch.
+      warning above 2x peak.
+    - "VALU FLOPs (FP64)" is only a candidate on gfx1201. gfx1250 uses that
+      name for the counted SP_VALU_FLOPS_FP64 rate, which is not dual-issue.
     - On gfx950 a non-zero SQ_ACTIVE_INST_VALU2 sum suffixes the dual-issue
       message with hardware confirmation.
     """
 
-    candidate_metrics = {"VALU Utilization", "VALU FLOPs (F64)"}
+    candidate_metrics = {
+        "VALU Utilization",
+        "VALU FLOPs (F64)",
+    }
+    # gfx1201's roofline spells this row "FP64". gfx1250 already uses the
+    # same name for a hardware FLOP counter with its own peak.
+    _fp64_metric = "VALU FLOPs (FP64)"
+    _fp64_arches = frozenset({"gfx1201"})
     faq_url = (
         "https://rocm.docs.amd.com/projects/"
         "rocprofiler-compute/en/latest/reference/"
@@ -35,15 +44,22 @@ class ValuDualIssueDetector:
     )
 
     def __init__(self, gpu_arch: str, raw_pmc_df: pd.DataFrame) -> None:
+        self._gpu_arch = gpu_arch
         self._dual_issue_confirmed = (
             gpu_arch == "gfx950"
             and "SQ_ACTIVE_INST_VALU2" in raw_pmc_df.columns
             and float(raw_pmc_df["SQ_ACTIVE_INST_VALU2"].sum()) > 0
         )
 
+    def is_candidate(self, metric_name: str) -> bool:
+        """Return whether this arch should dual-issue-check the metric name."""
+        if metric_name in self.candidate_metrics:
+            return True
+        return metric_name == self._fp64_metric and self._gpu_arch in self._fp64_arches
+
     def check(self, metric_name: str, value: float, peak: float) -> None:
         """Emit dual-issue warning above peak; counter-issue warning above 2x peak."""
-        if metric_name not in self.candidate_metrics:
+        if not self.is_candidate(metric_name):
             return
         if not (peak > 0 and value > peak):
             return

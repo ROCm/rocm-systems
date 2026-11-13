@@ -12,6 +12,7 @@ ROOFLINE_DATA_TYPES = (
     "FP4",
     "FP6",
     "FP8",
+    "BF8",
     "MXFP8",
     "FP16",
     "BF16",
@@ -465,6 +466,11 @@ class MIGPUSpecs:
     def get_roofline_bandwidth(cls, gpu_arch: str) -> Tuple[str, ...]:
         """Return the memory levels with a measured bandwidth ceiling on gpu_arch."""
         return tuple(cls._roofline.get(gpu_arch, {}).get("bandwidth", []))
+
+    @classmethod
+    def get_roofline_plots_mall(cls, gpu_arch: str) -> bool:
+        """Return whether gpu_arch draws its measured MALL bandwidth as a roof."""
+        return bool(cls._roofline.get(gpu_arch, {}).get("plot_mall", False))
 
     @classmethod
     def get_roofline_data_types(

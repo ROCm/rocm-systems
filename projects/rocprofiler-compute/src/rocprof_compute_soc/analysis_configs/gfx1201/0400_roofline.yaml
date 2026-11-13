@@ -1,0 +1,117 @@
+Panel Config:
+  id: 400
+  title: Roofline
+  data source:
+  - metric_table:
+      id: 401
+      title: Roofline Performance Rates
+      cli_style: Roofline
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+        peak: Peak (Empirical)
+      metric:
+        VALU FLOPs:
+          value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum)) / SUM(End_Timestamp - Start_Timestamp)
+          unit: GFLOP/s
+          peak: $FP32Flops_empirical_peak
+        WMMA FLOPs (FP16):
+          value: 8192 * SUM(SQ_WMMA_VALU_INSTS_sum) / SUM(End_Timestamp - Start_Timestamp)
+          unit: GFLOP/s
+          peak: $WMMAF16Flops_empirical_peak
+        VALU FLOPs (FP64):
+          value: SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
+          unit: GFLOP/s
+          peak: $FP64Flops_empirical_peak
+        GL0 Cache BW (TCP Cache):
+          value: 128 * SUM(TCP_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: $L0Bw_empirical_peak * 1e9
+        LDS BW:
+          value: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: $LDSBw_empirical_peak * 1e9
+        L2 to Memory BW:
+          value: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: $VRAMBw_empirical_peak * 1e9
+
+  - metric_table:
+      id: 402
+      title: Roofline Plot Points
+      cli_style: Roofline
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        AI L0:
+          value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (128 * SUM(TCP_REQ_sum))
+          unit: FLOPs/Byte
+        AI LDS:
+          value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu)
+          unit: FLOPs/Byte
+        AI VRAM:
+          value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum))
+          unit: FLOPs/Byte
+        Performance (GFLOPs):
+          value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
+          unit: GFLOP/s
+
+  metrics_description:
+    VALU FLOPs: >-
+      VALU issues per second, excluding WMMA, at one FLOP per lane. gfx120x
+      compute is wave32 by default, so that is 32 per instruction. SQ_INSTS_VALU
+      counts every VALU issue, including integer, move, and convert, and an FMA
+      counts as one issue while the FP32 roof counts it as two FLOPs. A pure FMA
+      kernel therefore reads low. A tiled FP32 GEMM also issues address
+      arithmetic, so this row can read about twice the true FLOP count.
+      SQ_WMMA_VALU_INSTS is per vec32, the same unit as SQ_INSTS_VALU for
+      gfx120x compute.
+    WMMA FLOPs (FP16): >-
+      Matrix operations per second scored against the measured FP16 roof.
+      The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts
+      every WMMA issue, and the counter does not separate FP16, BF16, FP8,
+      and BF8, so the achieved rate is not FP16-only.
+      V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
+    VALU FLOPs (FP64): >-
+      64-bit floating-point operations per second on the VALU.
+    GL0 Cache BW (TCP Cache): >-
+      Achieved bandwidth at the GL0 vector cache (TCP Cache). Counts 128 bytes
+      per TCP_REQ cache-line request, an interim upper bound until the
+      TCP_SECTORS counter is defined.
+    LDS BW: >-
+      Achieved bandwidth for Local Data Share memory operations.
+    L2 to Memory BW: >-
+      Bandwidth of GL2C/EA read and write requests leaving L2 toward memory,
+      compared with the measured VRAM bandwidth (VRAMBw column of roofline.csv).
+      Counts 32-byte granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and
+      GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and
+      EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte through 128-byte
+      requests, so a fixed 256 bytes per request would overstate them. It
+      includes requests the Infinity Cache serves. The counters cannot separate
+      them, so this can be higher than true VRAM traffic and can exceed the
+      measured VRAM peak.
+    AI L0: >-
+      Arithmetic intensity relative to GL0 (TCP) requests, at 128 bytes per
+      TCP_REQ as an upper bound on GL0 bytes. The FLOP numerator is the VALU
+      FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU,
+      plus the WMMA FLOPs at 8192 per instruction.
+    AI LDS: >-
+      Arithmetic intensity relative to Local Data Share traffic. The FLOP
+      numerator is the VALU FLOPs excluding the WMMA instructions already
+      counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    AI VRAM: >-
+      Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The
+      plot marks the point at the VRAM level. Compare it with both the VRAM roof
+      and the Infinity Cache (MALL) roof. The requests include those the Infinity
+      Cache serves, and the counters cannot separate them, so this intensity can
+      be lower than the true VRAM intensity. The FLOP numerator is the VALU
+      FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU,
+      plus the WMMA FLOPs at 8192 per instruction.
+    Performance (GFLOPs): >-
+      Achieved VALU plus WMMA throughput of floating-point
+      operations per second. The FLOP count is the VALU FLOPs excluding the
+      WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs
+      at 8192 per instruction.

@@ -167,6 +167,48 @@ Memory chart - Workgroup Processors (WGPs):
     plain: The number of workgroups in the launch divided by the number of WGPs.
     rst: The number of workgroups in the launch divided by the number of WGPs.
     unit: Workgroups per WGP
+Roofline Performance Rates:
+  VALU FLOPs:
+    plain: VALU issues per second, excluding WMMA, at one FLOP per lane. gfx120x compute is wave32 by default, so that is 32 per instruction. SQ_INSTS_VALU counts every VALU issue, including integer, move, and convert, and an FMA counts as one issue while the FP32 roof counts it as two FLOPs. A pure FMA kernel therefore reads low. A tiled FP32 GEMM also issues address arithmetic, so this row can read about twice the true FLOP count. SQ_WMMA_VALU_INSTS is per vec32, the same unit as SQ_INSTS_VALU for gfx120x compute.
+    rst: VALU issues per second, excluding WMMA, at one FLOP per lane. gfx120x compute is wave32 by default, so that is 32 per instruction. SQ_INSTS_VALU counts every VALU issue, including integer, move, and convert, and an FMA counts as one issue while the FP32 roof counts it as two FLOPs. A pure FMA kernel therefore reads low. A tiled FP32 GEMM also issues address arithmetic, so this row can read about twice the true FLOP count. SQ_WMMA_VALU_INSTS is per vec32, the same unit as SQ_INSTS_VALU for gfx120x compute.
+    unit: GFLOP/s
+  WMMA FLOPs (FP16):
+    plain: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only. V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
+    rst: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only. V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
+    unit: GFLOP/s
+  VALU FLOPs (FP64):
+    plain: 64-bit floating-point operations per second on the VALU.
+    rst: 64-bit floating-point operations per second on the VALU.
+    unit: GFLOP/s
+  GL0 Cache BW (TCP Cache):
+    plain: Achieved bandwidth at the GL0 vector cache (TCP Cache). Counts 128 bytes per TCP_REQ cache-line request, an interim upper bound until the TCP_SECTORS counter is defined.
+    rst: Achieved bandwidth at the GL0 vector cache (TCP Cache). Counts 128 bytes per TCP_REQ cache-line request, an interim upper bound until the TCP_SECTORS counter is defined.
+    unit: Bytes/s
+  LDS BW:
+    plain: Achieved bandwidth for Local Data Share memory operations.
+    rst: Achieved bandwidth for Local Data Share memory operations.
+    unit: Bytes/s
+  L2 to Memory BW:
+    plain: Bandwidth of GL2C/EA read and write requests leaving L2 toward memory, compared with the measured VRAM bandwidth (VRAMBw column of roofline.csv). Counts 32-byte granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte through 128-byte requests, so a fixed 256 bytes per request would overstate them. It includes requests the Infinity Cache serves. The counters cannot separate them, so this can be higher than true VRAM traffic and can exceed the measured VRAM peak.
+    rst: Bandwidth of GL2C/EA read and write requests leaving L2 toward memory, compared with the measured VRAM bandwidth (VRAMBw column of roofline.csv). Counts 32-byte granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte through 128-byte requests, so a fixed 256 bytes per request would overstate them. It includes requests the Infinity Cache serves. The counters cannot separate them, so this can be higher than true VRAM traffic and can exceed the measured VRAM peak.
+    unit: Bytes/s
+Roofline Plot Points:
+  AI L0:
+    plain: Arithmetic intensity relative to GL0 (TCP) requests, at 128 bytes per TCP_REQ as an upper bound on GL0 bytes. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    rst: Arithmetic intensity relative to GL0 (TCP) requests, at 128 bytes per TCP_REQ as an upper bound on GL0 bytes. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    unit: FLOPs/Byte
+  AI LDS:
+    plain: Arithmetic intensity relative to Local Data Share traffic. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    rst: Arithmetic intensity relative to Local Data Share traffic. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    unit: FLOPs/Byte
+  AI VRAM:
+    plain: Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks the point at the VRAM level. Compare it with both the VRAM roof and the Infinity Cache (MALL) roof. The requests include those the Infinity Cache serves, and the counters cannot separate them, so this intensity can be lower than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    rst: Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks the point at the VRAM level. Compare it with both the VRAM roof and the Infinity Cache (MALL) roof. The requests include those the Infinity Cache serves, and the counters cannot separate them, so this intensity can be lower than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    unit: FLOPs/Byte
+  Performance (GFLOPs):
+    plain: Achieved VALU plus WMMA throughput of floating-point operations per second. The FLOP count is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    rst: Achieved VALU plus WMMA throughput of floating-point operations per second. The FLOP count is the VALU FLOPs excluding the WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    unit: GFLOP/s
 Wave Dispatch Statistics:
   Compute Wave Dispatches:
     plain: Total wavefronts dispatched (SQ_WAVES_sum).

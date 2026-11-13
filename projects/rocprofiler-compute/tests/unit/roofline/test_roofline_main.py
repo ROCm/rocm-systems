@@ -20,7 +20,12 @@ import roofline.roofline_html as roofline_html
 from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
 from roofline.roofline_hover import truncate_kernel_name, wrap_hover_name
 from roofline.roofline_html import RooflineViewModel, build_interactive_document
-from roofline.roofline_main import Roofline, _default_precisions
+from roofline.roofline_main import (
+    TRACE_COLORS,
+    Roofline,
+    _default_precisions,
+    get_color,
+)
 from utils.html_report.report_shell import DARK_THEME_CLASS, read_asset
 
 _ASSETS = Path(roofline_html.__file__).parent / "assets"
@@ -33,6 +38,14 @@ class MockMspec:
     gpu_model = "MI210"
     gpu_series = "mi200"
     gpu_arch = "gfx90a"
+
+
+class MockNavi48Mspec:
+    """Minimal MachineSpecs: a Navi48, whose memory levels include MALL and VRAM."""
+
+    gpu_model = "rdna4_navi48"
+    gpu_series = "rdna4"
+    gpu_arch = "gfx1201"
 
 
 def make_roofline(**run_parameters: object) -> Roofline:
@@ -392,6 +405,57 @@ def test_canonical_frame_requires_bandwidths_and_peaks() -> None:
     assert canonical_frame([], [5000.0]) is None
     assert canonical_frame([0.0, float("nan")], [5000.0]) is None
     assert canonical_frame([500.0], [0.0, float("inf")]) is None
+
+
+def test_gfx1201_figure_draws_the_vram_and_mall_roofs_where_mi_draws_hbm(
+    tmp_path: Path, benchmarked_roofline
+) -> None:
+    """Navi48 names its device-memory roof VRAM and draws the measured Infinity
+    Cache bandwidth as the MALL roof. An MI roofline keeps HBM and no MALL."""
+    header = (
+        "device,VRAMBw,MALLBw,L2Bw,L1Bw,L0Bw,LDSBw,FP32Flops,FP64Flops,WMMAF16Flops"
+    )
+    row = "0,170,345,4800,4900,7000,5300,12900,290,71000"
+    navi48_dir = tmp_path / "navi48"
+    navi48_dir.mkdir()
+    (navi48_dir / "roofline.csv").write_text(f"{header}\n{row}\n", encoding="utf-8")
+    navi48 = Roofline(
+        argparse.Namespace(),
+        MockNavi48Mspec(),
+        {
+            "workload_dir": str(navi48_dir),
+            "device_id": 0,
+            "is_standalone": True,
+            "matrix_ops_type": "WMMA",
+        },
+    )
+
+    navi48_names = [
+        trace.name for trace in navi48.generate_plot("FP32", fig=go.Figure()).data
+    ]
+    mi_names = [
+        trace.name
+        for trace in benchmarked_roofline().generate_plot("FP64", fig=go.Figure()).data
+    ]
+
+    assert navi48_names[:6] == ["LDS", "L0", "L1", "L2", "MALL", "VRAM"]
+    assert "HBM" not in navi48_names
+    assert "HBM" in mi_names
+    assert "MALL" not in mi_names
+    assert "VRAM" not in mi_names
+
+
+def test_vram_and_mall_traces_have_their_own_colors() -> None:
+    """VRAM shares the HBM color. MALL has a mid-tone color of its own that
+    shows on both the white and black plot areas and differs from the
+    page's #888888 fallback trace color."""
+    assert get_color("vram") == get_color("hbm")
+    mall = get_color("mall")
+    assert mall == "#9467BD"
+    other_roofs = {k: v for k, v in TRACE_COLORS.items() if k != "mall"}
+    assert mall not in other_roofs.values()
+    assert mall.upper() != "#888888"
+    assert mall.upper() not in {"#000000", "#FFFFFF"}
 
 
 @pytest.mark.parametrize(
