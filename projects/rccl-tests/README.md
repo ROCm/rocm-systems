@@ -212,7 +212,7 @@ All tests support the same set of arguments :
   * `-x,--cta_policy <0/1/2>` Set CTA policy (NCCL_CTA_POLICY_DEFAULT (0), NCCL_CTA_POLICY_EFFICIENCY (1), NCCL_CTA_POLICY_ZERO (2)) (default: do not set).
   * `reduce_perf` (single node only):
     * `-D 3` picks one of two tiers by message size:
-      * Messages up to `NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES` bytes take an LL tier (default: the smaller of 16 MiB / (4 × ranks) and 1 MiB; 0 disables it).
+      * Messages up to `NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES` bytes take an LL tier (default: the smaller of 16 MiB / (4 × ranks) and 1 MiB; 0 disables it). The LL tier sizes its own grid from the message size and ignores `-V`.
       * Larger messages reduce through LSA pointers.
       * The resolved LL cap is printed at startup.
     * `NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES` must have the same value on every rank, or ranks wait for each other forever.

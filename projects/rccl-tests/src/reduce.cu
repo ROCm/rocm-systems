@@ -186,7 +186,7 @@ testResult_t ReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirement
     }
     default:
       if (is_main_proc && is_main_thread)
-        fprintf(stderr, "Reduce has no -D %d; -D 3 picks the LL or LSA tier by message size.\n", deviceImpl);
+        fprintf(stderr, "Reduce has no -D %d; -D 3 picks the LL tier or the tiled kernel by message size.\n", deviceImpl);
       return testNotImplemented;
   }
 }

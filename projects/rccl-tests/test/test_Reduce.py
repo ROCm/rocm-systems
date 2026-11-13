@@ -297,6 +297,19 @@ def test_ReduceGinSdmaLL(request, size, dtype, op, root_pos):
         total_bytes, dtype, op, root), total_bytes, REDUCE_NP, expect_tier="ll")
 
 
+# 2000 back-to-back LL calls with no warmup gap. Without the root's ack, a
+# sender gets two epochs ahead and overwrites slots the root has not read, which
+# shows up as #wrong or a hang.
+@_reduce_gin_skip
+def test_ReduceGinSdmaLLBackToBack(request):
+    total_bytes = REDUCE_NP * 16
+    rc, out = _run_reduce_gin_sdma(request, total_bytes, "float", "sum", REDUCE_NP - 1,
+                                   xenv=["NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES=1048576"],
+                                   extra=["-w", "0", "-n", "2000"])
+    _assert_reduce_ok(rc, out, "-D 3 LL, 2000 back-to-back calls", total_bytes, REDUCE_NP,
+                      expect_tier="ll")
+
+
 # With NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES unset: the printed cap is the
 # documented default, a message at the cap takes the LL tier, and the next
 # aligned size up takes the tiled kernel.
