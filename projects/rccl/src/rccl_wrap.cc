@@ -1326,7 +1326,8 @@ static size_t rcclCeArRegChunkElems(const ncclComm* comm, size_t count, ncclData
 
 // LL128 table cap; ReduceScatter takes the small-comm per-rank entry where it applies.
 inline size_t ddaLL128TierCapFromTable(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
-  if (func == ncclFuncReduceScatter && rcclRsSmallComm(table, nRanks) && table->rsSmallCommDdaLL128MaxPerRank != 0) {
+  if (func == ncclFuncReduceScatter && rcclRsSmallComm(table, nRanks) && nRanks <= table->rsSmallCommDdaLL128MaxRanks &&
+      table->rsSmallCommDdaLL128MaxPerRank != 0) {
     return std::min((size_t)nRanks * table->rsSmallCommDdaLL128MaxPerRank, table->rankScaledMaxBytes);
   }
   return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks);

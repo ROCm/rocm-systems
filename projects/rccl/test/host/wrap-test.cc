@@ -1794,6 +1794,7 @@ rcclArchThresholds MakeRankScaledTable() {
   t.rsRingSimpleCappedMaxPerRank = 32 * kMiB;
   t.rsRingSimpleCappedChannels = 128;
   t.rsSmallCommMaxRanks = 16;
+  t.rsSmallCommDdaLL128MaxRanks = 8;
   t.rsSmallCommDdaLL128MaxPerRank = 16 * kMiB;
   t.rsSmallCommRingLL128MaxPerRank = 32 * kMiB;
   t.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
@@ -7988,7 +7989,7 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         comm->nRanks = 16;
         EXPECT_EQ(16 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
-        EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "small-comm entry";
+        EXPECT_EQ(120 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "DDA entry stops at 8 ranks";
         comm->nRanks = 32;
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather)) << "clipped";
         EXPECT_EQ(64 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
@@ -9052,7 +9053,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
       });
 }
 
-// gfx1250 SPX ReduceScatter: DDA LL to its cap, LL128 to 224M below 8 ranks, nRanks x 16M at 8-16 ranks,
+// gfx1250 SPX ReduceScatter: DDA LL to its cap, LL128 to 224M below 8 ranks, nRanks x 16M at 8 ranks,
 // nRanks x 7.5M to 256M above, then Ring.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
   RUN_ISOLATED_TEST(
@@ -9086,7 +9087,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
           EXPECT_EQ(ll128, algo(c.second + (size_t)c.first * sizeof(float))) << c.first;
         }
         const std::pair<int, size_t> cases[] = {
-            {4, 224 * kMiB}, {8, 128 * kMiB}, {16, 256 * kMiB}, {32, 240 * kMiB}, {64, 256 * kMiB}};
+            {4, 224 * kMiB}, {8, 128 * kMiB}, {16, 120 * kMiB}, {32, 240 * kMiB}, {64, 256 * kMiB}};
         for (const auto& c : cases) {
           comm->nRanks = c.first;
           EXPECT_EQ(ll128, algo(c.second)) << c.first;

@@ -172,8 +172,10 @@ struct rcclArchThresholds {
 
   // ReduceScatter on rank-scaled comms of at most rsSmallCommMaxRanks ranks. A non-zero entry
   // replaces ddaLL128MaxPerRank[ReduceScatter] (still clipped to rankScaledMaxBytes) or
-  // rsRingLL128MaxPerRank (2- and 4-byte types). 0 ranks = off.
+  // rsRingLL128MaxPerRank (2- and 4-byte types). 0 ranks = off. The DDA LL128 entry further
+  // stops at rsSmallCommDdaLL128MaxRanks.
   int rsSmallCommMaxRanks;
+  int rsSmallCommDdaLL128MaxRanks;
   size_t rsSmallCommDdaLL128MaxPerRank;
   size_t rsSmallCommRingLL128MaxPerRank;
 

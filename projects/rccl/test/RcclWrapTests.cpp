@@ -3120,7 +3120,7 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), std::min(n * 16 * MiB, 256 * MiB))
                     << nRanks;
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter),
-                          std::min(n * (nRanks <= 16 ? 16 * MiB : 15 * MiB / 2), 256 * MiB))
+                          std::min(n * (nRanks <= 8 ? 16 * MiB : 15 * MiB / 2), 256 * MiB))
                     << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
                 // Unscaled tiers keep their totals.

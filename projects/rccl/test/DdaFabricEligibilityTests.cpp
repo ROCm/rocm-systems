@@ -1757,10 +1757,10 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AboveLlCapWithinLl128Ca
 
 // Scratch is sized the way fabric init does: LL enabled, AllReduce LL128 cap,
 // payload cap from the arch table. The ReduceScatter cap is read after nRanks
-// changes. Below rankScaledMinRanks it is the table total (224 MiB), at 8-16
+// changes. Below rankScaledMinRanks it is the table total (224 MiB), at 8
 // ranks nRanks times the 16 MiB small-comm entry, and above that nRanks times the
 // 7.5 MiB per-rank entry. The 2-rank shard is the largest;
-// 8 ranks at 128 MiB and 16 ranks at 256 MiB are the tightest slot fits.
+// 8 ranks at 128 MiB is the tightest slot fit.
 TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AtThresholdEligible)
 {
     const int savedRanks = mockComm_.comm.nRanks;
@@ -1771,7 +1771,7 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AtThresholdEligible)
         // Reading the cap before this assignment would check a 64 MiB shard here instead of the 112 MiB 2-rank shard.
         const size_t n = static_cast<size_t>(nRanks);
         const size_t expected = nRanks < 8 ? 224ULL * 1024 * 1024
-                                : nRanks <= 16 ? n * 16 * 1024 * 1024
+                                : nRanks <= 8 ? n * 16 * 1024 * 1024
                                                : n * 15 * 512 * 1024;
         EXPECT_EQ(totalCap, expected) << "nRanks=" << nRanks;
         mockComm_.comm.ddaScratchBytes = nccl_dda_detail::ddaFabricScratchSizing(
