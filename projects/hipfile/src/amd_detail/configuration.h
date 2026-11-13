@@ -55,6 +55,10 @@ public:
 
     /// @brief Override host backend enablement
     virtual void host(bool enabled) noexcept;
+
+    /// @brief Gets the size of the device stream pool
+    /// @return the size of the device stream pool in bytes
+    virtual size_t deviceStreamPoolSize() const noexcept;
 };
 
 }
