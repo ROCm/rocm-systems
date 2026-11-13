@@ -76,6 +76,13 @@ public:
      */
     void set(std::string_view param_id, std::string_view value, config_source source);
 
+    /**
+     * Store a value that is already parsed, such as one decoded from JSON.
+     * @throws std::runtime_error if the id is unknown or accepts_value() refuses it.
+     * Change callbacks follow the same rules as set().
+     */
+    void set_value(std::string_view param_id, config_value_t value, config_source source);
+
     [[nodiscard]] std::optional<std::string>   get(std::string_view param_id) const;
     [[nodiscard]] bool                         contains(std::string_view param_id) const;
     [[nodiscard]] std::optional<config_source> source_of(std::string_view param_id) const;
@@ -109,6 +116,8 @@ private:
 
     [[nodiscard]] std::shared_ptr<const schema> locked_schema() const;
     [[nodiscard]] std::optional<stored_value>   lookup(std::string_view param_id) const;
+    void store_parsed(std::string_view param_id, config_value_t value,
+                      config_source source);
 
     std::shared_ptr<const schema>                                      m_schema;
     mutable std::shared_mutex                                          m_mutex;
