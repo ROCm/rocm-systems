@@ -853,7 +853,7 @@ parse_metadata(std::string_view text, trace_description* trace, std::string* err
             throw parse_error{0,
                               "CTF " + std::to_string(trace->major) + "." +
                                   std::to_string(trace->minor) + " is not supported (1.8 is)"};
-        if(trace->streams.empty()) throw parse_error{0, "no stream"};
+        // A process that ended before it wrote any event declares no stream: an empty trace.
         return true;
     } catch(const std::exception& e)
     {

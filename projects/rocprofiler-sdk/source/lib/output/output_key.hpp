@@ -27,6 +27,8 @@
 
 #include <fmt/format.h>
 
+#include <sys/types.h>
+
 #include <string>
 #include <utility>
 #include <vector>
@@ -57,6 +59,23 @@ output_key::output_key(std::string _key, Tp&& _val, std::string _desc)
 , value{fmt::format("{}", std::forward<Tp>(_val))}
 , description{std::move(_desc)}
 {}
+
+// The process whose output is written. By default the current process; a tool that writes
+// output for another process (the out-of-process collector) sets it, so that %pid%, %ppid%
+// and the command-line keys describe that process.
+struct output_process
+{
+    pid_t                    pid          = 0;
+    pid_t                    ppid         = 0;
+    std::vector<std::string> command_line = {};
+};
+
+void
+set_output_process(const output_process& process);
+
+// Back to the current process.
+void
+reset_output_process();
 
 std::vector<output_key>
 output_keys(std::string _tag = {});

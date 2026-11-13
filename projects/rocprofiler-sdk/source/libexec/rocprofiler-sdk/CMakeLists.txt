@@ -22,3 +22,6 @@
 
 add_subdirectory(rocprofiler-sdk-launch-compiler)
 add_subdirectory(rocprofv3-doctor)
+if(ROCPROFILER_BUILD_COLLECTOR)
+    add_subdirectory(rocprofv3-collector)
+endif()

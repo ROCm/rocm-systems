@@ -339,6 +339,28 @@ TEST(ctf_reader, reports_decoding_errors)
     EXPECT_NE(result.error.find("bad packet magic"), std::string::npos) << result.error;
 }
 
+TEST(ctf_reader, reads_a_trace_without_streams)
+{
+    // A process that ended before writing an event: metadata without a stream, and empty
+    // stream files.
+    auto dir = scratch_dir{};
+    test::write_file(dir.path / "metadata", R"(/* CTF 1.8 */
+typealias integer { size = 32; align = 8; signed = false; } := uint32_t;
+trace {
+	major = 1;
+	minor = 8;
+	byte_order = le;
+	packet.header := struct { uint32_t magic; };
+};
+)");
+    test::write_file(dir.path / "channel0_0", "");
+
+    auto result = read_all(dir.path);
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_TRUE(result.events.empty());
+    EXPECT_EQ(result.stats.traces, 1u);
+}
+
 TEST(ctf_reader, finds_and_loads_traces)
 {
     auto dir = scratch_dir{};

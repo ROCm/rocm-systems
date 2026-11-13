@@ -308,6 +308,42 @@ The preceding command generates a ``marker-trace`` file prefixed with the proces
    "MARKER_CORE_API","Kokkos::parallel_reduce: fence due to result being value, not view",4069256,4069256,4,56728501767957,56728501769600
    "MARKER_CORE_API","Kokkos::Finalization Complete",4069256,4069256,6,56728502054554,56728502054554
 
+.. _hip-trace-collector:
+
+HIP trace without profiler code in the application (experimental)
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+With ``--collector`` (or ``ROCPROF_COLLECTOR=1``), ``rocprofv3`` loads nothing into the
+application. The HIP runtime's trace probes record its API calls through LTTng, and
+``rocprofv3`` runs the application, reads the trace when it exits, and writes the same output
+files in every format, with the same columns and argument text:
+
+.. code-block:: bash
+
+    rocprofv3 --collector --hip-trace -- <application_path>
+
+- Only HIP API tracing is available: ``--hip-trace``, ``--hip-runtime-trace`` and
+  ``--hip-compiler-trace``. Any other tracing, counter collection, thread trace, PC sampling and
+  attach (``--pid``) are errors with ``--collector``. ``--hip-trace`` also implies HIP graph and
+  HIP event tracing, which are not available yet: they are skipped with a warning, and are an
+  error when requested explicitly.
+- Before it starts the application, ``rocprofv3`` checks for what the collector needs, and
+  stops with an error naming what is missing:
+
+  - The LTTng tools (``lttng-sessiond``) of the ROCm installation, in ``lib/rocm_sysdeps``, or
+    in ``PATH``. Set ``ROCPROFILER_COLLECTOR_LTTNG_PREFIX`` to use another lttng-tools prefix.
+  - The HIP runtime's probe schema, ``share/rocm-trace/rocm_hip.json``, which a HIP runtime
+    built with its trace probes (``HIP_ENABLE_ROCM_TRACE``) installs. Set
+    ``ROCPROFILER_COLLECTOR_SCHEMA_DIR`` to its directory for a HIP runtime installed elsewhere.
+
+  An application that loads a different HIP runtime, without the probes, cannot be detected
+  before it runs: no calls are recorded, and ``rocprofv3`` warns.
+- Every process of the application's tree that loads HIP is traced, each with its own output
+  files, as without ``--collector``.
+- Calls that complete outside ``rocprofv3``'s interception today are included: calls made
+  before ``rocprofv3`` wraps the HIP tables, and the HIP teardown at exit (for example
+  ``__hipUnregisterFatBinary``).
+
 Kernel trace
 ++++++++++++++
 
