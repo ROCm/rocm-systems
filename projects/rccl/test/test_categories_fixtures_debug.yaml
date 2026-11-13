@@ -21,6 +21,7 @@ test_categories:
       - "ArgCheckTest.*"
       - "DdaIpcEligibilityTest.*"
       - "NetSocketTests.*"
+      - "BcmLinksTest.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
       - "NetDevsPolicyP2pNetTests.*"
