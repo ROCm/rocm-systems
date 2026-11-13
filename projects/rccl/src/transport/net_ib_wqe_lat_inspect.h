@@ -49,6 +49,10 @@ ncclResult_t ncclIbWqeLatTestStampSend(struct ncclIbWqeLatMon* m, struct ibv_sen
  * completion must not be slow: a slow report would read device state. */
 ncclResult_t ncclIbWqeLatTestHandleCompletion(struct ncclIbWqeLatMon* m, enum ibv_wc_opcode opcode, uint64_t tPollNs);
 
+/* Test-only. hostMem is the flush dummy payload; gpuMem is device dev's RO=0
+ * scratchpad, or null when that device has none. */
+ncclResult_t ncclIbGdrFlushGetScratch(void* recvComm, int dev, int** hostMem, int** gpuMem);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

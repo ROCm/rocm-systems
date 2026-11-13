@@ -688,7 +688,6 @@ irecvFail:
 ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void** mhandles, void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   ncclResult_t ret = ncclSuccess;
-  ncclResult_t iflushRet = ncclSuccess;
   struct ncclIbRequest* req = NULL;
   struct ncclIbMrHandle* mhandle = NULL;
   int last = -1;
@@ -714,8 +713,9 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (uint64_t)(req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
 
+    // Chain the unsignaled write to the signaled read: one post, RC send-queue order keeps the fence.
+    struct ibv_send_wr writeWr;
     if (useGpuFlushMem) {
-      struct ibv_send_wr writeWr;
       memset(&writeWr, 0, sizeof(writeWr));
       writeWr.wr_id = wr.wr_id;
       writeWr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
@@ -724,10 +724,8 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
       writeWr.num_sge = 1;
       writeWr.opcode = IBV_WR_RDMA_WRITE;
       writeWr.send_flags = 0;
-      struct ibv_send_wr* badWriteWr;
-      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr), ret, iflushFail);
-    }
-    if (useGpuFlushMem) {
+      writeWr.next = &wr;
+
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
     } else {
@@ -743,7 +741,8 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
           wr.wr_id);
     TIME_START(4);
     struct ibv_send_wr* bad_wr;
-    NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), iflushRet, iflushFail);
+    struct ibv_send_wr* postWr = useGpuFlushMem ? &writeWr : &wr;
+    NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, postWr, &bad_wr), ret, iflushFail);
     TIME_STOP(4);
 
     ncclIbAddEvent(req, i);

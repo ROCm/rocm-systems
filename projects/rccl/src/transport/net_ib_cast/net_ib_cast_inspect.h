@@ -142,6 +142,10 @@ struct ncclIbCastUdmaState {
  * Returns ncclInvalidArgument on null pointers. */
 ncclResult_t ncclIbCastGetUdmaState(void* sendComm, struct ncclIbCastUdmaState* out);
 
+/* Test-only. hostMem is the flush dummy payload; gpuMem is device dev's RO=0
+ * scratchpad, or null when that device has none. recvComm is an IbCastAccept comm. */
+ncclResult_t ncclIbCastGdrFlushGetScratch(void* recvComm, int dev, int** hostMem, int** gpuMem);
+
 /* ── Multiplane test-only wrappers (host-only, no HW). ── */
 
 /* Convert an IPv4 or IPv6 address string to the 16-byte ibv_gid representation.
