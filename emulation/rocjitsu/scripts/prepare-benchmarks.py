@@ -1003,7 +1003,7 @@ class Preparation:
 
     def validate_llama_build(self):
         build = self.root / 'llama-hip'
-        binary = build / 'bounded-ops'
+        binary = build / 'llama_bounded_ops'
         receipt_path = build / 'benchmark-build.json'
         require(
             self.diagnostic_file(binary) and self.diagnostic_file(receipt_path),
@@ -1016,7 +1016,10 @@ class Preparation:
             source=self.env['LLAMA_SOURCE'],
             backend='hip',
             targets=['gfx1100', 'gfx1201'],
-            binary_sha256=sha256(binary),
+            adapter_sha256=sha256(
+                Path(self.env['CORPUS_SOURCE_DIR'])
+                / 'corpus/benchmarks/llama/runner.cpp'
+            ),
         )
         require(
             all(receipt.get(k) == v for k, v in expected.items()),
@@ -1149,7 +1152,7 @@ class Preparation:
                 ],
             )
             self.validate_llama_build()
-            exports['ROCJITSU_LLAMA_BINARY'] = str(llama_build / 'bounded-ops')
+            exports['ROCJITSU_LLAMA_BINARY'] = str(llama_build / 'llama_bounded_ops')
         if any(name.startswith('gluon_') for name in workloads):
             self.run(
                 'gluon-prepare',

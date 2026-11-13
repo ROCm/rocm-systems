@@ -391,7 +391,7 @@ def test_tensile_revision_shell_consumes_declared_pin(tmp_path, matches):
 
 def test_benchmark_pin_and_unfiltered_execution():
     workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
-    assert workflow['env']['CORPUS_SHA'] == '2b7f6ab86da41f22b21a1c46ec0e8dff5c8f3144'
+    assert workflow['env']['CORPUS_SHA'] == 'f3d8c49d7f0ead0f7369eda577cd46d73aa54a93'
     benchmark = workflow['jobs']['benchmark']
     command = next(
         s['run'] for s in benchmark['steps'] if s['name'] == 'Run performance suite'

@@ -147,13 +147,29 @@ def test_rdna_artifacts_validate_exact_inventory_and_provenance(tmp_path, fault)
 
 
 @pytest.mark.parametrize(
-    'fault', ['none', 'pin', 'backend', 'target', 'hash', 'symlink']
+    'fault',
+    [
+        'none',
+        'schema',
+        'source',
+        'pin',
+        'backend',
+        'target',
+        'adapter-source',
+        'missing-adapter-hash',
+        'symlink',
+        'receipt-symlink',
+        'build-symlink',
+    ],
 )
 def test_llama_build_receipt_verified_before_export(tmp_path, fault):
     ctx = rdna_context(tmp_path)
     build = ctx.root / 'llama-hip'
     build.mkdir()
-    binary = build / 'bounded-ops'
+    adapter = Path(ctx.env['CORPUS_SOURCE_DIR']) / 'corpus/benchmarks/llama/runner.cpp'
+    adapter.parent.mkdir(parents=True)
+    adapter.write_text('// intercepted adapter source\n')
+    binary = build / 'llama_bounded_ops'
     binary.write_text('intercepted build; not native evidence')
     receipt = dict(
         schema='rocjitsu.benchmark.llama-build.v1',
@@ -161,21 +177,37 @@ def test_llama_build_receipt_verified_before_export(tmp_path, fault):
         source=ctx.env['LLAMA_SOURCE'],
         backend='hip',
         targets=['gfx1100', 'gfx1201'],
-        binary_sha256=load_helper().sha256(binary),
+        adapter_sha256=load_helper().sha256(adapter),
     )
+    assert 'binary_sha256' not in receipt
+    if fault == 'schema':
+        receipt['schema'] = 'unknown'
+    if fault == 'source':
+        receipt['source'] = str(tmp_path / 'other-source')
     if fault == 'pin':
         receipt['source_pin'] = 'a' * 40
     if fault == 'backend':
         receipt['backend'] = 'cpu'
     if fault == 'target':
         receipt['targets'] = ['gfx1100']
-    if fault == 'hash':
-        binary.write_text('modified')
+    if fault == 'adapter-source':
+        adapter.write_text('// modified adapter source\n')
+    if fault == 'missing-adapter-hash':
+        del receipt['adapter_sha256']
     if fault == 'symlink':
         outside = tmp_path / 'outside-binary'
         binary.rename(outside)
         binary.symlink_to(outside)
     (build / 'benchmark-build.json').write_text(json.dumps(receipt))
+    if fault == 'receipt-symlink':
+        receipt_path = build / 'benchmark-build.json'
+        outside = tmp_path / 'outside-receipt.json'
+        receipt_path.rename(outside)
+        receipt_path.symlink_to(outside)
+    if fault == 'build-symlink':
+        outside = tmp_path / 'outside-build'
+        build.rename(outside)
+        build.symlink_to(outside, target_is_directory=True)
     if fault == 'none':
         ctx.validate_llama_build()
     else:
@@ -254,7 +286,7 @@ workload = "gluon_copy"
             output.parent.mkdir()
             output.write_text('intercepted native build')
         if label == 'llama-prepare':
-            output = ctx.root / 'llama-hip/bounded-ops'
+            output = ctx.root / 'llama-hip/llama_bounded_ops'
             output.parent.mkdir()
             output.write_text('intercepted HIP build')
 
@@ -311,6 +343,7 @@ workload = "gluon_copy"
         str(ctx.root / 'reports/gluon-source.json'),
     ]
     exported = Path(ctx.env['GITHUB_ENV']).read_text()
+    assert f'ROCJITSU_LLAMA_BINARY={ctx.root}/llama-hip/llama_bounded_ops\n' in exported
     for key in (
         'FULL_TENSILE_ARTIFACTS',
         'FULL_TENSILE_RUNNER',

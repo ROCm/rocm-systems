@@ -53,7 +53,7 @@ env:
   GFX1100_CONFIG_FILENAME: gfx1100_w7900.json
   GFX1201_CONFIG_FILENAME: gfx1201_r9700.json
   # Temporary corpus PR-head pin; replace with the merged corpus commit before merging this workflow change.
-  CORPUS_SHA: 2b7f6ab86da41f22b21a1c46ec0e8dff5c8f3144
+  CORPUS_SHA: f3d8c49d7f0ead0f7369eda577cd46d73aa54a93
   TENSILE_SHA: dd77374194a3ea1a7258cd54f87af6747b6362a5
   FULL_TENSILE_SHA: 1c63e26254a357007ce2d963266085a30b39515b
   LLAMA_SHA: 26d52b0f9543f441fc2bfa383557c992a4fbf4b9
