@@ -31,8 +31,79 @@ static constexpr int kNumBatchSlots = 4;
 // memory with every slot.
 static constexpr int kMaxInFlightImages = 64;
 
+/**
+ * @brief The work of one worker, pass by pass over the image set (-n): which images it decodes on each pass, in order.
+ *
+ * At -n 1 the workers decode contiguous slices of the images, and the first (number of images % number of workers) slices
+ * have one image more. On every pass, a worker decodes its block: the same images, in the same order, as at -n 1. With
+ * batches that hold whole passes (see DecodeImages), this keeps the worker's decoder handle on the same images, in the same
+ * batches, on every pass. This matters for GPU memory: rocJPEG keeps memory per handle for every mix of images in a batch
+ * that the handle decodes, so a worker going over other images, or batching its own images differently, on later passes
+ * would keep adding to it.
+ *
+ * The leftover images, the extra last image of the first slices, go round the workers from pass to pass instead of
+ * staying with the first workers, so that every worker decodes the same number of images over the run, within one, and
+ * every image is still decoded exactly once per pass. A worker decodes at most one leftover image per pass, after its block,
+ * so only the last batch of a pass changes from pass to pass. At -n 1 they stay with the first workers, as before -n existed.
+ */
+class WorkPlan {
+    public:
+        WorkPlan() = default;
+        WorkPlan(size_t num_files, size_t num_workers, size_t worker_index, size_t num_iterations)
+            : num_workers_(num_workers), worker_index_(worker_index), num_iterations_(num_iterations),
+              block_size_(num_files / num_workers), num_leftover_(num_files % num_workers),
+              block_begin_(worker_index * block_size_ + std::min(worker_index, num_leftover_)) {}
+
+        // Gives this worker's next work item: the image it decodes, its pass over the image set, and whether -o saves the
+        // image from it. Returns false once the worker has no work left. Every image is saved from exactly one of its
+        // passes: the one at the same fraction of the passes as the image's position among the block or leftover images.
+        // This spreads the saves of the leftover images, which several workers share, over those workers. With -n 1 it is
+        // the only pass.
+        bool Next(size_t &file_index, size_t &pass, bool &save) {
+            for (; pass_ < num_iterations_; pass_++, offset_ = 0) {
+                size_t position, count;
+                if (offset_ < block_size_) {
+                    position = offset_;
+                    count = block_size_;
+                    file_index = block_begin_ + position;
+                } else if (offset_ == block_size_ && HasLeftover(pass_)) {
+                    position = LeftoverImage(pass_);
+                    count = num_leftover_;
+                    file_index = position * (block_size_ + 1) + block_size_;
+                } else {
+                    continue; // done with this pass
+                }
+                offset_++;
+                pass = pass_;
+                save = pass == position * num_iterations_ / count;
+                return true;
+            }
+            return false;
+        }
+
+        // Number of images this worker decodes on the given pass: its block, and on some passes a leftover image.
+        size_t PassSize(size_t pass) const { return block_size_ + (HasLeftover(pass) ? 1 : 0); }
+
+    private:
+        // Leftover image j is the last image of slice j. This worker decodes it on the passes p for which
+        // (j + p * num_leftover) % num_workers is this worker, so on every pass each leftover image has one worker.
+        size_t LeftoverImage(size_t pass) const {
+            return (worker_index_ + num_workers_ - pass * num_leftover_ % num_workers_) % num_workers_;
+        }
+        bool HasLeftover(size_t pass) const { return num_leftover_ > 0 && LeftoverImage(pass) < num_leftover_; }
+
+        size_t num_workers_ = 1;
+        size_t worker_index_ = 0;
+        size_t num_iterations_ = 0;
+        size_t block_size_ = 0;    // images every worker decodes on every pass
+        size_t num_leftover_ = 0;  // images left over after the blocks: the last image of each of the first slices
+        size_t block_begin_ = 0;   // first image of this worker's block
+        size_t pass_ = 0;          // position of the next work item: its pass,
+        size_t offset_ = 0;        // and its position in the pass
+};
+
 struct DecodeInfo {
-    std::vector<std::string> file_paths;
+    WorkPlan work;
     RocJpegHandle rocjpeg_handle;
     std::vector<RocJpegStreamHandle> rocjpeg_stream_handles;
     std::vector<RocJpegImage> output_images; // num_batch_slots * batch_size, batch_size per slot
@@ -59,6 +130,7 @@ struct BatchSlot {
     std::vector<std::vector<uint32_t>> heights;
     std::vector<RocJpegChromaSubsampling> subsamplings;
     std::vector<std::string> base_file_names;
+    std::vector<bool> save; // per image: whether to save it with -o; set on exactly one work item of each input image
     int current_batch_size = 0;
     std::chrono::high_resolution_clock::time_point submit_time; // just before rocJpegDecodeBatchedAsync()
 };
@@ -166,6 +238,12 @@ void SyncBatches(DecodeInfo &decode_info, std::vector<BatchSlot> &slots, BatchRi
 
         if (save_images) {
             for (int b = 0; b < slot.current_batch_size; b++) {
+                // With -n, an image is decoded once per pass, possibly by different workers at the same time. Save it
+                // from only one of those passes (see WorkPlan::Next), so that each output file is written once and by
+                // one thread.
+                if (!slot.save[b]) {
+                    continue;
+                }
                 std::string image_save_path = output_file_path;
                 //if ROI is present, need to pass roi_width and roi_height
                 uint32_t roi_width = slot.decode_params[b].crop_rectangle.right - slot.decode_params[b].crop_rectangle.left;
@@ -194,7 +272,8 @@ void SyncBatches(DecodeInfo &decode_info, std::vector<BatchSlot> &slots, BatchRi
  * overlap with the hardware decode of the previous batch, and the output copy or color conversion of a batch overlaps
  * with the hardware decode of the next.
  *
- * @param decode_info parameters info for decoding a batch of jpeg images.
+ * @param decode_info parameters info for decoding a batch of jpeg images, including this worker's work plan.
+ * @param file_paths All the input images, shared by every worker.
  * @param rocjpeg_utils Utility functions for RocJpeg operations.
  * @param decode_params Parameters for decoding the JPEG images (output_format, crop_rectangle)
  * @param save_images A boolean flag indicating whether to save the decoded images.
@@ -202,7 +281,7 @@ void SyncBatches(DecodeInfo &decode_info, std::vector<BatchSlot> &slots, BatchRi
  * @param batch_size The number of images to be processed in each batch.
  * @param num_batch_slots The number of batches that can be in flight at once.
  */
-void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDecodeParams &decode_params, bool save_images, std::string &output_file_path, int batch_size, int num_batch_slots, int device_id) {
+void DecodeImages(DecodeInfo &decode_info, const std::vector<std::string> &file_paths, RocJpegUtils rocjpeg_utils, RocJpegDecodeParams &decode_params, bool save_images, std::string &output_file_path, int batch_size, int num_batch_slots, int device_id) {
 
     uint8_t num_components;
     uint32_t channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
@@ -226,6 +305,7 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
         slot.heights.assign(batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
         slot.subsamplings.resize(batch_size);
         slot.base_file_names.resize(batch_size);
+        slot.save.resize(batch_size);
     }
     BatchRing ring(num_batch_slots);
     std::thread sync_thread(SyncBatches, std::ref(decode_info), std::ref(slots), std::ref(ring), std::ref(rocjpeg_utils),
@@ -238,15 +318,48 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
         ring.PushReadySlot(slot_index);
     };
 
+    // With -n, the image set is decoded num_iterations times so that a run lasts long enough to measure. This worker
+    // decodes its work items (see WorkPlan) pass by pass, in one loop.
+    WorkPlan &work = decode_info.work;
+
+    // Images that cannot be decoded are skipped on later visits instead of being read and parsed again. They are counted
+    // only on the first pass over the image set, which visits each image once, so each skipped image is counted once
+    // however many passes or workers visit it.
+    std::vector<bool> skipped_files(file_paths.size(), false);
+    auto skip_file = [&](size_t file_index, bool first_pass, uint64_t &num_skipped) {
+        skipped_files[file_index] = true;
+        if (first_pass) {
+            num_skipped++;
+        }
+    };
+
     int slot_index = -1;
-    for (size_t i = 0; i < decode_info.file_paths.size(); i++) {
+    size_t i, pass, current_pass = 0;
+    bool save_pass;
+    while (work.Next(i, pass, save_pass)) {
+        // Batches hold whole passes: a new pass starts a new batch unless all of it fits in the current one. A pass of at
+        // least a batch then decodes the same batches as every other pass, as -n 1 does, and smaller passes are packed
+        // several to a batch. Batches that ran on from one pass into the next would mix the images differently on every
+        // pass, and rocJPEG keeps GPU memory for every mix of images in a batch that it decodes, until it runs out.
+        if (pass != current_pass) {
+            const size_t batched = slot_index >= 0 ? slots[slot_index].current_batch_size : 0;
+            if (batched > 0 && batched + work.PassSize(pass) > static_cast<size_t>(batch_size)) {
+                submit_batch(slot_index);
+                slot_index = -1;
+            }
+            current_pass = pass;
+        }
+        const bool first_pass = pass == 0;
+        if (skipped_files[i]) {
+            continue;
+        }
         if (slot_index < 0) {
             slot_index = ring.AcquireFreeSlot();
             slots[slot_index].current_batch_size = 0;
         }
         BatchSlot &slot = slots[slot_index];
         int index = slot.current_batch_size;
-        const std::string &file_path = decode_info.file_paths[i];
+        const std::string &file_path = file_paths[i];
 
         // Read an image from disk.
         std::ifstream input(file_path.c_str(), std::ios::in | std::ios::binary | std::ios::ate);
@@ -268,7 +381,7 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
 
         RocJpegStatus rocjpeg_status = rocJpegStreamParse(reinterpret_cast<uint8_t*>(batch_images[index].data()), file_size, decode_info.rocjpeg_stream_handles[index]);
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-            decode_info.num_bad_jpegs++;
+            skip_file(i, first_pass, decode_info.num_bad_jpegs);
             continue;
         }
 
@@ -276,16 +389,16 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
 
         rocjpeg_utils.GetChromaSubsamplingStr(temp_subsampling, chroma_sub_sampling);
         if (temp_widths[0] < 64 || temp_heights[0] < 64) {
-            decode_info.num_jpegs_with_unsupported_resolution++;
+            skip_file(i, first_pass, decode_info.num_jpegs_with_unsupported_resolution);
             continue;
         }
 
         if (temp_subsampling == ROCJPEG_CSS_411 || temp_subsampling == ROCJPEG_CSS_UNKNOWN) {
             if (temp_subsampling == ROCJPEG_CSS_411) {
-                decode_info.num_jpegs_with_411_subsampling++;
+                skip_file(i, first_pass, decode_info.num_jpegs_with_411_subsampling);
             }
             if (temp_subsampling == ROCJPEG_CSS_UNKNOWN) {
-                decode_info.num_jpegs_with_unknown_subsampling++;
+                skip_file(i, first_pass, decode_info.num_jpegs_with_unknown_subsampling);
             }
             continue;
         }
@@ -316,6 +429,7 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
         slot.widths[index] = temp_widths;
         slot.heights[index] = temp_heights;
         slot.base_file_names[index] = file_path.substr(file_path.find_last_of("/\\") + 1);
+        slot.save[index] = save_pass;
         slot.current_batch_size++;
 
         if (slot.current_batch_size == batch_size) {
@@ -341,6 +455,7 @@ int main(int argc, char **argv) {
     bool save_images = false;
     int num_threads = 1;
     int batch_size = 1;
+    int num_iterations = 1;
     bool is_dir = false;
     bool is_file = false;
     RocJpegBackend rocjpeg_backend = ROCJPEG_BACKEND_HARDWARE;
@@ -350,9 +465,13 @@ int main(int argc, char **argv) {
     std::vector<std::string> file_paths = {};
     std::vector<DecodeInfo> decode_info_per_thread;
 
-    RocJpegUtils::ParseCommandLine(input_path, output_file_path, save_images, device_id, rocjpeg_backend, decode_params, &num_threads, &batch_size, argc, argv);
+    RocJpegUtils::ParseCommandLine(input_path, output_file_path, save_images, device_id, rocjpeg_backend, decode_params, &num_threads, &batch_size, argc, argv, &num_iterations);
     if (batch_size <= 0) {
         std::cerr << "ERROR: The batch size must be greater than 0!" << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (num_iterations <= 0) {
+        std::cerr << "ERROR: The number of iterations must be greater than 0!" << std::endl;
         return EXIT_FAILURE;
     }
     const int num_batch_slots = std::max(1, std::min(kNumBatchSlots, kMaxInFlightImages / batch_size));
@@ -365,8 +484,10 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    if (num_threads > file_paths.size()) {
-        num_threads = file_paths.size();
+    // One work item per image per iteration. With -n, the work items can keep more threads busy than there are images.
+    const size_t num_work_items = file_paths.size() * static_cast<size_t>(num_iterations);
+    if (static_cast<size_t>(num_threads) > num_work_items) {
+        num_threads = static_cast<int>(num_work_items);
     }
 
     decode_info_per_thread.resize(num_threads);
@@ -432,19 +553,16 @@ int main(int argc, char **argv) {
 
     ThreadPool thread_pool(num_threads);
 
-    size_t files_per_thread = file_paths.size() / num_threads;
-    size_t remaining_files = file_paths.size() % num_threads;
-    size_t start_index = 0;
+    // Split the work between the threads (see WorkPlan). With -n 1 each thread decodes the same slice of the images, in
+    // the same order, as before -n existed.
     for (int i = 0; i < num_threads; i++) {
-        size_t end_index = start_index + files_per_thread + (i < remaining_files ? 1 : 0);
-        decode_info_per_thread[i].file_paths.assign(file_paths.begin() + start_index, file_paths.begin() + end_index);
-        start_index = end_index;
+        decode_info_per_thread[i].work = WorkPlan(file_paths.size(), num_threads, i, num_iterations);
     }
 
-    std::cout << "Decoding started with " << num_threads << " threads, please wait!" << std::endl;
+    std::cout << "Decoding started with " << num_threads << " threads, " << num_iterations << " iteration(s) over the image set, please wait!" << std::endl;
     auto overall_start_time = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < num_threads; ++i) {
-        thread_pool.ExecuteJob(std::bind(DecodeImages, std::ref(decode_info_per_thread[i]), rocjpeg_utils, std::ref(decode_params), save_images, std::ref(output_file_path), batch_size, num_batch_slots, device_id));
+        thread_pool.ExecuteJob(std::bind(DecodeImages, std::ref(decode_info_per_thread[i]), std::cref(file_paths), rocjpeg_utils, std::ref(decode_params), save_images, std::ref(output_file_path), batch_size, num_batch_slots, device_id));
     }
     thread_pool.JoinThreads();
     auto overall_end_time = std::chrono::high_resolution_clock::now();

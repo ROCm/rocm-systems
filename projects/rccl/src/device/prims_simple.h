@@ -889,13 +889,9 @@ public:
       patBarrier</*isHierarchical=*/false>();
     }
   }
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
-#else
-    // The cheap post-peer fence is only safe with global DWORDX4 builtins
-    // (system-scope cache-bypassing stores); otherwise always use the full fence.
-    skip_fence = false;
-#endif
+  // No DWORDX4 builtins: only unregistered collectives (stores to the uncached FIFO) take the cheap fence.
+  skip_fence = RCCL_USE_CHEAP_POST_SEND_FENCE(
+    ncclShmem.comm.cheapPostSendFenceOff, rcclSimplePostSendRegisteredOrP2p(collWork));
 }
 
 __forceinline__ __device__ ~Primitives() {

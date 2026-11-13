@@ -49,6 +49,8 @@ VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -104,6 +106,8 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -159,6 +163,8 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -214,6 +220,8 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -269,6 +277,8 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -324,6 +334,8 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -379,6 +391,8 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -434,6 +448,8 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -489,6 +505,8 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -544,6 +562,8 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -599,6 +619,8 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -654,6 +676,8 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -709,6 +733,8 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -764,6 +790,8 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -819,6 +847,8 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -874,6 +904,8 @@ VCmpTF16Vopc::VCmpTF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -926,6 +958,8 @@ VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -978,6 +1012,8 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1030,6 +1066,8 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1082,6 +1120,8 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1134,6 +1174,8 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1186,6 +1228,8 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1238,6 +1282,8 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1290,6 +1336,8 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1342,6 +1390,8 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1394,6 +1444,8 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1446,6 +1498,8 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1498,6 +1552,8 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1550,6 +1606,8 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1602,6 +1660,8 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1654,6 +1714,8 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1706,6 +1768,8 @@ VCmpTF32Vopc::VCmpTF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1742,6 +1806,8 @@ VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1776,6 +1842,8 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1810,6 +1878,8 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1844,6 +1914,8 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1878,6 +1950,8 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1912,6 +1986,8 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1946,6 +2022,8 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -1980,6 +2058,8 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2014,6 +2094,8 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2048,6 +2130,8 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2082,6 +2166,8 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2116,6 +2202,8 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2150,6 +2238,8 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2184,6 +2274,8 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2218,6 +2310,8 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2252,6 +2346,8 @@ VCmpTF64Vopc::VCmpTF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2305,6 +2401,8 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -2362,6 +2460,8 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -2419,6 +2519,8 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -2476,6 +2578,8 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -2533,6 +2637,8 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -2590,6 +2696,8 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -2647,6 +2755,8 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -2704,6 +2814,8 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -2761,6 +2873,8 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -2818,6 +2932,8 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -2875,6 +2991,8 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -2932,6 +3050,8 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -2986,6 +3106,8 @@ VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3038,6 +3160,8 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3090,6 +3214,8 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3142,6 +3268,8 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3194,6 +3322,8 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3246,6 +3376,8 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3298,6 +3430,8 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3350,6 +3484,8 @@ VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3402,6 +3538,8 @@ VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3454,6 +3592,8 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3506,6 +3646,8 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3558,6 +3700,8 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3610,6 +3754,8 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3662,6 +3808,8 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3714,6 +3862,8 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3766,6 +3916,8 @@ VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3802,6 +3954,8 @@ VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3836,6 +3990,8 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3870,6 +4026,8 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3904,6 +4062,8 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3938,6 +4098,8 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3972,6 +4134,8 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4006,6 +4170,8 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4040,6 +4206,8 @@ VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4074,6 +4242,8 @@ VCmpFU64Vopc::VCmpFU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4108,6 +4278,8 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4142,6 +4314,8 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4176,6 +4350,8 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4210,6 +4386,8 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4244,6 +4422,8 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4278,6 +4458,8 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4312,6 +4494,8 @@ VCmpTU64Vopc::VCmpTU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -4365,6 +4549,8 @@ VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4417,6 +4603,8 @@ VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4453,6 +4641,8 @@ VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4509,6 +4699,8 @@ VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4567,6 +4759,8 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4625,6 +4819,8 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4683,6 +4879,8 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4741,6 +4939,8 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4799,6 +4999,8 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4857,6 +5059,8 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4915,6 +5119,8 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4973,6 +5179,8 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5031,6 +5239,8 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5090,6 +5300,8 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5149,6 +5361,8 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5208,6 +5422,8 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5267,6 +5483,8 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5326,6 +5544,8 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5385,6 +5605,8 @@ VCmpxTF16Vopc::VCmpxTF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5440,6 +5662,8 @@ VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5495,6 +5719,8 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5550,6 +5776,8 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5605,6 +5833,8 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5660,6 +5890,8 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5715,6 +5947,8 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5770,6 +6004,8 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5825,6 +6061,8 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5880,6 +6118,8 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5935,6 +6175,8 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5991,6 +6233,8 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6047,6 +6291,8 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6103,6 +6349,8 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6159,6 +6407,8 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6215,6 +6465,8 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6271,6 +6523,8 @@ VCmpxTF32Vopc::VCmpxTF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6310,6 +6564,8 @@ VCmpxFF64Vopc::VCmpxFF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6347,6 +6603,8 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6384,6 +6642,8 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6421,6 +6681,8 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6458,6 +6720,8 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6495,6 +6759,8 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6532,6 +6798,8 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6569,6 +6837,8 @@ VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6606,6 +6876,8 @@ VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6643,6 +6915,8 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6681,6 +6955,8 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6719,6 +6995,8 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6757,6 +7035,8 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6795,6 +7075,8 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6833,6 +7115,8 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6871,6 +7155,8 @@ VCmpxTF64Vopc::VCmpxTF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6927,6 +7213,8 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -6987,6 +7275,8 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -7047,6 +7337,8 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -7107,6 +7399,8 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -7167,6 +7461,8 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -7227,6 +7523,8 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -7287,6 +7585,8 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -7347,6 +7647,8 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -7407,6 +7709,8 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -7467,6 +7771,8 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -7527,6 +7833,8 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -7587,6 +7895,8 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
@@ -7644,6 +7954,8 @@ VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7699,6 +8011,8 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7754,6 +8068,8 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7809,6 +8125,8 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7864,6 +8182,8 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7919,6 +8239,8 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7974,6 +8296,8 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8029,6 +8353,8 @@ VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8084,6 +8410,8 @@ VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8139,6 +8467,8 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8194,6 +8524,8 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8249,6 +8581,8 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8304,6 +8638,8 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8359,6 +8695,8 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8414,6 +8752,8 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8469,6 +8809,8 @@ VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8508,6 +8850,8 @@ VCmpxFI64Vopc::VCmpxFI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8545,6 +8889,8 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8582,6 +8928,8 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8619,6 +8967,8 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8656,6 +9006,8 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8693,6 +9045,8 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8730,6 +9084,8 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8767,6 +9123,8 @@ VCmpxTI64Vopc::VCmpxTI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8804,6 +9162,8 @@ VCmpxFU64Vopc::VCmpxFU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8841,6 +9201,8 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8878,6 +9240,8 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8915,6 +9279,8 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8952,6 +9318,8 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8989,6 +9357,8 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9026,6 +9396,8 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9063,6 +9435,8 @@ VCmpxTU64Vopc::VCmpxTU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9119,6 +9493,8 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9175,6 +9551,8 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9215,6 +9593,8 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 

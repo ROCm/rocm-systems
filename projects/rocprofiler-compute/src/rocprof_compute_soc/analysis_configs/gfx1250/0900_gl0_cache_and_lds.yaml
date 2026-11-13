@@ -98,12 +98,12 @@ Panel Config:
         unit: Unit
       metric:
         Cache Lookup Hit Rate:
-          avg: 100 * SUM(1 - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum)
+          avg: 100 * SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum)
           min: 100 * MIN(1 - TX_VMW_REQ_MISS_sum / TX_VMW_REQ_sum)
           max: 100 * MAX(1 - TX_VMW_REQ_MISS_sum / TX_VMW_REQ_sum)
           unit: Percent
         Cache Sector Lookup Hit Rate:
-          avg: 100 * SUM(1 - TX_VMW_SECTOR_MISS_sum) / SUM(TX_VMW_SECTORS_sum)
+          avg: 100 * SUM(TX_VMW_SECTORS_sum - TX_VMW_SECTOR_MISS_sum) / SUM(TX_VMW_SECTORS_sum)
           min: 100 * MIN(1 - TX_VMW_SECTOR_MISS_sum / TX_VMW_SECTORS_sum)
           max: 100 * MAX(1 - TX_VMW_SECTOR_MISS_sum / TX_VMW_SECTORS_sum)
           unit: Percent
