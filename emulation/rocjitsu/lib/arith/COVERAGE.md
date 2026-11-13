@@ -55,7 +55,9 @@ unchanged, matching its documented gfx1201 behavior; true16-output DOT2 rejects
 mode 3. The 50% figure describes these two supported contracts out of four,
 not the ability to raise a flag on half of all DOT mnemonics.
 
-## CDNA and gfx1250 matrix migration
+## CDNA and gfx1250
+
+### Matrix instructions
 
 CDNA matrix support covers twenty gfx942 MFMA forms (FP16/BF16, XF32 and FP8/BF8),
 fourteen gfx950 half-input MFMA forms plus eight OCP FP8/BF8 forms, and five
@@ -63,4 +65,21 @@ gfx1250 half-input WMMA forms plus sixteen FP8/BF8 K64/K128 forms.
 gfx942 FP8/BF8 uses FNUZ; gfx950 and gfx1250 use OCP.
 All have scalar, AVX2 and AVX-512-v4 implementations. Loose, allow-Loose and
 Compatibility are supported; strict bit-exact modes are not advertised.
-Other CDNA instruction families retain their existing handlers.
+Comparison and register-routing instructions also use rj-arith. Other families
+are migrating independently; an entry point's header documents its supported
+semantics and controls.
+
+### Floating-point selection
+
+CDNA3/4 legacy MIN/MAX and MIN3/MAX3/MED3 support FP16/FP32, with binary
+FP64 MIN/MAX as well. gfx950 also has propagating FP32 MINIMUM3/MAXIMUM3.
+gfx1250 supports numeric and propagating binary/ternary selection, including
+packed FP16 forms. Loose and Compatibility retain their respective numerical
+and output-control policies, with scalar, AVX2 and AVX-512 paths.
+
+FP-status reporting is not implemented for these selection entry points, so
+explicit mode 3 stops execution. Mode 2 also rejects effective OMOD scaling on
+gfx950 propagating FP32 ternary selection. Selected NaN inputs are also rejected
+for gfx950/gfx1250 packed FP16 MINIMUM3/MAXIMUM3 and gfx1250 packed FP16
+MINIMUM/MAXIMUM, pending target qualification. Rejection leaves
+the destination unchanged; Compatibility continues to support these cases.
