@@ -17,8 +17,10 @@ Pre-built simulator configs are in `configs/`:
 | `gfx950_mi350x_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
 | `gfx950_mi350x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
+| `gfx1250_mi455x_4gpu_scaleup.json` | Four local CDNA5 GPUs with ScaleUp routes |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four MI455X GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x_kmd_2node_net.json` | Schematic two-node, one-GPU-per-node RCCL NET fixture |
+| `gfx1250_mi455x_kmd_4node_2gpu_if.json` | Four-node, two-GPU-per-node mixed P2P/NET fixture; see the [same-host RCCL gate](same-host-pod-rccl-gate.md#run-this-gate) |
 | `gfx1251_synthetic.json` | Minimal synthetic gfx1251 topology for functional simulation; not a product model |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
@@ -30,6 +32,10 @@ describe an MI350X (PCI device ID `0x75a0`). They remain only so that existing
 callers keep working; use the `gfx950_mi350x*` names instead. The
 `gfx950_mi355x*` configs will later describe an MI355X (PCI device ID `0x75a3`);
 see [#14644](https://github.com/ROCm/rocm-systems/issues/14644).
+
+`system.coherence_domains` describes GPU membership for inventory and
+validation. Changing that grouping does not grant peer-memory access or change
+runtime cache maintenance, which is assembled per SoC from the modeled routes.
 
 ### PCI/VFIO guest compatibility
 
@@ -50,9 +56,12 @@ For a two-node launch recipe with reference and NET-channel checks, see
 currently unqualified. A manifest's network or local fabric edges describe
 reachability; they do not grant peer memory access. Legacy replicated-GPU
 configs retain their XGMI links, hive ID, and XGMI SDMA count for
-compatibility. A manifest with those same GPUs suppresses the advertisement
-until its local peer routes can execute, so converting a legacy config to a
-manifest changes what ROCr discovers. Legacy single-GPU drivers also keep the
+compatibility. An explicit manifest suppresses that XGMI discovery metadata
+even when its local ScaleUp or Infinity Fabric routes execute through the
+VM-owned `FabricEndpoint`. Those routes model local effects behind the stock
+driver's UC PCIe peer BAR mappings; they do not establish native XGMI
+discovery or cacheable peer access. Converting a legacy config to a manifest
+therefore changes what ROCr discovers. Legacy single-GPU drivers also keep the
 old render-node routing: they claim any render minor even when their config
 advertises a different one. Manifest drivers select only their configured
 render minors. The daemon handshake carries this policy to remote clients, so
@@ -182,14 +191,16 @@ permit up to 16 partitions, while `num_threads: 4` assigns XCDs from both GPUs
 to each partition.
 
 `gfx950_mi350x_kmd_2gpu.json` (with its deprecated copy
-`gfx950_mi355x_kmd_2gpu.json`) and `gfx1250_mi455x_kmd_4gpu.json` are the
-shipped configs that still pin `num_threads: 1`. Any multi-partition setting on
-the 2-GPU config hangs RCCL collectives (`AllReduce`, `Broadcast`, `AllGather`,
-`ReduceScatter`) with the engine workers spinning and the simulation making no
-progress; point-to-point `SendRecv` is unaffected. The hang predates the default
-and reproduces with as few as two partitions. The 4-GPU config keeps the pin for
-the same reason, though the hang has only been characterised on the 2-GPU
-config. Remove the pins once it is fixed.
+`gfx950_mi355x_kmd_2gpu.json`), `gfx1250_mi455x_kmd_4gpu.json`,
+`gfx1250_mi455x_kmd_2node_net.json`, `gfx1250_mi455x_4gpu_scaleup.json`, and
+`gfx1250_mi455x_kmd_4node_2gpu_if.json` are the shipped multi-GPU KMD and
+scale-up fixture configs that pin `num_threads: 1`. Any multi-partition setting
+on the 2-GPU MI350X config hangs RCCL collectives (`AllReduce`, `Broadcast`,
+`AllGather`, `ReduceScatter`) with the engine workers spinning and the simulation
+making no progress; point-to-point `SendRecv` is unaffected. The hang predates
+the default and reproduces with as few as two partitions. The other configs keep
+the pin for the same reason, though the hang has only been characterised on the
+2-GPU config. Remove the pins once it is fixed.
 
 Raising `num_threads` only pays off if the work reaches more than one XCD, which
 is decided by `AqlQueueConfig::xcd_fanout` rather than by how the queue was created (see
@@ -354,6 +365,8 @@ The optional top-level `arithmetic` object selects one semantics mode for
 instructions executed through rj-arith, regardless of GPU architecture.
 Instructions not yet migrated to rj-arith retain their existing implementations
 and do not use this setting.
+On RDNA2 this includes FP32 FMA/FMAC, FP64 FMA, FP16 add/subtract/multiply,
+and VOP3 floating-point comparisons.
 
 ```json
 "arithmetic": {
@@ -502,7 +515,14 @@ to the correct device based on `gpu_id`.
 
 `configs/gfx950_mi350x_kmd_2gpu.json` is the default multi-GPU
 configuration for RCCL tests. `configs/gfx1250_mi455x_kmd_4gpu.json`
-provides a four-GPU daemon topology for explicit multi-GPU runs.
+provides a four-GPU daemon topology through legacy GPU replication.
+`configs/gfx1250_mi455x_4gpu_scaleup.json` is a separate explicit system
+manifest. It connects four GPUs using one abstract switch for functional
+testing. The four-GPU shape and links are simulator choices; they do not
+describe a physical tray, switch, bandwidth, timing, or peer-memory
+coherence. KFD peer discovery stays off until the routed data and coherence
+paths qualify separately.
+
 When the selected ROCm compiler parses `gfx1250`, its HIP runtime advertises
 that target, and its RCCL library exists, the build also produces
 `tests/hip_rccl_gfx1250_test`. This is a compilation gate for the numerically
@@ -531,5 +551,11 @@ This is an inactivity timeout policy, not a deadlock diagnosis: a process that
 keeps executing instructions can keep its waits alive indefinitely. Quiescence or insufficient
 residency never releases a GWS wait. Barriers require an explicit GWS INIT;
 unsupported residency can exhaust the budget but cannot produce a successful
-rendezvous. Checkpoints containing GWS resource state are rejected because the
-format does not serialize the shared table.
+rendezvous. Before checkpointing, processes must release their GWS resource
+tables and any device GDS state that the checkpoint cannot serialize. Resident
+RDNA2 waves may be running or waiting at a workgroup barrier once their memory
+counters have drained. Checkpoints preserve CU-owned LDS. Release shared WGP LDS
+and process-backed scratch reservations before saving. Restoring an active RDNA2 wave
+requires its recorded process, memory and register allocations, and sticky
+exception flags. An older checkpoint taken after all RDNA2 waves retired can
+still be restored.

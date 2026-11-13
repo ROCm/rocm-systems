@@ -122,15 +122,6 @@ pub(super) const SVM_FLAG_GPU_READ_ONLY: u32 = 0x08;
 pub(super) const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
 pub(super) const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
 pub(super) const SVM_FLAG_GPU_ALWAYS_MAPPED: u32 = 0x40;
-pub(super) const SVM_FLAG_EXT_COHERENT: u32 = 0x80;
-pub(super) const SVM_FLAGS: u32 = SVM_FLAG_HOST_ACCESS
-    | SVM_FLAG_COHERENT
-    | SVM_FLAG_HIVE_LOCAL
-    | SVM_FLAG_GPU_READ_ONLY
-    | SVM_FLAG_GPU_EXECUTE
-    | SVM_FLAG_GPU_READ_MOSTLY
-    | SVM_FLAG_GPU_ALWAYS_MAPPED
-    | SVM_FLAG_EXT_COHERENT;
 
 /// KFD UAPI version returned by `GET_VERSION`.
 #[repr(C)]

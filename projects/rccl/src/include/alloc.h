@@ -960,7 +960,8 @@ finish:
 
 template <typename T>
 ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char* filefunc, int line, struct ncclMemManager* manager,
-                                 ncclMemType_t memType = ncclMemPersist, unsigned int flags = hipDeviceMallocDefault) {
+                                 ncclMemType_t memType = ncclMemPersist, unsigned int flags = hipDeviceMallocDefault,
+                                 bool forceLegacy = false) {
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   *ptr = nullptr;
@@ -968,7 +969,7 @@ ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char* filefunc, in
   bool useCuMem = false;
 
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  useCuMem = ncclCuMemEnable();
+  useCuMem = ncclCuMemEnable() && !forceLegacy;
   if (nelem > 0) {
     if (useCuMem) {
       // ncclCuMemAlloc already zeroes the buffer (ROCM-20370 residue scrub),
@@ -1096,7 +1097,7 @@ finish:
 }
 
 template <typename T>
-ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegments = 1) {
+ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegments = 1, bool forceLegacy = false) {
   if (ptr == NULL) return ncclSuccess;
 
   // Check if process is shutting down. The atexit handler sets this flag
@@ -1121,7 +1122,7 @@ ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegment
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   // ncclCuMemFree updates allocTracker itself; only the cudaFree path is counted here.
-  bool useCuMem = ncclCuMemEnable();
+  bool useCuMem = ncclCuMemEnable() && !forceLegacy;
   TRACE(NCCL_ALLOC, "Cuda Free pointer %p", ptr);
 
   // get the size of the allocation for tracking

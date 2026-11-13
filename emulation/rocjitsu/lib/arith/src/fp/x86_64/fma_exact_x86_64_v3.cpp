@@ -9,7 +9,7 @@
 #include "common/simd.h"
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "fp/scalar_repair.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>

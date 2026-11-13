@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "async_mma_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
@@ -46,6 +47,8 @@ AdmissionCache::Words write_window(amdgpu::GpuMemory &memory, amdgpu::Instructio
 }
 
 TEST(MmaAdmissionCacheTest, BoundsRetainedPlansAndRebuildsAfterEviction) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   decoder->enable_pool();
   AdmissionCache cache(2, 3);
@@ -81,6 +84,8 @@ TEST(MmaAdmissionCacheTest, BoundsRetainedPlansAndRebuildsAfterEviction) {
 }
 
 TEST(MmaAdmissionCacheTest, ReplacesChangedCodeWithoutGrowingTheCache) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   decoder->enable_pool();
   AdmissionCache cache(2, 1);
@@ -105,6 +110,8 @@ TEST(MmaAdmissionCacheTest, ReplacesChangedCodeWithoutGrowingTheCache) {
 }
 
 TEST(MmaAdmissionCacheTest, RevalidatesAcceptedAndRejectedPlansBeyondTheInitialFetch) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   decoder->enable_pool();
   AdmissionCache cache;
@@ -190,6 +197,8 @@ private:
 };
 
 TEST(MmaAdmissionCacheTest, ReleasesTemporaryDecodesBeforeReturningAndSurvivesThreadMigration) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   for (bool pooled : {false, true}) {
     AdmissionCache cache;
     amdgpu::GpuMemory memory("decode_lifetimes");
