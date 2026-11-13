@@ -11466,6 +11466,8 @@ TEST_F(KfdCdna5PeerBindingTest, ProductionAqlTensorStoreRefreshesCachedRequester
         : ExecutionPlugin("initialize-tensor-store"), process_id_(process_id), address_(address),
           values_(values), endpoint_(endpoint), backing_word_(backing_word) {}
 
+    bool supports_async_instructions() const override { return false; }
+    bool observes_after_execute_instruction() const override { return true; }
     void onAmdgpuWavefrontDispatched(rocjitsu::amdgpu::Wavefront &wf) override {
       EXPECT_EQ(wf.process_id(), process_id_);
       wave = &wf;

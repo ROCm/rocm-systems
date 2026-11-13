@@ -140,8 +140,9 @@ public:
   /// observer owns suppression. This does not request register-access hooks.
   virtual bool observes_register_hazards() const { return false; }
 
-  /// Called on the issuer before the consuming instruction executes, including
-  /// before its ordinary before-execute or async-issue notification. The record
+  /// Called on the issuer during issue, before async submission or memory
+  /// publication. Usually precedes the before-execute hook; buffer payload
+  /// checks needing prepared lane masks run after address preparation. The record
   /// owns its instruction evidence; the wave is borrowed only for this callback.
   /// Does not apply the core stderr budget. The observer must not mutate the
   /// scoreboard or execute/replay instructions from this callback.

@@ -320,17 +320,17 @@ void RaceDetectorPlugin::onAmdgpuRegisterHazard(const amdgpu::RegisterHazardObse
   };
   auto details = [&]() -> util::FailureOr<std::string> {
     if (hazard.producer_instruction && hazard.consumer_instruction) {
-      // This hook precedes the consumer's instruction notification. Copy and
-      // extend the trace only when emitting a report, not on every instruction.
+      // The consumer's instruction notification may not have run yet. Include
+      // its owned encoding in a copy of the trace only when emitting a report.
       auto trace = state->trace;
       trace.push(*hazard.consumer_instruction);
       return formatTrace(trace, disassemble,
-                          MarkedInstruction{*hazard.producer_instruction, wave, -1},
-                          MarkedInstruction{*hazard.consumer_instruction, wave, lane});
+                         MarkedInstruction{*hazard.producer_instruction, wave, -1},
+                         MarkedInstruction{*hazard.consumer_instruction, wave, lane});
     }
     // Do not recover historical bytes by reading the code mapping at a saved PC.
-    const auto describe = [&](const std::optional<InstructionSnapshot> &instruction)
-        -> util::FailureOr<std::string> {
+    const auto describe =
+        [&](const std::optional<InstructionSnapshot> &instruction) -> util::FailureOr<std::string> {
       if (!instruction)
         return std::string("(encoding unavailable)");
       return disassemble(*instruction);
@@ -661,7 +661,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       // Each lane reads the leading bytes the execution recorded: the bytes of
       // its source inside the allocation. They are checked and registered at
       // byte granularity.
-      std::vector<LdsByteRange> ranges;
+      std::vector<amdgpu::LdsByteRange> ranges;
       ranges.reserve(wf.wf_size());
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         const uint32_t address = d.per_lane_lds_addr[lane];

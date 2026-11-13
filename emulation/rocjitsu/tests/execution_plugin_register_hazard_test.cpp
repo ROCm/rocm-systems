@@ -180,6 +180,114 @@ TEST(RegisterHazardPluginTest, RegisterCheckingUsesOnlyCoreFindings) {
   }
 }
 
+TEST(RegisterHazardPluginTest, ReportedHazardFailureStopsBeforeDependentEffects) {
+  class FailingHazardPlugin final : public ExecutionPlugin {
+  public:
+    explicit FailingHazardPlugin(bool reject)
+        : ExecutionPlugin(reject ? "reject-hazard" : "observe-hazard"), reject_(reject) {}
+    bool observes_register_hazards() const override { return true; }
+    bool observes_before_execute_instruction() const override { return true; }
+    bool observes_after_execute_instruction() const override { return true; }
+    bool observes_async_instruction_issued() const override { return true; }
+    bool observes_memory_routing() const override { return true; }
+    void onAmdgpuRegisterHazard(const RegisterHazardObservation &, const Wavefront &wave) override {
+      ++hazards;
+      if (reject_)
+        wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
+                                                "register hazard reporting failed");
+      else
+        EXPECT_EQ(wave.instruction_execution_error(), InstructionExecutionError::PluginFailure);
+    }
+    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &,
+                                          std::span<const uint32_t>) override {
+      ++before;
+    }
+    void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &, Wavefront &) override {
+      ++after;
+    }
+    void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &, Wavefront &) override {
+      ++async;
+    }
+    void onAmdgpuMemoryAccessRouted(const MemoryAccessObservation &, const Instruction &,
+                                    Wavefront &) override {
+      ++routed;
+    }
+    void onAmdgpuWavefrontCancelled(Wavefront &) override { ++cancelled; }
+    unsigned hazards = 0, before = 0, after = 0, async = 0, routed = 0, cancelled = 0;
+
+  private:
+    bool reject_;
+  };
+
+  enum class Consumer { Move, BufferStore, Mma };
+  for (auto consumer : {Consumer::Move, Consumer::BufferStore, Consumer::Mma})
+    for (uint32_t helpers : {0, 4}) {
+      SCOPED_TRACE(std::format("consumer={} helpers={}", static_cast<int>(consumer), helpers));
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "cdna5", 32, 128, 256, 1, helpers, "off"));
+      fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+      auto rejecting = std::make_unique<FailingHazardPlugin>(true);
+      auto observing = std::make_unique<FailingHazardPlugin>(false);
+      const std::array observers{rejecting.get(), observing.get()};
+      ASSERT_TRUE(fixture.plugin_group_->add(std::move(rejecting)));
+      ASSERT_TRUE(fixture.plugin_group_->add(std::move(observing)));
+      fixture.soc->set_plugin_group(fixture.plugin_group_);
+      auto *cu = fixture.cu();
+      auto *wave = cu->dispatch_wf(0, 0x1000, 128, 256, 32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(consumer == Consumer::Mma ? 0xffffffffULL : 1);
+      const RegisterAccess registers(*wave);
+      ASSERT_TRUE(registers.write_sgpr(wave->sgpr_alloc().base, 0x2000).succeeded());
+      ASSERT_TRUE(registers.write_sgpr(wave->sgpr_alloc().base + 2, 4).succeeded());
+      registers.write_vgpr(wave->vgpr_alloc().base + 4, 0, 0x12345678);
+      registers.write_vgpr(wave->vgpr_alloc().base + 64, 0, 0xfeed);
+      fixture.mem->write32(0x2000, 0xabcd);
+      Program program;
+      if (consumer == Consumer::Move)
+        program.emit(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 260, .vdst = 64}));
+      else if (consumer == Consumer::BufferStore)
+        program.emit(
+            cdna5::build_vbuffer(cdna5::kBufferStoreB32Vbuffer, {.soffset = 124, .vdata = 4}));
+      else
+        program.emit(
+            cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
+                               {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3}));
+      program.emit(cdna5::build_sopp(cdna5::kSEndpgmSopp));
+      fixture.mem->load_image(reinterpret_cast<const uint8_t *>(program.words.data()),
+                              program.words.size() * sizeof(uint32_t), 0x1000);
+      auto &scoreboard = wave->ensure_memory_wait_scoreboard();
+      scoreboard.add({scoreboard.issue(WaitCounterKind::Load),
+                      0x80,
+                      1,
+                      {RegClass::VGPR, 4, 1},
+                      WaitCounterKind::Load,
+                      0xf});
+      unsigned failures = 0;
+      cu->set_execution_failure_handler([&](Wavefront &failed) {
+        ++failures;
+        EXPECT_EQ(failed.pc, 0x1000u);
+        EXPECT_EQ(failed.instruction_execution_error(), InstructionExecutionError::PluginFailure);
+        EXPECT_STREQ(failed.instruction_execution_error_detail(),
+                     "register hazard reporting failed");
+        EXPECT_EQ(registers.read_vgpr(failed.vgpr_alloc().base + 64, 0), 0xfeedu);
+        EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::Store), 0u);
+        return false;
+      });
+      static_cast<void>(cu->step());
+      EXPECT_EQ(failures, 1u);
+      EXPECT_EQ(fixture.mem->read32(0x2000), 0xabcdu);
+      for (const auto *observer : observers) {
+        EXPECT_EQ(observer->hazards, 1u);
+        // Buffer payload lanes are known only after the address-preparation handler.
+        EXPECT_EQ(observer->before, consumer == Consumer::BufferStore ? 1u : 0u);
+        EXPECT_EQ(observer->after, 0u);
+        EXPECT_EQ(observer->async, 0u);
+        EXPECT_EQ(observer->routed, 0u);
+        EXPECT_EQ(observer->cancelled, 1u);
+      }
+    }
+}
+
 TEST(RegisterHazardPluginTest, Cdna2TrapEntryDrainsObserverStateIndependentOfCoreWarnings) {
   for (const bool warnings : {false, true}) {
     for (const bool handler_installed : {false, true}) {

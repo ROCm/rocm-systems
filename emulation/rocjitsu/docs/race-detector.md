@@ -180,9 +180,11 @@ Register records additionally include:
 | `lanes`, `bytes` | Actual overlapping lane mask and byte mask within a dword, in hexadecimal. Scalar lanes are all ones. |
 | `lane` | First overlapping vector lane, or -1 for a scalar/special register. |
 
-The trace uses the instruction encodings captured at execution, not code reread
-at a saved PC. The issuer reports before the consumer's instruction notification;
-the reporter includes the consumer's owned encoding in the displayed trace. If
+The trace uses captured instruction encodings, not code reread at a saved PC.
+The issuer usually reports before the consumer's instruction notification;
+buffer payload checks that need prepared lane masks run after address
+preparation, before memory publication. The reporter includes the consumer's
+owned encoding in the displayed trace in either case. If
 either encoding is unavailable, the report keeps both PCs and prints explicit
 `encoding unavailable` witnesses instead of a reconstructed trace.
 
@@ -321,7 +323,7 @@ completed LDS access still conflicts with an unsynchronized peer.
 The plugin supports asynchronous MMA execution. It records instruction evidence
 from the issuer's synchronous before-execute or accepted async-issue callback.
 The async callback reads no register values, and helper register accesses do not
-enter the race plugin. Core register findings precede either notification, so the
+enter the race plugin. For MMA, core register findings precede either notification, so the
 reporter includes the current consumer when extending its trace. Memory issue
 capacity handling remains in the synchronous before-execute hook.
 

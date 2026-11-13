@@ -572,7 +572,11 @@ TEST(PerfsimPluginConfigTest, RejectsInvalidObservedWorkgroupCaps) {
 
 TEST_F(PerfsimPluginTest, InterestsRequireSynchronousInstructionInspection) {
   ExecutionPluginGroup group(PluginSinkConfig{});
-  ASSERT_TRUE(group.add(std::make_unique<PerfsimPlugin>(plugin_config().c_str())));
+  auto plugin = std::make_unique<PerfsimPlugin>();
+  util::StringDiagnostic diagnostic;
+  ASSERT_TRUE(plugin->initialize(plugin_config().c_str(), diagnostic.emitter()).succeeded())
+      << diagnostic.message();
+  ASSERT_TRUE(group.add(std::move(plugin)));
   EXPECT_FALSE(group.supports_async_instructions());
   EXPECT_TRUE(group.observes_before_execute_instruction());
   EXPECT_TRUE(group.observes_memory_routing());

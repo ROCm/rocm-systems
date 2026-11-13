@@ -2701,6 +2701,14 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       wait_state && !wait_state->empty() && inst->is_memory_wait_producer() &&
       MemoryWaitScoreboard::needs_buffer_payload_lanes(*inst, config_.arch);
   bool wait_checked = false;
+  const auto check_memory_wait = [&] {
+    wait_state->check_instruction(*inst, *active);
+    if (active->instruction_execution_failed()) [[unlikely]] {
+      fail_current_instruction();
+      return false;
+    }
+    return true;
+  };
 
   if constexpr (EnableAsync) {
     bool may_submit = true;
@@ -2728,7 +2736,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     if (window) {
       window->before(*inst);
       if (wait_state && !wait_for_buffer_lanes) {
-        wait_state->check_instruction(*inst, *active);
+        if (!check_memory_wait())
+          return IssueOutcome::Issued;
         wait_checked = true;
       }
       const bool submitted = may_submit && window->submit_mma(decoded.value());
@@ -2752,8 +2761,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     }
   }
 
-  if (wait_state && !wait_checked && !wait_for_buffer_lanes)
-    wait_state->check_instruction(*inst, *active);
+  if (wait_state && !wait_checked && !wait_for_buffer_lanes && !check_memory_wait())
+    return IssueOutcome::Issued;
 
   struct ProbeWaitIssue {
     MemoryWaitScoreboard::IssueSnapshot before;
@@ -2897,7 +2906,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   const util::Result execution_result =
       execute_instruction(inst, *active, &execution_failure_detail_);
   if (wait_for_buffer_lanes) {
-    wait_state->check_instruction(*inst, *active);
+    if (!check_memory_wait())
+      return IssueOutcome::Issued;
     track_memory_wait(*inst, *active);
   }
 

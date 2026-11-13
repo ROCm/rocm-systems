@@ -3638,16 +3638,19 @@ TEST(GpuVmPipeline, TensorLoadCompletionFailureStopsResidentAndDeferredExecution
   public:
     explicit FailingCompletionObserver(amdgpu::Wavefront &wave)
         : ExecutionPlugin("failing-tensor-completion"), wave_(wave) {}
+    bool supports_async_instructions() const override { return false; }
+    bool observes_before_execute_instruction() const override { return true; }
     bool observes_tensor_dma_memory_access() const override { return true; }
-    void
-    onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override {
+    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
+                                       const amdgpu::Wavefront &wave) override {
       ++completions;
+      EXPECT_EQ(&wave, &wave_);
       EXPECT_EQ(access.pc, 0x1000u);
       wave_.report_instruction_execution_error(amdgpu::InstructionExecutionError::PluginFailure,
                                                "tensor completion failed");
     }
-    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
-                                          amdgpu::Wavefront &) override {
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, amdgpu::Wavefront &,
+                                          std::span<const uint32_t>) override {
       if (pc == 0x100c)
         ++successors;
     }
