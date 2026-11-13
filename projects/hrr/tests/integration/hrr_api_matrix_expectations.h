@@ -543,7 +543,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipArrayDestroy", "T5", 1, false, true, false, false},
     {"hipArrayGetDescriptor", "T5", 1, false, true, false, false},
     {"hipArrayGetInfo", "T5", 1, false, true, false, false},
-    {"hipArrayGetSparseProperties", "T5", 0, false, true, false, false},
+    {"hipArrayGetSparseProperties", "T5", 1, false, true, false, false},
     {"hipBindTexture", "T5", 0, true, true, false, false},
     {"hipBindTexture2D", "T5", 0, true, true, false, false},
     {"hipBindTextureToArray", "T5", 0, true, true, false, false},
