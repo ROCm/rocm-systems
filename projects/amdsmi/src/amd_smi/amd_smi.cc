@@ -6553,6 +6553,12 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
       info->pcie_static.pcie_interface_version = 0;
   }
 
+  if (smi_amdgpu_has_xgmi_host_link(gpu_device)) {
+    info->pcie_static.max_pcie_width = std::numeric_limits<uint16_t>::max();
+    info->pcie_static.max_pcie_speed = std::numeric_limits<uint32_t>::max();
+    info->pcie_static.pcie_interface_version = std::numeric_limits<uint32_t>::max();
+  }
+
   // default to PCIe
   info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_PCIE;
   rsmi_pcie_slot_type_t slot_type;

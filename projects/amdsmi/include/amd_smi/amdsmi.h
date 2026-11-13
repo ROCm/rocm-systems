@@ -8210,6 +8210,11 @@ amdsmi_status_t amdsmi_get_power_cap_info(amdsmi_processor_handle processor_hand
  *  @param[out] info Reference to the PCIe information
  *  returned by the library. Must be allocated by user.
  *
+ *  @note pcie_static.max_pcie_width, max_pcie_speed and pcie_interface_version describe the
+ *  GPU's PCIe host link, its PCIe connection to the host CPU. When KFD reports that the GPU
+ *  connects to the CPU over xGMI instead, there is no PCIe host link and these fields are set to
+ *  the maximum value of their type.
+ *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,

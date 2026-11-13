@@ -36,7 +36,11 @@
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/scoped_fd.h"
+#include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_io_link.h"
+#include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 std::string leftTrim(const std::string& s) {
@@ -710,6 +714,23 @@ amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uin
       return AMDSMI_STATUS_API_FAILED;
   }
   return AMDSMI_STATUS_SUCCESS;
+}
+
+bool smi_amdgpu_has_xgmi_host_link(amd::smi::AMDSmiGPUDevice* device) {
+  uint64_t kfd_gpu_id = 0;
+  const rsmi_status_t status = rsmi_dev_guid_get(device->get_gpu_id(), &kfd_gpu_id);
+  const auto& kfd_nodes = amd::smi::RocmSMI::getInstance().kfd_node_map();
+  const auto node = status == RSMI_STATUS_SUCCESS ? kfd_nodes.find(kfd_gpu_id) : kfd_nodes.end();
+  if (node == kfd_nodes.end()) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | GPU " << device->get_gpu_id() << ": rsmi_dev_guid_get "
+       << amd::smi::getRSMIStatusString(status, false);
+    if (status == RSMI_STATUS_SUCCESS) ss << ", gpu_id " << kfd_gpu_id << " has no KFD node";
+    ss << "; keeping the PCIe link values";
+    LOG_INFO(ss);
+    return false;
+  }
+  return node->second->numa_node_type() == amd::smi::IOLINK_TYPE_XGMI;
 }
 
 amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device,

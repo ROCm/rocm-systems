@@ -44,6 +44,9 @@ amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device
 amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int* length,
                                               char* version);
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed);
+// True when KFD reports the GPU's link to the CPU as xGMI: the GPU has no PCIe host link, and
+// the PCIe link in its config space is emulated. False otherwise, including when the lookup fails.
+bool smi_amdgpu_has_xgmi_host_link(amd::smi::AMDSmiGPUDevice* device);
 // PLX temperature is carried in gpu_metrics rather than hwmon. Reports
 // NOT_SUPPORTED when the reading holds the not-applicable sentinel (an APU has
 // no such sensor), otherwise writes *temperature.
