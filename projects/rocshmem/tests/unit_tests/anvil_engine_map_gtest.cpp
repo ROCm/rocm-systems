@@ -69,6 +69,14 @@ TEST(AnvilEngineMap, PreferredMaskSelectsAnEvenEngine) {
   EXPECT_EQ(preferredUsableEngine(0), -1);
 }
 
+TEST(AnvilEngineMap, PreferredMaskWithLoadSelectsTheLeastLoadedEvenEngine) {
+  EXPECT_EQ(leastLoadedPreferredEngine(0xfff, {2, 0, 2, 0, 1, 0, 2, 0, 2, 0, 2, 0}), 4);
+  EXPECT_EQ(leastLoadedPreferredEngine(0x0014, {0, 0, 3, 0, 1, 0, 0, 0}), 4);
+  EXPECT_EQ(leastLoadedPreferredEngine(0x0008, {0, 0, 5, 0}), 2);
+  EXPECT_EQ(leastLoadedPreferredEngine(0xfff, {}), 0);
+  EXPECT_EQ(leastLoadedPreferredEngine(0, {}), -1);
+}
+
 TEST(AnvilEngineMap, PartitionFoldsEvenWhenDoubledIdIsInRange) {
   // The partition path must apply the safe-engine fold even when the legacy map id is in range.
   EXPECT_TRUE(oamMapEngineNeedsFold(kCpxXgmi, kCpxTotal, 0));

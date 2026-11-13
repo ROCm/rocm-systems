@@ -28,7 +28,6 @@
 #include <hip/hip_runtime.h>
 
 #include <functional>
-#include <vector>
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "util.hpp"
@@ -43,59 +42,45 @@ namespace rocshmem {
 #if defined(USE_SDMA)
 class SdmaImpl {
  public:
-  static constexpr int kMaxPoolQueues = 64;   // one sdmaDirty bit per pool queue
-  static constexpr int kMaxPoolEngines = 32;
-
   // Configuration (set from environment variables during init)
-  // True only after the IPC pod agreed to use SDMA; init_constant_memory() derives
+  // True only after the node-local group agreed to use SDMA; init_constant_memory() derives
   // constmem.ipc_sdma_threshold from it. Stays false if sdmaHostInit never runs.
   bool sdmaEnabled{false};
-  // Bit q set = pool queue q has a pending non-blocking SDMA op. Tracked per queue rather than per
-  // (pe, channel) so it fits one word for any pod size.
+  // Dirty bitmask: bit (slot & 63) set = some slot with that residue has a pending SDMA op, where
+  // slot = local_pe * numChannels + ch. Up to 64 slots this is one bit per slot; past that, slots
+  // share bits and a quiet drains every slot of a set bit, which is conservative but correct.
   uint64_t sdmaDirty{0};
   size_t sdmaThreshold{256};  // Use SDMA for transfers >= 256B
   int numChannels{1};
   int sdmaChannel{0};       // Per-context base channel (= ctx_id % numChannels)
   int sdmaChannelStride{0}; // 0 = use sdmaChannel as-is; 1 = add wf_id offset
 
-  // Slot table [pod_size * numChannels], indexed by the pod position isIpcAvailable hands every
-  // caller, on- or off-node: deviceHandles_d[pod_pe * numChannels + channel]. Every slot points at
-  // a queue of this rank's pool, which spreads over all usable engines of its GPU. A queue can
-  // write any address the GPU maps, so off-node fabric peers use SDMA too.
+  // Device resources - 2D array: [shm_size * numChannels], indexed by the IPC pod position that
+  // isIpcAvailable hands every caller, so a pod spanning several hosts stays in bounds.
+  // Index as: deviceHandles_d[local_pe * numChannels + sdmaChannel]
+  // A peer on this host uses Anvil's per-device queues; a peer on another host of the pod uses
+  // queues of its own (Anvil remote-peer queues), written through its fabric-mapped memory.
   sdma_anvil::SdmaQueueDeviceHandle** deviceHandles_d{nullptr};
-  uint8_t* slotQueue_d{nullptr};       // pool queue index of each slot
-  uint64_t* peQueueMask_d{nullptr};    // [pod_size] pool queues any slot of that PE uses
-  sdma_anvil::SdmaQueueDeviceHandle** poolHandles_d{nullptr};  // [poolSize], by sdmaDirty bit
-
-  int shm_size{0};    // node-local ranks
-  int pod_size{0};    // IPC pod ranks; sizes the slot table and the agreement
+  int shm_size{0};     // IPC pod size: the slot count per channel and the agreement group
   int my_pe{0};
-  int local_rank{0};
-  int pod_rank{0};
-  // Host-side pool layout: numPoolLayers queues on each of poolEngines[0, numPoolEngines). Pool
-  // queue q sits on poolEngines[q % numPoolEngines]. poolId 0 means no pool is held.
-  int poolId{0};
-  int numPoolEngines{0};
-  int numPoolLayers{0};
-  int poolEngines[kMaxPoolEngines]{};
+  int pod_rank{0};     // this rank's position in the pod
+  int local_size{0};   // pod ranks on this host
+  int local_rank{0};   // this rank's position among them
+  // Host-side key of the queues this init connected (sdma_policy.cpp); 0 = none.
+  int wiringId{0};
 
-  // Gathers one int from every rank of the IPC pod into values[0, pod_size), indexed by pod rank.
-  // The caller has already written its own entry at values[pod_rank].
-  using PodAllGather = std::function<void(int* values)>;
+  // Gathers bytes_per_rank bytes from every pod rank into buf, indexed by pod rank. The caller has
+  // already written its own entry at buf + pod_rank * bytes_per_rank.
+  using PodAllGather = std::function<void(void* buf, int bytes_per_rank)>;
 
-  // Host initialization (called from IpcSdmaImpl::ipcHostInit). Collective over the IPC pod, so
-  // every rank that may pick the SDMA alltoall agrees on sdmaEnabled. local_pod_index[i] is the
-  // pod position of node-local rank i, which runs on HIP device i.
-  __host__ void sdmaHostInit(int pe, int local_size, int local_rank, int pod_size, int pod_rank,
-                             const std::vector<int>& local_pod_index,
-                             const PodAllGather& allGather);
+  // Host initialization (called from IpcSdmaImpl::ipcHostInit). Collective over the IPC pod: ranks
+  // exchange device and host ids, then agree on the connect result, so a failure on any rank drops
+  // SDMA on all of them (ranks that disagree on sdmaEnabled run incompatible alltoalls and hang).
+  __host__ void sdmaHostInit(int pe, int pod_size, int pod_rank, const PodAllGather& allGather);
   __host__ void sdmaHostStop();
-  // Fill the slot table from the pool, or with nulls when SDMA was dropped. local_pod_index is
-  // passed through rather than stored so SdmaImpl stays trivially device-constructible.
-  __host__ void sdmaPublishHandles(int deviceId, bool useQueues,
-                                   const std::vector<int>& local_pod_index);
-  __host__ bool sdmaBuildPool(int deviceId);
-  __host__ void sdmaReleasePool();
+  // Copy this rank's queue handles to deviceHandles_d, or nulls when SDMA was dropped.
+  __host__ void sdmaPublishHandles(int deviceId, bool useQueues);
+  __host__ void sdmaReleasePeers();
 
   // Device-side copy with optional wavefront-affine channel spreading.
   //
@@ -125,10 +110,11 @@ class SdmaImpl {
       atomic::threadfence<atomic::memory_scope::device,
                           atomic::memory_order::release>();
       sdma_anvil::put(*handle, dst, src, size);
-      // Mark the pool queue dirty so a later fence/quiet drains it. Blocking copies drain inline
-      // via quietAll, so the dirty bit would only cause a redundant poll in a later fence.
+      // Mark (local_pe, effective_channel) dirty so sdmaQuiet drains the right
+      // channel.  Blocking copies drain inline via quietAll, so the dirty bit
+      // is unnecessary and would only cause a redundant poll in a later fence.
       if constexpr (!is_blocking(Kind)) {
-        uint64_t bit = 1ULL << slotQueue_d[idx];
+        uint64_t bit = 1ULL << (idx & 63);
         atomic::fetch_or<atomic::memory_scope::device,
                          atomic::memory_order::relaxed>(&sdmaDirty, bit);
       }
@@ -136,38 +122,41 @@ class SdmaImpl {
     return handle;
   }
 
-  // Pool queues that copies to local_pe can have used.
+  // Dirty bits that copies to local_pe can have set.
   __device__ __forceinline__ uint64_t sdmaPeMask(int local_pe) const {
-    return peQueueMask_d[local_pe];
+    uint64_t mask = 0;
+    for (int ch = 0; ch < numChannels; ch++) mask |= 1ULL << ((local_pe * numChannels + ch) & 63);
+    return mask;
   }
 
-  // Drain the pool queues in mask that have pending work, clearing their dirty bits. A queue can
-  // be shared with other PEs; draining it fully is still correct, just conservative.
+  // Drain every slot whose dirty bit is set in `bits`.
+  __device__ void sdmaDrainBits(uint64_t bits) {
+    const int numSlots = shm_size * numChannels;
+    while (bits) {
+      int bit = __builtin_ffsll(bits) - 1;
+      for (int slot = bit; slot < numSlots; slot += 64) {
+        sdma_anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[slot];
+        if (handle != nullptr) sdma_anvil::quiet(*handle);
+      }
+      bits &= ~(1ULL << bit);
+    }
+  }
+
+  // Wait for pending SDMA ops in `mask`, clearing those dirty bits.
   // The caller must use rocshmem_ctx_fence(ctx, pe) for it to read sdmaDirty from
   // the same context (and SdmaImpl) that submitted the puts.
   __device__ void sdmaQuietMask(uint64_t mask) {
-    uint64_t was_dirty =
-      atomic::fetch_and<atomic::memory_scope::device,
-                        atomic::memory_order::relaxed>(&sdmaDirty, ~mask) & mask;
-    while (was_dirty) {
-      int bit = __builtin_ffsll(was_dirty) - 1;
-      sdma_anvil::quiet(*poolHandles_d[bit]);
-      was_dirty &= ~(1ULL << bit);
-    }
+    sdmaDrainBits(atomic::fetch_and<atomic::memory_scope::device,
+                                    atomic::memory_order::relaxed>(&sdmaDirty, ~mask) & mask);
   }
 
+  // Wait for SDMA completions for a specific PE across all channels.
   __device__ void sdmaQuiet(int local_pe) { sdmaQuietMask(sdmaPeMask(local_pe)); }
 
-  // Wait for all SDMA completions across every pool queue with pending work.
+  // Wait for all SDMA completions across all PEs and channels.
   __device__ void sdmaQuietAll() {
-    uint64_t dirty =
-      atomic::exchange<atomic::memory_scope::device,
-                       atomic::memory_order::relaxed>(&sdmaDirty, 0ULL);
-    while (dirty) {
-      int bit = __builtin_ffsll(dirty) - 1;
-      sdma_anvil::quiet(*poolHandles_d[bit]);
-      dirty &= ~(1ULL << bit);
-    }
+    sdmaDrainBits(atomic::exchange<atomic::memory_scope::device,
+                                   atomic::memory_order::relaxed>(&sdmaDirty, 0ULL));
   }
 };
 #endif  // USE_SDMA

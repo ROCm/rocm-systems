@@ -399,7 +399,7 @@ class IpcSdmaImpl : public IpcOnImpl {
   __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
     if (size >= constmem.ipc_sdma_threshold) {
       auto* handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
-      // Every pod slot points at a pool queue once SDMA is agreed, so nullptr is only a safety net.
+      // Every pod slot has a queue once SDMA is agreed, so nullptr is only a safety net.
       if (handle != nullptr) {
         if constexpr (is_blocking(Kind)) {
           handle->quietAll();

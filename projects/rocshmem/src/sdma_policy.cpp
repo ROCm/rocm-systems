@@ -24,7 +24,10 @@
 
 #include "sdma_policy.hpp"
 
-#include <algorithm>
+#include <unistd.h>
+
+#include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
@@ -41,13 +44,55 @@ namespace rocshmem {
 
 #if defined(USE_SDMA)
 
-__host__ void SdmaImpl::sdmaHostInit(int pe, int local_size, int lrank, int pod_sz, int prank,
-                                     const std::vector<int>& local_pod_index,
+namespace {
+
+// What every pod rank publishes about itself: the HIP device it runs on and a hash of its host.
+struct SdmaPeerInfo {
+  int32_t deviceId;
+  int32_t reserved;
+  uint64_t hostId;
+};
+static_assert(sizeof(SdmaPeerInfo) == 16, "exchanged as raw bytes");
+
+// FNV-1a of the hostname. Never 0, so 0 can mean "unknown".
+uint64_t sdmaHostId() {
+  char name[256] = {};
+  gethostname(name, sizeof(name) - 1);
+  uint64_t h = 1469598103934665603ull;
+  for (const char* c = name; *c != '\0'; ++c) {
+    h ^= static_cast<unsigned char>(*c);
+    h *= 1099511628211ull;
+  }
+  return h != 0 ? h : 1;
+}
+
+// Names a GPU on another host for Anvil's remote-peer queues, as the RCCL GIN factory does. A
+// collision would only make two such peers share a queue.
+uint64_t sdmaRemotePeerKey(const SdmaPeerInfo& p) {
+  return p.hostId ^ ((static_cast<uint64_t>(p.deviceId) + 1) * 0x9E3779B97F4A7C15ull);
+}
+
+// Host-side state of one sdmaHostInit, kept out of SdmaImpl so it stays trivially
+// device-constructible. Keyed by SdmaImpl::wiringId.
+struct SdmaWiring {
+  std::vector<SdmaPeerInfo> peers;           // by pod rank
+  std::vector<int> connectedDevs;            // local devices this init connected
+  std::vector<uint64_t> connectedRemotes;    // remote-peer keys this init connected
+};
+
+std::unordered_map<int, SdmaWiring>& sdmaWirings() {
+  static std::unordered_map<int, SdmaWiring> wirings;
+  return wirings;
+}
+
+int sdmaNextWiringId = 0;
+
+}  // namespace
+
+__host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
                                      const PodAllGather& allGather) {
   my_pe = pe;
-  shm_size = local_size;
-  local_rank = lrank;
-  pod_size = pod_sz;
+  shm_size = pod_sz;
   pod_rank = prank;
 
   // Read configuration from environment variables
@@ -62,209 +107,175 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int local_size, int lrank, int pod_
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
 
+  // Every rank joins the exchange, enabled or not: it is collective over the pod.
+  wiringId = ++sdmaNextWiringId;
+  SdmaWiring& wiring = sdmaWirings()[wiringId];
+  wiring.peers.assign(static_cast<size_t>(shm_size), SdmaPeerInfo{-1, 0, 0});
+  wiring.peers[static_cast<size_t>(pod_rank)] = SdmaPeerInfo{deviceId, 0, sdmaHostId()};
+  allGather(wiring.peers.data(), static_cast<int>(sizeof(SdmaPeerInfo)));
+
+  const uint64_t myHost = wiring.peers[static_cast<size_t>(pod_rank)].hostId;
+  local_size = 0;
+  local_rank = 0;
+  for (int p = 0; p < shm_size; p++) {
+    if (wiring.peers[static_cast<size_t>(p)].hostId != myHost) continue;
+    if (p < pod_rank) local_rank++;
+    local_size++;
+  }
+  const int remotePeers = shm_size - local_size;
+
   uint32_t queuesBefore = 0;
   int status = kSdmaDisabledByEnv;
   if (sdmaEnabled) {
-    LOG_INFO("SDMA init with threshold=%zu, channels=%d, local_size=%d, pod_size=%d",
-             sdmaThreshold, numChannels, shm_size, pod_size);
+    LOG_INFO("SDMA init with threshold=%zu, channels=%d, pod_size=%d (%d on this host)",
+             sdmaThreshold, numChannels, shm_size, local_size);
 
     // Initialize the Anvil library
     sdma_anvil::anvil.init();
     queuesBefore = sdma_anvil::anvil.queuesUsed();
     status = kSdmaReady;
 
-    // Peer access lets SDMA read and write the other local GPUs' heaps.
     int numDevices = 0;
     CHECK_HIP(hipGetDeviceCount(&numDevices));
-    for (int i = 0; i < std::min(shm_size, numDevices); i++) {
-      if (i != deviceId) sdma_anvil::EnablePeerAccess(deviceId, i);
+
+    // Connect to every pod peer. A peer on this host uses the per-device queues; a peer on another
+    // host gets queues of its own and no peer access, because the destination is its fabric-mapped
+    // memory. Queues a previous init left behind are reused. A failure is not acted on here; the
+    // pod agrees on the result below.
+    for (int p = 0; p < shm_size && status == kSdmaReady; p++) {
+      const SdmaPeerInfo& peer = wiring.peers[static_cast<size_t>(p)];
+      if (peer.hostId == myHost) {
+        const int dev = peer.deviceId;
+        if (dev < 0 || dev >= numDevices) {
+          LOG_ERROR("SDMA: pod rank %d reports device %d, not one of this host's %d", p, dev,
+                    numDevices);
+          status = kSdmaConnectFailed;
+          break;
+        }
+        if (sdma_anvil::anvil.getSdmaQueue(deviceId, dev, numChannels - 1) != nullptr) continue;
+        if (dev != deviceId) sdma_anvil::EnablePeerAccess(deviceId, dev);
+        if (!sdma_anvil::anvil.connect(deviceId, dev, numChannels)) {
+          LOG_ERROR("SDMA: connect failed from device %d to %d with %d channel(s)", deviceId,
+                    dev, numChannels);
+          status = kSdmaConnectFailed;
+          break;
+        }
+        wiring.connectedDevs.push_back(dev);
+      } else {
+        const uint64_t key = sdmaRemotePeerKey(peer);
+        if (sdma_anvil::anvil.getRemotePeerQueue(key, numChannels - 1) != nullptr) continue;
+        if (!sdma_anvil::anvil.connectRemotePeer(deviceId, key, numChannels)) {
+          LOG_ERROR("SDMA: connect failed from device %d to pod rank %d on another host with %d "
+                    "channel(s)", deviceId, p, numChannels);
+          status = kSdmaConnectFailed;
+          break;
+        }
+        wiring.connectedRemotes.push_back(key);
+      }
     }
-    // A failure is not acted on here; the pod agrees on the result below, because disagreeing on
-    // sdmaEnabled hangs alltoall.
-    if (!sdmaBuildPool(deviceId)) status = kSdmaConnectFailed;
+    if (status == kSdmaReady && remotePeers > 0) {
+      LOG_INFO("SDMA: %d of %d pod peers are on other hosts; each gets its own SDMA queue(s)",
+               remotePeers, shm_size);
+    }
   }
 
-  std::vector<int> statuses(pod_size, kSdmaDisabledByEnv);
+  std::vector<int> statuses(shm_size, kSdmaDisabledByEnv);
   statuses[pod_rank] = applyForcedFailure(status, local_rank, forcedFailureLocalRank());
   if (statuses[pod_rank] != status) {
     LOG_ERROR("SDMA: local rank %d reports a failed connect, forced by "
               "ROCSHMEM_SDMA_FAIL_CONNECT_LOCAL_RANK", local_rank);
   }
-  allGather(statuses.data());
-  const SdmaAgreement agreed = agreeSdmaStatus(statuses.data(), pod_size);
+  allGather(statuses.data(), static_cast<int>(sizeof(int)));
+  const SdmaAgreement agreed = agreeSdmaStatus(statuses.data(), shm_size);
 
   switch (agreed.decision) {
     case SdmaDecision::kCommit:
-      sdmaPublishHandles(deviceId, true, local_pod_index);
+      sdmaPublishHandles(deviceId, true);
       return;
     case SdmaDecision::kAllDisabled:
       LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
       // USE_SDMA testers index deviceHandles_d without checking sdmaEnabled.
-      sdmaPublishHandles(deviceId, false, local_pod_index);
+      sdmaPublishHandles(deviceId, false);
       return;
     case SdmaDecision::kFallbackConnectFailed:
       LOG_ERROR("SDMA: connect failed on pod rank(s) %s of %d; all of them fall back to IPC "
                 "memcpy. Lower ROCSHMEM_SDMA_NUM_CHANNELS or use fewer ranks per node to keep "
-                "SDMA", agreed.ranks.c_str(), pod_size);
+                "SDMA", agreed.ranks.c_str(), shm_size);
       break;
     case SdmaDecision::kFallbackEnvMismatch:
       LOG_ERROR("SDMA: ROCSHMEM_SDMA_ENABLED=0 on pod rank(s) %s of %d only; all of them fall "
                 "back to IPC memcpy. Set it the same on every rank", agreed.ranks.c_str(),
-                pod_size);
+                shm_size);
       break;
   }
 
-  const int released = numPoolEngines * numPoolLayers;
-  sdmaReleasePool();
+  const size_t released = wiring.connectedDevs.size() + wiring.connectedRemotes.size();
+  sdmaReleasePeers();
   if (status != kSdmaDisabledByEnv) {
     const uint32_t queuesAfter = sdma_anvil::anvil.queuesUsed();
     if (queuesAfter != queuesBefore) {
       LOG_WARN("SDMA: %u queue(s) held after the fallback, %u before init", queuesAfter,
                queuesBefore);
     } else {
-      LOG_INFO("SDMA: fallback released %d pool queue(s), %u queue(s) held", released,
-               queuesAfter);
+      LOG_INFO("SDMA: fallback released %zu peer(s), %u queue(s) held", released, queuesAfter);
     }
   }
   sdmaEnabled = false;
   // USE_SDMA testers index deviceHandles_d without checking sdmaEnabled.
-  sdmaPublishHandles(deviceId, false, local_pod_index);
+  sdmaPublishHandles(deviceId, false);
 }
 
-__host__ bool SdmaImpl::sdmaBuildPool(int deviceId) {
-  std::vector<uint32_t> engines = sdma_anvil::anvil.usableEngineIds();
-  if (engines.empty()) {
-    // Engine count unknown: fall back to the single engine connect() would use for self.
-    const int e = sdma_anvil::anvil.engineFor(deviceId, deviceId);
-    if (e < 0) {
-      LOG_ERROR("SDMA: no usable engine on device %d", deviceId);
-      return false;
-    }
-    engines.push_back(static_cast<uint32_t>(e));
-  }
-  const int maxEngines = std::min({static_cast<int>(engines.size()), kMaxPoolEngines,
-                                   kMaxPoolQueues});
-  const int maxLayers = std::max(1, std::min(numChannels, kMaxPoolQueues / maxEngines));
+__host__ void SdmaImpl::sdmaPublishHandles(int deviceId, bool useQueues) {
+  // Total number of handles: shm_size (pod) * numChannels
+  // Indexed as: deviceHandles_d[local_pe * numChannels + channel_idx]
+  int total_handles = shm_size * numChannels;
 
-  poolId = sdma_anvil::anvil.allocPoolId();
-  numPoolEngines = 0;
-  numPoolLayers = 0;
-  for (int layer = 0; layer < maxLayers; ++layer) {
-    int created = 0;
-    for (int e = 0; e < maxEngines; ++e) {
-      if (layer > 0 && e >= numPoolEngines) break;
-      if (sdma_anvil::anvil.createPoolQueue(deviceId, poolId, engines[static_cast<size_t>(e)]) ==
-          nullptr) {
-        break;
-      }
-      if (layer == 0) poolEngines[e] = static_cast<int>(engines[static_cast<size_t>(e)]);
-      ++created;
-    }
-    if (layer == 0) {
-      // Keep however many engines got a first queue; fewer engines is still SDMA.
-      numPoolEngines = created;
-      if (created == 0) break;
-      numPoolLayers = 1;
-    } else if (created < numPoolEngines) {
-      // Out of queue budget part way through a layer: keep only the complete layers.
-      sdma_anvil::anvil.trimPool(poolId, static_cast<size_t>(numPoolLayers * numPoolEngines));
-      break;
-    } else {
-      ++numPoolLayers;
-    }
-  }
+  // Allocate device-side array to hold SDMA queue device handles
+  CHECK_HIP(hipMalloc(&deviceHandles_d,
+                      total_handles * sizeof(sdma_anvil::SdmaQueueDeviceHandle*)));
 
-  if (numPoolEngines == 0) {
-    LOG_ERROR("SDMA: could not create any queue on device %d", deviceId);
-    sdmaReleasePool();
-    return false;
-  }
-  LOG_INFO("SDMA: device %d pool of %d engine(s) x %d queue(s) per engine (%zu usable engines)",
-           deviceId, numPoolEngines, numPoolLayers, engines.size());
-  return true;
-}
-
-__host__ void SdmaImpl::sdmaPublishHandles(int deviceId, bool useQueues,
-                                           const std::vector<int>& local_pod_index) {
-  const int numSlots = pod_size * numChannels;
-  const int poolSize = useQueues ? numPoolEngines * numPoolLayers : 0;
-
-  std::vector<sdma_anvil::SdmaQueueDeviceHandle*> handles_h(numSlots, nullptr);
-  std::vector<uint8_t> slotQueue_h(numSlots, 0);
-  std::vector<uint64_t> peMask_h(pod_size, 0);
-  std::vector<sdma_anvil::SdmaQueueDeviceHandle*> pool_h(std::max(poolSize, 1), nullptr);
-
+  // Copy device handles to device memory
+  std::vector<sdma_anvil::SdmaQueueDeviceHandle*> handles_h(total_handles, nullptr);
   if (useQueues) {
-    for (int q = 0; q < poolSize; q++) {
-      sdma_anvil::SdmaQueue* queue = sdma_anvil::anvil.getSdmaQueue(deviceId, poolId, q);
-      pool_h[q] = queue ? queue->deviceHandle() : nullptr;
-    }
-
-    // Starting engine per pod PE. Off-node PEs round-robin over the pool; on-node PEs start on the
-    // engine connect() would have picked for that device, so their routing is unchanged.
-    std::vector<int> baseEngine(pod_size);
-    for (int p = 0; p < pod_size; p++) baseEngine[p] = p % numPoolEngines;
-    for (int i = 0; i < static_cast<int>(local_pod_index.size()); i++) {
-      const int p = local_pod_index[i];
-      if (p < 0 || p >= pod_size) continue;
-      const int engine = sdma_anvil::anvil.engineFor(deviceId, i);
-      for (int e = 0; e < numPoolEngines; e++) {
-        if (poolEngines[e] == engine) {
-          baseEngine[p] = e;
-          break;
-        }
-      }
-    }
-
-    // Channels of one PE step across engines; PEs that share a starting engine step across that
-    // engine's queues, so concurrent peers contend on different write pointers.
-    for (int p = 0; p < pod_size; p++) {
+    const SdmaWiring& wiring = sdmaWirings()[wiringId];
+    const uint64_t myHost = wiring.peers[static_cast<size_t>(pod_rank)].hostId;
+    for (int i = 0; i < shm_size; i++) {
+      const SdmaPeerInfo& peer = wiring.peers[static_cast<size_t>(i)];
+      const bool local = peer.hostId == myHost;
       for (int ch = 0; ch < numChannels; ch++) {
-        const int e = (baseEngine[p] + ch) % numPoolEngines;
-        const int layer = (ch / numPoolEngines + p / numPoolEngines) % numPoolLayers;
-        const int q = layer * numPoolEngines + e;
-        const int idx = p * numChannels + ch;
-        handles_h[idx] = pool_h[q];
-        slotQueue_h[idx] = static_cast<uint8_t>(q);
-        peMask_h[p] |= 1ULL << q;
+        int idx = i * numChannels + ch;
+        sdma_anvil::SdmaQueue* queue =
+            local ? sdma_anvil::anvil.getSdmaQueue(deviceId, peer.deviceId, ch)
+                  : sdma_anvil::anvil.getRemotePeerQueue(sdmaRemotePeerKey(peer), ch);
+        handles_h[idx] = queue ? queue->deviceHandle() : nullptr;
       }
     }
   }
-
-  CHECK_HIP(hipMalloc(&deviceHandles_d, numSlots * sizeof(*deviceHandles_d)));
-  CHECK_HIP(hipMemcpy(deviceHandles_d, handles_h.data(), numSlots * sizeof(*deviceHandles_d),
-                      hipMemcpyHostToDevice));
-  CHECK_HIP(hipMalloc(&slotQueue_d, numSlots * sizeof(*slotQueue_d)));
-  CHECK_HIP(hipMemcpy(slotQueue_d, slotQueue_h.data(), numSlots * sizeof(*slotQueue_d),
-                      hipMemcpyHostToDevice));
-  CHECK_HIP(hipMalloc(&peQueueMask_d, pod_size * sizeof(*peQueueMask_d)));
-  CHECK_HIP(hipMemcpy(peQueueMask_d, peMask_h.data(), pod_size * sizeof(*peQueueMask_d),
-                      hipMemcpyHostToDevice));
-  CHECK_HIP(hipMalloc(&poolHandles_d, pool_h.size() * sizeof(*poolHandles_d)));
-  CHECK_HIP(hipMemcpy(poolHandles_d, pool_h.data(), pool_h.size() * sizeof(*poolHandles_d),
+  CHECK_HIP(hipMemcpy(deviceHandles_d, handles_h.data(),
+                      total_handles * sizeof(sdma_anvil::SdmaQueueDeviceHandle*),
                       hipMemcpyHostToDevice));
 }
 
-__host__ void SdmaImpl::sdmaReleasePool() {
-  // Only this init's pool: the channel map is process-global, so disconnect() would also destroy
-  // queues another user still holds.
-  if (poolId != 0) sdma_anvil::anvil.disconnectDevice(poolId);
-  poolId = 0;
-  numPoolEngines = 0;
-  numPoolLayers = 0;
+__host__ void SdmaImpl::sdmaReleasePeers() {
+  // Release only the queues this init connected: the channel maps are process-global, so
+  // disconnect() would also destroy queues another user still holds.
+  auto it = sdmaWirings().find(wiringId);
+  if (it == sdmaWirings().end()) return;
+  for (int dev : it->second.connectedDevs) sdma_anvil::anvil.disconnectDevice(dev);
+  for (uint64_t key : it->second.connectedRemotes) sdma_anvil::anvil.disconnectRemotePeer(key);
+  it->second.connectedDevs.clear();
+  it->second.connectedRemotes.clear();
 }
 
 __host__ void SdmaImpl::sdmaHostStop() {
   LOG_TRACE("SDMA stop");
-  CHECK_HIP(hipFree(deviceHandles_d));
-  CHECK_HIP(hipFree(slotQueue_d));
-  CHECK_HIP(hipFree(peQueueMask_d));
-  CHECK_HIP(hipFree(poolHandles_d));
-  deviceHandles_d = nullptr;
-  slotQueue_d = nullptr;
-  peQueueMask_d = nullptr;
-  poolHandles_d = nullptr;
-  sdmaReleasePool();
+  if (deviceHandles_d != nullptr) {
+    CHECK_HIP(hipFree(deviceHandles_d));
+    deviceHandles_d = nullptr;
+  }
+  sdmaReleasePeers();
+  sdmaWirings().erase(wiringId);
+  wiringId = 0;
 }
 
 #endif  // USE_SDMA
