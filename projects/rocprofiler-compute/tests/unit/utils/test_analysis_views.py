@@ -17,6 +17,7 @@ from conftest import ProfileModeImportGuard
 import utils
 from rocprof_compute_soc.metric_library import loader
 from utils.analysis_views import (
+    get_arch_alias_to_panel_id,
     iter_view_rows,
     load_views,
     view_metric_errors,
@@ -145,6 +146,13 @@ def test_view_metric_errors():
         "2.1.11 compute.branch_util has no 'peak_empirical'",
         "11.2.0 compute.made_up: not a metric of the arch's library",
     ]
+
+
+def test_an_arch_reads_only_the_aliases_of_its_own_views():
+    """Panel 30 (memory bandwidth analysis) has a view on gfx950 only, so its alias is
+    unknown on gfx942."""
+    assert get_arch_alias_to_panel_id("gfx950")["membw_analysis"] == "30"
+    assert "membw_analysis" not in get_arch_alias_to_panel_id("gfx942")
 
 
 def test_imports_only_profile_mode_dependencies(monkeypatch):

@@ -12,9 +12,9 @@ from memory_chart.units import PLAIN, display_unit, format_value, panel_units
     ("unit", "value", "expected"),
     [
         ("Percent", 66.66, "66.7%"),
-        ("Bytes/s", 1.5e9, "1.500 GB/s"),
-        ("Bytes/s", 0, "0.000 GB/s"),
-        ("KB per Wave", 0.625, "0.625 KB"),
+        ("GB/s", 1.5, "1.500 GB/s"),
+        ("GB/s", 0, "0.000 GB/s"),
+        ("KB per Wavefront", 0.625, "0.625 KB"),
         ("Bytes per Workgroup", 32768, "32.0 KB"),
         ("Cycles", 68.24, "68.2 cycles"),
         ("Registers", 64, "64.0"),
