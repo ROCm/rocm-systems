@@ -203,7 +203,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     if (!fifoSend) {
       if (nthreads != WARP_SIZE) {
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
-        barrier_generic(__atomic_signal_fence(__ATOMIC_SEQ_CST), nthreads, barrier_next, barriers);
+        barrier_generic_ordered(__atomic_signal_fence(__ATOMIC_SEQ_CST), nthreads, barrier_next, barriers,
+                                __ATOMIC_RELAXED, __ATOMIC_RELAXED);
         __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
       }
       return;

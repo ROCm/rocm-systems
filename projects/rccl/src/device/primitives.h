@@ -17,6 +17,11 @@
 
 #define NCCL_SPINS_BEFORE_CHECK_ABORT 10000
 #define barrier_generic(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR) \
+  barrier_generic_ordered(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)
+// ARRIVE_ORDER/WAIT_ORDER order the software arrive/spin on BARRIERS_PTR. A workgroup-scope release
+// there drains every outstanding store (s_wait_storecnt on gfx1250), so callers that order memory
+// with their own fences pass __ATOMIC_RELAXED.
+#define barrier_generic_ordered(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR, ARRIVE_ORDER, WAIT_ORDER) \
   do { \
     if (nthreads == threadsPerBlock) { \
       __THREAD_FENCE; \
@@ -27,10 +32,10 @@
       if (wid == 0) { \
         (BARRIER_NEXT) += (NWORKERS) / WARP_SIZE; \
         __THREAD_FENCE; \
-        __scoped_atomic_fetch_add((BARRIERS_PTR), 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_WRKGRP); \
+        __scoped_atomic_fetch_add((BARRIERS_PTR), 1, (ARRIVE_ORDER), __MEMORY_SCOPE_WRKGRP); \
         int spins = 0; \
         int rate_limit = 50; \
-        while (__scoped_atomic_load_n((BARRIERS_PTR), __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) < (BARRIER_NEXT)) { \
+        while (__scoped_atomic_load_n((BARRIERS_PTR), (WAIT_ORDER), __MEMORY_SCOPE_WRKGRP) < (BARRIER_NEXT)) { \
           spins++; \
           if (spins == NCCL_SPINS_BEFORE_CHECK_ABORT) { \
             if (__atomic_load_n(ncclShmem.comm.abortFlag, __ATOMIC_SEQ_CST)) { \
@@ -42,8 +47,7 @@
           if (spins == 0 && rate_limit > 0) { \
             rate_limit--; \
             traceData(__LINE__, threadIdx.x, \
-                      __scoped_atomic_load_n((BARRIERS_PTR), __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP), \
-                      (BARRIER_NEXT)); \
+                      __scoped_atomic_load_n((BARRIERS_PTR), (WAIT_ORDER), __MEMORY_SCOPE_WRKGRP), (BARRIER_NEXT)); \
           } \
           __builtin_amdgcn_s_sleep(1); \
         } \
