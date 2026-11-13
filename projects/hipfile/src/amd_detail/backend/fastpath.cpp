@@ -37,6 +37,17 @@ fastpathFallbackEligibleErrno(int err)
     return err == ENODEV || err == EREMOTEIO || err == ENOTTY;
 }
 
+// Stop trying the fastpath for the rest of the process if the error means it
+// can never succeed.
+static void
+maybeDisableFastpath(int err)
+{
+    // ENOTTY: the GPU driver has no AIS ioctl.
+    if (err == ENOTTY) {
+        Context<Configuration>::get()->fastpath(false);
+    }
+}
+
 /* The fastpath backend is used when:
  *  - Configuration::fastpath() is true. Among other things, this is false when
  *    ROCr is running on WSL2 (/dev/dxg), where AIS is not implemented
@@ -230,11 +241,7 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
     }
     catch (const std::system_error &e) {
         Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
-        // ENOTTY: the GPU driver has no AIS ioctl. That can't change while
-        // the process runs, so stop trying the fastpath.
-        if (e.code().value() == ENOTTY) {
-            Context<Configuration>::get()->fastpath(false);
-        }
+        maybeDisableFastpath(e.code().value());
         throw;
     }
     catch (...) {
@@ -358,6 +365,7 @@ async_fastpath_copy(void *userArgs)
     }
     catch (const std::system_error &sys_err) {
         op->bytes_transferred_internal = -hipFileInternalError;
+        maybeDisableFastpath(sys_err.code().value());
         if (op->failover && fastpathFallbackEligibleErrno(sys_err.code().value())) {
             op->failover->fallback_needed = true;
         }
