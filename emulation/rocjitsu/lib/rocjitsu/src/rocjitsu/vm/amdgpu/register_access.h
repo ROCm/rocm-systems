@@ -1710,6 +1710,44 @@ public:
     }
   }
 
+  /// @brief Read one dword from validated scalar storage without reporting an
+  /// instruction-visible register read.
+  /// @details Code that plans an instruction's accesses, or observes it, uses
+  /// this path to read encoding-selected control words such as a resource
+  /// descriptor, which are not register reads by the instruction itself. It is
+  /// header-only, so that self-contained plugins can use it. An SGPR the wave
+  /// does not own and an offset outside `range` give nullopt.
+  [[nodiscard]] std::optional<uint32_t> read_scalar_unobserved(const ScalarRegisterRange &range,
+                                                               uint32_t offset = 0) const {
+    const Wavefront &wf = wavefront();
+    if (offset >= range.width)
+      return std::nullopt;
+    const uint32_t index = range.index + offset;
+    const auto word = [index](uint64_t value) {
+      return static_cast<uint32_t>(value >> (index == 0 ? 0 : 32));
+    };
+    switch (range.storage) {
+    case ScalarRegisterStorage::SGPR:
+      // Like write_scalar_unobserved(), reach only this wave's SGPRs.
+      if (!cu_->owns_sgpr_range(wf, wf.sgpr_alloc().base + range.index, range.width))
+        return std::nullopt;
+      return cu_->read_sgpr_storage(wf.sgpr_alloc().base + index);
+    case ScalarRegisterStorage::FLAT_SCRATCH:
+      return word(read_sgpr_pair_unobserved(wf.scratch_base_));
+    case ScalarRegisterStorage::VCC:
+      return word(read_sgpr_pair_unobserved(wf.vcc_));
+    case ScalarRegisterStorage::TTMP:
+      return wf.ttmp(index);
+    case ScalarRegisterStorage::M0:
+      return wf.m0();
+    case ScalarRegisterStorage::EXEC:
+      return word(wf.exec_raw());
+    case ScalarRegisterStorage::DISCARD:
+      return 0u;
+    }
+    return std::nullopt;
+  }
+
   // Physical SGPR access. These APIs are for helpers that already know the
   // physical scalar register index. Reads may use a CU-bound compatibility path
   // that resolves one owner for the complete range. Writes require an explicit
@@ -1989,6 +2027,18 @@ private:
   }
 
   friend class MemoryWaitScoreboard;
+
+  /// Read a VCC or FLAT_SCRATCH pair as Wavefront::read_sgpr_pair() does, but
+  /// inline: Wavefront::read_backed_sgpr_pair() is out of line because
+  /// Wavefront cannot see ComputeUnitCore's storage.
+  [[nodiscard]] uint64_t read_sgpr_pair_unobserved(const Wavefront::SgprPair &pair) const {
+    if (!pair.backed_words)
+      return pair.local;
+    const uint32_t lo = cu_->read_sgpr_storage(pair.physical_base);
+    const uint64_t hi =
+        pair.backed_words == 2 ? cu_->read_sgpr_storage(pair.physical_base + 1) : pair.local >> 32;
+    return (hi << 32) | lo;
+  }
 
   /// Only explicitly qualified destinations preserve bytes outside their mask.
   [[nodiscard]] static uint8_t operand_write_byte_mask(const Operand &op) {

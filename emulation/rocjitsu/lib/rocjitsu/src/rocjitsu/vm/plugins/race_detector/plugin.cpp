@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -100,9 +101,149 @@ bool supports_counter_capacity(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_CDNA4:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return true;
   default:
     return false;
+  }
+}
+
+/// gfx1250 (CDNA5) issues an EXEC-zero memory instruction and counts it, unless
+/// it is skipped: "VMEM can be skipped only if: EXEC == 0 and LOADcnt / STOREcnt
+/// / ASYNCcnt / TENSORcnt == 0", FLAT also requires DScnt == 0, and "LDS can be
+/// skipped only if: DScnt==0 and EXEC==0" (CDNA5 ISA 3.2.2.1). A skipped
+/// instruction leaves no older operation on those counters to complete, so
+/// either way its admission is sound.
+bool exec_zero_memory_issue_counts(rj_code_arch_t arch) { return arch == ROCJITSU_CODE_ARCH_CDNA5; }
+
+/// The obligations on which a gfx1250 memory instruction issued with EXEC zero
+/// is sure to count. It is skipped only when the counters its encoding names are
+/// all zero (CDNA5 ISA 3.2.2.1): "VMEM can be skipped only if: EXEC == 0 and
+/// LOADcnt / STOREcnt / ASYNCcnt / TENSORcnt == 0", FLAT also requires DScnt ==
+/// 0, and "LDS can be skipped only if: DScnt==0 and EXEC==0". On those counters
+/// it either counts or was skipped because they were empty, so admitting it and
+/// recording its slot are sound. On any other counter, such as the ASYNCcnt of
+/// ds_atomic_async_barrier_arrive_b64, an LDS instruction, it may be skipped
+/// while the counter is nonzero, so that obligation is left out.
+amdgpu::MemoryIssueInfo exec_zero_counted_obligations(const amdgpu::MemoryIssueInfo &info,
+                                                      std::string_view mnemonic) {
+  const bool lds = mnemonic.starts_with("ds_");
+  const bool flat = mnemonic.starts_with("flat_");
+  amdgpu::MemoryIssueInfo counted;
+  counted.exec_masked = info.exec_masked;
+  for (const auto obligation : info.counter_obligations()) {
+    bool counts = false;
+    switch (obligation.wait_counter_type()) {
+    case amdgpu::WaitCounterType::DSCNT:
+      counts = lds || flat;
+      break;
+    case amdgpu::WaitCounterType::LOADCNT:
+    case amdgpu::WaitCounterType::STORECNT:
+    case amdgpu::WaitCounterType::ASYNCCNT:
+    case amdgpu::WaitCounterType::TENSORCNT:
+      counts = !lds;
+      break;
+    default:
+      break;
+    }
+    if (counts)
+      counted.counter_obligations_[counted.num_counter_obligations_++] = obligation;
+  }
+  return counted;
+}
+
+/// A gfx1250 VBUFFER instruction whose resource descriptor TYPE is not a buffer
+/// is ignored (CDNA5 ISA 9.6), so it applies no backpressure and holds no
+/// counter slot. If hardware still counted it, leaving it out only keeps older
+/// operations pending longer.
+bool ignored_memory_issue(const Instruction &inst, const amdgpu::Wavefront &wf) {
+  // Every gfx1250 VBUFFER instruction has conditional memory lanes, so others
+  // skip decoding their register modifiers.
+  if (wf.cu().arch() != ROCJITSU_CODE_ARCH_CDNA5 || !(inst.flags() & CONDITIONAL_MEMORY_LANES))
+    return false;
+  amdgpu::RegisterModifiers modifiers;
+  inst.amdgpu_register_modifiers(modifiers);
+  return amdgpu::addr_calc::cdna5_ignores_buffer_resource(modifiers, wf);
+}
+
+/// Record a counter slot that an instruction holds without registers or LDS
+/// bytes, as an event, so that later capacity checks and partial waits count
+/// it. Two kinds of gfx1250 instruction hold one:
+/// - A memory instruction issued with EXEC zero, on the counters
+///   exec_zero_counted_obligations() selects. Recording the slot is sound even
+///   if the instruction was skipped: those counters were then zero, so every
+///   earlier operation on them had completed, and oldest-first retirement
+///   reaches the slot before any later operation. A FLAT instruction's slots
+///   are recorded by register_unused_flat_domains(), so its routed obligations
+///   here are empty.
+/// - A wait-counter producer without memory issue metadata, on the counter
+///   counter_only_slot() selects.
+void register_counter_slot(WaveRaceState &race, const InstructionSnapshot &instruction,
+                           std::span<const amdgpu::MemoryCounterObligation> obligations,
+                           MemoryOrderClass memoryOrder, bool is_load) {
+  if (obligations.empty())
+    return;
+  race.registerEvent(instruction,
+                     is_load ? MemoryEventType::GLOBAL_TO_VGPR : MemoryEventType::VGPR_TO_GLOBAL,
+                     /*registers=*/{}, /*execMask=*/0, /*byteMask=*/0xF, obligations, memoryOrder);
+}
+
+/// The counter slot a gfx1250 wait-counter producer without memory issue
+/// metadata takes when it issues, and whether it returns data:
+/// - GLOBAL_INV counts on LOADcnt, and GLOBAL_WB and GLOBAL_WBINV on STOREcnt
+///   (CDNA5 ISA 5.7.1.2), in order with the VMEM operations on that counter, as
+///   LLVM orders GLOBAL_INV with VMEM reads. None is skipped for EXEC zero
+///   (CDNA5 ISA 3.2.2.1).
+/// - The LDS lane permutes and DS_SWIZZLE_B32 use the LDS hardware without LDS
+///   memory (CDNA5 ISA 11.2.3), and LDS operations count on DScnt and are kept
+///   in order (CDNA5 ISA 5.7.1.4). With EXEC zero one is skipped only when
+///   DScnt is zero (CDNA5 ISA 3.2.2.1), so its admission is sound either way.
+/// - DS_NOP holds an ordered DScnt slot too, as the core memory-wait checker
+///   models it; the ISA describes it only as "Do nothing".
+struct CounterOnlySlot {
+  amdgpu::MemoryCounterObligation obligation;
+  bool is_load;
+};
+
+std::optional<CounterOnlySlot> counter_only_slot(std::string_view mnemonic) {
+  using amdgpu::MemoryCompletionClass;
+  using amdgpu::WaitCounterType;
+  if (mnemonic == "global_inv")
+    return CounterOnlySlot{{WaitCounterType::LOADCNT, MemoryCompletionClass::VMEM}, true};
+  if (mnemonic == "global_wb" || mnemonic == "global_wbinv")
+    return CounterOnlySlot{{WaitCounterType::STORECNT, MemoryCompletionClass::VMEM}, false};
+  if (mnemonic == "ds_permute_b32" || mnemonic == "ds_bpermute_b32" ||
+      mnemonic == "ds_bpermute_fi_b32" || mnemonic == "ds_swizzle_b32" || mnemonic == "ds_nop")
+    return CounterOnlySlot{{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}, true};
+  return std::nullopt;
+}
+
+/// On gfx1250 (CDNA5) "Every Flat instruction increments both DScnt and either
+/// LOADcnt or STOREcnt when the instruction issues" (CDNA5 ISA 5.7.1.3),
+/// whichever memory its addresses resolve to.
+bool flat_counts_on_both_domains(rj_code_arch_t arch) { return arch == ROCJITSU_CODE_ARCH_CDNA5; }
+
+/// Record each counter slot that a gfx1250 FLAT instruction takes in a memory
+/// domain its addresses did not use, as an event with no registers and no LDS
+/// bytes. The slot completes in order with that domain's other operations: the
+/// LDS portion of a FLAT stays in order with LDS instructions, and the VMEM
+/// portion with other VMEM operations (CDNA5 ISA 5.7.1.3). Recording it lets
+/// later capacity checks and partial waits count it, as hardware does.
+/// `routed` holds the obligations of the domains the addresses used; its
+/// event carries the instruction's data dependencies.
+void register_unused_flat_domains(WaveRaceState &race, const InstructionSnapshot &instruction,
+                                  const amdgpu::MemoryIssueInfo &decoded,
+                                  const amdgpu::MemoryIssueInfo &routed, bool is_load) {
+  for (const auto obligation : decoded.counter_obligations()) {
+    const bool used = std::ranges::any_of(routed.counter_obligations(), [&](const auto routed_one) {
+      return routed_one.wait_counter_type() == obligation.wait_counter_type();
+    });
+    if (used)
+      continue;
+    const std::array slot{obligation};
+    race.registerEvent(
+        instruction, is_load ? MemoryEventType::GLOBAL_TO_VGPR : MemoryEventType::VGPR_TO_GLOBAL,
+        /*registers=*/{}, /*execMask=*/0, /*byteMask=*/0xF, slot, obligation.completion_class());
   }
 }
 
@@ -463,11 +604,30 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   const auto &issue = routed ? *routed : *decoded;
   const auto obligations = issue.counter_obligations();
   const MemoryOrderClass memoryOrder = memoryOrderForObligations(obligations);
-  if (routed && access.request_lane_mask != 0 && supports_counter_capacity(wf.cu().arch()) &&
-      rs->prepareForMemoryIssue(issue).failed()) {
+  // On the pre-GFX12 capacity targets, FLAT is admitted here, on the domains
+  // its addresses used. On gfx1250 it counts on both domains and was admitted
+  // at issue.
+  const bool flatOnBothDomains = routed && flat_counts_on_both_domains(wf.cu().arch());
+  if (routed && !flatOnBothDomains && access.request_lane_mask != 0 &&
+      supports_counter_capacity(wf.cu().arch()) && rs->prepareForMemoryIssue(issue).failed()) {
     report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
     return;
   }
+  if (flatOnBothDomains)
+    register_unused_flat_domains(*rs, instruction, *decoded, *routed,
+                                 inst.data_as<amdgpu::VectorMemState>()->is_load);
+
+  // A gfx1250 instruction issued with wave EXEC zero holds its counter slot. An
+  // access whose lanes are all cleared while EXEC is active records none, and
+  // neither does an ignored buffer instruction (see ignored_memory_issue()).
+  const auto record_exec_zero_slot = [&](bool is_load) {
+    if (!exec_zero_memory_issue_counts(wf.cu().arch()) || wf.exec() != 0 ||
+        ignored_memory_issue(inst, wf))
+      return;
+    const auto counted = exec_zero_counted_obligations(issue, inst.mnemonic());
+    register_counter_slot(*rs, instruction, counted.counter_obligations(),
+                          memoryOrderForObligations(counted.counter_obligations()), is_load);
+  };
 
   const uint64_t sharedLanes = access.flat_local_lane_mask | access.flat_dds_lane_mask;
   const bool mixedFlat = inst.data()->tag() == amdgpu::GLOBAL_MEM && sharedLanes != 0;
@@ -478,8 +638,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     // dependencies, but do not access bytes in the ordinary LDS allocation.
     const uint64_t ldsMask = (mixedFlat ? execMask & access.flat_local_lane_mask : execMask) &
                              ~(access.flat_dds_lane_mask | access.flat_local_oob_lane_mask);
-    if (execMask == 0)
+    if (execMask == 0) {
+      record_exec_zero_slot(d.is_load);
       return;
+    }
     LdsAccess ldsAccess{
         .read_modify_write =
             (routed.has_value() || access.decoded_space == amdgpu::DecodedMemorySpace::LOCAL) &&
@@ -578,22 +740,17 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   if (inst.data()->tag() == amdgpu::GLOBAL_MEM) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
     if (d.exec_mask == 0) {
-      // A VMEM instruction with EXEC zero issues and counts like any other; the
-      // hardware may skip it only when LOADcnt, STOREcnt, ASYNCcnt and TENSORcnt
-      // are all zero (CDNA5 ISA 3.2.2.1). An async copy is therefore registered
-      // as an event without LDS bytes, so later partial waits complete the copies
-      // issued before it. Registering it is safe even if it was skipped: every
-      // earlier async copy had then completed, and partial waits retire the
-      // oldest copies first, so counting it never retires a later copy.
+      // An async copy with no active lanes still issues and counts, even while
+      // wave EXEC is nonzero, so it holds its slot on every counter it names,
+      // and later partial waits complete the copies issued before it.
       const bool asyncCopy =
           (d.lds_src || d.lds_dst) && std::ranges::any_of(obligations, [](const auto &obligation) {
             return obligation.wait_counter_type() == amdgpu::WaitCounterType::ASYNCCNT;
           });
-      if (asyncCopy)
-        rs->registerLdsRangeEvent(instruction,
-                                  d.lds_src ? MemoryEventType::LDS_TO_GLOBAL
-                                            : MemoryEventType::GLOBAL_TO_LDS,
-                                  {}, obligations, memoryOrder);
+      if (asyncCopy && wf.exec() != 0)
+        register_counter_slot(*rs, instruction, obligations, memoryOrder, d.is_load);
+      else
+        record_exec_zero_slot(d.is_load);
       return;
     }
     if (d.lds_dst) {
@@ -745,6 +902,15 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   // against a pending load's destination.
   constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
   constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
+  // Tensor instructions carry no memory issue metadata, so their TENSORcnt
+  // backpressure is applied here, once per tensor instruction, before the
+  // transfer's LDS bytes are checked. That way the issue can complete the
+  // oldest transfer first, as the stall at a full TENSORcnt does.
+  if (supports_counter_capacity(wf.cu().arch()) &&
+      rs->prepareForCounterIncrement(amdgpu::WaitCounterType::TENSORCNT).failed()) {
+    report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
+    return;
+  }
   // An observed range can end mid-element: an element that straddles the end
   // of the wave's LDS allocation transfers only its leading bytes. Validate the
   // ranges at byte granularity, as registerLdsRangeEvent registers them;
@@ -767,11 +933,13 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
       detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
   }
 
-  // An instruction that moves no data, such as a NOP tile, a gather with no
-  // valid indices or a store wholly outside the tensor, still occupies a
-  // TENSORCNT slot, so its event is registered even without LDS ranges. A NULL
-  // descriptor is registered the same way, matching the emulator's assumption
-  // that it counts on TENSORCNT.
+  // TENSORcnt counts each tensor instruction (CDNA5 ISA 10.11.1), so one that
+  // moves no data, such as a gather with no valid indices or a store wholly
+  // outside the tensor, still occupies a TENSORCNT slot, and its event is
+  // registered even without LDS ranges. A NULL descriptor and a NOP tile (zero
+  // tile_dim0) are registered the same way, matching the emulator's assumption
+  // that they count on TENSORCNT; hardware behavior for them is not
+  // established.
   const std::array obligations{
       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
   rs->registerLdsRangeEvent(
@@ -819,24 +987,59 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
   auto *s = get_state(wf);
   assert(s && s->race_state);
   if (supports_counter_capacity(wf.cu().arch())) {
-    // FLAT's address-dependent admission is applied after routing. Before its
-    // operands are read, neither memory domain is guaranteed to be used.
-    if (inst.is_memory_op() && !inst.mnemonic().starts_with("flat_")) {
+    // On the pre-GFX12 capacity targets, FLAT's address-dependent admission is
+    // applied after routing: before its operands are read, neither memory
+    // domain is guaranteed to be used. On gfx1250 every FLAT counts on both
+    // domains, so it is admitted here like any other memory instruction.
+    if (inst.is_memory_op() &&
+        (!inst.mnemonic().starts_with("flat_") || flat_counts_on_both_domains(wf.cu().arch()))) {
       const auto *info = inst.amdgpu_memory_issue_info();
       assert(info && "memory instruction reached the race detector without issue metadata");
-      if (info && (!info->exec_masked || wf.exec() != 0) &&
-          s->race_state->prepareForMemoryIssue(*info).failed()) {
+      util::Result admitted = util::Result::success();
+      if (info && !ignored_memory_issue(inst, wf)) {
+        if (!info->exec_masked || wf.exec() != 0)
+          admitted = s->race_state->prepareForMemoryIssue(*info);
+        else if (exec_zero_memory_issue_counts(wf.cu().arch()))
+          admitted = s->race_state->prepareForMemoryIssue(
+              exec_zero_counted_obligations(*info, inst.mnemonic()));
+      }
+      if (admitted.failed()) {
         report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
         return;
       }
     }
 
-    // Messages share LGKMCNT on the capacity-modeled targets but are not memory
-    // instructions, so they intentionally remain outside memory issue metadata.
-    if (std::string_view(inst.mnemonic()).starts_with("s_sendmsg") &&
-        s->race_state->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT).failed()) {
-      report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
-      return;
+    // Wait-counter producers without memory issue metadata, such as GLOBAL_INV
+    // and the LDS lane permutes, apply their gfx1250 backpressure here and then
+    // hold their slot (see counter_only_slot()).
+    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 && inst.is_memory_wait_producer() &&
+        !inst.is_memory_op()) {
+      if (const auto slot = counter_only_slot(inst.mnemonic())) {
+        const std::span<const amdgpu::MemoryCounterObligation> obligations{&slot->obligation, 1};
+        if (s->race_state->prepareForCounterIncrement(slot->obligation.wait_counter_type())
+                .failed()) {
+          report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
+          return;
+        }
+        register_counter_slot(*s->race_state, instruction.value(), obligations,
+                              memoryOrderForObligations(obligations), slot->is_load);
+      }
+    }
+
+    // Messages are not memory instructions, so they remain outside memory
+    // issue metadata. They count on LGKMCNT before GFX12 and on KMcnt on
+    // gfx1250 (CDNA5 ISA 5.7.1.5), where S_SENDMSG_RTN_B* adds two tokens, one
+    // for the message and one for its returned data (CDNA5 ISA 5.4).
+    const std::string_view mnemonic = inst.mnemonic();
+    if (mnemonic.starts_with("s_sendmsg")) {
+      const bool cdna5 = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5;
+      const auto counter =
+          cdna5 ? amdgpu::WaitCounterType::KMCNT : amdgpu::WaitCounterType::LGKMCNT;
+      const uint8_t increment = cdna5 && mnemonic.starts_with("s_sendmsg_rtn") ? 2 : 1;
+      if (s->race_state->prepareForCounterIncrement(counter, increment).failed()) {
+        report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
+        return;
+      }
     }
   }
   s->lds_operand_read.reset();

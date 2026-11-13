@@ -27,6 +27,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -536,6 +537,7 @@ protected:
 
   PluginFixture fixture;
   StringSink *sink = nullptr;
+  RaceDetectorPlugin *plugin = nullptr;
   std::array<Wavefront *, 2> waves{};
   std::unique_ptr<Decoder> decoder;
 
@@ -545,7 +547,9 @@ protected:
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
     fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
-    ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    auto race_plugin = std::make_unique<RaceDetectorPlugin>();
+    plugin = race_plugin.get();
+    ASSERT_TRUE(fixture.plugin_group_->add(std::move(race_plugin)));
     fixture.soc->set_plugin_group(fixture.plugin_group_);
     fixture.plugin_group_->onInit();
     for (auto &wave : waves) {
@@ -1393,6 +1397,1043 @@ TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesLeavesTheLoadPendingUntilTheWai
   EXPECT_TRUE(ds_read(0, 4));
 }
 
+/// Drives gfx1250 counter-capacity backpressure through the plugin's hooks.
+/// Each split counter holds 63 tokens, or 31 for KMcnt (CDNA5 ISA 5.7.1);
+/// issuing one more stalls until the oldest completes, which proves it complete
+/// for its wave.
+/// Each test issues an oldest operation and enough younger ones to fill or
+/// overflow the counter, then probes the oldest operation's register or LDS
+/// bytes. Probes are same-wave accesses in another completion class, so they
+/// race unless the oldest operation is complete.
+class Gfx1250CounterCapacityRaceTest : public TensorDmaRaceTest {
+protected:
+  // LOADcnt, DScnt, ASYNCcnt and TENSORcnt are 6-bit counters (the counter
+  // table in CDNA5 ISA 5.7.1), and issue stalls rather than overflow one, so
+  // each holds 2^6 - 1 tokens.
+  static constexpr int kCapacity = 63;
+  static constexpr uint32_t kOldestAddress = 0;
+  static constexpr uint32_t kYoungerAddress = 64;
+  static constexpr uint32_t kFlatLdsAddress = 128;
+
+  /// Issue a one-lane, one-dword vector memory operation on the global route,
+  /// as execution does: the issue hook, then the routed-memory hook.
+  void vmem(int wave, bool is_load, uint32_t vgpr, uint64_t exec = 1) {
+    waves[wave]->pc += 16;
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = is_load;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = exec;
+    state->lane_mask = exec;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base + vgpr;
+    const auto counter = is_load ? WaitCounterType::LOADCNT : WaitCounterType::STORECNT;
+    TestMemoryInstruction inst(std::move(state), {{counter, MemoryCompletionClass::VMEM}});
+    issue(wave, inst, {}, exec);
+  }
+
+  void vmem_load(int wave, uint32_t vgpr, uint64_t exec = 1) { vmem(wave, true, vgpr, exec); }
+
+  /// Issue a one-dword DS read with EXEC zero.
+  void exec_zero_ds_read(int wave, uint32_t address) {
+    waves[wave]->pc += 16;
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = 0;
+    state->lane_mask = 0;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base;
+    state->per_lane_addr[0] = address;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}},
+                               /*exec_masked=*/true, "ds_load_b32");
+    issue(wave, inst, {}, /*exec=*/0);
+  }
+  void vmem_store(int wave) { vmem(wave, false, /*vgpr=*/0); }
+
+  static constexpr uint32_t kResourceSgpr = 8;
+
+  /// Issue a one-lane decoded buffer_load_b32 into `vgpr` whose resource
+  /// descriptor has TYPE `type`. A descriptor whose TYPE is not 0 is not a
+  /// buffer, so the instruction is ignored (CDNA5 ISA 9.6) and execution
+  /// clears its lanes.
+  void buffer_load(int wave, uint32_t vgpr, uint32_t type, uint64_t exec = 1) {
+    waves[wave]->pc += 16;
+    const uint32_t resource = waves[wave]->sgpr_alloc().base + kResourceSgpr;
+    for (uint32_t word = 0; word < 3; ++word)
+      fixture.cu()->write_sgpr(resource + word, 0);
+    // TYPE is bits [127:126] of the descriptor, the top two bits of word 3.
+    fixture.cu()->write_sgpr(resource + 3, type << 30);
+    auto words =
+        cdna5::build_vbuffer(cdna5::kBufferLoadB32Vbuffer, {.soffset = cdna5::OPR_SREG_NULL,
+                                                            .vdata = static_cast<uint8_t>(vgpr),
+                                                            .rsrc = kResourceSgpr});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    const uint64_t lanes = type == 0 ? exec : 0;
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = lanes;
+    state->lane_mask = lanes;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base + vgpr;
+    inst->set_data(std::move(state));
+    issue(wave, *inst, {}, exec);
+  }
+
+  void wait_storecnt(int wave, uint16_t count) {
+    execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc10000u | count);
+  }
+
+  struct WriteBack {
+    const char *name;
+    uint32_t word;
+  };
+  static constexpr std::array<WriteBack, 2> kWriteBacks{
+      {{"global_wb", 0xEE0B0000u}, {"global_wbinv", 0xEE13C000u}}};
+
+  /// Issue a decoded GLOBAL_INV with the wave's EXEC set to `exec`.
+  void global_inv(int wave, uint64_t exec = 1) {
+    const uint64_t wave_exec = waves[wave]->exec();
+    waves[wave]->set_exec(exec);
+    issue_words(wave, {0xEE0AC000u, 0x00000000u, 0x00000000u});
+    waves[wave]->set_exec(wave_exec);
+  }
+
+  struct LanePermute {
+    const char *name;
+    uint16_t op;
+  };
+  static constexpr std::array<LanePermute, 4> kLanePermutes{
+      {{"ds_permute_b32", cdna5::kDsPermuteB32Vds},
+       {"ds_bpermute_b32", cdna5::kDsBpermuteB32Vds},
+       {"ds_bpermute_fi_b32", cdna5::kDsBpermuteFiB32Vds},
+       {"ds_swizzle_b32", cdna5::kDsSwizzleB32Vds}}};
+
+  /// Issue a decoded DS instruction that accesses no LDS memory, such as a lane
+  /// permute, a swizzle or DS_NOP, which reaches only the issue hook.
+  void ds_counter_only(int wave, uint16_t op) {
+    const auto words = cdna5::build_vds(op, {.addr = 8, .data0 = 9, .vdst = 10});
+    issue_words(wave, {words[0], words[1], 0x00000000u});
+  }
+
+  int next_event() { return race_state(0).getDetector()->events().totalAllocated(); }
+
+  /// `Mixed` sends lane 0 to global memory and lane 1 to LDS.
+  enum class FlatRoute { Global, Lds, Mixed, NoActiveLanes };
+
+  /// Issue a one-lane, one-dword generic FLAT load whose addresses resolved as
+  /// `route` says. It carries both decoded counter obligations, as gfx1250
+  /// FLAT metadata does: LOADcnt in the VMEM class and DScnt in the LDS class.
+  void flat_load(int wave, uint32_t vgpr, FlatRoute route) {
+    waves[wave]->pc += 16;
+    const bool lds = route == FlatRoute::Lds;
+    const bool mixed = route == FlatRoute::Mixed;
+    const uint64_t exec = route == FlatRoute::NoActiveLanes ? 0 : mixed ? 0x3 : 0x1;
+    auto state = std::make_unique<VectorMemState>(lds ? LOCAL_MEM : GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = exec;
+    state->lane_mask = exec;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base + vgpr;
+    state->per_lane_addr[0] = kFlatLdsAddress;
+    state->per_lane_addr[1] = kFlatLdsAddress;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::LOADCNT, MemoryCompletionClass::VMEM},
+                                {WaitCounterType::DSCNT, MemoryCompletionClass::LDS}},
+                               /*exec_masked=*/true, "flat_load_b32");
+    MemoryAccessObservation access{};
+    access.route = lds ? MemoryRoute::LOCAL : MemoryRoute::GLOBAL;
+    access.decoded_space = DecodedMemorySpace::FLAT;
+    access.request_lane_mask = exec;
+    access.normalized_to_local = lds;
+    access.flat_local_lane_mask = lds ? exec : mixed ? 0x2 : 0;
+    issue(wave, inst, access, exec);
+  }
+
+  /// Deliver a memory instruction to the issue hook, then the routed-memory
+  /// hook, with the wave's EXEC set to `exec` for the issue.
+  void issue(int wave, Instruction &inst, const MemoryAccessObservation &access, uint64_t exec) {
+    const uint64_t wave_exec = waves[wave]->exec();
+    waves[wave]->set_exec(exec);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted(access, inst, *waves[wave]);
+    waves[wave]->set_exec(wave_exec);
+  }
+
+  void wait_loadcnt(int wave, uint16_t count) {
+    execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc00000u | count);
+  }
+
+  using TensorDmaRaceTest::wait_dscnt;
+  void wait_dscnt(int wave, uint16_t count) {
+    execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc60000u | count);
+  }
+
+  /// Issue an instruction decoded from `word` through the issue hook only, as
+  /// execution does for one that is not a memory operation.
+  void issue_word(int wave, uint32_t word) {
+    waves[wave]->pc += 16;
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, &word));
+    ASSERT_NE(inst, nullptr);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, *inst, *waves[wave]);
+  }
+
+  /// Read one lane of a VGPR and report whether it raced.
+  bool vgpr_read(int wave, uint32_t vgpr) {
+    waves[wave]->pc += 16;
+    record_register_probe(*fixture.plugin_group_, *waves[wave]);
+    const size_t previous = sink->str().size();
+    fixture.plugin_group_->onAmdgpuReadVgprLanes(waves[wave], waves[wave]->vgpr_alloc().base + vgpr,
+                                                 /*lane_mask=*/1);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  bool tensor_load_oldest() { return tensor_load(0, {{.address = kOldestAddress, .bytes = 4}}); }
+
+  /// Issue a one-lane ds_atomic_async_barrier_arrive_b64 on the barrier cell at
+  /// `address`, with the counter metadata it decodes with (see
+  /// AsyncBarrierArriveDecodesAsAnAsyncLoad).
+  void async_barrier_arrive(int wave, uint32_t address, uint64_t exec = 1) {
+    waves[wave]->pc += 16;
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = sizeof(uint64_t);
+    state->num_elems = 1;
+    state->is_load = false;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = exec;
+    state->lane_mask = exec;
+    state->per_lane_addr[0] = address;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}},
+                               /*exec_masked=*/true, "ds_atomic_async_barrier_arrive_b64");
+    issue(wave, inst, {}, exec);
+  }
+
+  /// Issue a one-dword async load into LDS with EXEC zero.
+  void exec_zero_async_load(int wave, uint32_t address) {
+    waves[wave]->pc += 16;
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->lds_dst = true;
+    state->lds_per_lane_addr = true;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = 0;
+    state->lane_mask = 0;
+    state->per_lane_lds_addr[0] = address;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}},
+                               /*exec_masked=*/true, "global_load_async_to_lds_b32");
+    issue(wave, inst, {}, /*exec=*/0);
+  }
+
+  /// Issue a decoded instruction through the issue hook only.
+  void issue_words(int wave, std::array<uint32_t, 3> words) {
+    waves[wave]->pc += 16;
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, *inst, *waves[wave]);
+  }
+
+  EventStatus event_status(int event) {
+    return race_state(0).getDetector()->events().status(EventId{event});
+  }
+
+  /// Issue a one-lane async store from LDS, which counts on ASYNCcnt in the
+  /// async-store class.
+  void async_store(int wave) {
+    waves[wave]->pc += 16;
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = false;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_STORE}});
+    issue(wave, inst, {}, /*exec=*/1);
+  }
+
+  WaveRaceState &race_state(int wave) {
+    return *static_cast<RaceWavefrontState *>(waves[wave]->plugin_state(plugin->slot_index()))
+                ->race_state;
+  }
+};
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FullLoadcntCompletesOldestLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, LoadcntBelowCapacityKeepsOldestLoadPending) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+// Loads and stores use separate counters on gfx1250 (CDNA5 ISA 5.7.1), so even
+// a store issued against a full STOREcnt says nothing about a pending load.
+TEST_F(Gfx1250CounterCapacityRaceTest, StorecntPressureDoesNotCompleteALoad) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity + 1; ++index)
+    vmem_store(0);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+// A VMEM instruction with EXEC zero still counts unless every VMEM counter is
+// zero (CDNA5 ISA 3.2.2.1), so it applies backpressure like any other load.
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroLoadTakesALoadcntSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  vmem_load(0, /*vgpr=*/2, /*exec=*/0);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroLoadBelowCapacityKeepsOldestLoadPending) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  vmem_load(0, /*vgpr=*/2, /*exec=*/0);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+// An EXEC-zero instruction also holds its slot afterwards: it is skipped only
+// when its counters are all zero (CDNA5 ISA 3.2.2.1), and here the younger
+// loads keep LOADcnt nonzero. A load, 61 younger loads, an EXEC-zero load at
+// issue 63 and an active load at issue 64 fill LOADcnt, so the last issue
+// completes the oldest load.
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroLoadHoldsALoadcntSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  vmem_load(0, /*vgpr=*/2, /*exec=*/0);
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroDsReadHoldsADscntSlot) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    ds_read(0, kYoungerAddress);
+  exec_zero_ds_read(0, kYoungerAddress);
+  ds_read(0, kYoungerAddress);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+// A load, then an EXEC-zero load: LOADcnt holds two, so waiting for one to
+// remain completes the first load.
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsExecZeroLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  vmem_load(0, /*vgpr=*/2, /*exec=*/0);
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+// Every FLAT instruction increments both DScnt and LOADcnt or STOREcnt when it
+// issues, whichever memory its addresses resolve to (CDNA5 ISA 5.7.1.3), so it
+// applies backpressure to both counters.
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatResolvedToGlobalAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatResolvedToGlobalAdvancesDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatResolvedToLdsAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatResolvedToLdsAdvancesDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+// A FLAT with EXEC zero still counts on both counters unless they are all zero
+// (CDNA5 ISA 3.2.2.1).
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatWithNoActiveLanesAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::NoActiveLanes);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatWithNoActiveLanesAdvancesDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::NoActiveLanes);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+// The FLAT with EXEC zero also keeps its slot on both counters afterwards. A
+// read, 61 younger operations, the FLAT at issue 63 and an active operation at
+// issue 64 fill the counter, so the last issue completes the oldest read.
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatWithNoActiveLanesHoldsALoadcntSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::NoActiveLanes);
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatWithNoActiveLanesHoldsADscntSlot) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    ds_read(0, kYoungerAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::NoActiveLanes);
+  ds_read(0, kYoungerAddress);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatBelowCapacityKeepsOldestDsReadPending) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    ds_read(0, kYoungerAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+// A FLAT keeps its slot in the counter of the domain it did not use, in order
+// with that domain's other operations (CDNA5 ISA 5.7.1.3), so partial waits
+// count it. A DS read, then a FLAT to global memory: DScnt holds two, and
+// waiting for one to remain completes the DS read.
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialDscntWaitCountsGlobalFlatSlot) {
+  ds_read(0, kOldestAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  wait_dscnt(0, 1);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialDscntWaitAllowingBothKeepsDsReadPending) {
+  ds_read(0, kOldestAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  wait_dscnt(0, 2);
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+// Capacity counts the FLAT's slot too. A DS read, a FLAT to global memory and
+// kCapacity - 2 more DS reads fill DScnt, so the next DS read completes the
+// first one.
+TEST_F(Gfx1250CounterCapacityRaceTest, CapacityCountsGlobalFlatSlot) {
+  ds_read(0, kOldestAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    ds_read(0, kYoungerAddress);
+  ds_read(0, kYoungerAddress);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+// Likewise for a FLAT to LDS: a load, a FLAT to LDS and kCapacity - 2 more loads
+// fill LOADcnt, so the next load completes the first one.
+TEST_F(Gfx1250CounterCapacityRaceTest, CapacityCountsLdsFlatSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsLdsFlatSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitAllowingBothKeepsLoadPending) {
+  vmem_load(0, /*vgpr=*/0);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  wait_loadcnt(0, 2);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+// The slot in the unused domain does not delay the FLAT's own result, which
+// depends only on the domain its addresses used.
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalFlatResultIsReadyAfterLoadcntWait) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  wait_loadcnt(0, 0);
+  EXPECT_FALSE(vgpr_read(0, 2));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, LdsFlatResultIsReadyAfterDscntWait) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  wait_dscnt(0, 0);
+  EXPECT_FALSE(vgpr_read(0, 2));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, MixedFlatAdvancesDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Mixed);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, MixedFlatAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Mixed);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+// A mixed FLAT's result depends on both domains, so it needs both waits.
+TEST_F(Gfx1250CounterCapacityRaceTest, MixedFlatResultNeedsBothWaits) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Mixed);
+  wait_loadcnt(0, 0);
+  EXPECT_TRUE(vgpr_read(0, 2));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, MixedFlatResultIsReadyAfterBothWaits) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Mixed);
+  wait_loadcnt(0, 0);
+  wait_dscnt(0, 0);
+  EXPECT_FALSE(vgpr_read(0, 2));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FullDscntCompletesOldestDsRead) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity; ++index)
+    ds_read(0, kYoungerAddress);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, DscntBelowCapacityKeepsOldestDsReadPending) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+// Messages use KMcnt on gfx1250 (CDNA5 ISA 5.7.1.5), not a counter shared with
+// DS operations.
+TEST_F(Gfx1250CounterCapacityRaceTest, SendmsgDoesNotAdvanceDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  ASSERT_NO_FATAL_FAILURE(issue_word(0, 0xBFB60000u)); // s_sendmsg 0.
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+// S_SENDMSG_RTN_B* increments KMcnt by 2 (CDNA5 ISA 5.4), and other messages by
+// 1 (CDNA5 ISA 5.7.1), on a 5-bit KMcnt that holds 2^5 - 1 tokens. No gfx1250
+// instruction registers an event in an ordered KMcnt class, so these tests
+// register synthetic ones to observe each message's increment.
+class Gfx1250MessageCapacityRaceTest : public Gfx1250CounterCapacityRaceTest {
+protected:
+  static constexpr int kKmcntCapacity = 31;
+
+  /// Leave one KMcnt slot free with ordered synthetic events.
+  void fill_kmcnt_but_one() {
+    for (int index = 0; index < kKmcntCapacity - 1; ++index)
+      register_pending_event(race_state(0), /*pc=*/0x80 + 4 * index,
+                             MemoryEventType::VGPR_TO_GLOBAL, /*registers=*/{},
+                             WaitCounterType::KMCNT, MemoryOrderClass::VMEM);
+  }
+
+  EventStatus status(int event) {
+    return race_state(0).getDetector()->events().status(EventId{event});
+  }
+};
+
+TEST_F(Gfx1250MessageCapacityRaceTest, ReturningMessageTakesTwoKmcntSlots) {
+  fill_kmcnt_but_one();
+  ASSERT_NO_FATAL_FAILURE(issue_word(0, 0xBE804C00u)); // s_sendmsg_rtn_b32 s0, 0.
+  EXPECT_EQ(status(0), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(status(1), EventStatus::ACTIVE);
+}
+
+TEST_F(Gfx1250MessageCapacityRaceTest, MessageTakesOneKmcntSlot) {
+  fill_kmcnt_but_one();
+  ASSERT_NO_FATAL_FAILURE(issue_word(0, 0xBFB60000u)); // s_sendmsg 0.
+  EXPECT_EQ(status(0), EventStatus::ACTIVE);
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FullAsynccntCompletesOldestAsyncLoad) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity; ++index)
+    dtl_write(0, kYoungerAddress);
+  EXPECT_FALSE(ds_read(0, kOldestAddress));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, AsynccntBelowCapacityKeepsOldestAsyncLoadPending) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    dtl_write(0, kYoungerAddress);
+  EXPECT_TRUE(ds_read(0, kOldestAddress));
+}
+
+// ds_atomic_async_barrier_arrive_b64 counts on ASYNCcnt and "is kept in-order
+// with async-loads" (CDNA5 ISA 10.8), so it decodes into the async-load class.
+TEST_F(Gfx1250CounterCapacityRaceTest, AsyncBarrierArriveDecodesAsAnAsyncLoad) {
+  const std::array<uint32_t, 2> words{0xD9580000u,
+                                      0x00000000u}; // ds_atomic_async_barrier_arrive_b64.
+  std::unique_ptr<Instruction> arrive(decode_valid(*decoder, words.data()));
+  ASSERT_NE(arrive, nullptr);
+  ASSERT_EQ(std::string_view(arrive->mnemonic()), "ds_atomic_async_barrier_arrive_b64");
+  const auto *info = arrive->amdgpu_memory_issue_info();
+  ASSERT_NE(info, nullptr);
+  const auto obligations = info->counter_obligations();
+  ASSERT_EQ(obligations.size(), 1u);
+  EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::ASYNCCNT);
+  EXPECT_EQ(obligations[0].completion_class(), MemoryCompletionClass::ASYNC_LOAD);
+  EXPECT_EQ(obligations[0].counter_increment(), 1);
+}
+
+// The arrive fills ASYNCcnt together with async loads, so an async load issued
+// once they fill it completes the oldest async load.
+TEST_F(Gfx1250CounterCapacityRaceTest, AsyncBarrierArriveFillsAsynccntWithAsyncLoads) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    dtl_write(0, kYoungerAddress);
+  async_barrier_arrive(0, kFlatLdsAddress);
+  dtl_write(0, kYoungerAddress);
+  EXPECT_FALSE(ds_read(0, kOldestAddress));
+}
+
+// An async store in the same position does not: async loads and stores
+// complete out of order with each other (CDNA5 ISA 10.8), so a full ASYNCcnt
+// does not prove the oldest async load complete.
+TEST_F(Gfx1250CounterCapacityRaceTest, AsyncStoreDoesNotFillAsynccntWithAsyncLoads) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    dtl_write(0, kYoungerAddress);
+  async_store(0);
+  dtl_write(0, kYoungerAddress);
+  EXPECT_TRUE(ds_read(0, kOldestAddress));
+}
+
+// An EXEC-zero instruction counts on its counters unless they are all zero, and
+// the counters are set by its encoding (CDNA5 ISA 3.2.2.1): VMEM is skipped only
+// if LOADcnt, STOREcnt, ASYNCcnt and TENSORcnt are zero, and LDS only if DScnt is.
+// So an EXEC-zero async load takes the last ASYNCcnt slot, but an EXEC-zero
+// ds_atomic_async_barrier_arrive_b64, an LDS instruction on ASYNCcnt, may be
+// skipped with DScnt zero while async loads are pending, and proves nothing.
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroAsyncLoadFillsAsynccnt) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    dtl_write(0, kYoungerAddress);
+  exec_zero_async_load(0, kYoungerAddress);
+  EXPECT_FALSE(ds_read(0, kOldestAddress));
+}
+
+// The EXEC-zero async load also keeps its ASYNCcnt slot afterwards: at issue 63
+// it lets an active async load at issue 64 complete the oldest one.
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroAsyncLoadHoldsAnAsynccntSlot) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    dtl_write(0, kYoungerAddress);
+  exec_zero_async_load(0, kYoungerAddress);
+  dtl_write(0, kYoungerAddress);
+  EXPECT_FALSE(ds_read(0, kOldestAddress));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroAsyncBarrierArriveDoesNotFillAsynccnt) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    dtl_write(0, kYoungerAddress);
+  async_barrier_arrive(0, kFlatLdsAddress, /*exec=*/0);
+  EXPECT_TRUE(ds_read(0, kOldestAddress));
+}
+
+// GLOBAL_INV counts on LOADcnt and GLOBAL_WB and GLOBAL_WBINV on STOREcnt
+// (CDNA5 ISA 5.7.1.2), and none of them is skipped for EXEC zero (CDNA5 ISA
+// 3.2.2.1), so each needs a free slot to issue.
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalInvAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0));
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalInvWithExecZeroAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0, /*exec=*/0));
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalInvBelowCapacityKeepsOldestLoadPending) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0));
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalWriteBacksAdvanceStorecnt) {
+  for (const WriteBack write_back : kWriteBacks) {
+    SCOPED_TRACE(write_back.name);
+    for (int index = 0; index < kCapacity; ++index)
+      vmem_store(0);
+    const int oldest = race_state(0).getDetector()->events().totalAllocated() - kCapacity;
+    ASSERT_NO_FATAL_FAILURE(issue_words(0, {write_back.word, 0x00000000u, 0x00000000u}));
+    EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
+    EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
+    wait_storecnt(0, 0);
+  }
+}
+
+// GLOBAL_INV also holds its LOADcnt slot afterwards, in order with loads, as
+// LLVM orders it with VMEM reads. A load, 61 younger loads, GLOBAL_INV at issue
+// 63 and a load at issue 64 fill LOADcnt, so the last issue completes the
+// oldest load and only that one.
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalInvHoldsALoadcntSlot) {
+  const int oldest = race_state(0).getDetector()->events().totalAllocated();
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0));
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+// A load, then GLOBAL_INV: LOADcnt holds two, so waiting for one to remain
+// completes the load.
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsGlobalInv) {
+  vmem_load(0, /*vgpr=*/0);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0));
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+// GLOBAL_WB and GLOBAL_WBINV hold their STOREcnt slot in order with stores.
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalWriteBacksHoldAStorecntSlot) {
+  for (const WriteBack write_back : kWriteBacks) {
+    SCOPED_TRACE(write_back.name);
+    for (int index = 0; index < kCapacity - 1; ++index)
+      vmem_store(0);
+    const int oldest = race_state(0).getDetector()->events().totalAllocated() - (kCapacity - 1);
+    ASSERT_NO_FATAL_FAILURE(issue_words(0, {write_back.word, 0x00000000u, 0x00000000u}));
+    vmem_store(0);
+    EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
+    EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
+    wait_storecnt(0, 0);
+  }
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialStorecntWaitCountsGlobalWriteBacks) {
+  for (const WriteBack write_back : kWriteBacks) {
+    SCOPED_TRACE(write_back.name);
+    vmem_store(0);
+    const int store = race_state(0).getDetector()->events().totalAllocated() - 1;
+    ASSERT_NO_FATAL_FAILURE(issue_words(0, {write_back.word, 0x00000000u, 0x00000000u}));
+    wait_storecnt(0, 1);
+    EXPECT_EQ(event_status(store), EventStatus::WAVE_COMPLETE);
+    wait_storecnt(0, 0);
+  }
+}
+
+// LDS lane permutes and swizzles use the LDS hardware without LDS memory (CDNA5
+// ISA 11.2.3), and LDS operations count on DScnt and are kept in order (CDNA5
+// ISA 5.7.1.4). So each needs a free DScnt slot to issue, and then holds one in
+// order with LDS operations.
+TEST_F(Gfx1250CounterCapacityRaceTest, LanePermuteAdvancesDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, cdna5::kDsBpermuteB32Vds));
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, LanePermuteBelowCapacityKeepsOldestDsReadPending) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    ds_read(0, kYoungerAddress);
+  ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, cdna5::kDsBpermuteB32Vds));
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, EachLanePermuteAdvancesDscnt) {
+  for (const LanePermute permute : kLanePermutes) {
+    SCOPED_TRACE(permute.name);
+    const int oldest = next_event();
+    for (int index = 0; index < kCapacity; ++index)
+      ds_read(0, kYoungerAddress);
+    ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, permute.op));
+    EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
+    EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
+    wait_dscnt(0, 0);
+  }
+}
+
+// A DS read, 61 younger reads, a permute at issue 63 and a read at issue 64
+// fill DScnt, so the last issue completes the oldest read and only that one.
+TEST_F(Gfx1250CounterCapacityRaceTest, LanePermutesHoldADscntSlot) {
+  for (const LanePermute permute : kLanePermutes) {
+    SCOPED_TRACE(permute.name);
+    const int oldest = next_event();
+    for (int index = 0; index < kCapacity - 1; ++index)
+      ds_read(0, kYoungerAddress);
+    ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, permute.op));
+    ds_read(0, kYoungerAddress);
+    EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
+    EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
+    wait_dscnt(0, 0);
+  }
+}
+
+// A DS read, then a permute: DScnt holds two, so waiting for one to remain
+// completes the read.
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialDscntWaitCountsLanePermutes) {
+  for (const LanePermute permute : kLanePermutes) {
+    SCOPED_TRACE(permute.name);
+    const int read = next_event();
+    ds_read(0, kYoungerAddress);
+    ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, permute.op));
+    wait_dscnt(0, 1);
+    EXPECT_EQ(event_status(read), EventStatus::WAVE_COMPLETE);
+    wait_dscnt(0, 0);
+  }
+}
+
+// DS_NOP holds an ordered DScnt slot, as the core memory-wait checker models it
+// (see MemoryWaitExecutionTest.InlineDsResultAndCounterOnlyNopUseOrderedQueue).
+TEST_F(Gfx1250CounterCapacityRaceTest, DsNopAdvancesDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, cdna5::kDsNopVds));
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, DsNopBelowCapacityKeepsOldestDsReadPending) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    ds_read(0, kYoungerAddress);
+  ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, cdna5::kDsNopVds));
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialDscntWaitCountsDsNop) {
+  const int read = next_event();
+  ds_read(0, kYoungerAddress);
+  ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, cdna5::kDsNopVds));
+  wait_dscnt(0, 1);
+  EXPECT_EQ(event_status(read), EventStatus::WAVE_COMPLETE);
+}
+
+// A buffer instruction whose descriptor TYPE is not 0 is ignored (CDNA5 ISA
+// 9.6). The detector gives it no LOADcnt slot, whether EXEC is active or zero,
+// so it proves no older load complete; if hardware still counted it, that only
+// keeps the older load pending longer. A valid buffer load takes a slot in both
+// cases.
+TEST_F(Gfx1250CounterCapacityRaceTest, BufferLoadFillsLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/0));
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, IgnoredBufferLoadDoesNotFillLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2));
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroBufferLoadFillsLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/0, /*exec=*/0));
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroIgnoredBufferLoadDoesNotFillLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2, /*exec=*/0));
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsExecZeroBufferLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/0, /*exec=*/0));
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitDoesNotCountIgnoredExecZeroBufferLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2, /*exec=*/0));
+  wait_loadcnt(0, 1);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+// Transfers that move no data still take a TENSORcnt slot.
+TEST_F(Gfx1250CounterCapacityRaceTest, FullTensorcntCompletesOldestTensorLoad) {
+  tensor_load_oldest();
+  for (int index = 0; index < kCapacity; ++index)
+    tensor_load(0, {});
+  EXPECT_FALSE(ds_read(0, kOldestAddress));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, TensorcntBelowCapacityKeepsOldestTensorLoadPending) {
+  tensor_load_oldest();
+  for (int index = 0; index < kCapacity - 1; ++index)
+    tensor_load(0, {});
+  EXPECT_TRUE(ds_read(0, kOldestAddress));
+}
+
+// A tensor instruction's admission completes the oldest transfer before its
+// own LDS bytes are checked, so overwriting that transfer's source is safe.
+TEST_F(Gfx1250CounterCapacityRaceTest, TensorAdmissionPrecedesItsLdsCheck) {
+  tensor_store(0, {{.address = kOldestAddress, .bytes = 4}});
+  for (int index = 0; index < kCapacity - 1; ++index)
+    tensor_load(0, {});
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, TensorBelowCapacityOverwritingAPendingSourceRaces) {
+  tensor_store(0, {{.address = kOldestAddress, .bytes = 4}});
+  for (int index = 0; index < kCapacity - 2; ++index)
+    tensor_load(0, {});
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+/// Counter capacity on gfx950 (CDNA4), whose combined VMCNT holds 63 tokens and
+/// LGKMCNT 15 (the generated ISA properties). These tests pin the pre-GFX12 side
+/// of behavior that differs on gfx1250.
+class Gfx950CounterCapacityRaceTest : public ::testing::Test {
+protected:
+  static constexpr int kVmcntCapacity = 63;
+  static constexpr int kLgkmcntCapacity = 15;
+
+  PluginFixture fixture;
+  StringSink *sink = nullptr;
+  Wavefront *wave = nullptr;
+  std::unique_ptr<Decoder> decoder;
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1, "cdna4"));
+    PluginSinkConfig sink_config;
+    sink = &sink_config.emplace<StringSink>();
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    fixture.plugin_group_->onInit();
+    wave = fixture.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x100, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    std::array<Wavefront *, 1> waves{wave};
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0, 256, 104,
+                                                       waves);
+    decoder = Decoder::create(fixture.cu()->arch());
+    ASSERT_NE(decoder, nullptr);
+  }
+
+  /// Issue a one-lane, one-dword load into `vgpr` from LDS or global memory,
+  /// with the wave's EXEC set to `exec`.
+  void load(bool lds, uint32_t vgpr, uint64_t exec = 1) {
+    wave->pc += 16;
+    auto state = std::make_unique<VectorMemState>(lds ? LOCAL_MEM : GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = wave->wf_size();
+    state->exec_mask = exec;
+    state->lane_mask = exec;
+    state->dst_reg_base = wave->vgpr_alloc().base + vgpr;
+    TestMemoryInstruction inst(std::move(state));
+    const uint64_t wave_exec = wave->exec();
+    wave->set_exec(exec);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, inst, *wave);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *wave);
+    wave->set_exec(wave_exec);
+  }
+
+  /// Read one lane of a VGPR and report whether it raced.
+  bool vgpr_read(uint32_t vgpr) {
+    wave->pc += 16;
+    record_register_probe(*fixture.plugin_group_, *wave);
+    const size_t previous = sink->str().size();
+    fixture.plugin_group_->onAmdgpuReadVgprLanes(wave, wave->vgpr_alloc().base + vgpr,
+                                                 /*lane_mask=*/1);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+};
+
+// Messages share LGKMCNT with DS operations before GFX12, so a message issued
+// at a full LGKMCNT completes the oldest DS read.
+TEST_F(Gfx950CounterCapacityRaceTest, MessageAdvancesLgkmcnt) {
+  load(/*lds=*/true, /*vgpr=*/0);
+  for (int index = 0; index < kLgkmcntCapacity - 1; ++index)
+    load(/*lds=*/true, /*vgpr=*/1);
+  wave->pc += 16;
+  const uint32_t word = 0xBF900000u; // s_sendmsg 0.
+  std::unique_ptr<Instruction> message(decode_valid(*decoder, &word));
+  ASSERT_NE(message, nullptr);
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *message, *wave);
+  EXPECT_FALSE(vgpr_read(0));
+}
+
+// Before GFX12, an EXEC-zero vector memory instruction applies no backpressure.
+TEST_F(Gfx950CounterCapacityRaceTest, ExecZeroLoadAppliesNoBackpressure) {
+  load(/*lds=*/false, /*vgpr=*/0);
+  for (int index = 0; index < kVmcntCapacity - 1; ++index)
+    load(/*lds=*/false, /*vgpr=*/1);
+  load(/*lds=*/false, /*vgpr=*/2, /*exec=*/0);
+  EXPECT_TRUE(vgpr_read(0));
+}
+
+// Nor does an EXEC-zero load hold a slot for later waits there.
+TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitDoesNotCountExecZeroLoad) {
+  load(/*lds=*/false, /*vgpr=*/0);
+  load(/*lds=*/false, /*vgpr=*/2, /*exec=*/0);
+  execute_wait(*fixture.plugin_group_, *wave,
+               legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/1, /*lgkmcnt=*/15));
+  EXPECT_TRUE(vgpr_read(0));
+}
+
+// A load issued at a full VMCNT with active lanes completes the oldest load.
+TEST_F(Gfx950CounterCapacityRaceTest, LoadAdvancesVmcnt) {
+  load(/*lds=*/false, /*vgpr=*/0);
+  for (int index = 0; index < kVmcntCapacity - 1; ++index)
+    load(/*lds=*/false, /*vgpr=*/1);
+  load(/*lds=*/false, /*vgpr=*/2);
+  EXPECT_FALSE(vgpr_read(0));
+}
+
 // Wave 1 writes LDS and may end; wave 0 then passes a barrier and reads the
 // bytes. The fixture's DS helpers are not specific to tensor DMA.
 class ExitedWaveRaceTest : public TensorDmaRaceTest {
@@ -1782,6 +2823,8 @@ TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
     state->d16_lo = !formatted;
     state->buffer_d16 = formatted;
     state->buffer_components = formatted ? 3 : 0;
+    if (arch == "cdna5")
+      state->wait_counter_type = WaitCounterType::LOADCNT; // gfx1250 global loads.
     TestMemoryInstruction load(std::move(state));
     f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wf->pc, load, *wf);
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
@@ -2736,6 +3779,7 @@ TEST(RaceDetectorPluginTest, MixedFlatChecksAndRecordsOnlySharedLaneIntervals) {
             state->wf_size = 32;
             state->dst_reg_base = ds_wave->vgpr_alloc().base;
             state->per_lane_addr[0] = probe_addresses[probe];
+            state->wait_counter_type = WaitCounterType::DSCNT;
             TestMemoryInstruction inst(std::move(state));
             f.plugin_group_->onAmdgpuBeforeExecuteInstruction(ds_wave->pc, inst, *ds_wave);
             f.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *ds_wave);
@@ -2927,6 +3971,7 @@ TEST(RaceDetectorPluginTest, MixedFlatAtLdsBackingEndTracksExecutedElements) {
     probe->wf_size = 32;
     probe->dst_reg_base = probe_wave->vgpr_alloc().base;
     probe->per_lane_addr[0] = capacity - 4;
+    probe->wait_counter_type = WaitCounterType::DSCNT;
     TestMemoryInstruction probe_inst(std::move(probe));
     f.plugin_group_->onAmdgpuBeforeExecuteInstruction(probe_wave->pc, probe_inst, *probe_wave);
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, probe_inst, *probe_wave);
@@ -3001,8 +4046,12 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
         EXPECT_EQ(events.totalAllocated(), 0);
         continue;
       }
-      const EventId event{0};
-      ASSERT_EQ(events.totalAllocated(), 1);
+      // A gfx1250 FLAT takes a slot in both counters (CDNA5 ISA 5.7.1.3). When
+      // its addresses use no global memory, that counter's slot is recorded
+      // first, as an event with no registers or LDS bytes.
+      const bool slot_event = !test.has_global;
+      const EventId event{slot_event ? 1 : 0};
+      ASSERT_EQ(events.totalAllocated(), slot_event ? 2 : 1);
       EXPECT_EQ(events.execMask(event), test.exec);
       EXPECT_EQ(events.ldsIntervals(event).getTotalBytes(), test.has_lds ? 4 : 0);
       EXPECT_EQ(events.ldsIntervals(event).contains(lds_base + 64), test.has_lds);
@@ -3010,10 +4059,20 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
       const auto global_counter = load ? WaitCounterType::LOADCNT : WaitCounterType::STORECNT;
       EXPECT_EQ(events.pendingCounterIncrement(event, global_counter), test.has_global ? 1 : 0);
       EXPECT_EQ(events.pendingCounterIncrement(event, WaitCounterType::DSCNT), 1);
+      const EventId slot{0};
+      if (slot_event) {
+        EXPECT_EQ(events.registers(slot).size(), 0u);
+        EXPECT_EQ(events.ldsIntervals(slot).getTotalBytes(), 0);
+        EXPECT_EQ(events.pendingCounterIncrement(slot, global_counter), 1);
+        EXPECT_EQ(events.pendingCounterIncrement(slot, WaitCounterType::DSCNT), 0);
+      }
       EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
       PendingWaitCount wait;
       wait.add(global_counter, 0);
       race.dispatch(wait);
+      if (slot_event) {
+        EXPECT_EQ(events.status(slot), EventStatus::WAVE_COMPLETE);
+      }
       EXPECT_EQ(events.status(event), EventStatus::ACTIVE);
       wait.updates.clear();
       wait.add(WaitCounterType::DSCNT, 0);
@@ -5194,7 +6253,9 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
   dropped->exec_mask = 0x1u;
   dropped->lane_mask = 0x1u;
   dropped->per_lane_lds_addr[0] = amdgpu::kInvalidLdsAddress;
-  TestMemoryInstruction dropped_inst(std::move(dropped));
+  // A global load into LDS is an async load on gfx1250.
+  TestMemoryInstruction dropped_inst(
+      std::move(dropped), {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(writer->pc, dropped_inst, *writer);
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, dropped_inst, *writer);
 
@@ -5207,6 +6268,7 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
   read->lane_mask = 0x1u;
   read->per_lane_addr[0] = 0;
   read->dst_reg_base = reader->vgpr_alloc().base;
+  read->wait_counter_type = WaitCounterType::DSCNT;
   TestMemoryInstruction read_inst(std::move(read));
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(reader->pc, read_inst, *reader);
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, read_inst, *reader);
@@ -5247,7 +6309,9 @@ TEST(RaceDetectorPluginTest, RejectedAsyncGlobalLaneDoesNotCreateLdsRace) {
   dropped->exec_mask = 0x1u;
   dropped->lane_mask = 0;
   dropped->per_lane_lds_addr[0] = 0;
-  TestMemoryInstruction dropped_inst(std::move(dropped));
+  // A global load into LDS is an async load on gfx1250.
+  TestMemoryInstruction dropped_inst(
+      std::move(dropped), {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(writer->pc, dropped_inst, *writer);
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, dropped_inst, *writer);
 
@@ -5260,6 +6324,7 @@ TEST(RaceDetectorPluginTest, RejectedAsyncGlobalLaneDoesNotCreateLdsRace) {
   read->lane_mask = 0x1u;
   read->per_lane_addr[0] = 0;
   read->dst_reg_base = reader->vgpr_alloc().base;
+  read->wait_counter_type = WaitCounterType::DSCNT;
   TestMemoryInstruction read_inst(std::move(read));
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(reader->pc, read_inst, *reader);
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, read_inst, *reader);
@@ -5298,6 +6363,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotCreateDestinationRace) {
   ignored->lane_mask = 0;
   ignored->wf_size = wf->wf_size();
   ignored->dst_reg_base = wf->vgpr_alloc().base + kDestinationVgpr;
+  ignored->wait_counter_type = WaitCounterType::LOADCNT;
   TestMemoryInstruction ignored_inst(std::move(ignored));
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wf->pc, ignored_inst, *wf);
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, ignored_inst, *wf);
