@@ -3,7 +3,7 @@
 
 #pragma once
 
-/// @file
+/// @file memory_backing.h
 /// @brief Shared backing descriptors, either native memfds or opaque socket tokens.
 /// @details Descriptors retain their storage across dup, fork, and SCM_RIGHTS.
 /// Tokens additionally depend on their creating keeper; native memfds do not.
@@ -13,9 +13,12 @@
 /// metadata; tokens do not support file I/O. Failures use errno. Ordinary file
 /// descriptors retain host behavior where an operation supports both forms.
 
+#include "rocjitsu/kmd/linux/device_backing.h"
+
 #include <cstddef>
 #include <cstdint>
-#include <string_view>
+#include <span>
+#include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -30,20 +33,20 @@ inline constexpr uint32_t kMemoryBackingMappingFlags = MAP_SHARED | MAP_FIXED | 
 #endif
     ;
 
-// Fixed descriptor slots shared by exec_keeper and the rocjitsu-memory entry
-// point across exec. Cleanup and descriptor duplication start at
-// kMemoryKeeperFirstUnreservedFd to preserve these channels.
-inline constexpr int kMemoryKeeperListenerFd = 3;
-inline constexpr int kMemoryKeeperLeaseFd = 4;
-inline constexpr int kMemoryKeeperStartupFd = 5;
-inline constexpr int kMemoryKeeperFirstUnreservedFd = kMemoryKeeperStartupFd + 1;
-
 inline constexpr char kMemoryBackingDefaultName[] = "rocjitsu_backing";
+
+/// @brief Prepare the private memory keeper with the current resource limits.
+/// @details The interposer calls this before application code can lower its
+/// hard limits. It validates the initial handshake or checks an existing lease.
+/// @returns Zero after preparation or -1 with errno set on startup failure.
+int prepare_memory_keeper();
 
 /// @brief Create fixed-size shared RAM, independent of RLIMIT_FSIZE.
 /// @details Preallocation is best effort for native memfds; token storage stays
 /// sparse. RJ_TEST_FORCE_TOKEN_BACKING=1 selects tokens for integration testing
 /// without affecting ordinary metadata files or changing application limits.
+/// An export of a native memfd whose user xattrs are unsupported receives a
+/// separate token retaining the same file and its export policy.
 /// The name controls classification: names beginning with kmd::kDeviceBackingNamePrefix
 /// select device backing for both memfds and tokens. All names without that prefix
 /// select ordinary host backing, including kMemoryBackingDefaultName and custom
@@ -55,12 +58,23 @@ int create_memory_backing(size_t size, bool preallocate = false,
                           const char *name = kMemoryBackingDefaultName);
 
 /// @brief Populate a newly created metadata file using the keeper's inherited hard limit.
-/// @details The caller owns this unpublished regular file; its offset stays at zero.
+/// @details The caller owns this unpublished regular file; its offset is unchanged.
 /// Unlike GPU backing, metadata files must fit the keeper's inherited hard file limit.
 int populate_backing_file(int fd, const void *data, size_t size);
 
-/// @brief Entry point for the private memory keeper executable.
-[[noreturn]] void run_memory_keeper(int listener, int lease, int startup, pid_t owner);
+/// @brief An unpublished metadata file and its individual creation/population error.
+struct BackingFile {
+  std::string path;
+  std::string contents;
+  int error = 0;
+};
+
+/// @brief Create metadata files in order, sharing a keeper connection for each run of nonempty
+/// files.
+/// @details Create paths with mode 0666 and truncate existing files. Empty entries are handled
+/// locally. Keep the files unpublished until this call returns. Each entry reports zero on success
+/// or its errno on failure.
+void create_backing_files(std::span<BackingFile> files);
 
 /// @brief Recognize a shared-RAM descriptor without consulting process-local state.
 bool is_memory_backing_token(int fd);
@@ -68,7 +82,7 @@ bool is_memory_backing_token(int fd);
 /// @brief Map shared RAM, or pass a non-backing descriptor to the host mmap.
 /// @details The caller must hold the host mapping lock when replacing mappings
 /// visible to the simulator. Ordinary munmap/mprotect/mremap work on the result.
-/// Token attachments enforce current System V IPC permissions; retaining a token
+/// System V token attachments enforce current IPC permissions; retaining one
 /// across an effective UID change does not grant new mapping authority (EACCES).
 /// A token whose keeper has exited fails with ESTALE.
 /// Tokens accept only kMemoryBackingMappingFlags; other flags fail with EINVAL.
@@ -85,12 +99,29 @@ bool stat_memory_backing_token(int fd, struct stat *result);
 bool seek_memory_backing_token(int fd, off_t offset, int whence, off_t &result);
 
 /// @brief Query backing metadata or forward a descriptor command to the host.
-/// @details Tokens synthesize F_GETFL and F_GET_SEALS, reject F_ADD_SEALS with
-/// EPERM, and forward other commands to their underlying socket descriptor.
+/// @details Tokens synthesize F_GETFL. System V tokens synthesize F_GET_SEALS
+/// and reject F_ADD_SEALS with EPERM. File tokens apply both seal operations
+/// to their retained file. Other commands use the socket descriptor.
 int fcntl_memory_backing(int fd, int command, uintptr_t argument = 0);
 
 /// @brief Reopen a backing with an independently retained access mode.
 int reopen_memory_backing(int fd, int access_mode);
+
+/// @brief Retain a KFD export's effective GPU allocation flags with its backing.
+/// @details The policy follows native memfds and keeper tokens across descriptor
+/// transfers and outlives the original KFD allocation. A second, different
+/// policy for the same backing fails instead of replacing the first export's.
+int set_memory_backing_alloc_flags(int fd, uint32_t flags);
+
+/// @brief Retain export flags and replace a native descriptor when xattrs are unsupported.
+/// @details On success, a replacement closes the old descriptor and preserves
+/// its access mode and close-on-exec setting. The caller owns the resulting fd.
+int retain_memory_backing_export_policy(int &fd, uint32_t flags);
+
+/// @brief Read retained export flags; return 1 if present, 0 if absent, or -1 on error.
+/// @details An absent policy is valid for ordinary imported files. Malformed
+/// rocjitsu metadata fails rather than silently choosing a default PTE policy.
+int get_memory_backing_alloc_flags(int fd, uint32_t *flags);
 
 /// @brief Verify that existing backing covers a requested mapping, without growing a file.
 int check_memory_backing_size(int fd, size_t size);
@@ -99,8 +130,6 @@ int check_memory_backing_size(int fd, size_t size);
 
 namespace rocjitsu::kmd {
 
-inline constexpr std::string_view kDeviceBackingNamePrefix = "rocjitsu_alloc_renderD";
-
 /// @brief Recognize device backing independently of a descriptor's number.
 /// @details SCM_RIGHTS and DMA-BUF export create independent descriptor numbers for the
 /// same backing. Its name preserves the device identity across those transfers.
@@ -108,17 +137,5 @@ inline constexpr std::string_view kDeviceBackingNamePrefix = "rocjitsu_alloc_ren
 /// receive device dump policy. Standalone allocations made before topology is
 /// published retain ordinary host dump eligibility through every alias.
 bool is_device_memory_backing(int fd);
-
-/// @brief Persistent GPU classification in System V VMA names after IPC_RMID.
-/// @details The low slot bits select a transient creation key, released after
-/// the keeper attaches and marks the segment for removal. Exhausting these keys
-/// falls back to IPC_PRIVATE: token metadata retains device classification, but
-/// the VMA name can no longer identify the segment for ROCr GPU core dumps.
-inline constexpr uint32_t kDeviceTokenKeyPrefix = 0x524a4700;
-inline constexpr unsigned kDeviceTokenSlotBits = 8;
-inline constexpr uint32_t kDeviceTokenSlotCount = uint32_t{1} << kDeviceTokenSlotBits;
-inline constexpr unsigned kDeviceTokenSlotHexDigits = kDeviceTokenSlotBits / 4;
-static_assert(kDeviceTokenSlotBits % 4 == 0);
-static_assert((kDeviceTokenKeyPrefix & (kDeviceTokenSlotCount - 1)) == 0);
 
 } // namespace rocjitsu::kmd

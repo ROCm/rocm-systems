@@ -251,9 +251,6 @@ void expect_uniform_result_with_overflow_modes(const SwmmacCase &test, uint8_t a
 } // namespace
 
 TEST(SwmmacK128SimdExact, AllEightDecodedFormsMatchForcedScalar) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "K=128 SWMMAC requires 16-lane native SIMD";
 
   constexpr std::array MODES{Mode::RandomInt, Mode::Zeros, Mode::SignedZero, Mode::Cancel,
                              Mode::NaN,       Mode::Inf,   Mode::Denorm,     Mode::MaxFinite};
@@ -316,9 +313,6 @@ TEST(SwmmacK128SimdExact, AllF16FormsHonorFp16OvflForFiniteOverflow) {
 }
 
 TEST(SwmmacK128SimdExact, DestinationAliasesA_BAndBothMetadataWords) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "K=128 SWMMAC requires 16-lane native SIMD";
 
   constexpr std::array ALIASES{DstAlias::A, DstAlias::B, DstAlias::Index};
   for (size_t case_index = 0; case_index < CASES.size(); ++case_index)
@@ -334,9 +328,6 @@ TEST(SwmmacK128SimdExact, DestinationAliasesA_BAndBothMetadataWords) {
 }
 
 TEST(SwmmacK128SimdExact, TiedCIsReadFromD) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "K=128 SWMMAC requires 16-lane native SIMD";
 
   for (const auto &test : CASES) {
     SCOPED_TRACE(test.name);
@@ -403,9 +394,6 @@ TEST(SwmmacK128SimdExact, IgnoresPartialExecAndUpdatesFullWave) {
 }
 
 TEST(SwmmacK128SimdExact, UpperMetadataAndPhysicalGatherMatchIndependentOracle) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "K=128 SWMMAC requires 16-lane native SIMD";
 
   for (const auto &test : CASES) {
     SCOPED_TRACE(test.name);
@@ -445,9 +433,6 @@ TEST(SwmmacK128SimdExact, UpperMetadataAndPhysicalGatherMatchIndependentOracle) 
 }
 
 TEST(SwmmacK128SimdExact, NaNSourcePriorityIsBitExact) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "K=128 SWMMAC requires 16-lane native SIMD";
 
   enum class Source { A, B, C };
   for (const auto &test : CASES)
@@ -491,9 +476,6 @@ TEST(SwmmacK128SimdExact, NaNSourcePriorityIsBitExact) {
 }
 
 TEST(SwmmacK128SimdExact, PackedF16RoundsHalfwayToEven) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "K=128 SWMMAC requires 16-lane native SIMD";
 
   for (size_t case_index = 4; case_index < CASES.size(); ++case_index) {
     const auto &test = CASES[case_index];

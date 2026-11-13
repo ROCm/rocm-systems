@@ -9,8 +9,9 @@
 #pragma once
 
 #include "common/bits.h"
+#include "common/compiler.h"
 #include "dot/x86_64/exact_dot_x86_64.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/layout.h"
 
 #include <stdint.h>
@@ -50,6 +51,7 @@ void wmma_exact(uint32_t instruction_flags, bool saturate, uint32_t *const *d,
       }
       for (int step = 0; step < 16; step += Step) {
         V av[Step], bv[Step];
+        RJ_ARITH_UNROLL(4)
         for (int j = 0; j < Step; ++j) {
           int logical = step + j;
           // gfx12 Wave32 visits K blocks 0,8,4,12; other layouts use 0,4,8,12.

@@ -35,7 +35,11 @@ ncclResult_t ncclCommSetAsyncError(ncclComm_t comm, ncclResult_t nextState) {
 }
 
 struct ncclAsyncJob;
-ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
-                                 void (*)(void*), struct ncclComm*) {
+// Null accepts the job without running or freeing it.
+ncclResult_t (*g_wrapperMgmtTaskEnqueue)(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
+                                         void (*)(void*), struct ncclComm*) = nullptr;
+ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob* job, ncclResult_t (*func)(struct ncclAsyncJob*),
+                                 void (*destructor)(void*), struct ncclComm* comm) {
+    if (g_wrapperMgmtTaskEnqueue) return g_wrapperMgmtTaskEnqueue(job, func, destructor, comm);
     return ncclSuccess;
 }

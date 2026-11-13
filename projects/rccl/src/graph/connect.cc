@@ -1093,7 +1093,7 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
 
   presetChannels = allTopoRanks[comm->rank]->nChannels;
   NCCLCHECKGOTO(expandTopoRanks(allTopoRanks, nranks, nChannels), ret, fail);
-  NCCLCHECK(repairMissingChannels(allTopoRanks, nranks, nChannels));
+  NCCLCHECKGOTO(repairMissingChannels(allTopoRanks, nranks, nChannels), ret, fail);
   // Alternate rings to avoid crossing rails.
   // CrossNic values could be not the same on all nodes as it depends on the number of net devs and the NVLink bandwidth.
   // Therefore, it's only done if the rank obtained a solution with crossNic=2.
@@ -1143,10 +1143,10 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
    * Ideally All the ranks should have consensus on to graphs.
    */
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151") || rcclParamInterGraphGen()) {
-    NCCLCHECK(connectRingsLoadBalanced(comm, ringRecv, ringSend, ringPrev, ringNext));
+    NCCLCHECKGOTO(connectRingsLoadBalanced(comm, ringRecv, ringSend, ringPrev, ringNext), ret, fail);
   } else {
     // Connect rings and trees. This should also duplicate the channels.
-    NCCLCHECK(connectRings(comm, ringRecv, ringSend, ringPrev, ringNext));
+    NCCLCHECKGOTO(connectRings(comm, ringRecv, ringSend, ringPrev, ringNext), ret, fail);
   }
 
   // Intra-node tree and CollNet chain links, for both halves like the rings below; inter-node links are added next.
@@ -1169,9 +1169,9 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
 
   // [RCCL] Connect rail-optimized trees
   if (comm->topo->useRailOptimizedTrees) {
-    NCCLCHECK(connectRailOptimizedTrees(comm, treeToParent, treeToChild0, treeToChild1));
+    NCCLCHECKGOTO(connectRailOptimizedTrees(comm, treeToParent, treeToChild0, treeToChild1), ret, fail);
   } else {
-    NCCLCHECK(connectTrees(comm, treeToParent, treeToChild0, treeToChild1, treePatterns));
+    NCCLCHECKGOTO(connectTrees(comm, treeToParent, treeToChild0, treeToChild1, treePatterns), ret, fail);
   }
 
   // Dump graphviz-friendly trees

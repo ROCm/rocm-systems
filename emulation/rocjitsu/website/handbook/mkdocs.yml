@@ -71,11 +71,14 @@ extra_javascript:
   - assets/repository-stats.js
 nav:
   - Overview: index.md
+  - Performance dashboard: performance-dashboard.md
   - User guide:
       - Build from source: building.md
       - Command-line interface: rocjitsu-cli.md
+      - Python execution API: python-api.md
       - Configuration: configuration.md
       - Two-node RCCL NET smoke: rccl-scaleout.md
+      - Same-host pod RCCL gate: same-host-pod-rccl-gate.md
       - Race detection: race-detector.md
       - Native LDS ConSan: consan.md
       - GPU debugging: rocgdb-debugging.md
@@ -108,12 +111,17 @@ nav:
       - Memory wait coverage: memory-wait-counter-coverage.md
   - Project:
       - Blog: blog/index.md
-      - Performance dashboard: performance-dashboard.md
+      - Pod qualification:
+          - RCCL result (2026-10-14): same-host-pod-rccl-result-20261014.md
+          - RCCL result (2026-10-15): same-host-pod-rccl-result-20261015.md
+          - RCCL result (2026-10-19): same-host-pod-rccl-result-20261019.md
+          - Stock-driver hardware path: stock-driver-hardware-path-20261014.md
+          - Unpatched AMDGPU ablation: unpatched-amdgpu-pod-ablation-20261015.md
 extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu
-      name: Rocjitsu on GitHub
+      name: rocjitsu on GitHub
     - icon: material/bug-outline
       link: https://github.com/ROCm/rocm-systems/issues
       name: Report an issue

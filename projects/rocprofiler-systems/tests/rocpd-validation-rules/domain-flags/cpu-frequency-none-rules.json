@@ -1,0 +1,22 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_info_pmc_",
+            "required_columns": [
+                "agent_id",
+                "target_arch",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "No CPU frequency counters with --cpus=none",
+                    "error_message": "--cpus=none still registered cpu_frequency counters",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name LIKE 'cpu_frequency%'"
+                }
+            ]
+        }
+    ]
+}

@@ -622,7 +622,6 @@ void MemoryAccessTest::MemoryAccessCoherentTest(void) {
   // that waits on signal-shader-start to change from 1 to 0.
   hsa_barrier_and_packet_t barrier_pkt;
   memset(&barrier_pkt, 0, sizeof(barrier_pkt));
-  barrier_pkt.header = HSA_PACKET_TYPE_BARRIER_AND;
   barrier_pkt.completion_signal = {0};
 
   // Set signal dependency
@@ -634,6 +633,10 @@ void MemoryAccessTest::MemoryAccessCoherentTest(void) {
   uint64_t index = hsa_queue_load_write_index_relaxed(queue);
   hsa_queue_store_write_index_relaxed(queue, index + 1);
   reinterpret_cast<hsa_barrier_and_packet_t*>(queue->base_address)[index % queue->size] = barrier_pkt;
+  rocrtst::AtomicSetPacketHeader(
+      HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE, 0,
+      reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
+          &reinterpret_cast<hsa_barrier_and_packet_t*>(queue->base_address)[index % queue->size]));
 
   // - Place Dispatch packet into the queue
   hsa_kernel_dispatch_packet_t dispatch_pkt;
@@ -660,10 +663,10 @@ void MemoryAccessTest::MemoryAccessCoherentTest(void) {
 
   const uint32_t queue_mask = queue->size - 1;
 
-  index = hsa_queue_load_write_index_relaxed(queue);
-  hsa_queue_store_write_index_relaxed(queue, index + 1);
+  uint64_t dispatch_index = hsa_queue_load_write_index_relaxed(queue);
+  hsa_queue_store_write_index_relaxed(queue, dispatch_index + 1);
 
-  rocrtst::WriteAQLToQueueLoc(queue, index, &dispatch_pkt);
+  rocrtst::WriteAQLToQueueLoc(queue, dispatch_index, &dispatch_pkt);
 
   hsa_kernel_dispatch_packet_t *q_base_addr =
       reinterpret_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address);
@@ -674,7 +677,7 @@ void MemoryAccessTest::MemoryAccessCoherentTest(void) {
           (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE),
                 (1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
       reinterpret_cast<hsa_kernel_dispatch_packet_t *>
-                                        (&q_base_addr[index & queue_mask]));
+                                                  (&q_base_addr[dispatch_index & queue_mask]));
 
 
   err = hsa_amd_memory_async_copy(device_buffer_src, gpus[0], host_buffer_src, cpus[0],
@@ -687,8 +690,7 @@ void MemoryAccessTest::MemoryAccessCoherentTest(void) {
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   // - Ring the doorbell to start the queue
-  index = hsa_queue_load_write_index_relaxed(queue);
-  hsa_signal_store_relaxed(queue->doorbell_signal, index);
+  hsa_signal_store_relaxed(queue->doorbell_signal, dispatch_index);
 
 
   // - Wait for the signal-test-end to change from 1 to 0.

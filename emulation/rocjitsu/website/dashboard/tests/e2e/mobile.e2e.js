@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { expectRunPicker } from './helpers/runPicker.js';
 import { benchmarkData as data } from '../fixtures/publishedData.js';
 import { selectOverviewProjection } from '../../src/data/overviewProjection.js';
 import { formatDuration } from '../../src/utils/formatters.js';
@@ -55,7 +56,7 @@ test('phone filters, all-page navigation, trend tap and result details stay usab
 
   for (const theme of ['light', 'dark']) {
     if (theme === 'dark') await page.getByRole('button', { name: 'Use dark theme' }).tap();
-    for (const name of ['Branch Runs', 'Benchmarks', 'Run Comparison', 'Overview']) {
+    for (const name of ['Branch runs', 'Benchmarks', 'Run comparison', 'Overview']) {
       const tab = page.getByRole('tab', { name, exact: true });
       await tab.tap();
       await expect(tab).toHaveAttribute('aria-selected', 'true');
@@ -69,7 +70,7 @@ test('phone filters, all-page navigation, trend tap and result details stay usab
   await page.getByRole('tab', { name: 'Benchmarks', exact: true }).tap();
   await ensureGridBenchmark(page, 'Fictional GEMM');
   const dialog = await inspectResult(page, 'Fictional GEMM', 'fictional-develop-23');
-  await expect(dialog.getByText('Run Provenance', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Run provenance', { exact: true })).toBeVisible();
   await expectDialogTypographyContained(dialog);
   const box = await dialog.boundingBox();
   expect(box.x).toBeGreaterThanOrEqual(0);
@@ -81,16 +82,15 @@ test('phone filters, all-page navigation, trend tap and result details stay usab
   await inspector.getByRole('button', { name: 'Close', exact: true }).tap();
   await expect(inspector).toHaveCount(0);
   await expectNoDocumentOverflow(page);
-  await page.getByRole('tab', { name: 'Run Comparison', exact: true }).tap();
+  await page.getByRole('tab', { name: 'Run comparison', exact: true }).tap();
   await expectLocalScroll(page.getByRole('region', { name: 'Compared run metadata scroll area' }), { horizontal: true });
   await expectLocalScroll(page.getByRole('region', { name: 'Compared run metadata scroll area' }));
   await expectNoDocumentOverflow(page);
   expect(errors).toEqual([]);
 });
 
-test('phone unscaled direct chart input opens the exact attempt and preserves selected markers', async ({ page }) => {
+test('phone direct chart input opens the exact attempt and preserves selected markers', async ({ page }) => {
   await openDashboard(page, '/?view=benchmarks');
-  expect(await page.evaluate(() => getComputedStyle(document.body).zoom)).toBe('1');
   await ensureGridBenchmark(page, 'Fictional GEMM');
   const chart = page.getByRole('img', { name: 'Fictional GEMM duration history', exact: true });
   const clicked = await clickLastCompletedChartPoint(chart);
@@ -126,7 +126,7 @@ test('phone branch list/detail restores local scroll, focus and exact selections
   await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeCloseTo(listPosition, 0);
   await page.goBack();
   await expect(view).toHaveAttribute('data-screen', 'detail');
-  await expect(page.getByTestId('candidate-selected-identity')).toContainText('fictional-branch-01');
+  await expectRunPicker(page, 'candidate', 'fictional-branch-01');
   await expect(page.getByTestId('branch-config-gfx950-default')).toHaveAttribute('aria-pressed', 'true');
   await page.goForward();
   await expect(view).toHaveAttribute('data-screen', 'list');

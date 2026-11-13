@@ -44,7 +44,9 @@ void shutdown_plugin_group(rj_vm_t *vm) {
     vm->soc->plugin_group().onShutdown();
 }
 
-rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, rj_vm_t **handle) {
+rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, rj_vm_t **handle,
+                               util::DiagnosticEmitter emit_error,
+                               rj_status_t admission_failure_status) {
   if (!loaded.soc())
     return ROCJITSU_STATUS_ERROR;
 
@@ -80,12 +82,18 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   s->engine_config = loaded.engine_config;
   s->engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
 
-  s->vm = assemble_virtual_machine_topology(loaded, s->engine->topology(), daemon);
+  auto machine =
+      assemble_virtual_machine_topology(loaded, s->engine->topology(), daemon, emit_error);
+  if (machine.failed())
+    return admission_failure_status;
+  s->vm = machine.value();
   if (num_threads_used > 1 && !amdgpu::partition_topology_by_xcds(
                                   s->engine->topology(), partition_socs, num_threads_used)) {
-    throw std::invalid_argument("multi-threaded VM requires at least one XCD");
+    emit_error.emit() << "multi-threaded VM requires at least one XCD";
+    return admission_failure_status;
   }
-  s->engine->create();
+  if (s->engine->create(emit_error).failed())
+    return admission_failure_status;
 
   // dispatch_wf() cannot enqueue work while a restored component tree is
   // detached from an engine. Once create() has assigned partitions and event
@@ -100,10 +108,10 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
 
   if (serve) {
     s->engine->register_as_primary();
-    // Legacy replicated-GPU configs keep their existing XGMI discovery
-    // metadata for compatibility. Manifest routes describe topology only;
-    // until peer execution is granted, they must not advertise KFD XGMI
-    // links, hive IDs, or XGMI SDMA engines to ROCr.
+    // Legacy replicated-GPU configs keep their XGMI discovery metadata for
+    // compatibility. Manifest routes can execute local effects through the
+    // VM-owned fabric, but they do not establish native XGMI discovery through
+    // the stock driver. Keep KFD links, hive IDs, and XGMI SDMA counts quiet.
     if (!loaded.devices.empty())
       s->vm->driver()->setup_topology(loaded.devices, num_xcds,
                                       !loaded.system_graph.explicit_manifest,
@@ -231,7 +239,11 @@ rj_status_t rj_vm_create_for_node(const char *json_path, const char *node_id, rj
       util::Logger::warn("rj_vm_create_for_node failed: ", diagnostic.message());
       return ROCJITSU_STATUS_INVALID_FILE;
     }
-    return create_from_loaded(loaded.value(), mode, vm);
+    const auto status = create_from_loaded(loaded.value(), mode, vm, diagnostic.emitter(),
+                                           ROCJITSU_STATUS_INVALID_FILE);
+    if (status != ROCJITSU_STATUS_SUCCESS && !diagnostic.message().empty())
+      util::Logger::warn("rj_vm_create_for_node failed: ", diagnostic.message());
+    return status;
   } catch (const std::exception &e) {
     util::Logger::warn("rj_vm_create_for_node failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
@@ -254,7 +266,11 @@ rj_status_t rj_vm_create_from_string_for_node(const char *json, const char *node
       util::Logger::warn("rj_vm_create_from_string_for_node failed: ", diagnostic.message());
       return ROCJITSU_STATUS_INVALID_ARGUMENT;
     }
-    return create_from_loaded(loaded.value(), mode, vm);
+    const auto status = create_from_loaded(loaded.value(), mode, vm, diagnostic.emitter(),
+                                           ROCJITSU_STATUS_INVALID_ARGUMENT);
+    if (status != ROCJITSU_STATUS_SUCCESS && !diagnostic.message().empty())
+      util::Logger::warn("rj_vm_create_from_string_for_node failed: ", diagnostic.message());
+    return status;
   } catch (const std::exception &e) {
     util::Logger::warn("rj_vm_create_from_string_for_node failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
@@ -266,18 +282,22 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
-  try {
-    auto group = PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "");
-    // rj_vm_load_plugins() is a pre-run operation, so replacing and initializing
-    // the group cannot overlap simulation callbacks.
-    shutdown_plugin_group(vm);
-    vm->soc->set_plugin_group(group);
-    group->onInit();
-    vm->plugin_group_active.store(true, std::memory_order_release);
-    return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::exception &) {
-    return ROCJITSU_STATUS_ERROR;
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<std::shared_ptr<ExecutionPluginGroup>> configured =
+      PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "",
+                                           diagnostic.emitter());
+  if (configured.failed()) {
+    util::Logger::warn("rj_vm_load_plugins failed: ", diagnostic.message());
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
+  std::shared_ptr<ExecutionPluginGroup> group = std::move(configured).value();
+  // rj_vm_load_plugins() is a pre-run operation, so replacing and initializing
+  // the group cannot overlap simulation callbacks.
+  shutdown_plugin_group(vm);
+  vm->soc->set_plugin_group(group);
+  group->onInit();
+  vm->plugin_group_active.store(true, std::memory_order_release);
+  return ROCJITSU_STATUS_SUCCESS;
 }
 
 void rj_vm_retain(rj_vm_t *vm) {
@@ -292,13 +312,24 @@ void rj_vm_release(rj_vm_t *vm) {
     delete vm;
 }
 
-void rj_vm_destroy(rj_vm_t *vm) {
+rj_status_t rj_vm_destroy_checked(rj_vm_t *vm) {
   if (!vm)
-    return;
+    return ROCJITSU_STATUS_SUCCESS;
   // The API requires an asynchronous host to stop and join rj_vm_run() first.
+  // Close while the VM still owns the driver, so a refused dirty writeback
+  // leaves the handle, plugins, and reference-count state intact for retry.
+  if (vm->vm && vm->vm->driver() && rj_vm_close_all_devices(vm) != ROCJITSU_STATUS_SUCCESS)
+    return ROCJITSU_STATUS_ERROR;
   shutdown_plugin_group(vm);
   if (vm->destroy())
     delete vm;
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
+void rj_vm_destroy(rj_vm_t *vm) {
+  if (rj_vm_destroy_checked(vm) != ROCJITSU_STATUS_SUCCESS)
+    util::Logger::warn("rj_vm_destroy retained VM after failed process close: ",
+                       std::strerror(errno));
 }
 
 rj_status_t rj_vm_step(rj_vm_t *vm, int *active) {
@@ -381,7 +412,11 @@ rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **vm) {
       util::Logger::warn("rj_vm_restore_checkpoint failed: ", diagnostic.message());
       return ROCJITSU_STATUS_INVALID_FILE;
     }
-    return create_from_loaded(loaded.value(), RJ_VM_MODE_DEFAULT, vm);
+    const auto status = create_from_loaded(loaded.value(), RJ_VM_MODE_DEFAULT, vm,
+                                           diagnostic.emitter(), ROCJITSU_STATUS_INVALID_FILE);
+    if (status != ROCJITSU_STATUS_SUCCESS && !diagnostic.message().empty())
+      util::Logger::warn("rj_vm_restore_checkpoint failed: ", diagnostic.message());
+    return status;
   } catch (const std::exception &e) {
     util::Logger::warn("rj_vm_restore_checkpoint failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
@@ -446,6 +481,16 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
   return ROCJITSU_STATUS_SUCCESS;
 }
 
+rj_status_t unmap_status(int result) {
+  if (result == 0)
+    return ROCJITSU_STATUS_SUCCESS;
+  if (result < -1)
+    errno = -result;
+  else if (result != -1 || errno == 0)
+    errno = EIO;
+  return ROCJITSU_STATUS_ERROR;
+}
+
 } // namespace
 
 rj_status_t rj_vm_execute(rj_vm_t *vm, rj_vm_cmd_t *cmd) {
@@ -482,18 +527,17 @@ rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_pid, uint32_t 
 rj_status_t rj_vm_device_close(rj_vm_t *vm, uint32_t process_id) {
   if (!vm || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  if (process_id == 0)
-    vm->vm->driver()->close();
-  else
-    vm->vm->driver()->close(process_id);
-  return ROCJITSU_STATUS_SUCCESS;
+  errno = 0;
+  const int result =
+      process_id == 0 ? vm->vm->driver()->close() : vm->vm->driver()->close(process_id);
+  return unmap_status(result);
 }
 
 rj_status_t rj_vm_close_all_devices(rj_vm_t *vm) {
   if (!vm || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  vm->vm->driver()->close_all_processes();
-  return ROCJITSU_STATUS_SUCCESS;
+  errno = 0;
+  return unmap_status(vm->vm->driver()->close_all_processes());
 }
 
 rj_status_t rj_vm_device_map(rj_vm_t *vm, rj_vm_map_t *map) {
@@ -524,17 +568,19 @@ rj_status_t rj_vm_device_map_as(rj_vm_t *vm, uint32_t process_id, rj_vm_map_t *m
 rj_status_t rj_vm_device_unmap(rj_vm_t *vm, rj_vm_unmap_t *unmap) {
   if (!vm || !unmap || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  vm->vm->driver()->munmap(reinterpret_cast<void *>(unmap->addr),
-                           static_cast<size_t>(unmap->length));
-  return ROCJITSU_STATUS_SUCCESS;
+  errno = 0;
+  const int result = vm->vm->driver()->munmap(reinterpret_cast<void *>(unmap->addr),
+                                              static_cast<size_t>(unmap->length));
+  return unmap_status(result);
 }
 
 rj_status_t rj_vm_device_unmap_as(rj_vm_t *vm, uint32_t process_id, rj_vm_unmap_t *unmap) {
   if (!vm || !unmap || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  vm->vm->driver()->munmap(process_id, reinterpret_cast<void *>(unmap->addr),
-                           static_cast<size_t>(unmap->length));
-  return ROCJITSU_STATUS_SUCCESS;
+  errno = 0;
+  const int result = vm->vm->driver()->munmap(process_id, reinterpret_cast<void *>(unmap->addr),
+                                              static_cast<size_t>(unmap->length));
+  return unmap_status(result);
 }
 
 rj_status_t rj_vm_gpu_id(rj_vm_t *vm, uint32_t *gpu_id) {
@@ -676,4 +722,13 @@ rj_status_t rj_vm_map_shared_mem(rj_handle_t handle, rj_vm_map_t *map) {
   map->map_errno = result == MAP_FAILED ? errno : 0;
   map->mapped_addr = reinterpret_cast<uint64_t>(result);
   return result == MAP_FAILED ? ROCJITSU_STATUS_ERROR : ROCJITSU_STATUS_SUCCESS;
+}
+
+rj_status_t rj_vm_dup_shared_mem_as(rj_vm_t *vm, uint32_t process_id, int64_t offset,
+                                    rj_handle_t *handle) {
+  if (!vm || !handle || !vm->vm || !vm->vm->driver())
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  const auto duplicated = vm->vm->driver()->dup_mmap_memfd(process_id, static_cast<off_t>(offset));
+  *handle = duplicated.value_or(-1);
+  return duplicated && *duplicated < 0 ? ROCJITSU_STATUS_ERROR : ROCJITSU_STATUS_SUCCESS;
 }
