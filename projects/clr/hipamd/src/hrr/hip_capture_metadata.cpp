@@ -173,10 +173,11 @@ DeviceMetadata collect_device_metadata(int device_count) {
 
 }  // namespace
 
-std::string collect_json() {
+std::string collect_json(const std::string& consent) {
   std::ostringstream os;
   os << "{\n"
      << "  \"schema_version\": 1,\n"
+     << "  \"capture_consent\": " << quote(consent) << ",\n"
      << "  \"runtime\": ";
   append_runtime_json(os);
   os << ",\n";

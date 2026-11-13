@@ -6,7 +6,7 @@
 
 #include "compare/integer_compare.h"
 #include "compare/predicate.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <immintrin.h>
 #include <stdint.h>
