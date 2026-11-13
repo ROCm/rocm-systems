@@ -419,6 +419,7 @@ function(rccl_define_micro_source_lists)
     fakes/channel_fakes.cc
     fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc         # src/enqueue/mgmt_task_enq.cc
     fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
@@ -1206,6 +1207,7 @@ function(rccl_define_micro_source_lists)
     fakes/diagnostics_p2p_device_fakes.cc  # src/diagnostics/device/p2p.cu
     fakes/hip_fakes.cc
     fakes/libc_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc         # src/enqueue/mgmt_task_enq.cc
     fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/nccl_fakes.cc
     fakes/topo_stubs.cc
