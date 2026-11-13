@@ -38,9 +38,18 @@ public:
   uint32_t tag() const { return tag_; }
   uint32_t slots_at_construction() const { return slots_at_construction_; }
 
+  /// A clocked pipeline learns of new work here, so count the wakeups that
+  /// reach this layer rather than stopping at the shell or the ISA parts.
+  void schedule_work() override {
+    ++schedule_work_calls_;
+    ExecComputeUnit<simdojo::ExecMode::CLOCKED>::schedule_work();
+  }
+  uint32_t schedule_work_calls() const { return schedule_work_calls_; }
+
 private:
   const uint32_t tag_;
   const uint32_t slots_at_construction_;
+  uint32_t schedule_work_calls_ = 0;
 };
 
 ComputeUnitCore::Config config_for(rj_code_arch_t arch, uint32_t slots = 2) {
@@ -80,8 +89,12 @@ TEST_F(DerivedComputeUnitTest, ExecutesThroughTheModelClass) {
   memory.write32(kProgram, kMovS5);
   for (uint32_t i = 1; i <= 4; ++i)
     memory.write32(kProgram + i * 4, kEndpgm);
+  EXPECT_EQ(cu->schedule_work_calls(), 0u);
   Wavefront *wave = cu->dispatch_wf(0, kProgram, 104, 256);
   ASSERT_NE(wave, nullptr);
+  // The test drives each cycle itself below, so only this count shows that
+  // dispatch woke the model's override, as a clocked pipeline needs it to.
+  EXPECT_EQ(cu->schedule_work_calls(), 1u);
   cu->write_vgpr(wave->vgpr_alloc().base, 3, 0x1234u);
   EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base, 3), 0x1234u);
 
