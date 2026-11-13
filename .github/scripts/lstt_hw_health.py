@@ -7,10 +7,9 @@
 Run it by hand on the host and in CI (.github/workflows/lstt-hw-health.yml)
 with the same arguments, and the two results are the same.
 
-This repository is public. System BIOS firmware is a public release, so its
-version is printed. The amdgpu driver on these hosts is an internal build: its
-version is never read, only whether the module is loaded, and the output of
-rocminfo and docker is never printed.
+This repository is public, so the output is kept minimal: the host name, the
+BIOS version, and pass or fail for the module and GPU checks. The amdgpu
+version and the output of rocminfo and docker are never read into the output.
 """
 
 import argparse

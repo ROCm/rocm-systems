@@ -1,15 +1,19 @@
-# Reports the BIOS and GPU state of each LSTT CI host, so a firmware or driver
-# change on a host shows up in the job summary naming the host and the layer.
-# Nothing is recorded or compared: the job reads the current state and checks
-# that the host is the one the matrix row names, that the amdgpu module is
-# loaded, and that ROCm sees the expected GPU.
+# Checks each LSTT CI host: that the host is the machine its labels say it is,
+# that the amdgpu module is loaded, and that ROCm sees the expected GPU. The
+# BIOS version is reported. Nothing is stored or compared.
 #
-# This repository is public. System BIOS firmware is a public release, so its
-# version is printed. The amdgpu driver on these hosts is an internal build: its
-# version is never read into a log, only whether the module is loaded.
+# Why this is not part of TheRock CI: these hosts are not in TheRock's runner
+# pool, so TheRock CI does not cover them. This is a per-host check, not a build
+# or test of a component, so it is its own workflow and its failures do not
+# appear on unrelated PRs.
 #
-# The checks live in .github/scripts/lstt_hw_health.py, so the same command
-# can be run by hand on a host and gives the same result as this job.
+# Why there is no pull_request trigger: the job runs on the host itself, not in
+# a container, and this repository is public. A PR could change the script and
+# print anything from the host into a log anyone can download. It runs only from
+# develop (nightly, or by hand from develop), so the code that runs there has
+# been reviewed.
+# To try a change, run the script by hand on the host:
+#   python3 .github/scripts/lstt_hw_health.py --host <host> --gfx <gfx>
 #
 # There is no BMC step yet: no host in the matrix has a BMC. Add one with the
 # first host that does, together with a green run. It needs ipmitool and
@@ -18,14 +22,9 @@
 name: LSTT hardware health
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/lstt-hw-health.yml'
-      - '.github/scripts/lstt_hw_health.py'
   workflow_dispatch:
   schedule:
-    # Nightly report. Schedules only run from the default branch, so this
-    # starts firing after merge, not on the PR.
+    # Nightly report. Schedules only run from the default branch.
     - cron: '17 6 * * *'
 
 permissions:
@@ -38,8 +37,8 @@ concurrency:
 jobs:
   health:
     name: ${{ matrix.host }}
-    # Self-hosted hardware: never auto-run untrusted fork-PR code on it.
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    # A manual run can pick any branch; only develop's reviewed code may run here.
+    if: ${{ github.ref == 'refs/heads/develop' }}
     strategy:
       fail-fast: false
       matrix:
