@@ -16,6 +16,7 @@
 #include "param.h"
 #include "recorder.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <vector>
@@ -36,19 +37,18 @@ ncclResult_t initChildFabric(struct ncclComm* child) {
   return ncclDdaFabricCommInit(child);
 }
 
-ncclResult_t reserveScratch(struct ncclComm* comm, struct rcclHostHier* h, size_t bytes, cudaStream_t stream) {
+// Never frees a buffer while the comm lives: freeing one that peer GPUs of the same process have just accessed
+// through the child comms intermittently fails in HIP, so a buffer that is outgrown is kept until teardown. Growing
+// at least twofold keeps the kept buffers under the size of the current one.
+ncclResult_t reserveScratch(struct ncclComm* comm, struct rcclHostHier* h, size_t bytes) {
   if (h->scratchBytes >= bytes) return ncclSuccess;
-  if (h->scratch != nullptr) {
-    // Earlier collectives on this stream may still read the old buffer.
-    CUDACHECK(cudaStreamSynchronize(stream));
-    NCCLCHECK(ncclCudaFree(h->scratch, comm->memManager));
-    h->scratch = nullptr;
-    h->scratchBytes = 0;
-  }
+  if (h->nRetired == kHostHierMaxRetired) return ncclInternalError;
+  const size_t grown = std::max(bytes, 2 * h->scratchBytes);
   char* buf = nullptr;
-  NCCLCHECK(ncclCudaMalloc(&buf, bytes, comm->memManager));
+  NCCLCHECK(ncclCudaMalloc(&buf, grown, comm->memManager));
+  if (h->scratch != nullptr) h->retired[h->nRetired++] = h->scratch;
   h->scratch = buf;
-  h->scratchBytes = bytes;
+  h->scratchBytes = grown;
   return ncclSuccess;
 }
 
@@ -203,9 +203,10 @@ ncclResult_t rcclHostHierTeardown(struct ncclComm* comm) {
   comm->hostHierState = rcclHostHierOff;
   if (h == nullptr) return ncclSuccess;
   ncclResult_t res = ncclSuccess;
-  if (h->scratch != nullptr) NCCLCHECKGOTO(ncclCudaFree(h->scratch, comm->memManager), res, exit);
   if (h->inter != nullptr) NCCLCHECKGOTO(ncclCommDestroy(h->inter), res, exit);
   if (h->intra != nullptr) NCCLCHECKGOTO(ncclCommDestroy(h->intra), res, exit);
+  for (int i = 0; i < h->nRetired; i++) NCCLCHECKGOTO(ncclCudaFree(h->retired[i], comm->memManager), res, exit);
+  if (h->scratch != nullptr) NCCLCHECKGOTO(ncclCudaFree(h->scratch, comm->memManager), res, exit);
 exit:
   free(h->hostRanks);
   free(h);
@@ -270,7 +271,7 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
   const bool doInter = h->inter != nullptr;
   // The inter-host AllReduce runs out of place: in place it is several times slower.
   const size_t stride = (chunkBytes + 255) & ~size_t{255};
-  NCCLCHECK(reserveScratch(comm, h, doInter ? stride + chunkBytes : chunkBytes, stream));
+  NCCLCHECK(reserveScratch(comm, h, doInter ? stride + chunkBytes : chunkBytes));
   char* rsOut = static_cast<char*>(h->scratch);
   char* agIn = doInter ? rsOut + stride : rsOut;
 

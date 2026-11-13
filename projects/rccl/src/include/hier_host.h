@@ -33,6 +33,9 @@ struct rcclHostLayout {
   int localRank;  // Position among this host's ranks, in rank order
 };
 
+// Scratch at least doubles each time it grows, so this covers any size.
+constexpr int kHostHierMaxRetired = 64;
+
 struct rcclHostHier {
   struct rcclHostLayout layout;
   ncclComm_t intra;  // Ranks of this host, ordered by local rank
@@ -42,6 +45,8 @@ struct rcclHostHier {
   // concurrently on two streams is unsafe.
   void* scratch;
   size_t scratchBytes;
+  void* retired[kHostHierMaxRetired]; // Outgrown scratch buffers, freed at teardown
+  int nRetired;
 };
 
 // Returns true and fills layout when every host holds the same number of ranks,
