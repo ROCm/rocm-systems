@@ -252,6 +252,16 @@ TEST(parser_schema, split_list_trims_and_rejects_an_empty_separator)
     EXPECT_FALSE(split_list("alpha", "").has_value());
 }
 
+TEST(parser_schema, split_list_ignores_a_separator_at_either_end)
+{
+    EXPECT_EQ(split_list("alpha,", ","), std::vector<std::string>{ "alpha" });
+    EXPECT_EQ(split_list(" , alpha", ","), std::vector<std::string>{ "alpha" });
+    EXPECT_EQ(split_list(",", ","), (std::vector<std::string>{ "", "" }));
+    EXPECT_EQ(split_list(",,", ","), (std::vector<std::string>{ "", "" }));
+    EXPECT_EQ(split_list("alpha,,beta", ","),
+              (std::vector<std::string>{ "alpha", "", "beta" }));
+}
+
 TEST(parser_schema, list_separator_is_a_comma)
 {
     const auto param = make_param("list", "ROCPROFSYS_LIST");

@@ -218,7 +218,11 @@ TEST(parser_schema_validator, enumeration_list_values)
     EXPECT_TRUE(is_valid_value(param, " alpha , beta "));
     EXPECT_FALSE(is_valid_value(param, "alpha,gamma"));
     EXPECT_FALSE(is_valid_value(param, "alpha,,beta"));
-    EXPECT_FALSE(is_valid_value(param, "alpha,"));
+    EXPECT_TRUE(is_valid_value(param, "alpha,"));
+    EXPECT_TRUE(is_valid_value(param, ",alpha"));
+    EXPECT_FALSE(is_valid_value(param, ","));
+    EXPECT_FALSE(is_valid_value(param, ",,"));
+    EXPECT_FALSE(is_valid_value(param, " , "));
 
     param.env = "ROCPROFSYS_LIST";
     EXPECT_TRUE(is_valid_value(param, "alpha,beta"));

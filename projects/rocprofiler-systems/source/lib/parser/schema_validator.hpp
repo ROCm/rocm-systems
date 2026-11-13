@@ -18,8 +18,9 @@ namespace rocprofsys::parser
  * Surrounding whitespace is ignored, then the whole string must parse as the
  * parameter's type. Numbers must be finite and
  * within min/max, and enumerations must name a choice unless custom values are
- * allowed. An enumeration_list is split on list_separator(); each trimmed element
- * must be a valid choice, and an empty string is the empty list. Boolean tokens
+ * allowed. An enumeration_list is split on list_separator(), ignoring one separator at
+ * either end of a value that names something; each trimmed element must be a valid
+ * choice, so "," is not a list, and an empty string is the empty list. Boolean tokens
  * (true/false, yes/no, on/off, y/n, t/f, 1/0) are matched case-insensitively. Any
  * other integer is true when it is not zero. A leading plus is accepted on that
  * integer. An empty boolean is not a value. A string is any text. A path must be

@@ -57,6 +57,23 @@ arg_spellings(const schema_param& param)
     }
     return spellings;
 }
+
+/// @p value trimmed, without one separator at either end. A separator that is all that
+/// is left stays, so text made only of separators still has an empty element.
+std::string_view
+inner_list_text(std::string_view value, std::string_view separator)
+{
+    auto text = utility::string::trim(value);
+    if(text.starts_with(separator) && text.size() > separator.size())
+    {
+        text = utility::string::trim(text.substr(separator.size()));
+    }
+    if(text.ends_with(separator) && text.size() > separator.size())
+    {
+        text = utility::string::trim(text.substr(0, text.size() - separator.size()));
+    }
+    return text;
+}
 }  // namespace
 
 std::string_view
@@ -73,18 +90,19 @@ split_list(std::string_view value, std::string_view separator)
         return std::nullopt;
     }
 
+    const auto               text = inner_list_text(value, separator);
     std::vector<std::string> parts;
-    if(value.empty())
+    if(text.empty())
     {
         return parts;
     }
 
     std::size_t start = 0;
-    while(start <= value.size())
+    while(start <= text.size())
     {
-        const auto position = value.find(separator, start);
-        const auto end = (position == std::string_view::npos) ? value.size() : position;
-        parts.emplace_back(utility::string::trim(value.substr(start, end - start)));
+        const auto position = text.find(separator, start);
+        const auto end = (position == std::string_view::npos) ? text.size() : position;
+        parts.emplace_back(utility::string::trim(text.substr(start, end - start)));
         if(position == std::string_view::npos)
         {
             break;

@@ -84,6 +84,9 @@ struct schema_param
 list_separator(const schema_param& param) noexcept;
 
 /// Split a list on @p separator, trimming each element.
+/// One separator at either end is ignored when the value names something, so "a," and
+/// ",a" are the list a. Text made only of separators, such as ",", and an empty element
+/// inside, as in "a,,b", keep their empty elements for the caller to refuse.
 /// @return nullopt when @p separator is empty. An empty @p value is an empty list.
 [[nodiscard]] std::optional<std::vector<std::string>>
 split_list(std::string_view value, std::string_view separator);
