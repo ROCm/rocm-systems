@@ -529,46 +529,6 @@ __device__ uint64_t ROContext::signal_fetch_wave(const uint64_t *sig_addr) {
   return value;
 }
 
-__device__ uint64_t number_active_lanes() {
-  return __popcll(__ballot(1));
-}
-
-__device__ uint64_t active_logical_lane_id() {
-  uint64_t ballot{__ballot(1)};
-  uint64_t my_physical_lane_id{__lane_id()};
-  uint64_t all_ones_mask = -1;
-  uint64_t lane_mask{all_ones_mask << my_physical_lane_id};
-  uint64_t inverted_mask{~lane_mask};
-  uint64_t lower_active_lanes{ballot & inverted_mask};
-  uint64_t my_logical_lane_id{__popcll(lower_active_lanes)};
-  return my_logical_lane_id;
-}
-
-__device__ uint64_t broadcast_lds(bool lowest_active, uint64_t value) {
-  constexpr size_t SIZE = 1024 / WF_SIZE;
-  __shared__ uint64_t value_per_warp[SIZE];
-  auto wavefront_number {get_flat_block_id() / WF_SIZE};
-  if (lowest_active) {
-    value_per_warp[wavefront_number] = value;
-    __threadfence_block();
-  }
-  return value_per_warp[wavefront_number];
-}
-
-__device__ uint64_t broadcast_shfl_up(uint64_t value) {
-  for (unsigned i{0}; i < WF_SIZE; i++) {
-    uint64_t temp{__shfl_up(value, i)};
-    if (temp) {
-      value = temp;
-    }
-  }
-  return value;
-}
-
-__device__ uint64_t broadcast(bool lowest_active, uint64_t value) {
-  return broadcast_lds(lowest_active, value);
-}
-
 __device__ int ROContext::broadcastmem_wave([[maybe_unused]] rocshmem_team_t team,
                                         [[maybe_unused]] void *dest,
                                         [[maybe_unused]] const void* source,
@@ -606,20 +566,63 @@ __device__ uint64_t next_write_slot_o_o_o(BlockHandle *handle) {
   return write_slot % handle->queue_size;
 }
 
-__device__ uint64_t next_write_slot_o_o_m(BlockHandle *handle) {
-  auto num_active_lanes{number_active_lanes()};
-  uint64_t write_slot{0};
-  auto my_active_lane_id {active_logical_lane_id()};
-  bool is_lowest_active_lane {my_active_lane_id == 0};
-  if (is_lowest_active_lane) {
-    wait_until_space_available(handle, num_active_lanes);
-    write_slot = handle->write_index;
-    handle->write_index += num_active_lanes;
-    __threadfence();
+// Reserves `count` consecutive slots on `handle` and returns the absolute index of the first one.
+template <bool kUseLock>
+__device__ uint64_t reserve_slots(BlockHandle *handle, uint64_t count) {
+  if (kUseLock) {
+    acquire_lock(handle);
   }
-  write_slot = broadcast(is_lowest_active_lane, write_slot);
-  write_slot += my_active_lane_id;
+  wait_until_space_available(handle, count);
+  uint64_t first_slot{handle->write_index};
+  handle->write_index += count;
+  __threadfence();
+  if (kUseLock) {
+    release_lock(handle);
+  }
+  return first_slot;
+}
+
+// Returns the lowest lane set in a non-empty lane mask.
+__device__ int lowest_lane(uint64_t mask) {
+  return __ffsll(static_cast<unsigned long long>(mask)) - 1;  // NOLINT(runtime/int)
+}
+
+// Gives every active lane one slot in its own handle's queue; lanes of a wave may use different contexts.
+// Lanes are grouped by handle: the group's lowest lane reserves the group size and each lane takes base + its rank in the group.
+// Groups reserve in ascending handle address, so two waves that mix the same handles never wait on space the other holds.
+// A wave on one handle forms a single group and reserves once.
+template <bool kUseLock>
+__device__ uint64_t next_write_slot_per_handle(BlockHandle *handle) {
+  const uint64_t my_key{reinterpret_cast<uint64_t>(handle)};
+  const uint64_t lanes_below{(1ULL << __lane_id()) - 1};
+  uint64_t remaining{__ballot(1)};
+  uint64_t write_slot{0};
+  while (remaining != 0) {
+    const bool waiting{((remaining >> __lane_id()) & 1) != 0};
+    uint64_t key{__shfl(my_key, lowest_lane(remaining))};
+    uint64_t lower{__ballot(waiting && my_key < key)};
+    while (lower != 0) {
+      key = __shfl(my_key, lowest_lane(lower));
+      lower = __ballot(waiting && my_key < key);
+    }
+    const bool in_group{waiting && my_key == key};
+    const uint64_t group{__ballot(in_group)};
+    const int leader{lowest_lane(group)};
+    uint64_t base{0};
+    if (static_cast<int>(__lane_id()) == leader) {
+      base = reserve_slots<kUseLock>(handle, __popcll(group));
+    }
+    base = __shfl(base, leader);
+    if (in_group) {
+      write_slot = base + __popcll(group & lanes_below);
+    }
+    remaining &= ~group;
+  }
   return write_slot % handle->queue_size;
+}
+
+__device__ uint64_t next_write_slot_o_o_m(BlockHandle *handle) {
+  return next_write_slot_per_handle<false>(handle);
 }
 
 __device__ uint64_t next_write_slot_o_m_o(BlockHandle *handle) {
@@ -634,21 +637,7 @@ __device__ uint64_t next_write_slot_o_m_o(BlockHandle *handle) {
 }
 
 __device__ uint64_t next_write_slot_o_m_m(BlockHandle *handle) {
-  auto num_active_lanes{number_active_lanes()};
-  uint64_t write_slot{0};
-  auto my_active_lane_id {active_logical_lane_id()};
-  bool is_lowest_active_lane {my_active_lane_id == 0};
-  if (is_lowest_active_lane) {
-    acquire_lock(handle);
-    wait_until_space_available(handle, num_active_lanes);
-    write_slot = handle->write_index;
-    handle->write_index += num_active_lanes;
-    __threadfence();
-    release_lock(handle);
-  }
-  write_slot = broadcast(is_lowest_active_lane, write_slot);
-  write_slot += my_active_lane_id;
-  return write_slot % handle->queue_size;
+  return next_write_slot_per_handle<true>(handle);
 }
 
 __device__ uint64_t next_write_slot(BlockHandle *handle) {

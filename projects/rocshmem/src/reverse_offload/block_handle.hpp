@@ -64,15 +64,16 @@ class DefaultBlockHandleProxy {
                           AWF_Queue_statusT *default_ctx_status,
                           AWF_Queue_ret_buffT *default_ctx_g_ret,
                           AWF_Queue_ret_buffT *default_ctx_atomic_ret,
+                          size_t queue_index,
                           const HIPAllocatorFinegrained& alloc = HIPAllocatorFinegrained(),
                           size_t num_elems = 1)
     : alloc_{alloc}, proxy_{num_elems, alloc_} {
 
-    // TODO(bpotter): create a default queue for this queue descriptor
-    auto queue_descriptor{queue->descriptor(0)};
+    // The default context owns its queue: sharing one with a created context would split its write_index in two.
+    auto queue_descriptor{queue->descriptor(queue_index)};
     auto block_handle{proxy_.get()};
     block_handle->profiler.resetStats();
-    block_handle->queue = queue->elements(0);
+    block_handle->queue = queue->elements(queue_index);
     block_handle->queue_size = queue->size();
     block_handle->read_index = queue_descriptor->read_index;
     block_handle->write_index = queue_descriptor->write_index;

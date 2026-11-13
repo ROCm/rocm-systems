@@ -51,7 +51,8 @@ ROBackend::ROBackend(MPI_Comm comm)
     : Backend(comm) {
   type = BackendType::RO_BACKEND;
 
-  poll_block_count_ = envvar::max_num_contexts;
+  // One queue per created context plus one for the default context.
+  poll_block_count_ = envvar::max_num_contexts + 1;
 
   profiler_proxy_ = ProfilerProxy(envvar::max_num_contexts);
 
@@ -72,7 +73,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   status_ = StatusProxyT(num_buff_elems, status_alloc_);
 
-  queue_ = Queue(envvar::max_num_contexts, queue_size_);
+  queue_ = Queue(poll_block_count_, queue_size_);
 
   transport_ = new MPITransport(backend_comm, &queue_);
   num_pes = transport_->getNumPes();
@@ -96,7 +97,7 @@ ROBackend::ROBackend(MPI_Comm comm)
   if (!envvar::disable_mixed_ipc)
     initIPC();
 
-  transport_->initTransport(envvar::max_num_contexts, &backend_proxy);
+  transport_->initTransport(poll_block_count_, &backend_proxy);
 
   host_interface = transport_->host_interface;
 
@@ -123,7 +124,8 @@ ROBackend::ROBackend(MPI_Comm comm)
                                 atomic_ret_buffer_.get(), &queue_,
                                 status_.get(), default_ctx_status_.get(),
                                 default_ctx_g_ret_buffer_.get(),
-                                default_ctx_atomic_ret_buffer_.get());
+                                default_ctx_atomic_ret_buffer_.get(),
+                                envvar::max_num_contexts);
 
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
 
