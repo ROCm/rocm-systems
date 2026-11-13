@@ -1054,12 +1054,12 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
 
   // detect if all GPUs are connected by XGMI
   for (int i = 0; i < system->nodes[GPU].count && allXgmi; i++) {
-    int cudaDev1 = system->nodes[GPU].nodes[i].gpu.dev;
+    int dev1 = system->nodes[GPU].nodes[i].gpu.dev;
     for (int j = 0; j < system->nodes[GPU].count && allXgmi; j++) {
       if (i == j) continue;
-      int cudaDev2 = system->nodes[GPU].nodes[j].gpu.dev;
+      int dev2 = system->nodes[GPU].nodes[j].gpu.dev;
       bool isXGMI;
-      NCCLCHECKGOTO(ncclTopoGetLinkType(comm->topo, cudaDev1, cudaDev2, &isXGMI), ret, fail);
+      NCCLCHECKGOTO(ncclTopoGetLinkType(comm->topo, dev1, dev2, &isXGMI), ret, fail);
       allXgmi &= isXGMI;
     }
   }
@@ -1231,7 +1231,17 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   if (comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT) {
     // In the case of >1 NVLD (and the user didn't set nChannelsPerNetPeer), the network is the bottleneck.
     // Reduce the number of channels per host to avoid going above p2pnChannels to fit all the peers within a single round.
-    while (comm->p2pnChannelsPerPeer * divUp(comm->nRanks, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >= comm->p2pnChannels && comm->p2pnChannelsPerPeer > 1) comm->p2pnChannelsPerPeer /= 2;
+    while (comm->p2pnChannelsPerPeer * divUp(comm->nRanks, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >= comm->p2pnChannels &&
+           comm->p2pnChannelsPerPeer > 1)
+      comm->p2pnChannelsPerPeer /= 2;
+    if (rcclUseAinic()) {
+      // A single AINIC NIC is only saturated by two net-p2p channels per peer.
+      // Restore the pre-2.29 count of max(netCountByBw, nChannelsMax) wherever the channel pool can hold it (was available up to 8 nodes).
+      bool atScale = comm->nNodes > 8 && 2 * comm->nRanks > comm->p2pnChannels;
+      int nChannelsMax = atScale ? 1 : 2;
+      comm->p2pnChannelsPerPeer = std::max(
+        comm->p2pnChannelsPerPeer, std::min(std::max(comm->minNetCount, nChannelsMax), comm->p2pnChannels));
+    }
   } else {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }

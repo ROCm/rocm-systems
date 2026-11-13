@@ -263,6 +263,7 @@ if(BUILD_TESTS)
       mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
+      graph/TopoGpuDevTests.cpp
       graph/TopoTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp

@@ -654,6 +654,7 @@ struct ncclComm {
 
   int node;
   int nNodes;
+  int minNetCount; // Minimum number of network devices local to a rank
   int rcclUseOneSlice; // RCCL: true if this comm is using one slice per primitive
   int gfx9CheapFenceOff; // RCCL: true if gfx9 cheap fence is disabled
   int localRank;
