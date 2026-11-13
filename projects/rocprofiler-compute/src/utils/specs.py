@@ -68,9 +68,24 @@ def generate_machine_specs(
     Otherwise, probes the current system for hardware information.
     """
     if sysinfo is not None:
+        check_experimental_arch(sysinfo.get("gpu_arch"), args)
         return _reconstruct_specs_from_sysinfo(sysinfo)
 
     return _probe_live_machine_specs(args)
+
+
+def check_experimental_arch(
+    gpu_arch: Optional[str], args: Optional[argparse.Namespace]
+) -> None:
+    """Stop on an experimental gpu_arch without --experimental; warn with it."""
+    if gpu_arch not in mi_gpu_specs.get_experimental_archs():
+        return
+    if not getattr(args, "experimental", False):
+        console_error(
+            f"{gpu_arch} is an experimental GPU. Use --experimental to enable it."
+        )
+        return
+    console_warning(f"{gpu_arch} is experimental and may change in future releases.")
 
 
 def get_rocm_ver() -> str:
@@ -322,6 +337,7 @@ def _probe_live_machine_specs(args: Optional[argparse.Namespace]) -> "MachineSpe
 
     machine_info = _extract_machine_info()
     soc_info = _extract_soc_info()
+    check_experimental_arch(soc_info["gpu_arch"], args)
     gpu_info = _extract_gpu_info(gpu_arch=soc_info["gpu_arch"])
 
     with amdsmi_interface.amdsmi_ctx():

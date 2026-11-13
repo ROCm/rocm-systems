@@ -33,6 +33,7 @@ from utils.metrics.expression import update_normal_unit_string
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import (
     MachineSpecs,
+    check_experimental_arch,
     generate_machine_specs,
 )
 from utils.utils_common import (
@@ -306,8 +307,11 @@ class RocProfCompute:
             if arch is None:
                 self.generate_machine_specs()
                 arch = self.__mspec.gpu_arch
+            else:
+                check_experimental_arch(arch, self.__args)
             self.list_metrics(arch)
         elif self.__args.list_blocks is not None:
+            check_experimental_arch(self.__args.list_blocks, self.__args)
             self.list_blocks()
 
         if self.__mode == "profile":
