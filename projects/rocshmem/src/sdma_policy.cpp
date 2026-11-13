@@ -66,9 +66,9 @@ uint64_t sdmaHostId() {
   return h != 0 ? h : 1;
 }
 
-// Names a GPU on another host for Anvil's remote-peer queues, as the RCCL GIN factory does. A
-// collision would only make two such peers share a queue.
-uint64_t sdmaRemotePeerKey(const SdmaPeerInfo& p) {
+// Names a pod peer's GPU for Anvil's per-peer queues, on this host or another, as the RCCL GIN
+// factory does. A collision would only make two peers share a queue.
+uint64_t sdmaPeerKey(const SdmaPeerInfo& p) {
   return p.hostId ^ ((static_cast<uint64_t>(p.deviceId) + 1) * 0x9E3779B97F4A7C15ull);
 }
 
@@ -76,8 +76,7 @@ uint64_t sdmaRemotePeerKey(const SdmaPeerInfo& p) {
 // device-constructible. Keyed by SdmaImpl::wiringId.
 struct SdmaWiring {
   std::vector<SdmaPeerInfo> peers;           // by pod rank
-  std::vector<int> connectedDevs;            // local devices this init connected
-  std::vector<uint64_t> connectedRemotes;    // remote-peer keys this init connected
+  std::vector<uint64_t> connectedPeers;      // peer keys this init connected
 };
 
 std::unordered_map<int, SdmaWiring>& sdmaWirings() {
@@ -138,40 +137,31 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
     int numDevices = 0;
     CHECK_HIP(hipGetDeviceCount(&numDevices));
 
-    // Connect to every pod peer. A peer on this host uses the per-device queues; a peer on another
-    // host gets queues of its own and no peer access, because the destination is its fabric-mapped
-    // memory. Queues a previous init left behind are reused. A failure is not acted on here; the
+    // Connect to every pod peer; each gets queues of its own. A peer on another host gets no peer
+    // access, because the destination is its fabric-mapped memory. Queues a previous init left behind are reused. A failure is not acted on here; the
     // pod agrees on the result below.
     for (int p = 0; p < shm_size && status == kSdmaReady; p++) {
       const SdmaPeerInfo& peer = wiring.peers[static_cast<size_t>(p)];
-      if (peer.hostId == myHost) {
-        const int dev = peer.deviceId;
-        if (dev < 0 || dev >= numDevices) {
-          LOG_ERROR("SDMA: pod rank %d reports device %d, not one of this host's %d", p, dev,
-                    numDevices);
-          status = kSdmaConnectFailed;
-          break;
-        }
-        if (sdma_anvil::anvil.getSdmaQueue(deviceId, dev, numChannels - 1) != nullptr) continue;
-        if (dev != deviceId) sdma_anvil::EnablePeerAccess(deviceId, dev);
-        if (!sdma_anvil::anvil.connect(deviceId, dev, numChannels)) {
-          LOG_ERROR("SDMA: connect failed from device %d to %d with %d channel(s)", deviceId,
-                    dev, numChannels);
-          status = kSdmaConnectFailed;
-          break;
-        }
-        wiring.connectedDevs.push_back(dev);
-      } else {
-        const uint64_t key = sdmaRemotePeerKey(peer);
-        if (sdma_anvil::anvil.getRemotePeerQueue(key, numChannels - 1) != nullptr) continue;
-        if (!sdma_anvil::anvil.connectRemotePeer(deviceId, key, numChannels)) {
-          LOG_ERROR("SDMA: connect failed from device %d to pod rank %d on another host with %d "
-                    "channel(s)", deviceId, p, numChannels);
-          status = kSdmaConnectFailed;
-          break;
-        }
-        wiring.connectedRemotes.push_back(key);
+      const bool onThisHost = peer.hostId == myHost;
+      const int dev = peer.deviceId;
+      if (onThisHost && (dev < 0 || dev >= numDevices)) {
+        LOG_ERROR("SDMA: pod rank %d reports device %d, not one of this host's %d", p, dev,
+                  numDevices);
+        status = kSdmaConnectFailed;
+        break;
       }
+      const uint64_t key = sdmaPeerKey(peer);
+      if (sdma_anvil::anvil.getQueue(key, numChannels - 1) != nullptr) continue;
+      if (onThisHost && dev != deviceId) sdma_anvil::EnablePeerAccess(deviceId, dev);
+      const int dst = onThisHost ? dev : sdma_anvil::AnvilLib::kOffHostPeer;
+      if (!sdma_anvil::anvil.connect(deviceId, key, dst, numChannels)) {
+        LOG_ERROR("SDMA: connect failed from device %d to pod rank %d (device %d on %s) with %d "
+                  "channel(s)", deviceId, p, dev, onThisHost ? "this host" : "another host",
+                  numChannels);
+        status = kSdmaConnectFailed;
+        break;
+      }
+      wiring.connectedPeers.push_back(key);
     }
     if (status == kSdmaReady && remotePeers > 0) {
       LOG_INFO("SDMA: %d of %d pod peers are on other hosts; each gets its own SDMA queue(s)",
@@ -190,12 +180,12 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
 
   switch (agreed.decision) {
     case SdmaDecision::kCommit:
-      sdmaPublishHandles(deviceId, true);
+      sdmaPublishHandles(true);
       return;
     case SdmaDecision::kAllDisabled:
       LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
       // USE_SDMA testers index deviceHandles_d without checking sdmaEnabled.
-      sdmaPublishHandles(deviceId, false);
+      sdmaPublishHandles(false);
       return;
     case SdmaDecision::kFallbackConnectFailed:
       LOG_ERROR("SDMA: connect failed on pod rank(s) %s of %d; all of them fall back to IPC "
@@ -209,7 +199,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
       break;
   }
 
-  const size_t released = wiring.connectedDevs.size() + wiring.connectedRemotes.size();
+  const size_t released = wiring.connectedPeers.size();
   sdmaReleasePeers();
   if (status != kSdmaDisabledByEnv) {
     const uint32_t queuesAfter = sdma_anvil::anvil.queuesUsed();
@@ -222,10 +212,10 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
   }
   sdmaEnabled = false;
   // USE_SDMA testers index deviceHandles_d without checking sdmaEnabled.
-  sdmaPublishHandles(deviceId, false);
+  sdmaPublishHandles(false);
 }
 
-__host__ void SdmaImpl::sdmaPublishHandles(int deviceId, bool useQueues) {
+__host__ void SdmaImpl::sdmaPublishHandles(bool useQueues) {
   // Total number of handles: shm_size (pod) * numChannels
   // Indexed as: deviceHandles_d[local_pe * numChannels + channel_idx]
   int total_handles = shm_size * numChannels;
@@ -238,15 +228,11 @@ __host__ void SdmaImpl::sdmaPublishHandles(int deviceId, bool useQueues) {
   std::vector<sdma_anvil::SdmaQueueDeviceHandle*> handles_h(total_handles, nullptr);
   if (useQueues) {
     const SdmaWiring& wiring = sdmaWirings()[wiringId];
-    const uint64_t myHost = wiring.peers[static_cast<size_t>(pod_rank)].hostId;
     for (int i = 0; i < shm_size; i++) {
-      const SdmaPeerInfo& peer = wiring.peers[static_cast<size_t>(i)];
-      const bool local = peer.hostId == myHost;
+      const uint64_t key = sdmaPeerKey(wiring.peers[static_cast<size_t>(i)]);
       for (int ch = 0; ch < numChannels; ch++) {
         int idx = i * numChannels + ch;
-        sdma_anvil::SdmaQueue* queue =
-            local ? sdma_anvil::anvil.getSdmaQueue(deviceId, peer.deviceId, ch)
-                  : sdma_anvil::anvil.getRemotePeerQueue(sdmaRemotePeerKey(peer), ch);
+        sdma_anvil::SdmaQueue* queue = sdma_anvil::anvil.getQueue(key, ch);
         handles_h[idx] = queue ? queue->deviceHandle() : nullptr;
       }
     }
@@ -261,10 +247,8 @@ __host__ void SdmaImpl::sdmaReleasePeers() {
   // disconnect() would also destroy queues another user still holds.
   auto it = sdmaWirings().find(wiringId);
   if (it == sdmaWirings().end()) return;
-  for (int dev : it->second.connectedDevs) sdma_anvil::anvil.disconnectDevice(dev);
-  for (uint64_t key : it->second.connectedRemotes) sdma_anvil::anvil.disconnectRemotePeer(key);
-  it->second.connectedDevs.clear();
-  it->second.connectedRemotes.clear();
+  for (uint64_t key : it->second.connectedPeers) sdma_anvil::anvil.disconnectPeer(key);
+  it->second.connectedPeers.clear();
 }
 
 __host__ void SdmaImpl::sdmaHostStop() {

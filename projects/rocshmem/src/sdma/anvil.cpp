@@ -402,10 +402,8 @@ void SdmaQueue::dump(std::ofstream& logFile) {
 }
 
 AnvilLib::~AnvilLib() {
-  for (auto& p : sdma_channels_) {
-    p.second.clear();
-  }
-  for (auto& p : remote_peer_channels_) {
+  // Destroy the queues before KFD closes: members are only destroyed after this body runs.
+  for (auto& p : peer_channels_) {
     p.second.clear();
   }
   if (s_kfd_opened) {
@@ -516,31 +514,19 @@ void AnvilLib::init() {
   });
 }
 
-SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
-                                     const EngineSelection& selection, int* channelIdx) {
-  auto& vec = sdma_channels_[dstDeviceId];
-  auto queue = std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId, getHipGpuAgent(srcDeviceId),
-                                           engineId, selection);
-  lastQueueStatus_ = queue->createStatus();
-  if (!queue->valid()) return nullptr;
-  vec.emplace_back(std::move(queue));
-  queuesUsedTotal_ += 1;
-  if (channelIdx != nullptr) {
-    *channelIdx = static_cast<int>(vec.size() - 1);
-  }
-  return vec.back().get();
-}
-
-bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
-  // createSdmaQueue's getHipGpuAgent exits the process on an unmapped device, and getBusId exits on
-  // an out-of-range one; refuse here instead.
+bool AnvilLib::connect(int srcDeviceId, uint64_t peerKey, int dstDeviceId, int numChannels) {
+  const auto key = static_cast<unsigned long long>(peerKey);
+  // getHipGpuAgent exits the process on an unmapped device, and getBusId exits on an out-of-range
+  // one; refuse here instead.
   if (srcDeviceId < 0 || srcDeviceId >= static_cast<int>(gpuAgentsByHipDev_.size()) ||
       !hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(srcDeviceId)])) {
-    LOG_ERROR("anvil: no HSA agent mapped for HIP device %d, cannot connect to %d", srcDeviceId,
-              dstDeviceId);
+    LOG_ERROR("anvil: no HSA agent mapped for HIP device %d, cannot connect peer %#llx",
+              srcDeviceId, key);
     return false;
   }
-  if (dstDeviceId < 0 || dstDeviceId >= static_cast<int>(gpuAgentsByHipDev_.size())) {
+  const bool onThisHost = dstDeviceId != kOffHostPeer;
+  if (onThisHost &&
+      (dstDeviceId < 0 || dstDeviceId >= static_cast<int>(gpuAgentsByHipDev_.size()))) {
     LOG_ERROR("anvil: destination HIP device %d out of range [0, %zu), cannot connect from %d",
               dstDeviceId, gpuAgentsByHipDev_.size(), srcDeviceId);
     return false;
@@ -551,14 +537,14 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   const uint32_t queueBudget = usableEngines * numSdmaQueuesPerEngine_;
   auto reportBudget = [&](uint32_t used) {
     LOG_ERROR(
-        "anvil: SDMA queue budget exhausted: %u queue(s) taken by this process + %d requested, "
-        "limit %u (%u usable even engines of %u: host=%u xgmi=%u, %u queues per engine). ROCm "
-        "already holds some of them, so this GPU cannot cover this peer count at %d channel(s) per "
-        "peer. Use fewer ranks per node, fewer channels, or a coarser partition mode (DPX/SPX).",
-        used, numChannels, queueBudget, usableEngines, numSdmaEnginesTotal_, numSdmaEngines_,
+        "anvil: SDMA queue budget exhausted: %u queue(s) taken by this process + %d requested for "
+        "peer %#llx, limit %u (%u usable even engines of %u: host=%u xgmi=%u, %u queues per "
+        "engine). ROCm already holds some of them, so this GPU cannot cover this peer count at %d "
+        "channel(s) per peer. Use fewer ranks per node, fewer channels, or a coarser partition "
+        "mode (DPX/SPX).",
+        used, numChannels, key, queueBudget, usableEngines, numSdmaEnginesTotal_, numSdmaEngines_,
         numSdmaXgmiEngines_, numSdmaQueuesPerEngine_, numChannels);
   };
-
   // The whole request is known up front. Refusing here avoids creating a queue
   // that rollback would destroy immediately.
   if (queueBudgetExceeded(queuesUsedTotal_, numChannels, usableEngines,
@@ -566,145 +552,90 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
     reportBudget(queuesUsedTotal_);
     return false;
   }
-
-  auto& vec = sdma_channels_[dstDeviceId];
+  auto& vec = peer_channels_[peerKey];
   const size_t already = vec.size();
+  auto rollback = [&]() {
+    releaseQueues(vec, already);
+    if (vec.empty()) peer_channels_.erase(peerKey);
+  };
   for (int c = 0; c < numChannels; ++c) {
-    // Selected per channel: the preferred mask can name several engines, and the least loaded one
-    // changes as each queue is added.
-    const EngineSelection selection = getSdmaEngineId(srcDeviceId, dstDeviceId);
+    // Selected per channel: the least loaded engine changes as each queue is added.
+    EngineSelection selection{};
+    if (onThisHost) {
+      selection = getSdmaEngineId(srcDeviceId, dstDeviceId);
+    } else {
+      selection.srcDeviceId = srcDeviceId;
+      selection.dstDeviceId = srcDeviceId;
+      selection.numSdmaEngines = numSdmaEngines_;
+      selection.numSdmaXgmiEngines = numSdmaXgmiEngines_;
+      selection.numSdmaEnginesTotal = numSdmaEnginesTotal_;
+      selection.engineId = leastLoadedUsableEngine(queuesPerEngine());
+    }
     if (!isUsableSdmaEngine(selection.engineId)) {
-      LOG_ERROR("anvil: no usable even SDMA engine for %d -> %d (selected %d)", srcDeviceId,
-                dstDeviceId, selection.engineId);
-      releaseQueues(vec, already);
+      LOG_ERROR("anvil: no usable even SDMA engine for %d -> peer %#llx (selected %d)",
+                srcDeviceId, key, selection.engineId);
+      rollback();
       return false;
     }
     const uint32_t engineId = static_cast<uint32_t>(selection.engineId);
-    LOG_TRACE("SDMA: Connect from %d to %d channel %d using engine %d", srcDeviceId, dstDeviceId, c,
-              engineId);
-    SdmaQueue* queue = createSdmaQueue(srcDeviceId, dstDeviceId, engineId, selection);
-    if (queue == nullptr) {
+    // The queue only uses its remote device in log lines. An off-host destination is a fabric
+    // address rather than a device here, so its queue names its own device.
+    const int queueDst = onThisHost ? dstDeviceId : srcDeviceId;
+    auto queue = std::make_unique<SdmaQueue>(srcDeviceId, queueDst, getHipGpuAgent(srcDeviceId),
+                                             engineId, selection);
+    lastQueueStatus_ = queue->createStatus();
+    if (!queue->valid()) {
       if (lastQueueStatus_ == HSAKMT_STATUS_NO_MEMORY) {
         reportBudget(queuesUsedTotal_);
       }
-      releaseQueues(vec, already);
+      rollback();
       return false;
     }
-  }
-  return true;
-}
-
-void AnvilLib::releaseQueues(std::vector<std::unique_ptr<SdmaQueue>>& vec, size_t keep) {
-  // createSdmaQueue stores only valid queues and charges each one, so every popped entry is
-  // credited back.
-  while (vec.size() > keep) {
-    if (queuesUsedTotal_ > 0) queuesUsedTotal_ -= 1;
-    vec.pop_back();
-  }
-}
-
-void AnvilLib::disconnect() {
-  // Destroy all SDMA queues. SdmaQueue destructor calls hsaKmtDestroyQueue.
-  sdma_channels_.clear();
-  remote_peer_channels_.clear();
-  queuesUsedTotal_ = 0;
-  LOG_TRACE("SDMA: Disconnected all queues");
-}
-
-void AnvilLib::disconnectDevice(int dstDeviceId) {
-  auto it = sdma_channels_.find(dstDeviceId);
-  if (it == sdma_channels_.end()) return;
-  releaseQueues(it->second, 0);
-  sdma_channels_.erase(it);
-  LOG_TRACE("SDMA: Disconnected queues for device %d", dstDeviceId);
-}
-
-SdmaQueue* AnvilLib::getSdmaQueue([[maybe_unused]] int srcDeviceId, int dstDeviceId,
-                                  int channel_idx) {
-  if (sdma_channels_.find(dstDeviceId) == sdma_channels_.end()) {
-    return nullptr;
-  }
-
-  if (!(channel_idx < static_cast<int>(sdma_channels_[dstDeviceId].size()))) {
-    return nullptr;
-  }
-
-  return sdma_channels_[dstDeviceId][channel_idx].get();
-}
-
-std::vector<uint32_t> AnvilLib::queuesPerEngine() const {
-  std::vector<uint32_t> counts(numSdmaEnginesTotal_, 0);
-  auto add = [&counts](const std::vector<std::unique_ptr<SdmaQueue>>& vec) {
-    for (const auto& q : vec) {
-      if (q->engineId() < counts.size()) counts[q->engineId()] += 1;
-    }
-  };
-  for (const auto& p : sdma_channels_) add(p.second);
-  for (const auto& p : remote_peer_channels_) add(p.second);
-  return counts;
-}
-
-bool AnvilLib::connectRemotePeer(int srcDeviceId, uint64_t peerKey, int numChannels) {
-  if (srcDeviceId < 0 || srcDeviceId >= static_cast<int>(gpuAgentsByHipDev_.size()) ||
-      !hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(srcDeviceId)])) {
-    LOG_ERROR("anvil: no HSA agent mapped for HIP device %d, cannot connect remote peer %#llx",
-              srcDeviceId, static_cast<unsigned long long>(peerKey));
-    return false;
-  }
-  const uint32_t usableEngines = usableSdmaEngines(numSdmaEnginesTotal_);
-  if (queueBudgetExceeded(queuesUsedTotal_, numChannels, usableEngines, numSdmaQueuesPerEngine_)) {
-    LOG_ERROR("anvil: SDMA queue budget exhausted: %u queue(s) taken by this process + %d "
-              "requested for remote peer %#llx, limit %u (%u usable even engines, %u queues per "
-              "engine)",
-              queuesUsedTotal_, numChannels, static_cast<unsigned long long>(peerKey),
-              usableEngines * numSdmaQueuesPerEngine_, usableEngines, numSdmaQueuesPerEngine_);
-    return false;
-  }
-
-  auto& vec = remote_peer_channels_[peerKey];
-  const size_t already = vec.size();
-  for (int c = 0; c < numChannels; ++c) {
-    EngineSelection selection{};
-    selection.srcDeviceId = srcDeviceId;
-    selection.dstDeviceId = srcDeviceId;
-    selection.numSdmaEngines = numSdmaEngines_;
-    selection.numSdmaXgmiEngines = numSdmaXgmiEngines_;
-    selection.numSdmaEnginesTotal = numSdmaEnginesTotal_;
-    selection.engineId = leastLoadedUsableEngine(queuesPerEngine());
-    // The destination is a fabric address, not a device on this host, so the queue names its own
-    // device as the remote one.
-    auto queue = std::make_unique<SdmaQueue>(srcDeviceId, srcDeviceId, getHipGpuAgent(srcDeviceId),
-                                             static_cast<uint32_t>(selection.engineId), selection);
-    lastQueueStatus_ = queue->createStatus();
-    if (!queue->valid()) {
-      releaseQueues(vec, already);
-      if (vec.empty()) remote_peer_channels_.erase(peerKey);
-      return false;
-    }
-    LOG_TRACE("SDMA: remote peer %#llx channel %d from device %d on engine %d",
-              static_cast<unsigned long long>(peerKey), c, srcDeviceId, selection.engineId);
+    LOG_TRACE("SDMA: peer %#llx (%s) channel %d from device %d on engine %u", key,
+              onThisHost ? "this host" : "another host", c, srcDeviceId, engineId);
     vec.emplace_back(std::move(queue));
     queuesUsedTotal_ += 1;
   }
   return true;
 }
-
-SdmaQueue* AnvilLib::getRemotePeerQueue(uint64_t peerKey, int channel_idx) {
-  auto it = remote_peer_channels_.find(peerKey);
-  if (it == remote_peer_channels_.end() || channel_idx < 0 ||
+void AnvilLib::releaseQueues(std::vector<std::unique_ptr<SdmaQueue>>& vec, size_t keep) {
+  // connect() stores only valid queues and charges each one, so every popped entry is credited
+  // back.
+  while (vec.size() > keep) {
+    if (queuesUsedTotal_ > 0) queuesUsedTotal_ -= 1;
+    vec.pop_back();
+  }
+}
+void AnvilLib::disconnect() {
+  // Destroy all SDMA queues. SdmaQueue destructor calls hsaKmtDestroyQueue.
+  peer_channels_.clear();
+  queuesUsedTotal_ = 0;
+  LOG_TRACE("SDMA: Disconnected all queues");
+}
+void AnvilLib::disconnectPeer(uint64_t peerKey) {
+  auto it = peer_channels_.find(peerKey);
+  if (it == peer_channels_.end()) return;
+  releaseQueues(it->second, 0);
+  peer_channels_.erase(it);
+  LOG_TRACE("SDMA: Disconnected queues for peer %#llx", static_cast<unsigned long long>(peerKey));
+}
+SdmaQueue* AnvilLib::getQueue(uint64_t peerKey, int channel_idx) {
+  auto it = peer_channels_.find(peerKey);
+  if (it == peer_channels_.end() || channel_idx < 0 ||
       channel_idx >= static_cast<int>(it->second.size())) {
     return nullptr;
   }
   return it->second[static_cast<size_t>(channel_idx)].get();
 }
-
-void AnvilLib::disconnectRemotePeer(uint64_t peerKey) {
-  auto it = remote_peer_channels_.find(peerKey);
-  if (it == remote_peer_channels_.end()) return;
-  releaseQueues(it->second, 0);
-  remote_peer_channels_.erase(it);
+std::vector<uint32_t> AnvilLib::queuesPerEngine() const {
+  std::vector<uint32_t> counts(numSdmaEnginesTotal_, 0);
+  for (const auto& p : peer_channels_) {
+    for (const auto& q : p.second) {
+      if (q->engineId() < counts.size()) counts[q->engineId()] += 1;
+    }
+  }
+  return counts;
 }
-
 AnvilLib& AnvilLib::getInstance() {
   static AnvilLib* instance;
   if (instance == nullptr) {

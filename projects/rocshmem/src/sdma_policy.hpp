@@ -79,7 +79,7 @@ class SdmaImpl {
   __host__ void sdmaHostInit(int pe, int pod_size, int pod_rank, const PodAllGather& allGather);
   __host__ void sdmaHostStop();
   // Copy this rank's queue handles to deviceHandles_d, or nulls when SDMA was dropped.
-  __host__ void sdmaPublishHandles(int deviceId, bool useQueues);
+  __host__ void sdmaPublishHandles(bool useQueues);
   __host__ void sdmaReleasePeers();
 
   // Device-side copy with optional wavefront-affine channel spreading.
