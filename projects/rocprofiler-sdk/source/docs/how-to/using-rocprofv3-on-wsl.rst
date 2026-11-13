@@ -9,7 +9,7 @@ Using rocprofv3 on WSL2
 =========================
 
 ROCprofiler-SDK has experimental support for Windows Subsystem for
-Linux). On WSL2, the GPU is exposed through the DirectX paravirtual driver
+Linux (WSL2), allowing you to profile AMD GPUs from within a Linux environment running on Windows. In WSL2, the GPU is exposed through the DirectX paravirtual driver
 (``/dev/dxg``) instead of the KFD driver (``/dev/kfd``) that are common for native Linux system. ``rocprofv3`` handles
 this automatically, allowing you to run the same commands as on native Linux systems without any additional configuration changes.
 
