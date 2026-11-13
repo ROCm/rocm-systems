@@ -8,7 +8,7 @@
 Using rocprofv3 on WSL2
 =========================
 
-ROCprofiler-SDK has experimental support for WSL2 (Windows Subsystem for
+ROCprofiler-SDK has experimental support for Windows Subsystem for
 Linux). On WSL2, the GPU is exposed through the DirectX paravirtual driver
 (``/dev/dxg``) instead of the KFD driver (``/dev/kfd``). ``rocprofv3`` handles
 this automatically, and you run it with the same commands as on native Linux.
