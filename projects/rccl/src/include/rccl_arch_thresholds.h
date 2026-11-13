@@ -166,6 +166,13 @@ struct rcclArchThresholds {
   size_t rsRingSimpleCappedMaxPerRank;  // Ring Simple ReduceScatter above the LL128 band,
   int rsRingSimpleCappedChannels;       // up to this per rank, runs on at most this many channels
 
+  // ReduceScatter on rank-scaled comms of at most rsSmallCommMaxRanks ranks. A non-zero entry
+  // replaces ddaLL128MaxPerRank[ReduceScatter] (still clipped to rankScaledMaxBytes) or
+  // rsRingLL128MaxPerRank (2- and 4-byte types). 0 ranks = off.
+  int rsSmallCommMaxRanks;
+  size_t rsSmallCommDdaLL128MaxPerRank;
+  size_t rsSmallCommRingLL128MaxPerRank;
+
   // Force CE-Scratch for unregistered AllGather / AlltoAll / Gather / Scatter
   // whenever the receive fits ddaScratch, on top of the ceNonRegMin/Max window.
   // NCCL_CTA_POLICY_ZERO forces it on every arch (it is the one zero-CU path for
@@ -186,6 +193,12 @@ enum rcclTuningPartition {
   RCCL_TUNING_PARTITION_SPX = 0,
   RCCL_TUNING_PARTITION_DPX = 1,
 };
+
+// True when the rsSmallComm* entries apply to an nRanks comm.
+inline bool rcclRsSmallComm(const rcclArchThresholds* t, int nRanks) {
+  return t != nullptr && t->rsSmallCommMaxRanks > 0 && t->rankScaledMinRanks > 0 &&
+         nRanks >= t->rankScaledMinRanks && nRanks <= t->rsSmallCommMaxRanks;
+}
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn,
                                                 rcclTuningPartition partition = RCCL_TUNING_PARTITION_SPX);

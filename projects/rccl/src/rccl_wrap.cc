@@ -230,6 +230,12 @@ static const rcclArchThresholds* rcclBroadcastTotalByteTable(const struct ncclCo
   return t;
 }
 
+// ReduceScatter Ring LL128 ceiling per rank for 2- and 4-byte types.
+static size_t rcclRsRingLL128MaxPerRank(const rcclArchThresholds* t, int nRanks) {
+  if (rcclRsSmallComm(t, nRanks) && t->rsSmallCommRingLL128MaxPerRank != 0) return t->rsSmallCommRingLL128MaxPerRank;
+  return t->rsRingLL128MaxPerRank;
+}
+
 // Arch-table replacements for the tuning model's LL / LL128 ranges (rank-scaled entries).
 static void rcclArchProtoRanges(const struct ncclComm* comm, const struct ncclTaskColl* info, uint64_t& llMax,
                                 uint64_t& ll128Min, uint64_t& ll128Max) {
@@ -244,8 +250,9 @@ static void rcclArchProtoRanges(const struct ncclComm* comm, const struct ncclTa
   } else if (info->func == ncclFuncReduceScatter && t->rsRingLL128MaxPerRank != 0) {
     // The table's band replaces the model's outright (it is narrower at the bottom).
     ll128Min = t->rsRingLL128MinPerRank;
-    ll128Max = (ncclTypeSize(info->datatype) == 1 && t->rsRingLL128MaxPerRank1B != 0) ? t->rsRingLL128MaxPerRank1B
-                                                                                      : t->rsRingLL128MaxPerRank;
+    ll128Max = (ncclTypeSize(info->datatype) == 1 && t->rsRingLL128MaxPerRank1B != 0)
+                 ? t->rsRingLL128MaxPerRank1B
+                 : rcclRsRingLL128MaxPerRank(t, comm->nRanks);
   }
 }
 
@@ -516,7 +523,7 @@ void rcclUpdateCollectiveChannels(struct ncclComm* comm, size_t nBytes, const st
   const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/true);
   if (t == nullptr || t->rsRingSimpleCappedChannels <= 0) return;
   const size_t perRank = nBytes / (size_t)comm->nRanks;
-  if (perRank > t->rsRingLL128MaxPerRank && perRank <= t->rsRingSimpleCappedMaxPerRank)
+  if (perRank > rcclRsRingLL128MaxPerRank(t, comm->nRanks) && perRank <= t->rsRingSimpleCappedMaxPerRank)
     nc = std::min(nc, t->rsRingSimpleCappedChannels);
 }
 
@@ -1313,6 +1320,14 @@ static size_t rcclCeArRegChunkElems(const ncclComm* comm, size_t count, ncclData
   return ncclCeAllReduceChunkBytes(shardBytes, slotChunkBytes) / eltSize;
 }
 
+// LL128 table cap; ReduceScatter takes the small-comm per-rank entry where it applies.
+inline size_t ddaLL128TierCapFromTable(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
+  if (func == ncclFuncReduceScatter && rcclRsSmallComm(table, nRanks) && table->rsSmallCommDdaLL128MaxPerRank != 0) {
+    return std::min((size_t)nRanks * table->rsSmallCommDdaLL128MaxPerRank, table->rankScaledMaxBytes);
+  }
+  return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks);
+}
+
 // Returns the LL128 size cap for this collective, or 0 if the tier is disabled.
 // RCCL_DDA_LL128 three-way logic:
 //   kDdaThresholdUnset (-1, default): auto — enabled iff arch table has non-zero
@@ -1327,11 +1342,11 @@ inline size_t rcclDdaLL128ThresholdTab(const rcclArchThresholds* table, ncclFunc
   if (param == 0) return 0;
   if (param == kDdaThresholdUnset) {
     if (table == nullptr) return 0;
-    return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks);
+    return ddaLL128TierCapFromTable(table, func, nRanks);
   }
   // param > 0: user forced on
   if (table == nullptr) return kDdaLL128BaseDefault;
-  return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks);
+  return ddaLL128TierCapFromTable(table, func, nRanks);
 }
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaLL128ThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);
