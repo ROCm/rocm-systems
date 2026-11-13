@@ -31,8 +31,12 @@ THE SOFTWARE.
  *
  * Optional -f/--functional runs the hand-written execute+sanity suite in
  * fp8_probe.h for deeper validation of known reduction paths.
+ *
+ * Optional -b/--bench times each FP8 reduce path in reduceOpPerf.h and reports
+ * which one the hardware runs fastest.
  */
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -45,6 +49,7 @@ THE SOFTWARE.
 
 #include "fp8_auto_probe.h"
 #include "fp8_probe.h"
+#include "reduceOpPerf.h"
 
 #define HIPCHECK(cmd)                                                          \
   do {                                                                         \
@@ -62,20 +67,30 @@ struct IntrinsicInfo {
   const char* desc;
 };
 
+// Benchmark shape. Threads and blocks-per-CU are sized to saturate the device;
+// iters controls how long each timed launch runs.
+static const int kDefaultIters = 2048;
+static const int kBenchThreads = 256;
+static const int kBlocksPerCu = 8;
+static const int kBenchWarmup = 2;
+static const int kBenchReps = 7;
+
 static void printUsage(const char* prog) {
   std::printf(
-      "Usage: %s [-d DEVICE] [-f] [-h]\n\n"
+      "Usage: %s [-d DEVICE] [-f] [-b] [--iters N] [-h]\n\n"
       "Probe FP8 hardware intrinsics on each GPU.\n\n"
-      "Default: auto-discover FP8/BF8 builtins from the installed ROCm/LLVM\n"
-      "BuiltinsAMDGPU database and report whether each is invocable on this\n"
-      "GPU target via __builtin_amdgcn_is_invocable().\n\n"
+      "Default: auto-discover FP8/BF8 builtins from the installed toolchain and\n"
+      "report whether each is invocable on this GPU target via\n"
+      "__builtin_amdgcn_is_invocable().\n\n"
       "  [yes]  invocable for this offload target\n"
       "  [n/a]  known to the toolchain but not invocable on this GPU\n\n"
       "Options:\n"
-      "  -d DEVICE      Probe a single GPU (default: all GPUs)\n"
+      "  -d DEVICE         Probe a single GPU (default: all GPUs)\n"
       "  -f, --functional  Also run hand-written execute+sanity tests\n"
-      "  -h             Show this help\n",
-      prog);
+      "  -b, --bench       Time each FP8 reduce path and rank by throughput\n"
+      "      --iters N     Inner-loop iterations per thread (default %d)\n"
+      "  -h                Show this help\n",
+      prog, kDefaultIters);
 }
 
 static void probeAuto(int device) {
@@ -228,9 +243,114 @@ static void probeFunctional(int device) {
   printSection(hResult, "End-to-end FP8 add on GPU", kFp8Add, sizeof(kFp8Add) / sizeof(kFp8Add[0]));
 }
 
+struct BenchResult {
+  int idx;
+  double gelemPerSec;
+  double msBest;
+};
+
+static void runBench(int device, int iters) {
+  HIPCHECK(hipSetDevice(device));
+
+  hipDeviceProp_t prop;
+  HIPCHECK(hipGetDeviceProperties(&prop, device));
+  const int blocks = prop.multiProcessorCount * kBlocksPerCu;
+  const int threads = kBenchThreads;
+  const size_t nThreads = (size_t)blocks * threads;
+
+  // Which paths can this target actually run?
+  int hAvail[REDUCE_OP_NUM_VARIANTS] = {};
+  int* dAvail = nullptr;
+  HIPCHECK(hipMalloc(&dAvail, sizeof(hAvail)));
+  hipLaunchKernelGGL(reduceOpAvailKernel, dim3(1), dim3(1), 0, 0, dAvail);
+  HIPCHECK(hipDeviceSynchronize());
+  HIPCHECK(hipMemcpy(hAvail, dAvail, sizeof(hAvail), hipMemcpyDeviceToHost));
+  HIPCHECK(hipFree(dAvail));
+
+  std::vector<uint32_t> hIn(nThreads);
+  for (size_t i = 0; i < nThreads; ++i) {
+    // Small magnitudes so repeated adds stay in range rather than pinning at inf.
+    hIn[i] = 0x38383838u ^ (uint32_t)(i * 2654435761u);
+  }
+
+  uint32_t *dIn = nullptr, *dOut = nullptr;
+  HIPCHECK(hipMalloc(&dIn, nThreads * sizeof(uint32_t)));
+  HIPCHECK(hipMalloc(&dOut, nThreads * sizeof(uint32_t)));
+  HIPCHECK(hipMemcpy(dIn, hIn.data(), nThreads * sizeof(uint32_t),
+                     hipMemcpyHostToDevice));
+
+  hipEvent_t evStart, evStop;
+  HIPCHECK(hipEventCreate(&evStart));
+  HIPCHECK(hipEventCreate(&evStop));
+
+  std::printf("================================================================\n");
+  std::printf("GPU %d: %s (%s) — reduce-op throughput\n", device, prop.name,
+              prop.gcnArchName);
+  std::printf("%d CUs, %d blocks x %d threads, %d iters, %d-way ILP\n",
+              prop.multiProcessorCount, blocks, threads, iters,
+              REDUCE_OP_ILP_WAYS);
+  std::printf("Register-resident: measures conversion throughput, not bandwidth.\n\n");
+
+  std::vector<BenchResult> results;
+  for (int v = 0; v < REDUCE_OP_NUM_VARIANTS; ++v) {
+    const ReduceOpVariant& var = kReduceOpVariants[v];
+    if (!hAvail[v]) {
+      std::printf("  %-28s  %s\n", var.name, "[n/a on this target]");
+      continue;
+    }
+
+    for (int w = 0; w < kBenchWarmup; ++w)
+      var.launch(dIn, dOut, iters, blocks, threads);
+    HIPCHECK(hipDeviceSynchronize());
+
+    // Best-of keeps clock ramp and stray interference out of the number.
+    float best = 0.f;
+    for (int r = 0; r < kBenchReps; ++r) {
+      HIPCHECK(hipEventRecord(evStart));
+      var.launch(dIn, dOut, iters, blocks, threads);
+      HIPCHECK(hipEventRecord(evStop));
+      HIPCHECK(hipEventSynchronize(evStop));
+      float ms = 0.f;
+      HIPCHECK(hipEventElapsedTime(&ms, evStart, evStop));
+      if (r == 0 || ms < best) best = ms;
+    }
+    HIPCHECK(hipGetLastError());
+
+    const double elems = (double)nThreads * REDUCE_OP_ILP_WAYS *
+                         var.elemsPerStep * (double)iters;
+    results.push_back({v, elems / (best * 1e-3) / 1e9, (double)best});
+  }
+
+  std::sort(results.begin(), results.end(),
+            [](const BenchResult& a, const BenchResult& b) {
+              return a.gelemPerSec > b.gelemPerSec;
+            });
+
+  std::printf("  %-28s %10s %9s %8s\n", "path", "Gelem/s", "ms", "rel");
+  const double top = results.empty() ? 1.0 : results[0].gelemPerSec;
+  for (const auto& r : results) {
+    std::printf("  %-28s %10.1f %9.3f %7.2fx%s\n",
+                kReduceOpVariants[r.idx].name, r.gelemPerSec, r.msBest,
+                r.gelemPerSec / top, &r == &results[0] ? "  <- fastest" : "");
+  }
+
+  std::printf("\n");
+  for (const auto& r : results)
+    std::printf("  %-28s %s\n", kReduceOpVariants[r.idx].name,
+                kReduceOpVariants[r.idx].detail);
+  std::printf("\n");
+
+  HIPCHECK(hipEventDestroy(evStart));
+  HIPCHECK(hipEventDestroy(evStop));
+  HIPCHECK(hipFree(dIn));
+  HIPCHECK(hipFree(dOut));
+}
+
 int main(int argc, char** argv) {
   int device = -1;
   bool functional = false;
+  bool bench = false;
+  int iters = kDefaultIters;
 
   for (int i = 1; i < argc; ++i) {
     if (!std::strcmp(argv[i], "-h") || !std::strcmp(argv[i], "--help")) {
@@ -239,6 +359,18 @@ int main(int argc, char** argv) {
     }
     if (!std::strcmp(argv[i], "-f") || !std::strcmp(argv[i], "--functional")) {
       functional = true;
+      continue;
+    }
+    if (!std::strcmp(argv[i], "-b") || !std::strcmp(argv[i], "--bench")) {
+      bench = true;
+      continue;
+    }
+    if (!std::strcmp(argv[i], "--iters") && i + 1 < argc) {
+      iters = std::atoi(argv[++i]);
+      if (iters < 1) {
+        std::cerr << "--iters must be >= 1\n";
+        return 1;
+      }
       continue;
     }
     if (!std::strcmp(argv[i], "-d") && i + 1 < argc) {
@@ -258,14 +390,16 @@ int main(int argc, char** argv) {
   }
 
   std::printf("reduceOpBench GPU hardware probe (HIP %d, %d GPU(s))\n", HIP_VERSION, nGpus);
-  std::printf("Mode: auto-discover from BuiltinsAMDGPU");
+  std::printf("Mode: auto-discover from the installed toolchain");
   if (functional) std::printf(" + functional suite");
+  if (bench) std::printf(" + throughput benchmark");
   std::printf("\n");
   std::printf("Note: rebuild with --offload-arch=native if GPU arch differs.\n\n");
 
   auto runOne = [&](int d) {
     probeAuto(d);
     if (functional) probeFunctional(d);
+    if (bench) runBench(d, iters);
   };
 
   if (device >= 0) {

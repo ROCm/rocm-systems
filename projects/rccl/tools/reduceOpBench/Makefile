@@ -18,7 +18,7 @@ $(AUTO_H): gen_auto_probe.py
 	$(PYTHON) gen_auto_probe.py --rocm-path $(ROCM_PATH) \
 		--categories $(AUTO_CATEGORIES) -o $@
 
-$(EXE): $(SRC) fp8_probe.h $(AUTO_H)
+$(EXE): $(SRC) fp8_probe.h reduceOpPerf.h $(AUTO_H)
 	$(HIPCC) $(CXXFLAGS) $(SRC) -o $@
 
 run: $(EXE)
