@@ -101,12 +101,12 @@ protected:
   }
 
   void report_lds_race() {
-    auto *state = plugin_state->race_state;
+    auto *state = plugin_state->race_state.get();
     const std::array ranges{LdsByteRange{0, 4}};
     const std::array obligations{
         MemoryCounterObligation{WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_LOAD}};
     state->registerLdsRangeEvent(testInstruction(0x100), LdsAccess::Write, ranges, obligations,
-                                MemoryOrderClass::ASYNC_LOAD);
+                                 MemoryOrderClass::ASYNC_LOAD);
     state->getDetector()->validateRead(0, state->getWaveId(), 0, 4, MemoryOrderClass::UNORDERED);
   }
 };
@@ -157,6 +157,10 @@ TEST_F(RaceCaptureTest, RejectsInvalidEncodingAtCapture) {
     EXPECT_EQ(wave->instruction_execution_error(), InstructionExecutionError::PluginFailure);
     EXPECT_EQ(plugin_state->trace.size(), 0u);
     wave->clear_instruction_execution_error();
+    fixture.plugin_group_->onAmdgpuAsyncInstructionIssued(0x1000, instruction, *wave);
+    EXPECT_EQ(wave->instruction_execution_error(), InstructionExecutionError::PluginFailure);
+    EXPECT_EQ(plugin_state->trace.size(), 0u);
+    wave->clear_instruction_execution_error();
     EXPECT_NO_THROW(fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, instruction, *wave));
     EXPECT_EQ(wave->instruction_execution_error(), InstructionExecutionError::PluginFailure);
     EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
@@ -195,6 +199,39 @@ TEST_F(RaceCaptureTest, RejectsRoutingWithoutInstructionHistory) {
   EXPECT_EQ(wave->instruction_execution_error(), InstructionExecutionError::PluginFailure);
   EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
   EXPECT_EQ(sink->str().find("RACE "), std::string::npos);
+}
+
+TEST_F(RaceCaptureTest, RegisterReportingRejectsUndecodableEvidenceAndPreservesExistingFailure) {
+  const auto words = rdna4::build_vbuffer(rdna4::kBufferLoadFormatXVbuffer);
+  const InstructionSnapshot truncated{0x100, std::span(words).first(1)};
+  const InstructionSnapshot consumer{0x200, rdna4::build_sopp(rdna4::kSNopSopp)};
+  for (bool has_consumer : {false, true})
+    for (bool existing_failure : {false, true}) {
+      SCOPED_TRACE(std::format("consumer={} existing_failure={}", has_consumer, existing_failure));
+      wave->clear_instruction_execution_error();
+      if (existing_failure)
+        wave->report_instruction_execution_error(InstructionExecutionError::InvalidRegisterAccess,
+                                                 "original failure");
+      const RegisterHazardObservation hazard{0x100,
+                                             0x200,
+                                             {RegClass::VGPR, 4, 1},
+                                             1,
+                                             0xf,
+                                             false,
+                                             WaitCounterKind::Load,
+                                             0,
+                                             truncated,
+                                             has_consumer ? std::optional(consumer) : std::nullopt};
+      fixture.plugin_group_->onAmdgpuRegisterHazard(hazard, *wave);
+      EXPECT_EQ(wave->instruction_execution_error(),
+                existing_failure ? InstructionExecutionError::InvalidRegisterAccess
+                                 : InstructionExecutionError::PluginFailure);
+      if (existing_failure)
+        EXPECT_STREQ(wave->instruction_execution_error_detail(), "original failure");
+      EXPECT_NE(sink->str().find("cannot disassemble captured instruction at PC 0x100"),
+                std::string::npos);
+      EXPECT_EQ(sink->str().find("RACE "), std::string::npos);
+    }
 }
 
 /// Drives tensor DMA, direct-to-LDS loads and async LDS stores through the
@@ -351,7 +388,8 @@ protected:
     state->lane_mask = lanes;
     TestMemoryInstruction inst(std::move(state),
                                {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_STORE}});
-    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave],
+                                                            {});
     fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *waves[wave]);
     return sink->str().find("RACE ", previous) != std::string::npos;
   }
@@ -378,7 +416,8 @@ protected:
     state->per_lane_addr[0] = address;
     TestMemoryInstruction inst(std::move(state),
                                {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
-    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave],
+                                                            {});
     fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *waves[wave]);
   }
 
@@ -929,7 +968,7 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreRegistersItsLdsSource) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   waves[0]->pc = 0x3000;
-  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0], {});
   ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
   test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), std::move(inst), *waves[0]);
 
@@ -959,7 +998,7 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreOutsideTheAllocationRegistersNoLdsBy
                                           {.saddr = 0, .vsrc = 1, .vaddr = 0});
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
-  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0], {});
   ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
   test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), std::move(inst), *waves[0]);
 
@@ -987,7 +1026,7 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreStraddlingTheAllocationTracksItsInRa
                                           {.saddr = 0, .vsrc = 1, .vaddr = 0});
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
-  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0], {});
   ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
   test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), std::move(inst), *waves[0]);
 
@@ -1013,7 +1052,7 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreWithoutActiveLanesKeepsItsAsynccntSl
   ASSERT_NE(inst, nullptr);
   waves[0]->set_exec(0);
   waves[0]->pc += 16;
-  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0], {});
   ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
   test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), std::move(inst), *waves[0]);
   waves[0]->set_exec(1);
@@ -1040,7 +1079,7 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncLoadWithoutActiveLanesKeepsItsAsynccntSlo
   ASSERT_NE(inst, nullptr);
   waves[0]->set_exec(0);
   waves[0]->pc += 16;
-  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0], {});
   ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
   test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), std::move(inst), *waves[0]);
   waves[0]->set_exec(1);

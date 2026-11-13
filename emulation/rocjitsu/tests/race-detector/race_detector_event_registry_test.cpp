@@ -49,7 +49,7 @@ TEST(RaceDetector, EventRegistry_LdsEventsWithoutBytesAreTrimmedOnceComplete) {
   // without LDS bytes lets these go.
   int N = EventRegistry::kTrimAttemptInterval;
   RaceDetector detector(/*nWaves=*/
-                        2, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0), [](RaceViolation) {},
+                        2, Dim3d(0), [](RaceViolation) {},
                         counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5),
                         /*ldsSizeBytes=*/64 * 1024);
   auto &wave = detector.getWaveRaceState(0);
@@ -57,12 +57,9 @@ TEST(RaceDetector, EventRegistry_LdsEventsWithoutBytesAreTrimmedOnceComplete) {
       rocjitsu::amdgpu::WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_STORE}};
 
   for (int i = 0; i < N; ++i) {
-    wave.registerLdsRangeEvent(testInstruction(/*pc=*/static_cast<uint64_t>(i)),
-                               LdsAccess::Read, /*ranges=*/{}, obligations,
-                               MemoryOrderClass::ASYNC_STORE);
-    PendingWaitCount wait;
-    wait.add(rocjitsu::amdgpu::WaitCounterType::ASYNCCNT, 0);
-    wave.dispatch(wait);
+    wave.registerLdsRangeEvent(testInstruction(/*pc=*/static_cast<uint64_t>(i)), LdsAccess::Read,
+                               /*ranges=*/{}, obligations, MemoryOrderClass::ASYNC_STORE);
+    wave.applyWaitCounter(rocjitsu::amdgpu::WaitCounterType::ASYNCCNT, 0);
   }
 
   // The trim attempt runs after event N - 1 is added, when every earlier event

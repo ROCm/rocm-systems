@@ -421,8 +421,12 @@ global `wait_checking` setting disables stderr warnings. It does not enable
 register-access hooks. XCNT replay-source checking still requires its existing
 explicit setting; when enabled, its findings use the same hook.
 
-`onAmdgpuRegisterHazard(observation, wave)` runs on the issuer before the
-consumer executes, including before its before-execute or async-issue callback.
+`onAmdgpuRegisterHazard(observation, wave)` runs on the issuer during instruction
+issue. It normally precedes the before-execute callback, and always precedes
+async submission. Buffer payload checks that need prepared lane masks instead
+run after address preparation, before the after-execute callback and memory
+publication. An instruction failure reported by the hook stops subsequent
+execution stages without interrupting the current callback fanout.
 The `RegisterHazardObservation` owns the producer and consumer instruction
 encodings when available and gives their PCs, overlapping register range, lane
 and byte masks, read/overwrite kind, counter, and sufficient wait threshold.

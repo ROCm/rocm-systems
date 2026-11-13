@@ -1743,7 +1743,8 @@ TEST(ExecutionPluginTest, ReportedAsyncIssueFailureDrainsBeforeCancellation) {
       else
         EXPECT_EQ(wave.instruction_execution_error(), InstructionExecutionError::PluginFailure);
     }
-    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &) override {
+    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &,
+                                          std::span<const uint32_t>) override {
       ++before_callbacks;
     }
     void onAmdgpuWavefrontCancelled(Wavefront &wave) override {
@@ -2163,10 +2164,11 @@ TEST(ExecutionPluginTest, ReportedInstructionHookFailureCancelsBeforeContinuing)
     explicit FailingHookPlugin(bool fail_before)
         : ExecutionPlugin("failing_hook"), fail_before_(fail_before) {}
 
+    bool supports_async_instructions() const override { return false; }
     bool observes_before_execute_instruction() const override { return true; }
     bool observes_after_execute_instruction() const override { return true; }
-    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
-                                          Wavefront &wave) override {
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, Wavefront &wave,
+                                          std::span<const uint32_t>) override {
       issue_pc = pc;
       if (fail_before_)
         wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
@@ -2231,6 +2233,7 @@ TEST(ExecutionPluginTest, ReportedRoutingHookFailurePreventsPipelineIssue) {
   public:
     explicit FailingRoutePlugin(bool after_routing)
         : ExecutionPlugin("failing_route"), after_routing_(after_routing) {}
+    bool supports_async_instructions() const override { return false; }
     bool observes_memory_instruction_routing() const override { return true; }
     bool observes_memory_routing() const override { return true; }
     void onAmdgpuRouteMemoryInstruction(const Instruction &, Wavefront &wave) override {

@@ -323,7 +323,6 @@ TEST_F(PluginLoaderTest, RaceModuleUsesCoreRegisterChecking) {
   EXPECT_TRUE(group.value()->observes_tensor_dma_issue());
 }
 
-
 TEST_F(PluginLoaderTest, CApiEmptyInputRemovesInstalledPlugins) {
   rocjitsu::SoC soc("plugin_loader_test");
   soc.set_plugin_group(nullptr);

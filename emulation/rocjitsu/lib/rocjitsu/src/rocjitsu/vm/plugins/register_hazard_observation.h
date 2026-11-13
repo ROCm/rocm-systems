@@ -12,7 +12,8 @@
 
 namespace rocjitsu::amdgpu {
 
-/// A register dependency found by the issuer, before instruction execution.
+/// A register dependency found by the issuer, before async or memory publication.
+/// Buffer payload checks needing prepared lane masks follow address preparation.
 /// Register numbers are wave-relative physical indices, including bank selection.
 /// Lanes and bytes describe the overlap, not the whole producer or consumer.
 /// X protects replay sources against overwrite; other counters protect results.
