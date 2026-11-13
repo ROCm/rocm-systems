@@ -98,10 +98,8 @@ protected:
                                reinterpret_cast<const uint8_t *>(co->image_data()) +
                                    co->image_size());
 
-    // Decode .text and find the first v_add_f32-mnemonic anchor that the
-    // trampoline machinery considers relocatable. Decode-and-search so the
-    // test is stable across compiler revisions.
-    // TODO: instrument multiple instructions
+    // Select anchors and locate the end of live code from decoded instructions
+    // so the fixture follows compiler changes without fixed byte offsets.
     auto decoder = Decoder::create(params_.arch);
     ASSERT_NE(decoder, nullptr);
     auto block_result = BasicBlock::build(*co, *decoder, params_.arch);
@@ -116,17 +114,15 @@ protected:
     for (const auto &block : blocks) {
       uint64_t cur = block->start_offset();
       for (const Instruction &inst : block->instructions()) {
-        if (is_relocatable_anchor(inst, cur, text_bytes, params_.arch)) {
+        if (anchor_count_ < 2 && is_relocatable_anchor(inst, cur, text_bytes, params_.arch)) {
           anchor_offsets_.push_back(cur); // Instrumentor will need offset
           anchor_mnemonics_.push_back(std::string(inst.mnemonic()));
           ++anchor_count_;
         }
         cur += static_cast<uint64_t>(inst.size());
-        if (anchor_count_ == 2)
-          break;
+        if (inst.mnemonic() == "s_endpgm")
+          original_live_end_ = std::max(original_live_end_, cur);
       }
-      if (anchor_count_ == 2)
-        break;
     }
     ASSERT_NE(anchor_count_, 0u) << "No relocatable anchor in " << params_.kernel_fixture
                                  << ".o; did the compiler change the lowering?";
@@ -159,6 +155,7 @@ protected:
   std::vector<std::string> anchor_mnemonics_;
   std::vector<InstrumentationPatch> patches_;
   uint64_t anchor_count_ = 0;
+  uint64_t original_live_end_ = 0;
 };
 
 // Hardware suites for this test. DbiHardwareBase supplies the per-target HSA
@@ -229,99 +226,57 @@ void HsaDbiNopAsmFixture::run_patched_elf_actually_contains_instrumentation() {
 // structure, semantically-equivalent dispatch output).
 template <const DbiTargetParams &Params>
 void HsaDbiNopAsmHardwareBase<Params>::run_trampoline_is_actually_executed_by_gpu() {
-  hsa_agent_t gpu = Base::s_gpu_;
-  hsa_agent_t cpu = find_cpu_agent();
+  const hsa_agent_t gpu = Base::s_gpu_;
+  const hsa_agent_t cpu = find_cpu_agent();
   ASSERT_NE(cpu.handle, 0u);
-
-  // The trampolines live inside .text at .text-relative offset
-  // patches_[i].trampoline_offset. Overwrite the first 4 bytes of each
-  // trampoline (the s_nop 0 placeholder) with s_endpgm.
   std::vector<uint8_t> sabotaged = this->patched_elf_bytes_;
   AmdGpuCodeObject parsed(sabotaged.data(), sabotaged.size());
   ASSERT_TRUE(parsed.is_valid());
   ASSERT_FALSE(parsed.text_sections().empty());
   const Section *text = parsed.text_sections().front();
-
   ASSERT_EQ(this->anchor_count_, 2u);
   ASSERT_EQ(this->patches_.size(), 2u);
-  ASSERT_GE(text->size(), this->patches_[1].trampoline_offset + 4);
-  // File offset of the first trampoline's placeholder word.
-  const uint64_t tramp0_file_off = text->sectionOffset() + this->patches_[0].trampoline_offset;
-  // Before sabotaging: verify the bytes we're about to overwrite are indeed
-  // s_nop 0. If this assertion fails, the orchestrator's trampoline layout
-  // no longer starts with the placeholder we think it does, and the
-  // sabotage premise ("we replaced the no-op with s_endpgm") would be a lie.
-  util::FailureOr<uint32_t> maybe_s_nop_2 = build_s_nop(0, Params.arch);
-  ASSERT_TRUE(maybe_s_nop_2.succeeded());
-  const uint32_t s_nop_0 = maybe_s_nop_2.value();
-  uint32_t pre_overwrite = 0;
-  std::memcpy(&pre_overwrite, sabotaged.data() + tramp0_file_off, sizeof(pre_overwrite));
-  ASSERT_EQ(pre_overwrite, s_nop_0) << "Expected s_nop 0 (0x" << std::hex << s_nop_0
-                                    << ") at start of the trampoline cave but found 0x"
-                                    << pre_overwrite << " - trampoline body layout changed?";
-
-  util::FailureOr<uint32_t> maybe_s_endpgm_1 = build_s_endpgm(Params.arch);
-  ASSERT_TRUE(maybe_s_endpgm_1.succeeded());
-  const uint32_t s_endpgm_0 = maybe_s_endpgm_1.value();
-  std::memcpy(sabotaged.data() + tramp0_file_off, &s_endpgm_0, sizeof(s_endpgm_0));
-
-  // Same inputs as the dispatch-equivalence test, so the golden matches.
-  const GoldenVectorAddInputs inputs;
-  constexpr uint32_t N = GoldenVectorAddInputs::kSize;
-
-  auto sabotaged_out_1 = dispatch_vector_add(sabotaged, gpu, cpu, inputs.a(), inputs.b(), N);
-  ASSERT_EQ(sabotaged_out_1.size(), N)
-      << "Sabotaged dispatch failed (HSA error before s_endpgm could run)";
-
-  // Trampoline-executed path: every thread that enters the trampoline hits
-  // s_endpgm and terminates before reaching the relocated instruction or its
-  // store-to-C. So C stays at the pre-dispatch zero pattern.
-  EXPECT_FALSE(kernel_wrote_output(sabotaged_out_1))
-      << "Sabotaged dispatch produced non-zero output - did the GPU bypass the trampoline?";
-
-  // And the output must NOT match the golden (would mean the trampoline
-  // wasn't hit and the kernel ran end-to-end normally).
-  const uint32_t matches_golden_1 = count_matching_golden(sabotaged_out_1, inputs.golden());
-  EXPECT_LT(matches_golden_1, N) << "Sabotaged dispatch matched the golden in " << matches_golden_1
-                                 << "/" << N << " elements - trampoline appears bypassed";
-
-  // Revert first trampoline in sabotaged
-  std::memcpy(sabotaged.data() + tramp0_file_off, &s_nop_0, sizeof(s_nop_0));
-  auto unsabotaged_out = dispatch_vector_add(sabotaged, gpu, cpu, inputs.a(), inputs.b(), N);
-  ASSERT_EQ(unsabotaged_out.size(), N) << "HSA error before unsabotaged run could finish";
-
-  ASSERT_EQ(count_matching_golden(unsabotaged_out, inputs.golden()), N)
-      << "Unsabotaged code differs from golden";
-
-  // Perform same change and test for second trampoline
-  int64_t offset_between_anchors =
-      this->patches_[1].trampoline_offset - this->patches_[0].trampoline_offset;
-  EXPECT_NE(offset_between_anchors, 0)
+  EXPECT_NE(this->patches_[0].trampoline_offset, this->patches_[1].trampoline_offset)
       << "Both selected trampolines have the same trampoline offset";
-  std::memcpy(&pre_overwrite, sabotaged.data() + tramp0_file_off + offset_between_anchors,
-              sizeof(pre_overwrite));
-  ASSERT_EQ(pre_overwrite, s_nop_0) << "Expected s_nop 0 (0x" << std::hex << s_nop_0
-                                    << ") at start of the trampoline cave but found 0x"
-                                    << pre_overwrite << " - trampoline body layout changed?";
 
-  std::memcpy(sabotaged.data() + tramp0_file_off + offset_between_anchors, &s_endpgm_0,
-              sizeof(s_endpgm_0));
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, Params.arch);
+  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(Params.arch);
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(endpgm.succeeded());
+  const GoldenVectorAddInputs inputs;
+  constexpr uint32_t kSize = GoldenVectorAddInputs::kSize;
+  for (size_t index = 0; index < this->patches_.size(); ++index) {
+    SCOPED_TRACE(index);
+    const uint64_t cave = this->patches_[index].trampoline_offset;
+    ASSERT_LE(cave, text->size());
+    ASSERT_LE(sizeof(uint32_t), text->size() - cave);
+    const uint64_t file_offset = text->sectionOffset() + cave;
+    // Verify each cave's NOP premise before replacing it with s_endpgm.
+    const uint32_t original_word =
+        test_support::read_elf_struct_for_test<uint32_t>(sabotaged, file_offset);
+    ASSERT_EQ(original_word, nop.value()) << "Trampoline body layout changed";
+    test_support::write_value_for_test(sabotaged, file_offset, endpgm.value());
 
-  auto sabotaged_out_2 = dispatch_vector_add(sabotaged, gpu, cpu, inputs.a(), inputs.b(), N);
-  ASSERT_EQ(sabotaged_out_2.size(), N)
-      << "Sabotaged dispatch failed (HSA error before s_endpgm could run)";
+    const std::vector<float> stopped =
+        dispatch_vector_add(sabotaged, gpu, cpu, inputs.a(), inputs.b(), kSize);
+    ASSERT_EQ(stopped.size(), kSize)
+        << "Sabotaged dispatch failed (HSA error before s_endpgm could run)";
+    EXPECT_FALSE(kernel_wrote_output(stopped))
+        << "Sabotaged dispatch produced non-zero output - did the GPU bypass the trampoline?";
+    const uint32_t matches = count_matching_golden(stopped, inputs.golden());
+    EXPECT_LT(matches, kSize) << "Sabotaged dispatch matched the golden in " << matches << "/"
+                              << kSize << " elements - trampoline appears bypassed";
 
-  // Trampoline-executed path: every thread that enters the trampoline hits
-  // s_endpgm and terminates before reaching the relocated v_add_f32 or its
-  // store-to-C. So C stays at the pre-dispatch zero pattern.
-  EXPECT_FALSE(kernel_wrote_output(sabotaged_out_2))
-      << "Sabotaged dispatch produced non-zero output - did the GPU bypass the trampoline?";
-
-  // And the output must NOT match the golden (would mean the trampoline
-  // wasn't hit and the kernel ran end-to-end normally).
-  const uint32_t matches_golden_2 = count_matching_golden(sabotaged_out_2, inputs.golden());
-  EXPECT_LT(matches_golden_2, N) << "Sabotaged dispatch matched the golden in " << matches_golden_2
-                                 << "/" << N << " elements - trampoline appears bypassed";
+    // Restore the first cave and verify the golden before sabotaging the second.
+    if (index == 0) {
+      test_support::write_value_for_test(sabotaged, file_offset, nop.value());
+      const std::vector<float> restored =
+          dispatch_vector_add(sabotaged, gpu, cpu, inputs.a(), inputs.b(), kSize);
+      ASSERT_EQ(restored.size(), kSize) << "HSA error before unsabotaged run could finish";
+      ASSERT_EQ(count_matching_golden(restored, inputs.golden()), kSize)
+          << "Unsabotaged code differs from golden";
+    }
+  }
 }
 
 // The concrete suites CMake registers. Availability is handled by
@@ -347,19 +302,7 @@ void HsaDbiNopAsmCdna2Hardware::run_tail_backing_case(bool file_backed) {
   const Section &text = *original.text_sections().front();
   std::unique_ptr<Decoder> decoder = Decoder::create(kCdna2Params.arch);
   ASSERT_NE(decoder, nullptr);
-  util::FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result =
-      BasicBlock::build(original, *decoder, kCdna2Params.arch);
-  ASSERT_TRUE(block_result.succeeded());
-  std::vector<std::unique_ptr<BasicBlock>> blocks = std::move(block_result).value();
-  uint64_t live_end = 0;
-  for (const std::unique_ptr<BasicBlock> &block : blocks) {
-    uint64_t offset = block->start_offset();
-    for (const Instruction &inst : block->instructions()) {
-      offset += static_cast<uint64_t>(inst.size());
-      if (inst.mnemonic() == "s_endpgm")
-        live_end = std::max(live_end, offset);
-    }
-  }
+  const uint64_t live_end = original_live_end_;
   ASSERT_GT(live_end, anchor_offsets_.front());
   ASSERT_LE(live_end + sizeof(uint32_t), text.size());
   const uint32_t padding_word =
