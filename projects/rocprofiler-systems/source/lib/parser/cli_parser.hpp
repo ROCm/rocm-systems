@@ -17,8 +17,9 @@ enum class unknown_option : std::uint8_t
 {
     /// Record an error and keep parsing.
     report = 0,
-    /// Stop and return that token plus everything after it as unparsed.
-    stop,
+    /// Keep that token, and every plain argument before "--", in unparsed, in
+    /// order, and keep parsing. A wrapper passes unparsed to the tool it runs.
+    forward,
 };
 
 /**
@@ -34,7 +35,8 @@ enum class unknown_option : std::uint8_t
  * "--flag=false" still sets the value. An integer or number may be negative
  * ("--num -5"). A single-letter flag bundle such as "-qv" is accepted when every
  * letter is a flag. "--" ends option parsing, and only the tokens after it are the
- * command. A token before "--" that is not an option is an unexpected argument.
+ * command. A token before "--" that is not an option is an unexpected argument,
+ * unless unknown_option::forward keeps it in unparsed.
  */
 class cli_parser
 {

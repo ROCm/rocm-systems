@@ -144,6 +144,11 @@ private:
         }
         if(!starts_option(token))
         {
+            if(m_unknown == unknown_option::forward)
+            {
+                forward(token);
+                return;
+            }
             m_result.errors.push_back(fmt::format("unexpected argument '{}'", token));
             ++m_index;
             return;
@@ -158,12 +163,18 @@ private:
 
     void reject_unknown(const std::string& token)
     {
-        if(m_unknown == unknown_option::stop)
+        if(m_unknown == unknown_option::forward)
         {
-            finish(m_result.unparsed, m_index);
+            forward(token);
             return;
         }
         m_result.errors.push_back(fmt::format("unknown option '{}'", token));
+        ++m_index;
+    }
+
+    void forward(const std::string& token)
+    {
+        m_result.unparsed.push_back(token);
         ++m_index;
     }
 

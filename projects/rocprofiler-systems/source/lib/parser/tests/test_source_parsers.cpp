@@ -284,13 +284,14 @@ TEST(parser_cli, keeps_the_command_after_the_separator)
     EXPECT_EQ(parsed.values.find("freq"), parsed.values.end());
 }
 
-TEST(parser_cli, stops_at_the_first_unknown_option)
+TEST(parser_cli, forwards_unknown_options_and_keeps_parsing)
 {
-    const auto parsed =
-        parse_cli({ "--trace", "--sampling-freq", "100" }, unknown_option::stop);
+    const auto parsed = parse_cli({ "--sampling-freq", "100", "--trace", "--", "./app" },
+                                  unknown_option::forward);
     EXPECT_TRUE(parsed.errors.empty());
     expect_stored(parsed.values, "trace", true);
     EXPECT_EQ(parsed.unparsed, (std::vector<std::string>{ "--sampling-freq", "100" }));
+    EXPECT_EQ(parsed.command, std::vector<std::string>{ "./app" });
 }
 
 TEST(parser_cli, reports_unknown_options_and_continues)
@@ -343,6 +344,21 @@ TEST(parser_cli, joins_tokens_until_the_next_option)
     EXPECT_TRUE(parsed.errors.empty());
     expect_stored(parsed.values, "events", std::vector<std::string>{ "ins", "cycles" });
     expect_stored(parsed.values, "trace", true);
+}
+
+TEST(parser_cli, forwarded_option_can_come_before_or_after_a_list)
+{
+    for(const auto& args :
+        { std::vector<std::string>{ "--gpu=temp", "--events", "ins", "--", "./app" },
+          std::vector<std::string>{ "--events", "ins", "--gpu=temp", "--", "./app" } })
+    {
+        const auto parsed =
+            cli_parser{ args, unknown_option::forward }.parse(make_event_schema());
+        EXPECT_TRUE(parsed.errors.empty());
+        expect_stored(parsed.values, "events", std::vector<std::string>{ "ins" });
+        EXPECT_EQ(parsed.unparsed, std::vector<std::string>{ "--gpu=temp" });
+        EXPECT_EQ(parsed.command, std::vector<std::string>{ "./app" });
+    }
 }
 
 TEST(parser_cli, does_not_take_the_next_option_as_a_value)

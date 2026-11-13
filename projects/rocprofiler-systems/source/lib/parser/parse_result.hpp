@@ -21,7 +21,8 @@ struct parse_result
     std::vector<std::string> errors;
     /// The profiled command. Only the tokens after a standalone "--".
     std::vector<std::string> command;
-    /// Remainder, including the first unknown token, when parsing stops early.
+    /// With unknown_option::forward, every unknown option and plain argument before
+    /// "--", in order.
     std::vector<std::string> unparsed;
 
     /// Canonical text of a stored value. @p param_id must be present in values.
