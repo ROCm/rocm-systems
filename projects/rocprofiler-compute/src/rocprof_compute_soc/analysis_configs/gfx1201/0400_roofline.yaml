@@ -36,10 +36,6 @@ Panel Config:
           value: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: $VRAMBw_empirical_peak * 1e9
-        L2 to Memory BW (Infinity Cache Peak):
-          value: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
-          unit: Bytes/s
-          peak: $MALLBw_empirical_peak * 1e9
 
   - metric_table:
       id: 402
@@ -91,21 +87,12 @@ Panel Config:
       Bandwidth of GL2C/EA read and write requests leaving L2 toward memory,
       compared with the measured VRAM bandwidth (VRAMBw column of roofline.csv).
       Counts 32-byte granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and
-      GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The same sum is compared with the
-      Infinity Cache peak in L2 to Memory BW (Infinity Cache Peak). The unsized
-      EA_RDREQ_DRAM and EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte
-      through 128-byte requests, so a fixed 256 bytes per request would
-      overstate them. It includes requests the Infinity Cache serves. The
-      counters cannot separate them, so this can be higher than true VRAM
-      traffic and can exceed the measured VRAM peak.
-    L2 to Memory BW (Infinity Cache Peak): >-
-      Bandwidth of GL2C/EA read and write requests leaving L2 toward memory,
-      compared with the measured Infinity Cache bandwidth (MALL column of
-      roofline.csv). Uses the same 32-byte request counters as L2 to Memory BW.
-      Requests pass through
-      GL0 (TCP), GL1, the GL2, and the Infinity Cache before VRAM. The measured
-      peak uses the device's reported Infinity Cache size. No counter separates
-      Infinity Cache hits from VRAM traffic.
+      GL2C_EA_WRREQ_DRAM_32B (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and
+      EA_WRREQ_DRAM counters (0xa5 and 0xa6) mix 32-byte through 128-byte
+      requests, so a fixed 256 bytes per request would overstate them. It
+      includes requests the Infinity Cache serves. The counters cannot separate
+      them, so this can be higher than true VRAM traffic and can exceed the
+      measured VRAM peak.
     AI L0: >-
       Arithmetic intensity relative to GL0 (TCP) requests, at 128 bytes per
       TCP_REQ as an upper bound on GL0 bytes. The FLOP numerator is the VALU

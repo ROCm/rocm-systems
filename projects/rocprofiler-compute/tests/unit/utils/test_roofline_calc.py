@@ -339,24 +339,23 @@ def test_gfx1201_plot_points_use_the_matching_traffic() -> None:
         assert evaluator.eval_expression(expression) == pytest.approx(ai, rel=1e-6)
 
 
-def test_gfx1201_dram_destined_rows_compare_one_value_with_both_roofs() -> None:
-    """The DRAM-destined bandwidth is shown against the VRAM and Infinity Cache
-    peaks, since no counter separates the two."""
+def test_gfx1201_l2_to_memory_is_one_row_against_the_vram_peak() -> None:
+    """Peers have one bandwidth row per memory level. The DRAM-destined
+    counters are shown once, against the VRAM peak. The Infinity Cache roof
+    is drawn on the plot with no kernel point."""
     rates = gfx1201_roofline_metrics("Roofline Performance Rates")
     dram = rates["L2 to Memory BW"]
-    infinity_cache = rates["L2 to Memory BW (Infinity Cache Peak)"]
 
-    assert dram["value"] == infinity_cache["value"]
+    assert "L2 to Memory BW (Infinity Cache Peak)" not in rates
     assert "GL2C_EA_RDREQ_DRAM_32B_sum" in dram["value"]
     assert "GL2C_EA_WRREQ_DRAM_32B_sum" in dram["value"]
     assert dram["value"].startswith("32 *")
     assert dram["peak"] == "$VRAMBw_empirical_peak * 1e9"
-    assert infinity_cache["peak"] == "$MALLBw_empirical_peak * 1e9"
 
 
 def test_gfx1201_dram_rate_counts_32_byte_requests_per_second() -> None:
     """1,000 read and 500 write 32-byte requests in one millisecond are
-    48,000 bytes, or 48 MB/s, for both the VRAM and the Infinity Cache rows."""
+    48,000 bytes, or 48 MB/s."""
     rates = gfx1201_roofline_metrics("Roofline Performance Rates")
     evaluator = MetricEvaluator(
         pd.DataFrame({
@@ -369,9 +368,8 @@ def test_gfx1201_dram_rate_counts_32_byte_requests_per_second() -> None:
         {},
     )
 
-    for row in ("L2 to Memory BW", "L2 to Memory BW (Infinity Cache Peak)"):
-        expression = build_eval_string(rates[row]["value"])
-        assert evaluator.eval_expression(expression) == pytest.approx(4.8e7), row
+    expression = build_eval_string(rates["L2 to Memory BW"]["value"])
+    assert evaluator.eval_expression(expression) == pytest.approx(4.8e7)
 
 
 def test_extract_ai_metrics_reads_the_vram_point_into_its_own_field() -> None:
