@@ -382,4 +382,71 @@ TEST_F(DdaMPI_BroadcastLL, BackToBackNoSync) {
   backToBackRounds(sizes, RCCL_DDA_FABRIC_LL);
 }
 
+
+// ---- DDA fabric Broadcast LL128 two-shot ----
+//
+// Environment set by standard_env_dda_bc_ll128 in test_categories_mpi.yaml:
+//   RCCL_DDA_BC=1                      -- opt-in to DDA Broadcast
+//   RCCL_DDA_LL_THRESHOLD=0            -- suppress LL tier so LL128 is chosen
+//   RCCL_DDA_LL128_THRESHOLD=<cap>     -- cap LL128 tier (kLL128Cap bytes)
+//   RCCL_DDA_LL128_BC_FANOUT=1         -- exercise the two-shot fan-out path
+
+// One LL128 slice carries 1920 bytes of payload (15 × 8-byte words, 32 threads/warp).
+// kLL128MultiChunk is 5.5 slices: exercises a partial last chunk in the two-shot tiling.
+// kLL128Cap is the fixed env cap; kLLMultiChunk reuses the LL multi-chunk constant.
+constexpr size_t kLL128MultiChunk = 1920 * 5 + 960;  // 10560 bytes, partial last chunk
+constexpr size_t kLL128Cap = 2 * 1024 * 1024;         // cap baked into the YAML category
+
+class DdaMPI_BroadcastLL128 : public DdaBroadcastMPITest {
+ protected:
+  std::vector<std::pair<const char*, std::string>> ddaEnv() const override {
+    return {
+      {"RCCL_DDA_BC", "1"},
+      {"RCCL_DDA_LL_THRESHOLD", "0"},
+      {"RCCL_DDA_LL128_THRESHOLD", std::to_string(kLL128Cap)},
+      {"RCCL_DDA_LL128_BC_FANOUT", "1"},
+    };
+  }
+
+  std::string configMismatch() override {
+    ncclComm* comm = getActiveCommunicator();
+    if (rcclParamDdaBc() <= 0) return "RCCL_DDA_BC is not on in this process";
+    if (rcclDdaLLThreshold(comm, ncclFuncBroadcast) != 0)
+      return "RCCL_DDA_LL_THRESHOLD is not 0; LL tier is not suppressed";
+    if (rcclDdaLL128Threshold(comm, ncclFuncBroadcast) != kLL128Cap)
+      return "Broadcast LL128 cap is not kLL128Cap; check RCCL_DDA_LL128_THRESHOLD";
+    return {};
+  }
+};
+
+// Nonzero root: rotate through every root so a non-root rank scatters and receives,
+// confirming the two-shot fan-out for all sender/receiver pairings.
+TEST_F(DdaMPI_BroadcastLL128, AllRootsOutOfPlace) {
+  allRoots({16, kLL128MultiChunk, 1024 * 1024, kLL128Cap}, false, RCCL_DDA_FABRIC_LL128);
+}
+
+// In-place: sendbuff == recvbuff; root writes into its own recv buffer and all
+// non-roots overwrite the same allocation with the broadcast value.
+TEST_F(DdaMPI_BroadcastLL128, AllRootsInPlace) {
+  allRoots({16, kLL128MultiChunk, 1024 * 1024, kLL128Cap}, true, RCCL_DDA_FABRIC_LL128);
+}
+
+// Partial last chunk: kLL128MultiChunk (5.5 slices) exercises the tail-slice handling
+// in the two-shot tiling where the last chunk is not a full set of slices.
+TEST_F(DdaMPI_BroadcastLL128, PartialLastChunk) {
+  for (int root = 0; root < nRanks_; ++root) {
+    broadcastAndCheck({kLL128MultiChunk, root, false, 0, 0}, RCCL_DDA_FABRIC_LL128);
+    if (HasFatalFailure() || IsSkipped()) return;
+    broadcastAndCheck({kLL128MultiChunk, root, true, 0, 0}, RCCL_DDA_FABRIC_LL128);
+    if (HasFatalFailure() || IsSkipped()) return;
+  }
+}
+
+// Back-to-back launches: exercises bank alternation and start-token reuse in the
+// two-shot path with RCCL_DDA_LL128_BC_FANOUT=1.
+TEST_F(DdaMPI_BroadcastLL128, BackToBackNoSync) {
+  const size_t sizes[7] = {16, kLL128MultiChunk, 1024 * 1024, kLL128Cap, kLL128MultiChunk, 16, 1024 * 1024};
+  backToBackRounds(sizes, RCCL_DDA_FABRIC_LL128);
+}
+
 #endif  // MPI_TESTS_ENABLED

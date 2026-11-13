@@ -554,6 +554,17 @@ test_categories:
     env_variables:
       - "RCCL_DDA_BC=1"
       - "RCCL_DDA_LL_THRESHOLD=262144"
+  standard_env_dda_bc_ll128:
+    description: "DDA fabric Broadcast two-shot LL128 data checks: nonzero root, in-place, partial last chunk, back-to-back with fan-out=1."
+    test_patterns:
+      - "DdaMPI_BroadcastLL128.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "RCCL_DDA_BC=1"
+      - "RCCL_DDA_LL_THRESHOLD=0"
+      - "RCCL_DDA_LL128_THRESHOLD=2097152"
+      - "RCCL_DDA_LL128_BC_FANOUT=1"
   comprehensive:
     description: "MPI exhaustive — same suites as standard; env enables implicit launch, CE memcpy paths, and verbose rank logs."
     test_patterns: *mpi_all_patterns
@@ -808,6 +819,7 @@ execution_settings:
     standard_env_dda_a2a_push_all_peer: 1200
     standard_env_dda_a2a_pull: 1200
     standard_env_dda_bc: 1200
+    standard_env_dda_bc_ll128: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200
     full_base: 1200
