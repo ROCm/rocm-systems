@@ -287,6 +287,7 @@ if(BUILD_TESTS)
     BroadcastTests.cpp
     CollImplInfoTests.cpp
     DeviceResourceRequirementTests.cpp
+    DiagnosticsTests.cpp
     DoneEventOrderingTests.cpp
     Fp8VerifiableTests.cpp
     GatherTests.cpp
@@ -410,6 +411,7 @@ if(BUILD_TESTS)
       DdaCollCommonTests.cpp
       CheapPostSendFenceTests.cpp
       Gfx1250SendRecvLl128WindowTests.cpp
+      ProfilerOverheadTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/TestFp8Reduce.cpp
@@ -458,6 +460,10 @@ if(BUILD_TESTS)
     endif()
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
+
+    # ProfilerOverheadTests loads its in-binary profiler via NCCL_PROFILER_PLUGIN=STATIC_PLUGIN,
+    # i.e. dlsym(dlopen(NULL), ...), which only sees the dynamic symbol table.
+    target_link_options(rccl-UnitTestsFixtures PRIVATE "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
 
     # Unit tests pass generic hipMalloc pointers into load16global/store16global.
     # The gfx942 b128 global-aperture builtins fault on those pointers; use the
@@ -826,6 +832,7 @@ if(BUILD_TESTS)
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      P2pCeChannelCap_test.cpp
       P2pMaxNchannelsTests.cpp
       TopoNicFusionTests.cpp
       NetSocketTests.cpp
@@ -1139,6 +1146,7 @@ if(BUILD_TESTS)
       DdaAllReduceMPITests.cpp
       DdaReduceScatterMPITests.cpp
       DdaReduceScatterLL128MPITests.cpp
+      DdaBroadcastMPITests.cpp
       DdaCollOpCountMPI_test.cpp
       DdaFabricSimpleMPITests.cpp
       DdaIpcIndexDataMPITests.cpp

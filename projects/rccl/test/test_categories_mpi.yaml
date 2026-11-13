@@ -149,6 +149,7 @@ test_categories:
     description: "P2P workflow with explicit P2P enabled and CUDA memcpy."
     test_patterns:
       - "P2pMPITest.P2pWorkflow"
+      - "P2pMPITest.P2pWithMemcpyTest"
     exclude_windows: *mpi_exclude_windows
     labels: *mpi_quick_labels
     env_variables:
@@ -157,6 +158,7 @@ test_categories:
       - "NCCL_P2P_USE_CUDA_MEMCPY=1"
       - "NCCL_LEGACY_CUDA_REGISTER=1"
       - "NCCL_P2P_DISABLE=0"
+      - "NCCL_PROTO=Simple"
   quick_env_p2p_ipc_small_buffer:
     description: "P2P IPC registration with very small buffer and SHM disabled."
     test_patterns:
@@ -543,6 +545,17 @@ test_categories:
       - "NCCL_DEBUG=INFO"
       - "RCCL_DDA_THRESHOLD=67108864"
       - "RCCL_DDA_A2A_PUSH=0"
+  # Broadcast DDA is opt-in and its caps are cached per process; the suite sizes its cases against these values.
+  standard_env_dda_bc:
+    description: "DDA fabric Broadcast one-shot data checks (LL)."
+    test_patterns:
+      - "DdaMPI_BroadcastLL.*"
+      - "AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "RCCL_DDA_BC=1"
+      - "RCCL_DDA_LL_THRESHOLD=262144"
   comprehensive:
     description: "MPI exhaustive — same suites as standard; env enables implicit launch, CE memcpy paths, and verbose rank logs."
     test_patterns: *mpi_all_patterns
@@ -796,6 +809,7 @@ execution_settings:
     standard_env_dda_a2a_push_vector: 1200
     standard_env_dda_a2a_push_all_peer: 1200
     standard_env_dda_a2a_pull: 1200
+    standard_env_dda_bc: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200
     full_base: 1200

@@ -7,6 +7,9 @@
 #include "VerifiableFp8.hpp"
 #include "DeviceDataOps.hpp"
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
 
 // Design:
 // - Each element is hashed from (seed, element index); each rank's value from that hash and
@@ -22,13 +25,36 @@
 // - Kernels are templated on Fp8Bits' format flag, not on rccl_float8 / rccl_bfloat8 (see
 //   DeviceDataOps.hpp), and convert only in device code, where the native type is the
 //   device's encoding (fnuz or OCP), as RCCL's collectives use.
+// - When this file's kernels cannot run on the current device, or UT_DEVICE_DATA=0, the same
+//   per-element functions run on the host, converting with the device's encoding explicitly.
 namespace RcclUnitTesting
 {
   namespace
   {
     constexpr int kThreadsPerBlock = 512;
 
-    __device__ uint64_t Mix(uint64_t x)
+    // FP8 conversion in the device's native encoding (device code only)
+    template <bool IsE5m2>
+    struct DeviceFp8Codec
+    {
+      __device__ uint8_t Encode(float x) const
+      {
+        using B = Fp8Bits<IsE5m2>;
+        return B::From(typename B::Native(x)).bits;
+      }
+      __device__ float Decode(uint8_t bits) const { return (float)Fp8Bits<IsE5m2>{bits}.Get(); }
+    };
+
+    // Host conversion in the encoding the device uses
+    struct HostFp8Codec
+    {
+      bool isE5m2;
+      bool fnuz;
+      uint8_t Encode(float x) const { return rcclFloatToFp8(x, isE5m2, fnuz); }
+      float Decode(uint8_t bits) const { return rcclFp8ToFloat(bits, isE5m2, fnuz); }
+    };
+
+    __host__ __device__ uint64_t Mix(uint64_t x)
     {
       x += 0x9e3779b97f4a7c15ull;
       x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
@@ -36,27 +62,13 @@ namespace RcclUnitTesting
       return x ^ (x >> 31);
     }
 
-    template <bool IsE5m2>
-    __device__ uint8_t ToFp8(float x)
-    {
-      using B = Fp8Bits<IsE5m2>;
-      return B::From(typename B::Native(x)).bits;
-    }
-
-    template <bool IsE5m2>
-    __device__ float FromFp8(uint8_t bits)
-    {
-      return (float)Fp8Bits<IsE5m2>{bits}.Get();
-    }
-
     // Rank's value for the element whose hash is h. Values are small integers times powers of
     // two, bounded so that every partial sum or product over any subset of ranks is exactly
     // representable in both FP8 formats: the reduction is exact in any order and precision.
-    template <bool IsE5m2>
-    __device__ float Contribution(int redOp, int rankN, int rank, uint64_t h)
+    __host__ __device__ float Contribution(bool isE5m2, int redOp, int rankN, int rank, uint64_t h)
     {
-      constexpr int M      = IsE5m2 ? 2 : 3;                                // Mantissa bits
-      constexpr int maxInt = (2 << M) - 1;                                  // Integers exact up to here
+      int      const M      = isE5m2 ? 2 : 3;                    // Mantissa bits
+      int      const maxInt = (2 << M) - 1;                      // Integers exact up to here
       int      const pos  = (rank + (int)(h % rankN)) % rankN; // Position in a per-element rotation
       uint64_t const hr   = Mix(h ^ (uint64_t)(rank + 1));     // Per-rank bits
       float    const sign = (hr & 1) ? -1.0f : 1.0f;
@@ -86,65 +98,68 @@ namespace RcclUnitTesting
       }
     }
 
-    template <bool IsE5m2>
-    __device__ uint8_t Expected(int redOp, int rankN, uint64_t h)
+    template <typename Codec>
+    __host__ __device__ uint8_t Expected(Codec const& codec, bool isE5m2, int redOp, int rankN, uint64_t h)
     {
       float acc = 0.0f;
       for (int r = 0; r < rankN; ++r)
       {
-        float x = Contribution<IsE5m2>(redOp, rankN, r, h);
-        if (redOp == ncclAvg) x = FromFp8<IsE5m2>(ToFp8<IsE5m2>(x * (1.0f / rankN)));
+        float x = Contribution(isE5m2, redOp, rankN, r, h);
+        if (redOp == ncclAvg) x = codec.Decode(codec.Encode(x * (1.0f / rankN)));
         if (r == 0 && redOp != ncclAvg) acc = x;
         else if (redOp == ncclProd)     acc *= x;
         else if (redOp == ncclMax)      acc = fmaxf(acc, x);
         else if (redOp == ncclMin)      acc = fminf(acc, x);
         else                            acc += x;
       }
-      return ToFp8<IsE5m2>(acc);
+      return codec.Encode(acc);
     }
 
-    __device__ uint64_t ElementHash(uint64_t seed, intptr_t index)
+    __host__ __device__ uint64_t ElementHash(uint64_t seed, intptr_t index)
     {
       return Mix(seed ^ Mix((uint64_t)index));
     }
 
     // rankMe < 0 generates the expected result instead of an input
-    template <bool IsE5m2>
-    __device__ void GenerateBody(uint8_t* elts, intptr_t eltN, int redOp, int rankN, int rankMe,
-                                 uint64_t seed, intptr_t eltIx0)
+    template <typename Codec>
+    __host__ __device__ uint8_t GenerateElt(Codec const& codec, bool isE5m2, int redOp, int rankN, int rankMe,
+                                            uint64_t seed, intptr_t eltIx)
     {
-      for (intptr_t i = (intptr_t)blockIdx.x * blockDim.x + threadIdx.x; i < eltN; i += (intptr_t)gridDim.x * blockDim.x)
-      {
-        uint64_t const h = ElementHash(seed, eltIx0 + i);
-        elts[i] = rankMe < 0 ? Expected<IsE5m2>(redOp, rankN, h) : ToFp8<IsE5m2>(Contribution<IsE5m2>(redOp, rankN, rankMe, h));
-      }
+      uint64_t const h = ElementHash(seed, eltIx);
+      return rankMe < 0 ? Expected(codec, isE5m2, redOp, rankN, h)
+                        : codec.Encode(Contribution(isE5m2, redOp, rankN, rankMe, h));
     }
 
-    template <bool IsE5m2>
-    __device__ void VerifyBody(uint8_t const* results, intptr_t eltN, int redOp, int rankN,
-                               uint64_t seed, intptr_t eltIx0, int tolerance, int64_t* badEltN)
+    template <typename Codec>
+    __host__ __device__ bool IsBadElt(Codec const& codec, bool isE5m2, uint8_t result, int redOp, int rankN,
+                                      uint64_t seed, intptr_t eltIx, int tolerance)
     {
-      unsigned long long bad = 0;
-      for (intptr_t i = (intptr_t)blockIdx.x * blockDim.x + threadIdx.x; i < eltN; i += (intptr_t)gridDim.x * blockDim.x)
-      {
-        int const expected = Expected<IsE5m2>(redOp, rankN, ElementHash(seed, eltIx0 + i));
-        bad += abs((int)results[i] - expected) > tolerance ? 1 : 0;
-      }
-      atomicAdd((unsigned long long*)badEltN, bad);
+      int const expected = Expected(codec, isE5m2, redOp, rankN, ElementHash(seed, eltIx));
+      return abs((int)result - expected) > tolerance;
     }
 
     template <bool IsE5m2>
     __global__ void GenerateKernel(uint8_t* elts, intptr_t eltN, int redOp, int rankN,
                                    int rankMe, uint64_t seed, intptr_t eltIx0)
     {
-      GenerateBody<IsE5m2>(elts, eltN, redOp, rankN, rankMe, seed, eltIx0);
+      DeviceFp8Codec<IsE5m2> const codec;
+      for (intptr_t i = (intptr_t)blockIdx.x * blockDim.x + threadIdx.x; i < eltN; i += (intptr_t)gridDim.x * blockDim.x)
+      {
+        elts[i] = GenerateElt(codec, IsE5m2, redOp, rankN, rankMe, seed, eltIx0 + i);
+      }
     }
 
     template <bool IsE5m2>
     __global__ void VerifyKernel(uint8_t const* results, intptr_t eltN, int redOp, int rankN,
                                  uint64_t seed, intptr_t eltIx0, int tolerance, int64_t* badEltN)
     {
-      VerifyBody<IsE5m2>(results, eltN, redOp, rankN, seed, eltIx0, tolerance, badEltN);
+      DeviceFp8Codec<IsE5m2> const codec;
+      unsigned long long bad = 0;
+      for (intptr_t i = (intptr_t)blockIdx.x * blockDim.x + threadIdx.x; i < eltN; i += (intptr_t)gridDim.x * blockDim.x)
+      {
+        bad += IsBadElt(codec, IsE5m2, results[i], redOp, rankN, seed, eltIx0 + i, tolerance) ? 1 : 0;
+      }
+      atomicAdd((unsigned long long*)badEltN, bad);
     }
 
     bool IsSupported(ncclDataType_t dataType, ncclRedOp_t redOp, int rankN)
@@ -158,15 +173,55 @@ namespace RcclUnitTesting
       return (unsigned)std::min<intptr_t>(1024, (eltN + kThreadsPerBlock - 1) / kThreadsPerBlock);
     }
 
+    // Same answer as UtDeviceDataEnabled() for this file's code object. Not shared with it
+    // because rccl-UnitTestsMPI builds this file without PtrUnion.cpp.
+    bool UseDeviceKernels()
+    {
+      static KernelLoadCache kernels;
+      return UtDeviceDataRequested() &&
+             kernels.Loadable(reinterpret_cast<void const*>(&GenerateKernel<false>), "Verifiable FP8");
+    }
+
+    // Host mirror of rcclFp8DeviceIsFnuz (archinfo.h), whose IsArchMatch librccl does not export
+    bool CurrentDeviceIsFnuz()
+    {
+      int dev = 0;
+      hipDeviceProp_t prop = {};
+      if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess)
+      {
+        (void)hipGetLastError();
+        return true;
+      }
+      for (char const* ocpArch : {"gfx950", "gfx1200", "gfx1201", "gfx1250"})
+      {
+        if (strncmp(prop.gcnArchName, ocpArch, strlen(ocpArch)) == 0) return false;
+      }
+      return true;
+    }
+
     hipError_t Generate(void* elts, intptr_t eltN, ncclDataType_t dataType, ncclRedOp_t redOp,
                         int rankN, int rankMe, uint64_t seed, intptr_t eltIx0, hipStream_t stream)
     {
       if (!IsSupported(dataType, redOp, rankN)) return hipErrorInvalidValue;
       if (eltN == 0) return hipSuccess;
-      auto const kernel = (dataType == ncclFloat8e5m2) ? GenerateKernel<true> : GenerateKernel<false>;
-      hipLaunchKernelGGL(kernel, dim3(NumBlocks(eltN)), dim3(kThreadsPerBlock), 0, stream,
-                         (uint8_t*)elts, eltN, (int)redOp, rankN, rankMe, seed, eltIx0);
-      return hipGetLastError();
+      bool const isE5m2 = (dataType == ncclFloat8e5m2);
+      if (UseDeviceKernels())
+      {
+        auto const kernel = isE5m2 ? GenerateKernel<true> : GenerateKernel<false>;
+        hipLaunchKernelGGL(kernel, dim3(NumBlocks(eltN)), dim3(kThreadsPerBlock), 0, stream,
+                           (uint8_t*)elts, eltN, (int)redOp, rankN, rankMe, seed, eltIx0);
+        return hipGetLastError();
+      }
+
+      HostFp8Codec const codec{isE5m2, CurrentDeviceIsFnuz()};
+      std::vector<uint8_t> host(eltN);
+      for (intptr_t i = 0; i < eltN; ++i)
+      {
+        host[i] = GenerateElt(codec, isE5m2, (int)redOp, rankN, rankMe, seed, eltIx0 + i);
+      }
+      hipError_t err = hipMemcpyAsync(elts, host.data(), eltN, hipMemcpyHostToDevice, stream);
+      if (err == hipSuccess) err = hipStreamSynchronize(stream);
+      return err;
     }
   }
 
@@ -192,10 +247,28 @@ namespace RcclUnitTesting
     if (!IsSupported(dataType, redOp, rankN)) return hipErrorInvalidValue;
     *badEltN = 0;
     if (eltN == 0) return hipSuccess;
-    auto const kernel = (dataType == ncclFloat8e5m2) ? VerifyKernel<true> : VerifyKernel<false>;
-    hipLaunchKernelGGL(kernel, dim3(NumBlocks(eltN)), dim3(kThreadsPerBlock), 0, stream,
-                       (uint8_t const*)results, eltN, (int)redOp, rankN,
-                       seed, eltIx0, redOp == ncclAvg ? 2 : 0, badEltN);
-    return hipGetLastError();
+    bool const isE5m2    = (dataType == ncclFloat8e5m2);
+    int  const tolerance = redOp == ncclAvg ? 2 : 0;
+    if (UseDeviceKernels())
+    {
+      auto const kernel = isE5m2 ? VerifyKernel<true> : VerifyKernel<false>;
+      hipLaunchKernelGGL(kernel, dim3(NumBlocks(eltN)), dim3(kThreadsPerBlock), 0, stream,
+                         (uint8_t const*)results, eltN, (int)redOp, rankN,
+                         seed, eltIx0, tolerance, badEltN);
+      return hipGetLastError();
+    }
+
+    std::vector<uint8_t> host(eltN);
+    hipError_t err = hipMemcpyAsync(host.data(), results, eltN, hipMemcpyDeviceToHost, stream);
+    if (err == hipSuccess) err = hipStreamSynchronize(stream);
+    if (err != hipSuccess) return err;
+    HostFp8Codec const codec{isE5m2, CurrentDeviceIsFnuz()};
+    int64_t bad = 0;
+    for (intptr_t i = 0; i < eltN; ++i)
+    {
+      bad += IsBadElt(codec, isE5m2, host[i], (int)redOp, rankN, seed, eltIx0 + i, tolerance) ? 1 : 0;
+    }
+    *badEltN = bad;
+    return hipSuccess;
   }
 }

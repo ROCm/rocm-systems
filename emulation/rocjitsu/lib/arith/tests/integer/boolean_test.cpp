@@ -4,7 +4,7 @@
 // Tests for two- and three-input bitwise boolean operations.
 
 #include "integer/boolean_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <gtest/gtest.h>
 

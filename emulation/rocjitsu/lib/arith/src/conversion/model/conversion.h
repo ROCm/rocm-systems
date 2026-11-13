@@ -167,6 +167,8 @@ struct FloatRounding {
   Rounding direction = Rounding::NEAREST_EVEN;
   bool flush_tiny = false;
   bool saturate = false;
+  // Inherited SDWA narrowing scales the exact value before destination rounding.
+  int32_t prescale = 0;
 };
 
 namespace detail {
@@ -293,7 +295,8 @@ constexpr V round_finite(V bits, const FloatRounding &policy) {
   const V fraction = magnitude & V(From::kMinNormal - 1);
   const auto subnormal = field == V(L{0});
   const V significand = fraction | choose(subnormal, V(L{0}), V(From::kMinNormal));
-  const V exponent = choose(subnormal, V(L{1}), field) + V(kRebias);
+  const V exponent =
+      choose(subnormal, V(L{1}), field) + V(L(kRebias + static_cast<L>(policy.prescale)));
   return detail::round_magnitude<To, From::kMantissaBits>(significand, exponent, negative, policy);
 }
 
@@ -359,7 +362,7 @@ constexpr V from_integer(V magnitude, const Mask &negative, const FloatRounding 
   // Integers are at least one, so results are never tiny.
   const V top = fp_format::bit_width(magnitude | V(L{1})) - V(L{1});
   const V significand = magnitude << (V(L{kTopBit}) - top);
-  const V exponent = top + V(L(To::kExponentMax >> 1));
+  const V exponent = top + V(L((To::kExponentMax >> 1) + static_cast<L>(policy.prescale)));
   V result = detail::round_normal<To, kTopBit>(significand, exponent, negative, policy.direction);
   result = detail::resolve_overflow<To>(result, negative, policy);
   result = choose(magnitude == V(L{0}), V(L{0}), result);

@@ -4,7 +4,8 @@
 // FP64 ADD/MUL/FMA using AVX-512 instruction-local guest rounding, without MXCSR changes.
 // Operand preparation and masked stores preserve the public split-VGPR layout.
 #include "fp/fp64_impl.h"
-#include "rj_arith/rj_arith.h"
+#include "fp/fp64_round.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -81,6 +82,33 @@ __m512d output(__m512d value, uint32_t instruction_flags, uint64_t flags, unsign
   return value;
 }
 
+// Re-evaluate the selected lanes with the integer model. Kept out of line so that the
+// common case carries no stack frame for it.
+[[gnu::cold, gnu::noinline]] __m512d flush_tiny_lanes(__m512d value, __m512d x, __m512d y,
+                                                      __m512d z, unsigned lanes,
+                                                      unsigned rounding) {
+  uint64_t result[8], a[8], b[8], c[8];
+  _mm512_storeu_pd(result, value);
+  _mm512_storeu_pd(a, x);
+  _mm512_storeu_pd(b, y);
+  _mm512_storeu_pd(c, z);
+  for (; lanes; lanes &= lanes - 1) {
+    int i = __builtin_ctz(lanes);
+    result[i] = fma_flush_tiny_f64(result[i], a[i], b[i], c[i], rounding);
+  }
+  return _mm512_loadu_pd(result);
+}
+
+// A product rounded to the smallest normal may still be tiny after rounding. Such lanes are
+// rare, so only they leave the SIMD path.
+inline __m512d flush_tiny_products(__m512d value, __m512d x, __m512d y, __m512d z,
+                                   unsigned rounding) {
+  auto magnitude = _mm512_and_si512(_mm512_castpd_si512(value), _mm512_set1_epi64(INT64_MAX));
+  unsigned boundary = _mm512_cmpeq_epi64_mask(magnitude, _mm512_set1_epi64(0x0010000000000000LL));
+  return __builtin_expect(boundary != 0, 0) ? flush_tiny_lanes(value, x, y, z, boundary, rounding)
+                                            : value;
+}
+
 // Use embedded rounding for the selected arithmetic operation, with exceptions masked.
 template <int Rounding> __m512d arithmetic(Fp64 op, __m512d x, __m512d y, __m512d z) {
   if (op == Fp64::Add) {
@@ -136,6 +164,11 @@ bool evaluate(Fp64 op, uint64_t flags, uint32_t instruction_flags, const uint32_
     default:
       value = arithmetic<_MM_FROUND_TO_ZERO>(op, x, y, z);
       break;
+    }
+    // Products judge tininess after rounding; ADD results are exact on the subnormal grid.
+    if ((op == Fp64::Mul || op == Fp64::Fma) && ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) ||
+                                                 (instruction_flags & RJ_ARITH_ALU_OMOD_MASK))) {
+      value = flush_tiny_products(value, x, y, z, rounding);
     }
     if constexpr (NanPriority) {
       value = nan_priority(op, value, x, y, z);

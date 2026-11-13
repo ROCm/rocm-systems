@@ -7,5 +7,6 @@
 #define ROCJITSU_VM_API_H_
 
 #include "rocjitsu/vm/rj_vm.h"
+#include "rocjitsu/vm/rj_vm_config.h"
 
 #endif // ROCJITSU_VM_API_H_
