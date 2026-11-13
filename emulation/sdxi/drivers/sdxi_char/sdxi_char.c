@@ -645,7 +645,7 @@ struct sdxi_inflight {
 	u8                  ioc_buf[48];
 };
 
-static void sdxi_cmd_finish(struct io_uring_cmd *cmd, unsigned int issue_flags)
+static void sdxi_cmd_complete(struct io_uring_cmd *cmd, unsigned int issue_flags)
 {
 	struct sdxi_inflight *inf = *(struct sdxi_inflight **)cmd->pdu;
 	struct sdxi_char_dev *sdev = g_sdev;
@@ -698,6 +698,25 @@ done:
 	kfree(inf);
 	io_uring_cmd_done(cmd, ret, issue_flags);
 }
+
+/*
+ * The task-work callback type changed from (cmd, issue_flags) to
+ * (io_tw_req, io_tw_token_t). Kernels with the new type also define
+ * IO_URING_CMD_TASK_WORK_ISSUE_FLAGS, the flags io_uring_cmd_done() wants
+ * when called from task work, so that macro selects the signature.
+ */
+#ifdef IO_URING_CMD_TASK_WORK_ISSUE_FLAGS
+static void sdxi_cmd_finish(struct io_tw_req tw_req, io_tw_token_t tw)
+{
+	sdxi_cmd_complete(io_uring_cmd_from_tw(tw_req),
+			  IO_URING_CMD_TASK_WORK_ISSUE_FLAGS);
+}
+#else
+static void sdxi_cmd_finish(struct io_uring_cmd *cmd, unsigned int issue_flags)
+{
+	sdxi_cmd_complete(cmd, issue_flags);
+}
+#endif
 
 static irqreturn_t sdxi_completion_irq(int irq, void *data)
 {
