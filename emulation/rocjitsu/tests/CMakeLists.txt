@@ -859,11 +859,22 @@ set(_rj_idle_wakeup_cases
     AsyncCausalityTest.StaleWakeDoesNotHideConcurrentPublication
     AsyncCausalityTest.QuiescentPublicationsToEveryPartitionMakeProgress
 )
+# Linux accounts SCM_RIGHTS descriptors in flight per UID, but compares that
+# count with the sender's RLIMIT_NOFILE. A sibling test can exhaust the low
+# limit in these fixtures before their own descriptor-pressure exercise starts.
+set(_rj_low_nofile_cases
+    MemoryBackingDeathTest.ClosesInheritedDescriptorsAboveLoweredHardLimit
+    MemoryBackingDeathTest.MetadataBatchPreservesContentsWithFewDescriptors
+    MemoryBackingDeathTest.MetadataBatchReportsIndividualFileErrors
+)
 # Exclude exactly the cases registered below, so future cases still participate
-# in normal discovery until they receive an explicit timeout registration.
+# in normal discovery until they receive an explicit registration.
 set(_rj_gtest_exclusions
     "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff:*EffectiveConfigTest.ReadsSelectedNodeLaunchConfigHandoff"
 )
+foreach(_low_nofile_case IN LISTS _rj_low_nofile_cases)
+    string(APPEND _rj_gtest_exclusions ":${_low_nofile_case}")
+endforeach()
 foreach(_idle_wakeup_case IN LISTS _rj_idle_wakeup_cases)
     string(APPEND _rj_gtest_exclusions ":${_idle_wakeup_case}")
 endforeach()
@@ -1001,6 +1012,22 @@ if(RJ_ENABLE_TSAN)
         )
     endforeach()
 endif()
+
+# Keep the low-limit senders exclusive in both build-tree and installed CTest
+# runs. The other fixtures exhaust open/receive slots or restore their limit
+# before sending descriptors; they do not need this UID-wide exclusion.
+foreach(_low_nofile_case IN LISTS _rj_low_nofile_cases)
+    rj_add_test(
+        NAME "${_low_nofile_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=${_low_nofile_case}"
+        RUN_SERIAL
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=${_low_nofile_case}"
+    )
+endforeach()
 
 # Bound worker joins in the idle notification and CPU-use regressions.
 # Register explicitly so build-tree and installed tests have the same timeout.

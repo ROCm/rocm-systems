@@ -126,9 +126,10 @@ TEST(Pm4DataTransferTest, DmaSelectorsResumeLocalAndDeferredReadWritePrefixes) {
                         source >= 0x1000 && source_select != 2 ? (bytes + 3) / 4 : 0u);
               EXPECT_EQ(fixture.memory->backing->write_effects,
                         destination >= 0x1000 ? (bytes + 3) / 4 : 0u);
-              if (kind == SubmissionKind::NativeRing)
+              if (kind == SubmissionKind::NativeRing) {
                 EXPECT_EQ(fixture.queue.read_pointer_journal.cursor(),
                           DeferredPm4Fixture::kInitialCursor + packet.size());
+              }
             }
 }
 
