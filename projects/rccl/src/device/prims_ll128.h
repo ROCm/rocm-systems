@@ -36,6 +36,15 @@
 #endif
 #endif
 
+// GenericOp's step barriers order LDS only instead of waiting for the step's stores to the peer (see stepBarrier()).
+#ifndef RCCL_LL128_STORE_FREE_STEP_BARRIER
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+#define RCCL_LL128_STORE_FREE_STEP_BARRIER 1
+#else
+#define RCCL_LL128_STORE_FREE_STEP_BARRIER 0
+#endif
+#endif
+
 // 128-bit load for FIFO and non-registered user buffers. On gfx1250, sibling
 // P2P into a cacheable comm FIFO is not coherent under a nontemporal load; use
 // system-scope b128 there. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h (default
@@ -190,7 +199,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 
   // LL128 lines carry per-step flags, so skip waiting on peer stores; connFifo sends keep the fence for the proxy.
   inline __device__ void stepBarrier() {
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+#if RCCL_LL128_STORE_FREE_STEP_BARRIER
     if (!fifoSend) {
       if (nthreads != WARP_SIZE) {
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
@@ -692,7 +701,7 @@ public:
     loadRecvSync();
     // coverity[var_deref_model:FALSE]
     loadSendSync();
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+#if RCCL_LL128_STORE_FREE_STEP_BARRIER
     for (int i = 0; i < nsend; i++) fifoSend |= channel->peers[sendPeers[i]]->send[connIndexSend].connFifo != nullptr;
 #endif
     userRegUsed = (e != nullptr) && (e->regUsed || e->netRegUsed);
