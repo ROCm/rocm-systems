@@ -760,6 +760,18 @@ class Graph {
   /// add node to the graph
   void AddNode(const Node& node);
   void RemoveNode(const Node& node);
+  //! Transfer every node of `src` into this graph, re-parenting them. `src` is left
+  //! empty and no longer owns (or deletes) them. Used by ownership-MOVE child graph
+  //! nodes so the caller's node handles become nodes of the parent's tree.
+  void AdoptNodesFrom(Graph* src);
+  //! True once this graph's nodes have been moved into a child graph node. Such a
+  //! graph is owned by that node: it cannot be instantiated, destroyed, re-parented
+  //! or passed to hipGraphExecUpdate.
+  bool IsMoved() const { return movedInto_ != nullptr; }
+  Graph* GetMovedInto() const { return movedInto_; }
+  void SetMovedInto(Graph* owner) { movedInto_ = owner; }
+  //! Queries on a moved graph see the node that now holds its nodes.
+  Graph* ResolveMoved() { return movedInto_ != nullptr ? movedInto_ : this; }
   /// Returns root nodes, all vertices with 0 in-degrees
   std::vector<Node> GetRootNodes() const;
   /// Returns leaf nodes, all vertices with 0 out-degrees
@@ -1052,6 +1064,9 @@ class Graph {
   friend class GraphExecSegmented;
   friend class GraphExecClassic;
   std::vector<Node> vertices_;
+  //!< Non-null once AdoptNodesFrom() has emptied this graph into a ChildGraphNode.
+  //!< That node owns this object and deletes it.
+  Graph* movedInto_ = nullptr;
   const Graph* pOriginalGraph_ = nullptr;
   //!< graphUserObj_.second stores refcount owned by this graph for user object,
   std::unordered_map<UserObject*, int> graphUserObj_;
@@ -1464,9 +1479,23 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   }
 
  public:
-  ChildGraphNode(Graph* g) : GraphNode(hipGraphNodeTypeGraph, "solid", "rectangle"), GraphExecSegmented() {
-    g->clone(this);
+  enum class Ownership { kClone, kMove };
+
+  ChildGraphNode(Graph* g, Ownership ownership = Ownership::kClone)
+      : GraphNode(hipGraphNodeTypeGraph, "solid", "rectangle"), GraphExecSegmented() {
     graphCaptureStatus_ = false;
+    if (ownership == Ownership::kClone) {
+      g->clone(this);
+    }
+    // kMove leaves this node empty until CommitMove() runs. Taking the caller's graph is
+    // not reversible, so it must wait until the node is known to be addable.
+  }
+
+  //! Completes an ownership MOVE once the node has been added to its parent.
+  void CommitMove(Graph* g) {
+    Graph::AdoptNodesFrom(g);
+    movedFrom_ = g;
+    g->SetMovedInto(this);
   }
 
   ~ChildGraphNode() {
@@ -1476,6 +1505,10 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
       command->release();
     }
     commands_.clear();
+    // Ownership MOVE: the caller's graph object is an empty shell we own. Its nodes were
+    // adopted into this object's Graph base and are freed by ~Graph(); deleting the shell
+    // here is what makes "destroyed when the parent is destroyed" true.
+    delete movedFrom_;
   }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
@@ -1483,7 +1516,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
 
   GraphNode* clone() const override { return new ChildGraphNode(*this); }
 
-  Graph* GetChildGraph() override { return this; }
+  Graph* GetChildGraph() override { return movedFrom_ != nullptr ? movedFrom_ : this; }
 
   void SetGraphCaptureStatus(bool status) { graphCaptureStatus_ = status; }
 
@@ -1624,6 +1657,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   }
 
   bool graphCaptureStatus_;
+  Graph* movedFrom_ = nullptr;  //!< Points to the original graph if ownership was moved
   bool parentAllowsKernargReuse_ = false;
 };
 

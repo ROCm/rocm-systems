@@ -795,6 +795,21 @@ contract:
   Contract_GraphChild_HipGraphNodeGetType_NodeType_ReportsGraph:
     <<: *level_0
     tags: [graph_child, P0]
+  Contract_GraphChild_HipGraphAddNode_OwnershipMove_ReturnsCallerGraphAsEmbedded:
+    <<: *level_0
+    tags: [graph_child, P0]
+  Contract_GraphChild_HipGraphAddNode_OwnershipClone_ReturnsDistinctEmbeddedGraph:
+    <<: *level_0
+    tags: [graph_child, P0]
+  Contract_GraphChild_HipGraphDestroy_MovedChildGraph_ReturnsError:
+    <<: *level_0
+    tags: [graph_child, P0]
+  Contract_GraphChild_HipGraphAddNode_RejectedMove_LeavesCallerGraphDestroyable:
+    <<: *level_0
+    tags: [graph_child, P0]
+  Contract_GraphChild_HipGraphAddNode_EmbeddedSourceMove_ReturnsError:
+    <<: *level_0
+    tags: [graph_child, P0]
   Contract_GraphHost_HipGraphAddHostNode_Default_InvokesCallbackOnLaunch:
     <<: *level_0
     tags: [graph_host, P0]
