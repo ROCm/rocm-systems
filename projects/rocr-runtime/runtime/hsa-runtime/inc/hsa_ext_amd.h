@@ -91,13 +91,17 @@
  * - 1.36 - hsa_amd_signal_batch_create, hsa_amd_signal_batch_destroy,
  *          HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE,
  *          HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH, HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED,
- *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
+ *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED (removed in 1.39, never released),
  *          hsa_amd_signal_set_hints, hsa_amd_signal_get_hints (inline)
  * - 1.37 - hsa_amd_memory_async_batch_copy: HSA_AMD_MEMORY_COPY_OP_RECT
  * - 1.38 - hsa_amd_pointer_info: HSA_EXT_POINTER_TYPE_SVM
+ * - 1.39 - hsa_amd_agent_aql_properties_t: HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS, which replaces
+ *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED. 1.36-1.38 were never in a release
+ *          (development and BKC snapshots only), so the 1.36 query is removed without a
+ *          deprecation period.
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 38
+#define HSA_AMD_INTERFACE_VERSION_MINOR 39
 
 #ifdef __cplusplus
 extern "C" {
@@ -146,6 +150,12 @@ typedef enum {
    * dependency signal, and additional performance-oriented features.
    */
   HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
+
+  /**
+   * Extended kernel dispatch packet with spatial locality computing support.
+   * Supports clusters, launch descriptor for advanced scheduling, and L2 prefetch.
+   */
+  HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD = 4,
 
   /* Reserved for a packet that is not yet released */
   HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
@@ -307,6 +317,10 @@ typedef union {
 
 /**
  * @brief AMD extended kernel dispatch packet.
+ *
+ * Supports both Format 3 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH) and
+ * Format 4 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD).
+ * The amd_format field determines which interpretation to use.
  */
 typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
   /**
@@ -320,15 +334,18 @@ typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
 
   /**
    * AMD vendor-specific packet type. Used to configure which vendor packet this
-   * is. The parameters are described by hsa_amd_packet_type_t. This packet is
-   * of type HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH.​
+   * is. The parameters are described by hsa_amd_packet_type_t.
+   * This packet supports:
+   * - HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH (Format 3)
+   * - HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD (Format 4)
    */
   hsa_amd_packet_type8_t amd_format;
 
   /**
-   * Dispatch setup parameters. Used to configure kernel dispatch parameters
-   * such as the number of dimensions in the grid. The parameters are described
-   * by hsa_kernel_dispatch_packet_setup_t.​
+   * Dispatch setup parameters.
+   * Used to configure kernel dispatch parameters such as the number of
+   * dimensions in the grid. The parameters are described by
+   * hsa_kernel_dispatch_packet_setup_t.
    */
   uint8_t setup;
 
@@ -424,16 +441,25 @@ typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
   void* kernarg_address;
 
   /**
-   * Dependent signal object. This signal is read in the launch phase.​
+   * Format-dependent field (DW 14:13).
+   * Interpretation depends on amd_format:
    *
-   * The packet processor does not exit the launch phase for this packet, and
-   * thus does not perform the requested acquire fence scope’s actions, until
-   * the signal has been observed with the value 0.​
+   * Format 3 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH):
+   *   - dep_signal: Dependent signal object read in the launch phase.
+   *     The packet processor waits until the signal value is 0 before
+   *     exiting the launch phase. A signal handle value of 0 is allowed
+   *     and is interpreted as a satisfied dependency.
    *
-   * A signal handle value of 0 is allowed and is interpreted by the packet
-   * processor as a satisfied dependency.​
+   * Format 4 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD):
+   *   - launch_descriptor: Pointer to amd_launch_descriptor_t structure
+   *     providing advanced scheduling control (CU enable, wave limiter,
+   *     L2 prefetch, etc.). A NULL pointer indicates no launch descriptor
+   *     is used. Dependencies must be handled via barrier packets.
    */
-  hsa_signal_t dep_signal;
+  union {
+    hsa_signal_t dep_signal;                      // Format 3: signal-based dependency
+    amd_launch_descriptor_t* launch_descriptor;   // Format 4: pointer to descriptor
+  };
 
   /**
    * Signal used to indicate completion of the job. The application can use the
@@ -911,7 +937,11 @@ typedef enum hsa_amd_agent_info_s {
   /**
    * Bit-mask indicating AQL Extensions supported by this agent. An AQL extension is set if the flag
    * bit is set at that position. User may use the hsa_flag_isset64 macro to verify whether a flag
-   * is set. The type of this attribute is uint8_t[8].
+   * is set. The position of an extension is the value of its ::hsa_amd_agent_aql_properties_t
+   * enumerator, a bit index, not a mask.
+   * Some extensions are reported by the CP firmware: the first query on a GPU agent submits one
+   * barrier packet to an internal queue and waits for it to complete.
+   * The type of this attribute is uint8_t[8].
    */
   HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = 0xA115,
   /**
@@ -1033,13 +1063,8 @@ typedef enum hsa_amd_agent_info_s {
    * The type of this attribute is bool.
    */
   HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED = 0xA128,
-  /**
-   * Whether the agent's CP firmware consumes completion signal handle hints
-   * (::hsa_amd_signal_set_hints). Hints may be put in the completion_signal
-   * of an AQL packet only on an agent that reports true. GPU agents only.
-   * The type of this attribute is bool.
-   */
-  HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED = 0xA129,
+  /* 0xA129 is not reused: it was HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
+     replaced by ::HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS. */
 } hsa_amd_agent_info_t;
 
 /**
@@ -1051,9 +1076,26 @@ typedef enum hsa_amd_agent_memory_properties_s {
 
 /**
  * @brief Agent AQL info properties attributes
+ *
+ * Each enumerator's value is the index of its bit in
+ * ::HSA_AMD_AGENT_INFO_AQL_EXTENSIONS, not a mask: test it with
+ * hsa_flag_isset64(value, HSA_AMD_AQL_PROPERTY_*), which is how the runtime
+ * sets it (HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS, 2, is bit 2 of the array).
+ * value[0] & HSA_AMD_AQL_PROPERTY_* tests another bit.
  */
 typedef enum hsa_amd_agent_aql_properties_s {
+  /**
+   * The agent executes ::hsa_amd_ext_kernel_dispatch_packet_t: natively, or
+   * with CP firmware that reports AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH.
+   */
   HSA_AMD_AQL_PROPERTY_EXT_DISPATCH = (1 << 0),
+  /**
+   * The agent's CP firmware consumes completion signal handle hints
+   * (::hsa_amd_signal_set_hints). Hints may be put in the completion_signal
+   * of an AQL packet only on an agent that reports this extension. GPU agents
+   * only.
+   */
+  HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS = (1 << 1),
 } hsa_amd_agent_aql_properties_t;
 
 /**
@@ -2240,8 +2282,8 @@ hsa_status_t HSA_API hsa_amd_signal_batch_destroy(hsa_amd_signal_batch_t batch);
  * @brief Return @p signal with its handle hints replaced by @p hints.
  *
  * @p hints combines ::amd_signal_hint_t values; 0 returns the plain handle.
- * Use hints only on an agent that reports
- * ::HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED: its CP firmware consumes every
+ * Use hints only on an agent that reports ::HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS
+ * in ::HSA_AMD_AGENT_INFO_AQL_EXTENSIONS: its CP firmware consumes every
  * defined hint, while firmware without support takes the hinted handle as the
  * signal address. Bits outside
  * ::AMD_SIGNAL_HINT_MASK are dropped. A hinted handle is only for the

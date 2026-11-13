@@ -5,13 +5,13 @@
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "common/compiler.h"
-#include "common/internal.h"
 #include "common/simd.h"
+#include "common/validation.h"
 #include "common/x86_64/half_x86_64_v3.h"
 #include "fp/packed_fma.h"
 #include "fp/scalar_repair.h"
 #include "fp/x86_64/mixed_half_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>

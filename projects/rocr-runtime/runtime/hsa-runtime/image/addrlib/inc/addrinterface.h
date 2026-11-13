@@ -4103,6 +4103,7 @@ typedef struct _ADDR3_COMPUTE_SURFACE_INFO_INPUT
 typedef struct _ADDR3_MIP_INFO
 {
     UINT_32             pitch;              ///< Pitch in elements
+    UINT_32             pitchForSlice;      ///< Pitch in elements used to compute slice size
     UINT_32             height;             ///< Padded height in elements
     UINT_32             depth;              ///< Padded depth
     UINT_32             pixelPitch;         ///< Pitch in pixels
@@ -4133,6 +4134,7 @@ typedef struct _ADDR3_COMPUTE_SURFACE_INFO_OUTPUT
 {
     UINT_32             size;                 ///< Size of this structure in bytes
     UINT_32             pitch;                ///< Pitch in elements (blocks for compressed formats)
+    UINT_32             pitchForSlice;        ///< Pitch in elements used to compute slice size
     UINT_32             pixelPitch;           ///< Pitch in original pixels
     UINT_32             pixelHeight;          ///< Height in original pixels
     UINT_32             pixelBits;            ///< Original bits per pixel, passed from input

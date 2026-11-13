@@ -95,6 +95,7 @@ test_categories:
       - "MgmtTaskJobFuncTest.*"
       - "GroupRegisterSymmetricCeInitTest.*"
       - "GroupRegisterSymmetricTest.*"
+      - "GroupRegisterSymmetricDevCommTest.*"
       - "GroupCleanupTest.*"
       - "AsyncJobLaunchDirectTest.*"
       # rccl_wrap.cc
@@ -106,6 +107,7 @@ test_categories:
       - "DvSymbolsTestIsolated.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
+      - "CeInitMicrotest.*"
       - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
       # graph/rccl_graph_gen.cc
       - "GraphGenPermuteTest.*"

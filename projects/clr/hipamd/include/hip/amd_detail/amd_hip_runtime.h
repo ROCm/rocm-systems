@@ -5,7 +5,7 @@
  */
 
 /**
- *  @file  amd_detail/hip_runtime.h
+ *  @file  amd_detail/amd_hip_runtime.h
  *  @brief Contains definitions of APIs for HIP runtime.
  */
 

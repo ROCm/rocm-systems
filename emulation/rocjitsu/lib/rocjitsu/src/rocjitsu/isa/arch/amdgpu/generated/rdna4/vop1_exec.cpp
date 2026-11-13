@@ -32,8 +32,7 @@ void VMovB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::arith::execute_unary32(wf, rj_arith_v_mov_b32_w32, rj_arith_v_mov_b32_w64,
-                                 wf.cu().arithmetic_flags(), 0u, vdst, src0);
+  amdgpu::arith::execute_move32(*this, wf, vdst, src0);
 }
 
 RJ_NOINLINE void VMovB32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -53,8 +52,7 @@ RJ_NOINLINE void VMovB32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::arith::execute_unary32(wf, rj_arith_v_mov_b32_w32, rj_arith_v_mov_b32_w64,
-                                 wf.cu().arithmetic_flags(), 0u, vdst, src0);
+  amdgpu::arith::execute_move32(*this, wf, vdst, src0);
   dpp_write_mask_scope_.restore();
 }
 
@@ -2851,7 +2849,7 @@ void VCvtF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
   const unsigned selector = 0u;
   const unsigned byte = ((selector & 1) << 1) | ((selector & 2) >> 1);
-  const uint64_t modifiers = uint64_t(byte) << 16;
+  const uint64_t modifiers = (uint64_t(byte) << 16);
   const uint8_t source_bytes = uint8_t(1u << byte);
   amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_fp8_w32, rj_arith_v_cvt_f32_fp8_w64,
                                  wf.cu().arithmetic_flags(), modifiers, vdst, src0, source_bytes);
@@ -2875,7 +2873,7 @@ RJ_NOINLINE void VCvtF32Fp8Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   const unsigned selector = 0u;
   const unsigned byte = ((selector & 1) << 1) | ((selector & 2) >> 1);
-  const uint64_t modifiers = uint64_t(byte) << 16;
+  const uint64_t modifiers = (uint64_t(byte) << 16);
   const uint8_t source_bytes = uint8_t(1u << byte);
   amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_fp8_w32, rj_arith_v_cvt_f32_fp8_w64,
                                  wf.cu().arithmetic_flags(), modifiers, vdst, src0, source_bytes);
@@ -2889,7 +2887,7 @@ void VCvtF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
   const unsigned selector = 0u;
   const unsigned byte = ((selector & 1) << 1) | ((selector & 2) >> 1);
-  const uint64_t modifiers = uint64_t(byte) << 16;
+  const uint64_t modifiers = (uint64_t(byte) << 16);
   const uint8_t source_bytes = uint8_t(1u << byte);
   amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_bf8_w32, rj_arith_v_cvt_f32_bf8_w64,
                                  wf.cu().arithmetic_flags(), modifiers, vdst, src0, source_bytes);
@@ -2913,7 +2911,7 @@ RJ_NOINLINE void VCvtF32Bf8Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   const unsigned selector = 0u;
   const unsigned byte = ((selector & 1) << 1) | ((selector & 2) >> 1);
-  const uint64_t modifiers = uint64_t(byte) << 16;
+  const uint64_t modifiers = (uint64_t(byte) << 16);
   const uint8_t source_bytes = uint8_t(1u << byte);
   amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_bf8_w32, rj_arith_v_cvt_f32_bf8_w64,
                                  wf.cu().arithmetic_flags(), modifiers, vdst, src0, source_bytes);

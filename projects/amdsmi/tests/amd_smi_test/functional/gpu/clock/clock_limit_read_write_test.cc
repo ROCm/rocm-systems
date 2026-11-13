@@ -25,7 +25,8 @@ TestClockLimitReadWrite::~TestClockLimitReadWrite(void) {}
 
 void TestClockLimitReadWrite::SetUp(void) {
   TestBase::SetUp();
-
+  // amdsmi_set_gpu_clk_limit() forces MANUAL even when it returns NOT_SUPPORTED.
+  SavePerfLevels();
   return;
 }
 
@@ -37,6 +38,7 @@ void TestClockLimitReadWrite::DisplayResults(void) const {
 }
 
 void TestClockLimitReadWrite::Close() {
+  RestorePerfLevels();
   // This will close handles opened within rsmitst utility calls and call
   // amdsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
@@ -143,14 +145,6 @@ void TestClockLimitReadWrite::Run(void) {
         continue;
       }
       set_limit(AMDSMI_CLK_LIMIT_MIN, orig_min_mhz, "min");
-
-      // Setting a clock limit switches the perf level to MANUAL; return the
-      // device to automatic control so later tests start from a clean state.
-      DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
-                         VERB(STANDARD));
-      ret = amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,
-                            AMDSMI_STATUS_NOT_SUPPORTED);
 
       // Verify the restored range via a fresh read.
       DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));

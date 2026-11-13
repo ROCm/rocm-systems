@@ -6,7 +6,7 @@
 use super::*;
 
 /// Finds the owned allocation containing a device address.
-pub(super) fn owned_memory(runtime: &HsaState, address: usize) -> Option<&Memory> {
+pub(crate) fn owned_memory(runtime: &HsaState, address: usize) -> Option<&Memory> {
     runtime
         .memory_state
         .allocations
