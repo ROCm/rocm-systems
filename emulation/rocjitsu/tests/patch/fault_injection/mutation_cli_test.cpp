@@ -29,6 +29,7 @@
 #include <string_view>
 #include <sys/resource.h>
 #include <sys/wait.h>
+#include <system_error>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -41,9 +42,19 @@ class FaultMutationCli : public ::testing::Test {
 protected:
   test::ScopedTempDirectory directory_;
   std::filesystem::path root_, input_, output_;
-  std::string stdout_, stderr_;
+  std::string cli_, stdout_, stderr_;
 
   void SetUp() override {
+    std::error_code error;
+    const std::filesystem::path executable = std::filesystem::read_symlink("/proc/self/exe", error);
+    ASSERT_FALSE(error) << error.message();
+    // Relocated tests must use their package even while the build tree exists.
+    cli_ = executable == RJ_CODE_MUTATE_TEST_PATH
+               ? RJ_CODE_MUTATE_PATH
+               : (executable.parent_path() / RJ_INSTALLED_CODE_MUTATE_PATH)
+                     .lexically_normal()
+                     .string();
+    ASSERT_TRUE(std::filesystem::is_regular_file(cli_));
     ASSERT_TRUE(directory_.initialize("fault-cli-"));
     root_ = directory_.path();
     input_ = root_ / "original.hsaco";
@@ -82,7 +93,7 @@ protected:
                : open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
   }
   int invoke(std::vector<std::string> arguments, InvokeOptions options) {
-    arguments.insert(arguments.begin(), RJ_CODE_MUTATE_PATH);
+    arguments.insert(arguments.begin(), cli_);
     std::vector<char *> pointers;
     for (std::string &argument : arguments)
       pointers.push_back(argument.data());
@@ -390,6 +401,18 @@ TEST_F(FaultMutationCli, PreservesTypedDiscoveryAndSelectionErrors) {
   expect_rejected(args());
   EXPECT_NE(stderr_.find("selection failed: code=NoCandidates"), std::string::npos) << stderr_;
   EXPECT_EQ(stderr_.find("offset="), std::string::npos) << stderr_;
+}
+
+TEST_F(FaultMutationCli, EmissionFailureDoesNotPublishOutput) {
+  const std::vector<uint8_t> image = test::make_out_of_range_second_member_elf();
+  write(input_, image);
+  ASSERT_EQ(invoke({"--input", input_.string(), "--kernel", "test_kernel", "--list"}), 0)
+      << stderr_;
+  EXPECT_NE(stdout_.find("ordinal=0 exact=0 "), std::string::npos) << stdout_;
+  expect_rejected(args({"--exact", "0"}));
+  EXPECT_NE(stderr_.find("mutation failed: code=ValidationFailure"), std::string::npos) << stderr_;
+  EXPECT_NE(stderr_.find("return branch exceeds s_branch simm16"), std::string::npos) << stderr_;
+  EXPECT_EQ(read(input_), image);
 }
 
 TEST_F(FaultMutationCli, FailedStdoutReturnsOutputIoError) {

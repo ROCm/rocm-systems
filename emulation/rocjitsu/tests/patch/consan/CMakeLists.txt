@@ -15,6 +15,12 @@ target_link_libraries(
         rocjitsu_amdgpu_isa_model_registry
         GTest::gtest_main
 )
+if(RJ_BUILD_FAULT_INJECTION)
+    target_compile_definitions(
+        consan_input_test
+        PRIVATE RJ_BUILD_FAULT_INJECTION=1
+    )
+endif()
 rj_configure_target(consan_input_test PRIVATE_INCLUDES WARNINGS)
 
 if(AMDCXX AND EXISTS "${ROCM_PATH}/lib/llvm/bin/ld.lld")

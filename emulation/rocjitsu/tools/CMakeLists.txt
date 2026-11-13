@@ -38,12 +38,14 @@ add_executable(rj_dbt_translate rj_dbt_translate_main.cpp)
 target_link_libraries(rj_dbt_translate PRIVATE rocjitsu_translate_cli)
 rj_configure_target(rj_dbt_translate TOOL)
 
-add_executable(rj_code_mutate rj_code_mutate.cpp)
-target_link_libraries(
-    rj_code_mutate
-    PRIVATE rocjitsu_dbt_internal rocjitsu_amdgpu_isa_model_registry
-)
-rj_configure_target(rj_code_mutate PRIVATE_INCLUDES WARNINGS)
+if(RJ_BUILD_FAULT_INJECTION)
+    add_executable(rj_code_mutate rj_code_mutate.cpp)
+    target_link_libraries(
+        rj_code_mutate
+        PRIVATE rocjitsu_dbt_internal rocjitsu_amdgpu_isa_model_registry
+    )
+    rj_configure_target(rj_code_mutate PRIVATE_INCLUDES WARNINGS)
+endif()
 
 add_executable(
     rj_decode_benchmark
