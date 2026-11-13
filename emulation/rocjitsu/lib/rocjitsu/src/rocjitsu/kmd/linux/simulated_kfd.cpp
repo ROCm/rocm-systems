@@ -6869,7 +6869,7 @@ int SimulatedKfd::free_memory_ioctl(
                  reinterpret_cast<uintptr_t>(view.ptr) == freed.gpu_va && view.size == freed.size;
         });
     const bool retired_fixed_identity_view =
-        !daemon_mode_ && freed.user_va && !freed.imported && !freed.backing_owner &&
+        !daemon_mode_ && freed.user_va && !freed.imported &&
         (kind == KFD_IOC_ALLOC_MEM_FLAGS_VRAM || kind == KFD_IOC_ALLOC_MEM_FLAGS_GTT) &&
         (primary_fixed_identity_view || client_fixed_identity_view);
     if (retired_fixed_identity_view) {

@@ -13509,6 +13509,58 @@ TEST_F(KfdIoctlTest, DriverScratchGrantRevokesBeforeFreeUnmapsBacking) {
   EXPECT_EQ(free_result, 0);
 }
 
+TEST_F(KfdIoctlTest, FreedCanonicalFixedBoViewPermitsLaterDoorbellReuse) {
+  constexpr size_t kPage = 4096;
+  const uint32_t process_id = driver_->local_process_id();
+  auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto access = soc_->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  const off_t doorbell_offset =
+      static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(kGpuId));
+
+  for (uint32_t visibility : {0u, uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC}}) {
+    SCOPED_TRACE(visibility);
+    void *reserved = ::mmap(nullptr, kPage, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    ASSERT_NE(reserved, MAP_FAILED);
+    const uint64_t address = reinterpret_cast<uint64_t>(reserved);
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.va_addr = address;
+    allocation.size = kPage;
+    allocation.gpu_id = kGpuId;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | visibility;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    ASSERT_EQ(driver_->mmap(process_id, reserved, kPage, PROT_READ | PROT_WRITE,
+                            MAP_SHARED | MAP_FIXED, static_cast<off_t>(allocation.mmap_offset)),
+              reserved);
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kGpuId;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    uint32_t gpu_id = kGpuId;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    ASSERT_TRUE(process->gpu_peer_backing_grant(kGpuId, address, kPage).backing);
+
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = allocation.handle;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+    EXPECT_FALSE(process->gpu_access_grant(kGpuId, address, 1).allowed);
+    ASSERT_EQ(driver_->munmap(process_id, reserved, kPage), 0);
+    ASSERT_EQ(driver_->mmap(process_id, reserved, kPage, PROT_READ | PROT_WRITE,
+                            MAP_SHARED | MAP_FIXED, doorbell_offset),
+              reserved);
+    ASSERT_TRUE(process->gpu_access_grant(kGpuId, address, sizeof(uint64_t)).allowed);
+    EXPECT_EQ(access->atomic_store(address, sizeof(uint64_t), 91),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(*static_cast<uint64_t *>(reserved), 91u);
+    EXPECT_EQ(driver_->munmap(process_id, reserved, kPage), 0);
+  }
+}
+
 TEST_F(KfdIoctlTest, FreedFixedBoViewPermitsLaterHostIdentityReuse) {
   using rocjitsu::amdgpu::VmAccessOutcome;
   constexpr size_t kPage = 4096;
