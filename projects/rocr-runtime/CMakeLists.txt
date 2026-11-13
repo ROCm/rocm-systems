@@ -363,3 +363,4 @@ cpack_add_component(asan
 
 # Debian specific packaging configuration install lintian files
 configure_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+# CI baseline for #15432 (test PR, do not merge)
