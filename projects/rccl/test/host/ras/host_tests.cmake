@@ -26,6 +26,7 @@ set(_MICRO_RAS_DEFS
   RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
   RAS_DIAGNOSTICS_ENV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_env.cc"
   RAS_DIAGNOSTICS_GPU_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_gpu.cc"
+  RAS_DIAGNOSTICS_XID_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_xid.cc"
   RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
   RAS_PEERS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/peers.cc"
   RASNET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/rasnet.cc")
@@ -83,6 +84,11 @@ rccl_add_ras_micro_binary(rccl-UnitTestsMicroRasDiagnostics ras-diagnostics-test
   SOURCES
     fakes/env_fakes.cc
     fakes/nccl_fakes.cc)
+
+rccl_add_ras_micro_binary(rccl-UnitTestsMicroRasDiagnosticsXid ras-diagnostics-xid-test.cc
+  SOURCES
+    fakes/nccl_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc)
 
 rccl_add_ras_micro_binary(rccl-UnitTestsMicroRasParam ras-param-test.cc
   SOURCES
