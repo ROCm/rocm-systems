@@ -27,7 +27,6 @@ from utils.metrics.aggregation import (
 )
 from utils.metrics.common import EVAL_BUILTINS
 from utils.metrics.expression import columns_read
-from utils.metrics.noise_clamper import to_noise_clamp
 
 
 def counter_table_index(
@@ -42,11 +41,17 @@ def counter_table_index(
     the merged table wins.
     """
     if isinstance(eval_string, str):
-        columns = columns_read(eval_string, build_in_vars)
         for index, table in enumerate(tables[:-1]):
-            if columns <= set(table.columns):
+            if table_holds(eval_string, table, build_in_vars):
                 return index
     return len(tables) - 1
+
+
+def table_holds(
+    eval_string: str, table: pd.DataFrame, build_in_vars: dict[str, str]
+) -> bool:
+    """Return whether table has every column the eval string reads."""
+    return columns_read(eval_string, build_in_vars) <= set(table.columns)
 
 
 class MetricEvaluator:
@@ -84,7 +89,6 @@ class MetricEvaluator:
                 "to_quantile": to_quantile,
                 "to_mod": to_mod,
                 "to_concat": to_concat,
-                "to_noise_clamp": to_noise_clamp,
             })
 
             with warnings.catch_warnings(record=True) as caught:

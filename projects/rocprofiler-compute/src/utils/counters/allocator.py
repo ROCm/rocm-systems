@@ -8,12 +8,15 @@ from typing import Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
 from utils.counters.counter_file import CounterFile, flat_counters_in_perfmon_file
 from utils.logger import console_debug, console_error, console_warning
-from utils.utils_counter_defs import extract_counters_and_variables
+from utils.utils_counter_defs import (
+    extract_counters_and_variables,
+    parse_counters_text,
+)
 
 
 def metric_counter_sets(
     metric_expressions: Iterable[List[str]],
-    gpu_series: str,
+    collectables: Dict[str, str],
     profile_counters: Set[str],
 ) -> List[FrozenSet[str]]:
     """Return, for each metric, the profiled counters its expressions read.
@@ -24,7 +27,7 @@ def metric_counter_sets(
     counter_sets = []
     for expressions in metric_expressions:
         formula_counters, _ = extract_counters_and_variables(
-            "\n".join(expressions), gpu_series, include_supported_denom=False
+            "\n".join(expressions), collectables, include_supported_denom=False
         )
         channel_prefixes = tuple(
             name for name in formula_counters if name.endswith("[")
@@ -37,6 +40,30 @@ def metric_counter_sets(
         if counters:
             counter_sets.append(counters)
     return counter_sets
+
+
+def reads_one_pass(
+    expressions: List[str],
+    collectables: Dict[str, str],
+    pass_counters: List[Set[str]],
+) -> bool:
+    """Return whether expressions read all of their counters from one pass.
+
+    That holds when one pass has every counter they read, or when they name no
+    counter themselves and each collectable they use reads one pass.
+    """
+    profiled = set().union(*pass_counters)
+    metric_sets = metric_counter_sets([expressions], collectables, profiled)
+    if not metric_sets or any(metric_sets[0] <= counters for counters in pass_counters):
+        return True
+    # Counters the expressions name themselves, not through a collectable
+    if metric_counter_sets([expressions], {}, profiled):
+        return False
+    _, names = parse_counters_text("\n".join(expressions))
+    return all(
+        reads_one_pass([collectables[name]], collectables, pass_counters)
+        for name in names & collectables.keys()
+    )
 
 
 def allocate_single_pass_metrics(

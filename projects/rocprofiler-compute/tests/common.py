@@ -47,7 +47,9 @@ def memory_chart_archs() -> list[str]:
     return sorted(
         path.name
         for path in config.analysis_configs_dir.iterdir()
-        if path.is_dir() and PanelConfigs.for_arch(path.name)
+        if path.is_dir()
+        and path.name.startswith("gfx")
+        and PanelConfigs.for_arch(path.name)
     )
 
 

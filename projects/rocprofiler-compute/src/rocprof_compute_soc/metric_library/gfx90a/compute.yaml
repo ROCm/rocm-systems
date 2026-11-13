@@ -37,7 +37,7 @@ compute.f64_ops:
     or MFMA units, per normalization unit.
 compute.flops_per_norm:
   name: FLOPs (Total)
-  formula: SUM(64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32 + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / SUM($denom)
+  formula: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops) / SUM($denom)
   unit: (FLOPs + $normUnit)
   description: >-
     The total number of floating-point operations executed on either the VALU or MFMA
@@ -291,7 +291,7 @@ compute.smem_lat:
     acknowledgment) required for a SMEM instruction to complete.
 compute.total_flops:
   name: Performance (GFLOPs)
-  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
+  formula: $valu_f16_flop_rate + $valu_f32_flop_rate + $valu_f64_flop_rate + $mfma_f16_flop_rate + $mfma_bf16_flop_rate + $mfma_f32_flop_rate + $mfma_f64_flop_rate
   unit: GFLOP/s
   description: >-
     The overall achieved performance, measured in GigaFLOPs per second (GFLOP/s).
@@ -302,7 +302,7 @@ compute.valu_active_threads:
   peak: 64
 compute.valu_flops:
   name: VALU FLOPs
-  formula: 64 * SUM(SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + 2 * SQ_INSTS_VALU_FMA_F64) / SUM(End_Timestamp - Start_Timestamp)
+  formula: $valu_f16_flop_rate + $valu_f32_flop_rate + $valu_f64_flop_rate
   unit: GFLOP/s
   description: >-
     The total floating-point operations executed per second on the VALU. Note: this

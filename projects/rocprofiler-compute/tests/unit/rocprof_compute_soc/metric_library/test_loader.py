@@ -13,8 +13,6 @@ from conftest import ProfileModeImportGuard
 from rocprof_compute_soc.metric_library import loader
 from rocprof_compute_soc.metric_library.loader import MetricLibrary, MetricLibraryError
 
-GPU_SERIES = "MI300"
-
 # A base and a four-deep chain of children. Each child changes one thing.
 FAMILY_PARENT_ARCH = {
     "gfx_base": None,
@@ -230,12 +228,13 @@ def test_four_deep_chain(family):
     )
 
 
-def test_load_reads_variables_apart_from_metrics(family):
+def test_load_reads_collectables_apart_from_metrics(family):
     write_file(
-        family / "gfx_base" / "variables.yaml", "GRBM_X:\n  formula: GRBM_GUI_ACTIVE\n"
+        family / "gfx_base" / "collectables.yaml",
+        "GRBM_X:\n  formula: GRBM_GUI_ACTIVE\n",
     )
     library = MetricLibrary.load(family, "gfx_c4")
-    assert library.variables == {"GRBM_X": {"formula": "GRBM_GUI_ACTIVE"}}
+    assert library.collectables == {"GRBM_X": {"formula": "GRBM_GUI_ACTIVE"}}
     assert "GRBM_X" not in library.metrics
 
 
@@ -260,15 +259,21 @@ def test_id_defined_in_two_files_fails(family):
         MetricLibrary.load(family, "gfx_c4")
 
 
-def test_counters_come_from_formula_peak_and_builtin_variables(family):
+def test_counters_come_from_formula_peak_and_collectables(family):
     """Counters come only from formula and peak, of metrics from any file of the chain.
-    Built-in variables resolve to counters and the unit denominators (SQ_WAVES) are
-    always added, as in detect_counters()."""
+    The library's collectables resolve to counters, and the unit denominators
+    (SQ_WAVES) are always added, as in detect_counters()."""
     write_file(family / "gfx_base" / "wave.yaml", WAVE_METRIC)
-    library = MetricLibrary.load(family, "gfx_c4")
-    selected = library.get_counters_for_metrics(
-        ["compute.valu_util", "compute.mfma_flops_f8", "wave.cycles"], GPU_SERIES
+    write_file(
+        family / "gfx_base" / "collectables.yaml",
+        "GRBM_GUI_ACTIVE_PER_XCD:\n  formula: GRBM_GUI_ACTIVE / $num_xcd\n",
     )
+    library = MetricLibrary.load(family, "gfx_c4")
+    selected = library.get_counters_for_metrics([
+        "compute.valu_util",
+        "compute.mfma_flops_f8",
+        "wave.cycles",
+    ])
     assert {
         "SQ_ACTIVE_INST_VALU",
         "SQ_INSTS_VALU_MFMA_MOPS_F8",
@@ -283,13 +288,13 @@ def test_counters_come_from_formula_peak_and_builtin_variables(family):
 def test_counters_of_unknown_metric_ids_fail(family):
     library = MetricLibrary.load(family, "gfx_c4")
     with pytest.raises(ValueError, match=r"for gfx_c4: \['l2.foo'\]"):
-        library.get_counters_for_metrics(["compute.valu_util", "l2.foo"], GPU_SERIES)
+        library.get_counters_for_metrics(["compute.valu_util", "l2.foo"])
 
 
 def test_shipped_library_loads():
     for arch in loader.METRIC_LIBRARY_PARENT_ARCH:
         library = MetricLibrary.load(loader.default_metric_library_dir(), arch)
-        assert library.metrics and library.variables
+        assert library.metrics and library.collectables
 
 
 def test_imports_under_profile_mode_guard(monkeypatch):

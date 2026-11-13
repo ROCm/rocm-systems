@@ -25,6 +25,7 @@ from rocprof_compute_soc.soc_base import (
     _rebuild_tcc_channel_file_map,
     _trial_counter_file_with_extra,
 )
+from utils.counters.allocator import reads_one_pass
 from utils.counters.counter_file import CounterFile, flat_counters_in_perfmon_file
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
@@ -32,7 +33,7 @@ from utils.utils_common import (
     canonical_config_arch,
     convert_metric_id_to_panel_info,
 )
-from utils.utils_counter_defs import extract_counters_and_variables
+from utils.utils_counter_defs import Collectables, extract_counters_and_variables
 
 # =============================================================================
 # Fixtures
@@ -674,7 +675,7 @@ def test_detect_counters_reads_only_metric_expressions(
     counters, _ = membw_analysis_soc.detect_counters()
 
     formula_counters, _ = extract_counters_and_variables(
-        "", membw_analysis_soc._mspec.gpu_series
+        "", Collectables.of_arch(membw_analysis_soc._mspec.gpu_arch)
     )
     formula_counters |= {"SQ_LEVEL_WAVES_ACCUM", "SQ_BUSY_CYCLES"}
     assert counters == formula_counters
@@ -721,6 +722,28 @@ def test_live_attach_set_fits_one_pass_on_each_architecture(gpu_arch: str) -> No
     assert set(flat_counters_in_perfmon_file(counter_files[0])) == requested_counters
     assert not any(counter.endswith("_ACCUM") for counter in requested_counters), (
         f"{gpu_arch}: live attachment set uses accumulators"
+    )
+
+
+@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+def test_every_metric_reads_one_pass(gpu_arch: str) -> None:
+    """Every metric of the default profile reads its counters from one pass."""
+    soc = offline_soc(gpu_arch, [], membw_analysis=False)
+    soc.set_perfmon_config(mi_gpu_specs.get_perfmon_config(gpu_arch))
+    counters, _ = soc.detect_counters()
+    passes = [
+        set(flat_counters_in_perfmon_file(counter_file))
+        for counter_file in soc._allocate_perfmon_counter_files(counters)
+    ]
+    collectables = Collectables.of_arch(gpu_arch)
+    spanning = [
+        f"{metric.table_id}.{metric.metric_idx} {metric.metric_name}"
+        for metric in soc._iter_arch_analysis_yaml_metrics()
+        if not reads_one_pass(metric.expressions, collectables, passes)
+    ]
+    assert spanning == [], (
+        f"{gpu_arch}: split these metrics into collectables "
+        "(see the metric library README and tools/counter_grouping_inspector.py)"
     )
 
 

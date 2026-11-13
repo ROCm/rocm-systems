@@ -49,7 +49,7 @@ compute.ipc:
   peak: 5
 compute.ipc_issued:
   name: IPC (Issued)
-  formula: SUM(SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SUM(SQ_ACTIVE_INST_ANY)
+  formula: $ipc_valu_vmem_salu_smem + $ipc_branch_sendmsg_vskipped_lds
   unit: Instructions per Cycle
   description: >-
     The ratio of the total number of (non-internal) instructions issued over the number

@@ -46,7 +46,7 @@ Panel Config:
           unit: GIOP/s
           peak: $MFMAI8Ops_empirical_peak
         HBM Bandwidth:
-          value: SUM( TCC_BUBBLE_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32 + TCC_EA0_WRREQ_64B_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
+          value: $hbm_read_bandwidth + $hbm_write_bandwidth
           unit: GB/s
           peak: $HBMBw_empirical_peak
         L2 Cache Bandwidth:
@@ -71,28 +71,19 @@ Panel Config:
         unit: Unit
       metric:
         AI HBM:
-          value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
-            + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
-            + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32)
-            + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64)
-            + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
-            (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 *
-            512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) ) / SUM( (TCC_BUBBLE_sum *
-            128) + (TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum
-            - TCC_EA0_RDREQ_32B_sum) * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-            * 32) + (TCC_EA0_WRREQ_64B_sum * 64) ) )
+          value: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops) / SUM($hbm_read_bytes + $hbm_write_bytes)
           unit: FLOPs/Byte
         AI L2:
-          value: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (64 * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum))
+          value: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops) / SUM($l2_bytes)
           unit: FLOPs/Byte
         AI L1:
-          value: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum))
+          value: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops) / SUM($l1_bytes)
           unit: FLOPs/Byte
         AI LDS:
-          value: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu)
+          value: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops) / SUM($lds_bytes)
           unit: FLOPs/Byte
         Performance (GFLOPs):
-          value: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
+          value: $valu_f16_flop_rate + $valu_f32_flop_rate + $valu_f64_flop_rate + $mfma_f16_flop_rate + $mfma_bf16_flop_rate + $mfma_f32_flop_rate + $mfma_f64_flop_rate
           unit: GFLOP/s
   metrics_description:
     VALU FLOPs (F16): >-

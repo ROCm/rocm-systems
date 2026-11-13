@@ -7,7 +7,7 @@ remove:
   - fabric.remote_rd
   - fabric.remote_wr_atomic
 fabric.ai_hbm:
-  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F8 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / SUM(TCC_EA0_RDREQ_128B_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32 + TCC_EA0_WRREQ_64B_sum * 64)
+  formula: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops + $mfma_f6f4_flops) / SUM($hbm_read_bytes + $hbm_write_bytes)
 fabric.ea_hbm_atomic_pressure:
   name: EA HBM Atomic Pressure
   formula: 100 * SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_sum) / SUM(TCC_EA0_WRREQ_DRAM_sum)
@@ -42,7 +42,7 @@ fabric.hbm_atomic_bw:
     Total number of bytes due to L2 atomic requests routed to Infinity Fabric targeting
     the accelerator's local HBM (DRAM), divided by total duration.
 fabric.hbm_bw:
-  formula: SUM(TCC_EA0_RDREQ_128B_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32 + TCC_EA0_WRREQ_64B_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
+  formula: $hbm_read_bandwidth + $hbm_write_bandwidth
 fabric.hbm_rd_bw:
   name: HBM Read Bandwidth
   formula: 32 * SUM(TCC_EA0_RDREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)

@@ -23,7 +23,7 @@ td.coalescable_insts:
     that were found to be coalescable, per normalization unit.
 td.rd_insts:
   name: TD Read Instructions
-  formula: SUM(TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum - TD_ATOMIC_WAVEFRONT_sum) / SUM($denom)
+  formula: SUM($td_load_wavefronts - $td_store_and_atomic_wavefronts) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
     The number of read instructions submitted to the data-return unit by the address

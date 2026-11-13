@@ -53,6 +53,7 @@ from utils.utils_common import (
     validate_roofline_csv,
 )
 from utils.utils_counter_defs import (
+    Collectables,
     extract_counters_and_variables,
     metric_expressions,
 )
@@ -416,7 +417,7 @@ class OmniSoC_Base:
         for metric in self._iter_arch_analysis_yaml_metrics():
             formula_hw, _ = extract_counters_and_variables(
                 "\n".join(metric.expressions),
-                self._mspec.gpu_series,
+                Collectables.of_arch(self._mspec.gpu_arch),
                 include_supported_denom=False,
             )
             hw = self._expand_tcc_template_counters(formula_hw)
@@ -511,7 +512,7 @@ class OmniSoC_Base:
             )
 
         counters, _ = extract_counters_and_variables(
-            "\n".join(expressions), self._mspec.gpu_series
+            "\n".join(expressions), Collectables.of_arch(self._mspec.gpu_arch)
         )
         counters = self._expand_tcc_template_counters(counters)
 
@@ -555,14 +556,19 @@ class OmniSoC_Base:
 
         Use single-pass packing. If it fails, use the older greedy packing.
         """
+        collectables = Collectables.of_arch(self._mspec.gpu_arch)
         output_files = allocate_single_pass_metrics(
             counters,
             metric_counter_sets(
-                (
-                    metric.expressions
-                    for metric in self._iter_arch_analysis_yaml_metrics()
-                ),
-                self._mspec.gpu_series,
+                [
+                    *(
+                        metric.expressions
+                        for metric in self._iter_arch_analysis_yaml_metrics()
+                    ),
+                    # Each collectable gets a pass that holds all its counters
+                    *([formula] for formula in collectables.values()),
+                ],
+                collectables,
                 counters,
             ),
             self.__perfmon_config,

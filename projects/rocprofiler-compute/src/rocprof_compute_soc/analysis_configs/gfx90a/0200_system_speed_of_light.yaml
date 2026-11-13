@@ -14,7 +14,7 @@ Panel Config:
         pct_of_peak: Percent of Peak
       metric:
         VALU FLOPs:
-          value: 64 * SUM(SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + 2 * SQ_INSTS_VALU_FMA_F64) / SUM(End_Timestamp - Start_Timestamp)
+          value: $valu_f16_flop_rate + $valu_f32_flop_rate + $valu_f64_flop_rate
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
           pct_of_peak: true
@@ -94,7 +94,7 @@ Panel Config:
           peak: 32
           pct_of_peak: true
         vL1D Cache Hit Rate:
-          value: 100 - 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          value: 100 - $vl1d_read_write_miss_rate - $vl1d_atomic_miss_rate
           unit: Percent
           peak: 100
           pct_of_peak: false

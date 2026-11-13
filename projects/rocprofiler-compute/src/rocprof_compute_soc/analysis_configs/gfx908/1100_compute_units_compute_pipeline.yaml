@@ -28,9 +28,9 @@ Panel Config:
           max: MAX(SQ_INSTS / SQ_BUSY_CU_CYCLES)
           unit: Instructions per Cycle
         IPC (Issued):
-          avg: SUM(SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SUM(SQ_ACTIVE_INST_ANY)
-          min: MIN((SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SQ_ACTIVE_INST_ANY)
-          max: MAX((SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SQ_ACTIVE_INST_ANY)
+          avg: $ipc_valu_vmem_salu_smem + $ipc_branch_sendmsg_vskipped_lds
+          min: MIN($ipc_valu_vmem_salu_smem_per_dispatch + $ipc_branch_sendmsg_vskipped_lds_per_dispatch)
+          max: MAX($ipc_valu_vmem_salu_smem_per_dispatch + $ipc_branch_sendmsg_vskipped_lds_per_dispatch)
           unit: Instructions per Cycle
         SALU Utilization:
           avg: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
