@@ -38,6 +38,9 @@ Key invariants verified:
   * CSV  — graph_exec_id / graph_node_id columns absent for pre-latest schemas;
            out_graph_launch_trace.csv not created for pre-latest schemas.
   * CSV  — above columns / file ARE present for the latest schema.
+  * CSV  — counters_collection averages a counter over kernel-replay passes for the
+           latest schema instead of summing them, and pmc_events reports each pass.
+  * Perfetto — counter values for the latest schema are those pass means.
   * Perfetto — .pftrace exists and is non-empty for every schema.
   * OTF2 — "HIP Graph Launch" locations absent for pre-latest schemas;
             present for the latest schema (requires the ``otf2`` package).
@@ -47,6 +50,7 @@ defined in conftest.py and passed by CMakeLists.txt.
 """
 
 import csv as csv_mod
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -305,6 +309,108 @@ def test_csv_for_schema_3_0_5_changes_present(output_root, latest_schema):
     assert any("SE: 1" in name and "SA: 0" in name and "WGP: 3" in name for name in names)
 
 
+def test_csv_counter_collection_averages_replay_passes(output_root, latest_schema):
+    """counters_collection must average a counter over kernel-replay passes, not sum them.
+
+    make_db.py gives dispatch 1 SQ_WAVES in three replay passes with per-pass sums 16, 18
+    and 20, GRBM_COUNT in pass 0 only (modeling later passes dedicated to another service),
+    and SQ_INSTS_SALU in passes 1 and 2 only with sums 5 and 6. Dispatch 2 has untagged
+    SQ_WAVES rows that sum to 8, modeling collection without kernel replay.
+    """
+    counter_csv = output_root / latest_schema / "csv" / "out_counter_collection_trace.csv"
+    assert (
+        counter_csv.exists()
+    ), f"out_counter_collection_trace.csv not found for schema {latest_schema}: {counter_csv}"
+    with open(counter_csv) as fh:
+        values = {
+            (int(row["Dispatch_Id"]), row["Counter_Name"]): float(row["Counter_Value"])
+            for row in csv_mod.DictReader(fh)
+        }
+    assert values == {
+        (1, "SQ_WAVES"): 18.0,
+        (1, "GRBM_COUNT"): 1000.0,
+        (1, "SQ_INSTS_SALU"): 5.5,
+        (2, "SQ_WAVES"): 8.0,
+    }, f"unexpected counter_collection values for schema {latest_schema}: {values}"
+
+
+def _open_ro_db(db_path: Path):
+    """Open an existing fixture DB read-only so a missing path cannot create an empty file."""
+    assert db_path.is_file(), f"database not found: {db_path}"
+    return sqlite3.connect(f"file:{db_path.resolve().as_posix()}?mode=ro", uri=True)
+
+
+def test_counters_collection_schema_unchanged_from_3_0_5(output_root, latest_schema):
+    """Replay averaging must not change the counters_collection columns."""
+
+    def columns(version):
+        db_path = output_root / version / "db" / f"schema_{version.replace('.', '_')}.db"
+        with _open_ro_db(db_path) as connection:
+            return [
+                row[1]
+                for row in connection.execute("PRAGMA table_info(counters_collection)")
+            ]
+
+    latest_columns = columns(latest_schema)
+    baseline_columns = columns("3.0.5")
+    assert latest_columns == baseline_columns, (
+        f"counters_collection columns changed between 3.0.5 and {latest_schema}: "
+        f"3.0.5={baseline_columns} {latest_schema}={latest_columns}"
+    )
+
+
+def test_pmc_events_replay_pass_absent_before_3_0_6(output_root, old_schema):
+    """Archived schemas must retain their original pmc_events columns."""
+    db_path = (
+        output_root / old_schema / "db" / f"schema_{old_schema.replace('.', '_')}.db"
+    )
+    with _open_ro_db(db_path) as connection:
+        columns = [row[1] for row in connection.execute("PRAGMA table_info(pmc_events)")]
+        view_sql = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name='pmc_events'"
+        ).fetchone()
+    assert view_sql and view_sql[0], f"pmc_events view missing for schema {old_schema}"
+    assert "replay_pass" not in columns, (
+        f"schema {old_schema} pmc_events unexpectedly has replay_pass; "
+        f"columns={columns}; sql={view_sql[0]}"
+    )
+    assert "replay_pass" not in view_sql[0], (
+        f"schema {old_schema} pmc_events SQL unexpectedly mentions replay_pass: "
+        f"{view_sql[0]}"
+    )
+
+
+def test_pmc_events_report_replay_pass(output_root, latest_schema):
+    """pmc_events must report each row's kernel-replay pass, and pass 0 for untagged rows.
+
+    SQ_WAVES of dispatch 1 is left out because the view also lists that dispatch's SPM
+    samples, which have no pass.
+    """
+    db_path = (
+        output_root
+        / latest_schema
+        / "db"
+        / f"schema_{latest_schema.replace('.', '_')}.db"
+    )
+    with _open_ro_db(db_path) as conn:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(pmc_events)")]
+        assert (
+            "replay_pass" in columns
+        ), f"schema {latest_schema} pmc_events missing replay_pass; columns={columns}"
+        rows = conn.execute(
+            "SELECT dispatch_id, counter_name, replay_pass, SUM(counter_value) "
+            "FROM pmc_events "
+            "WHERE counter_name IN ('GRBM_COUNT', 'SQ_INSTS_SALU') OR dispatch_id = 2 "
+            "GROUP BY dispatch_id, counter_name, replay_pass"
+        ).fetchall()
+    assert sorted(rows) == [
+        (1, "GRBM_COUNT", 0, 1000.0),
+        (1, "SQ_INSTS_SALU", 1, 5.0),
+        (1, "SQ_INSTS_SALU", 2, 6.0),
+        (2, "SQ_WAVES", 0, 8.0),
+    ], f"unexpected pmc_events passes for schema {latest_schema}: {rows}"
+
+
 # ---------------------------------------------------------------------------
 # Perfetto tests — old schemas
 # ---------------------------------------------------------------------------
@@ -327,6 +433,33 @@ def test_pftrace_completes_without_error_latest(output_root, latest_schema):
     pftrace = output_root / latest_schema / "pftrace" / "out_results.pftrace"
     assert pftrace.exists(), f".pftrace not found for schema {latest_schema}: {pftrace}"
     assert pftrace.stat().st_size > 0, f".pftrace is empty for schema {latest_schema}"
+
+
+def test_pftrace_counter_values_average_replay_passes(output_root, latest_schema):
+    """Perfetto counter values must be the kernel-replay pass means, not the pass sums.
+
+    The writer annotates every kernel slice with each counter's total over all dispatches,
+    so only counters that make_db.py collects on a single dispatch are checked: GRBM_COUNT
+    (pass 0 only) and SQ_INSTS_SALU (passes 1 and 2, with sums 5 and 6).
+    """
+    pytest.importorskip("perfetto", reason="perfetto package not installed")
+    from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
+
+    pftrace = output_root / latest_schema / "pftrace" / "out_results.pftrace"
+    assert pftrace.exists(), f".pftrace not found for schema {latest_schema}: {pftrace}"
+    with PerfettoReader(str(pftrace)) as reader:
+        rows = reader.query_tp(
+            "SELECT args.key AS key, COALESCE(args.real_value, args.int_value) AS value "
+            "FROM slice JOIN args USING (arg_set_id) "
+            "WHERE args.key IN ('debug.GRBM_COUNT', 'debug.SQ_INSTS_SALU')"
+        )
+    values = {}
+    for key, value in zip(rows["key"], rows["value"]):
+        values.setdefault(key, set()).add(float(value))
+    assert values == {
+        "debug.GRBM_COUNT": {1000.0},
+        "debug.SQ_INSTS_SALU": {5.5},
+    }, f"unexpected Perfetto counter values for schema {latest_schema}: {values}"
 
 
 # ---------------------------------------------------------------------------
