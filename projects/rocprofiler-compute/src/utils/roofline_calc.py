@@ -68,7 +68,7 @@ class PlotPoints:
     ai_l1: list[list[float]]
     ai_l2: list[list[float]]
     ai_hbm: list[list[float]]
-    ai_vram: list[list[float]]
+    ai_vram: List[List[float]]
     ai_lds: list[list[float]]
     kernelNames: list[str]
     counts: list[Optional[float]]
@@ -103,8 +103,8 @@ class GraphPoints:
     """Data structure for storing roofline graph ceiling points."""
 
     hbm: list[Union[list[float], float, None]]
-    vram: list[Union[list[float], float, None]]
-    mall: list[Union[list[float], float, None]]
+    vram: List[Union[List[float], float, None]]
+    mall: List[Union[List[float], float, None]]
     l2: list[Union[list[float], float, None]]
     l1: list[Union[list[float], float, None]]
     l0: list[Union[list[float], float, None]]
