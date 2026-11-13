@@ -3,7 +3,6 @@
 
 import argparse
 import csv
-import ctypes
 import errno
 import io
 import os
@@ -15,14 +14,11 @@ import sys
 import tempfile
 import textwrap
 import threading
-import time
 import uuid
-from contextlib import contextmanager
 from pathlib import Path
 from typing import (
     Any,
     Dict,
-    Generator,
     Iterator,
     List,
     Mapping,
@@ -387,108 +383,6 @@ def detect_rocprof(args: argparse.Namespace) -> str:
         console_debug(f"rocprof_cmd is {get_rocprof_cmd()}")
         console_debug(f"ROC Profiler: {rocprof_path}")
     return get_rocprof_cmd()
-
-
-def perform_attach_detach(new_env: Dict[str, str], options: Dict[str, Any]) -> None:
-    @contextmanager
-    def temporary_env(env_vars: Dict[str, str]) -> Generator[None, None, None]:
-        """
-        Temporarily change the environment variable of this application.
-        """
-        original_env = os.environ.copy()
-        os.environ.update({k: str(v) for k, v in env_vars.items()})
-        try:
-            yield
-        finally:
-            os.environ.clear()
-            os.environ.update(original_env)
-
-    with temporary_env(new_env):
-        libname = options["ROCPROF_ATTACH_LIBRARY"]
-
-        try:
-            c_lib = ctypes.CDLL(libname)
-            if c_lib is None:
-                console_error(f"Error opening {libname}")
-        except Exception as e:
-            console_error(f"Error loading {libname}: {e}")
-
-        # Set argument and return types for live attach functions
-        try:
-            # new live attach API
-            c_lib.rocattach_attach.restype = ctypes.c_int
-            c_lib.rocattach_attach.argtypes = [ctypes.c_int]
-            c_lib.rocattach_detach.restype = ctypes.c_int
-            c_lib.rocattach_detach.argtypes = [ctypes.c_int]
-        except Exception as e:
-            console_debug(
-                "Error setting new live attach API argument "
-                f"types: {e}, trying legacy live attach API"
-            )
-            try:
-                # old live attach API
-                c_lib.attach.restype = ctypes.c_int
-                c_lib.attach.argtypes = [ctypes.c_uint]
-                c_lib.detach.restype = ctypes.c_int
-                c_lib.detach.argtypes = [ctypes.c_uint]
-            except Exception as e:
-                console_error(f"Error setting live attach function argument types: {e}")
-
-        pid = options["ROCPROF_ATTACH_PID"]
-        if pid is None:
-            console_error("Live attach mode requires a process ID (ROCPROF_ATTACH_PID)")
-
-        try:
-            # new live attach API
-            attach_status = c_lib.rocattach_attach(int(pid))
-            if attach_status != 0:
-                console_error(
-                    f"Error attaching to process {pid}, "
-                    f"rocattach_attach returned {attach_status}"
-                )
-        except Exception as e:
-            console_debug(
-                "Error attaching with latest live attach "
-                f"API: {e}, trying legacy live attach API"
-            )
-            try:
-                # old live attach API
-                c_lib.attach(int(pid))
-            except Exception as e:
-                console_error(f"Error attaching to process {pid}: {e}")
-
-        duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
-        if duration is None:
-            console_log(
-                f"\033[93mAttach to process with ID {pid} is successful, "
-                "Press Enter to detach...\033[0m"
-            )
-            input()
-        else:
-            console_log(
-                f"\033[93mAttach to process with ID {pid} is successful, "
-                f"detach will happen in {duration} milliseconds...\033[0m"
-            )
-            time.sleep(int(duration) / 1000)
-
-        try:
-            # new live attach API
-            detach_status = c_lib.rocattach_detach(int(pid))
-            if detach_status != 0:
-                console_error(
-                    f"Error detaching from process {pid}, "
-                    f"rocattach_detach returned {detach_status}"
-                )
-        except Exception as e:
-            console_debug(
-                f"Error detaching with latest live attach API: {e}, "
-                "trying detach with legacy live attach API"
-            )
-            try:
-                # old live attach API
-                c_lib.detach(int(pid))
-            except Exception as e:
-                console_error(f"Error detaching from process {pid}: {e}")
 
 
 def capture_subprocess_output(
@@ -1089,22 +983,17 @@ def print_status(msg: str) -> None:
     console_log("")
 
 
-def create_temp_rocprofiler_metrics_path(sdk_config: Dict[str, Any]) -> str:
-    """
-    Create temporary directory with rocprofiler metrics config files.
+def create_temp_rocprofiler_metrics_path(
+    sdk_config: Dict[str, Any], parent_dir: Path = Path("/tmp")
+) -> str:
+    """Create a temporary directory with the rocprofiler-sdk counter definitions.
 
-    Writes two config files:
-    - counter_defs.yaml: For backward compatibility (excludes firmware restrictions)
-    - config.yaml: Current version with full config
-
-    Args:
-        sdk_config: The rocprofiler-sdk configuration dictionary.
-
-    Returns:
-        Path to the temporary directory (for ROCPROFILER_METRICS_PATH env var).
+    The directory is created in parent_dir. It holds config.yaml with the full
+    config, and counter_defs.yaml without firmware restrictions for older
+    rocprofiler-sdk versions. Return the path of the directory.
     """
     tmpfile_parent = Path(
-        tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir="/tmp")
+        tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir=parent_dir)
     )
 
     # counter_defs.yaml is for backward compatibility with previous versions of sdk
