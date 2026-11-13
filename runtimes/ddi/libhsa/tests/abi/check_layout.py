@@ -8,24 +8,22 @@ from __future__ import annotations
 import difflib
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 
 HERE = Path(__file__).resolve().parent
 RUNTIMES = HERE.parents[3]
-LIBRARY = Path(os.environ.get("CARGO_TARGET_DIR", HERE.parents[3] / "target")) / "release/librocddi_runtime.so"
+LIBRARY = (
+    Path(os.environ.get("CARGO_TARGET_DIR", RUNTIMES / "target"))
+    / "release"
+    / ("rocddi_runtime.dll" if os.name == "nt" else "librocddi_runtime.so")
+).resolve()
+# Both frontends use the workspace's native compiler adapter.
+sys.path.insert(0, str(RUNTIMES / "cmake"))
+from abi_probe import compile_c, run
+
 HEADERS = RUNTIMES / "api-headers/include"
-EXPECTED_RECORDS = 26
-
-
-def run(command: list[str], environment: dict[str, str] | None = None) -> str:
-    completed = subprocess.run(
-        command, capture_output=True, text=True, check=False, env=environment
-    )
-    if completed.returncode:
-        raise RuntimeError(f"{command[0]} failed:\n{completed.stderr}")
-    return completed.stdout
+EXPECTED_RECORDS = 34
 
 
 def main() -> int:
@@ -33,26 +31,11 @@ def main() -> int:
         raise FileNotFoundError(f"build the release workspace first: {LIBRARY}")
     with tempfile.TemporaryDirectory(prefix="rocddi-hsa-abi-") as temporary:
         output = Path(temporary)
-        c_binary = output / "c_layout"
-        rust_binary = output / "rust_layout"
-        (output / "libhsa-runtime64.so.1").symlink_to(LIBRARY)
-        run(
-            [
-                os.environ.get("CC", "cc"),
-                "-std=c11",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                "-I",
-                str(HEADERS),
-                str(HERE / "layout.c"),
-                "-L",
-                str(LIBRARY.parent),
-                "-lrocddi_runtime",
-                "-o",
-                str(c_binary),
-            ]
-        )
+        c_binary = output / ("c_layout.exe" if os.name == "nt" else "c_layout")
+        rust_binary = output / ("rust_layout.exe" if os.name == "nt" else "rust_layout")
+        if os.name != "nt":
+            (output / "libhsa-runtime64.so.1").symlink_to(LIBRARY)
+        compile_c(HERE / "layout.c", c_binary, HEADERS, LIBRARY)
         run(
             [
                 os.environ.get("RUSTC", "rustc"),
@@ -63,7 +46,10 @@ def main() -> int:
             ]
         )
         environment = os.environ.copy()
-        environment["LD_LIBRARY_PATH"] = str(output)
+        search = "PATH" if os.name == "nt" else "LD_LIBRARY_PATH"
+        environment[search] = os.pathsep.join(
+            [str(output), str(LIBRARY.parent), environment.get(search, "")]
+        )
         c_lines = run([str(c_binary)], environment).splitlines()
         rust_lines = run([str(rust_binary)]).splitlines()
     if len(c_lines) != EXPECTED_RECORDS:
@@ -76,7 +62,10 @@ def main() -> int:
         )
         print("\n".join(differences), file=sys.stderr)
         return 1
-    print(f"{len(c_lines)} HSA C/Rust ABI layout records and local finalizer call pass")
+    print(
+        f"{len(c_lines)} HSA C/Rust ABI layout records and native handle "
+        "and finalizer calls pass"
+    )
     return 0
 
 

@@ -113,7 +113,8 @@ option(BUILD_NCCL4PY                           "Build the nccl4py Python binding
 # layout for diagnostics.  See cmake/linker_scripts/hip_fatbin_tail.ld.
 option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
-option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy path" OFF)
+option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy and reduce paths" OFF)
+option(ENABLE_TDM_PRIM_LL128                   "Build the experimental gfx1250 TDM LL128 user-buffer path" OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
@@ -128,6 +129,10 @@ option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx
 if(ENABLE_TDM_SIMPLE)
   add_compile_definitions(ENABLE_TDM_SIMPLE=1)
 endif()
+
+if(ENABLE_TDM_PRIM_LL128)
+  add_compile_definitions(ENABLE_TDM_PRIM_LL128=1)
+endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
 #   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
@@ -141,7 +146,6 @@ if(ENABLE_ROCSHMEM AND ENABLE_ROCSHMEM_GIN)
   message(FATAL_ERROR "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are mutually exclusive")
 endif()
 set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
-option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device-template unit tests (ENABLE_ROCSHMEM_GIN on Fixtures; no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 option(ENABLE_RCCL_EP_TESTS                    "Build rccl_ep multi-GPU tests; needs ENABLE_MPI_TESTS and a runtime with working cuMem symmetric memory" OFF)
 option(ENABLE_RCCL_EP_IN_LIBRCCL               "Compile rccl_ep into librccl.so instead of the standalone librccl_ep.so; gfx9 only" OFF)
@@ -283,13 +287,8 @@ elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*clang\\+\\+")
   set(COMPILER_EXE_NAME clang++)
   set(COMPILER_GREP_STRING "AMD clang version")
   set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $4}'")
-elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*hipcc$")
-  message(STATUS "Compiling with hipcc")
-  set(COMPILER_EXE_NAME hipcc)
-  set(COMPILER_GREP_STRING "HIP version")
-  set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $3}' | awk -F\"-\" '{ printf $1}'")
 else()
-  message(FATAL_ERROR "RCCL can be built only with hipcc or amdclang++")
+  message(FATAL_ERROR "RCCL can be built only with amdclang++")
 endif()
 
 # Set CMAKE flags
@@ -335,11 +334,8 @@ execute_process(
 message(STATUS "${COMPILER_EXE_NAME} version:    ${compiler_version_string}")
 
 ## Check for HIP version
-find_program(hipconfig_executable hipconfig)
-message(STATUS "hipconfig executable: ${hipconfig_executable}")
-execute_process(
-  COMMAND         bash "-c" "${hipconfig_executable} -v | awk -F\"-\" '{ printf $1 }'"
-  OUTPUT_VARIABLE hip_version_string)
+# Use hip_VERSION from find_package(hip) above
+string(REGEX MATCH "^([0-9]+\\.[0-9]+\\.[0-9]+)" hip_version_string "${hip_VERSION}")
 message(STATUS "${COMPILER_EXE_NAME} HIP version:    ${hip_version_string}")
 
 ## Check for ROCm version
@@ -489,6 +485,17 @@ check_cxx_source_compiles("
     return 0;
   }
 " HIP_VMM_UNCACHED_MEMORY_AVAILABLE)
+
+### Check for host VMM location types (hipMemLocationTypeHost). Stock ROCm 7.0.2
+### shares the 7.0.2.x backport's HIP_VERSION but does not declare them.
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemLocationType t = hipMemLocationTypeHost;
+    (void)t;
+    return 0;
+  }
+" HIP_MEM_LOCATION_TYPE_HOST)
 
 unset(CMAKE_REQUIRED_LIBRARIES)
 
@@ -794,9 +801,14 @@ file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+if (NOT Python3_FOUND)
+  message(FATAL_ERROR "RCCL requires Python3 for generating host/device tables")
+endif()
+
 ## Compile tuner/*.csv into librccl.so so the built-in CSV tuner works without
 ## the files being staged on every node. Disk locations remain as overrides.
-set(RCCL_EMBEDDED_TUNER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateEmbeddedTunerConfigs.cmake)
+set(RCCL_EMBEDDED_TUNER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/tuner/embed_tuner_configs.py)
 set(RCCL_EMBEDDED_TUNER_HEADER ${PROJECT_BINARY_DIR}/include/rccl_tuner_embedded_configs.h)
 # Always run, like update_git_version: an OUTPUT/DEPENDS command re-runs only
 # when an input is newer than the output, so deleting a CSV would leave it
@@ -804,11 +816,12 @@ set(RCCL_EMBEDDED_TUNER_HEADER ${PROJECT_BINARY_DIR}/include/rccl_tuner_embedded
 # running every build does not churn rebuilds.
 add_custom_target(rccl_embedded_tuner_configs
   ALL
-  COMMAND ${CMAKE_COMMAND} -DTUNER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tuner
-                           -DOUT_FILE=${RCCL_EMBEDDED_TUNER_HEADER}
-                           -P ${RCCL_EMBEDDED_TUNER_SCRIPT}
+  COMMAND ${Python3_EXECUTABLE} ${RCCL_EMBEDDED_TUNER_SCRIPT}
+          ${CMAKE_CURRENT_SOURCE_DIR}/tuner
+          ${RCCL_EMBEDDED_TUNER_HEADER}
+  DEPENDS ${RCCL_EMBEDDED_TUNER_SCRIPT}
   BYPRODUCTS ${RCCL_EMBEDDED_TUNER_HEADER}
-  COMMENT "Generating embedded RCCL tuner configs"
+  COMMENT "Embedding RCCL tuner configurations"
   VERBATIM)
 
 # Example plugins are C sources

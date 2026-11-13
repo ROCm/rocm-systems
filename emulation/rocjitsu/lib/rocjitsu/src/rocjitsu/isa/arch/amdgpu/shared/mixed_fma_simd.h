@@ -10,9 +10,9 @@ namespace rocjitsu::amdgpu {
 
 // The compatible ABI avoids broken Clang/libstdc++ AVX-512 64-bit masks
 // while retaining packed arithmetic instead of a per-lane fallback.
-using MixedFmaAbi = std::conditional_t<UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS,
-                                       util::stdx::simd_abi::compatible<double>,
-                                       util::stdx::simd_abi::native<double>>;
+using MixedFmaAbi =
+    std::conditional_t<RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS, util::stdx::simd_abi::compatible<double>,
+                       util::stdx::simd_abi::native<double>>;
 using MixedFmaDouble = util::stdx::simd<double, MixedFmaAbi>;
 using MixedFmaBits = util::stdx::simd<uint64_t, MixedFmaAbi>;
 inline constexpr std::size_t mixed_fma_width64 = MixedFmaDouble::size();

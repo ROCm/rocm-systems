@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -171,6 +172,40 @@ std::vector<uint8_t> make_relocation_function_table_elf(std::span<const uint32_t
               .sh_addralign = 1,
               .sh_entsize = 0};
   std::memcpy(image.data() + shoff, shdrs.data(), sizeof(shdrs));
+  return image;
+}
+
+// Retain the fixture's allocated GOT slot, but make its sole relocation name a
+// function symbol at .text + 4. No RELATIVE64 addend can require the missing
+// mapping on the symbol writer's behalf. The unused relocation storage holds
+// the optional one-byte tail without changing any section's file placement.
+std::vector<uint8_t> make_text_symbol_reference_elf(bool trailing_partial_record,
+                                                    bool nonallocated_reference) {
+  std::vector<uint8_t> image = make_relocation_function_table_elf();
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  std::vector<Elf64_Shdr> sections(header.e_shnum);
+  std::memcpy(sections.data(), image.data() + header.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+  constexpr uint16_t kTextSectionIndex = 1;
+  constexpr uint16_t kRelocationSectionIndex = 5;
+  constexpr uint32_t kReferencedSymbolIndex = 1;
+  const Elf64_Shdr &text = sections[kTextSectionIndex];
+  Elf64_Shdr &relocations = sections[kRelocationSectionIndex];
+  const Elf64_Shdr &symbols = sections[relocations.sh_link];
+  const Elf64_Sym symbol = {.st_name = 0,
+                            .st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc),
+                            .st_other = 0,
+                            .st_shndx = kTextSectionIndex,
+                            .st_value = text.sh_addr + sizeof(uint32_t),
+                            .st_size = sizeof(uint32_t)};
+  std::memcpy(image.data() + symbols.sh_offset + kReferencedSymbolIndex * sizeof(symbol), &symbol,
+              sizeof(symbol));
+  // The existing first record is ABS64(symbol 1, addend 0) into the GOT slot.
+  relocations.sh_size = sizeof(Elf64_Rela) + (trailing_partial_record ? 1u : 0u);
+  relocations.sh_info = nonallocated_reference ? header.e_shstrndx : SHN_UNDEF;
+  if (trailing_partial_record)
+    image[relocations.sh_offset + sizeof(Elf64_Rela)] = 0xa5;
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
   return image;
 }
 
@@ -531,6 +566,67 @@ TEST(RelocationFunctionTable, PatcherRejectsRelativeTextAddendWithoutExactOffset
   EXPECT_FALSE(patcher.replace_text(bytes, incomplete_mapping));
 }
 
+TEST(RelocationFunctionTable, PatcherRequiresSymbolMappingBeforePartialRelocationTail) {
+  for (const bool trailing_partial_record : {false, true}) {
+    SCOPED_TRACE(trailing_partial_record);
+    for (const bool nonallocated_reference : {false, true}) {
+      SCOPED_TRACE(nonallocated_reference);
+      const std::vector<uint8_t> image =
+          make_text_symbol_reference_elf(trailing_partial_record, nonallocated_reference);
+      const std::vector<uint8_t> original_image = image;
+      const AmdGpuCodeObject object(image.data(), image.size());
+      ASSERT_TRUE(object.is_valid());
+      CodeObjectPatcher patcher(object);
+      ASSERT_FALSE(patcher.has_unsupported_relocation_to_text());
+      const std::array<uint32_t, 6> expanded_text = {0xbf800000u, 0xbf800000u, 0xbf800000u,
+                                                     0xbf800000u, 0xbf800000u, 0xbf800000u};
+      // A nonempty map must omit the referenced symbol at source offset 4;
+      // an empty map takes the instrumentation path and does not remap symbols.
+      constexpr std::array<TextOffsetRelocation, 1> incomplete_mapping = {
+          TextOffsetRelocation{.source_offset = 0, .target_offset = 0}};
+      const std::span<const uint8_t> bytes(reinterpret_cast<const uint8_t *>(expanded_text.data()),
+                                           sizeof(expanded_text));
+      EXPECT_EQ(patcher.replace_text(bytes, incomplete_mapping), nonallocated_reference);
+      EXPECT_EQ(image, original_image);
+      EXPECT_EQ(std::memcmp(object.image_data(), original_image.data(), original_image.size()), 0);
+    }
+  }
+}
+
+TEST(RelocationFunctionTable, PatcherRetargetsSymbolBeforePartialRelocationTail) {
+  for (const bool trailing_partial_record : {false, true}) {
+    SCOPED_TRACE(trailing_partial_record);
+    const std::vector<uint8_t> image =
+        make_text_symbol_reference_elf(trailing_partial_record, false);
+    const std::vector<uint8_t> original_image = image;
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    CodeObjectPatcher patcher(object);
+    ASSERT_FALSE(patcher.has_unsupported_relocation_to_text());
+    const std::array<uint32_t, 6> expanded_text = {0xbf800000u, 0xbf800000u, 0xbf800000u,
+                                                   0xbf800000u, 0xbf800000u, 0xbf800000u};
+    constexpr std::array<TextOffsetRelocation, 1> mapping = {
+        TextOffsetRelocation{.source_offset = 4, .target_offset = 8}};
+    const std::span<const uint8_t> bytes(reinterpret_cast<const uint8_t *>(expanded_text.data()),
+                                         sizeof(expanded_text));
+    ASSERT_TRUE(patcher.replace_text(bytes, mapping));
+    const std::vector<uint8_t> patched = patcher.emit();
+    const AmdGpuCodeObject output(patched.data(), patched.size());
+    ASSERT_TRUE(output.is_valid());
+    const std::vector<Elf64_Shdr> sections = patcher.section_headers();
+    const std::vector<Elf64_Shdr>::const_iterator symbols =
+        std::ranges::find(sections, SHT_DYNSYM, &Elf64_Shdr::sh_type);
+    ASSERT_NE(symbols, sections.end());
+    ASSERT_GE(symbols->sh_size, 2 * sizeof(Elf64_Sym));
+    Elf64_Sym symbol = {};
+    std::memcpy(&symbol, patched.data() + symbols->sh_offset + sizeof(symbol), sizeof(symbol));
+    EXPECT_EQ(symbol.st_value, output.text_sections().front()->vaddr() + 8);
+    EXPECT_EQ(symbol.st_shndx, *output.text_sections().front()->sectionHeaderIndex());
+    EXPECT_EQ(image, original_image);
+    EXPECT_EQ(std::memcmp(object.image_data(), original_image.data(), original_image.size()), 0);
+  }
+}
+
 TEST(RelocationFunctionTable, PatcherRejectsConflictingRelative64PlacementsAcrossScopes) {
   const auto image = make_relocation_function_table_elf();
   const AmdGpuCodeObject object(image.data(), image.size());
@@ -567,7 +663,8 @@ TEST(RelocationFunctionTable, ResolvesDynamicDispatchThroughGotAndTableLoads) {
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{40};
   const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
-  const auto dispatches = analyze_relocation_pairs(blocks, tables, 0x1000).dispatches;
+  const auto dispatches =
+      analyze_relocation_pairs(blocks, tables, 0x1000, /*wave_size=*/32).dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);
   EXPECT_EQ(dispatches[0].source_call_offset, 32u);
@@ -591,7 +688,8 @@ TEST(RelocationFunctionTable, GotSlotLoadRequiresAConstantZeroOffset) {
       auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
       std::array<uint64_t, 1> leaders{40};
       const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
-      const auto dispatches = analyze_relocation_pairs(blocks, tables, 0x1000).dispatches;
+      const auto dispatches =
+          analyze_relocation_pairs(blocks, tables, 0x1000, /*wave_size=*/32).dispatches;
       EXPECT_EQ(dispatches.size(), soffset == 124 && ioffset == 0 ? 1u : 0u);
     }
 }
@@ -611,7 +709,7 @@ TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{32};
   const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
-  const auto analysis = analyze_relocation_pairs(blocks, tables, 0x1000);
+  const auto analysis = analyze_relocation_pairs(blocks, tables, 0x1000, /*wave_size=*/32);
   const auto &dispatches = analysis.dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);
@@ -626,7 +724,7 @@ TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
   EXPECT_EQ(analysis.address_builders[0].source_address_add_offset, 4u);
   EXPECT_EQ(analysis.address_builders[0].target_vaddr, 0x2000u);
 
-  const auto table_free_analysis = analyze_relocation_pairs(blocks, {}, 0x1000);
+  const auto table_free_analysis = analyze_relocation_pairs(blocks, {}, 0x1000, /*wave_size=*/32);
   ASSERT_EQ(table_free_analysis.address_builders.size(), 1u);
   EXPECT_EQ(table_free_analysis.address_builders[0].source_getpc_offset,
             analysis.address_builders[0].source_getpc_offset);
@@ -650,7 +748,8 @@ TEST(RelocationFunctionTable, RejectsChainedAddressAddDispatch) {
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{44};
   const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
-  const auto dispatches = analyze_relocation_pairs(blocks, tables, 0x1000).dispatches;
+  const auto dispatches =
+      analyze_relocation_pairs(blocks, tables, 0x1000, /*wave_size=*/32).dispatches;
   // The base is built with two literal adds; only one add offset can be relocated,
   // so the dispatch must fail closed rather than resolve to a value whose first
   // addend would still execute.
@@ -679,7 +778,8 @@ TEST(RelocationFunctionTable, ResolvesBackwardTableAddress) {
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{32};
   const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
-  const auto dispatches = analyze_relocation_pairs(blocks, tables, kAssumedTextVaddr).dispatches;
+  const auto dispatches =
+      analyze_relocation_pairs(blocks, tables, kAssumedTextVaddr, /*wave_size=*/32).dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);
   EXPECT_EQ(dispatches[0].source_table_address_vaddr, 0x2000u);

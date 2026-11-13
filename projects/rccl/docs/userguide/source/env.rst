@@ -978,7 +978,9 @@ exhaustion.
 Finally, NVLS is currently not compatible with multiple ranks within the same communicator using
 the same GPU. If ``NCCL_NVLS_ENABLE`` is set to 1, communicator initialization will fail when
 multiple ranks per GPU are detected. If ``NCCL_NVLS_ENABLE`` is set to 2 (the default), NVLS will
-be silently disabled.
+be silently disabled. This applies to NCCL only. RCCL does not implement NVLS, so
+``NCCL_NVLS_ENABLE`` has no effect and multiple ranks per GPU never cause an NVLS initialization
+failure (see :ref:`env_NCCL_NVLS_ENABLE`).
 
 Disclaimer: This is currently an experimental feature, and is still being tuned. It is not
 compatible with all configurations. It may exhaust resources and lock NCCL.
@@ -1765,8 +1767,9 @@ Value accepted
 NCCL_MULTI_SEGMENT_REGISTER
 ---------------------------
 
-Register one DMA-BUF memory region per physical segment. When this is off,
-registration keeps the single-region path.
+Register one DMA-BUF memory region per physical segment. When this is off, a buffer that spans several physical segments is not registered per segment.
+
+NET registration counts segments over the whole registered buffer. With this variable set to 0, a collective on any part of a buffer whose registration spans several segments skips NET registration and stages through the internal buffers.
 
 Value accepted
 ^^^^^^^^^^^^^^
@@ -1799,9 +1802,32 @@ Enable/disable support for multiple outstanding NCCL calls from parallel CUDA gr
 
 The ability to disable support is motivated by observed hangs in the CUDA launches when support is enabled and multiple ranks have work launched via cudaGraphLaunch from the same thread.
 
+To turn mixing off while keeping graph use supported, leave this variable unset,
+set ``graphUsageMode=1`` and use one graph at a time. Setting the variable to
+``0`` forces ``graphUsageMode=0``, under which capturing collectives is not
+supported, so it only suits applications that stop capturing.
+
+Support is in effect only on a communicator whose ``graphUsageMode`` (see
+:ref:`ncclconfig`) is ``2``. Set ``2`` on every communicator involved, including
+each one that shares resources through ``ncclCommSplit``: the interlock only
+holds when both the capturing and the non-captured side use ``2``.
+
+When set to ``0`` or ``1``, this variable overrides ``graphUsageMode``: ``1``
+sets it to ``2`` and ``0`` sets it to ``0``. Any other value is ignored and
+leaves the field in effect.
+
+``graphUsageMode=2`` cannot be combined with :ref:`NCCL_GRAPH_STREAM_ORDERING`
+``0`` (see :c:macro:`graphStreamOrdering <ncclConfig_t.graphStreamOrdering>`).
+Do not rely on the fallback described there: keep the two settings apart on
+every communicator, including those created by ``ncclCommSplit``,
+``ncclCommShrink`` or ``ncclCommGrow`` without a config, which inherit their
+parent's settings; joining ranks of ``ncclCommGrow`` use defaults instead.
+
 Value accepted
 ^^^^^^^^^^^^^^
-0 or 1. Default is 1 (enabled).
+``0`` or ``1``. Unset by default, in which case the communicator's ``graphUsageMode``
+applies. In RCCL that defaults to ``0``, so graph mixing support is
+**disabled** by default.
 
 .. _NCCL_GRAPH_STREAM_ORDERING:
 
@@ -1818,8 +1844,8 @@ CUDA graph capture.
 .. warning::
 
    ``NCCL_GRAPH_STREAM_ORDERING=0`` together with **graph mixing** (communicator
-   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. NCCL emits
-   a warning, forces ``graphStreamOrdering`` to ``1``, and continues communicator
+   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. RCCL logs
+   an INFO message (visible with ``NCCL_DEBUG=INFO``), forces ``graphStreamOrdering`` to ``1``, and continues communicator
    creation successfully. If stream ordering is disabled for a communicator,
    **graph mixing must be off**—use ``graphUsageMode`` ``0`` or ``1`` (and note
    that :ref:`NCCL_GRAPH_MIXING_SUPPORT` ``1`` forces ``graphUsageMode=2`` at init,
@@ -1917,6 +1943,8 @@ NCCL_DMABUF_ENABLE
 Enable GPU Direct RDMA buffer registration using the Linux dma-buf subsystem.
 
 The Linux dma-buf subsystem allows GPU Direct RDMA capable NICs to read and write CUDA buffers directly without CPU involvement.
+
+GIN registration of a window that contains host VMM memory requires this variable set to 1, because that memory is registered through a DMA-BUF memory region. With 0, registration fails with ``ncclInvalidUsage``.
 
 Value accepted
 ^^^^^^^^^^^^^^
@@ -2072,6 +2100,9 @@ NCCL_NVLS_ENABLE
 Enable the use of NVLink SHARP (NVLS). NVLink SHARP is available in third-generation NVSwitch systems (NVLink4) with Hopper and later GPU architectures, allowing collectives such as ``ncclAllReduce`` to be offloaded to the NVSwitch domain.
 The default value is 2.
 
+In RCCL, this variable has no effect. RCCL does not implement NVLink SHARP, so no value allocates NVLink SHARP
+resources, and communicator initialization never fails because of them. The values below describe NCCL.
+
 Values accepted
 ^^^^^^^^^^^^^^^
 0: Disable the use of NVLink SHARP. No NVLink SHARP resources will be allocated.
@@ -2200,7 +2231,8 @@ socket timeouts.
 
 Values accepted
 ^^^^^^^^^^^^^^^
-Default is 1. A positive floating-point number. Values less than or equal to 0 are ignored and replaced with 1.
+Default is 1. A floating-point number between 0.001 and 1000000 (inclusive). Values outside this range, or that are
+not valid numbers, are ignored and replaced with 1.
 
 NCCL_PROGRESS_COUNTERS
 ----------------------

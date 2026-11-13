@@ -191,6 +191,8 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeCopyAttributes_Functional) {
  *   2) Pass destination kernel node as nullptr for copy attribute api
  *   3) Pass source kernel node as Uninitialize for copy attribute api
  *   4) Pass dest kernel node as Uninitialize for copy attribute api
+ *   5) Pass non-kernel node as source for copy attribute api
+ *   6) Pass non-kernel node as destination for copy attribute api
  * Test source
  * ------------------------
  *  - unit/graph/hipGraphKernelNodeCopyAttributes.cc
@@ -257,6 +259,18 @@ HIP_TEST_CASE(Unit_hipGraphKernelNodeCopyAttributes_Attribute_Negative) {
   SECTION("Pass dest kernel node as Uninitialize for copy attribute api") {
     hipGraphNode_t kNodeUninit{};
     ret = hipGraphKernelNodeCopyAttributes(kNode_2, kNodeUninit);
+    REQUIRE(hipErrorInvalidValue == ret);
+  }
+  SECTION("Pass non-kernel node as source for copy attribute api") {
+    hipGraphNode_t emptyNode;
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, nullptr, 0));
+    ret = hipGraphKernelNodeCopyAttributes(emptyNode, kNode);
+    REQUIRE(hipErrorInvalidValue == ret);
+  }
+  SECTION("Pass non-kernel node as destination for copy attribute api") {
+    hipGraphNode_t emptyNode;
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, nullptr, 0));
+    ret = hipGraphKernelNodeCopyAttributes(kNode, emptyNode);
     REQUIRE(hipErrorInvalidValue == ret);
   }
 

@@ -7,7 +7,6 @@
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
 #include "hip_conversions.hpp"
-#include "hip_platform.hpp"
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
@@ -16,7 +15,6 @@
 namespace hip {
 
 // Forward declaraiton of a function
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocation location,
                                 hipStream_t stream);
 hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
@@ -379,7 +377,7 @@ hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  for (int i = 0; i < num_attributes; i++) {
+  for (size_t i = 0; i < num_attributes; i++) {
     if (!data[i]) {
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -454,7 +452,8 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t len
 }
 
 // ================================================================================================
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_host_ptr) {
+hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_host_ptr,
+                             ManagedMemOwner owner) {
   if (ptr == nullptr) {
     return hipErrorInvalidValue;
   } else if (size == 0) {
@@ -467,16 +466,23 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_hos
 
   const amd::Device& dev = *ctx.devices()[0];
 
+  // ROCCLR_MEM_INTERNAL_MEMORY ties this storage's lifetime to the module that declares the
+  // variable rather than to the device, so hipDeviceReset() leaves it mapped.
+  const cl_svm_mem_flags keep_across_reset =
+      (owner == ManagedMemOwner::kModuleVariable) ? ROCCLR_MEM_INTERNAL_MEMORY : 0;
+
   // Allocate SVM fine grain buffer with the forced host pointer, avoiding explicit memory
   // allocation in the device driver
   if (use_host_ptr) {
-    // If the host pointer is already allocated, map it to svm fine grain buffer
-    *ptr =
-        amd::SvmBuffer::malloc(ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR, size,
-                               (align == 0) ? dev.info().memBaseAddrAlign_ : align, nullptr, *ptr);
+    // If the host pointer is already allocated, map it to svm fine grain buffer. The range
+    // belongs to the caller, not to this buffer, and releasing the buffer would unmap it.
+    *ptr = amd::SvmBuffer::malloc(
+        ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR | keep_across_reset, size,
+        (align == 0) ? dev.info().memBaseAddrAlign_ : align, nullptr, *ptr);
   } else {
-    *ptr = amd::SvmBuffer::malloc(ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR, size,
-                                  (align == 0) ? dev.info().memBaseAddrAlign_ : align);
+    *ptr = amd::SvmBuffer::malloc(
+        ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR | keep_across_reset, size,
+        (align == 0) ? dev.info().memBaseAddrAlign_ : align);
   }
   if (*ptr == nullptr) {
     return hipErrorMemoryAllocation;
@@ -487,8 +493,11 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_hos
   if (memObj == nullptr) {
     return hipErrorMemoryAllocation;
   }
-  // saves the current device id so that it can be accessed later
-  memObj->getUserData().deviceId = hipDev->deviceId();
+
+  // Mapping a __managed__ variable's storage reaches here before any HIP API has
+  // established a current device. Device 0 is fine in that case since managed memory is
+  // reachable from every device.
+  memObj->getUserData().deviceId = (hipDev != nullptr) ? hipDev->deviceId() : 0;
 
   ClPrint(amd::LOG_INFO, amd::LOG_API, "ihipMallocManaged ptr=0x%zx", *ptr);
   return hipSuccess;
@@ -630,17 +639,6 @@ hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t coun
       size_t size = sizes[op_idx];
       amd::Memory* mem_obj = mem_objs[op_idx];
       size_t offset = offsets[op_idx];
-
-      if (mem_obj == nullptr) {
-        hip::Var* deferred_var = PlatformState::Instance().StatCO().FindDeferredManagedVar(dev_ptr);
-        if (deferred_var != nullptr) {
-          hipError_t status = deferred_var->AllocateManagedVarPtr();
-          if (status != hipSuccess) {
-            return status;
-          }
-          mem_obj = getMemoryObject(hip::getCurrentDevice(), dev_ptr, offset);
-        }
-      }
 
       if (mem_obj != nullptr) {
         if (size > (mem_obj->getSize() - offset)) {

@@ -117,6 +117,12 @@ struct Backend {
                                 ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream,
                                 std::shared_ptr<AsyncFailoverState> failover) = 0;
 
+    /// @brief Callback when Driver state refcount reaches zero, allowing the backend to perform any necessary
+    /// cleanup.
+    virtual void driver_state_teardown()
+    {
+    }
+
 protected:
     /// @brief Perform a read or write operation
     ///

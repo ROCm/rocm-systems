@@ -9,6 +9,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/signaling_compare.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -186,17 +188,20 @@ void VCvtF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F16>(
+          wf, inst_.abs, inst_.neg, inst_.omod, inst_.clamp);
+  if (amdgpu::try_execute_words_simd<1, false, true, 0>(inst, wf, conversion))
+    return;
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
-          amdgpu::sdwa::round_f16_result(*this, wf,
-                                         std::bit_cast<float>(static_cast<uint32_t>(
-                                             amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                                         wf.fp16_ovfl())));
+      uint32_t src_half = static_cast<uint32_t>(
+          static_cast<uint16_t>(conversion(amdgpu::RegisterAccess(wf).read_lane(src0, lane))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -218,17 +223,20 @@ RJ_NOINLINE void VCvtF16F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  auto &inst = *this;
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F16>(
+          wf, inst_.abs, inst_.neg, inst_.omod, inst_.clamp);
+  if (amdgpu::try_execute_words_simd<1, false, true, 0>(inst, wf, conversion))
+    return;
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
-          amdgpu::sdwa::round_f16_result(*this, wf,
-                                         std::bit_cast<float>(static_cast<uint32_t>(
-                                             amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                                         wf.fp16_ovfl())));
+      uint32_t src_half = static_cast<uint32_t>(
+          static_cast<uint16_t>(conversion(amdgpu::RegisterAccess(wf).read_lane(src0, lane))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -260,8 +268,10 @@ void VCvtF32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                     0, inst_.abs, inst_.neg),
                 wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -308,8 +318,10 @@ RJ_NOINLINE void VCvtF32F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                     0, inst_.abs, inst_.neg),
                 wf.cu().arch(), wf.ieee_mode()));
             return amdgpu::fp_mode::apply_omod_f32(
-                v, amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
-                                                   wf.ieee_mode(), inst_.omod));
+                v,
+                amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
+                                                wf.ieee_mode(), inst_.omod),
+                wf.fp_round_mode_f32());
           }();
           if (inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
@@ -1192,18 +1204,31 @@ void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + wf.m0() : UINT64_MAX;
-  bool rel_dst_valid =
-      amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(), wf.vgpr_alloc().count)
-          .has_value();
+  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(),
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
+                           .has_value();
   if (!rel_dst_valid)
     return;
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
+  Operand &rel_src = src0;
+  std::optional<StagedOperand> rel_staged_src;
+  amdgpu::dpp::DppPlan rel_dpp_plan;
+  if (inst_.src0 == amdgpu::SRC_DPP) {
+    rel_dpp_plan =
+        amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                   dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+    amdgpu::dpp::apply_dpp(rel_src, rel_dpp_plan, wf.exec(), rel_staged_src, wf);
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::apply_dpp8(rel_src, dpp8_lane_sel_, dpp_fi_, rel_staged_src, wf);
+  ScopedOperandDelegate rel_staged_src_binding(rel_src,
+                                               rel_staged_src ? &*rel_staged_src : nullptr);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
   }
 }
 
@@ -1214,11 +1239,6 @@ RJ_NOINLINE void VMovreldB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
@@ -1227,18 +1247,31 @@ RJ_NOINLINE void VMovreldB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + wf.m0() : UINT64_MAX;
-  bool rel_dst_valid =
-      amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(), wf.vgpr_alloc().count)
-          .has_value();
+  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(),
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
+                           .has_value();
   if (!rel_dst_valid)
     return;
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
+  Operand &rel_src = src0;
+  std::optional<StagedOperand> rel_staged_src;
+  amdgpu::dpp::DppPlan rel_dpp_plan;
+  if (inst_.src0 == amdgpu::SRC_DPP) {
+    rel_dpp_plan =
+        amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                   dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+    amdgpu::dpp::apply_dpp(rel_src, rel_dpp_plan, wf.exec(), rel_staged_src, wf);
+  }
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::apply_dpp8(rel_src, dpp8_lane_sel_, dpp_fi_, rel_staged_src, wf);
+  ScopedOperandDelegate rel_staged_src_binding(rel_src,
+                                               rel_staged_src ? &*rel_staged_src : nullptr);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -1252,9 +1285,9 @@ void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
   uint64_t rel_src_index =
       rel_src_base ? static_cast<uint64_t>(*rel_src_base) + wf.m0() : UINT64_MAX;
-  bool rel_src_valid =
-      amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), src0.vgpr_count(), wf.vgpr_alloc().count)
-          .has_value();
+  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), src0.vgpr_count(),
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
+                           .has_value();
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   std::optional<StagedOperand> rel_staged_src;
@@ -1293,9 +1326,9 @@ RJ_NOINLINE void VMovrelsB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
   uint64_t rel_src_index =
       rel_src_base ? static_cast<uint64_t>(*rel_src_base) + wf.m0() : UINT64_MAX;
-  bool rel_src_valid =
-      amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), src0.vgpr_count(), wf.vgpr_alloc().count)
-          .has_value();
+  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), src0.vgpr_count(),
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
+                           .has_value();
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   std::optional<StagedOperand> rel_staged_src;
@@ -1336,10 +1369,10 @@ void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
   bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   if (!rel_dst_valid)
     return;
@@ -1389,10 +1422,10 @@ RJ_NOINLINE void VMovrelsdB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
   bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   if (!rel_dst_valid)
     return;
@@ -1437,10 +1470,10 @@ void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
   bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   if (!rel_dst_valid)
     return;
@@ -1490,10 +1523,10 @@ RJ_NOINLINE void VMovrelsd2B32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
   bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   if (!rel_dst_valid)
     return;
@@ -1527,18 +1560,20 @@ void VCvtF16U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::conversion::U16, amdgpu::fp_format::F16>(
+          wf, 0u, 0u, inst_.omod, inst_.clamp);
+  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, conversion))
+    return;
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half =
-          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::sdwa::round_f16_result(
-              *this, wf,
-              static_cast<float>(static_cast<uint16_t>(
-                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))),
-              wf.fp16_ovfl())));
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
+          conversion(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -1562,18 +1597,20 @@ RJ_NOINLINE void VCvtF16U16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  auto &inst = *this;
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::conversion::U16, amdgpu::fp_format::F16>(
+          wf, 0u, 0u, inst_.omod, inst_.clamp);
+  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, conversion))
+    return;
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half =
-          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::sdwa::round_f16_result(
-              *this, wf,
-              static_cast<float>(static_cast<uint16_t>(
-                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))),
-              wf.fp16_ovfl())));
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
+          conversion(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -1585,18 +1622,20 @@ void VCvtF16I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::conversion::I16, amdgpu::fp_format::F16>(
+          wf, 0u, 0u, inst_.omod, inst_.clamp);
+  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, conversion))
+    return;
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half =
-          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::sdwa::round_f16_result(
-              *this, wf,
-              static_cast<float>(static_cast<int16_t>(
-                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0) & 0xFFFF)),
-              wf.fp16_ovfl())));
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
+          conversion(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -1620,18 +1659,20 @@ RJ_NOINLINE void VCvtF16I16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  auto &inst = *this;
+  const auto conversion =
+      amdgpu::conversion_to_float<amdgpu::conversion::I16, amdgpu::fp_format::F16>(
+          wf, 0u, 0u, inst_.omod, inst_.clamp);
+  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, conversion))
+    return;
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half =
-          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::sdwa::round_f16_result(
-              *this, wf,
-              static_cast<float>(static_cast<int16_t>(
-                  ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0) & 0xFFFF)),
-              wf.fp16_ovfl())));
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
+          conversion(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -3008,7 +3049,8 @@ void VSatPkU8I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     int32_t hi = static_cast<int16_t>(raw >> 16);
     uint32_t result = static_cast<uint32_t>(std::clamp(lo, 0, 255)) |
                       (static_cast<uint32_t>(std::clamp(hi, 0, 255)) << 8);
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_), result,
+                                              true);
   }
 }
 
@@ -3037,7 +3079,8 @@ RJ_NOINLINE void VSatPkU8I16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     int32_t hi = static_cast<int16_t>(raw >> 16);
     uint32_t result = static_cast<uint32_t>(std::clamp(lo, 0, 255)) |
                       (static_cast<uint32_t>(std::clamp(hi, 0, 255)) << 8);
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, result);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, amdgpu::vop3_opsel(inst_), result,
+                                              true);
   }
   dpp_write_mask_scope_.restore();
 }
@@ -3049,16 +3092,18 @@ void VCvtNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>([&]() -> uint32_t {
-        float s = [&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(
-              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-          return amdgpu::source_modifier::apply_to_float(sv, 0, inst_.abs, inst_.neg);
-        }();
+        float s = amdgpu::source_modifier::apply_to_float(
+            util::f16_to_f32(
+                static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
+                    input_policy))),
+            0, inst_.abs, inst_.neg);
         if (std::isnan(s))
           return 0u;
         double scaled =
@@ -3090,16 +3135,18 @@ RJ_NOINLINE void VCvtNormI16F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>([&]() -> uint32_t {
-        float s = [&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(
-              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-          return amdgpu::source_modifier::apply_to_float(sv, 0, inst_.abs, inst_.neg);
-        }();
+        float s = amdgpu::source_modifier::apply_to_float(
+            util::f16_to_f32(
+                static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
+                    input_policy))),
+            0, inst_.abs, inst_.neg);
         if (std::isnan(s))
           return 0u;
         double scaled =
@@ -3119,16 +3166,18 @@ void VCvtNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>([&]() -> uint32_t {
-        float s = [&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(
-              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-          return amdgpu::source_modifier::apply_to_float(sv, 0, inst_.abs, inst_.neg);
-        }();
+        float s = amdgpu::source_modifier::apply_to_float(
+            util::f16_to_f32(
+                static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
+                    input_policy))),
+            0, inst_.abs, inst_.neg);
         if (std::isnan(s))
           return 0u;
         double scaled =
@@ -3160,16 +3209,18 @@ RJ_NOINLINE void VCvtNormU16F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>([&]() -> uint32_t {
-        float s = [&]() {
-          float sv = util::f16_to_f32(static_cast<uint16_t>(
-              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-          return amdgpu::source_modifier::apply_to_float(sv, 0, inst_.abs, inst_.neg);
-        }();
+        float s = amdgpu::source_modifier::apply_to_float(
+            util::f16_to_f32(
+                static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                    ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
+                    input_policy))),
+            0, inst_.abs, inst_.neg);
         if (std::isnan(s))
           return 0u;
         double scaled =
@@ -3361,6 +3412,12 @@ void VAddF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  if (wf.dx10_clamp()) {
+    amdgpu::execute_v_add_f32_vop3(*this, wf);
+    return;
+  }
+  CapturedArithmeticSource lhs_input(wf, src0, 0xf);
+  CapturedArithmeticSource rhs_input(wf, src1, 0xf, wf.exec());
   amdgpu::execute_v_add_f32_vop3(*this, wf);
 }
 
@@ -3380,6 +3437,14 @@ RJ_NOINLINE void VAddF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  if (!(wf.exec() & wf.vgpr_write_mask()) && !src1.decoded_vgpr())
+    return;
+  if (wf.dx10_clamp()) {
+    amdgpu::execute_v_add_f32_vop3(*this, wf);
+    return;
+  }
+  CapturedArithmeticSource lhs_input(wf, src0, 0xf);
+  CapturedArithmeticSource rhs_input(wf, src1, 0xf, wf.exec());
   amdgpu::execute_v_add_f32_vop3(*this, wf);
   dpp_write_mask_scope_.restore();
 }
@@ -4041,17 +4106,19 @@ void VSubrevNcU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 RJ_NOINLINE void VSubrevNcU32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
-  std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  if (!src1.decoded_vgpr())
+    dpp_src1_.emplace(src1, wf.wf_size());
+  else if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_dpp(src1, dpp_plan_, dpp_old_exec_, dpp_src1_, wf);
+  else if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::apply_dpp8(src1, dpp8_lane_sel_, dpp_fi_, dpp_src1_, wf);
+  ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
@@ -4122,7 +4189,8 @@ void VAddF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true, amdgpu::fp_mode::Arithmetic::ADD);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true, amdgpu::fp_mode::Arithmetic::ADD,
+                                          amdgpu::NegatedSource::NONE);
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
@@ -4176,7 +4244,8 @@ RJ_NOINLINE void VAddF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true, amdgpu::fp_mode::Arithmetic::ADD);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true, amdgpu::fp_mode::Arithmetic::ADD,
+                                          amdgpu::NegatedSource::NONE);
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
@@ -4218,18 +4287,8 @@ void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
-                                                 wf.fp_denorm_mode_f16_f64())) {
-    if (wf.fp16_ovfl()) {
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
-      });
-    } else {
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
-      });
-    }
-  }
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true, amdgpu::fp_mode::Arithmetic::ADD,
+                                          amdgpu::NegatedSource::SRC1);
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
@@ -4243,19 +4302,19 @@ void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           uint32_t>(static_cast<uint16_t>(amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
           static_cast<uint32_t>(amdgpu::sdwa::finish_arithmetic_f16(
               *this, wf,
-              amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
+              amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
                   amdgpu::source_modifier::apply_to_float(
                       util::f16_to_f32(static_cast<uint16_t>(
                           amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
                               input_policy))),
                       0, inst_.abs, inst_.neg),
-                  amdgpu::source_modifier::apply_to_float(
+                  (-amdgpu::source_modifier::apply_to_float(
                       util::f16_to_f32(static_cast<uint16_t>(
                           amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
                               input_policy))),
-                      1, inst_.abs, inst_.neg),
+                      1, inst_.abs, inst_.neg)),
                   0.0f, wf.fp_round_mode_f16_f64()),
               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
           output_policy)));
@@ -4283,18 +4342,8 @@ RJ_NOINLINE void VSubF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
-                                                 wf.fp_denorm_mode_f16_f64())) {
-    if (wf.fp16_ovfl()) {
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
-      });
-    } else {
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b));
-      });
-    }
-  }
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true, amdgpu::fp_mode::Arithmetic::ADD,
+                                          amdgpu::NegatedSource::SRC1);
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
@@ -4308,19 +4357,19 @@ RJ_NOINLINE void VSubF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
           uint32_t>(static_cast<uint16_t>(amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
           static_cast<uint32_t>(amdgpu::sdwa::finish_arithmetic_f16(
               *this, wf,
-              amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
+              amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
                   amdgpu::source_modifier::apply_to_float(
                       util::f16_to_f32(static_cast<uint16_t>(
                           amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
                               input_policy))),
                       0, inst_.abs, inst_.neg),
-                  amdgpu::source_modifier::apply_to_float(
+                  (-amdgpu::source_modifier::apply_to_float(
                       util::f16_to_f32(static_cast<uint16_t>(
                           amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
                               input_policy))),
-                      1, inst_.abs, inst_.neg),
+                      1, inst_.abs, inst_.neg)),
                   0.0f, wf.fp_round_mode_f16_f64()),
               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
           output_policy)));
@@ -4336,18 +4385,8 @@ void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
-                                                 wf.fp_denorm_mode_f16_f64())) {
-    if (wf.fp16_ovfl()) {
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
-      });
-    } else {
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
-      });
-    }
-  }
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true, amdgpu::fp_mode::Arithmetic::ADD,
+                                          amdgpu::NegatedSource::SRC0);
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
@@ -4361,19 +4400,19 @@ void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           uint32_t>(static_cast<uint16_t>(amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
           static_cast<uint32_t>(amdgpu::sdwa::finish_arithmetic_f16(
               *this, wf,
-              amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
+              amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
+                  (-amdgpu::source_modifier::apply_to_float(
+                      util::f16_to_f32(static_cast<uint16_t>(
+                          amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
+                              input_policy))),
+                      0, inst_.abs, inst_.neg)),
                   amdgpu::source_modifier::apply_to_float(
                       util::f16_to_f32(static_cast<uint16_t>(
                           amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
                               input_policy))),
                       1, inst_.abs, inst_.neg),
-                  amdgpu::source_modifier::apply_to_float(
-                      util::f16_to_f32(static_cast<uint16_t>(
-                          amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
-                              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-                              input_policy))),
-                      0, inst_.abs, inst_.neg),
                   0.0f, wf.fp_round_mode_f16_f64()),
               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
           output_policy)));
@@ -4401,18 +4440,8 @@ RJ_NOINLINE void VSubrevF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f16_f64(),
-                                                 wf.fp_denorm_mode_f16_f64())) {
-    if (wf.fp16_ovfl()) {
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_ovfl_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
-      });
-    } else {
-      ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [](auto a, auto b) {
-        return util::f32_to_f16_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a));
-      });
-    }
-  }
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true, amdgpu::fp_mode::Arithmetic::ADD,
+                                          amdgpu::NegatedSource::SRC0);
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
@@ -4426,19 +4455,19 @@ RJ_NOINLINE void VSubrevF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
           uint32_t>(static_cast<uint16_t>(amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
           static_cast<uint32_t>(amdgpu::sdwa::finish_arithmetic_f16(
               *this, wf,
-              amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
+              amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
+                  (-amdgpu::source_modifier::apply_to_float(
+                      util::f16_to_f32(static_cast<uint16_t>(
+                          amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
+                              input_policy))),
+                      0, inst_.abs, inst_.neg)),
                   amdgpu::source_modifier::apply_to_float(
                       util::f16_to_f32(static_cast<uint16_t>(
                           amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
                               ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1),
                               input_policy))),
                       1, inst_.abs, inst_.neg),
-                  amdgpu::source_modifier::apply_to_float(
-                      util::f16_to_f32(static_cast<uint16_t>(
-                          amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
-                              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-                              input_policy))),
-                      0, inst_.abs, inst_.neg),
                   0.0f, wf.fp_round_mode_f16_f64()),
               wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())),
           output_policy)));
@@ -4454,7 +4483,8 @@ void VMulF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true, amdgpu::fp_mode::Arithmetic::MUL);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true, amdgpu::fp_mode::Arithmetic::MUL,
+                                          amdgpu::NegatedSource::NONE);
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
@@ -4508,7 +4538,8 @@ RJ_NOINLINE void VMulF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true, amdgpu::fp_mode::Arithmetic::MUL);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true, amdgpu::fp_mode::Arithmetic::MUL,
+                                          amdgpu::NegatedSource::NONE);
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
@@ -5205,14 +5236,17 @@ void VAlignbitB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;
-    auto va = util::stdx::static_simd_cast<U64>(a);
-    auto vb = util::stdx::static_simd_cast<U64>(b);
-    auto val = (va << 32) | vb;
-    auto sh = util::stdx::static_simd_cast<U64>(c & 31u);
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [offset = ::rocjitsu::amdgpu::vop3_align_count_offset(
+                     ::rocjitsu::amdgpu::vop3_opsel(inst.inst_), inst.src2.size_bits())](
+                    auto a, auto b, auto c) {
+        using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;
+        auto va = util::stdx::static_simd_cast<U64>(a);
+        auto vb = util::stdx::static_simd_cast<U64>(b);
+        auto val = (va << 32) | vb;
+        auto sh = util::stdx::static_simd_cast<U64>((c >> offset) & 31u);
+        return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh);
+      });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5245,14 +5279,17 @@ RJ_NOINLINE void VAlignbitB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;
-    auto va = util::stdx::static_simd_cast<U64>(a);
-    auto vb = util::stdx::static_simd_cast<U64>(b);
-    auto val = (va << 32) | vb;
-    auto sh = util::stdx::static_simd_cast<U64>(c & 31u);
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [offset = ::rocjitsu::amdgpu::vop3_align_count_offset(
+                     ::rocjitsu::amdgpu::vop3_opsel(inst.inst_), inst.src2.size_bits())](
+                    auto a, auto b, auto c) {
+        using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;
+        auto va = util::stdx::static_simd_cast<U64>(a);
+        auto vb = util::stdx::static_simd_cast<U64>(b);
+        auto val = (va << 32) | vb;
+        auto sh = util::stdx::static_simd_cast<U64>((c >> offset) & 31u);
+        return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh);
+      });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5275,14 +5312,17 @@ void VAlignbyteB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;
-    auto va = util::stdx::static_simd_cast<U64>(a);
-    auto vb = util::stdx::static_simd_cast<U64>(b);
-    auto val = (va << 32) | vb;
-    auto sh = util::stdx::static_simd_cast<U64>((c & 3u) * 8u);
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [offset = ::rocjitsu::amdgpu::vop3_align_count_offset(
+                     ::rocjitsu::amdgpu::vop3_opsel(inst.inst_), inst.src2.size_bits())](
+                    auto a, auto b, auto c) {
+        using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;
+        auto va = util::stdx::static_simd_cast<U64>(a);
+        auto vb = util::stdx::static_simd_cast<U64>(b);
+        auto val = (va << 32) | vb;
+        auto sh = util::stdx::static_simd_cast<U64>(((c >> offset) & 3u) * 8u);
+        return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh);
+      });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5315,14 +5355,17 @@ RJ_NOINLINE void VAlignbyteB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
-    using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;
-    auto va = util::stdx::static_simd_cast<U64>(a);
-    auto vb = util::stdx::static_simd_cast<U64>(b);
-    auto val = (va << 32) | vb;
-    auto sh = util::stdx::static_simd_cast<U64>((c & 3u) * 8u);
-    return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh);
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+      uint32_t, [offset = ::rocjitsu::amdgpu::vop3_align_count_offset(
+                     ::rocjitsu::amdgpu::vop3_opsel(inst.inst_), inst.src2.size_bits())](
+                    auto a, auto b, auto c) {
+        using U64 = util::stdx::fixed_size_simd<uint64_t, util::native<uint32_t>::size()>;
+        auto va = util::stdx::static_simd_cast<U64>(a);
+        auto vb = util::stdx::static_simd_cast<U64>(b);
+        auto val = (va << 32) | vb;
+        auto sh = util::stdx::static_simd_cast<U64>(((c >> offset) & 3u) * 8u);
+        return util::stdx::static_simd_cast<util::native<uint32_t>>(val >> sh);
+      });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5869,6 +5912,10 @@ void VMqsadU32U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
       accum[1] = static_cast<uint32_t>(*constant >> 32);
       accum[2] = 0;
       accum[3] = 0;
+    } else if (auto region =
+                   amdgpu::RegisterAccess(wf).read_operand_region(src2, uint64_t{1} << lane, 4)) {
+      for (uint32_t word = 0; word < 4; ++word)
+        accum[word] = region->lane(word, lane);
     } else {
       Operand accum_word = src2;
       accum_word.size_bits_ = 32;
@@ -5937,7 +5984,7 @@ void VMadU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
     uint32_t s2 = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
     uint32_t result = amdgpu::vop3_integer_mad<uint16_t, 16>(s0, s1, s2, inst_.clamp);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, false);
   }
 }
 
@@ -5968,7 +6015,7 @@ RJ_NOINLINE void VMadU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
     uint32_t s2 = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
     uint32_t result = amdgpu::vop3_integer_mad<uint16_t, 16>(s0, s1, s2, inst_.clamp);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, false);
   }
 
   dpp_write_mask_scope_.restore();
@@ -6905,7 +6952,7 @@ void VMadI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
     uint32_t s2 = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
     uint32_t result = amdgpu::vop3_integer_mad<int16_t, 16>(s0, s1, s2, inst_.clamp);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, false);
   }
 }
 
@@ -6936,7 +6983,7 @@ RJ_NOINLINE void VMadI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
     uint32_t s2 = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
     uint32_t result = amdgpu::vop3_integer_mad<int16_t, 16>(s0, s1, s2, inst_.clamp);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, false);
   }
 
   dpp_write_mask_scope_.restore();
@@ -7356,10 +7403,14 @@ void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
               ((amdgpu::read_wave_mask_scalar(src2, wf) >> lane) & 1)
-                  ? static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))
-                  : static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))))));
+                  ? amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(
+                        static_cast<uint32_t>(static_cast<uint16_t>(
+                            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))),
+                        1, inst_.abs, inst_.neg)
+                  : amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(
+                        static_cast<uint32_t>(static_cast<uint16_t>(
+                            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))),
+                        0, inst_.abs, inst_.neg)))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -7392,10 +7443,14 @@ RJ_NOINLINE void VCndmaskB16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       uint32_t src_half =
           static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
               ((amdgpu::read_wave_mask_scalar(src2, wf) >> lane) & 1)
-                  ? static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))
-                  : static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))))));
+                  ? amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(
+                        static_cast<uint32_t>(static_cast<uint16_t>(
+                            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))),
+                        1, inst_.abs, inst_.neg)
+                  : amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(
+                        static_cast<uint32_t>(static_cast<uint16_t>(
+                            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))),
+                        0, inst_.abs, inst_.neg)))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -7754,18 +7809,20 @@ void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       raw0 = (raw0 & 0xffffu) * 0x10001u;
     if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
       raw1 = (raw1 & 0xffffu) * 0x10001u;
-    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(raw1 & 0xffffu));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>((raw1 >> 16) & 0xffffu));
-    float acc = util::f16_to_f32(static_cast<uint16_t>(acc_bits));
-    a0 = amdgpu::source_modifier::apply_to_float(a0, 0, inst_.abs, inst_.neg);
-    a1 = amdgpu::source_modifier::apply_to_float(a1, 0, inst_.abs, inst_.neg);
-    b0 = amdgpu::source_modifier::apply_to_float(b0, 1, inst_.abs, inst_.neg);
-    b1 = amdgpu::source_modifier::apply_to_float(b1, 1, inst_.abs, inst_.neg);
-    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.abs, inst_.neg);
-    uint32_t result_bits = amdgpu::fp_mode::dot2_f16(a0, b0, a1, b1, acc, wf.fp16_ovfl());
+    uint32_t acc_bits = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src2))
+      acc_bits = (acc_bits & 0xffffu) * 0x10001u;
+    if (opsel & 4u)
+      acc_bits >>= 16;
+    const auto half = [&](uint32_t bits, unsigned source) {
+      return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(bits & 0xffffu, source,
+                                                                             inst_.abs, inst_.neg));
+    };
+    const uint16_t src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);
+    const uint16_t src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);
+    const uint16_t acc = half(acc_bits, 2);
+    const uint16_t result_bits =
+        amdgpu::gfx11_dot2_packed16<false>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
 }
@@ -7801,18 +7858,20 @@ RJ_NOINLINE void VDot2F16F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       raw0 = (raw0 & 0xffffu) * 0x10001u;
     if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
       raw1 = (raw1 & 0xffffu) * 0x10001u;
-    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(raw1 & 0xffffu));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>((raw1 >> 16) & 0xffffu));
-    float acc = util::f16_to_f32(static_cast<uint16_t>(acc_bits));
-    a0 = amdgpu::source_modifier::apply_to_float(a0, 0, inst_.abs, inst_.neg);
-    a1 = amdgpu::source_modifier::apply_to_float(a1, 0, inst_.abs, inst_.neg);
-    b0 = amdgpu::source_modifier::apply_to_float(b0, 1, inst_.abs, inst_.neg);
-    b1 = amdgpu::source_modifier::apply_to_float(b1, 1, inst_.abs, inst_.neg);
-    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.abs, inst_.neg);
-    uint32_t result_bits = amdgpu::fp_mode::dot2_f16(a0, b0, a1, b1, acc, wf.fp16_ovfl());
+    uint32_t acc_bits = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src2))
+      acc_bits = (acc_bits & 0xffffu) * 0x10001u;
+    if (opsel & 4u)
+      acc_bits >>= 16;
+    const auto half = [&](uint32_t bits, unsigned source) {
+      return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(bits & 0xffffu, source,
+                                                                             inst_.abs, inst_.neg));
+    };
+    const uint16_t src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);
+    const uint16_t src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);
+    const uint16_t acc = half(acc_bits, 2);
+    const uint16_t result_bits =
+        amdgpu::gfx11_dot2_packed16<false>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
   dpp_write_mask_scope_.restore();
@@ -7838,18 +7897,20 @@ void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       raw0 = (raw0 & 0xffffu) * 0x10001u;
     if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
       raw1 = (raw1 & 0xffffu) * 0x10001u;
-    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
-    float a0 = util::bf16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
-    float a1 = util::bf16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
-    float b0 = util::bf16_to_f32(static_cast<uint16_t>(raw1 & 0xffffu));
-    float b1 = util::bf16_to_f32(static_cast<uint16_t>((raw1 >> 16) & 0xffffu));
-    float acc = util::bf16_to_f32(static_cast<uint16_t>(acc_bits));
-    a0 = amdgpu::source_modifier::apply_to_float(a0, 0, inst_.abs, inst_.neg);
-    a1 = amdgpu::source_modifier::apply_to_float(a1, 0, inst_.abs, inst_.neg);
-    b0 = amdgpu::source_modifier::apply_to_float(b0, 1, inst_.abs, inst_.neg);
-    b1 = amdgpu::source_modifier::apply_to_float(b1, 1, inst_.abs, inst_.neg);
-    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.abs, inst_.neg);
-    uint32_t result_bits = amdgpu::fp_mode::dot2_bf16(a0, b0, a1, b1, acc);
+    uint32_t acc_bits = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src2))
+      acc_bits = (acc_bits & 0xffffu) * 0x10001u;
+    if (opsel & 4u)
+      acc_bits >>= 16;
+    const auto half = [&](uint32_t bits, unsigned source) {
+      return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::BF16>(
+          bits & 0xffffu, source, inst_.abs, inst_.neg));
+    };
+    const uint16_t src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);
+    const uint16_t src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);
+    const uint16_t acc = half(acc_bits, 2);
+    const uint16_t result_bits =
+        amdgpu::gfx11_dot2_packed16<true>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
 }
@@ -7885,18 +7946,20 @@ RJ_NOINLINE void VDot2Bf16Bf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
       raw0 = (raw0 & 0xffffu) * 0x10001u;
     if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
       raw1 = (raw1 & 0xffffu) * 0x10001u;
-    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
-    float a0 = util::bf16_to_f32(static_cast<uint16_t>(raw0 & 0xffffu));
-    float a1 = util::bf16_to_f32(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));
-    float b0 = util::bf16_to_f32(static_cast<uint16_t>(raw1 & 0xffffu));
-    float b1 = util::bf16_to_f32(static_cast<uint16_t>((raw1 >> 16) & 0xffffu));
-    float acc = util::bf16_to_f32(static_cast<uint16_t>(acc_bits));
-    a0 = amdgpu::source_modifier::apply_to_float(a0, 0, inst_.abs, inst_.neg);
-    a1 = amdgpu::source_modifier::apply_to_float(a1, 0, inst_.abs, inst_.neg);
-    b0 = amdgpu::source_modifier::apply_to_float(b0, 1, inst_.abs, inst_.neg);
-    b1 = amdgpu::source_modifier::apply_to_float(b1, 1, inst_.abs, inst_.neg);
-    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.abs, inst_.neg);
-    uint32_t result_bits = amdgpu::fp_mode::dot2_bf16(a0, b0, a1, b1, acc);
+    uint32_t acc_bits = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src2))
+      acc_bits = (acc_bits & 0xffffu) * 0x10001u;
+    if (opsel & 4u)
+      acc_bits >>= 16;
+    const auto half = [&](uint32_t bits, unsigned source) {
+      return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::BF16>(
+          bits & 0xffffu, source, inst_.abs, inst_.neg));
+    };
+    const uint16_t src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);
+    const uint16_t src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);
+    const uint16_t acc = half(acc_bits, 2);
+    const uint16_t result_bits =
+        amdgpu::gfx11_dot2_packed16<true>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
   dpp_write_mask_scope_.restore();
@@ -8091,6 +8154,8 @@ void VCvtPkI16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     float f0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
     float f1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    f0 = amdgpu::source_modifier::apply_to_float(f0, 0, inst_.abs, inst_.neg);
+    f1 = amdgpu::source_modifier::apply_to_float(f1, 1, inst_.abs, inst_.neg);
     uint32_t lo = amdgpu::cvt_i16_f32(f0);
     uint32_t hi = amdgpu::cvt_i16_f32(f1);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
@@ -8120,6 +8185,8 @@ RJ_NOINLINE void VCvtPkI16F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
       continue;
     float f0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
     float f1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    f0 = amdgpu::source_modifier::apply_to_float(f0, 0, inst_.abs, inst_.neg);
+    f1 = amdgpu::source_modifier::apply_to_float(f1, 1, inst_.abs, inst_.neg);
     uint32_t lo = amdgpu::cvt_i16_f32(f0);
     uint32_t hi = amdgpu::cvt_i16_f32(f1);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
@@ -8139,6 +8206,8 @@ void VCvtPkU16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     float f0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
     float f1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    f0 = amdgpu::source_modifier::apply_to_float(f0, 0, inst_.abs, inst_.neg);
+    f1 = amdgpu::source_modifier::apply_to_float(f1, 1, inst_.abs, inst_.neg);
     uint32_t lo = amdgpu::cvt_u16_f32(f0);
     uint32_t hi = amdgpu::cvt_u16_f32(f1);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
@@ -8168,6 +8237,8 @@ RJ_NOINLINE void VCvtPkU16F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
       continue;
     float f0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
     float f1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    f0 = amdgpu::source_modifier::apply_to_float(f0, 0, inst_.abs, inst_.neg);
+    f1 = amdgpu::source_modifier::apply_to_float(f1, 1, inst_.abs, inst_.neg);
     uint32_t lo = amdgpu::cvt_u16_f32(f0);
     uint32_t hi = amdgpu::cvt_u16_f32(f1);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
@@ -8522,8 +8593,8 @@ void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(
-      uint32_t, [](auto a, auto b) { return (a & 0xFFFFu) | ((b & 0xFFFFu) << 16); });
+  const auto conversion = amdgpu::conversion_pack_b32_f16(wf, inst_.abs, inst_.neg);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(uint32_t, conversion);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8531,7 +8602,7 @@ void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, inst_.op_sel, 0);
     uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, inst_.op_sel, 1);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
-                                                               s0 | (s1 << 16));
+                                                               conversion(s0, s1));
   }
 }
 
@@ -8554,8 +8625,8 @@ RJ_NOINLINE void VPackB32F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(
-      uint32_t, [](auto a, auto b) { return (a & 0xFFFFu) | ((b & 0xFFFFu) << 16); });
+  const auto conversion = amdgpu::conversion_pack_b32_f16(wf, inst_.abs, inst_.neg);
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(uint32_t, conversion);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8563,7 +8634,7 @@ RJ_NOINLINE void VPackB32F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, inst_.op_sel, 0);
     uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, inst_.op_sel, 1);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
-                                                               s0 | (s1 << 16));
+                                                               conversion(s0, s1));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -9511,19 +9582,10 @@ void VCmpFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t, [](auto a, auto b) { return decltype(a == b)(false); });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (0)
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::F>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpFF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -9539,12 +9601,14 @@ RJ_NOINLINE void VCmpFF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_row_bank_mask_ = dpp_plan_.row_bank_mask;
     dpp_source_write_mask_ = dpp_plan_.source_write_mask;
   }
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (!wf.dx10_clamp()) {
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
+                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+    if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+      amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
+                              amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -9553,19 +9617,12 @@ RJ_NOINLINE void VCmpFF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t, [](auto a, auto b) { return decltype(a == b)(false); });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (0)
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::F>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9576,28 +9633,10 @@ void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpLtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -9627,28 +9666,12 @@ RJ_NOINLINE void VCmpLtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9659,28 +9682,10 @@ void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpEqF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -9710,28 +9715,12 @@ RJ_NOINLINE void VCmpEqF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9742,28 +9731,10 @@ void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpLeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -9793,28 +9764,12 @@ RJ_NOINLINE void VCmpLeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9825,28 +9780,10 @@ void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpGtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -9876,28 +9813,12 @@ RJ_NOINLINE void VCmpGtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9908,28 +9829,10 @@ void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpLgF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -9959,28 +9862,12 @@ RJ_NOINLINE void VCmpLgF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -9991,28 +9878,10 @@ void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpGeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10042,28 +9911,12 @@ RJ_NOINLINE void VCmpGeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10074,28 +9927,10 @@ void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::O>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::O>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::O>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpOF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10125,28 +9960,12 @@ RJ_NOINLINE void VCmpOF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::O>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::O>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::O>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10157,28 +9976,10 @@ void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::U>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::U>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::U>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpUF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10208,28 +10009,12 @@ RJ_NOINLINE void VCmpUF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::U>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::U>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::U>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10240,28 +10025,10 @@ void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpNgeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10291,28 +10058,12 @@ RJ_NOINLINE void VCmpNgeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10323,28 +10074,10 @@ void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpNlgF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10374,28 +10107,12 @@ RJ_NOINLINE void VCmpNlgF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10406,28 +10123,10 @@ void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpNgtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10457,28 +10156,12 @@ RJ_NOINLINE void VCmpNgtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10489,28 +10172,10 @@ void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpNleF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10540,28 +10205,12 @@ RJ_NOINLINE void VCmpNleF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10572,28 +10221,10 @@ void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpNeqF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10623,28 +10254,12 @@ RJ_NOINLINE void VCmpNeqF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10655,28 +10270,10 @@ void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpNltF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10706,28 +10303,12 @@ RJ_NOINLINE void VCmpNltF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t,
-      [input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()),
-       abs_mods = inst.inst_.abs, neg_mods = inst.inst_.neg](auto a, auto b) {
-        return amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
-            a, b, abs_mods, neg_mods, input_policy);
-      });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0),
-            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1), inst_.abs,
-            inst_.neg, input_policy))
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpTF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10738,19 +10319,10 @@ void VCmpTF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t, [](auto a, auto b) { return decltype(a == b)(true); });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (1)
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::T>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpTF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10766,12 +10338,14 @@ RJ_NOINLINE void VCmpTF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_row_bank_mask_ = dpp_plan_.row_bank_mask;
     dpp_source_write_mask_ = dpp_plan_.source_write_mask;
   }
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (!wf.dx10_clamp()) {
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
+                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+    if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+      amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
+                              amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -10780,19 +10354,12 @@ RJ_NOINLINE void VCmpTF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOPC_VOP3_TRUE16_INT_RESULT(
-      commit_result, uint32_t, [](auto a, auto b) { return decltype(a == b)(true); });
-  uint64_t exec = wf.exec();
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  uint64_t vcc = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    if (1)
-      vcc |= (1ULL << lane);
-  }
-  commit_result(vcc);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::T>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10803,7 +10370,10 @@ void VCmpFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_f_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::F>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpFF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10819,10 +10389,12 @@ RJ_NOINLINE void VCmpFF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_row_bank_mask_ = dpp_plan_.row_bank_mask;
     dpp_source_write_mask_ = dpp_plan_.source_write_mask;
   }
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (!wf.dx10_clamp()) {
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
+    if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+      amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -10831,7 +10403,12 @@ RJ_NOINLINE void VCmpFF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_f_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::F>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10842,7 +10419,10 @@ void VCmpLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_lt_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Lt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpLtF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10870,7 +10450,12 @@ RJ_NOINLINE void VCmpLtF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_lt_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Lt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10881,7 +10466,10 @@ void VCmpEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_eq_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Eq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpEqF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10909,7 +10497,12 @@ RJ_NOINLINE void VCmpEqF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_eq_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Eq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10920,7 +10513,10 @@ void VCmpLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_le_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Le>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpLeF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10948,7 +10544,12 @@ RJ_NOINLINE void VCmpLeF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_le_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Le>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10959,7 +10560,10 @@ void VCmpGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_gt_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Gt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpGtF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -10987,7 +10591,12 @@ RJ_NOINLINE void VCmpGtF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_gt_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Gt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -10998,7 +10607,10 @@ void VCmpLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_lg_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Lg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpLgF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -11026,7 +10638,12 @@ RJ_NOINLINE void VCmpLgF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_lg_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Lg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11037,7 +10654,10 @@ void VCmpGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_ge_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Ge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpGeF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -11065,7 +10685,12 @@ RJ_NOINLINE void VCmpGeF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_ge_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Ge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11076,7 +10701,10 @@ void VCmpOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_o_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::O>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpOF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -11104,7 +10732,12 @@ RJ_NOINLINE void VCmpOF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_o_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::O>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11115,7 +10748,10 @@ void VCmpUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_u_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::U>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpUF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -11143,7 +10779,12 @@ RJ_NOINLINE void VCmpUF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_u_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::U>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11154,7 +10795,10 @@ void VCmpNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_nge_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpNgeF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -11182,7 +10826,12 @@ RJ_NOINLINE void VCmpNgeF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_nge_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11193,7 +10842,10 @@ void VCmpNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_nlg_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nlg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpNlgF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -11221,7 +10873,12 @@ RJ_NOINLINE void VCmpNlgF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_nlg_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nlg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11232,7 +10889,10 @@ void VCmpNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_ngt_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Ngt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpNgtF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -11260,7 +10920,12 @@ RJ_NOINLINE void VCmpNgtF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_ngt_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Ngt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11271,7 +10936,10 @@ void VCmpNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_nle_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nle>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpNleF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -11299,7 +10967,12 @@ RJ_NOINLINE void VCmpNleF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_nle_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nle>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11310,7 +10983,10 @@ void VCmpNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_neq_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Neq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpNeqF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -11338,7 +11014,12 @@ RJ_NOINLINE void VCmpNeqF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_neq_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Neq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11349,7 +11030,10 @@ void VCmpNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_nlt_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nlt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpNltF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -11377,7 +11061,12 @@ RJ_NOINLINE void VCmpNltF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_nlt_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nlt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpTF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11388,7 +11077,10 @@ void VCmpTF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
-  amdgpu::execute_v_cmp_t_f32_vop3(*this, wf, commit_result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::T>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpTF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -11404,10 +11096,12 @@ RJ_NOINLINE void VCmpTF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_row_bank_mask_ = dpp_plan_.row_bank_mask;
     dpp_source_write_mask_ = dpp_plan_.source_write_mask;
   }
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (!wf.dx10_clamp()) {
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
+    if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+      amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -11416,7 +11110,12 @@ RJ_NOINLINE void VCmpTF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_t_f32_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::T>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11424,7 +11123,10 @@ void VCmpFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_f_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::F>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11432,7 +11134,10 @@ void VCmpLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_lt_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Lt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11440,7 +11145,10 @@ void VCmpEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_eq_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Eq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11448,7 +11156,10 @@ void VCmpLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_le_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Le>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11456,7 +11167,10 @@ void VCmpGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_gt_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Gt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11464,7 +11178,10 @@ void VCmpLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_lg_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Lg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11472,7 +11189,10 @@ void VCmpGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_ge_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Ge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11480,7 +11200,10 @@ void VCmpOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_o_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::O>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11488,7 +11211,10 @@ void VCmpUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_u_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::U>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11496,7 +11222,10 @@ void VCmpNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_nge_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Nge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11504,7 +11233,10 @@ void VCmpNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_nlg_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Nlg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11512,7 +11244,10 @@ void VCmpNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_ngt_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Ngt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11520,7 +11255,10 @@ void VCmpNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_nle_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Nle>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11528,7 +11266,10 @@ void VCmpNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_neq_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Neq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11536,7 +11277,10 @@ void VCmpNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_nlt_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Nlt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpTF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11544,7 +11288,10 @@ void VCmpTF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
-  amdgpu::execute_v_cmp_t_f64_vop3(*this, wf, commit_result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::T>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -11555,6 +11302,8 @@ void VCmpLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11595,6 +11344,8 @@ RJ_NOINLINE void VCmpLtI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11616,6 +11367,8 @@ void VCmpEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11656,6 +11409,8 @@ RJ_NOINLINE void VCmpEqI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11677,6 +11432,8 @@ void VCmpLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11717,6 +11474,8 @@ RJ_NOINLINE void VCmpLeI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11738,6 +11497,8 @@ void VCmpGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11778,6 +11539,8 @@ RJ_NOINLINE void VCmpGtI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11799,6 +11562,8 @@ void VCmpNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11839,6 +11604,8 @@ RJ_NOINLINE void VCmpNeI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11860,6 +11627,8 @@ void VCmpGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11900,6 +11669,8 @@ RJ_NOINLINE void VCmpGeI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11921,6 +11692,8 @@ void VCmpLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11961,6 +11734,8 @@ RJ_NOINLINE void VCmpLtU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -11982,6 +11757,8 @@ void VCmpEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -12023,6 +11800,8 @@ RJ_NOINLINE void VCmpEqU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -12045,6 +11824,8 @@ void VCmpLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -12086,6 +11867,8 @@ RJ_NOINLINE void VCmpLeU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -12108,6 +11891,8 @@ void VCmpGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -12148,6 +11933,8 @@ RJ_NOINLINE void VCmpGtU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -12169,6 +11956,8 @@ void VCmpNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -12210,6 +11999,8 @@ RJ_NOINLINE void VCmpNeU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -12232,6 +12023,8 @@ void VCmpGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     amdgpu::write_wave_mask_scalar(vdst, wf, raw_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -12273,6 +12066,8 @@ RJ_NOINLINE void VCmpGeU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(vdst, wf, final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
   uint64_t vcc = 0;
@@ -13275,14 +13070,10 @@ void VCmpxFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::F>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxFF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -13298,12 +13089,14 @@ RJ_NOINLINE void VCmpxFF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_row_bank_mask_ = dpp_plan_.row_bank_mask;
     dpp_source_write_mask_ = dpp_plan_.source_write_mask;
   }
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (!wf.dx10_clamp()) {
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
+                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+    if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+      amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
+                              amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -13312,14 +13105,12 @@ RJ_NOINLINE void VCmpxFF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::F>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13328,20 +13119,10 @@ void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxLtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -13371,20 +13152,12 @@ RJ_NOINLINE void VCmpxLtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Lt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13393,20 +13166,10 @@ void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxEqF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -13436,20 +13199,12 @@ RJ_NOINLINE void VCmpxEqF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Eq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13458,20 +13213,10 @@ void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxLeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -13501,20 +13246,12 @@ RJ_NOINLINE void VCmpxLeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Le>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13523,20 +13260,10 @@ void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxGtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -13566,20 +13293,12 @@ RJ_NOINLINE void VCmpxGtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Gt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13588,20 +13307,10 @@ void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxLgF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -13631,20 +13340,12 @@ RJ_NOINLINE void VCmpxLgF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Lg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13653,20 +13354,10 @@ void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxGeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -13696,20 +13387,12 @@ RJ_NOINLINE void VCmpxGeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Ge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13718,20 +13401,10 @@ void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::O>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::O>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxOF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -13761,20 +13434,12 @@ RJ_NOINLINE void VCmpxOF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::O>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::O>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13783,20 +13448,10 @@ void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::U>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::U>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxUF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -13826,20 +13481,12 @@ RJ_NOINLINE void VCmpxUF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::U>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::U>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13848,20 +13495,10 @@ void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxNgeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -13891,20 +13528,12 @@ RJ_NOINLINE void VCmpxNgeF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13913,20 +13542,10 @@ void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxNlgF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -13956,20 +13575,12 @@ RJ_NOINLINE void VCmpxNlgF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nlg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -13978,20 +13589,10 @@ void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxNgtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14021,20 +13622,12 @@ RJ_NOINLINE void VCmpxNgtF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Ngt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14043,20 +13636,10 @@ void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxNleF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14086,20 +13669,12 @@ RJ_NOINLINE void VCmpxNleF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nle>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14108,20 +13683,10 @@ void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxNeqF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14151,20 +13716,12 @@ RJ_NOINLINE void VCmpxNeqF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Neq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14173,20 +13730,10 @@ void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxNltF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14216,20 +13763,12 @@ RJ_NOINLINE void VCmpxNltF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
-    const uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::Nlt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxTF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14238,14 +13777,10 @@ void VCmpxTF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::T>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxTF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14261,12 +13796,14 @@ RJ_NOINLINE void VCmpxTF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_row_bank_mask_ = dpp_plan_.row_bank_mask;
     dpp_source_write_mask_ = dpp_plan_.source_write_mask;
   }
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
-                           amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
-                            amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  if (!wf.dx10_clamp()) {
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf,
+                             amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+    if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+      amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf,
+                              amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -14275,14 +13812,12 @@ RJ_NOINLINE void VCmpxTF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F16, amdgpu::comparison::T>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14291,14 +13826,10 @@ void VCmpxFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::F>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxFF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14314,10 +13845,12 @@ RJ_NOINLINE void VCmpxFF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_row_bank_mask_ = dpp_plan_.row_bank_mask;
     dpp_source_write_mask_ = dpp_plan_.source_write_mask;
   }
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (!wf.dx10_clamp()) {
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
+    if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+      amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -14326,14 +13859,12 @@ RJ_NOINLINE void VCmpxFF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::F>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14342,19 +13873,10 @@ void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Lt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxLtF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14382,19 +13904,12 @@ RJ_NOINLINE void VCmpxLtF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Lt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14403,19 +13918,10 @@ void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Eq>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Eq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxEqF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14443,19 +13949,12 @@ RJ_NOINLINE void VCmpxEqF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Eq>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Eq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14464,19 +13963,10 @@ void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Le>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Le>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxLeF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14504,19 +13994,12 @@ RJ_NOINLINE void VCmpxLeF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Le>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Le>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14525,19 +14008,10 @@ void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Gt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Gt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxGtF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14565,19 +14039,12 @@ RJ_NOINLINE void VCmpxGtF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Gt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Gt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14586,19 +14053,10 @@ void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lg>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Lg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxLgF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14626,19 +14084,12 @@ RJ_NOINLINE void VCmpxLgF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Lg>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Lg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14647,19 +14098,10 @@ void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ge>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Ge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxGeF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14687,19 +14129,12 @@ RJ_NOINLINE void VCmpxGeF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ge>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Ge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14708,19 +14143,10 @@ void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::O>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::O>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxOF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14748,19 +14174,12 @@ RJ_NOINLINE void VCmpxOF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::O>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::O>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14769,19 +14188,10 @@ void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::U>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::U>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxUF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14809,19 +14219,12 @@ RJ_NOINLINE void VCmpxUF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::U>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::U>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14830,19 +14233,10 @@ void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nge>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxNgeF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14870,19 +14264,12 @@ RJ_NOINLINE void VCmpxNgeF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nge>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14891,19 +14278,10 @@ void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlg>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nlg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxNlgF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14931,19 +14309,12 @@ RJ_NOINLINE void VCmpxNlgF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlg>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nlg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -14952,19 +14323,10 @@ void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ngt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Ngt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxNgtF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -14992,19 +14354,12 @@ RJ_NOINLINE void VCmpxNgtF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Ngt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Ngt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15013,19 +14368,10 @@ void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nle>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nle>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxNleF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -15053,19 +14399,12 @@ RJ_NOINLINE void VCmpxNleF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nle>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nle>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15074,19 +14413,10 @@ void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Neq>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Neq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxNeqF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -15114,19 +14444,12 @@ RJ_NOINLINE void VCmpxNeqF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Neq>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Neq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15135,19 +14458,10 @@ void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nlt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxNltF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -15175,19 +14489,12 @@ RJ_NOINLINE void VCmpxNltF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F32, amdgpu::comparison::Nlt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::Nlt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxTF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15196,14 +14503,10 @@ void VCmpxTF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  commit_result(result);
+  const uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::T>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 RJ_NOINLINE void VCmpxTF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -15219,10 +14522,12 @@ RJ_NOINLINE void VCmpxTF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_row_bank_mask_ = dpp_plan_.row_bank_mask;
     dpp_source_write_mask_ = dpp_plan_.source_write_mask;
   }
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  if (!wf.dx10_clamp()) {
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
+    if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+      amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  }
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
@@ -15231,14 +14536,12 @@ RJ_NOINLINE void VCmpxTF32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F32, amdgpu::comparison::T>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15246,14 +14549,10 @@ void VCmpxFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::F>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15261,19 +14560,10 @@ void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Lt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Lt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15281,19 +14571,10 @@ void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Eq>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Eq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15301,19 +14582,10 @@ void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Le>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Le>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15321,19 +14593,10 @@ void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Gt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Gt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15341,19 +14604,10 @@ void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Lg>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Lg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15361,19 +14615,10 @@ void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Ge>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Ge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15381,19 +14626,10 @@ void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::O>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::O>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15401,19 +14637,10 @@ void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::U>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::U>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15421,19 +14648,10 @@ void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nge>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Nge>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15441,19 +14659,10 @@ void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nlg>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Nlg>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15461,19 +14670,10 @@ void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Ngt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Ngt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15481,19 +14681,10 @@ void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nle>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Nle>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15501,19 +14692,10 @@ void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Neq>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Neq>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15521,19 +14703,10 @@ void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (amdgpu::comparison::evaluate<amdgpu::fp_format::F64, amdgpu::comparison::Nlt>(
-            s0, s1, inst_.abs, inst_.neg, input_policy))
-      result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::Nlt>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxTF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15541,14 +14714,10 @@ void VCmpxTF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t final_result = raw_result;
     wf.set_exec(final_result);
   };
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  commit_result(result);
+  uint64_t exec_mask = wf.exec();
+  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F64, amdgpu::comparison::T>(
+      wf, src0, src1, amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg, exec_mask, !wf.dx10_clamp(),
+      inst_.clamp, commit_result);
 }
 
 void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -15557,6 +14726,8 @@ void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -15604,6 +14775,8 @@ RJ_NOINLINE void VCmpxLtI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -15630,6 +14803,8 @@ void VCmpxEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -15677,6 +14852,8 @@ RJ_NOINLINE void VCmpxEqI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -15703,6 +14880,8 @@ void VCmpxLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -15750,6 +14929,8 @@ RJ_NOINLINE void VCmpxLeI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -15776,6 +14957,8 @@ void VCmpxGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -15823,6 +15006,8 @@ RJ_NOINLINE void VCmpxGtI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -15849,6 +15034,8 @@ void VCmpxNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -15896,6 +15083,8 @@ RJ_NOINLINE void VCmpxNeI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -15922,6 +15111,8 @@ void VCmpxGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -15969,6 +15160,8 @@ RJ_NOINLINE void VCmpxGeI16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -15995,6 +15188,8 @@ void VCmpxLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -16042,6 +15237,8 @@ RJ_NOINLINE void VCmpxLtU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -16068,6 +15265,8 @@ void VCmpxEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -16115,6 +15314,8 @@ RJ_NOINLINE void VCmpxEqU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -16141,6 +15342,8 @@ void VCmpxLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -16188,6 +15391,8 @@ RJ_NOINLINE void VCmpxLeU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -16214,6 +15419,8 @@ void VCmpxGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -16261,6 +15468,8 @@ RJ_NOINLINE void VCmpxGtU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -16287,6 +15496,8 @@ void VCmpxNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -16334,6 +15545,8 @@ RJ_NOINLINE void VCmpxNeU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -16360,6 +15573,8 @@ void VCmpxGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_exec(raw_result); };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -16407,6 +15622,8 @@ RJ_NOINLINE void VCmpxGeU16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                                      dpp_source_write_mask_);
     wf.set_exec(final_result);
   };
+  CapturedArithmeticSource lhs_input(wf, src0, src0.register_byte_mask());
+  CapturedArithmeticSource rhs_input(wf, src1, src1.register_byte_mask());
   uint64_t exec = wf.exec();
   uint64_t result = 0;
   uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -17887,13 +17104,6 @@ RJ_NOINLINE void VAddCoCiU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  uint64_t dpp_source_write_mask_ = ~0ULL;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    dpp_source_write_mask_ = dpp_plan_.source_write_mask;
-  uint64_t dpp_old_secondary_dst_ = 0;
-  if (inst_.src0 == amdgpu::SRC_DPP && (dpp_old_exec_ & ~dpp_source_write_mask_)) {
-    dpp_old_secondary_dst_ = amdgpu::read_wave_mask_scalar(sdst, wf);
-  }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
@@ -17906,8 +17116,7 @@ RJ_NOINLINE void VAddCoCiU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
     if (inst_.src0 == amdgpu::SRC_DPP)
-      final_result = amdgpu::dpp::dpp_source_suppressed_result(
-          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
+      final_result &= dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_add_co_ci_u32_vop3(*this, wf, commit_result);
@@ -17932,13 +17141,6 @@ RJ_NOINLINE void VSubCoCiU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  uint64_t dpp_source_write_mask_ = ~0ULL;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    dpp_source_write_mask_ = dpp_plan_.source_write_mask;
-  uint64_t dpp_old_secondary_dst_ = 0;
-  if (inst_.src0 == amdgpu::SRC_DPP && (dpp_old_exec_ & ~dpp_source_write_mask_)) {
-    dpp_old_secondary_dst_ = amdgpu::read_wave_mask_scalar(sdst, wf);
-  }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
@@ -17951,8 +17153,7 @@ RJ_NOINLINE void VSubCoCiU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
     if (inst_.src0 == amdgpu::SRC_DPP)
-      final_result = amdgpu::dpp::dpp_source_suppressed_result(
-          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
+      final_result &= dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_sub_co_ci_u32_vop3(*this, wf, commit_result);
@@ -17971,24 +17172,19 @@ void VSubrevCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 RJ_NOINLINE void VSubrevCoCiU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront &wf) {
-  std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  uint64_t dpp_source_write_mask_ = ~0ULL;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    dpp_source_write_mask_ = dpp_plan_.source_write_mask;
-  uint64_t dpp_old_secondary_dst_ = 0;
-  if (inst_.src0 == amdgpu::SRC_DPP && (dpp_old_exec_ & ~dpp_source_write_mask_)) {
-    dpp_old_secondary_dst_ = amdgpu::read_wave_mask_scalar(sdst, wf);
-  }
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  if (!src1.decoded_vgpr())
+    dpp_src1_.emplace(src1, wf.wf_size());
+  else if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_dpp(src1, dpp_plan_, dpp_old_exec_, dpp_src1_, wf);
+  else if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::apply_dpp8(src1, dpp8_lane_sel_, dpp_fi_, dpp_src1_, wf);
+  ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
@@ -17996,8 +17192,7 @@ RJ_NOINLINE void VSubrevCoCiU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefr
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
     if (inst_.src0 == amdgpu::SRC_DPP)
-      final_result = amdgpu::dpp::dpp_source_suppressed_result(
-          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
+      final_result &= dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_subrev_co_ci_u32_vop3(*this, wf, commit_result);
@@ -18054,13 +17249,6 @@ RJ_NOINLINE void VAddCoU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront &
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  uint64_t dpp_source_write_mask_ = ~0ULL;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    dpp_source_write_mask_ = dpp_plan_.source_write_mask;
-  uint64_t dpp_old_secondary_dst_ = 0;
-  if (inst_.src0 == amdgpu::SRC_DPP && (dpp_old_exec_ & ~dpp_source_write_mask_)) {
-    dpp_old_secondary_dst_ = amdgpu::read_wave_mask_scalar(sdst, wf);
-  }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
@@ -18073,8 +17261,7 @@ RJ_NOINLINE void VAddCoU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront &
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
     if (inst_.src0 == amdgpu::SRC_DPP)
-      final_result = amdgpu::dpp::dpp_source_suppressed_result(
-          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
+      final_result &= dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_add_co_u32_vop3(*this, wf, commit_result);
@@ -18099,13 +17286,6 @@ RJ_NOINLINE void VSubCoU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront &
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  uint64_t dpp_source_write_mask_ = ~0ULL;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    dpp_source_write_mask_ = dpp_plan_.source_write_mask;
-  uint64_t dpp_old_secondary_dst_ = 0;
-  if (inst_.src0 == amdgpu::SRC_DPP && (dpp_old_exec_ & ~dpp_source_write_mask_)) {
-    dpp_old_secondary_dst_ = amdgpu::read_wave_mask_scalar(sdst, wf);
-  }
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
@@ -18118,8 +17298,7 @@ RJ_NOINLINE void VSubCoU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront &
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
     if (inst_.src0 == amdgpu::SRC_DPP)
-      final_result = amdgpu::dpp::dpp_source_suppressed_result(
-          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
+      final_result &= dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_sub_co_u32_vop3(*this, wf, commit_result);
@@ -18138,24 +17317,19 @@ void VSubrevCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 RJ_NOINLINE void VSubrevCoU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront &wf) {
-  std::optional<StagedOperand> dpp_src0_;
+  std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                            dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
   [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
-  uint64_t dpp_source_write_mask_ = ~0ULL;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    dpp_source_write_mask_ = dpp_plan_.source_write_mask;
-  uint64_t dpp_old_secondary_dst_ = 0;
-  if (inst_.src0 == amdgpu::SRC_DPP && (dpp_old_exec_ & ~dpp_source_write_mask_)) {
-    dpp_old_secondary_dst_ = amdgpu::read_wave_mask_scalar(sdst, wf);
-  }
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
-  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
-    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  if (!src1.decoded_vgpr())
+    dpp_src1_.emplace(src1, wf.wf_size());
+  else if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_dpp(src1, dpp_plan_, dpp_old_exec_, dpp_src1_, wf);
+  else if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::apply_dpp8(src1, dpp8_lane_sel_, dpp_fi_, dpp_src1_, wf);
+  ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
@@ -18163,8 +17337,7 @@ RJ_NOINLINE void VSubrevCoU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefron
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
     if (inst_.src0 == amdgpu::SRC_DPP)
-      final_result = amdgpu::dpp::dpp_source_suppressed_result(
-          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
+      final_result &= dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask;
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_subrev_co_u32_vop3(*this, wf, commit_result);

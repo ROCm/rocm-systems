@@ -5,6 +5,8 @@
 import json
 import os
 from pathlib import Path
+import resource
+import signal
 import struct
 import subprocess
 import tempfile
@@ -19,12 +21,15 @@ class DecodeCliTest(unittest.TestCase):
             raise unittest.SkipTest("RJ_DECODE_FUZZ is not set")
         cls.decoder = Path(decoder)
 
-    def run_decoder(self, *arguments: str) -> subprocess.CompletedProcess[str]:
+    def run_decoder(
+        self, *arguments: str, preexec_fn=None
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(self.decoder), *arguments],
             text=True,
             capture_output=True,
             check=False,
+            preexec_fn=preexec_fn,
         )
 
     def test_replays_exact_window_as_json(self):
@@ -44,6 +49,54 @@ class DecodeCliTest(unittest.TestCase):
             process = self.run_decoder("--input", str(sample), "--json")
             self.assertEqual(process.returncode, 2)
             self.assertIn("exactly 16 bytes", process.stderr)
+
+    def test_rejects_missing_replay(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            process = self.run_decoder(
+                "--input", str(Path(temporary) / "missing.bin"), "--json"
+            )
+            self.assertEqual(process.returncode, 2)
+            self.assertEqual(process.stdout, "")
+            self.assertIn("rj_decode_fuzz: cannot open input:", process.stderr)
+
+    def test_rejects_seed_destination_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "seeds"
+            destination.write_bytes(b"keep")
+            process = self.run_decoder("--emit-seeds", str(destination))
+            self.assertEqual(process.returncode, 2)
+            self.assertEqual(process.stdout, "")
+            self.assertIn("seed destination is not a directory:", process.stderr)
+            self.assertEqual(destination.read_bytes(), b"keep")
+
+    def test_reports_seed_filesystem_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary) / "file"
+            parent.write_bytes(b"keep")
+            process = self.run_decoder("--emit-seeds", str(parent / "seeds"))
+            self.assertEqual(process.returncode, 2)
+            self.assertEqual(process.stdout, "")
+            self.assertIn("seed destination:", process.stderr)
+            self.assertEqual(parent.read_bytes(), b"keep")
+
+    def test_reports_buffered_seed_write_failure(self):
+        def limit_seed_size():
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            _, hard_limit = resource.getrlimit(resource.RLIMIT_FSIZE)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (8, hard_limit))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            seeds = Path(temporary) / "seeds"
+            process = self.run_decoder(
+                "--emit-seeds",
+                str(seeds),
+                "--target",
+                "gfx950",
+                preexec_fn=limit_seed_size,
+            )
+            self.assertEqual(process.returncode, 2)
+            self.assertIn("cannot write seed:", process.stderr)
+            self.assertEqual(process.stdout, "")
 
     def test_replay_preserves_concrete_target(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -25,7 +25,6 @@ Panel Config:
           unit: Percent
       comparable: false
       cli_style: simple_bar
-      tui_style: simple_bar
   - metric_table:
       id: 1602
       title: vL1D cache stall metrics
@@ -54,7 +53,6 @@ Panel Config:
         Tag RAM Stall (Atomic):
           expr: 100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
       cli_style: simple_box
-      tui_style: simple_box
   - metric_table:
       id: 1603
       title: vL1D cache access metrics
@@ -342,9 +340,9 @@ Panel Config:
           max: MAX(TCP_UTCL1_LFIFO_FULL_sum / $denom)
           unit: (Cycles + $normUnit)
         Resident Page Full Stall:
-          avg: SUM(TCP_UTCL1_STALL_LFIFO_NO_RES_sum) / SUM($denom)
-          min: MIN(TCP_UTCL1_STALL_LFIFO_NO_RES_sum / $denom)
-          max: MAX(TCP_UTCL1_STALL_LFIFO_NO_RES_sum / $denom)
+          avg: SUM(TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES_sum) / SUM($denom)
+          min: MIN(TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES_sum / $denom)
+          max: MAX(TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES_sum / $denom)
           unit: (Cycles + $normUnit)
         UTCL2 Stall:
           avg: SUM(TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum) / SUM($denom)

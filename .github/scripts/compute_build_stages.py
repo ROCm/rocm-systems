@@ -58,7 +58,8 @@ logger = logging.getLogger(__name__)
 # Projects whose changes ripple into downstream consumers. For these we build
 # everything (empty allowlist) to preserve coverage, mirroring the pre-multi-arch
 # CI where clr/hip/rocr-runtime, amdsmi, and profiler mapped to
-# -DTHEROCK_ENABLE_ALL=ON in .github/scripts/therock_matrix.py.
+# -DTHEROCK_ENABLE_ALL=ON. This set is now where that mapping lives; every other
+# project is mapped to stages by TheRock's BUILD_TOPOLOGY.toml.
 FULL_BUILD_PROJECTS = {
     "clr",
     "hip",

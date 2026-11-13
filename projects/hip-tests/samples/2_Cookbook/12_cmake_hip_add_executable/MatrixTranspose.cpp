@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <cstdlib>
 #include <iostream>
 
 // hip header file
@@ -73,6 +74,7 @@ int main() {
   hipLaunchKernelGGL(
       matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
       dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix, gpuMatrix, WIDTH);
+  checkHipErrors(hipGetLastError());
 
   // Memory transfer from device to host
   checkHipErrors(
@@ -104,5 +106,5 @@ int main() {
   free(TransposeMatrix);
   free(cpuTransposeMatrix);
 
-  return errors;
+  return errors ? EXIT_FAILURE : EXIT_SUCCESS;
 }

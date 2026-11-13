@@ -3,45 +3,47 @@
 
 //! Native allocation requests and limits, independent of kernel handle formats.
 
-/// One native memory allocation request with explicit size and alignment.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct AllocationDesc {
-    /// Requested bytes, satisfying the native allocator's size granularity.
-    pub size: u64,
-    /// Required base alignment in bytes, expressed as a nonzero power of two.
-    pub alignment: u64,
+/// Policy for detached physical backing created for virtual-memory mappings.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VirtualMemoryOptions {
+    /// Prevent substitution of the native backing after creation.
+    pub pinned: bool,
+    /// Request an uncached backing where the selected placement supports it.
+    pub uncached: bool,
 }
 
-/// Native allocation limits for one backing kind. A successful query describes support,
-/// not a promise that sufficient memory will still be available when allocating.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct AllocationLimits {
-    /// Minimum base alignment in bytes, expressed as a power of two.
-    pub alignment: u64,
-    /// Required size multiple in bytes. Native requests are not silently rounded.
-    pub granularity: u64,
-    /// Largest request supported by this allocator, independent of free capacity.
-    pub maximum_size: u64,
-}
-
-impl AllocationLimits {
-    /// Checks a request against these facts without querying or allocating on a
-    /// device. The allocator still validates the request against current native
-    /// state; retaining this value does not keep a removed device operational.
-    #[must_use]
-    pub fn supports(self, desc: AllocationDesc) -> bool {
-        self.is_valid()
-            && desc.size != 0
-            && desc.size <= self.maximum_size
-            && desc.size % self.granularity == 0
-            && desc.alignment.is_power_of_two()
-            && desc.alignment >= self.alignment
+/// Returns the aligned base and page cover for `size` bytes starting at the
+/// exact registered host address. Both KFD and DRM registration use this rule.
+pub(crate) fn registered_host_page_cover(
+    address: usize,
+    size: usize,
+    page: usize,
+) -> Option<(usize, usize)> {
+    if address == 0 || size == 0 || !page.is_power_of_two() {
+        return None;
     }
+    let offset = address & (page - 1);
+    let base = address - offset;
+    let cover = offset.checked_add(size)?.checked_add(page - 1)? & !(page - 1);
+    base.checked_add(cover)?;
+    Some((base, cover))
+}
 
-    pub(crate) fn is_valid(self) -> bool {
-        self.alignment.is_power_of_two()
-            && self.granularity != 0
-            && self.maximum_size >= self.granularity
+#[cfg(test)]
+mod registration_tests {
+    use super::registered_host_page_cover;
+
+    #[test]
+    fn exact_unaligned_extent_covers_the_page_after_its_end() {
+        assert_eq!(
+            registered_host_page_cover(0x1001, 4096, 4096),
+            Some((0x1000, 8192))
+        );
+        assert_eq!(
+            registered_host_page_cover(0x1001, 4095, 4096),
+            Some((0x1000, 4096))
+        );
+        assert_eq!(registered_host_page_cover(0x1001, 0, 4096), None);
     }
 }
 
@@ -102,6 +104,8 @@ pub enum MemoryKind {
         host_visible: bool,
         /// Request coherent device mappings for fine-grained access.
         coherent: bool,
+        /// Promote device-scope atomic coherence to extended system scope.
+        extended_coherent: bool,
         /// Bypass device caches for this allocation.
         uncached: bool,
         /// Request physically contiguous backing.
@@ -161,8 +165,8 @@ pub struct VirtualMemoryInfo {
 pub enum VirtualMemoryPlacement {
     /// System memory visible through a CPU agent.
     System,
-    /// Device memory owned by the KFD GPU with this native identity.
-    Device(u32),
+    /// Device memory owned by the endpoint with this stable identity.
+    Device([u8; 16]),
 }
 
 /// Cached facts for one reserved process virtual-address range.

@@ -6,9 +6,10 @@
 //! This module assigns no runtime handles and does not activate a device.
 
 use super::{
-    CpuCache, CpuCacheKind, CpuInfo, CpuSet, HostCaches, HostDomain, HostTopologySnapshot,
+    CpuApicId, CpuCache, CpuCacheKind, CpuId, CpuInfo, CpuSet, HostCaches, HostDomain,
+    HostTopologyGraphSnapshot,
 };
-use crate::topology::CacheInfo;
+use crate::topology::{CacheAssociations, CacheInfo};
 use std::path::{Path, PathBuf};
 
 fn parse_memory_bytes(contents: &str) -> Option<usize> {
@@ -39,11 +40,35 @@ fn parse_cpu_info(contents: &str) -> Option<CpuInfo> {
         }
     }
     Some(CpuInfo {
-        name: name?,
+        name,
         compute_units: u32::try_from(compute_units)
             .ok()
             .filter(|count| *count != 0)?,
     })
+}
+
+fn parse_cpu_apic_ids(contents: &str) -> Vec<CpuApicId> {
+    contents
+        .split("\n\n")
+        .filter_map(|entry| {
+            let mut logical_cpu = None;
+            let mut apic_id = None;
+            for line in entry.lines() {
+                let Some((key, value)) = line.split_once(':') else {
+                    continue;
+                };
+                match key.trim() {
+                    "processor" => logical_cpu = value.trim().parse().ok(),
+                    "apicid" => apic_id = value.trim().parse().ok(),
+                    _ => (),
+                }
+            }
+            Some(CpuApicId {
+                logical_cpu: CpuId::linux(logical_cpu?),
+                apic_id: apic_id?,
+            })
+        })
+        .collect()
 }
 
 fn parse_cpu_set(contents: &str) -> Option<CpuSet> {
@@ -69,7 +94,12 @@ fn parse_cpu_set(contents: &str) -> Option<CpuSet> {
         }
         ranges.push((first, last));
     }
-    Some(CpuSet { ranges })
+    Some(CpuSet {
+        ranges: ranges
+            .into_iter()
+            .map(|(a, b)| (u64::from(a), u64::from(b)))
+            .collect(),
+    })
 }
 
 fn parse_node_cpu_set(contents: &str) -> Option<CpuSet> {
@@ -161,29 +191,34 @@ fn discover_caches(root: &Path) -> HostCaches {
                 continue;
             };
             records.push(CpuCache {
-                cpu,
+                cpu: CpuId::linux(cpu),
                 shared_cpus,
-                info: CacheInfo::new(level, size_bytes, line_size_bytes, kind),
+                info: CacheInfo {
+                    associations: CacheAssociations::CPU,
+                    ..CacheInfo::new(level, size_bytes, line_size_bytes, kind)
+                },
             });
         }
     }
     HostCaches { records, complete }
 }
 
-fn snapshot_from(
+fn graph_snapshot_from(
     meminfo: &Path,
     cpuinfo: &Path,
     online: &Path,
     cpu_root: &Path,
     node_root: &Path,
-) -> HostTopologySnapshot {
+) -> HostTopologyGraphSnapshot {
     let memory_bytes = std::fs::read_to_string(meminfo)
         .ok()
         .and_then(|contents| parse_memory_bytes(&contents))
         .filter(|bytes| *bytes != 0);
-    let cpu = std::fs::read_to_string(cpuinfo)
-        .ok()
-        .and_then(|contents| parse_cpu_info(&contents));
+    let cpuinfo_contents = std::fs::read_to_string(cpuinfo).ok();
+    let cpu = cpuinfo_contents.as_deref().and_then(parse_cpu_info);
+    let cpu_apic_ids = cpuinfo_contents
+        .as_deref()
+        .map_or_else(Vec::new, parse_cpu_apic_ids);
     let online_cpus = std::fs::read_to_string(online)
         .ok()
         .and_then(|contents| parse_cpu_set(&contents));
@@ -222,9 +257,10 @@ fn snapshot_from(
             caches: node_caches,
         });
     }
-    HostTopologySnapshot {
+    HostTopologyGraphSnapshot {
         memory_bytes,
         cpu,
+        cpu_apic_ids,
         online_cpus,
         caches,
         domains,
@@ -234,8 +270,8 @@ fn snapshot_from(
 
 /// Reads Linux host facts without requiring KFD or an activated device.
 #[must_use]
-pub(super) fn snapshot() -> HostTopologySnapshot {
-    snapshot_from(
+pub(super) fn graph_snapshot() -> HostTopologyGraphSnapshot {
+    graph_snapshot_from(
         Path::new("/proc/meminfo"),
         Path::new("/proc/cpuinfo"),
         Path::new("/sys/devices/system/cpu/online"),
@@ -302,8 +338,8 @@ mod tests {
             self.write(&format!("{path}/size"), "48K\n");
         }
 
-        fn snapshot(&self) -> HostTopologySnapshot {
-            snapshot_from(
+        fn graph_snapshot(&self) -> HostTopologyGraphSnapshot {
+            graph_snapshot_from(
                 &self.0.join("meminfo"),
                 &self.0.join("cpuinfo"),
                 &self.0.join("online"),
@@ -322,9 +358,9 @@ mod tests {
     #[test]
     fn cpu_sets_reject_malformed_ranges_without_expanding_them() {
         let set = parse_cpu_set("0-3,8,10-12\n").unwrap();
-        assert_eq!(set.first(), Some(0));
-        assert!(set.contains(11));
-        assert!(!set.contains(9));
+        assert_eq!(set.first(), Some(CpuId::linux(0)));
+        assert!(set.contains(CpuId::linux(11)));
+        assert!(!set.contains(CpuId::linux(9)));
         assert!(set.intersects(&parse_cpu_set("9-10").unwrap()));
         assert!(!set.intersects(&parse_cpu_set("4-7").unwrap()));
         for malformed in ["", "2-1", "0-3,3-4", "3,2", "1-", "0-4294967296"] {
@@ -337,11 +373,17 @@ mod tests {
         assert_eq!(
             parse_cpu_info("processor : 0\nmodel name : AMD Example CPU\nprocessor : 1\n"),
             Some(CpuInfo {
-                name: "AMD Example CPU".to_owned(),
+                name: Some("AMD Example CPU".to_owned()),
                 compute_units: 2,
             })
         );
-        assert_eq!(parse_cpu_info("processor : 0\n"), None);
+        assert_eq!(
+            parse_cpu_info("processor : 0\n"),
+            Some(CpuInfo {
+                name: None,
+                compute_units: 1
+            })
+        );
         assert_eq!(parse_cpu_info("model name : AMD Example CPU\n"), None);
         assert_eq!(
             parse_memory_bytes("MemTotal: 263219812 kB\n"),
@@ -351,7 +393,33 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_partitions_complete_cache_scan_by_numa_domain() {
+    fn apic_ids_resolve_numa_domains_through_logical_cpu_ids() {
+        let fixture = Fixture::new();
+        fixture.write(
+            "cpuinfo",
+            "processor : 0\napicid : 8\n\nprocessor : 1\napicid : 2\n",
+        );
+        fixture.write("node/node0/cpulist", "0\n");
+        fixture.write("node/node1/cpulist", "1\n");
+        let snapshot = fixture.graph_snapshot();
+        assert_eq!(snapshot.logical_cpu_for_apic_id(2), Some(CpuId::linux(1)));
+        assert_eq!(
+            snapshot
+                .domain_for_apic_id(2)
+                .map(|domain| domain.numa_node),
+            Some(1)
+        );
+        assert_eq!(
+            snapshot
+                .domain_for_apic_id(8)
+                .map(|domain| domain.numa_node),
+            Some(0)
+        );
+        assert!(snapshot.domain_for_apic_id(1).is_none());
+    }
+
+    #[test]
+    fn graph_snapshot_partitions_complete_cache_scan_by_numa_domain() {
         let fixture = Fixture::new();
         fixture.write("meminfo", "MemTotal: 1024 kB\n");
         fixture.write(
@@ -364,14 +432,20 @@ mod tests {
         fixture.cache("cpu", 4, 0, "4-5\n", "Data\n", 1);
         fixture.write("node/node0/cpulist", "0-1\n");
         fixture.write("node/node2/cpulist", "4-5\n");
-        let snapshot = fixture.snapshot();
+        let snapshot = fixture.graph_snapshot();
         assert_eq!(snapshot.memory_bytes, Some(1024 * 1024));
         assert_eq!(snapshot.cpu.as_ref().unwrap().compute_units, 2);
         assert_eq!(snapshot.domains.len(), 2);
         assert_eq!(snapshot.domain(0).unwrap().caches.records.len(), 2);
-        assert_eq!(snapshot.domain(0).unwrap().caches.records[0].cpu, 0);
+        assert_eq!(
+            snapshot.domain(0).unwrap().caches.records[0].cpu,
+            CpuId::linux(0)
+        );
         assert_eq!(snapshot.domain(2).unwrap().caches.records.len(), 1);
-        assert_eq!(snapshot.domain(2).unwrap().caches.records[0].cpu, 4);
+        assert_eq!(
+            snapshot.domain(2).unwrap().caches.records[0].cpu,
+            CpuId::linux(4)
+        );
         assert!(
             snapshot
                 .domain(2)
@@ -379,12 +453,19 @@ mod tests {
                 .cpus
                 .as_ref()
                 .unwrap()
-                .contains(5)
+                .contains(CpuId::linux(5))
         );
         assert!(snapshot.domains_complete);
         assert_eq!(snapshot.caches.records.len(), 3);
-        assert_eq!(snapshot.caches.records[0].first_shared_cpu(), Some(0));
+        assert_eq!(
+            snapshot.caches.records[0].first_shared_cpu(),
+            Some(CpuId::linux(0))
+        );
         assert_eq!(snapshot.caches.records[0].info.line_size_bytes, Some(64));
+        assert_eq!(
+            snapshot.caches.records[0].info.associations,
+            CacheAssociations::CPU
+        );
         assert_eq!(snapshot.caches.records[1].info.kind, CpuCacheKind::Unified);
         assert!(snapshot.caches.complete);
     }
@@ -397,7 +478,7 @@ mod tests {
         fixture.write("node/node0/cpulist", "0\n");
         fixture.write("node/node2/cpulist", "\n");
 
-        let snapshot = fixture.snapshot();
+        let snapshot = fixture.graph_snapshot();
         assert!(snapshot.domains_complete);
         let node = snapshot.domain(2).unwrap();
         assert_eq!(node.cpus.as_ref().unwrap().first(), None);
@@ -406,12 +487,12 @@ mod tests {
         assert!(node.caches.records.is_empty());
 
         fixture.write("node/node2/cpulist", "invalid\n");
-        let snapshot = fixture.snapshot();
+        let snapshot = fixture.graph_snapshot();
         assert!(!snapshot.domains_complete);
         assert_eq!(snapshot.domain(2).unwrap().cpus, None);
 
         std::fs::remove_file(fixture.0.join("node/node2/cpulist")).unwrap();
-        let snapshot = fixture.snapshot();
+        let snapshot = fixture.graph_snapshot();
         assert!(!snapshot.domains_complete);
         assert_eq!(snapshot.domain(2).unwrap().cpus, None);
     }
@@ -435,7 +516,7 @@ mod tests {
         fixture.write("node/node0/cpulist", "0\n");
         fixture.cache("node/node0", 0, 0, "0\n", "Data\n", 1);
 
-        let snapshot = fixture.snapshot();
+        let snapshot = fixture.graph_snapshot();
         assert!(!snapshot.caches.complete);
         assert!(snapshot.domain(0).unwrap().caches.complete);
         assert_eq!(snapshot.domain(0).unwrap().caches.records.len(), 1);

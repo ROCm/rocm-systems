@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ipaddress
 import json
 import math
 import os
@@ -19,8 +20,9 @@ import shlex
 import stat
 import subprocess
 import sys
-from collections.abc import Iterator
-from typing import Any
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
+from typing import Any, Literal
 
 SocketIdentity = tuple[int, int]
 DEFAULT_PROBE_TIMEOUT_SECONDS = 10.0
@@ -31,6 +33,62 @@ MANAGED_TERMINATION_SIGNALS = frozenset((signal.SIGTERM, signal.SIGINT))
 
 class GuestRunError(ValueError):
     """A QEMU or vfio-user launch requirement was not satisfied."""
+
+
+def validate_network_endpoint(value: str) -> str:
+    """Return a safe, canonical IPv4 endpoint for QEMU's socket netdev."""
+
+    host, separator, port_text = value.rpartition(":")
+    if not separator:
+        raise GuestRunError("network socket endpoint must be numeric IPv4 HOST:PORT")
+    try:
+        address = ipaddress.IPv4Address(host)
+    except ipaddress.AddressValueError as error:
+        raise GuestRunError(
+            "network socket endpoint must be numeric IPv4 HOST:PORT"
+        ) from error
+    if len(port_text) > 5 or not port_text.isascii() or not port_text.isdecimal():
+        raise GuestRunError("network socket port must be in 1..65535")
+    port = int(port_text)
+    if not 1 <= port <= 65535:
+        raise GuestRunError("network socket port must be in 1..65535")
+    return f"{address}:{port}"
+
+
+def validate_network_mac(value: str) -> str:
+    """Require six hexadecimal octets with the multicast bit clear."""
+
+    octets = value.split(":")
+    hex_digits = "0123456789abcdefABCDEF"
+    if len(octets) != 6 or any(
+        len(octet) != 2 or any(digit not in hex_digits for digit in octet)
+        for octet in octets
+    ):
+        raise GuestRunError("network MAC must be six colon-separated hex octets")
+    parsed = [int(octet, 16) for octet in octets]
+    if parsed[0] & 1:
+        raise GuestRunError("network MAC must be unicast")
+    return ":".join(f"{octet:02x}" for octet in parsed)
+
+
+@dataclass(frozen=True)
+class SocketNetwork:
+    """Validated settings for one optional QEMU socket NIC."""
+
+    mode: Literal["listen", "connect", "mcast"]
+    endpoint: str
+    mac: str
+
+    def __post_init__(self) -> None:
+        if self.mode not in ("listen", "connect", "mcast"):
+            raise GuestRunError(f"unknown network socket mode: {self.mode}")
+        object.__setattr__(self, "endpoint", validate_network_endpoint(self.endpoint))
+        if (
+            self.mode == "mcast"
+            and not ipaddress.IPv4Address(self.endpoint.rpartition(":")[0]).is_multicast
+        ):
+            raise GuestRunError("mcast network endpoint must be multicast IPv4")
+        object.__setattr__(self, "mac", validate_network_mac(self.mac))
 
 
 @contextlib.contextmanager
@@ -157,6 +215,24 @@ def require_qemu_vfio_user(qemu: Path, timeout: float) -> None:
         raise GuestRunError("QEMU does not provide the vfio-user-pci device")
 
 
+def require_qemu_atomic_ports(qemu: Path, timeout: float) -> None:
+    """Check that root completion and switch routing are opt-in properties."""
+
+    for device, properties in (
+        ("pcie-root-port", ("x-atomic-comp32=", "x-atomic-comp64=")),
+        ("x3130-upstream", ("x-atomic-route=",)),
+        ("xio3130-downstream", ("x-atomic-route=",)),
+    ):
+        result = run_capability_probe(
+            [str(qemu), "-device", f"{device},help"],
+            f"QEMU {device} AtomicOp property probe",
+            timeout,
+        )
+        detail = "\n".join(part for part in (result.stdout, result.stderr) if part)
+        if result.returncode != 0 or any(prop not in detail for prop in properties):
+            raise GuestRunError(f"QEMU {device} lacks opt-in AtomicOp properties")
+
+
 def require_rocjitsu_vfio_user(rocjitsu: Path, timeout: float) -> None:
     """Require a rocjitsu binary built with its VFIO-user front end."""
 
@@ -194,13 +270,25 @@ def build_qemu_arguments(
     qemu: Path,
     kernel: Path,
     initramfs: Path,
-    socket_path: Path,
+    socket_paths: Sequence[Path],
     accelerator: str,
     memory: str,
     append: str,
+    socket_network: SocketNetwork | None = None,
+    p2v_switch_topology: bool = False,
+    p2v_atomic_root: bool = False,
+    smp: int = 1,
 ) -> list[str]:
+    if smp < 1:
+        raise GuestRunError("guest CPU count must be positive")
+    if socket_network is not None and len(socket_paths) > 4:
+        raise GuestRunError("socket networking supports at most four VFIO-user devices")
+    if p2v_switch_topology and len(socket_paths) not in (2, 4):
+        raise GuestRunError("P2V switch topology requires two or four GPU sockets")
+    if p2v_atomic_root and not p2v_switch_topology:
+        raise GuestRunError("P2V AtomicOp root requires the switch topology")
     cpu = "host,+hypervisor" if accelerator == "kvm" else "qemu64,+hypervisor"
-    return [
+    arguments = [
         str(qemu),
         "-accel",
         accelerator,
@@ -218,26 +306,104 @@ def build_qemu_arguments(
         str(initramfs),
         "-append",
         append,
-        "-device",
-        json.dumps(
-            {
-                "driver": "vfio-user-pci",
-                "rombar": 0,
-                "socket": {"type": "unix", "path": str(socket_path)},
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        ),
-        "-nodefaults",
-        "-no-user-config",
-        "-display",
-        "none",
-        "-monitor",
-        "none",
-        "-serial",
-        "stdio",
-        "-no-reboot",
     ]
+    if smp != 1:
+        arguments.extend(["-smp", str(smp)])
+    if p2v_switch_topology:
+        root_port = (
+            "pcie-root-port,id=p2v-rp,bus=pcie.0,addr=0x4,chassis=1,slot=4,"
+            "x-speed=2_5,x-width=1"
+        )
+        upstream = "x3130-upstream,id=p2v-up,bus=p2v-rp,addr=0x0"
+        if p2v_atomic_root:
+            root_port += ",x-atomic-comp32=on,x-atomic-comp64=on"
+            upstream += ",x-atomic-route=on"
+        for bridge in (root_port, upstream):
+            arguments.extend(["-device", bridge])
+        for ordinal in range(len(socket_paths)):
+            downstream = (
+                f"xio3130-downstream,id=p2v-down-{ordinal},bus=p2v-up,"
+                f"addr=0x{ordinal:x},chassis={ordinal + 2},slot={ordinal}"
+            )
+            if p2v_atomic_root:
+                downstream += ",x-atomic-route=on"
+            arguments.extend(
+                [
+                    "-device",
+                    downstream,
+                ]
+            )
+    for ordinal, socket_path in enumerate(socket_paths):
+        device: dict[str, Any] = {
+            "driver": "vfio-user-pci",
+            "rombar": 0,
+            "socket": {"type": "unix", "path": str(socket_path)},
+        }
+        if p2v_switch_topology:
+            device.update(
+                {
+                    "bus": f"p2v-down-{ordinal}",
+                    "addr": "0x0",
+                    "id": f"rocjitsu-gpu-{ordinal}",
+                }
+            )
+        elif len(socket_paths) > 1 or socket_network is not None:
+            # Keep low slots and the Q35 chipset's upper slots available.
+            if ordinal + 4 >= 0x1C:
+                raise GuestRunError("too many VFIO-user devices for Q35 PCI slots")
+            device.update(
+                {
+                    "bus": "pcie.0",
+                    "addr": f"0x{ordinal + 4:x}",
+                    "id": f"rocjitsu-gpu-{ordinal}",
+                }
+            )
+        arguments.extend(
+            [
+                "-device",
+                json.dumps(device, separators=(",", ":"), sort_keys=True),
+            ]
+        )
+    if socket_network is not None:
+        netdev_id = "rocjitsu-net0"
+        netdev = (
+            f"socket,id={netdev_id},{socket_network.mode}={socket_network.endpoint}"
+        )
+        if socket_network.mode == "mcast":
+            netdev += ",localaddr=127.0.0.1"
+        arguments.extend(
+            [
+                "-netdev",
+                netdev,
+                "-device",
+                json.dumps(
+                    {
+                        "driver": "virtio-net-pci",
+                        "netdev": netdev_id,
+                        "mac": socket_network.mac,
+                        "bus": "pcie.0",
+                        "addr": "0x8",
+                        "id": "rocjitsu-nic0",
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            ]
+        )
+    arguments.extend(
+        [
+            "-nodefaults",
+            "-no-user-config",
+            "-display",
+            "none",
+            "-monitor",
+            "none",
+            "-serial",
+            "stdio",
+            "-no-reboot",
+        ]
+    )
+    return arguments
 
 
 def start_vfio_server(
@@ -266,12 +432,12 @@ def start_vfio_server(
 
 
 def wait_for_server_ready(
-    path: Path,
+    paths: Sequence[Path],
     process: subprocess.Popen[Any],
     ready_fd: int,
     timeout: float = DEFAULT_STARTUP_TIMEOUT_SECONDS,
-) -> SocketIdentity:
-    """Wait until rocjitsu reports that its listening socket is ready."""
+) -> dict[Path, SocketIdentity]:
+    """Wait for rocjitsu's single readiness signal and inspect every socket."""
 
     with selectors.DefaultSelector() as selector:
         selector.register(ready_fd, selectors.EVENT_READ)
@@ -293,17 +459,54 @@ def wait_for_server_ready(
             f"socket was ready{detail}"
         )
 
-    try:
-        socket_stat = path.lstat()
-    except FileNotFoundError as error:
-        raise GuestRunError(
-            f"rocjitsu reported readiness without creating {path}"
-        ) from error
-    except OSError as error:
-        raise GuestRunError(f"cannot inspect vfio-user socket: {error}") from error
-    if not stat.S_ISSOCK(socket_stat.st_mode):
-        raise GuestRunError(f"vfio-user socket path is not a socket: {path}")
-    return socket_stat.st_dev, socket_stat.st_ino
+    identities: dict[Path, SocketIdentity] = {}
+    for path in paths:
+        try:
+            socket_stat = path.lstat()
+        except FileNotFoundError as error:
+            raise GuestRunError(
+                f"rocjitsu reported readiness without creating {path}"
+            ) from error
+        except OSError as error:
+            raise GuestRunError(f"cannot inspect vfio-user socket: {error}") from error
+        if not stat.S_ISSOCK(socket_stat.st_mode):
+            raise GuestRunError(f"vfio-user socket path is not a socket: {path}")
+        identities[path] = socket_stat.st_dev, socket_stat.st_ino
+    return identities
+
+
+def validate_socket_paths(output: Path, requested: Sequence[Path]) -> list[Path]:
+    """Require distinct, absent socket files directly in the private output."""
+
+    paths: list[Path] = []
+    lexical_paths: set[Path] = set()
+    resolved_paths: set[Path] = set()
+    for requested_path in requested:
+        if ".." in requested_path.parts:
+            raise GuestRunError(
+                "vfio-user socket must be directly inside the run output "
+                f"directory: {requested_path}"
+            )
+        lexical_path = Path(os.path.abspath(requested_path))
+        path = requested_path.resolve()
+        if path.parent != output:
+            raise GuestRunError(
+                "vfio-user socket must be directly inside the run output directory"
+            )
+        if lexical_path in lexical_paths or path in resolved_paths:
+            raise GuestRunError(f"duplicate vfio-user socket path: {requested_path}")
+        if len(os.fsencode(path)) >= 108:
+            raise GuestRunError(f"vfio-user socket path is too long: {path}")
+        try:
+            lexical_path.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise GuestRunError(f"vfio-user socket path already exists: {lexical_path}")
+        lexical_paths.add(lexical_path)
+        resolved_paths.add(path)
+        paths.append(path)
+    return paths
 
 
 def remove_owned_socket(path: Path, identity: SocketIdentity | None) -> None:
@@ -342,7 +545,9 @@ def stop_after_failure(process: subprocess.Popen[Any]) -> None:
 
 
 def finish_server(
-    process: subprocess.Popen[Any], shutdown_grace: float | None = None
+    process: subprocess.Popen[Any],
+    shutdown_grace: float | None = None,
+    stop_requested: bool = False,
 ) -> None:
     """Stop rocjitsu, force-killing it if cooperative shutdown stalls."""
 
@@ -350,10 +555,11 @@ def finish_server(
     if status is None:
         if shutdown_grace is None:
             shutdown_grace = SERVER_SHUTDOWN_GRACE_SECONDS
-        try:
-            process.send_signal(signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        if not stop_requested:
+            try:
+                process.send_signal(signal.SIGTERM)
+            except ProcessLookupError:
+                pass
         try:
             status = process.wait(timeout=shutdown_grace)
         except subprocess.TimeoutExpired as error:
@@ -444,6 +650,16 @@ def positive_seconds(value: str) -> float:
     return seconds
 
 
+def positive_cpu_count(value: str) -> int:
+    try:
+        count = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a positive CPU count") from error
+    if count < 1:
+        raise argparse.ArgumentTypeError("must be a positive CPU count")
+    return count
+
+
 def parse_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kernel", required=True, type=Path)
@@ -452,8 +668,55 @@ def parse_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rocjitsu", required=True, type=Path)
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--socket", type=Path)
+    parser.add_argument(
+        "--socket",
+        type=Path,
+        action="append",
+        default=[],
+        help="VFIO-user socket for one local GPU; repeat in GPU ordinal order",
+    )
+    parser.add_argument("--node", help="local node ID in a system manifest")
+    parser.add_argument(
+        "--fabric-effect-trace",
+        action="store_true",
+        help="capture directed local GPU effects in the VFIO server",
+    )
+    parser.add_argument(
+        "--p2v-switch-topology",
+        action="store_true",
+        help="place two or four GPUs behind one diagnostic X3130 switch",
+    )
+    parser.add_argument(
+        "--p2v-atomic-root",
+        action="store_true",
+        help="advertise 32/64-bit root completion and switch routing for a verified atomic DMA backend",
+    )
+    network_socket = parser.add_mutually_exclusive_group()
+    network_socket.add_argument(
+        "--net-socket-listen",
+        metavar="HOST:PORT",
+        help="listen for a QEMU socket network peer at a numeric IPv4 address",
+    )
+    network_socket.add_argument(
+        "--net-socket-connect",
+        metavar="HOST:PORT",
+        help="connect to a QEMU socket network peer at a numeric IPv4 address",
+    )
+    network_socket.add_argument(
+        "--net-socket-mcast",
+        metavar="GROUP:PORT",
+        help="join a same-host multicast Ethernet segment through the loopback interface",
+    )
+    parser.add_argument(
+        "--net-mac", metavar="MAC", help="unicast MAC for the socket network NIC"
+    )
     parser.add_argument("--accel", choices=("auto", "kvm", "tcg"), default="auto")
+    parser.add_argument(
+        "--smp",
+        type=positive_cpu_count,
+        default=1,
+        help="guest virtual CPUs (default: 1)",
+    )
     parser.add_argument("--memory", default="4G")
     parser.add_argument("--append", default="console=ttyS0 panic=-1")
     parser.add_argument(
@@ -471,12 +734,31 @@ def parse_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expect-log", action="append", default=[])
     parser.add_argument("--reject-log", action="append", default=[])
     parser.add_argument("--dry-run", action="store_true")
-    return parser.parse_args(arguments)
+    args = parser.parse_args(arguments)
+    has_network_socket = (
+        args.net_socket_listen is not None
+        or args.net_socket_connect is not None
+        or args.net_socket_mcast is not None
+    )
+    if has_network_socket != (args.net_mac is not None):
+        parser.error("--net-mac must be specified with a network socket option")
+    return args
 
 
 def main(arguments: list[str] | None = None) -> int:
     args = parse_arguments(arguments)
     try:
+        socket_network = None
+        if args.net_socket_listen is not None:
+            socket_network = SocketNetwork(
+                "listen", args.net_socket_listen, args.net_mac
+            )
+        elif args.net_socket_connect is not None:
+            socket_network = SocketNetwork(
+                "connect", args.net_socket_connect, args.net_mac
+            )
+        elif args.net_socket_mcast is not None:
+            socket_network = SocketNetwork("mcast", args.net_socket_mcast, args.net_mac)
         kernel = require_file(args.kernel, "guest kernel")
         initramfs = require_file(args.initramfs, "guest initramfs")
         qemu = require_executable(args.qemu, "QEMU")
@@ -486,41 +768,45 @@ def main(arguments: list[str] | None = None) -> int:
         if output.exists():
             raise GuestRunError(f"run output directory already exists: {output}")
 
-        socket_path = (args.socket or output / "vfio-user.sock").resolve()
-        if socket_path.parent != output:
+        socket_paths = validate_socket_paths(
+            output, args.socket or [output / "vfio-user.sock"]
+        )
+        if socket_network is not None and len(socket_paths) > 4:
             raise GuestRunError(
-                "vfio-user socket must be directly inside the run output directory"
+                "socket networking supports at most four VFIO-user devices"
             )
-        if len(str(socket_path).encode("utf-8")) >= 108:
-            raise GuestRunError(f"vfio-user socket path is too long: {socket_path}")
-        try:
-            socket_path.lstat()
-        except FileNotFoundError:
-            pass
-        else:
-            raise GuestRunError(f"vfio-user socket path already exists: {socket_path}")
 
         accelerator = select_accelerator(
             args.accel, available_accelerators(qemu, args.probe_timeout)
         )
         require_qemu_vfio_user(qemu, args.probe_timeout)
+        if args.p2v_atomic_root:
+            require_qemu_atomic_ports(qemu, args.probe_timeout)
         require_rocjitsu_vfio_user(rocjitsu, args.probe_timeout)
         qemu_arguments = build_qemu_arguments(
             qemu,
             kernel,
             initramfs,
-            socket_path,
+            socket_paths,
             accelerator,
             args.memory,
             args.append,
+            socket_network,
+            args.p2v_switch_topology,
+            args.p2v_atomic_root,
+            args.smp,
         )
         server_arguments = [
             str(rocjitsu),
             "--config",
             str(config),
-            "--vfio-socket",
-            str(socket_path),
         ]
+        if args.node is not None:
+            server_arguments.extend(["--node", args.node])
+        if args.fabric_effect_trace:
+            server_arguments.append("--fabric-effect-trace")
+        for socket_path in socket_paths:
+            server_arguments.extend(["--vfio-socket", str(socket_path)])
         if args.dry_run:
             print(shlex.join(server_arguments))
             print(shlex.join(qemu_arguments))
@@ -535,7 +821,8 @@ def main(arguments: list[str] | None = None) -> int:
             run_error: GuestRunError | OSError | subprocess.SubprocessError | None = (
                 None
             )
-            socket_identity: SocketIdentity | None = None
+            socket_identities: dict[Path, SocketIdentity] = {}
+            server_stop_requested = False
             try:
                 with block_termination_signals() as child_signal_mask:
                     with server_log_path.open("wb") as server_log:
@@ -543,8 +830,8 @@ def main(arguments: list[str] | None = None) -> int:
                             server_arguments, server_log, child_signal_mask
                         )
                 try:
-                    socket_identity = wait_for_server_ready(
-                        socket_path, server, ready_fd, args.startup_timeout
+                    socket_identities = wait_for_server_ready(
+                        socket_paths, server, ready_fd, args.startup_timeout
                     )
                 finally:
                     with block_termination_signals():
@@ -554,6 +841,16 @@ def main(arguments: list[str] | None = None) -> int:
                     guest_returncode = run_qemu(qemu_arguments, server, guest_log)
                 if guest_returncode != 0:
                     raise GuestRunError(f"QEMU exited with status {guest_returncode}")
+                # QEMU can close its PCI sockets before process exit. Tell the
+                # node its guest is done as soon as that exit is observed;
+                # reading a large guest log must not consume the group's
+                # disconnect grace period before shutdown is requested.
+                if server.poll() is None:
+                    try:
+                        server.send_signal(signal.SIGTERM)
+                        server_stop_requested = True
+                    except ProcessLookupError:
+                        pass
                 check_guest_log(guest_log_path, args.expect_log, args.reject_log)
             except (GuestRunError, OSError, subprocess.SubprocessError) as error:
                 run_error = error
@@ -577,7 +874,9 @@ def main(arguments: list[str] | None = None) -> int:
                                     )
                         if server is not None:
                             try:
-                                finish_server(server)
+                                finish_server(
+                                    server, stop_requested=server_stop_requested
+                                )
                             except (
                                 GuestRunError,
                                 OSError,
@@ -589,22 +888,21 @@ def main(arguments: list[str] | None = None) -> int:
                                     run_error = GuestRunError(
                                         f"{run_error}; cleanup also failed: {error}"
                                     )
-                            try:
-                                if (
-                                    socket_identity is None
-                                    and server.poll() is not None
-                                ):
-                                    socket_identity = socket_identity_if_present(
-                                        socket_path
-                                    )
-                                remove_owned_socket(socket_path, socket_identity)
-                            except OSError as error:
-                                if run_error is None:
-                                    run_error = error
-                                else:
-                                    run_error = GuestRunError(
-                                        f"{run_error}; socket cleanup also failed: {error}"
-                                    )
+                            for socket_path in socket_paths:
+                                try:
+                                    identity = socket_identities.get(socket_path)
+                                    if identity is None and server.poll() is not None:
+                                        identity = socket_identity_if_present(
+                                            socket_path
+                                        )
+                                    remove_owned_socket(socket_path, identity)
+                                except OSError as error:
+                                    if run_error is None:
+                                        run_error = error
+                                    else:
+                                        run_error = GuestRunError(
+                                            f"{run_error}; socket cleanup also failed: {error}"
+                                        )
                 except GuestRunError as error:
                     # Restoring the signal mask delivers any termination signal
                     # deferred by the cleanup block. Preserve an earlier guest

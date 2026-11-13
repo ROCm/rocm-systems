@@ -72,7 +72,7 @@ sed -n "${START},${END}p" CHANGELOG.md | grep -nE '^### ' \
 
 # format — bold headline bullets must end with two trailing spaces; JIRA IDs never in entry text
 sed -n "${START},${END}p" CHANGELOG.md | grep -nP '^- \*\*.*\*\*[^ ]*$'         # any match = a headline bullet missing its two trailing spaces
-sed -n "${START},${END}p" CHANGELOG.md | grep -nE 'ROCM-[0-9]+|SWDEV-[0-9]+'    # JIRA belongs only in the PR JIRA ID section
+sed -n "${START},${END}p" CHANGELOG.md | grep -nE 'ROCM-[0-9]+|SWDEV-[0-9]+'    # JIRA belongs only in the PR Issue Tracking section
 ```
 
 **Blame is a screen, not a verdict.** Confirm every placement flag against the
@@ -117,7 +117,7 @@ cases blame gets wrong:
   impact, not internal mechanics, as a short bold summary plus one concise
   bullet; drop signal/abort details, enum constants and file internals.
 - Breaking changes include migration guidance.
-- JIRA/issue refs only in the PR `JIRA ID` section, never in entry text.
+- JIRA/issue refs only in the PR `Issue Tracking` section, never in entry text.
 - Bold headline bullets must end with **two trailing spaces** (`··`) so Sphinx
   keeps the headline and its bullet on separate lines:
   ```markdown

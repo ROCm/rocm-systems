@@ -30,8 +30,6 @@ subtrees:
     - file: how-to/analyze/mode.rst
       entries:
       - file: how-to/analyze/cli.rst
-      - file: how-to/analyze/standalone-gui.rst
-      - file: how-to/analyze/tui.rst
       - file: how-to/analyze/optiq.rst
 
   - caption: Conceptual

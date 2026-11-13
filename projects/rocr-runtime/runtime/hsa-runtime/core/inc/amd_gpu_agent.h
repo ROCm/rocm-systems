@@ -472,6 +472,9 @@ class GpuAgent : public GpuAgentInt {
   __forceinline bool HostAtomicsSupported() const { return xgmi_cpu_gpu_; }
   /// @brief The CP firmware consumes completion signal handle hints.
   bool SignalHintsSupported() const;
+  /// @brief The agent executes hsa_amd_ext_kernel_dispatch_packet_t: natively (gfx12.5), or
+  /// with CP firmware that reports AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH.
+  bool ExtendedAqlDispatchSupported() const;
   /// @brief Is large BAR support enabled for this GPU.
   __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
 
@@ -712,9 +715,11 @@ class GpuAgent : public GpuAgentInt {
 
   lazy_ptr<core::Queue> queues_[QueueCount];
 
-  // @brief Hint support is read from the utility queue's caps once, on first query.
-  mutable std::once_flag signal_hints_once_;
-  mutable bool signal_hints_supported_ = false;
+  // @brief The CP firmware's capabilities, read from the utility queue's caps once, on first
+  // query.
+  uint32_t CpFirmwareCaps() const;
+  mutable std::once_flag cp_caps_once_;
+  mutable uint32_t cp_caps_ = 0;
 
   // @brief Mutex to protect the update to coherency type.
   std::mutex coherency_lock_;
@@ -888,7 +893,9 @@ class GpuAgent : public GpuAgentInt {
       const hsa_agent_t* dst_agent_list,
       const size_t* size_list,
       uint32_t coord_engine = 0,
-      uint32_t max_engines = 0);
+      uint32_t max_engines = 0,
+      // Optional per-entry dst-side swap sizes (null = symmetric).
+      const size_t* dst_size_list = nullptr);
 
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);
@@ -1126,6 +1133,8 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Is PCIe large BAR enabled.
   bool large_bar_enabled_;
 
+  // Native support (gfx12.5), set at construction and never written later. CP firmware support
+  // comes from CpFirmwareCaps(); ExtendedAqlDispatchSupported() combines the two.
   bool extended_aql_dispatch_supported_;
 
   /* Workgroup Cluster Parameters */

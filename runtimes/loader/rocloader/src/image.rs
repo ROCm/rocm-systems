@@ -206,7 +206,16 @@ pub fn load_image(
     page: u64,
     resolve_external: impl Fn(&str) -> Option<u64>,
 ) -> Result<(LoadedImage, Vec<Symbol>), Error> {
-    let target = Target::from(device.endpoint().gpu().ok_or(Error::InvalidTarget)?);
+    let mut target = Target::from(device.endpoint().gpu().ok_or(Error::InvalidTarget)?);
+    if target.gfx_major == 9 {
+        target.xnack_enabled = Some(
+            device
+                .gpu()
+                .map_err(Error::Device)?
+                .xnack_enabled()
+                .map_err(Error::Device)?,
+        );
+    }
     let object = CodeObject::parse(&code_object)?;
     object.validate_target(target)?;
     let layout = object.layout();

@@ -16,7 +16,6 @@
 #include "library/tracing.hpp"
 #include <cstdint>
 
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/type_traits.hpp>

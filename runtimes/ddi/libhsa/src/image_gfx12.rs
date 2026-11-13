@@ -14,6 +14,7 @@ use rocddi::device::gpu::image::{
 
 pub(crate) use hardware::{BUFFER_MAX_ELEMENTS, Format, Layout, ROW_ALIGNMENT, supported_gpu};
 
+/// Maps image error to the corresponding HSA representation.
 fn map_image_error(error: ImageError) -> Status {
     match error {
         ImageError::Format => IMAGE_FORMAT_UNSUPPORTED,
@@ -22,6 +23,7 @@ fn map_image_error(error: ImageError) -> Status {
     }
 }
 
+/// Converts an HSA image descriptor to a validated GFX12 surface description.
 fn description(desc: HsaExtImageDescriptor) -> Result<Description, Status> {
     let (geometry, height, slices) = match desc.geometry {
         0 if desc.height == 0 && desc.depth == 0 && desc.array_size == 0 => {
@@ -52,10 +54,12 @@ fn description(desc: HsaExtImageDescriptor) -> Result<Description, Status> {
     })
 }
 
+/// Checks whether the image geometry is supported by the GFX12 backend.
 pub(crate) fn supported_geometry(geometry: u32) -> bool {
     matches!(geometry, 0..=5)
 }
 
+/// Maps an HSA channel format to a native image format.
 pub(crate) fn format(format: HsaExtImageFormat) -> Option<Format> {
     let order = match format.channel_order {
         0 => ChannelOrder::A,
@@ -85,6 +89,7 @@ pub(crate) fn format(format: HsaExtImageFormat) -> Option<Format> {
     hardware::format(order, channel_type)
 }
 
+/// Calculates the GFX12 surface layout for an HSA image descriptor.
 pub(crate) fn layout(
     desc: HsaExtImageDescriptor,
     format: Format,
@@ -94,6 +99,7 @@ pub(crate) fn layout(
     hardware::layout(description(desc)?, format, row_pitch, slice_pitch).map_err(map_image_error)
 }
 
+/// Returns the required image allocation size and alignment.
 pub(crate) fn info(layout: Layout) -> HsaExtImageDataInfo {
     HsaExtImageDataInfo {
         size: layout.size,
@@ -101,12 +107,14 @@ pub(crate) fn info(layout: Layout) -> HsaExtImageDataInfo {
     }
 }
 
+/// Adjusts GPU image descriptor words to the HSA metadata layout.
 fn hsa_metadata(mut words: [u32; 12], desc: HsaExtImageDescriptor) -> [u32; 12] {
     words[8] = desc.format.channel_type;
     words[9] = desc.format.channel_order;
     words
 }
 
+/// Encodes a native image layout into GPU descriptor words.
 pub(crate) fn descriptor(
     desc: HsaExtImageDescriptor,
     format: Format,
@@ -118,6 +126,7 @@ pub(crate) fn descriptor(
         .map_err(map_image_error)
 }
 
+/// Encodes the descriptor for one level of a mipmapped image.
 pub(crate) fn native_mip_descriptor(
     desc: HsaExtImageDescriptor,
     format: Format,
@@ -139,6 +148,7 @@ pub(crate) fn native_mip_descriptor(
     .map_err(map_image_error)
 }
 
+/// Builds a GPU descriptor for imported image storage.
 pub(crate) fn imported_descriptor(
     desc: HsaExtImageDescriptor,
     format: Format,
@@ -151,6 +161,7 @@ pub(crate) fn imported_descriptor(
         .map_err(map_image_error)
 }
 
+/// Builds descriptors for every level of an imported mip chain.
 pub(crate) fn imported_mip_chain(
     words: [u32; 12],
     desc: HsaExtImageDescriptor,
@@ -160,6 +171,7 @@ pub(crate) fn imported_mip_chain(
     hardware::imported_mip_chain(words, description(desc)?, source, levels).map_err(map_image_error)
 }
 
+/// Returns a view of one mip level from an imported image.
 pub(crate) fn mip_level_view(
     words: [u32; 12],
     level: u32,

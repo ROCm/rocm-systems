@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vds.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_ds_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -346,7 +347,8 @@ void DsStoreB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -382,15 +384,25 @@ void DsStore2addrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, data1.opr_type_, data1.encoding_value_, data1.vgpr_msb_role());
-  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
-  auto data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
-  auto data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+  if (maybe_addresses.failed())
+    return;
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
+  auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
+  if (maybe_data0_0.failed())
+    return;
+  const std::span<const uint32_t> data0_0 = maybe_data0_0.value();
+  auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  if (maybe_data1_0.failed())
+    return;
+  const std::span<const uint32_t> data1_0 = maybe_data1_0.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t base = addresses[lane];
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
+    const uint32_t lane_address = addresses[lane];
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 4U);
+    d->ds2_per_lane_addr[lane] =
+        amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 4U);
     uint32_t v0_0 = data0_0[lane];
     std::memcpy(&d->store_data[lane * 4 + 0], &v0_0, 4);
     uint32_t v1_0 = data1_0[lane];
@@ -421,15 +433,25 @@ void DsStore2addrStride64B32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, data1.opr_type_, data1.encoding_value_, data1.vgpr_msb_role());
-  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
-  auto data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
-  auto data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+  if (maybe_addresses.failed())
+    return;
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
+  auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
+  if (maybe_data0_0.failed())
+    return;
+  const std::span<const uint32_t> data0_0 = maybe_data0_0.value();
+  auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  if (maybe_data1_0.failed())
+    return;
+  const std::span<const uint32_t> data1_0 = maybe_data1_0.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t base = addresses[lane];
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
+    const uint32_t lane_address = addresses[lane];
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 256U);
+    d->ds2_per_lane_addr[lane] =
+        amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 256U);
     uint32_t v0_0 = data0_0[lane];
     std::memcpy(&d->store_data[lane * 4 + 0], &v0_0, 4);
     uint32_t v1_0 = data1_0[lane];
@@ -994,8 +1016,8 @@ void DsStorexchg2addrRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset0 * 4U);
+    d->ds2_per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset1 * 4U);
     uint32_t val0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0_0, 4);
     uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
@@ -1039,8 +1061,8 @@ void DsStorexchg2addrStride64RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset0 * 256U);
+    d->ds2_per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset1 * 256U);
     uint32_t val0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0_0, 4);
     uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
@@ -1139,7 +1161,8 @@ void DsMaxNumRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsSwizzleB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_swizzle_b32_vds(*this, wf);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_swizzle(wf, wf.cu().arithmetic_flags(), vdst, addr, offset);
 }
 
 void DsLoadB32Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -1180,16 +1203,20 @@ void DsLoad2addrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t base = read_address(lane);
-      d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
-      d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
+      const uint32_t lane_address = read_address(lane);
+      d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 4U);
+      d->ds2_per_lane_addr[lane] =
+          amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 4U);
     }
   };
   if (cu.observes_register_access()) {
     calculate_addresses(
         [&](uint32_t lane) { return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane); });
   } else {
-    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    if (maybe_addresses.failed())
+      return;
+    const std::span<const uint32_t> addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
@@ -1220,17 +1247,21 @@ void DsLoad2addrStride64B32Vds::execute_impl(amdgpu::Wavefront &wf) {
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t base = read_address(lane);
-      d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
+      const uint32_t lane_address = read_address(lane);
+      d->per_lane_addr[lane] =
+          amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 256U);
       d->ds2_per_lane_addr[lane] =
-          base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
+          amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 256U);
     }
   };
   if (cu.observes_register_access()) {
     calculate_addresses(
         [&](uint32_t lane) { return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane); });
   } else {
-    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    if (maybe_addresses.failed())
+      return;
+    const std::span<const uint32_t> addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
@@ -1306,7 +1337,7 @@ void DsConsumeVds::execute_impl(amdgpu::Wavefront &wf) {
   d->wg_id = wf.wg_id();
   d->wf_id = wf.wf_id();
   uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  uint32_t addr = wf.lds_base() + wf.m0() + offset;
+  uint64_t addr = uint64_t{wf.lds_base()} + wf.m0() + offset;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (exec & (1ULL << lane))
       d->per_lane_addr[lane] = addr;
@@ -1330,7 +1361,7 @@ void DsAppendVds::execute_impl(amdgpu::Wavefront &wf) {
   d->wg_id = wf.wg_id();
   d->wf_id = wf.wf_id();
   uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  uint32_t addr = wf.lds_base() + wf.m0() + offset;
+  uint64_t addr = uint64_t{wf.lds_base()} + wf.m0() + offset;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (exec & (1ULL << lane))
       d->per_lane_addr[lane] = addr;
@@ -1686,7 +1717,8 @@ void DsStoreB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 2, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -1724,17 +1756,33 @@ void DsStore2addrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, data1.opr_type_, data1.encoding_value_, data1.vgpr_msb_role());
-  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
-  auto data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
-  auto data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
-  auto data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
-  auto data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
+  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+  if (maybe_addresses.failed())
+    return;
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
+  auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
+  if (maybe_data0_0.failed())
+    return;
+  const std::span<const uint32_t> data0_0 = maybe_data0_0.value();
+  auto maybe_data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
+  if (maybe_data0_1.failed())
+    return;
+  const std::span<const uint32_t> data0_1 = maybe_data0_1.value();
+  auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  if (maybe_data1_0.failed())
+    return;
+  const std::span<const uint32_t> data1_0 = maybe_data1_0.value();
+  auto maybe_data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
+  if (maybe_data1_1.failed())
+    return;
+  const std::span<const uint32_t> data1_1 = maybe_data1_1.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t base = addresses[lane];
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 8U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 8U + wf.lds_base();
+    const uint32_t lane_address = addresses[lane];
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 8U);
+    d->ds2_per_lane_addr[lane] =
+        amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 8U);
     uint32_t v0_0 = data0_0[lane];
     std::memcpy(&d->store_data[lane * 8 + 0], &v0_0, 4);
     uint32_t v0_1 = data0_1[lane];
@@ -1769,17 +1817,33 @@ void DsStore2addrStride64B64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data1_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, data1.opr_type_, data1.encoding_value_, data1.vgpr_msb_role());
-  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
-  auto data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
-  auto data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
-  auto data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
-  auto data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
+  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+  if (maybe_addresses.failed())
+    return;
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
+  auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
+  if (maybe_data0_0.failed())
+    return;
+  const std::span<const uint32_t> data0_0 = maybe_data0_0.value();
+  auto maybe_data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
+  if (maybe_data0_1.failed())
+    return;
+  const std::span<const uint32_t> data0_1 = maybe_data0_1.value();
+  auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  if (maybe_data1_0.failed())
+    return;
+  const std::span<const uint32_t> data1_0 = maybe_data1_0.value();
+  auto maybe_data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
+  if (maybe_data1_1.failed())
+    return;
+  const std::span<const uint32_t> data1_1 = maybe_data1_1.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t base = addresses[lane];
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 512U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 512U + wf.lds_base();
+    const uint32_t lane_address = addresses[lane];
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 512U);
+    d->ds2_per_lane_addr[lane] =
+        amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 512U);
     uint32_t v0_0 = data0_0[lane];
     std::memcpy(&d->store_data[lane * 8 + 0], &v0_0, 4);
     uint32_t v0_1 = data0_1[lane];
@@ -2353,8 +2417,8 @@ void DsStorexchg2addrRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 8U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 8U + wf.lds_base();
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset0 * 8U);
+    d->ds2_per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset1 * 8U);
     uint32_t val0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0_0, 4);
     uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
@@ -2402,8 +2466,8 @@ void DsStorexchg2addrStride64RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);
-    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 512U + wf.lds_base();
-    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 512U + wf.lds_base();
+    d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset0 * 512U);
+    d->ds2_per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), base, inst_.offset1 * 512U);
     uint32_t val0_0 = amdgpu::RegisterAccess(cu).read_vgpr(data0_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0_0, 4);
     uint32_t val1_0 = amdgpu::RegisterAccess(cu).read_vgpr(data1_base + 0, lane);
@@ -2610,16 +2674,20 @@ void DsLoad2addrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t base = read_address(lane);
-      d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 8U + wf.lds_base();
-      d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 8U + wf.lds_base();
+      const uint32_t lane_address = read_address(lane);
+      d->per_lane_addr[lane] = amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 8U);
+      d->ds2_per_lane_addr[lane] =
+          amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 8U);
     }
   };
   if (cu.observes_register_access()) {
     calculate_addresses(
         [&](uint32_t lane) { return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane); });
   } else {
-    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    if (maybe_addresses.failed())
+      return;
+    const std::span<const uint32_t> addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
@@ -2650,17 +2718,21 @@ void DsLoad2addrStride64B64Vds::execute_impl(amdgpu::Wavefront &wf) {
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t base = read_address(lane);
-      d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 512U + wf.lds_base();
+      const uint32_t lane_address = read_address(lane);
+      d->per_lane_addr[lane] =
+          amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset0 * 512U);
       d->ds2_per_lane_addr[lane] =
-          base + static_cast<uint32_t>(inst_.offset1) * 512U + wf.lds_base();
+          amdgpu::ds_address(wf.lds_base(), lane_address, inst_.offset1 * 512U);
     }
   };
   if (cu.observes_register_access()) {
     calculate_addresses(
         [&](uint32_t lane) { return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane); });
   } else {
-    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    if (maybe_addresses.failed())
+      return;
+    const std::span<const uint32_t> addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
@@ -3088,7 +3160,8 @@ void DsStoreAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -3130,15 +3203,24 @@ void DsLoadAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsPermuteB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_permute_b32_vds(*this, wf);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_permute<false, false>(
+      wf, rj_arith_ds_permute_b32_w32, rj_arith_ds_permute_b32_w64_gfx12,
+      wf.cu().arithmetic_flags(), vdst, addr, data0, offset);
 }
 
 void DsBpermuteB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_bpermute_b32_vds(*this, wf);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_permute<true, false>(
+      wf, rj_arith_ds_bpermute_b32_w32, rj_arith_ds_bpermute_b32_w64_gfx12,
+      wf.cu().arithmetic_flags(), vdst, addr, data0, offset);
 }
 
 void DsBpermuteFiB32Vds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_bpermute_fi_b32_vds(*this, wf);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_permute<true, true>(
+      wf, rj_arith_ds_bpermute_fi_b32_w32, rj_arith_ds_bpermute_fi_b32_w64,
+      wf.cu().arithmetic_flags(), vdst, addr, data0, offset);
 }
 
 void DsStoreB96Vds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3157,7 +3239,8 @@ void DsStoreB96Vds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 3, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -3191,7 +3274,8 @@ void DsStoreB128Vds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 4, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }

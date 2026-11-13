@@ -22,6 +22,8 @@ related to HIP should be labeled accordingly to ensure they receive the proper a
 * You may also open an issue to ask questions to the maintainers about whether a proposed change
   meets the acceptance criteria, or to discuss an idea pertaining to the library.
 
+<a name="acceptance-criteria"></a>
+
 ## Acceptance Criteria ##
 
 HIP is a C++ Runtime API and Kernel Language that allows developers to create portable applications for AMD and NVIDIA GPUs from single source code. Contributors wishing to submit new HIP Features (ie functions, classes, types) should resemble CUDA APIs.
@@ -145,5 +147,5 @@ To update the code in your PR (eg. in response to a code review discussion), you
 
 ### Doxygen Editing Guidelines ###
 
-* bugs should be marked with @bugs near the code where the bug might be fixed.  The @bug message will appear in the API description and also in the
+* bugs should be marked with \@bug near the code where the bug might be fixed.  The \@bug message will appear in the API description and also in the
 doxygen bug list.

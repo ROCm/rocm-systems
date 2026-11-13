@@ -101,8 +101,12 @@ ROSHMEM_ALLTOALL
 ----------------
 
 .. cpp:function:: __device__ void rocshmem_TYPENAME_alltoall_wg(rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
+.. cpp:function:: __device__ int rocshmem_TYPENAME_alltoall_wave(rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
+.. cpp:function:: __device__ void rocshmem_alltoallmem_wg(rocshmem_team_t team, void *dest, const void *source, int nelems)
+.. cpp:function:: __device__ int rocshmem_alltoallmem_wave(rocshmem_team_t team, void *dest, const void *source, int nelems)
 .. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_alltoall_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_alltoall_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
+.. cpp:function:: __device__ void rocshmem_ctx_alltoallmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems)
 .. cpp:function:: __device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems)
 
   :param ctx:    Context with which to perform this operation.
@@ -113,15 +117,16 @@ ROSHMEM_ALLTOALL
                  heap.
   :param nelems: Number of elements transferred per pair of PEs (typed ``TYPENAME``
                  variants); number of bytes transferred per pair of PEs
-                 (``alltoallmem_wave``).
+                 (``alltoallmem_wg`` / ``alltoallmem_wave``).
   :returns:      None (``_wg`` variants). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
 
 **Description:**
 This routine exchanges a fixed amount of contiguous data blocks between all pairs
 of PEs participating in the collective routine.
 The ``_wg`` variants must be called as a work-group collective; the ``_wave`` variants
-must be called as a wave-level collective. ``alltoallmem_wave`` operates on untyped
-bytes rather than a typed element count.
+must be called as a wave-level collective. ``alltoallmem_wg`` and ``alltoallmem_wave``
+operate on untyped bytes rather than a typed element count. The undecorated (non-``ctx``)
+variants operate on the default context.
 
 Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`RMA_TYPES`.
 
@@ -171,8 +176,13 @@ Valid TYPENAME and TYPE values are listed in :ref:`RMA_TYPES`.
 ROCSHMEM_BROADCAST
 ------------------
 
+.. cpp:function:: __device__ void rocshmem_TYPENAME_broadcast_wg(rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
+.. cpp:function:: __device__ int rocshmem_TYPENAME_broadcast_wave(rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
+.. cpp:function:: __device__ void rocshmem_broadcastmem_wg(rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
+.. cpp:function:: __device__ int rocshmem_broadcastmem_wave(rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
 .. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_broadcast_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
+.. cpp:function:: __device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
 .. cpp:function:: __device__ int rocshmem_ctx_broadcastmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
 
   :param ctx:     Context with which to perform this collective.
@@ -182,16 +192,17 @@ ROCSHMEM_BROADCAST
   :param source:  Source address. Must be an address on the symmetric
                   heap.
   :param nelems:  Number of elements to broadcast (``_wg`` / ``_wave`` variants);
-                  number of bytes to broadcast (``broadcastmem_wave``).
+                  number of bytes to broadcast (``broadcastmem_wg`` / ``broadcastmem_wave``).
   :param pe_root: Root PE (relative to team) from which to broadcast.
-  :returns:       None (``_wg`` variant). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
+  :returns:       None (``_wg`` variants). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
 
 **Description:**
 This routine performs a broadcast across PEs in the team.
 The caller is blocked until the broadcast completes.
-The ``_wg`` variant must be called as a work-group collective; the ``_wave`` variants
-must be called as a wave-level collective. ``broadcastmem_wave`` operates on untyped
-bytes rather than a typed element count.
+The ``_wg`` variants must be called as a work-group collective; the ``_wave`` variants
+must be called as a wave-level collective. ``broadcastmem_wg`` and ``broadcastmem_wave``
+operate on untyped bytes rather than a typed element count. The undecorated (non-``ctx``)
+variants operate on the default context.
 
 Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`RMA_TYPES`.
 

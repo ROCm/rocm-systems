@@ -23,10 +23,12 @@ include(GNUInstallDirs)
 #  By default, CMake will search for a folder named opencl or ROCm-OpenCL-Runtime relative to the current path. Specify -DAMD_OPENCL_PATH=$OPENCL_DIR if opencl source is in obscure location.
 list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 
-
 #############################
 # Options
 #############################
+# Applies -Werror if CLR_ENABLE_WERROR is set
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/CLRWarnings.cmake")
+
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" OFF)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 option(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS
@@ -239,9 +241,7 @@ endif()
 # Determine HIP_PLATFORM
 if(NOT DEFINED HIP_PLATFORM)
     if(NOT DEFINED ENV{HIP_PLATFORM})
-        execute_process(COMMAND ${__HIPCONFIG_EXECUTABLE__} --platform
-            OUTPUT_VARIABLE HIP_PLATFORM
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        set(HIP_PLATFORM "amd")
     else()
         set(HIP_PLATFORM $ENV{HIP_PLATFORM} CACHE STRING "HIP Platform")
     endif()
@@ -333,17 +333,49 @@ if(HIP_RUNTIME STREQUAL "rocclr")
 endif()
 
 # Build doxygen documentation
-find_program(DOXYGEN_EXE doxygen)
-if(DOXYGEN_EXE)
+find_package(Doxygen 1.9.1 QUIET COMPONENTS doxygen)
+if(DOXYGEN_FOUND)
+    set(HIP_DOXYGEN_CONFIG "")
     if(EXISTS "${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg")
-        add_custom_target(doc COMMAND HIP_PATH=${CMAKE_CURRENT_SOURCE_DIR} ${DOXYGEN_EXE} ${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs)
+        set(HIP_DOXYGEN_CONFIG "${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg")
     elseif(EXISTS "${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile")
-        add_custom_target(doc COMMAND HIP_PATH=${CMAKE_CURRENT_SOURCE_DIR} ${DOXYGEN_EXE} ${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs)
+        set(HIP_DOXYGEN_CONFIG "${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile")
     else()
-        message(STATUS "Unable to find doxygen config file. Will not generate doxygen output")
+        message(
+            STATUS
+            "Unable to find doxygen config file. Will not generate doxygen output"
+        )
     endif()
+
+    if(HIP_DOXYGEN_CONFIG)
+        get_filename_component(
+            HIP_DOXYGEN_WORKING_DIRECTORY
+            "${HIP_DOXYGEN_CONFIG}"
+            DIRECTORY
+        )
+        set(HIP_DOXYGEN_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/RuntimeAPI")
+        set(HIP_DOXYGEN_WRAPPER_CFG
+            "${CMAKE_CURRENT_BINARY_DIR}/doxy_build.cfg"
+        )
+        file(
+            WRITE "${HIP_DOXYGEN_WRAPPER_CFG}"
+            "@INCLUDE = \"${HIP_DOXYGEN_CONFIG}\"\n"
+            "OUTPUT_DIRECTORY = \"${HIP_DOXYGEN_OUTPUT_DIR}\"\n"
+            "INCLUDE_PATH = \"${HIP_COMMON_DIR}/include\" \"${PROJECT_BINARY_DIR}/include\"\n"
+        )
+        add_custom_target(
+            doc
+            COMMAND
+                ${CMAKE_COMMAND} -E env "HIP_PATH=${HIP_COMMON_DIR}"
+                "${DOXYGEN_EXECUTABLE}" "${HIP_DOXYGEN_WRAPPER_CFG}"
+            WORKING_DIRECTORY "${HIP_DOXYGEN_WORKING_DIRECTORY}"
+        )
+    endif()
+else()
+    message(
+        STATUS
+        "Doxygen 1.9.1 or newer not found; skipping HIP API documentation"
+    )
 endif()
 
 #############################
@@ -366,7 +398,6 @@ execute_process(COMMAND test ${CMAKE_INSTALL_PREFIX} -ef ${CMAKE_CURRENT_SOURCE_
     RESULT_VARIABLE INSTALL_SOURCE)
 if(NOT ${INSTALL_SOURCE} EQUAL 0)
     if(WIN32)
-      install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS)
       if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/src/" DESTINATION ${CMAKE_INSTALL_BINDIR}
                 FILES_MATCHING PATTERN "*.pdb"
