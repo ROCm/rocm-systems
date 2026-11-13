@@ -1070,8 +1070,6 @@ class TestBuildMetricDetails:
             "header": header,
             "metric": {metric_name: expression_values},
         }
-        if "expr" in expression_values:
-            table["cli_style"] = "simple_box"
 
         panel_configs = OrderedDict()
         panel_configs[200] = {

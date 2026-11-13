@@ -843,7 +843,7 @@ Examples:
         action=DebugAction,
         base_action="store_true",
         debug_enabled=debug_enabled,
-        help="Force plain tables and ignore cli_style from YAML.",
+        help="Print the memory chart and roofline blocks as plain tables.",
     )
     analyze_debug_group.add_argument(
         "--debug-verify-deps",

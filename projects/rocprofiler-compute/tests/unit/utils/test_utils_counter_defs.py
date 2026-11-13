@@ -145,9 +145,6 @@ class TestMetricExpressions:
         assert metric_expressions(table, {"avg": "", "peak": None}) == []
 
     def test_simple_box_reads_only_expr(self):
-        table = {
-            "header": {"metric": "Metric", "expr": "Expression", "unit": "Unit"},
-            "cli_style": "simple_box",
-        }
-        metric = {"expr": "TCC_HIT[::_1]", "unit": "Hits"}
+        table = {"header": {"metric": "Metric", "expr": "Expression"}}
+        metric = {"expr": "TCC_HIT[::_1]", "tips": "Hits"}
         assert metric_expressions(table, metric) == ["TCC_HIT[::_1]"]
