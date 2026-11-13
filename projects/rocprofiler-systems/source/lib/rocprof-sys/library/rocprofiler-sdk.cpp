@@ -969,10 +969,22 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     std::vector<domain_selection> domain_selection_list;
 
+    // An exception escaping tool_init ends in an unrelated rocprofiler-sdk check
+    // failure that does not name the cause, so log it here.
+    auto domain_requests = std::vector<tracing_config_t::domain_request>{};
+    try
+    {
+        domain_requests = tracing_config_t::get_domains();
+    } catch(const std::exception& e)
+    {
+        LOG_CRITICAL("tracing_config::get_domains failed: {}", e.what());
+        throw;
+    }
+
     // Backtrace checks run per SDK record, so they are keyed by the callback kind the
     // domain service reports for each requested domain.
     const auto available_domains = g_domain_service->available_domains();
-    for(auto& request : tracing_config_t::get_domains())
+    for(auto& request : domain_requests)
     {
         const auto domain = std::ranges::find_if(
             available_domains, [&request](const domains::domain_info& info) {

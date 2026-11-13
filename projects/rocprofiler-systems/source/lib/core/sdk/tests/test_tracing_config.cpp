@@ -67,6 +67,9 @@ enum backend_tag : int
     domain_requests_before_hip_stream           = 115,
     domain_requests_marker_skipped_aliases      = 116,
     domain_requests_buffered_operations         = 117,
+    domain_choices_supported_only               = 118,
+    domain_requests_without_handler             = 120,
+    domain_requests_below_version_gate          = 121,
 };
 
 // tracing_config no longer caches get_version()/get_callback_tracing_names()/
@@ -118,7 +121,7 @@ template <int Tag>
 struct tagged_backend : cached_backend_methods<Tag, mock_backend>
 {};
 
-// The KFD gate is s_sdk_version_1_2_2 (10202): SDK versions below 1.2.2 have a
+// The KFD gate is k_sdk_version_1_2_2 (10202): SDK versions below 1.2.2 have a
 // fatal bug parsing KFD events with undefined node IDs. 10201 (1.2.1) is one
 // patch below the boundary, so KFD domains must stay unsupported.
 template <>
@@ -494,6 +497,52 @@ TEST_F(tracing_config_test, domain_choices_returns_expected_choices)
     EXPECT_THAT(choices, gtest::Not(gtest::Contains(std::string{ "none" })));
 }
 
+// The mock runs at SDK 1.3.1: rocshmem_api (1.3.4) and hipfile_api (1.3.5) are in the
+// SDK table but gated off; runtime_initialization, code_object and the marker kinds
+// have no domain_service handler; hip_stream has a handler but only counts when the
+// SDK table reports it.
+TEST_F(tracing_config_test, domain_choices_returns_only_supported_domains)
+{
+    using sut =
+        tracing_config<tagged_backend<domain_choices_supported_only>, mock_sdk_externals>;
+
+    auto callback_names = make_callback_name_info();
+    callback_names.emplace(mock_backend::CALLBACK_TRACING_RUNTIME_INITIALIZATION,
+                           "RUNTIME_INITIALIZATION");
+    callback_names.emplace(mock_backend::CALLBACK_TRACING_HIP_STREAM, "HIP_STREAM");
+    expect_name_tables(callback_names);
+
+    EXPECT_THAT(sut::get_domain_choices(),
+                gtest::ElementsAreArray(std::vector<std::string>{
+                    "hip_api",
+                    "hip_compiler_api",
+                    "hip_runtime_api",
+                    "hip_stream",
+                    "hsa_amd_ext_api",
+                    "hsa_api",
+                    "hsa_core_api",
+                    "hsa_finalize_ext_api",
+                    "hsa_image_ext_api",
+                    "kernel_dispatch",
+                    "kfd_event_dropped_events",
+                    "kfd_event_page_fault",
+                    "kfd_event_page_migrate",
+                    "kfd_event_queue",
+                    "kfd_event_unmap_from_gpu",
+                    "kfd_events",
+                    "kfd_page_fault",
+                    "kfd_page_migrate",
+                    "kfd_queue",
+                    "marker_api",
+                    "memory_allocation",
+                    "memory_copy",
+                    "ompt",
+                    "rccl_api",
+                    "roctx",
+                    "scratch_memory",
+                }));
+}
+
 TEST_F(tracing_config_test, domain_defaults_returns_expected_defaults)
 {
     using sut = tracing_config<tagged_backend<domain_settings_test>, mock_sdk_externals>;
@@ -736,6 +785,12 @@ TEST_F(tracing_config_domains_test, get_domains_skips_legacy_page_migration)
     expect_name_tables(make_callback_name_info());
     expect_domains_environment("page_migration");
 
+    // page_migration is in the pre-1.0 default value, so it must stay a valid choice.
+    const auto choices = sut::get_domain_choices();
+    EXPECT_THAT(choices, gtest::Contains(std::string{ "page_migration" }));
+    EXPECT_THAT(choices, gtest::Not(gtest::Contains(std::string{ "memory_allocation" })));
+    EXPECT_THAT(choices, gtest::Not(gtest::Contains(std::string{ "kfd_events" })));
+
     EXPECT_THAT(domain_names(sut::get_domains()), gtest::IsEmpty());
 }
 
@@ -774,6 +829,31 @@ TEST_F(tracing_config_domains_test, get_domains_rejects_kfd_events_before_sdk_1_
 
     expect_name_tables(make_callback_name_info());
     expect_domains_environment("kfd_events");
+
+    EXPECT_THROW(static_cast<void>(sut::get_domains()), std::runtime_error);
+}
+
+TEST_F(tracing_config_domains_test, get_domains_rejects_sdk_domain_without_handler)
+{
+    using sut = tracing_config<tagged_backend<domain_requests_without_handler>,
+                               mock_sdk_externals>;
+
+    auto callback_names = make_callback_name_info();
+    callback_names.emplace(mock_backend::CALLBACK_TRACING_RUNTIME_INITIALIZATION,
+                           "RUNTIME_INITIALIZATION");
+    expect_name_tables(callback_names);
+    expect_domains_environment("runtime_initialization");
+
+    EXPECT_THROW(static_cast<void>(sut::get_domains()), std::runtime_error);
+}
+
+TEST_F(tracing_config_domains_test, get_domains_rejects_domain_below_its_version_gate)
+{
+    using sut = tracing_config<tagged_backend<domain_requests_below_version_gate>,
+                               mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("rocshmem_api");
 
     EXPECT_THROW(static_cast<void>(sut::get_domains()), std::runtime_error);
 }
