@@ -1014,6 +1014,18 @@ def test_resolve_rocm_library_path(tmp_path):
     assert resolve_rocm_library_path(str(missing)) == str(missing)
 
 
+def test_create_temp_rocprofiler_metrics_path_in_parent_dir(tmp_path):
+    metrics_path = Path(
+        utils_common.create_temp_rocprofiler_metrics_path(
+            {"rocprofiler-sdk": {"counters": []}}, tmp_path
+        )
+    )
+
+    assert metrics_path.parent == tmp_path
+    assert (metrics_path / "config.yaml").is_file()
+    assert (metrics_path / "counter_defs.yaml").is_file()
+
+
 # =============================================================================
 # BUILD METRIC DETAILS TESTS
 # =============================================================================
@@ -1301,3 +1313,31 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
     assert not utils_common.is_gfx1250("gfx12500")
     assert not utils_common.is_gfx1250("gfx1251")
     assert not utils_common.is_gfx1250(None)
+
+
+@pytest.mark.parametrize(
+    ("filter_blocks", "selects"),
+    [
+        (None, True),
+        ([], True),
+        (["4"], True),
+        (["roof"], True),
+        (["4.1.1"], True),
+        (["2", "4"], True),
+        (["2", "sol"], False),
+        (["40"], False),
+    ],
+    ids=[
+        "none",
+        "empty",
+        "block_4",
+        "alias",
+        "roofline_metric",
+        "with_other_block",
+        "no_roofline",
+        "block_40",
+    ],
+)
+def test_roofline_selection(filter_blocks, selects):
+    """4, 4.x and the roof alias all count as roofline."""
+    assert utils_common.selects_roofline(filter_blocks) is selects

@@ -7,34 +7,28 @@ Unit tests for rocprof-compute general CLI options.
 
 import argparse
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
-from common import SUPPORTED_ARCHS
+from common import SUPPORTED_ARCHS, patch_console
 
-from argparser import omniarg_parser
+from argparser import CliHelpFormatter, DeprecatedAction, build_parser
 
 HOME = Path.cwd()
 VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
+REMOVAL = "is deprecated and will be removed in a future release."
 
 
 def build_args(argv, experimental=False):
-    """Construct the argument parser."""
-    parser = argparse.ArgumentParser(
-        prog="tool", usage="rocprof-compute [mode] [options]"
-    )
-    omniarg_parser(parser, HOME, SUPPORTED_ARCHS, VERSION, experimental)
-    return parser.parse_args(argv)
+    """Parse argv with the rocprof-compute parser."""
+    if experimental:
+        argv = ["--experimental", *argv]
+    return build_parser(HOME, SUPPORTED_ARCHS, VERSION, argv).parse_args(argv)
 
 
 def help_text(home, argv, capsys):
     """Return the help output for argv with the given rocprof-compute home."""
-    parser = argparse.ArgumentParser(
-        prog="tool",
-        description="CLI",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    omniarg_parser(parser, home, SUPPORTED_ARCHS, VERSION)
+    parser = build_parser(home, SUPPORTED_ARCHS, VERSION, argv)
     with pytest.raises(SystemExit):
         parser.parse_args([*argv, "--help"])
     return capsys.readouterr().out
@@ -46,6 +40,35 @@ def write_skills_readme(skills_dir):
     readme = skills_dir / "README.md"
     readme.write_text("skills")
     return readme
+
+
+def deprecated_option_parser():
+    """Return a parser with a renamed option and two wholly deprecated options."""
+    parser = argparse.ArgumentParser(formatter_class=CliHelpFormatter)
+    parser.add_argument(
+        "--new",
+        "--old",
+        dest="value",
+        metavar="<value>",
+        action=DeprecatedAction,
+        base_action="store",
+        deprecated_names=["--old"],
+        help="Set the value.",
+    )
+    parser.add_argument(
+        "--gone",
+        action=DeprecatedAction,
+        base_action="store_true",
+        advice="Use --new instead.",
+        help="Turn it on.",
+    )
+    parser.add_argument(
+        "--retired",
+        action=DeprecatedAction,
+        base_action="store_true",
+        help="Turn it off.",
+    )
+    return parser
 
 
 # =============================================================================
@@ -122,22 +145,6 @@ def test_quiet_rejects_explicit_value(flag, capsys):
 
 
 # =============================================================================
-# --config-dir
-# =============================================================================
-
-
-def test_config_dir_success_stores_value():
-    assert build_args(["--config-dir", "/tmp/cfg"]).config_dir == "/tmp/cfg"
-
-
-def test_config_dir_requires_value(capsys):
-    with pytest.raises(SystemExit) as exc:
-        build_args(["--config-dir"])
-    assert exc.value.code == 2
-    assert "--config-dir" in capsys.readouterr().err
-
-
-# =============================================================================
 # profile -d / --output-directory
 # =============================================================================
 
@@ -166,17 +173,26 @@ def test_profile_kernel_iteration_range():
 
 
 # =============================================================================
-# analyze --verify-deps
+# analyze debug options
 # =============================================================================
 
 
-def test_analyze_verify_deps_defaults_off():
-    assert build_args(["analyze", "-p", "/tmp/workload"]).verify_deps is False
+def test_analyze_debug_options():
+    """Debug options work without --debug, and without -p."""
+    defaults = build_args(["analyze", "-p", "/tmp/workload"])
+    assert defaults.debug_metric_expression is False
+    assert defaults.debug_table_view is False
+    assert defaults.debug_verify_deps is False
 
-
-def test_analyze_verify_deps_needs_no_workload():
-    """The flag is a standalone environment check, so -p stays optional."""
-    assert build_args(["analyze", "--verify-deps"]).verify_deps is True
+    args = build_args([
+        "analyze",
+        "--debug-metric-expression",
+        "--debug-table-view",
+        "--debug-verify-deps",
+    ])
+    assert args.debug_metric_expression is True
+    assert args.debug_table_view is True
+    assert args.debug_verify_deps is True
 
 
 def test_pc_sampling_analyze_options():
@@ -249,6 +265,63 @@ def test_ml_api_options_reject_unknown_values(argv, capsys):
 
 
 # =============================================================================
+# Deprecated option names
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("argv", "warnings"),
+    [
+        (["--old", "1"], [call(f"--old {REMOVAL} Use --new instead.")]),
+        (["--new", "1"], []),
+        (["--gone"], [call(f"--gone {REMOVAL} Use --new instead.")]),
+        (["--retired"], [call(f"--retired {REMOVAL}")]),
+    ],
+    ids=["old_name", "new_name", "whole_option", "whole_option_without_advice"],
+)
+def test_deprecated_action_warns_only_for_deprecated_names(monkeypatch, argv, warnings):
+    mocks = patch_console(monkeypatch, "argparser", "warning")
+    deprecated_option_parser().parse_args(argv)
+    assert mocks["warning"].call_args_list == warnings
+
+
+def test_deprecated_alias_fills_the_same_dest(monkeypatch):
+    patch_console(monkeypatch, "argparser", "warning")
+    assert deprecated_option_parser().parse_args(["--old", "1"]).value == "1"
+
+
+def test_deprecated_action_adds_the_deprecation_to_the_help():
+    help_text = deprecated_option_parser().format_help()
+    assert "Set the value.\n" in help_text
+    assert "Deprecated alias: --old." in help_text
+    assert "DEPRECATED: Use --new instead." in help_text
+    assert "DEPRECATED: Will be removed in a future release." in help_text
+
+
+# =============================================================================
+# Help notation
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("option_strings", "nargs", "metavar", "expected"),
+    [
+        (["-b", "--block"], "+", "<ids>", "-b, --block <ids>..."),
+        (["--operator"], "*", "patterns", "--operator [patterns]..."),
+        (["-t", "--time-unit"], None, "<unit>", "-t, --time-unit <unit>"),
+        (["--view"], "?", "view", "--view [view]"),
+    ],
+    ids=["one_or_more", "zero_or_more", "one_value", "optional_value"],
+)
+def test_cli_help_formatter_shows_option_names_and_argument_once(
+    option_strings, nargs, metavar, expected
+):
+    parser = argparse.ArgumentParser(formatter_class=CliHelpFormatter)
+    parser.add_argument(*option_strings, nargs=nargs, metavar=metavar)
+    assert expected in parser.format_help()
+
+
+# =============================================================================
 # Experimental Feature Tests
 # =============================================================================
 
@@ -270,10 +343,7 @@ def test_experimental_feature_without_flag_errors(monkeypatch, capsys):
         action=ExperimentalAction,
         experimental_enabled=False,
         feature_label="Test experimental feature",
-        base_action="store_const",
-        nargs=0,
-        const=True,
-        default=False,
+        base_action="store_true",
         help="Custom Help",
     )
 
@@ -304,10 +374,7 @@ def test_experimental_feature_with_flag_succeeds(monkeypatch, caplog):
         action=ExperimentalAction,
         experimental_enabled=True,
         feature_label="Test experimental feature",
-        base_action="store_const",
-        nargs=0,
-        const=True,
-        default=False,
+        base_action="store_true",
         help="Custom Help",
     )
 
@@ -321,83 +388,19 @@ def test_experimental_feature_with_flag_succeeds(monkeypatch, caplog):
 
 
 @pytest.mark.experimental_feature
-def test_experimental_flag_parsing_before_separator(monkeypatch, caplog):
-    """Test that prelim parser correctly detects --experimental
-    before '--' separator."""
-    import argparse
-
-    from argparser import ExperimentalAction
-
-    # Monkeypatch sys.argv with --experimental before separator
-    monkeypatch.setattr(
-        "sys.argv",
-        ["rocprof-compute", "--experimental", "profile", "-n", "test", "--", "./app"],
-    )
-
-    # Create a self-contained prelim parser
-    prelim_parser = argparse.ArgumentParser(add_help=False)
-    prelim_parser.add_argument("--experimental", action="store_true", default=False)
-    prelim_parser.parse_known_args()
-
-    # Create full parser with experimental feature
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--experimental", action="store_true", default=False)
-    parser.add_argument(
-        "--test-exp-feature",
-        action=ExperimentalAction,
-        experimental_enabled=True,
-        feature_label="Test experimental feature",
-        base_action="store_const",
-        nargs=0,
-        const=True,
-        default=False,
-        help="Custom Help",
-    )
-
-    # Parse with just the experimental feature flag
-    monkeypatch.setattr("sys.argv", ["rocprof-compute", "--test-exp-feature"])
-    parser.parse_args()
-
-    assert "experimental" in caplog.text.lower()
+def test_experimental_option_works_with_experimental_before_workload():
+    argv = ["--experimental", "profile", "--pc-sampling", "-n", "test", "--", "./app"]
+    args = build_parser(HOME, SUPPORTED_ARCHS, VERSION, argv).parse_args(argv)
+    assert args.pc_sampling
 
 
 @pytest.mark.experimental_feature
-def test_experimental_flag_parsing_after_separator(monkeypatch, capsys):
-    """Test that prelim parser ignores --experimental after '--' separator."""
-    import argparse
-
-    from argparser import ExperimentalAction
-
-    # Monkeypatch sys.argv with --experimental after separator
-    monkeypatch.setattr(
-        "sys.argv",
-        ["rocprof-compute", "profile", "-n", "test", "--", "./app", "--experimental"],
-    )
-
-    # Create a self-contained prelim parser
-    prelim_parser = argparse.ArgumentParser(add_help=False)
-    prelim_parser.add_argument("--experimental", action="store_true", default=False)
-    prelim_parser.parse_known_args()
-
-    # Create full parser with experimental feature
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--test-exp-feature",
-        action=ExperimentalAction,
-        experimental_enabled=False,
-        feature_label="Test experimental feature",
-        base_action="store_const",
-        nargs=0,
-        const=True,
-        default=False,
-        help="Custom Help",
-    )
-
-    with pytest.raises(SystemExit):
-        parser.parse_args()
-
-    captured = capsys.readouterr()
-    assert "use --experimental" not in captured.err.lower()
+def test_experimental_option_fails_with_experimental_in_workload(capsys):
+    argv = ["profile", "--pc-sampling", "-n", "test", "--", "./app", "--experimental"]
+    with pytest.raises(SystemExit) as exc:
+        build_parser(HOME, SUPPORTED_ARCHS, VERSION, argv).parse_args(argv)
+    assert exc.value.code == 2
+    assert "experimental feature" in capsys.readouterr().err.lower()
 
 
 @pytest.mark.experimental_feature
@@ -439,10 +442,7 @@ def test_experimental_action_help_suppression():
         action=ExperimentalAction,
         experimental_enabled=False,
         feature_label="Test experimental feature",
-        base_action="store_const",
-        nargs=0,
-        const=True,
-        default=False,
+        base_action="store_true",
         help="Test help text",
     )
 

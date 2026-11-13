@@ -131,9 +131,9 @@ numActiveCUs:
 
 Phase A has no collectables: the metric library has no collectable file, field or
 reference. Collectables are designed in the single-pass metrics plan
-([Terms](../../single-pass_and_multi-pass_metrics/hld-plan.md#terms) and
-[splitting multi-pass metrics](../../single-pass_and_multi-pass_metrics/hld-plan.md#phase-2--splitting-multi-pass-metrics-into-single-pass-parts))
-and its [grouping algorithm](../../single-pass_and_multi-pass_metrics/lld-metrics-grouping-algorithm.md).
+([Terms](../single-pass-and-multi-pass-metrics/hld-plan.md#terms) and
+[splitting multi-pass metrics](../single-pass-and-multi-pass-metrics/hld-plan.md#phase-2--splitting-multi-pass-metrics-into-single-pass-parts))
+and its [grouping algorithm](../single-pass-and-multi-pass-metrics/lld-metrics-grouping-algorithm.md).
 
 ### Inheritance loader
 
@@ -365,7 +365,7 @@ Production switches once, at [Stage 8](lld-phase-b-display-view.md#stage-8----cu
 The Layer 2 files live in a sibling tree, `src/rocprof_compute_soc/metric_library/`
 (`default_metric_library_dir()`), not in `analysis_configs/{arch}/`. The old loader
 requires a `Panel Config` key in every `*.yaml` of an arch directory, so mixing the two
-formats there would break it. A user-supplied `--config-dir` keeps using the old loader.
+formats there would break it.
 
 At the cutover, counters come from the metrics that the selected views place
 (`get_counters_for_metrics()`). Phase A checks only the no-filter counter set, because

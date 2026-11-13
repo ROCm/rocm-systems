@@ -4,6 +4,7 @@
 // Tests for scalar-result special functions without EXEC masking.
 
 #include "math/unary_test.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 #include <bit>
 
 namespace {

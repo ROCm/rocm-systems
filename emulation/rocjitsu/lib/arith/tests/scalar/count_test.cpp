@@ -3,6 +3,7 @@
 
 // Tests for scalar bit counts, reversal, and significant-bit searches.
 
+#include "rj_arith/detail/rj_arith_scalar.h"
 #include "scalar/integer_helpers.h"
 
 // Check integer results and SCC against the supplied scalar reference.

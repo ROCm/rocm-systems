@@ -587,94 +587,6 @@ def _attach_stat_column(dfs: dict, dfs_type: dict, statistic: str) -> None:
         ]
 
 
-def _evaluate_stat_columns(
-    arch_config: object,
-    filtered: object,
-    sys_info: object,
-    pass_layout: object,
-    roofline_peaks: object,
-    columns: List[str],
-) -> None:
-    """Evaluate Median and Std Dev cells, keeping the rest of the table.
-
-    One expression that cannot be reduced does not drop the other metrics.
-    Pass binding matches ``eval_metric`` so a counter copied across passes is
-    read from the numerator's pass.
-    """
-    from utils.metrics.evaluation_pipeline import (
-        _calc_pass_scoped_builtins,
-        calc_builtin_vars,
-        create_empirical_peaks_dict,
-        create_sys_vars,
-    )
-    from utils.metrics.metric_evaluator import MetricEvaluator
-    from utils.metrics.pass_provenance import bind_metric_tables_to_passes
-    from utils.mi_gpu_spec import mi_gpu_specs
-    from utils.utils_common import SUPPORTED_FIELD
-
-    frames = arch_config.dfs
-    frame_types = arch_config.dfs_type
-    expressions: List[str] = []
-    for df_id, frame in frames.items():
-        if frame_types.get(df_id) != "metric_table":
-            continue
-        for column in columns:
-            if column not in frame.columns:
-                continue
-            for cell in frame[column]:
-                if isinstance(cell, str) and cell and cell != "None":
-                    expressions.append(cell)
-
-    info = sys_info.iloc[0]
-    sys_vars = create_sys_vars(info)
-    empirical_peaks = create_empirical_peaks_dict(roofline_peaks)
-    used_passes: Set[str] = set()
-    if pass_layout is not None and pass_layout.has_duplicates:
-        used_passes = bind_metric_tables_to_passes(
-            frames,
-            frame_types,
-            pass_layout,
-            mi_gpu_specs.get_gpu_series(info["gpu_arch"]),
-            frozenset(SUPPORTED_FIELD),
-        )
-    sys_vars.update(
-        calc_builtin_vars(filtered, sys_vars, info["gpu_arch"], expressions)
-    )
-    if pass_layout is not None and used_passes:
-        sys_vars.update(
-            _calc_pass_scoped_builtins(
-                filtered,
-                sys_vars,
-                info["gpu_arch"],
-                pass_layout,
-                used_passes,
-                expressions,
-            )
-        )
-    evaluator = MetricEvaluator(filtered, sys_vars, empirical_peaks)
-    for df_id, frame in frames.items():
-        if frame_types.get(df_id) != "metric_table":
-            continue
-        for column in columns:
-            if column not in frame.columns:
-                continue
-            for row_id, row in frame.iterrows():
-                expression = row.get(column)
-                if (
-                    not isinstance(expression, str)
-                    or not expression
-                    or expression == "None"
-                ):
-                    continue
-                try:
-                    evaluated = evaluator.eval_expression(expression)
-                except Exception:  # noqa: BLE001 — one bad aggregate must not drop the rest
-                    evaluated = None
-                if evaluated == "N/A":
-                    evaluated = None
-                frame.at[row_id, column] = evaluated
-
-
 def _read_stat_column(arch_config: object, column: str) -> Dict[str, Optional[float]]:
     """Read one evaluated statistic column into metric-key → float."""
     skip_cols = {
@@ -732,6 +644,7 @@ def compute_dispatch_stats_for_workload(
 
     import config
     from utils import file_io, parser, schema
+    from utils.metrics.evaluation_pipeline import eval_metric
     from utils.metrics.expression import build_metric_value_string
     from utils.utils_common import canonical_config_arch
 
@@ -798,17 +711,21 @@ def compute_dispatch_stats_for_workload(
     workload.filter_gpu_ids = None
     workload.filter_kernel_ids = None
     workload.filter_dispatch_ids = None
-    workload.raw_pmc, workload.pmc_pass_layout = file_io.load_df_pmc(
+    workload.raw_pmc, workload.pass_tables = file_io.create_df_pmc(
         str(wl_dir), verbose=0
     )
     filtered = parser.apply_filters(workload, debug=False)
-    _evaluate_stat_columns(
-        arch_config,
-        filtered,
-        sys_info,
-        workload.pmc_pass_layout,
+    eval_metric(
+        arch_config.dfs,
+        arch_config.dfs_type,
+        arch_config.dfs_expressions,
+        sys_info.iloc[0],
         workload.roofline_peaks,
-        ["Median", "Std Dev"],
+        filtered,
+        debug=False,
+        pass_tables=[
+            table.loc[filtered.index] for table in workload.pass_tables.values()
+        ],
     )
     return (
         _read_stat_column(arch_config, "Median"),

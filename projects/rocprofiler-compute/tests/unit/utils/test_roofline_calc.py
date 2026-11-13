@@ -93,7 +93,7 @@ def run_calc_ai_analyze_with_values(
         roofline_peaks: object,
         pmc_data: object,
         debug: object,
-        pass_layout: object = None,
+        pass_tables: object = None,
     ) -> None:
         dfs[402] = pd.DataFrame({
             "Metric": [

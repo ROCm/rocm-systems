@@ -28,7 +28,7 @@ unsafe fn store_signal_value(signal: &AmdSignal, value: SignalValue, order: Orde
             let address = signal.value.load(Ordering::Relaxed) as usize;
             // SAFETY: The caller retains the locally owned queue and its MMIO
             // mapping. Shared IPC signals are excluded by host_store_kind.
-            unsafe { rocddi::device::gpu::queue::ring_doorbell(address, value as u64) };
+            unsafe { rocddi::device::gpu::queue::store_ordered_mmio64(address, value as u64) };
         }
         AMD_SIGNAL_KIND_LEGACY_DOORBELL => {
             signal.value.store(value, order);

@@ -596,15 +596,16 @@ def load_table_data(
     """
     load_non_mertrics_table(workload, dir_path, args, pc_sampling_tool_data)
 
+    filtered_pmc = apply_filters(workload, args.debug_metric_expression)
     eval_metric(
         workload.dfs,
         workload.dfs_type,
         dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
-        apply_filters(workload, args.debug),
-        args.debug,
-        pass_layout=getattr(workload, "pmc_pass_layout", None),
+        filtered_pmc,
+        args.debug_metric_expression,
+        [table.loc[filtered_pmc.index] for table in workload.pass_tables.values()],
     )
 
 
@@ -628,24 +629,17 @@ def build_comparable_columns(time_unit: str) -> list[str]:
     return comparable_columns
 
 
-def correct_sys_info(mspec: MachineSpecs, specs_correction: str) -> pd.DataFrame:
-    """
-    Correct system spec items manually based on user-provided corrections.
-    """
-    # Parse key:value pairs
-    pairs: dict[str, str] = {}
-    for pair in specs_correction.split(","):
-        if ":" in pair:
-            key, value = pair.split(":", 1)
-            pairs[key.strip()] = value.strip()
-
-    # Apply corrections
-    for key, value in pairs.items():
-        if hasattr(mspec, key):
-            setattr(mspec, key, value)
-        else:
+def correct_sys_info(mspec: MachineSpecs, specs_correction: List[str]) -> pd.DataFrame:
+    """Apply the name:value corrections to mspec and return the specs as one row."""
+    for pair in specs_correction:
+        name, _, value = pair.partition(":")
+        name = name.strip()
+        if pair.count(":") != 1 or not hasattr(mspec, name):
             console_error(
-                "analyze", f'Invalid spec "{key}". Use --specs to see valid options'
+                "analyze",
+                f'Invalid --specs-correction "{pair}". Use name:value, where name '
+                "is a column name in the workload's sysinfo.csv.",
             )
+        setattr(mspec, name, value.strip())
     # Convert dict to DataFrame for downstream pandas-based processing
     return pd.DataFrame(mspec.get_class_members(), index=[0])
