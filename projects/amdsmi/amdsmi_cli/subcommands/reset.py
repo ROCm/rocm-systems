@@ -114,7 +114,7 @@ class ResetCommands:
             self.helpers.check_required_groups()
             self.group_check_printed = True
 
-        # Mode-1 gpureset is hive-wide.
+        # Mode-1 gpureset is hive-wide on XGMI.
         # Group GPUs by hive and reset each hive only once.
         gpus_to_reset = []
 
@@ -125,6 +125,14 @@ class ResetCommands:
             gpus_without_hive = []
 
             for gpu in args.gpu:
+                # UALink GPUs share a KFD hive ID, but reset is per device.
+                try:
+                    fabric_info = amdsmi_interface.amdsmi_get_gpu_fabric_info(gpu)
+                    if fabric_info.get("fabric_type") in ("UALINK", "UALOE"):
+                        gpus_without_hive.append(gpu)
+                        continue
+                except Exception:
+                    pass
                 try:
                     xgmi_info = amdsmi_interface.amdsmi_get_xgmi_info(gpu)
                     if isinstance(xgmi_info, dict):
