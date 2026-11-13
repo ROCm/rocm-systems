@@ -42,6 +42,7 @@
 #include "fakes/ce_fakes.h"      // g_ncclCeInit, g_ncclCeEnsureAllReduceStaging
 #include "fakes/hip_fakes.h"     // g_hipThreadExchangeStreamCaptureMode
 #include "fakes/transport_stubs.h"  // g_ncclTransportP2pSetup
+#include "fakes/tuning_fakes.h"   // g_policyRuntimeToggleRequested
 #include "ScopedHook.h"          // RAII install/restore for controllable seams
 #include "WaitUntil.h"           // bounded poll for what the other thread does
 
@@ -1363,6 +1364,35 @@ TEST(JobFreeCallbacksTest, LegacyP2pPreconnectJobIsWiredToPreconnectJobFree) {
   ASSERT_EQ(1, setup.calls);
   EXPECT_EQ(&ncclPreconnectJobFree, destructor);
   EXPECT_TRUE(ncclIntruQueueEmpty(&gjob->asyncJobs)) << "the job must be drained and freed after launch";
+}
+
+// Connector index 2 is the NET slot and the execution policy's alternate-transfer-mode IPC slot; P2P preconnect
+// sets it up only when one of them can be in use.
+TEST(P2PPreconnectFuncTest, SetsUpIndex2OnlyForP2pNetOrTheExecutionPolicy) {
+  ScopedHook mode(g_hipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode* m) {
+    *m = hipStreamCaptureModeRelaxed;
+    return hipSuccess;
+  });
+  for (bool p2pNet : {false, true}) {
+    for (bool toggle : {false, true}) {
+      auto comm = std::make_unique<ncclComm>();
+      comm->p2pNet = p2pNet;
+      g_policyRuntimeToggleRequested = toggle;
+      std::vector<int> connIndices;
+      ScopedHook setup(g_ncclTransportP2pSetup, [&](struct ncclComm*, struct ncclTopoGraph*, int connIndex, bool*) {
+        connIndices.push_back(connIndex);
+        return ncclSuccess;
+      });
+      ncclPreconnectJob job{};
+      job.comm = comm.get();
+      job.base.isThreadMain = true;
+      EXPECT_EQ(ncclSuccess, ncclP2PPreconnectFunc(&job.base));
+      std::vector<int> expected = {1};
+      if (p2pNet || toggle) expected.push_back(NCCL_CONN_IDX_P2P_NET);
+      EXPECT_EQ(expected, connIndices) << "p2pNet=" << p2pNet << " toggle=" << toggle;
+    }
+  }
+  g_policyRuntimeToggleRequested = false;
 }
 
 // ncclMgmtTaskJobFunc: drains comm->mgmtTaskQueue, running each queued task's own func then

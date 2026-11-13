@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 //
-// Host-only microtests for ncclTransportPatConnect (src/transport/generic.cc),
+// Host-only microtests for ncclTransportPatConnect and ncclTransportRingConnect (src/transport/generic.cc),
 // compiled in via GENERIC_CC_PATH. ncclTransportP2pSetup is a blocking exchange
 // with the rank's peers, so a rank that enters it while another rank skips it
 // hangs (NVIDIA/nccl#2385).
@@ -14,19 +14,35 @@
 #include <algorithm>
 #include <memory>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 #include GENERIC_CC_PATH
 
 namespace {
 int fakePatEnable;
+bool fakeShmEligible;
 int p2pSetupCalls;
+std::vector<int> connectConnIndices;
+std::vector<std::pair<int, int>> setupSpecificCalls;  // (connIndex, transport)
 }  // namespace
 
 int ncclPatEnable(struct ncclComm*) { return fakePatEnable; }
-ncclResult_t ncclTransportP2pConnect(struct ncclComm*, int, int, int*, int, int*, int) { return ncclSuccess; }
+bool rcclPolicyCanonicalShmEligible(const struct ncclComm*) { return fakeShmEligible; }
+int64_t ncclParamLocalRegister() { return 0; }
+int64_t ncclParamGraphRegister() { return 0; }
+ncclResult_t bootstrapAllGather(void*, void*, int) { return ncclInternalError; }
+ncclResult_t ncclTransportP2pConnect(struct ncclComm*, int, int, int*, int, int*, int connIndex) {
+  connectConnIndices.push_back(connIndex);
+  return ncclSuccess;
+}
 ncclResult_t ncclTransportP2pSetup(struct ncclComm*, struct ncclTopoGraph*, int, bool*) {
   p2pSetupCalls++;
+  return ncclSuccess;
+}
+ncclResult_t ncclTransportP2pSetupSpecific(struct ncclComm*, struct ncclTopoGraph*, int connIndex, bool*,
+                                           int transport) {
+  setupSpecificCalls.emplace_back(connIndex, transport);
   return ncclSuccess;
 }
 
@@ -92,4 +108,36 @@ TEST(GenericPatConnectMicrotest, EvenMultiRankPerNodeSetsUpEveryRank) {
 
 TEST(GenericPatConnectMicrotest, PatDisabledSkipsSetupOnEveryRank) {
   EXPECT_EQ(std::vector<int>({0, 0}), setupCallsPerRank({1, 1}, /*patEnable=*/0));
+}
+
+namespace {
+
+// Runs ncclTransportRingConnect on a two-rank, two-channel communicator.
+void ringConnect(bool shmEligible) {
+  fakeShmEligible = shmEligible;
+  p2pSetupCalls = 0;
+  connectConnIndices.clear();
+  setupSpecificCalls.clear();
+  auto comm = std::make_unique<ncclComm>();
+  comm->nRanks = 2;
+  comm->nChannels = 2;
+  EXPECT_EQ(ncclSuccess, ncclTransportRingConnect(comm.get()));
+}
+
+}  // namespace
+
+// The SHM decision comes from all-gathered peer info, so every rank takes the same arm;
+// an ineligible communicator never touches the SHM connector.
+TEST(GenericRingConnectMicrotest, ShmIneligibleConnectsOnlyTheDefaultConnector) {
+  ringConnect(/*shmEligible=*/false);
+  EXPECT_EQ(1, p2pSetupCalls);
+  EXPECT_EQ(std::vector<int>({0, 0}), connectConnIndices);
+  EXPECT_TRUE(setupSpecificCalls.empty());
+}
+
+TEST(GenericRingConnectMicrotest, ShmEligibleAlsoProvisionsTheShmConnectorOnEveryChannel) {
+  ringConnect(/*shmEligible=*/true);
+  EXPECT_EQ(1, p2pSetupCalls);
+  EXPECT_EQ(std::vector<int>({0, 0, RCCL_CONN_IDX_COLL_SHM, RCCL_CONN_IDX_COLL_SHM}), connectConnIndices);
+  EXPECT_EQ((std::vector<std::pair<int, int>>{{RCCL_CONN_IDX_COLL_SHM, TRANSPORT_SHM}}), setupSpecificCalls);
 }

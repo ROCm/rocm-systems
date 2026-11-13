@@ -47,8 +47,7 @@ enum rcclExecutionTransport {
   RCCL_EXECUTION_TRANSPORT_MIXED,
   RCCL_EXECUTION_TRANSPORT_COUNT,
 };
-static_assert(RCCL_EXECUTION_TRANSPORT_COUNT < 32,
-              "Execution transport masks require fewer than 32 values");
+static_assert(RCCL_EXECUTION_TRANSPORT_COUNT < 32, "Execution transport masks require fewer than 32 values");
 constexpr uint32_t rcclExecutionTransportBit(enum rcclExecutionTransport transport) {
   return uint32_t{1} << static_cast<unsigned>(transport);
 }
@@ -195,10 +194,16 @@ struct rcclExecutionPolicyCondition {
 struct rcclExecutionPolicyAssignment {
   enum rcclExecutionPolicyOutputField field;
   struct rcclExecutionPolicyValue value;
+  // Dropped, rather than rejecting the rule, when no rule's full profile is
+  // valid for the input.
+  bool optional;
 };
 
 // A rule is an atomic execution profile. Assignments are applied to a fresh
 // default policy and are never merged with assignments from another rule.
+// Selection takes the first rule whose full profile is valid; only if none is
+// does it take the first rule that becomes valid without its optional
+// assignments.
 struct rcclCollectiveExecutionRule {
   const struct rcclExecutionPolicyCondition* conditions;
   size_t conditionCount;
@@ -275,33 +280,52 @@ struct rcclExecutionPolicyResolution {
 
 void rcclDefaultCollectiveExecutionPolicy(struct rcclCollectiveExecutionPolicy* policy);
 void rcclDefaultExecutionPolicyValidationContext(struct rcclExecutionPolicyValidationContext* context);
+// A resolution with the given status, no selected or rejected rule, and the
+// default policy.
+void rcclInitExecutionPolicyResolution(struct rcclExecutionPolicyResolution* resolution,
+                                       enum rcclExecutionPolicyResolutionStatus status);
 struct rcclExecutionPolicyResolution rcclEvaluateCollectiveExecutionRulesWithValidation(
-  const struct rcclExecutionPolicyFact* facts, size_t factCount,
-  const struct rcclCollectiveExecutionRule* rules, size_t ruleCount,
-  const struct rcclExecutionPolicyValidationContext* validation);
+  const struct rcclExecutionPolicyFact* facts, size_t factCount, const struct rcclCollectiveExecutionRule* rules,
+  size_t ruleCount, const struct rcclExecutionPolicyValidationContext* validation);
 struct rcclExecutionPolicyResolution rcclResolveCollectiveExecutionPolicyWithValidation(
-  const struct rcclCollectivePolicyInput* input,
-  const struct rcclExecutionPolicyValidationContext* validation);
-bool rcclEvaluateCollectiveExecutionRules(const struct rcclExecutionPolicyFact* facts, size_t factCount,
-                                           const struct rcclCollectiveExecutionRule* rules, size_t ruleCount,
-                                           struct rcclCollectiveExecutionPolicy* policy,
-                                           rcclExecutionPolicyRuleId* selectedRuleId);
-bool rcclResolveCollectiveExecutionPolicy(const struct rcclCollectivePolicyInput* input,
-                                          struct rcclCollectiveExecutionPolicy* policy,
-                                          rcclExecutionPolicyRuleId* selectedRuleId);
+  const struct rcclCollectivePolicyInput* input, const struct rcclExecutionPolicyValidationContext* validation);
 bool rcclBuffersOverlap(const void* firstBuffer, size_t firstBytes, const void* secondBuffer, size_t secondBytes);
-int rcclResolveExecutionPolicyRequiredChannels(
-  const struct rcclExecutionPolicyProvisioningInput* input);
+int rcclResolveExecutionPolicyRequiredChannels(const struct rcclExecutionPolicyProvisioningInput* input);
 
-inline bool rcclEvaluateCollectiveExecutionRules(const struct rcclExecutionPolicyFact* facts, size_t factCount,
-                                                 const struct rcclCollectiveExecutionRule* rules, size_t ruleCount,
-                                                 struct rcclCollectiveExecutionPolicy* policy) {
-  return rcclEvaluateCollectiveExecutionRules(facts, factCount, rules, ruleCount, policy, nullptr);
+inline size_t rcclSaturatingMultiply(size_t lhs, size_t rhs) {
+  return rhs != 0 && lhs > SIZE_MAX / rhs ? SIZE_MAX : lhs * rhs;
 }
 
-inline bool rcclResolveCollectiveExecutionPolicy(const struct rcclCollectivePolicyInput* input,
-                                                 struct rcclCollectiveExecutionPolicy* policy) {
-  return rcclResolveCollectiveExecutionPolicy(input, policy, nullptr);
+// End of the furthest of nRanks (displacement, count) ranges.
+inline size_t rcclAllToAllvBufferSpan(const size_t* counts, const size_t* displacements, int nRanks) {
+  size_t span = 0;
+  for (int rank = 0; rank < nRanks; rank++) {
+    size_t end = counts[rank] > SIZE_MAX - displacements[rank] ? SIZE_MAX : displacements[rank] + counts[rank];
+    if (end > span) span = end;
+  }
+  return span;
+}
+
+// Whether one rank's send and receive buffers of a collective overlap.
+// allToAllvSizes, when not null, is that rank's AllToAllv table: send counts,
+// send displacements, receive counts and receive displacements, nRanks bytes
+// each.
+inline bool rcclCollectiveBuffersOverlap(ncclFunc_t func, const void* sendbuff, const void* recvbuff, size_t count,
+                                         size_t typeSize, int nRanks, const size_t* allToAllvSizes) {
+  if (sendbuff == nullptr || recvbuff == nullptr || nRanks <= 0) return false;
+  size_t sendBytes;
+  size_t recvBytes;
+  if (func == ncclFuncAlltoAllv && allToAllvSizes != nullptr) {
+    sendBytes = rcclAllToAllvBufferSpan(allToAllvSizes, allToAllvSizes + nRanks, nRanks);
+    recvBytes = rcclAllToAllvBufferSpan(allToAllvSizes + 2 * nRanks, allToAllvSizes + 3 * nRanks, nRanks);
+  } else {
+    size_t allRanksCount = rcclSaturatingMultiply(count, static_cast<size_t>(nRanks));
+    bool sendsAllRanks = func == ncclFuncAlltoAll || func == ncclFuncScatter || func == ncclFuncReduceScatter;
+    bool receivesAllRanks = func == ncclFuncAlltoAll || func == ncclFuncGather || func == ncclFuncAllGather;
+    sendBytes = rcclSaturatingMultiply(sendsAllRanks ? allRanksCount : count, typeSize);
+    recvBytes = rcclSaturatingMultiply(receivesAllRanks ? allRanksCount : count, typeSize);
+  }
+  return rcclBuffersOverlap(sendbuff, sendBytes, recvbuff, recvBytes);
 }
 
 #endif // RCCL_COLLECTIVE_EXECUTION_POLICY_H_

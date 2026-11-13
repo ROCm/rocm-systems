@@ -11,10 +11,36 @@
 #include "utils.h"
 #include "param.h"
 #include "archinfo.h"
+#include "transport.h"
 
 bool rcclUseAinic();
 int rcclEffectiveP2pBatchEnable(struct ncclComm* comm);
 int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI);
+
+// Marks the connIndex connectors of the first nParts channels of a peer's P2P
+// mapping for preconnect. Returns whether any connector still needs setup.
+inline bool rcclP2pMarkPreconnectChannels(struct ncclComm* comm, int peer, bool isSendNotRecv, uint8_t base,
+                                          int nP2pChannels, int nP2pChannelsPerPeer, int nParts, int connIndex) {
+  bool marked = false;
+  base %= nP2pChannels;
+  for (int c = 0; c < nParts; c++) {
+    int channelId = ncclP2pChannelForPart(nP2pChannels, base, c, nP2pChannelsPerPeer, comm->nNodes,
+                                          comm->p2pChannelShiftSize);
+    struct ncclConnector* conn = isSendNotRecv ? &comm->channels[channelId].peers[peer]->send[connIndex]
+                                               : &comm->channels[channelId].peers[peer]->recv[connIndex];
+    if (conn->hasSeen != 0) continue;
+    // P2P uses only one connector. hasSeen also prevents duplicate setup
+    // when split shared communicators enqueue the same connection.
+    conn->hasSeen = 1;
+    if (connIndex == RCCL_CONN_IDX_P2P_SHM && conn->connected) continue;
+    if (connIndex != NCCL_CONN_IDX_P2P_NET) conn->p2pOnly = 1;
+    int maskPeer = peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex);
+    struct channelMasks* connect = isSendNotRecv ? &comm->connectSend[maskPeer] : &comm->connectRecv[maskPeer];
+    connect->masks[channelId / 64] |= (1ULL << (channelId % 64));
+    marked = true;
+  }
+  return marked;
+}
 
 RCCL_PARAM_DECLARE(
   PxnOptQpUsage); // RCCL_PXN_OPT_QP_USAGE: uses batch stride of comm->maxLocalRanks instead of 1 to reduce QP usage when p2p-batching is disabled

@@ -30,6 +30,7 @@ ASSERT_HOOK_MATCHES_PROD(g_useAinic, rcclUseAinic);
 ASSERT_HOOK_MATCHES_PROD(g_pxnDisable, ncclPxnDisable);
 ASSERT_HOOK_MATCHES_PROD(g_ncclProxyStop, ncclProxyStop);
 ASSERT_HOOK_MATCHES_PROD(g_ncclTransportP2pSetup, ncclTransportP2pSetup);
+ASSERT_HOOK_MATCHES_PROD(g_ncclTransportP2pSetupSpecific, ncclTransportP2pSetupSpecific);
 ASSERT_HOOK_MATCHES_PROD(g_ncclTransportP2pConnect, ncclTransportP2pConnect);
 ASSERT_HOOK_MATCHES_PROD(g_ncclTransportInitRankMap, ncclTransportInitRankMap);
 ASSERT_HOOK_MATCHES_PROD(g_ncclTransportCollNetSetup, ncclTransportCollNetSetup);
@@ -96,6 +97,12 @@ static ncclResult_t DefaultTransportP2pSetup(struct ncclComm*, struct ncclTopoGr
 }
 std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*)>
     g_ncclTransportP2pSetup = DefaultTransportP2pSetup;
+
+static ncclResult_t DefaultTransportP2pSetupSpecific(struct ncclComm*, struct ncclTopoGraph*, int, bool*, int) {
+  FailLoudUnfaked("transport_stubs", "ncclTransportP2pSetupSpecific");
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*, int)>
+    g_ncclTransportP2pSetupSpecific = DefaultTransportP2pSetupSpecific;
 
 static ncclResult_t DefaultTransportP2pConnect(struct ncclComm*, int, int, int*, int, int*, int) {
   FailLoudUnfaked("transport_stubs", "ncclTransportP2pConnect");
@@ -272,6 +279,7 @@ void ResetTransportStubs() {
   g_ncclNvlsTuningResult = ncclSuccess;
   g_ncclNvlsTuningCalls = 0;
   g_ncclTransportP2pSetup = DefaultTransportP2pSetup;
+  g_ncclTransportP2pSetupSpecific = DefaultTransportP2pSetupSpecific;
   g_ncclTransportP2pConnect = DefaultTransportP2pConnect;
   g_ncclTransportInitRankMap = DefaultTransportInitRankMap;
   g_ncclTransportCollNetSetup = DefaultTransportCollNetSetup;
@@ -353,9 +361,10 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
                                    bool* needsProxy) {
   return g_ncclTransportP2pSetup(comm, graph, connIndex, needsProxy);
 }
-__attribute__((weak)) ncclResult_t ncclTransportP2pSetupSpecific(
-  struct ncclComm*, struct ncclTopoGraph*, int, bool*, int) {
-  ::abort();
+__attribute__((weak)) ncclResult_t ncclTransportP2pSetupSpecific(struct ncclComm* comm, struct ncclTopoGraph* graph,
+                                                                  int connIndex, bool* needsProxy,
+                                                                  int requestedTransport) {
+  return g_ncclTransportP2pSetupSpecific(comm, graph, connIndex, needsProxy, requestedTransport);
 }
 
 // ppc64le TOC references survive --gc-sections, so netTransport must have

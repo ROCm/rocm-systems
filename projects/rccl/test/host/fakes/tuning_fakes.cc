@@ -51,13 +51,19 @@ int64_t g_tuningParamP2pDisable = 0;
 int64_t g_paramShmDisable = 0;
 int64_t g_paramP2pReadEnable = -2;
 bool g_runtimeTransportToggleEligible = false;
+bool g_policyRuntimeToggleRequested = false;
+bool g_policyCanonicalShmEligible = false;
+bool g_policyAllToAllUsesSendRecvPath = false;
 int64_t ncclParamMinNchannels() { return g_paramMinNchannels; }
 int64_t ncclParamMaxNchannels() { return g_paramMaxNchannels; }
 __attribute__((weak)) int64_t ncclParamP2pDisable() { return g_tuningParamP2pDisable; }
 // Policy seams group.cc and rccl_wrap.cc reach in targets without the policy sources.
-__attribute__((weak)) bool rcclPolicyCanonicalShmEligible(const struct ncclComm*) { return false; }
+__attribute__((weak)) bool rcclPolicyRuntimeToggleRequested() { return g_policyRuntimeToggleRequested; }
+__attribute__((weak)) bool rcclPolicyCanonicalShmEligible(const struct ncclComm*) {
+  return g_policyCanonicalShmEligible;
+}
 __attribute__((weak)) bool rcclPolicyAllToAllUsesSendRecvPath(const struct ncclComm*, size_t, bool) {
-  return false;
+  return g_policyAllToAllUsesSendRecvPath;
 }
 __attribute__((weak)) bool rcclBuffersOverlap(const void*, size_t, const void*, size_t) { return false; }
 __attribute__((weak)) int64_t ncclParamShmDisable() { return g_paramShmDisable; }
@@ -97,6 +103,9 @@ void ResetTuningFakes() {
   g_paramShmDisable = 0;
   g_paramP2pReadEnable = -2;
   g_runtimeTransportToggleEligible = false;
+  g_policyRuntimeToggleRequested = false;
+  g_policyCanonicalShmEligible = false;
+  g_policyAllToAllUsesSendRecvPath = false;
   g_tuningIndexValue = 0;
   g_tuningIndexLastArch.clear();
   g_tuningCompute = DefaultTuningCompute;

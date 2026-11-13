@@ -1322,6 +1322,12 @@ static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
   return stopEvent;
 }
 
+// NCCL_CONN_IDX_P2P_NET carries intra-node NET when either p2pNet or useIntraNet enabled it.
+// Otherwise the execution policy reuses the slot as RCCL_CONN_IDX_P2P_ALT.
+static inline bool rcclConnIndexIsIntraNet(const struct ncclComm* comm, int connIndex) {
+  return connIndex == NCCL_CONN_IDX_P2P_NET && (comm->p2pNet || comm->useIntraNet);
+}
+
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);
 ncclResult_t ncclCommSetAsyncError(ncclComm_t comm, ncclResult_t nextState);
 

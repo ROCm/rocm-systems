@@ -617,12 +617,12 @@ set(SRC_FILES
   tuning/collective_execution_policy.cc
   tuning/collective_execution_policy_internal.h
   tuning/collective_execution_policy_rules.cc
-  tuning/policy_adapter.cc
   tuning/collnet.cc
   tuning/cost_model.cc
   tuning/cost_model.h
   tuning/nvls.cc
   tuning/pat.cc
+  tuning/policy_adapter.cc
   tuning/ring.cc
   tuning/sym_model.cc
   tuning/sym_model/gin.cc

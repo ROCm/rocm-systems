@@ -87,6 +87,11 @@ void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage) {}
 // ENQUEUE_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/enqueue/enqueue.cc -- hipify
 // keeps the src/enqueue/ directory layout.
 #include ENQUEUE_CC_PATH
+// graph/topo.h's NET node-type macro would rewrite the rule DSL's NET transport.
+#pragma push_macro("NET")
+#undef NET
+#include "tuning/collective_execution_policy_internal.h"
+#pragma pop_macro("NET")
 
 // Link-only floor for ncclLaunchPrepare tests that stop immediately after plan
 // construction. None of these paths executes before the test seam returns.
@@ -374,43 +379,46 @@ TEST_F(EnqueueMicrotest, ShmemDynamicSize_DeviceLinker_IsAlwaysZero) {
 // Collective execution policy -- architecture/collective-specific P2P striping.
 // ===========================================================================
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_Gfx110xAllToAllUsesOneDirectionLocalChannel) {
-  ncclComm comm{};
-  char arch[] = "gfx1100";
-  comm.archName = arch;
-  comm.p2pnChannels = 8;
-
-  constexpr size_t testSizes[] = {1, 128ULL << 10, 8ULL << 30};
-  for (size_t bytes : testSizes) {
-    rcclCollectiveExecutionPolicy policy;
-    EXPECT_TRUE(rcclGetCollectiveExecutionPolicy(&comm, RCCL_EXECUTION_SCOPE_P2P, ncclFuncAlltoAll, bytes,
-                                                 /*p2pDisabled=*/false, &policy));
-    EXPECT_EQ(1, policy.nChannels);
-    EXPECT_EQ(-1, policy.protocol);
-    EXPECT_EQ(RCCL_P2P_PATH_AUTO, policy.path);
-    EXPECT_EQ(RCCL_P2P_TRANSFER_AUTO, policy.transferMode);
+// Every policy entry point answers "no rule" unless RCCL_RUNTIME_TRANSPORT_TOGGLE=1, so the
+// policy tests opt in here. Tests that cover the gate itself clear it again.
+class ExecutionPolicyMicrotest : public EnqueueMicrotest {
+ protected:
+  void SetUp() override {
+    EnqueueMicrotest::SetUp();
+    SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "1");
   }
+
+  // SHM is offered only when every rank shares this host and /dev/shm; zeroed peer entries all match.
+  void ShareShm(ncclComm& comm) {
+    peerInfo.assign(comm.nRanks, ncclPeerInfo{});
+    comm.peerInfo = peerInfo.data();
+  }
+
+  std::vector<ncclPeerInfo> peerInfo;
+};
+
+// Unvalidated resolution, reduced to "was a rule selected" for tests that check only the outcome.
+static bool ResolvePolicy(const rcclCollectivePolicyInput* input, rcclCollectiveExecutionPolicy* policy,
+                          rcclExecutionPolicyRuleId* ruleId = nullptr) {
+  rcclExecutionPolicyResolution resolution = rcclResolveCollectiveExecutionPolicyWithValidation(input, nullptr);
+  *policy = resolution.policy;
+  if (ruleId != nullptr) *ruleId = resolution.selectedRuleId;
+  return resolution.status == RCCL_EXECUTION_POLICY_SELECTED;
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_Gfx110xRuleIsNarrowAndRequiresP2p) {
-  ncclComm comm{};
-  char gfx1201[] = "gfx1201";
-  comm.archName = gfx1201;
-  comm.p2pnChannels = 8;
-  rcclCollectiveExecutionPolicy policy;
-  EXPECT_FALSE(rcclGetCollectiveExecutionPolicy(&comm, RCCL_EXECUTION_SCOPE_P2P, ncclFuncAlltoAll, 32ULL << 20,
-                                                /*p2pDisabled=*/false, &policy));
-
-  char gfx1102[] = "gfx1102";
-  comm.archName = gfx1102;
-  EXPECT_FALSE(rcclGetCollectiveExecutionPolicy(&comm, RCCL_EXECUTION_SCOPE_P2P, ncclFuncGather, 32ULL << 20,
-                                                /*p2pDisabled=*/false, &policy));
-  EXPECT_FALSE(rcclGetCollectiveExecutionPolicy(&comm, RCCL_EXECUTION_SCOPE_P2P, ncclFuncAlltoAll, 32ULL << 20,
-                                                /*p2pDisabled=*/true, &policy));
+static bool EvaluateRules(const rcclExecutionPolicyFact* facts, size_t factCount,
+                          const rcclCollectiveExecutionRule* rules, size_t ruleCount,
+                          rcclCollectiveExecutionPolicy* policy, rcclExecutionPolicyRuleId* ruleId) {
+  rcclExecutionPolicyResolution resolution =
+    rcclEvaluateCollectiveExecutionRulesWithValidation(facts, factCount, rules, ruleCount, nullptr);
+  *policy = resolution.policy;
+  *ruleId = resolution.selectedRuleId;
+  return resolution.status == RCCL_EXECUTION_POLICY_SELECTED;
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ResolvesCompleteAllToAllExecutionShapeAtThreshold) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_ResolvesCompleteAllToAllExecutionShapeAtThreshold) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -427,8 +435,9 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ResolvesCompleteAllToAllExecutionSha
   EXPECT_EQ(RCCL_P2P_TRANSFER_WRITE, policy.transferMode);
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_CoversEveryP2pBackedCollective) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_CoversEveryP2pBackedCollective) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -461,8 +470,9 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_CoversEveryP2pBackedCollective) {
   }
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_DirectSendRecvSelectsIpcBelowTwoMiB) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_DirectSendRecvSelectsIpcBelowTwoMiB) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -488,8 +498,9 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_DirectSendRecvSelectsIpcBelowTwoMiB)
   }
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_UsesWideReadModeForMeasuredFanoutCases) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_UsesWideReadModeForMeasuredFanoutCases) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -529,8 +540,9 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_UsesWideReadModeForMeasuredFanoutCas
   EXPECT_EQ(RCCL_P2P_TRANSFER_WRITE, policy.transferMode);
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_CapsMeasuredLowSizeFanoutRange) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_CapsMeasuredLowSizeFanoutRange) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -556,8 +568,9 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_CapsMeasuredLowSizeFanoutRange) {
                                                 /*p2pDisabled=*/false, /*inPlace=*/false, &policy));
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_UsesOneChannelOnlyForLargeOutOfPlaceAllToAll) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_UsesOneChannelOnlyForLargeOutOfPlaceAllToAll) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -580,7 +593,23 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_UsesOneChannelOnlyForLargeOutOfPlace
   EXPECT_EQ(1, policy.nChannels);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_BufferOverlapDetectsPlacement) {
+// A grouped AlltoAllv reaches the CE path with only this rank's 4 * nRanks sizes. The CE plan
+// reads every rank's table, so it must refuse the short layout instead of over-reading it.
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AlltoAllvRejectsLocalSizeTable) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
+  comm.nRanks = 8;
+  std::vector<size_t> sizes(4 * comm.nRanks);
+  ncclInfo info{};
+  info.coll = ncclFuncAlltoAllv;
+  info.comm = &comm;
+  info.sizes = sizes.data();
+  info.sizesCount = sizes.size();
+  EXPECT_EQ(ncclInvalidArgument,
+            ceCollTaskAppend(&comm, &info, nullptr, nullptr, nullptr, nullptr, ncclDevRedOpFull{}));
+}
+
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_BufferOverlapDetectsPlacement) {
   char buffer[128];
   EXPECT_TRUE(rcclBuffersOverlap(buffer, 64, buffer, 64));
   EXPECT_TRUE(rcclBuffersOverlap(buffer, 64, buffer + 32, 64));
@@ -589,7 +618,8 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_BufferOverlapDetectsPlacement
   EXPECT_FALSE(rcclBuffersOverlap(buffer, 0, buffer, 64));
   EXPECT_FALSE(rcclBuffersOverlap(nullptr, 64, buffer, 64));
 
-  ncclComm comm{};
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   comm.nRanks = 8;
   ncclInfo info{};
   info.coll = ncclFuncAlltoAll;
@@ -627,8 +657,9 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_BufferOverlapDetectsPlacement
   EXPECT_TRUE(rcclCollectiveTaskBuffersOverlap(&comm, &task));
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_MapMissPreservesAllDefaults) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_MapMissPreservesAllDefaults) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char gfx1201[] = "gfx1201";
   char gfx1100[] = "gfx1100";
   comm.archName = gfx1201;
@@ -664,13 +695,11 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_MapMissPreservesAllDefaults) {
                                                 /*p2pDisabled=*/false, &policy));
 
   comm.archName = gfx1100;
-  EXPECT_TRUE(rcclGetCollectiveExecutionPolicy(&comm, RCCL_EXECUTION_SCOPE_P2P, ncclFuncAlltoAll, 1 << 20,
-                                               /*p2pDisabled=*/false, &policy));
-  EXPECT_EQ(1, policy.nChannels);
-  EXPECT_EQ(RCCL_P2P_PATH_AUTO, policy.path);
+  EXPECT_FALSE(rcclGetCollectiveExecutionPolicy(&comm, RCCL_EXECUTION_SCOPE_P2P, ncclFuncAlltoAll, 1 << 20,
+                                                /*p2pDisabled=*/false, &policy));
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_RuleEngineTupleAndNullInputFallback) {
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_RuleEngineTupleAndNullInputFallback) {
   rcclCollectivePolicyInput input = {
     RCCL_EXECUTION_SCOPE_P2P, "gfx1201", ncclFuncAlltoAll, 32 << 20, /*nNodes=*/1, /*nRanks=*/4,
     /*nChannels=*/4, rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_IPC), /*inPlace=*/false,
@@ -678,22 +707,22 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_RuleEngineTupleAndNullInputFallback)
   };
   rcclCollectiveExecutionPolicy policy;
   rcclExecutionPolicyRuleId ruleId = RCCL_EXECUTION_POLICY_NO_RULE;
-  EXPECT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy, &ruleId));
+  EXPECT_TRUE(ResolvePolicy(&input, &policy, &ruleId));
   EXPECT_NE(RCCL_EXECUTION_POLICY_NO_RULE, ruleId);
 
   input.availableTransportMask =
     rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_NET);
-  EXPECT_FALSE(rcclResolveCollectiveExecutionPolicy(&input, &policy, &ruleId));
+  EXPECT_FALSE(ResolvePolicy(&input, &policy, &ruleId));
   EXPECT_EQ(RCCL_EXECUTION_POLICY_NO_RULE, ruleId);
   EXPECT_EQ(-1, policy.nChannels);
   EXPECT_EQ(RCCL_P2P_PATH_AUTO, policy.path);
 
-  EXPECT_FALSE(rcclResolveCollectiveExecutionPolicy(nullptr, &policy, &ruleId));
+  EXPECT_FALSE(ResolvePolicy(nullptr, &policy, &ruleId));
   EXPECT_EQ(RCCL_EXECUTION_POLICY_NO_RULE, ruleId);
   EXPECT_EQ(RCCL_P2P_TRANSFER_AUTO, policy.transferMode);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_GenericConditionsAndSparseAssignments) {
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_GenericConditionsAndSparseAssignments) {
   constexpr rcclExecutionPolicyFact facts[] = {
     {RCCL_EXECUTION_INPUT_SCOPE, rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_SCOPE_COLLECTIVE)},
     {RCCL_EXECUTION_INPUT_GFX_ARCH, rcclExecutionPolicyValue::String("gfx1201")},
@@ -721,8 +750,8 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_GenericConditionsAndSparseAss
 
   rcclCollectiveExecutionPolicy policy;
   rcclExecutionPolicyRuleId ruleId = RCCL_EXECUTION_POLICY_NO_RULE;
-  EXPECT_TRUE(rcclEvaluateCollectiveExecutionRules(facts, sizeof(facts) / sizeof(facts[0]), rules,
-                                                   sizeof(rules) / sizeof(rules[0]), &policy, &ruleId));
+  EXPECT_TRUE(EvaluateRules(facts, sizeof(facts) / sizeof(facts[0]), rules, sizeof(rules) / sizeof(rules[0]),
+                            &policy, &ruleId));
   EXPECT_EQ(0, ruleId);
   EXPECT_EQ(3, policy.nChannels);
   EXPECT_EQ(NCCL_ALGO_RING, policy.algorithm);
@@ -731,7 +760,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_GenericConditionsAndSparseAss
   EXPECT_EQ(RCCL_P2P_TRANSFER_AUTO, policy.transferMode);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_UsesPriorityAndFallsBackPastInvalidMatches) {
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_UsesPriorityAndFallsBackPastInvalidMatches) {
   constexpr rcclExecutionPolicyFact facts[] = {
     {RCCL_EXECUTION_INPUT_SCOPE, rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_SCOPE_COLLECTIVE)},
   };
@@ -755,7 +784,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_UsesPriorityAndFallsBackPastI
   };
   rcclCollectiveExecutionPolicy policy;
   rcclExecutionPolicyRuleId ruleId = RCCL_EXECUTION_POLICY_NO_RULE;
-  EXPECT_TRUE(rcclEvaluateCollectiveExecutionRules(facts, 1, prioritizedRules, 2, &policy, &ruleId));
+  EXPECT_TRUE(EvaluateRules(facts, 1, prioritizedRules, 2, &policy, &ruleId));
   EXPECT_EQ(0, ruleId);
   EXPECT_EQ(2, policy.nChannels);
   EXPECT_EQ(-1, policy.protocol); // Profiles are atomic; rule 1 is not merged.
@@ -764,18 +793,18 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_UsesPriorityAndFallsBackPastI
     {matches, 1, invalidProfile, 1},
     {matches, 1, lowerPriorityProfile, 1},
   };
-  EXPECT_TRUE(rcclEvaluateCollectiveExecutionRules(facts, 1, fallbackRules, 2, &policy, &ruleId));
+  EXPECT_TRUE(EvaluateRules(facts, 1, fallbackRules, 2, &policy, &ruleId));
   EXPECT_EQ(1, ruleId);
   EXPECT_EQ(-1, policy.nChannels);
   EXPECT_EQ(NCCL_PROTO_SIMPLE, policy.protocol);
 
-  EXPECT_FALSE(rcclEvaluateCollectiveExecutionRules(facts, 1, fallbackRules, 1, &policy, &ruleId));
+  EXPECT_FALSE(EvaluateRules(facts, 1, fallbackRules, 1, &policy, &ruleId));
   EXPECT_EQ(RCCL_EXECUTION_POLICY_NO_RULE, ruleId);
   EXPECT_EQ(-1, policy.nChannels);
   EXPECT_EQ(-1, policy.protocol);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ValidationRejectsUnavailableChannelsAtomically) {
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_ValidationRejectsUnavailableChannelsAtomically) {
   constexpr rcclExecutionPolicyFact facts[] = {
     {RCCL_EXECUTION_INPUT_SCOPE,
      rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_SCOPE_COLLECTIVE)},
@@ -826,7 +855,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ValidationRejectsUnavailableC
   EXPECT_EQ(RCCL_EXECUTION_POLICY_INVALID_INPUT, resolution.status);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ValidationHonorsAllowedUserShape) {
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_ValidationHonorsAllowedUserShape) {
   constexpr rcclExecutionPolicyFact facts[] = {
     {RCCL_EXECUTION_INPUT_SCOPE,
      rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_SCOPE_COLLECTIVE)},
@@ -862,7 +891,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ValidationHonorsAllowedUserSh
   EXPECT_EQ(NCCL_PROTO_SIMPLE, resolution.policy.protocol);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ValidationRejectsUnsupportedTransportShape) {
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_ValidationRejectsUnsupportedTransportShape) {
   constexpr rcclExecutionPolicyFact facts[] = {
     {RCCL_EXECUTION_INPUT_SCOPE,
      rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_SCOPE_COLLECTIVE)},
@@ -947,7 +976,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ValidationRejectsUnsupportedT
   EXPECT_EQ(RCCL_P2P_TRANSFER_AUTO, resolution.policy.transferMode);
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ValidationUsesResolvedCapabilityMasks) {
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_ValidationUsesResolvedCapabilityMasks) {
   constexpr rcclExecutionPolicyFact facts[] = {
     {RCCL_EXECUTION_INPUT_SCOPE,
      rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_SCOPE_P2P)},
@@ -996,7 +1025,7 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ValidationUsesResolvedCapabilityMask
   EXPECT_EQ(RCCL_P2P_TRANSFER_READ, resolution.policy.transferMode);
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_BuiltInValidationFallsBackToSupportedProfile) {
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_BuiltInValidationFallsBackToSupportedProfile) {
   const rcclCollectivePolicyInput input = {
     RCCL_EXECUTION_SCOPE_P2P,
     "gfx1201",
@@ -1030,7 +1059,88 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_BuiltInValidationFallsBackToSupporte
   EXPECT_EQ(RCCL_P2P_TRANSFER_WRITE, resolution.policy.transferMode);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ValidationRejectsCrossFieldMismatch) {
+// A rule whose full profile is valid wins over an earlier rule that is valid only once its
+// optional channel count is dropped; the dropped form is the fallback when no full profile fits.
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_OptionalChannelsDropOnlyWhenNoFullProfileFits) {
+  constexpr rcclExecutionPolicyFact facts[] = {
+    {RCCL_EXECUTION_INPUT_SCOPE, rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_SCOPE_COLLECTIVE)},
+  };
+  constexpr rcclExecutionPolicyAssignment preferWide[] = {
+    {RCCL_EXECUTION_OUTPUT_N_CHANNELS, rcclExecutionPolicyValue::Signed(24), /*optional=*/true},
+    {RCCL_EXECUTION_OUTPUT_PROTOCOL, rcclExecutionPolicyValue::Signed(NCCL_PROTO_SIMPLE), false},
+  };
+  constexpr rcclExecutionPolicyAssignment lowLatency[] = {
+    {RCCL_EXECUTION_OUTPUT_PROTOCOL, rcclExecutionPolicyValue::Signed(NCCL_PROTO_LL), false},
+  };
+  const rcclCollectiveExecutionRule rules[] = {
+    {nullptr, 0, preferWide, 2},
+    {nullptr, 0, lowLatency, 1},
+  };
+  rcclExecutionPolicyValidationContext validation;
+  rcclDefaultExecutionPolicyValidationContext(&validation);
+
+  rcclExecutionPolicyResolution resolution =
+    rcclEvaluateCollectiveExecutionRulesWithValidation(facts, 1, rules, 2, &validation);
+  ASSERT_EQ(RCCL_EXECUTION_POLICY_SELECTED, resolution.status);
+  EXPECT_EQ(0, resolution.selectedRuleId);
+  EXPECT_EQ(24, resolution.policy.nChannels);
+
+  validation.maxChannels = 8;
+  resolution = rcclEvaluateCollectiveExecutionRulesWithValidation(facts, 1, rules, 2, &validation);
+  ASSERT_EQ(RCCL_EXECUTION_POLICY_SELECTED, resolution.status);
+  EXPECT_EQ(1, resolution.selectedRuleId);
+  EXPECT_EQ(NCCL_PROTO_LL, resolution.policy.protocol);
+
+  resolution = rcclEvaluateCollectiveExecutionRulesWithValidation(facts, 1, rules, 1, &validation);
+  ASSERT_EQ(RCCL_EXECUTION_POLICY_SELECTED, resolution.status);
+  EXPECT_EQ(0, resolution.selectedRuleId);
+  EXPECT_EQ(-1, resolution.policy.nChannels);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, resolution.policy.protocol);
+  EXPECT_EQ(RCCL_EXECUTION_POLICY_VALIDATION_CHANNELS_UNAVAILABLE, resolution.firstRejectedError);
+}
+
+// The rule table's static_asserts run these validators on the shipped rules; this pins that each
+// one actually rejects the shape it names.
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_BuildValidatorsRejectTheirShapes) {
+  using namespace rcclExecutionPolicyRules;
+  constexpr RuleSpec duplicate[] = {
+    {{COLL, "gfx120", ALL_REDUCE, {128, 1023}, EQ(1), EQ(8), kAnyInt, IPC, ANY_BOOL},
+     {AUTO, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
+    {{COLL, "gfx120", ALL_REDUCE, {128, 1023}, EQ(1), EQ(8), kAnyInt, IPC, ANY_BOOL},
+     {AUTO, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
+  };
+  static_assert(firstDuplicateRule(duplicate) == 1, "an exact repeat is unreachable");
+  constexpr RuleSpec differentProfile[] = {
+    duplicate[0],
+    {{COLL, "gfx120", ALL_REDUCE, {128, 1023}, EQ(1), EQ(8), kAnyInt, IPC, ANY_BOOL},
+     {AUTO, RING, LL, AUTO_PATH, KEEP}, UNMEASURED},
+  };
+  static_assert(firstDuplicateRule(differentProfile) == 2, "only exact repeats are duplicates");
+
+  constexpr RuleSpec rooted[] = {
+    {{P2P, "gfx120", SCATTER, {1, 1023}, EQ(1), EQ(8), kAnyInt, IPC, ANY_BOOL},
+     {CHANNELS(2), KEEP, SIMPLE, SENDRECV, WRITE}, UNMEASURED},
+    {{P2P, "gfx120", GATHER, {1, 1023}, EQ(1), EQ(8), kAnyInt, IPC, BOOL_TRUE},
+     {CHANNELS(2), KEEP, SIMPLE, SENDRECV, WRITE}, UNMEASURED},
+  };
+  static_assert(firstPlacementDependentRootedP2pRule(rooted) == 1, "rooted placement is rank-local");
+
+  constexpr RuleSpec p2pThreeChannels =
+    {{P2P, "gfx120", ALL_TO_ALL, {1, 1023}, EQ(1), EQ(8), kAnyInt, IPC, ANY_BOOL},
+     {CHANNELS(3), KEEP, SIMPLE, SENDRECV, WRITE}, UNMEASURED};
+  static_assert(!isRuleSpecValid(p2pThreeChannels), "P2P channel counts are powers of two");
+  constexpr RuleSpec collThreeChannels =
+    {{COLL, "gfx120", ALL_REDUCE, {128, 1023}, EQ(1), EQ(8), kAnyInt, IPC, ANY_BOOL},
+     {CHANNELS(3), RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED};
+  static_assert(isRuleSpecValid(collThreeChannels), "collective channel counts are unconstrained");
+  constexpr RuleSpec p2pPrefer =
+    {{P2P, "gfx120", ALL_TO_ALL, {1, 1023}, EQ(1), EQ(8), kAnyInt, IPC, ANY_BOOL},
+     {PREFER_CHANNELS(2), KEEP, SIMPLE, SENDRECV, WRITE}, UNMEASURED};
+  static_assert(!isRuleSpecValid(p2pPrefer), "PREFER_CHANNELS is collective-only");
+  SUCCEED();
+}
+
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_ValidationRejectsCrossFieldMismatch) {
   constexpr rcclExecutionPolicyFact facts[] = {
     {RCCL_EXECUTION_INPUT_SCOPE,
      rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_SCOPE_P2P)},
@@ -1054,8 +1164,9 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ValidationRejectsCrossFieldMi
   EXPECT_EQ(0, resolution.firstRejectedRuleId);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_DataDerivedRulesUseMeasuredRanges) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_DataDerivedRulesUseMeasuredRanges) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -1111,8 +1222,10 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_DataDerivedRulesUseMeasuredRa
   }
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ShmRulesUseSmoothMeasuredRanges) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_ShmRulesUseSmoothMeasuredRanges) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
+  g_tuningParamP2pDisable = 1;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -1161,7 +1274,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ShmRulesUseSmoothMeasuredRang
   }
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ShmRulesFallbackPastUserChannelBounds) {
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_ShmRulesFallbackPastUserChannelBounds) {
   const rcclCollectivePolicyInput input = {
     RCCL_EXECUTION_SCOPE_COLLECTIVE, "gfx1201", ncclFuncAllGather,
     2ULL << 20, 1, 8, 28,
@@ -1187,7 +1300,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_ShmRulesFallbackPastUserChann
   EXPECT_EQ(NCCL_PROTO_SIMPLE, resolution.policy.protocol);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_TransportMasksFilterCandidateFamilies) {
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_TransportMasksFilterCandidateFamilies) {
   rcclCollectivePolicyInput input = {
     RCCL_EXECUTION_SCOPE_COLLECTIVE, "gfx1201", ncclFuncAllReduce,
     2ULL << 20, 1, 8, 28,
@@ -1195,24 +1308,24 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_TransportMasksFilterCandidate
     RCCL_EXECUTION_TRANSPORT_INTENT_AUTO,
   };
   rcclCollectiveExecutionPolicy policy;
-  EXPECT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+  EXPECT_TRUE(ResolvePolicy(&input, &policy));
   EXPECT_EQ(12, policy.nChannels);
   EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, policy.transport);
 
   input.availableTransportMask =
     rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_IPC);
-  EXPECT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+  EXPECT_TRUE(ResolvePolicy(&input, &policy));
   EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
 
   input.availableTransportMask =
     rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_NET);
-  EXPECT_FALSE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+  EXPECT_FALSE(ResolvePolicy(&input, &policy));
   input.availableTransportMask = 0;
   EXPECT_EQ(RCCL_EXECUTION_POLICY_INVALID_INPUT,
             rcclResolveCollectiveExecutionPolicyWithValidation(&input, nullptr).status);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_SelectsMeasuredRuntimeTransportBands) {
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_SelectsMeasuredRuntimeTransportBands) {
   rcclCollectivePolicyInput input = {
     RCCL_EXECUTION_SCOPE_COLLECTIVE, "gfx1201", ncclFuncReduce,
     24ULL << 20, 1, 8, 28,
@@ -1236,13 +1349,13 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_SelectsMeasuredRuntimeTranspo
     input.collType = test.coll;
     for (size_t bytes : {test.minBytes, test.maxBytes}) {
       input.dataSize = bytes;
-      EXPECT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+      EXPECT_TRUE(ResolvePolicy(&input, &policy));
       EXPECT_EQ(test.channels, policy.nChannels);
       EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, policy.transport);
     }
     for (size_t bytes : {test.minBytes - 1, test.maxBytes + 1}) {
       input.dataSize = bytes;
-      ASSERT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+      ASSERT_TRUE(ResolvePolicy(&input, &policy));
       EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
     }
   }
@@ -1250,12 +1363,12 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_SelectsMeasuredRuntimeTranspo
   input.collType = ncclFuncBroadcast;
   for (size_t bytes : {size_t{128}, size_t{(16ULL << 20) - 1}}) {
     input.dataSize = bytes;
-    ASSERT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+    ASSERT_TRUE(ResolvePolicy(&input, &policy));
     EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
   }
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_FallsBackWhenShmTransportUnavailable) {
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_FallsBackWhenShmTransportUnavailable) {
   rcclCollectivePolicyInput input = {
     RCCL_EXECUTION_SCOPE_COLLECTIVE, "gfx1201", ncclFuncReduce,
     32ULL << 20, 1, 8, 28,
@@ -1290,8 +1403,9 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_FallsBackWhenShmTransportUnav
   EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, resolution.policy.transport);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_RuntimePersistsSelectedTransport) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_RuntimePersistsSelectedTransport) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -1304,30 +1418,37 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_RuntimePersistsSelectedTransp
   task.minCTAs = 1;
   task.maxCTAs = 28;
   float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
-  for (int algorithm = 0; algorithm < NCCL_NUM_ALGORITHMS; algorithm++)
-    for (int protocol = 0; protocol < NCCL_NUM_PROTOCOLS; protocol++)
-      table[algorithm][protocol] = NCCL_ALGO_PROTO_IGNORE;
+  initCollCostTable((float**)table);
   table[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 1.0f;
 
   SetMicroEnvAbsent("NCCL_P2P_DISABLE");
   g_tuningParamP2pDisable = 0;
-  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "1");
+  ShareShm(comm);
   int policyChannels = -1;
   EXPECT_TRUE(rcclApplyCollectiveExecutionPolicy(
     &comm, &task, 32ULL << 20, table, &policyChannels));
   EXPECT_EQ(24, policyChannels);
   EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, task.executionTransport);
 
-  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "0");
+  // A peer on a different /dev/shm leaves SHM unavailable on every rank.
+  peerInfo[3].shmDev = 1;
   policyChannels = -1;
   EXPECT_TRUE(rcclApplyCollectiveExecutionPolicy(
     &comm, &task, 32ULL << 20, table, &policyChannels));
   EXPECT_EQ(-1, policyChannels);
   EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, task.executionTransport);
+
+  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "0");
+  policyChannels = -1;
+  EXPECT_FALSE(rcclApplyCollectiveExecutionPolicy(
+    &comm, &task, 32ULL << 20, table, &policyChannels));
+  EXPECT_EQ(-1, policyChannels);
+  EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_UNKNOWN, task.executionTransport);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_RuntimeHonorsResolvedAlgoProtoInputs) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_RuntimeHonorsResolvedAlgoProtoInputs) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -1342,9 +1463,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_RuntimeHonorsResolvedAlgoProt
   task.maxCTAs = 8;
 
   float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
-  for (int algorithm = 0; algorithm < NCCL_NUM_ALGORITHMS; algorithm++)
-    for (int protocol = 0; protocol < NCCL_NUM_PROTOCOLS; protocol++)
-      table[algorithm][protocol] = NCCL_ALGO_PROTO_IGNORE;
+  initCollCostTable((float**)table);
 
   table[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE] = 1.0f;
   int policyChannels = -1;
@@ -1361,8 +1480,9 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_RuntimeHonorsResolvedAlgoProt
   EXPECT_EQ(NCCL_PROTO_LL, task.protocol);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_RuntimeHonorsResolvedChannelInputs) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_RuntimeHonorsResolvedChannelInputs) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -1377,9 +1497,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_RuntimeHonorsResolvedChannelI
   task.maxCTAs = 8;
 
   float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
-  for (int algorithm = 0; algorithm < NCCL_NUM_ALGORITHMS; algorithm++)
-    for (int protocol = 0; protocol < NCCL_NUM_PROTOCOLS; protocol++)
-      table[algorithm][protocol] = NCCL_ALGO_PROTO_IGNORE;
+  initCollCostTable((float**)table);
   table[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 1.0f;
 
   g_paramMinNchannels = 2;
@@ -1396,8 +1514,9 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_RuntimeHonorsResolvedChannelI
   EXPECT_EQ(-1, policyChannels);
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_RuntimeHonorsResolvedProtocolAndChannelInputs) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_RuntimeHonorsResolvedProtocolAndChannelInputs) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -1419,17 +1538,22 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_RuntimeHonorsResolvedProtocolAndChan
   EXPECT_EQ(NCCL_PROTO_SIMPLE, policy.protocol);
   EXPECT_EQ(2, policy.nChannels);
 
+  // Both ends of a pair must resolve the same policy, so per-rank NCCL_MIN/MAX_NCHANNELS do not
+  // bound it. The provisioned P2P pool, which every rank shares, does.
   g_paramMinNchannels = 3;
-  EXPECT_FALSE(rcclExecutionPolicyForP2pTask(
+  g_paramMaxNchannels = 1;
+  EXPECT_TRUE(rcclExecutionPolicyForP2pTask(
     &comm, &task, /*p2pDisabled=*/false, &policy));
   g_paramMinNchannels = -2;
-  g_paramMaxNchannels = 1;
+  g_paramMaxNchannels = -2;
+  comm.p2pnChannels = 1;
   EXPECT_FALSE(rcclExecutionPolicyForP2pTask(
     &comm, &task, /*p2pDisabled=*/false, &policy));
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_RuntimeAppliesShmRulesAndUserFallback) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_RuntimeAppliesShmRulesAndUserFallback) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -1444,9 +1568,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_RuntimeAppliesShmRulesAndUser
   task.maxCTAs = 28;
 
   float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
-  for (int algorithm = 0; algorithm < NCCL_NUM_ALGORITHMS; algorithm++)
-    for (int protocol = 0; protocol < NCCL_NUM_PROTOCOLS; protocol++)
-      table[algorithm][protocol] = NCCL_ALGO_PROTO_IGNORE;
+  initCollCostTable((float**)table);
   table[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 1.0f;
 
   g_tuningParamP2pDisable = 1;
@@ -1471,7 +1593,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_RuntimeAppliesShmRulesAndUser
   EXPECT_EQ(NCCL_ALGO_TREE, task.algorithm);
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_SelectsMeasuredRuntimeTransportBands) {
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_SelectsMeasuredRuntimeTransportBands) {
   rcclCollectivePolicyInput input = {
     RCCL_EXECUTION_SCOPE_P2P, "gfx1201", ncclFuncGather,
     2ULL << 20, 1, 8, 32,
@@ -1492,7 +1614,7 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_SelectsMeasuredRuntimeTransportBands
     {ncclFuncGather, 48ULL << 10, true, false},
     {ncclFuncGather, 2ULL << 20, true, true},
     {ncclFuncGather, 1ULL << 20, false, true},
-    {ncclFuncGather, 1ULL << 20, true, false},
+    {ncclFuncGather, 1ULL << 20, true, true},
     {ncclFuncGather, (3ULL << 20) - 1, false, true},
     {ncclFuncGather, 3ULL << 20, false, true},
     {ncclFuncScatter, 512ULL << 10, false, true},
@@ -1534,7 +1656,7 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_SelectsMeasuredRuntimeTransportBands
     input.collType = test.coll;
     input.dataSize = test.bytes;
     input.inPlace = test.inPlace;
-    bool matched = rcclResolveCollectiveExecutionPolicy(&input, &policy);
+    bool matched = ResolvePolicy(&input, &policy);
     if (test.useShm) {
       EXPECT_TRUE(matched);
       EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, policy.transport);
@@ -1559,7 +1681,7 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_SelectsMeasuredRuntimeTransportBands
   input.collType = ncclFuncGather;
   input.dataSize = 1ULL << 20;
   input.inPlace = false;
-  ASSERT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+  ASSERT_TRUE(ResolvePolicy(&input, &policy));
   EXPECT_EQ(32, policy.nChannels);
   EXPECT_EQ(-1, policy.protocol);
   EXPECT_EQ(RCCL_P2P_TRANSFER_AUTO, policy.transferMode);
@@ -1567,14 +1689,14 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_SelectsMeasuredRuntimeTransportBands
 
   input.collType = ncclFuncAlltoAllv;
   input.transportIntent = RCCL_EXECUTION_TRANSPORT_INTENT_IPC;
-  ASSERT_TRUE(rcclResolveCollectiveExecutionPolicy(&input, &policy));
+  ASSERT_TRUE(ResolvePolicy(&input, &policy));
   EXPECT_EQ(8, policy.nChannels);
   EXPECT_EQ(NCCL_PROTO_SIMPLE, policy.protocol);
   EXPECT_EQ(RCCL_P2P_TRANSFER_READ, policy.transferMode);
   EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ShmTransportRequiresRuntimeAvailability) {
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_ShmTransportRequiresRuntimeAvailability) {
   rcclCollectivePolicyInput input = {
     RCCL_EXECUTION_SCOPE_P2P, "gfx1201", ncclFuncGather,
     2ULL << 20, 1, 8, 32,
@@ -1597,8 +1719,9 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ShmTransportRequiresRuntimeAvailabil
   EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_SHM, resolution.policy.transport);
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_AdapterExposesShmOnlyForAutomaticIntent) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_AdapterExposesShmOnlyForAutomaticIntent) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -1608,12 +1731,17 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_AdapterExposesShmOnlyForAutomaticInt
 
   SetMicroEnvAbsent("NCCL_P2P_DISABLE");
   SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "0");
+  EXPECT_FALSE(rcclGetCollectiveExecutionPolicy(
+    &comm, RCCL_EXECUTION_SCOPE_P2P, ncclFuncGather, 2ULL << 20,
+    false, false, &policy));
+
+  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "1");
   EXPECT_TRUE(rcclGetCollectiveExecutionPolicy(
     &comm, RCCL_EXECUTION_SCOPE_P2P, ncclFuncGather, 2ULL << 20,
     false, false, &policy));
-  EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport);
+  EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_IPC, policy.transport) << "peers do not share /dev/shm";
 
-  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "1");
+  ShareShm(comm);
   EXPECT_TRUE(rcclGetCollectiveExecutionPolicy(
     &comm, RCCL_EXECUTION_SCOPE_P2P, ncclFuncGather, 2ULL << 20,
     false, false, &policy));
@@ -1633,7 +1761,7 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_AdapterExposesShmOnlyForAutomaticInt
   SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "0");
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_AdapterNormalizesExternalTransportIntent) {
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_AdapterNormalizesExternalTransportIntent) {
   SetMicroEnvAbsent("NCCL_P2P_DISABLE");
   EXPECT_EQ(RCCL_EXECUTION_TRANSPORT_INTENT_AUTO,
             rcclPolicyTransportIntent(/*p2pDisabled=*/false));
@@ -1647,8 +1775,9 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_AdapterNormalizesExternalTran
             rcclPolicyTransportIntent(/*p2pDisabled=*/true));
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_OutputAdapterDiscoversTransportConnectorSlots) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_OutputAdapterDiscoversTransportConnectorSlots) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.rank = 0;
@@ -1677,9 +1806,11 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_OutputAdapterDiscoversTranspo
   ncclTaskColl task{};
   task.algorithm = NCCL_ALGO_RING;
   task.protocol = NCCL_PROTO_SIMPLE;
+  ShareShm(comm);
+  // IPC runs on the default connectors, so the policy leaves the runtime's connector choice alone.
   task.executionTransport = RCCL_EXECUTION_TRANSPORT_IPC;
-  EXPECT_EQ(0, rcclPolicyCollectiveConnectorIndex(
-                 &comm, &task, /*channelId=*/0, 32ULL << 20));
+  EXPECT_EQ(-1, rcclPolicyCollectiveConnectorIndex(
+                  &comm, &task, /*channelId=*/0, 32ULL << 20));
   task.executionTransport = RCCL_EXECUTION_TRANSPORT_SHM;
   EXPECT_EQ(RCCL_CONN_IDX_COLL_SHM,
             rcclPolicyCollectiveConnectorIndex(
@@ -1698,8 +1829,51 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_OutputAdapterDiscoversTranspo
               /*isSendNotRecv=*/true, RCCL_EXECUTION_TRANSPORT_SHM));
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_CanonicalModeSharesProvisioningAndShmSlot) {
-  ncclComm comm{};
+// An IPC policy that fixes the transfer mode runs on whichever P2P connector was set up in that
+// mode: the default slot or the alternate one, which takes the opposite mode. The alternate slot
+// is the intra-node NET connector when either NET path is on, so it is never picked then.
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_TransferModeSelectsMatchingIpcConnector) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
+  comm.nRanks = 8;
+  ncclChannelPeer peer{};
+  ncclChannelPeer* peers[8] = {};
+  peers[1] = &peer;
+  comm.channels[0].peers = peers;
+  for (int connIndex : {1, RCCL_CONN_IDX_P2P_ALT}) {
+    peer.send[connIndex].connected = 1;
+    peer.send[connIndex].transportComm = &p2pTransport.send;
+  }
+  peer.send[1].conn.flags = NCCL_P2P_WRITE;
+  peer.send[RCCL_CONN_IDX_P2P_ALT].conn.flags = NCCL_P2P_READ;
+
+  rcclP2pPolicyWorkPlan plan{};
+  plan.matched[1] = true;
+  rcclDefaultCollectiveExecutionPolicy(&plan.policy[1]);
+  plan.policy[1].transport = RCCL_EXECUTION_TRANSPORT_IPC;
+  plan.policy[1].path = RCCL_P2P_PATH_SENDRECV;
+  const int channelIds[] = {0};
+  constexpr int kDefault = 1;
+
+  plan.policy[1].transferMode = RCCL_P2P_TRANSFER_READ;
+  EXPECT_EQ(RCCL_CONN_IDX_P2P_ALT,
+            rcclPolicyP2pWorkConnectorIndex(&comm, &plan, /*dir=*/1, channelIds, 1, /*peer=*/1, kDefault));
+  plan.policy[1].transferMode = RCCL_P2P_TRANSFER_WRITE;
+  EXPECT_EQ(1, rcclPolicyP2pWorkConnectorIndex(&comm, &plan, /*dir=*/1, channelIds, 1, /*peer=*/1, kDefault));
+
+  plan.policy[1].transferMode = RCCL_P2P_TRANSFER_READ;
+  for (uint32_t p2pNet : {0u, 1u}) {
+    comm.p2pNet = p2pNet;
+    comm.useIntraNet = 1 - p2pNet;
+    EXPECT_EQ(kDefault,
+              rcclPolicyP2pWorkConnectorIndex(&comm, &plan, /*dir=*/1, channelIds, 1, /*peer=*/1, kDefault))
+      << "p2pNet=" << comm.p2pNet << " useIntraNet=" << comm.useIntraNet;
+  }
+}
+
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_CanonicalModeSharesProvisioningAndShmSlot) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.rank = 0;
@@ -1729,6 +1903,7 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_CanonicalModeSharesProvisioni
   task.algorithm = NCCL_ALGO_RING;
   task.protocol = NCCL_PROTO_SIMPLE;
   task.executionTransport = RCCL_EXECUTION_TRANSPORT_SHM;
+  ShareShm(comm);
 
   struct Intent {
     const char* env;
@@ -1773,8 +1948,8 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_CanonicalModeSharesProvisioni
   // Without the toggle, forced SHM keeps upstream's primary connectors.
   SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "0");
   EXPECT_FALSE(rcclPolicyCanonicalShmEligible(&comm));
-  EXPECT_EQ(0, rcclPolicyCollectiveConnectorIndex(
-                 &comm, &task, /*channelId=*/0, 32ULL << 20));
+  EXPECT_EQ(-1, rcclPolicyCollectiveConnectorIndex(
+                  &comm, &task, /*channelId=*/0, 32ULL << 20));
   EXPECT_EQ(1, rcclPolicyP2pConnectorIndex(
                  &comm, /*channelId=*/0, /*peer=*/1,
                  /*isSendNotRecv=*/true, RCCL_EXECUTION_TRANSPORT_SHM));
@@ -1782,8 +1957,43 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_CanonicalModeSharesProvisioni
   setIntent(autoIntent);
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_PreconnectTargetsPolicyTransportSlot) {
-  ncclComm comm{};
+// Placement is rank-local, so each end marks the connectors either placement's policy needs.
+// Large AllToAll picks SHM out of place and IPC in place; both ends must mark both.
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_PreconnectCoversBothPlacements) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
+  char arch[] = "gfx1201";
+  comm.archName = arch;
+  comm.nNodes = 1;
+  comm.nRanks = 8;
+  comm.p2pnChannels = 32;
+  comm.p2pnChannelsPerPeer = 4;
+  ShareShm(comm);
+
+  auto connIndices = [&](bool inPlace) {
+    ncclTaskP2p task{};
+    task.collAPI = ncclFuncAlltoAll;
+    task.bytes = 64ULL << 20;
+    task.inPlace = inPlace;
+    rcclPolicyResolveP2pTask(&comm, &task);
+    rcclP2pPolicyPreconnect preconnects[2];
+    int n = rcclPolicyP2pPreconnects(&comm, &task, preconnects);
+    std::vector<int> indices;
+    for (int i = 0; i < n; i++)
+      indices.insert(indices.end(), preconnects[i].connIndices,
+                     preconnects[i].connIndices + preconnects[i].nConnIndices);
+    std::sort(indices.begin(), indices.end());
+    return indices;
+  };
+  const std::vector<int> outOfPlace = connIndices(false);
+  EXPECT_EQ(outOfPlace, connIndices(true));
+  EXPECT_NE(outOfPlace.end(), std::find(outOfPlace.begin(), outOfPlace.end(), RCCL_CONN_IDX_P2P_SHM));
+  EXPECT_NE(outOfPlace.end(), std::find(outOfPlace.begin(), outOfPlace.end(), 1));
+}
+
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_PreconnectTargetsPolicyTransportSlot) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -1795,6 +2005,7 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_PreconnectTargetsPolicyTransportSlot
   gather.collAPI = ncclFuncGather;
   gather.bytes = 1ULL << 20;
   rcclP2pPolicyPreconnect preconnect;
+  ShareShm(comm);
 
   SetMicroEnv("NCCL_P2P_DISABLE", "1");
   g_tuningParamP2pDisable = 1;
@@ -1811,11 +2022,12 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_PreconnectTargetsPolicyTransportSlot
 
   SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "0");
   rcclPolicyResolveP2pTask(&comm, &gather);
-  ASSERT_TRUE(rcclPolicyP2pPreconnect(&comm, &gather, &preconnect));
-  ASSERT_EQ(1, preconnect.nConnIndices);
-  EXPECT_EQ(1, preconnect.connIndices[0]);
+  EXPECT_FALSE(gather.executionPolicyMatched);
+  EXPECT_FALSE(rcclPolicyP2pPreconnect(&comm, &gather, &preconnect));
 
   // Later stages read the stored decision instead of re-resolving it.
+  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "1");
+  rcclPolicyResolveP2pTask(&comm, &gather);
   SetMicroEnvAbsent("NCCL_P2P_DISABLE");
   g_tuningParamP2pDisable = 0;
   EXPECT_FALSE(rcclPolicyP2pTaskAllowsRegistration(&gather));
@@ -1833,11 +2045,12 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_PreconnectTargetsPolicyTransportSlot
   EXPECT_TRUE(rcclPolicyP2pTaskAllowsRegistration(&gather));
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_UnconnectedPolicyChannelDropsWholePolicy) {
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_UnconnectedPolicyChannelDropsWholePolicy) {
   constexpr int kRanks = 8;
   constexpr int kChannels = 32;
   constexpr int kPeer = 1;
-  ncclComm comm{};
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.rank = 0;
@@ -1916,7 +2129,7 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_UnconnectedPolicyChannelDropsWholePo
   EXPECT_EQ(1, rcclPolicyP2pWorkConnectorIndex(&comm, &plan, /*dir=*/1, parts, 2, kPeer, 1));
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_TransportIntentConstrainsCandidates) {
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_TransportIntentConstrainsCandidates) {
   rcclCollectivePolicyInput input = {
     RCCL_EXECUTION_SCOPE_P2P, "gfx1201", ncclFuncGather,
     2ULL << 20, 1, 8, 32,
@@ -1965,8 +2178,9 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_TransportIntentConstrainsCand
             rcclResolveCollectiveExecutionPolicyWithValidation(&input, &validation).status);
 }
 
-TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_DataDerivedRulesRequireMeasuredTopology) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, CollectiveExecutionPolicy_DataDerivedRulesRequireMeasuredTopology) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char gfx1201[] = "gfx1201";
   char gfx1100[] = "gfx1100";
   comm.archName = gfx1201;
@@ -1977,10 +2191,9 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_DataDerivedRulesRequireMeasur
 
   SetMicroEnvAbsent("NCCL_P2P_DISABLE");
   SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "0");
-  EXPECT_EQ(8, rcclGetCollectiveExecutionPolicyRequiredChannels(&comm, /*p2pDisabled=*/false));
+  EXPECT_EQ(0, rcclGetCollectiveExecutionPolicyRequiredChannels(&comm, /*p2pDisabled=*/false));
   SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "1");
   EXPECT_EQ(32, rcclGetCollectiveExecutionPolicyRequiredChannels(&comm, /*p2pDisabled=*/false));
-  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "0");
   SetMicroEnv("NCCL_P2P_DISABLE", "1");
   EXPECT_EQ(32, rcclGetCollectiveExecutionPolicyRequiredChannels(&comm, /*p2pDisabled=*/true));
   EXPECT_TRUE(rcclGetCollectiveExecutionPolicy(&comm, RCCL_EXECUTION_SCOPE_COLLECTIVE, ncclFuncAllReduce, 1 << 10,
@@ -2003,8 +2216,9 @@ TEST_F(EnqueueMicrotest, CollectiveExecutionPolicy_DataDerivedRulesRequireMeasur
   EXPECT_EQ(0, rcclGetCollectiveExecutionPolicyRequiredChannels(&comm, /*p2pDisabled=*/false));
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_EachDirectionKeepsItsOwnPool) {
-  ncclComm comm{};
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_EachDirectionKeepsItsOwnPool) {
+  auto commOwner = std::make_unique<ncclComm>();
+  ncclComm& comm = *commOwner;
   char arch[] = "gfx1201";
   comm.archName = arch;
   comm.nNodes = 1;
@@ -2045,35 +2259,7 @@ TEST_F(EnqueueMicrotest, P2pExecutionPolicy_EachDirectionKeepsItsOwnPool) {
   EXPECT_FALSE(rcclPolicyP2pWorkSplitsDirections(&comm, recvOnly, /*sendRank=*/1));
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_Gfx110xMixedDirectionsKeepFullPoolAndLocalCap) {
-  ncclComm comm{};
-  char arch[] = "gfx1100";
-  comm.archName = arch;
-  comm.nRanks = 4;
-  comm.p2pnChannels = 4;
-
-  ncclTaskP2p recv{};
-  ncclTaskP2p send{};
-  recv.collAPI = ncclFuncAlltoAll;
-  recv.bytes = 32ULL << 20;
-  send.collAPI = ncclFuncSend;
-  send.bytes = 8ULL << 20;
-  ncclTaskP2p* tasks[2] = {&recv, &send};
-  rcclP2pPolicyWorkPlan plan;
-
-  rcclPolicyResolveP2pTask(&comm, &recv);
-  rcclPolicyResolveP2pTask(&comm, &send);
-  rcclPolicyPlanP2pWork(&comm, tasks, /*logSelection=*/false, &plan);
-  EXPECT_TRUE(plan.matched[0]);
-  EXPECT_EQ(1, plan.policy[0].nChannels);
-  EXPECT_EQ(1, plan.channels[0]);
-  EXPECT_EQ(RCCL_P2P_PATH_AUTO, plan.policy[0].path);
-  EXPECT_FALSE(plan.matched[1]);
-  EXPECT_EQ(-1, plan.channels[1]);
-  EXPECT_EQ(4, plan.activeChannels);
-}
-
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ChannelMappingStaysInsideCappedPool) {
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_ChannelMappingStaysInsideCappedPool) {
   constexpr int pool = 2;
   constexpr int channelsPerPeer = 2;
   for (int round = 0; round < 8; round++) {
@@ -2137,7 +2323,17 @@ TEST_F(EnqueueMicrotest, P2pTaskParts_ScatterKeepsPerPeerOutsideMultiNodeAinicOr
   EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "single node";
 }
 
-TEST_F(EnqueueMicrotest, P2pExecutionPolicy_ProtocolOverrideUsesSupportedRequestsOnly) {
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {
+  // Returns before the arch policy table, so comm->topo is never read.
+  g_rcclUseAinicValue = true;
+  auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncScatter;
+  EXPECT_EQ(1, rcclP2pPolicyChannels(comm.get(), &task));
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), nullptr));
+}
+
+TEST_F(ExecutionPolicyMicrotest, P2pExecutionPolicy_ProtocolOverrideUsesSupportedRequestsOnly) {
   rcclP2pPolicyWorkPlan plan{};
   plan.matched[0] = true;
   auto applied = [&plan](int requestedProtocol, int selectedProtocol) {
@@ -4237,6 +4433,30 @@ void SetParam(const char* key, int64_t v) {
 }
 void SetBatchParam(int64_t v) { SetParam("RCCL_P2P_BATCH_ENABLE", v); }
 }  // namespace
+
+// Without a matching execution policy rule, gfx110x AllToAll keeps develop's one-channel cap.
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_Gfx110xCapsOnlyAllToAllOverP2p) {
+  BatchComm c(/*nNodes=*/1, "gfx1100");
+  c.get()->nRanks = 4;
+  c.get()->p2pnChannels = 4;
+  c.get()->p2pnChannelsPerPeer = 2;
+  c.get()->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncAlltoAll;
+  EXPECT_EQ(1, rcclP2pPolicyChannels(c.get(), &task));
+
+  for (ncclFunc_t other : {ncclFuncGather, ncclFuncScatter, ncclFuncSend}) {
+    task.collAPI = other;
+    EXPECT_EQ(-1, rcclP2pPolicyChannels(c.get(), &task)) << "collAPI=" << int(other);
+  }
+
+  task.collAPI = ncclFuncAlltoAll;
+  g_tuningParamP2pDisable = 1;
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(c.get(), &task)) << "P2P disabled";
+  g_tuningParamP2pDisable = 0;
+  SetSingleGpuArch(c.topo.get(), "gfx1201");
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(c.get(), &task)) << "other arch";
+}
 
 TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_UserOverrideWinsOverEverything) {
   // userInput >= 0 returns immediately -- single node and a non-gfx950 arch,
@@ -6642,6 +6862,34 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_OverrideChannelsCanChangeTheChannelCoun
   ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(),
                                          /*simInfo=*/nullptr));
   EXPECT_EQ(3, task.nMaxChannels) << "the override's channel count must reach the task";
+}
+
+// A matched collective rule's channel count replaces the tuned one. gfx1201 8-rank Broadcast at
+// 64-512 KiB is measured on one Ring/Simple channel.
+TEST_F(ExecutionPolicyMicrotest, TopoGetAlgoInfo_PolicyChannelsReplaceTheTunedCount) {
+  AlgoInfoComm cc;
+  char arch[] = "gfx1201";
+  cc.get()->archName = arch;
+  cc.get()->nChannels = 8;
+  auto task = CostTask(ncclFuncBroadcast);
+  task.minCTAs = 1;
+  task.maxCTAs = 8;
+  CostTable tbl;
+  tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 1.0f;
+
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 128 << 10, tbl.ptr(), /*simInfo=*/nullptr));
+  EXPECT_EQ(1, task.nMaxChannels);
+
+  SetMicroEnv("RCCL_RUNTIME_TRANSPORT_TOGGLE", "0");
+  auto untuned = CostTask(ncclFuncBroadcast);
+  untuned.minCTAs = 1;
+  untuned.maxCTAs = 8;
+  g_rcclOverrideChannels = [](struct ncclComm*, ncclFunc_t, size_t, int& nc) {
+    nc = 4;
+    return ncclSuccess;
+  };
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &untuned, 128 << 10, tbl.ptr(), /*simInfo=*/nullptr));
+  EXPECT_EQ(4, untuned.nMaxChannels) << "without the toggle the tuned count stands";
 }
 
 TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_RemoteFlushChannelsSetTheCountCappedByComm) {

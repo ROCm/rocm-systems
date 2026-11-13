@@ -3888,6 +3888,8 @@ TEST_F(WindowRegisterNonSymIpcTest, NoCuMemProbe_KeepsCallerLastError) {
 // Branch: a peer in our own process uses its exchanged direct pointer rather
 // than opening an IPC handle against the same address space.
 TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_UsesDirectPointer) {
+  peers[1].hostHash = peers[0].hostHash;
+  peers[1].pidHash = peers[0].pidHash;
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers(/*sameProcRank=*/1));
   ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
     *ptr = reinterpret_cast<void*>(0x900000);
@@ -3901,6 +3903,23 @@ TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_UsesDirectPointer) {
   ncclDevrWindow* win = comm->devrState.winSorted[0].win;
   EXPECT_EQ(win->ipcPeerPtrs[1], reinterpret_cast<void*>(0xa10040));
   EXPECT_EQ(win->ipcPeerPtrsAllocBase[1], nullptr);
+}
+
+// Branch: whether a peer shares our address space comes from this rank's own
+// peer table, so a peer whose exchange entry reports our process is still mapped.
+TEST_F(WindowRegisterNonSymIpcTest, PeerReportingOurProcess_IsStillMapped) {
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers(/*sameProcRank=*/1));
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_EQ(open.calls, 2);  // ranks 1 and 2
+
+  ncclDevrWindow* win = comm->devrState.winSorted[0].win;
+  EXPECT_EQ(win->ipcPeerPtrs[1], static_cast<char*>(reinterpret_cast<void*>(0x900000)) + 64);
 }
 
 // Branch: a peer exported a cuMem handle and this rank has cuMem disabled. The

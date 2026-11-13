@@ -71,7 +71,8 @@ def strip_braces(text):
 
 
 def eval_bytes(expr):
-    return int(eval(expr.replace("ULL", "").replace("SIZE_MAX", str(SIZE_MAX)), {}, {}))
+    # The expressions use <<, so ast.literal_eval cannot parse them; eval with no builtins instead.
+    return int(eval(expr.replace("ULL", "").replace("SIZE_MAX", str(SIZE_MAX)), {"__builtins__": {}}, {}))
 
 
 def fmt_bytes(value):
@@ -241,14 +242,6 @@ def load_sweep(directory, name, multiplier, peak):
     return points
 
 
-def forced_winner(target, rule_list, size, placement, transport):
-    for rule in rule_list:
-        if rule.coll == target.coll and rule.scope == target.scope and rule.matches(
-                SWEEP_ARCH, SWEEP_NODES, SWEEP_RANKS, SWEEP_CHANNELS, size, placement, (transport,)):
-            return rule
-    return None
-
-
 def score_pieces(pieces, sweep_dirs, peak):
     rules = [rule for _, rule in pieces]
     cache = {}
@@ -265,7 +258,7 @@ def score_pieces(pieces, sweep_dirs, peak):
         for placement in rule.placements():
             values = [point[placement] for size, point in sweep.items()
                       if rule.lo <= size <= rule.hi and placement in point
-                      and forced_winner(rule, rules, size, placement, rule.transport) is rule]
+                      and first_match(rules, rule.scope, rule.coll, size, placement, (rule.transport,)) is rule]
             if not values:
                 break
             peaks.append(max(values))

@@ -238,7 +238,9 @@ ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity);
   NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
-  NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
+  // Index 2 also hosts the execution policy's alternate-transfer-mode IPC connector.
+  if (comm->p2pNet || rcclPolicyRuntimeToggleRequested())
+    NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
   if (rcclPolicyCanonicalShmEligible(comm)) {
     NCCLCHECK(ncclTransportP2pSetupSpecific(
       comm, NULL, RCCL_CONN_IDX_P2P_SHM, nullptr, TRANSPORT_SHM));

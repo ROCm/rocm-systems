@@ -1607,7 +1607,9 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
     win->ipcPeerCount = teamSize;
 
     for (int r = 0; r < teamSize; r++) {
-      bool sameProc = (peers[r].hostHash == peers[teamSelf].hostHash) && (peers[r].pidHash == peers[teamSelf].pidHash);
+      const struct ncclPeerInfo& myInfo = comm->peerInfo[comm->rank];
+      const struct ncclPeerInfo& peerInfo = comm->peerInfo[teamRankList[r]];
+      bool sameProc = peerInfo.hostHash == myInfo.hostHash && peerInfo.pidHash == myInfo.pidHash;
       if (r == teamSelf || sameProc) {
         // Same address space: use the exchanged pointer directly and avoid an
         // unnecessary IPC import/close pair. Keep AllocBase null for peer

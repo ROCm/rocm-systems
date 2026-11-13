@@ -18,9 +18,12 @@ namespace rcclExecutionPolicyRules {
 // Score is EFFICIENCY(peak measured bus GB/s over the rule's inputs, platform
 // peak bus GB/s), or UNMEASURED. The build rejects a table where:
 //   - two rules that can match the same input differ in byte range or
-//     in-place constraint (scores would describe different inputs), or
+//     in-place constraint (scores would describe different inputs),
 //   - a measured rule outscores an earlier measured rule matching the same
-//     input by more than kScoreOrderMargin (the earlier rule would shadow it).
+//     input by more than kScoreOrderMargin (the earlier rule would shadow it),
+//   - a rule repeats an earlier rule's match and profile,
+//   - a P2P Gather or Scatter rule constrains placement, or
+//   - a P2P rule sets a channel count that is not a power of two.
 // After a forced-transport sweep, tools/scripts/execution_policy_scores.py
 // splits rules to satisfy the first check, rewrites every score, and lists
 // the rules that must move to satisfy the second.
@@ -41,7 +44,10 @@ namespace rcclExecutionPolicyRules {
 //                      disjoint, or ANY_BOOL when placement is irrelevant.
 //
 // Profile fields, in order:
-//   channels           Scope-local channel count.
+//   channels           Scope-local channel count. PREFER_CHANNELS(n) is a
+//                      collective channel count that is dropped, keeping the
+//                      rest of the profile, when no rule's full profile is
+//                      valid for the input.
 //   algorithm          RING or another NCCL_ALGO_* alias.
 //   protocol           SIMPLE, LL, or another NCCL_PROTO_* alias.
 //   path               SENDRECV or AUTO_PATH.
@@ -64,14 +70,8 @@ namespace rcclExecutionPolicyRules {
 // PCIe Gen5 x16 per direction: 32 GT/s * 16 lanes * 128/130 / 8.
 constexpr double kGfx120xPeakBusBwGBps = 63.0;
 
+// clang-format off
 constexpr RuleSpec kCollectiveExecutionRules[] = {
-  // Preserve the gfx110x AllToAll variance workaround from #11803 as a
-  // direction-local channel cap. PATH remains AUTO so existing collective
-  // routing (pivot, CE, GDA, GIN, and DDA) is not overridden.
-  {{P2P, "gfx110", ALL_TO_ALL, kAnyBytes, kAnyInt, kAnyInt,
-    kAnyInt, IPC, ANY_BOOL},
-   {CHANNELS(1), KEEP, AUTO, AUTO_PATH, AUTO_XFER}, UNMEASURED},
-
   // Direct Send/Recv remains on IPC below the measured 2 MiB per-peer
   // crossover. P2P policy facts are rank-aggregate bytes, hence 16 MiB here
   // for the eight-rank gfx120x tuning topology. Keep the ordinary Send/Recv
@@ -83,16 +83,14 @@ constexpr RuleSpec kCollectiveExecutionRules[] = {
     kAnyInt, IPC, ANY_BOOL},
    {AUTO, KEEP, AUTO, AUTO_PATH, AUTO_XFER}, EFFICIENCY(17.22, kGfx120xPeakBusBwGBps)},
 
-  // Runtime IPC/SHM crossover candidates for P2P-backed collectives. Each
-  // endpoint resolves the same per-link byte count and placement, so the
-  // selected connector index remains symmetric. Bands require a >=3% win in
-  // both placements at two or more adjacent sizes in the September 24 sweep.
-  // Placement-specific rows are used only where the measurements diverge.
+  // Runtime IPC/SHM crossover candidates for P2P-backed collectives. Both
+  // endpoints of a link resolve the same per-link byte count, so the selected
+  // connector index remains symmetric. Bands require a >=3% win in both
+  // placements at two or more adjacent sizes in the September 24 sweep.
+  // AllToAll uses placement-specific rows where the measurements diverge;
+  // Gather and Scatter cannot, since their placement is rank-local.
   {{P2P, "gfx1201", GATHER, {1ULL << 20, 8ULL << 30}, EQ(1), EQ(8),
-    kAnyInt, SHM, BOOL_FALSE},
-   {CHANNELS(32), KEEP, AUTO, SENDRECV, AUTO_XFER}, EFFICIENCY(49.79, kGfx120xPeakBusBwGBps)},
-  {{P2P, "gfx1201", GATHER, {1536ULL << 10, 8ULL << 30}, EQ(1), EQ(8),
-    kAnyInt, SHM, BOOL_TRUE},
+    kAnyInt, SHM, ANY_BOOL},
    {CHANNELS(32), KEEP, AUTO, SENDRECV, AUTO_XFER}, EFFICIENCY(49.70, kGfx120xPeakBusBwGBps)},
 
   {{P2P, "gfx1201", SCATTER, {48ULL << 10, (64ULL << 10) - 1}, EQ(1), EQ(8),
@@ -188,10 +186,10 @@ constexpr RuleSpec kCollectiveExecutionRules[] = {
   // 32-64 MiB.
   {{COLL, "gfx1201", REDUCE, {16ULL << 20, (1536ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(24.31, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(24.31, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", ALL_REDUCE, {24ULL << 20, (96ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(22.84, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(22.84, kGfx120xPeakBusBwGBps)},
   // AllGather and ReduceScatter have no stable SHM-winning crossover.
   // Broadcast also remains IPC below 16 MiB; these intentionally fall through
   // to their IPC profiles.
@@ -343,19 +341,10 @@ constexpr RuleSpec kCollectiveExecutionRules[] = {
     GE(3), IPC, ANY_BOOL},
    {CHANNELS(2), KEEP, SIMPLE, SENDRECV, WRITE}, EFFICIENCY(22.33, kGfx120xPeakBusBwGBps)},
   {{P2P, "gfx120", GATHER, {1ULL << 20, 8ULL << 30}, EQ(1), GE(3),
-    GE(3), IPC, BOOL_FALSE},
+    GE(3), IPC, ANY_BOOL},
    {CHANNELS(2), KEEP, SIMPLE, SENDRECV, WRITE}, EFFICIENCY(44.99, kGfx120xPeakBusBwGBps)},
   {{P2P, "gfx120", GATHER, {8589934593, SIZE_MAX}, EQ(1), GE(3),
-    GE(3), IPC, BOOL_FALSE},
-   {CHANNELS(2), KEEP, SIMPLE, SENDRECV, WRITE}, UNMEASURED},
-  {{P2P, "gfx120", GATHER, {1ULL << 20, (1536ULL << 10) - 1}, EQ(1), GE(3),
-    GE(3), IPC, BOOL_TRUE},
-   {CHANNELS(2), KEEP, SIMPLE, SENDRECV, WRITE}, EFFICIENCY(31.06, kGfx120xPeakBusBwGBps)},
-  {{P2P, "gfx120", GATHER, {1536ULL << 10, 8ULL << 30}, EQ(1), GE(3),
-    GE(3), IPC, BOOL_TRUE},
-   {CHANNELS(2), KEEP, SIMPLE, SENDRECV, WRITE}, EFFICIENCY(45.56, kGfx120xPeakBusBwGBps)},
-  {{P2P, "gfx120", GATHER, {8589934593, SIZE_MAX}, EQ(1), GE(3),
-    GE(3), IPC, BOOL_TRUE},
+    GE(3), IPC, ANY_BOOL},
    {CHANNELS(2), KEEP, SIMPLE, SENDRECV, WRITE}, UNMEASURED},
   {{P2P, "gfx120", SCATTER, {1ULL << 20, (24ULL << 20) - 1}, EQ(1), GE(3),
     GE(3), IPC, ANY_BOOL},
@@ -369,94 +358,91 @@ constexpr RuleSpec kCollectiveExecutionRules[] = {
 
   // Eight-rank, single-node gfx1201 pure-SHM matrix. These ranges follow stable
   // Ring/Simple bus-bandwidth plateaus and merge isolated point winners into
-  // smooth size bands.
+  // smooth size bands. A user or per-call channel bound that rejects a measured
+  // channel count keeps the SHM algorithm and protocol; an explicit
+  // NCCL_ALGO/NCCL_PROTO conflict still rejects the whole profile. AllReduce
+  // 24-96 MiB and Reduce 16-1536 MiB use the crossover rows above.
   {{COLL, "gfx1201", ALL_REDUCE, {128, (64ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(0.88, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(0.88, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", ALL_REDUCE, {64ULL << 10, (256ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(2.74, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(2.74, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", ALL_REDUCE, {256ULL << 10, (1ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(4), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(7.77, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(4), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(7.77, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", ALL_REDUCE, {1ULL << 20, (16ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(12), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(18.36, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(12), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(18.36, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", ALL_REDUCE, {16ULL << 20, (24ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(20.94, kGfx120xPeakBusBwGBps)},
-  {{COLL, "gfx1201", ALL_REDUCE, {24ULL << 20, (96ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
+   {PREFER_CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(20.94, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", ALL_REDUCE, {96ULL << 20, 8ULL << 30}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(22.48, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(22.48, kGfx120xPeakBusBwGBps)},
 
   {{COLL, "gfx1201", ALL_GATHER, {128, (16ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(0.18, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(0.18, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", ALL_GATHER, {16ULL << 10, (32ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(0.37, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(0.37, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", ALL_GATHER, {32ULL << 10, (256ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(2.68, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(2.68, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", ALL_GATHER, {256ULL << 10, (1ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(6), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(6.09, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(6), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(6.09, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", ALL_GATHER, {1ULL << 20, (16ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(12), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(17.51, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(12), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(17.51, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", ALL_GATHER, {16ULL << 20, 8ULL << 30}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(28), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(21.59, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(28), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(21.59, kGfx120xPeakBusBwGBps)},
 
   {{COLL, "gfx1201", REDUCE_SCATTER, {128, (8ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(0.10, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(0.10, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", REDUCE_SCATTER, {8ULL << 10, (32ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(0.39, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(0.39, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", REDUCE_SCATTER, {32ULL << 10, (256ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(2.84, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(2.84, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", REDUCE_SCATTER, {256ULL << 10, (1ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(2), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(6.11, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(2), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(6.11, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", REDUCE_SCATTER, {1ULL << 20, (16ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(12), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(16.68, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(12), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(16.68, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", REDUCE_SCATTER, {16ULL << 20, (2ULL << 30) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(28), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(21.81, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(28), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(21.81, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", REDUCE_SCATTER, {2ULL << 30, (8ULL << 30) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(28), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(21.37, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(28), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(21.37, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", REDUCE_SCATTER, {8ULL << 30, 8ULL << 30}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(28), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(21.20, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(28), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(21.20, kGfx120xPeakBusBwGBps)},
 
   {{COLL, "gfx1201", REDUCE, {128, (64ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(2.05, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(2.05, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", REDUCE, {64ULL << 10, (256ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(4.89, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(4.89, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", REDUCE, {256ULL << 10, (512ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(2), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(8.13, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(2), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(8.13, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", REDUCE, {512ULL << 10, (1ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(2), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(9.56, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(2), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(9.56, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", REDUCE, {1ULL << 20, (16ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(8), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(17.37, kGfx120xPeakBusBwGBps)},
-  {{COLL, "gfx1201", REDUCE, {16ULL << 20, (1536ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
+   {PREFER_CHANNELS(8), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(17.37, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", REDUCE, {1536ULL << 20, 8ULL << 30}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(22.14, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(24), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(22.14, kGfx120xPeakBusBwGBps)},
 
   // Broadcast's sub-64 KiB channel winner was noisy. Select only its measured
   // Ring/Simple protocol there, then use the stable channel plateaus.
@@ -465,129 +451,24 @@ constexpr RuleSpec kCollectiveExecutionRules[] = {
    {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(2.13, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", BROADCAST, {64ULL << 10, (256ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(4.93, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(1), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(4.93, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", BROADCAST, {256ULL << 10, (512ULL << 10) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(2), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(8.43, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(2), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(8.43, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", BROADCAST, {512ULL << 10, (1ULL << 20) - 1}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(2), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(10.39, kGfx120xPeakBusBwGBps)},
+   {PREFER_CHANNELS(2), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(10.39, kGfx120xPeakBusBwGBps)},
   {{COLL, "gfx1201", BROADCAST, {1ULL << 20, 8ULL << 30}, EQ(1), EQ(8),
     kAnyInt, SHM, ANY_BOOL},
-   {CHANNELS(8), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(22.63, kGfx120xPeakBusBwGBps)},
-
-  // If a user or per-call channel bound rejects a measured channel profile,
-  // retain the SHM algorithm/protocol choice without partially applying the
-  // rejected profile. Explicit NCCL_ALGO/NCCL_PROTO conflicts reject these
-  // fallbacks as well and preserve the user's selection.
-  {{COLL, "gfx1201", ALL_REDUCE, {128, (64ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", ALL_REDUCE, {64ULL << 10, (256ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", ALL_REDUCE, {256ULL << 10, (1ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", ALL_REDUCE, {1ULL << 20, (16ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", ALL_REDUCE, {16ULL << 20, (24ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", ALL_REDUCE, {24ULL << 20, (96ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", ALL_REDUCE, {96ULL << 20, 8ULL << 30}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", ALL_GATHER, {128, (16ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", ALL_GATHER, {16ULL << 10, (32ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", ALL_GATHER, {32ULL << 10, (256ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", ALL_GATHER, {256ULL << 10, (1ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", ALL_GATHER, {1ULL << 20, (16ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", ALL_GATHER, {16ULL << 20, 8ULL << 30}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE_SCATTER, {128, (8ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE_SCATTER, {8ULL << 10, (32ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE_SCATTER, {32ULL << 10, (256ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE_SCATTER, {256ULL << 10, (1ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE_SCATTER, {1ULL << 20, (16ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE_SCATTER, {16ULL << 20, (2ULL << 30) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE_SCATTER, {2ULL << 30, (8ULL << 30) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE_SCATTER, {8ULL << 30, 8ULL << 30}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE, {128, (64ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE, {64ULL << 10, (256ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE, {256ULL << 10, (512ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE, {512ULL << 10, (1ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE, {1ULL << 20, (16ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE, {16ULL << 20, (1536ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", REDUCE, {1536ULL << 20, 8ULL << 30}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", BROADCAST, {128, (64ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", BROADCAST, {64ULL << 10, (256ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", BROADCAST, {256ULL << 10, (512ULL << 10) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", BROADCAST, {512ULL << 10, (1ULL << 20) - 1}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
-  {{COLL, "gfx1201", BROADCAST, {1ULL << 20, 8ULL << 30}, EQ(1), EQ(8),
-    kAnyInt, SHM, ANY_BOOL},
-   {KEEP, RING, SIMPLE, AUTO_PATH, KEEP}, UNMEASURED},
+   {PREFER_CHANNELS(8), RING, SIMPLE, AUTO_PATH, KEEP}, EFFICIENCY(22.63, kGfx120xPeakBusBwGBps)},
 };
+// clang-format on
 
 constexpr size_t kCollectiveExecutionRuleCount =
   sizeof(kCollectiveExecutionRules) / sizeof(kCollectiveExecutionRules[0]);
 constexpr size_t kFirstInvalidRule = firstInvalidRule(kCollectiveExecutionRules);
-constexpr size_t kFirstIncompleteP2pTransportShape =
-  firstIncompleteP2pTransportShape(kCollectiveExecutionRules);
-constexpr size_t kFirstMismatchedAllToAllVShape =
-  firstMismatchedAllToAllVShape(kCollectiveExecutionRules);
+constexpr size_t kFirstIncompleteP2pTransportShape = firstIncompleteP2pTransportShape(kCollectiveExecutionRules);
+constexpr size_t kFirstMismatchedAllToAllVShape = firstMismatchedAllToAllVShape(kCollectiveExecutionRules);
 static_assert(kCollectiveExecutionRuleCount <= RCCL_EXECUTION_POLICY_NO_RULE,
               "Execution policy rule count exceeds the RuleId range");
 static_assert(kFirstInvalidRule == kCollectiveExecutionRuleCount,
@@ -596,6 +477,10 @@ static_assert(kFirstIncompleteP2pTransportShape == kCollectiveExecutionRuleCount
               "P2P transport candidates must carry a complete work shape");
 static_assert(kFirstMismatchedAllToAllVShape == kCollectiveExecutionRuleCount,
               "AllToAllV P2P rules must share one non-transport work shape");
+static_assert(firstPlacementDependentRootedP2pRule(kCollectiveExecutionRules) == kCollectiveExecutionRuleCount,
+              "P2P Gather and Scatter rules must match both placements");
+static_assert(firstDuplicateRule(kCollectiveExecutionRules) == kCollectiveExecutionRuleCount,
+              "A rule repeats an earlier rule's match and profile and can never be selected");
 static_assert(firstMisalignedRule(kCollectiveExecutionRules) == kCollectiveExecutionRuleCount,
               "Rules that can match one input must cover identical sizes and placement; "
               "run tools/scripts/execution_policy_scores.py");

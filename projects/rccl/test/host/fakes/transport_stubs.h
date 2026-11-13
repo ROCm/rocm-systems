@@ -26,6 +26,8 @@ struct ncclTopoGraph;
 
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*)>
     g_ncclTransportP2pSetup;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*, int)>
+    g_ncclTransportP2pSetupSpecific;
 
 // src/transport.cc, and ncclTransportInitRankMap from src/transport/generic.cc. Fail-loud by default,
 // except ncclTransportInitRankMap, which succeeds.

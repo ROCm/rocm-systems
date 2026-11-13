@@ -159,33 +159,9 @@ static ncclResult_t postTuneP2pChannelBase(struct ncclComm* comm, int peer, bool
   return ncclSuccess;
 }
 
-static void postTuneP2pMarkPreconnectChannels(struct ncclComm* comm, int peer, bool isSendNotRecv, uint8_t base,
-                                              int nP2pChannels, int nP2pChannelsPerPeer, int nParts, int connIndex,
-                                              bool* needPreconnect) {
-  base %= nP2pChannels;
-  for (int c = 0; c < nParts; c++) {
-    int channelId = ncclP2pChannelForPart(nP2pChannels, base, c, nP2pChannelsPerPeer, comm->nNodes,
-                                          comm->p2pChannelShiftSize);
-    struct ncclConnector* conn =
-      isSendNotRecv ? &comm->channels[channelId].peers[peer]->send[connIndex]
-                    : &comm->channels[channelId].peers[peer]->recv[connIndex];
-    if (conn->hasSeen != 0) continue;
-    if (connIndex == RCCL_CONN_IDX_P2P_SHM && conn->connected) {
-      conn->hasSeen = 1;
-      continue;
-    }
-    conn->hasSeen = 1;
-    if (connIndex != NCCL_CONN_IDX_P2P_NET) conn->p2pOnly = 1;
-    int maskPeer = peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex);
-    struct channelMasks* connect = isSendNotRecv ? &comm->connectSend[maskPeer] : &comm->connectRecv[maskPeer];
-    connect->masks[channelId / 64] |= (1ULL << (channelId % 64));
-    *needPreconnect = true;
-  }
-}
-
 // Resolves the task's execution policy and marks the connectors it needs beyond the default one:
-// P2P_NET on a peer's first use when the comm has it, and every connector the policy names. Runs
-// before postTuneP2pRecordPreconnect, which records that first use.
+// P2P_NET on a peer's first use when the comm has it, and every connector the policy names under
+// either placement. Runs before postTuneP2pRecordPreconnect, which records that first use.
 static ncclResult_t postTuneP2pRecordPolicyPreconnect(struct ncclComm* comm, struct ncclRawTaskSendRecv* raw,
                                                       bool* needDefaultPreconnect, bool* needSecondaryPreconnect,
                                                       bool* needShmPreconnect) {
@@ -207,26 +183,28 @@ static ncclResult_t postTuneP2pRecordPolicyPreconnect(struct ncclComm* comm, str
 
   bool firstPeerUse = !(isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen);
   bool netFirstUse = firstPeerUse && comm->p2pNet;
-  struct rcclP2pPolicyPreconnect policyPreconnect;
-  bool hasPolicy = rcclPolicyP2pPreconnect(comm, &task, &policyPreconnect);
-  if (!netFirstUse && !hasPolicy) return ncclSuccess;
+  struct rcclP2pPolicyPreconnect policyPreconnects[2];
+  int nPolicyPreconnects = rcclPolicyP2pPreconnects(comm, &task, policyPreconnects);
+  if (!netFirstUse && nPolicyPreconnects == 0) return ncclSuccess;
 
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
 
-  if (netFirstUse) {
-    postTuneP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, comm->p2pnChannels, comm->p2pnChannelsPerPeer,
-                                      rcclP2pTaskParts(comm, raw->collAPI), NCCL_CONN_IDX_P2P_NET,
-                                      needSecondaryPreconnect);
-  }
+  if (netFirstUse &&
+      rcclP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, comm->p2pnChannels, comm->p2pnChannelsPerPeer,
+                                    rcclP2pTaskParts(comm, raw->collAPI), NCCL_CONN_IDX_P2P_NET))
+    *needSecondaryPreconnect = true;
 
-  for (int i = 0; i < policyPreconnect.nConnIndices; i++) {
-    int connIndex = policyPreconnect.connIndices[i];
-    bool* needPreconnect = connIndex == RCCL_CONN_IDX_P2P_SHM ? needShmPreconnect
-                           : connIndex == 1                   ? needDefaultPreconnect
-                                                              : needSecondaryPreconnect;
-    postTuneP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyPreconnect.nChannels,
-                                      policyPreconnect.nChannelsPerPeer, policyPreconnect.nChannelsPerPeer, connIndex,
-                                      needPreconnect);
+  for (int p = 0; p < nPolicyPreconnects; p++) {
+    const struct rcclP2pPolicyPreconnect& preconnect = policyPreconnects[p];
+    for (int i = 0; i < preconnect.nConnIndices; i++) {
+      int connIndex = preconnect.connIndices[i];
+      bool* needPreconnect = connIndex == RCCL_CONN_IDX_P2P_SHM ? needShmPreconnect
+                             : connIndex == 1                   ? needDefaultPreconnect
+                                                                : needSecondaryPreconnect;
+      if (rcclP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, preconnect.nChannels,
+                                        preconnect.nChannelsPerPeer, preconnect.nChannelsPerPeer, connIndex))
+        *needPreconnect = true;
+    }
   }
   return ncclSuccess;
 }

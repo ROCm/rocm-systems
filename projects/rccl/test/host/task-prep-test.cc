@@ -306,6 +306,12 @@ TEST_F(TaskPrepMicrotest, TaskPrepare_TuningExcludedCollFuncs_SkipTuningAndCarry
   scene.EnqueueGeneric(scene.NewColl(ncclFuncAlltoAll));
   scene.EnqueueGeneric(scene.NewColl(ncclFuncScatter));
   scene.EnqueueGeneric(scene.NewColl(ncclFuncGather));
+  // AlltoAllv lowers to a send/recv pair per rank like AlltoAll; zero counts keep the buffers untouched.
+  std::vector<size_t> allToAllvSizes(4 * kRanks, 0);
+  struct ncclRawTask* allToAllv = scene.NewColl(ncclFuncAlltoAllv, ncclInt8);
+  allToAllv->coll.sizes = allToAllvSizes.data();
+  allToAllv->coll.sizesCount = allToAllvSizes.size();
+  scene.EnqueueGeneric(allToAllv);
   // Harness-only pair: no collectives.cc entry point builds a coll raw whose func is ncclFuncAllGatherV.
   scene.EnqueueGeneric(scene.NewColl(ncclFuncAllGatherV));
 
@@ -319,8 +325,8 @@ TEST_F(TaskPrepMicrotest, TaskPrepare_TuningExcludedCollFuncs_SkipTuningAndCarry
   EXPECT_TRUE(CarriesTuningEstimate(legacy[0]->tuningOut));
   EXPECT_EQ(ncclFuncAllGatherV, legacy[1]->tuningIn.func);
   EXPECT_TRUE(CarriesNoTuningEstimate(legacy[1]->tuningOut));
-  EXPECT_EQ(kLoweredP2pTasks, QueueTasks(&ctq->p2pTaskQueue).size());
-  EXPECT_FLOAT_EQ(kTunedTimeUs + (1 + kLoweredP2pTasks) * NCCL_TUNING_IGNORE, sim.estimatedTime);
+  EXPECT_EQ(kLoweredP2pTasks + 2 * kRanks, QueueTasks(&ctq->p2pTaskQueue).size());
+  EXPECT_FLOAT_EQ(kTunedTimeUs + (1 + kLoweredP2pTasks + 2 * kRanks) * NCCL_TUNING_IGNORE, sim.estimatedTime);
 }
 
 TEST_F(TaskPrepMicrotest, TaskPrepare_PreTuningFails_PropagatesWithoutTuningOrPostTuning) {
