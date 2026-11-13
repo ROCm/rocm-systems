@@ -23,7 +23,9 @@ classifiers = [
 "Documentation" = "https://rocm.docs.amd.com/projects/amdsmi/en/latest/"
 
 [tool.setuptools]
-packages = ["amdsmi"]
+# The notices directory has no __init__.py; listing it keeps setuptools from
+# flagging its files as data shipped from an undeclared package.
+packages = ["amdsmi", "amdsmi.THIRD_PARTY_LICENSES"]
 zip-safe = false
 include-package-data = true
 
