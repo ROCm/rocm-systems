@@ -106,46 +106,53 @@ macro(_HIP_PARSE_ARGS _out_src _out_cmake_opts _out_cxx_opts)
     unset(_hip_arg)
 endmacro()
 
-# Internal helper: split HIP_HIPCC_FLAGS elements that contain multiple
-# space-separated flags packed into a single string (e.g. "-O3 -fPIC
-# -std=c++17") into individual flags.  
-macro(_HIP_SPLIT_FLAGS _out_var)
-    set(${_out_var})
-    foreach(_hip_flag_element IN LISTS HIP_HIPCC_FLAGS)
-        separate_arguments(_hip_flag_split UNIX_COMMAND "${_hip_flag_element}")
-        list(APPEND ${_out_var} ${_hip_flag_split})
+# Compile .cu files and files tagged HIP_SOURCE_PROPERTY_FORMAT as HIP.
+# Leave every other source on the host C++ compiler.
+macro(_HIP_MARK_HIP_SOURCES)
+    foreach(_hip_s ${ARGN})
+        get_source_file_property(_hip_header "${_hip_s}" HEADER_FILE_ONLY)
+        if(_hip_header)
+            continue()
+        endif()
+        get_source_file_property(_hip_fmt "${_hip_s}" HIP_SOURCE_PROPERTY_FORMAT)
+        get_filename_component(_hip_ext "${_hip_s}" EXT)
+        if(_hip_fmt OR _hip_ext STREQUAL ".cu")
+            set_source_files_properties("${_hip_s}" PROPERTIES LANGUAGE HIP)
+        endif()
     endforeach()
-    unset(_hip_flag_element)
-    unset(_hip_flag_split)
+    unset(_hip_s)
+    unset(_hip_header)
+    unset(_hip_fmt)
+    unset(_hip_ext)
+endmacro()
+
+# SHELL: removes extra quotes around flags such as "-Wno-#pragma-messages".
+# The generator expression applies those flags only to HIP compiles.
+macro(_HIP_ADD_HIPCC_OPTIONS hip_target)
+    foreach(_hip_o ${ARGN})
+        string(REPLACE ">" "$<ANGLE-R>" _hip_o "${_hip_o}")
+        target_compile_options(${hip_target} PRIVATE
+            "$<$<COMPILE_LANGUAGE:HIP>:SHELL:${_hip_o}>")
+    endforeach()
+    unset(_hip_o)
 endmacro()
 
 macro(HIP_ADD_LIBRARY hip_target)
     _HIP_PARSE_ARGS(_hip_src _hip_cmake_opts _hip_cxx_opts ${ARGN})
-    # Tag sources as HIP so CMake compiles them with CMAKE_HIP_COMPILER
-    # (amdclang++) instead of CMAKE_CXX_COMPILER (which may be GCC).
     if(CMAKE_HIP_COMPILER)
-        set_source_files_properties(${_hip_src} PROPERTIES LANGUAGE HIP)
+        _HIP_MARK_HIP_SOURCES(${_hip_src})
     endif()
     add_library(${hip_target} ${_hip_cmake_opts} ${_hip_src})
     if(_hip_cxx_opts)
-        target_compile_options(${hip_target} PRIVATE ${_hip_cxx_opts})
+        _HIP_ADD_HIPCC_OPTIONS(${hip_target} ${_hip_cxx_opts})
     endif()
-    # Forward legacy HIP_HIPCC_FLAGS if the caller populated them (e.g.
-    # rocALUTION appends --offload-arch, -O3, etc. to this list variable).
+    # Forward HIP_HIPCC_FLAGS, such as --offload-arch, to HIP compiles only.
     if(HIP_HIPCC_FLAGS)
-        _HIP_SPLIT_FLAGS(_hip_split_flags)
-        target_compile_options(${hip_target} PRIVATE ${_hip_split_flags})
-        unset(_hip_split_flags)
+        _HIP_ADD_HIPCC_OPTIONS(${hip_target} ${HIP_HIPCC_FLAGS})
     endif()
-    if(hip_FOUND AND TARGET hip::device)
-        # PRIVATE hip::device: the library's own sources need -x hip and
-        # --offload-arch for device code compilation.
-        # PUBLIC hip::host: consumers get the HIP runtime (headers +
-        # libamdhip64) without inheriting -x hip, which would force their
-        # plain C++ sources to be compiled as HIP device code.
-        # Keyword signature required for CMP0023 compatibility (see e.g.
-        # rocALUTION, which mixes PRIVATE/PUBLIC links on the same target).
-        target_link_libraries(${hip_target} PRIVATE hip::device PUBLIC hip::host)
+    if(hip_FOUND AND TARGET hip::host)
+        # hip::host provides headers and libamdhip64 without adding -x hip.
+        target_link_libraries(${hip_target} PUBLIC hip::host)
     endif()
     unset(_hip_src)
     unset(_hip_cmake_opts)
@@ -155,21 +162,18 @@ endmacro()
 macro(HIP_ADD_EXECUTABLE hip_target)
     _HIP_PARSE_ARGS(_hip_src _hip_cmake_opts _hip_cxx_opts ${ARGN})
     if(CMAKE_HIP_COMPILER)
-        set_source_files_properties(${_hip_src} PROPERTIES LANGUAGE HIP)
+        _HIP_MARK_HIP_SOURCES(${_hip_src})
     endif()
     add_executable(${hip_target} ${_hip_cmake_opts} ${_hip_src})
     if(_hip_cxx_opts)
-        target_compile_options(${hip_target} PRIVATE ${_hip_cxx_opts})
+        _HIP_ADD_HIPCC_OPTIONS(${hip_target} ${_hip_cxx_opts})
     endif()
     if(HIP_HIPCC_FLAGS)
-        _HIP_SPLIT_FLAGS(_hip_split_flags)
-        target_compile_options(${hip_target} PRIVATE ${_hip_split_flags})
-        unset(_hip_split_flags)
+        _HIP_ADD_HIPCC_OPTIONS(${hip_target} ${HIP_HIPCC_FLAGS})
     endif()
-    if(hip_FOUND AND TARGET hip::device)
-        # PRIVATE for executables — nothing consumes an executable's link
-        # interface. Keyword form required for CMP0023 (see HIP_ADD_LIBRARY).
-        target_link_libraries(${hip_target} PRIVATE hip::device)
+    if(hip_FOUND AND TARGET hip::host)
+        # PRIVATE for executables. Nothing consumes an executable's link interface.
+        target_link_libraries(${hip_target} PRIVATE hip::host)
     endif()
     unset(_hip_src)
     unset(_hip_cmake_opts)
