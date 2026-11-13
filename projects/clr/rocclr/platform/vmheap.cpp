@@ -206,6 +206,10 @@ void VmHeap::TrimPhysMemory(size_t unmap_threshold) {
   auto unmap_org = unmap_threshold_;
   unmap_threshold_ = unmap_threshold;
   while (current != nullptr) {
+    const uint64_t free_mapped = alignDown(FreeMappedSize(), kChunkSize);
+    if (free_mapped <= unmap_threshold_ || chunk_size_ > free_mapped - unmap_threshold_) {
+      break;
+    }
     UnmapPhysMemory(current->offset_, current->size_);
     current = current->next_;
   }
@@ -446,21 +450,22 @@ void VmHeapArray::Free(amd::Memory* memory) {
 
 // ================================================================================================
 void VmHeapArray::TrimPhysMemory(size_t unmap_threshold) {
+  uint64_t free_mapped = FreeMappedSize();
   for (uint i = 0; i < kMaxArraySize; ++i) {
     // Allocations may skip smaller heaps; an uncreated heap is not the end.
     if (!vm_heaps_[i]->created_) {
       continue;
     }
-    const uint64_t free_mapped = FreeMappedSize();
     if (free_mapped <= unmap_threshold) {
       break;
     }
-    // Share one retention budget across the array. Recompute it after each
-    // heap because busy blocks and whole chunks can limit the actual release.
+    // Share one retention budget across the array, deducting only what each
+    // heap actually releases: busy blocks and whole chunks can limit trimming.
     const uint64_t release_budget = free_mapped - unmap_threshold;
     const uint64_t heap_free = vm_heaps_[i]->FreeMappedSize();
     const uint64_t heap_retain = (heap_free > release_budget) ? heap_free - release_budget : 0;
     vm_heaps_[i]->TrimPhysMemory(heap_retain);
+    free_mapped -= heap_free - vm_heaps_[i]->FreeMappedSize();
   }
 }
 

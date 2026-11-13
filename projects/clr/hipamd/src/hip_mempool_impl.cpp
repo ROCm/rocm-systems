@@ -155,7 +155,7 @@ bool Heap::ReleaseAllMemory() {
   }
   // Lowering the threshold must also trim mappings whose allocation objects
   // were released at an earlier synchronization.
-  if (vm_heap_.FreeMappedSize() > release_threshold_) {
+  if (use_vm_heap_ && vm_heap_.FreeMappedSize() > release_threshold_) {
     vm_heap_.TrimPhysMemory(release_threshold_);
   }
   return true;
