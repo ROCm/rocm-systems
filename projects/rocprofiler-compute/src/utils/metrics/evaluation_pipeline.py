@@ -15,7 +15,7 @@ from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
-from utils.metrics.metric_evaluator import MetricEvaluator, pass_frame_index
+from utils.metrics.metric_evaluator import MetricEvaluator, counter_table_index
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -161,12 +161,12 @@ def eval_metric(
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
     debug: bool,
-    pass_frames: Optional[list[pd.DataFrame]] = None,
+    pass_tables: Optional[list[pd.DataFrame]] = None,
 ) -> None:
     """Execute the expr string for each metric in the df.
 
-    A metric is read from the first table in pass_frames that has all of its
-    counters, and from raw_pmc_df when no pass table has them all.
+    A metric reads the first table in pass_tables that has all of its
+    counters. When none has them all, it reads raw_pmc_df.
     """
     # confirm no illogical counter values
     gui_active_counter = next(
@@ -197,20 +197,25 @@ def eval_metric(
     # Clear any previous noise clamp warnings before this analysis
     clear_noise_clamp_warnings()
 
-    # Create metric evaluator
-    metric_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
-    # One evaluator per pass, with the built-in variables of that pass
-    pass_evaluators = [
-        MetricEvaluator(
-            frame,
-            {
-                **sys_vars,
-                **calc_builtin_vars(frame, sys_vars, sys_info["gpu_arch"], expressions),
-            },
-            empirical_peaks,
-        )
-        for frame in pass_frames or []
+    # One evaluator per pass table, with that pass's built-in variables. The
+    # merged table's evaluator comes last.
+    evaluators = [
+        *(
+            MetricEvaluator(
+                table,
+                {
+                    **sys_vars,
+                    **calc_builtin_vars(
+                        table, sys_vars, sys_info["gpu_arch"], expressions
+                    ),
+                },
+                empirical_peaks,
+            )
+            for table in pass_tables or []
+        ),
+        MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks),
     ]
+    tables = [evaluator.raw_pmc_df for evaluator in evaluators]
     build_in_vars = get_build_in_vars(mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"]))
 
     exprs_to_eval = []
@@ -231,12 +236,9 @@ def eval_metric(
                         "percent of peak",
                     }:
                         if row[expr]:
-                            evaluator = _evaluator_for(
-                                row[expr],
-                                metric_evaluator,
-                                pass_evaluators,
-                                build_in_vars,
-                            )
+                            evaluator = evaluators[
+                                counter_table_index(row[expr], tables, build_in_vars)
+                            ]
                             exprs_to_eval.append((
                                 df_id,
                                 row_id,
@@ -346,19 +348,3 @@ def validate_dual_issue_metrics(
                 # DB cells may be non-numeric (e.g. "N/A"); skip those.
                 continue
             detector.check(metric_name, value, peak)
-
-
-def _evaluator_for(
-    eval_string: str,
-    metric_evaluator: MetricEvaluator,
-    pass_evaluators: list[MetricEvaluator],
-    build_in_vars: dict[str, str],
-) -> MetricEvaluator:
-    """Return the evaluator of the first pass that has every column eval_string
-    reads, or metric_evaluator when no pass has them all."""
-    index = pass_frame_index(
-        eval_string,
-        [evaluator.raw_pmc_df for evaluator in pass_evaluators],
-        build_in_vars,
-    )
-    return metric_evaluator if index is None else pass_evaluators[index]

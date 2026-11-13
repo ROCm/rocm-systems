@@ -79,7 +79,7 @@ Visit order: largest PMC sets first (M1, then HBM-like, M2, M3).
 
 ## 3. Reading each metric from one pass
 
-Analyze reads all of a metric's counters from the same pass. Code: `split_counters_by_pass` and `impute_counters_by_pass_iteration_multiplex` in `utils_analysis.py`, `pass_frame_index` in `metric_evaluator.py`, and both analyze entry points: CLI (`eval_metric`) and DB (`calc_dataframe_expressions`).
+Analyze reads all of a metric's counters from the same pass. Code: `split_counters_by_pass` and `impute_counters_iteration_multiplex` in `utils_analysis.py`, `counter_table_index` in `metric_evaluator.py`, and both analyze entry points: CLI (`eval_metric`) and DB (`calc_dataframe_expressions`).
 
 - **Tables.** Analyze keeps the merged counter table, one row per dispatch, and one counter table per pass on the same rows. A pass table holds the dispatch columns and only the counters and timestamps that pass collected. In the merged table, a counter that several passes collected keeps the first pass's value.
 - **Pass names.** A pass is named after its result file without the prefix and suffix: `results_pmc_perf_3.csv.gz` becomes `pmc_perf_3`. Passes are in number order (`pmc_perf_2` before `pmc_perf_10`).

@@ -105,7 +105,7 @@ _DISPATCH_ID_KEYS = [
     "End_Timestamp",
 ]
 _KERNEL_ID_KEYS = ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"]
-# The keys process_rocpd_csv merges the passes of one dispatch by.
+# process_rocpd_csv merges the passes of one dispatch on these keys.
 _MERGE_KEYS = ["Dispatch_ID", *_KERNEL_ID_KEYS]
 ARGS_DISPLAY_MAX_ITEMS = 8
 ARGS_DISPLAY_MAX_CHARS = 160
@@ -1748,32 +1748,23 @@ def add_unit_counter(df: pd.DataFrame) -> None:
     df[UNIT_COUNTER] = 1
 
 
+@demarcate
 def impute_counters_iteration_multiplex(
     df: pd.DataFrame,
     policy: str,
     workload_dir: Path,
-) -> pd.DataFrame:
-    """
-    Perform data imputation for missing counter values due to iteration multiplexing.
-    """
-    imputed_df, _pass_frames = impute_counters_by_pass_iteration_multiplex(
-        df, policy, workload_dir
-    )
-    return imputed_df
-
-
-def impute_counters_by_pass_iteration_multiplex(
-    df: pd.DataFrame,
-    policy: str,
-    workload_dir: Path,
 ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
-    """Impute the counters each launch missed under iteration multiplexing.
+    """Fill in the counters each launch did not collect under iteration
+    multiplexing.
 
-    Each launch of a kernel collects one pass, in rotation. A round is one
-    rotation through the passes. Returns the imputed frame, where every
-    launch takes each missing counter from its round, and one table per pass,
-    where every launch takes that pass's counters from the one launch of its
-    round that collected the pass.
+    Each launch of a kernel collects one pass, in turn. A round is one launch
+    of every pass. Returns two things:
+
+    - The imputed frame. Each launch takes its missing counters from the
+      other launches of its round.
+    - One table per pass. Each launch takes that pass's counters from the one
+      launch of its round that collected the pass, so a pass's counters always
+      come from one launch.
     """
     # Counter buckets configured for the workload. A kernel needs at least
     # this many dispatches to cover every bucket.
@@ -1815,8 +1806,9 @@ def impute_counters_by_pass_iteration_multiplex(
     counter_columns = [col for col in df.columns if col not in non_counter_column_index]
     # Collect imputed groups as dataframes
     group_dfs: list[pd.DataFrame] = []
-    # Per group, each pass's counters on that group's rows
-    group_pass_values: list[dict[frozenset[str], pd.DataFrame]] = []
+    # Each pass's counter values, one piece per kernel, keyed by the set of
+    # counters the pass collects
+    pass_pieces: dict[frozenset[str], list[pd.DataFrame]] = {}
 
     # Log imputation task summary before processing
     console_debug(
@@ -1835,10 +1827,9 @@ def impute_counters_by_pass_iteration_multiplex(
             group_copy[counter_columns] = np.nan
             incomplete_kernel_names.add(group_copy["Kernel_Name"].iloc[0])
             group_dfs.append(group_copy)
-            group_pass_values.append({})
             continue
 
-        # Identify counter buckets, in the order the rotation collects them
+        # Find the passes, in the order the launches collect them
         counter_groups: list[frozenset[str]] = []
         for _, row in group.iterrows():
             # Set of counter column names with non empty values
@@ -1861,12 +1852,12 @@ def impute_counters_by_pass_iteration_multiplex(
         # Create subgroup_id column for groupby: 0,0,0,...,1,1,1,...,2,2,2,...
         # Use numpy for vectorized operation
         round_ids = np.arange(len(group)) // len(counter_groups)
-        group_pass_values.append({
-            counter_group: _pass_values_by_round(
-                group, counter_columns, counter_group, round_ids
+        # Which counters each launch collected
+        collected = group[counter_columns].notna()
+        for counter_group in counter_groups:
+            pass_pieces.setdefault(counter_group, []).append(
+                _pass_values_by_round(group, collected, counter_group, round_ids)
             )
-            for counter_group in counter_groups
-        })
         group_copy = group.copy()
         group_copy["__subgroup_id"] = round_ids
         # groupby().bfill() automatically excludes the grouping column from result
@@ -1884,26 +1875,16 @@ def impute_counters_by_pass_iteration_multiplex(
 
     if not group_dfs:
         return pd.DataFrame(columns=df.columns), {}
-    imputed_df = pd.concat(group_dfs, ignore_index=True)
+    # Pass tables join their pieces by the original row labels, so reset
+    # the labels last
+    imputed_df = pd.concat(group_dfs)
     dispatch_df = imputed_df.drop(columns=counter_columns)
-    counter_groups_seen = dict.fromkeys(
-        counter_group
-        for pass_values in group_pass_values
-        for counter_group in pass_values
-    )
-    pass_frames = {
-        f"pass_{number}": dispatch_df.join(
-            pd.concat(
-                [
-                    pass_values.get(counter_group, group_df[[]])
-                    for group_df, pass_values in zip(group_dfs, group_pass_values)
-                ],
-                ignore_index=True,
-            )
-        )
-        for number, counter_group in enumerate(counter_groups_seen)
+    # A kernel that never collected a pass has empty counters in its table
+    pass_tables = {
+        f"pass_{number}": dispatch_df.join(pd.concat(pieces)).reset_index(drop=True)
+        for number, pieces in enumerate(pass_pieces.values())
     }
-    return imputed_df, pass_frames
+    return imputed_df.reset_index(drop=True), pass_tables
 
 
 def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) -> None:
@@ -1932,17 +1913,17 @@ def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) ->
 
 def _pass_values_by_round(
     group: pd.DataFrame,
-    counter_columns: list[str],
+    collected: pd.DataFrame,
     counter_group: frozenset[str],
     round_ids: np.ndarray,
 ) -> pd.DataFrame:
-    """Copy one pass's counters onto every launch of the group.
+    """Give every launch of one kernel the counters of one pass.
 
     The values come from the launch of the same round that collected exactly
     that pass. A round without such a launch gets empty values.
     """
     columns = sorted(counter_group)
-    collected = group[counter_columns].notna()
+    # Launches whose collected counters are exactly this pass's counters
     collected_this_pass = collected[columns].all(axis=1) & ~collected.drop(
         columns=columns
     ).any(axis=1)
@@ -1952,6 +1933,7 @@ def _pass_values_by_round(
         .assign(Round=round_ids[collected_this_pass.to_numpy()])
         .drop_duplicates("Round")
     )
+    # Copy each round's source values onto every launch of that round
     values = (
         pd
         .DataFrame({"Round": round_ids})
@@ -2027,7 +2009,7 @@ def split_counters_by_pass(
         if column not in set(counter_rows["Counter_Name"])
         and column not in ("Start_Timestamp", "End_Timestamp")
     ]
-    pass_frames: dict[str, pd.DataFrame] = {}
+    pass_tables: dict[str, pd.DataFrame] = {}
     for pass_key, rows in counter_rows.groupby("Pass_Key", sort=False):
         counters = rows.pivot_table(
             index="Merged_Row",
@@ -2036,10 +2018,10 @@ def split_counters_by_pass(
             aggfunc="first",
         )
         timestamps = rows.groupby("Merged_Row")[["Start_Timestamp", "End_Timestamp"]]
-        pass_frames[str(pass_key)] = (
+        pass_tables[str(pass_key)] = (
             merged_df[dispatch_columns].join(timestamps.first()).join(counters)
         )
-    return pass_frames
+    return pass_tables
 
 
 def find_native_artifacts(workload_dir: Path) -> List[NativeArtifacts]:

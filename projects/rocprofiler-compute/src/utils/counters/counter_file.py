@@ -11,8 +11,8 @@ _ACCUM_SUFFIX = "_ACCUM"
 
 
 def slot_cost(counter: str) -> int:
-    """Return the block slots a counter uses: 2 for an *_ACCUM counter, which
-    also uses an accumulation register, and 1 for any other counter."""
+    """Return the block slots a counter uses. An *_ACCUM counter uses 2, one
+    more for its accumulation register. Any other counter uses 1."""
     return 2 if counter.split("[", 1)[0].endswith(_ACCUM_SUFFIX) else 1
 
 

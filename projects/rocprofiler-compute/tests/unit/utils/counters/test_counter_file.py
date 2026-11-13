@@ -12,18 +12,8 @@ from utils.counters.counter_file import (
     slot_cost,
 )
 
-PERFMON_CONFIG = {
-    "SQ": 8,
-    "TA": 2,
-    "TD": 2,
-    "TCP": 4,
-    "TCC": 4,
-    "CPC": 2,
-    "CPF": 2,
-    "SPI": 6,
-    "GRBM": 2,
-    "GDS": 4,
-}
+# Made-up block sizes; real arches set theirs in mi_gpu_spec.yaml.
+PERFMON_CONFIG = {"SQ": 5, "TA": 2, "TCP": 3}
 
 
 @pytest.fixture
@@ -106,20 +96,20 @@ def test_counter_file_exposes_name_attribute(perfmon_config):
 def test_counter_file_add_and_block_mapping(perfmon_config):
     cf = CounterFile("0", perfmon_config)
 
-    # SQ, SQC, SP all map to the SQ block (capacity 8)
+    # SQ, SQC, SP all map to the SQ block (capacity 5)
     assert cf.add("SQ_WAVES") is True
     assert cf.add("SQC_CACHE_HIT") is True
     assert cf.add("SP_SOMETHING") is True
-    assert cf.blocks["SQ"].avail == 5  # 8 - 3
+    assert cf.blocks["SQ"].avail == 2  # 5 - 3
 
     # TA maps to its own block (capacity 2)
     assert cf.add("TA_ADDR") is True
     assert cf.add("TA_DATA") is True
     assert cf.add("TA_EXTRA") is False  # TA full
 
-    # TCP maps to its own block (capacity 4)
+    # TCP maps to its own block (capacity 3)
     assert cf.add("TCP_READ") is True
-    assert cf.blocks["TCP"].avail == 3
+    assert cf.blocks["TCP"].avail == 2
 
 
 def test_counter_file_reserve_delegates_to_block(perfmon_config):
@@ -128,10 +118,10 @@ def test_counter_file_reserve_delegates_to_block(perfmon_config):
     counter_to_block(counter) and returns the underlying boolean.
     """
     cf = CounterFile("0", perfmon_config)
-    assert cf.add("SQ_WAVES") is True  # SQ avail: 8 -> 7
+    assert cf.add("SQ_WAVES") is True  # SQ avail: 5 -> 4
 
     assert cf.reserve("SQ_INSTS", 2) is True
-    assert cf.blocks["SQ"].avail == 5  # 7 - 2
+    assert cf.blocks["SQ"].avail == 2  # 4 - 2
 
     # TA capacity is 2 in the fixture, so reserving 3 must fail.
     assert cf.reserve("TA_EXTRA", 3) is False

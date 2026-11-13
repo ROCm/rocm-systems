@@ -76,7 +76,7 @@ from utils.metrics.aggregation import (
 )
 from utils.metrics.common import EVAL_BUILTINS, ValuDualIssueDetector
 from utils.metrics.expression import transform_expression
-from utils.metrics.metric_evaluator import pass_frame_index
+from utils.metrics.metric_evaluator import counter_table_index
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -91,6 +91,7 @@ from utils.roofline_calc import (
 from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
+    impute_counters_iteration_multiplex,
 )
 from utils.utils_common import get_uuid, get_version, normalize_filter_to_str_list
 from utils.utils_counter_defs import (
@@ -321,18 +322,6 @@ def memory_chart_layout_extdata(gpu_arch: str) -> Optional[dict[str, Any]]:
     return layout_json
 
 
-def _frame_for(
-    eval_string: str,
-    pmc_df: pd.DataFrame,
-    pass_frames: list[pd.DataFrame],
-    build_in_vars: dict[str, str],
-) -> pd.DataFrame:
-    """Return the first pass table that has every column eval_string reads, or
-    pmc_df when no pass table has them all."""
-    index = pass_frame_index(eval_string, pass_frames, build_in_vars)
-    return pmc_df if index is None else pass_frames[index]
-
-
 class db_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -348,7 +337,7 @@ class db_analysis(OmniAnalyze_Base):
             if self.pc_sampling_collected()
             else {}
         )
-        self._pmc_df_per_workload, self._pmc_by_pass_per_workload = (
+        self._pmc_df_per_workload, self._pass_tables_per_workload = (
             self.calc_pmc_df_data()
         )
         self._pmc_df_per_workload = self.apply_pmc_filters()
@@ -645,12 +634,12 @@ class db_analysis(OmniAnalyze_Base):
     def calc_pmc_df_data(
         self,
     ) -> tuple[dict[str, pd.DataFrame], dict[str, dict[str, pd.DataFrame]]]:
-        """Return each workload's counter frame and its per-pass counter tables."""
+        """Return the merged counter table and the pass tables of each workload."""
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
-        pmc_by_pass_per_workload: dict[str, dict[str, pd.DataFrame]] = {}
+        pass_tables_per_workload: dict[str, dict[str, pd.DataFrame]] = {}
 
         for workload_path in self._runs.keys():
-            pmc_df, _slot_to_id, pmc_by_pass = file_io.create_df_pmc_with_slot_ids(
+            pmc_df, pass_tables = file_io.create_df_pmc(
                 workload_path,
                 self.get_args().verbose,
             )
@@ -658,19 +647,19 @@ class db_analysis(OmniAnalyze_Base):
                 continue
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
-                pmc_df, pmc_by_pass = self.iteration_multiplex_impute_counters(
+                pmc_df, pass_tables = impute_counters_iteration_multiplex(
                     pmc_df,
                     policy=self._profiling_config["iteration_multiplexing"],
                     workload_dir=Path(workload_path),
                 )
 
             pmc_df_per_workload[workload_path] = pmc_df
-            pmc_by_pass_per_workload[workload_path] = pmc_by_pass
+            pass_tables_per_workload[workload_path] = pass_tables
 
         if pmc_df_per_workload:
             console_debug("Collected dispatch data")
 
-        return pmc_df_per_workload, pmc_by_pass_per_workload
+        return pmc_df_per_workload, pass_tables_per_workload
 
     def calc_roofline_ceilings(self) -> dict[str, dict[str, Any]]:
         roofline_ceilings_per_workload: dict[str, dict[str, Any]] = {}
@@ -1160,35 +1149,36 @@ class db_analysis(OmniAnalyze_Base):
         sys_info: dict,
         expression_df: pd.DataFrame,
         emit_variance_warnings: bool = False,
-        pass_frames: Optional[list[pd.DataFrame]] = None,
+        pass_tables: Optional[list[pd.DataFrame]] = None,
     ) -> pd.Series:
-        """Evaluate each expression row. A row is read from the first table in
-        pass_frames that has all of its counters, and from pmc_df otherwise."""
+        """Evaluate each expression row.
+
+        A row reads the first table in pass_tables that has all of its
+        counters. When none has them all, it reads pmc_df.
+        """
         expressions = [
             v
             for v in expression_df["value"].tolist()
             if isinstance(v, str) and v and v != "None"
         ]
-        db_analysis.calc_builtin_vars(pmc_df, sys_info, expressions)
-        pass_frames = pass_frames or []
-        pass_sys_infos = []
-        for frame in pass_frames:
-            frame_sys_info = sys_info.copy()
-            db_analysis.calc_builtin_vars(frame, frame_sys_info, expressions)
-            pass_sys_infos.append(frame_sys_info)
+        # Pass tables first, pmc_df last. Each gets its own built-in variables.
+        tables = [*(pass_tables or []), pmc_df]
+        table_sys_infos = [sys_info.copy() for _table in tables[:-1]] + [sys_info]
+        for table, table_sys_info in zip(tables, table_sys_infos):
+            db_analysis.calc_builtin_vars(table, table_sys_info, expressions)
         build_in_vars = get_build_in_vars(
             mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
         )
 
         values = []
         for row in expression_df.itertuples(index=False):
-            index = pass_frame_index(row.value, pass_frames, build_in_vars)
+            index = counter_table_index(row.value, tables, build_in_vars)
             values.append(
                 db_analysis.evaluate(
                     f"{row.metric_id} - {row.value_name}",
                     row.value,
-                    pmc_df if index is None else pass_frames[index],
-                    sys_info if index is None else pass_sys_infos[index],
+                    tables[index],
+                    table_sys_infos[index],
                     emit_variance_warnings=emit_variance_warnings,
                 )
             )
@@ -1252,7 +1242,7 @@ class db_analysis(OmniAnalyze_Base):
 
         for workload_path in self._pmc_df_per_workload.keys():
             pmc_df = self._pmc_df_per_workload[workload_path]
-            pmc_by_pass = self._pmc_by_pass_per_workload[workload_path].values()
+            pass_tables = self._pass_tables_per_workload[workload_path].values()
             expression_template = self._metric_expression_data_per_workload[
                 workload_path
             ]
@@ -1281,8 +1271,8 @@ class db_analysis(OmniAnalyze_Base):
                     kernel_pmc_df,
                     sys_info.copy(),
                     kernel_expression_df,
-                    pass_frames=[
-                        frame.loc[kernel_pmc_df.index] for frame in pmc_by_pass
+                    pass_tables=[
+                        table.loc[kernel_pmc_df.index] for table in pass_tables
                     ],
                 )
                 new_kernel_rows.extend(
@@ -1313,7 +1303,7 @@ class db_analysis(OmniAnalyze_Base):
                 sys_info.copy(),
                 workload_expression_df,
                 emit_variance_warnings=True,
-                pass_frames=[frame.loc[pmc_df.index] for frame in pmc_by_pass],
+                pass_tables=[table.loc[pmc_df.index] for table in pass_tables],
             )
             print_noise_clamp_summary()
             db_analysis.validate_dual_issue_metrics(
@@ -1620,12 +1610,14 @@ class db_analysis(OmniAnalyze_Base):
             )
 
             build_in_vars = get_build_in_vars(mi_gpu_specs.get_gpu_series(gfx_arch))
-            pmc_by_pass = self._pmc_by_pass_per_workload[workload_path].values()
+            pass_tables = self._pass_tables_per_workload[workload_path].values()
             roofline_rows = []
             for kernel_name in top_kernels:
                 kernel_pmc_df = pmc_df[pmc_df["Kernel_Name"] == kernel_name]
-                kernel_pass_frames = [
-                    frame.loc[kernel_pmc_df.index] for frame in pmc_by_pass
+                # This kernel's rows: pass tables first, the merged table last
+                kernel_tables = [
+                    *(table.loc[kernel_pmc_df.index] for table in pass_tables),
+                    kernel_pmc_df,
                 ]
                 roofline_rows.append({
                     "kernel_name": kernel_name,
@@ -1633,12 +1625,11 @@ class db_analysis(OmniAnalyze_Base):
                         metric_name: db_analysis.evaluate(
                             metric_name,
                             expression,
-                            _frame_for(
-                                expression,
-                                kernel_pmc_df,
-                                kernel_pass_frames,
-                                build_in_vars,
-                            ),
+                            kernel_tables[
+                                counter_table_index(
+                                    expression, kernel_tables, build_in_vars
+                                )
+                            ],
                             sys_info,
                         )
                         for metric_name, expression in roofline_data_expressions.items()

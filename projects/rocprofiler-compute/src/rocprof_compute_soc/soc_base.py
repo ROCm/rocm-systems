@@ -551,12 +551,9 @@ class OmniSoC_Base:
         return filter_blocks
 
     def _allocate_perfmon_counter_files(self, counters: Set[str]) -> List[CounterFile]:
-        """Bin-pack counters into perfmon buckets.
+        """Pack counters into perfmon passes.
 
-        Each metric whose counters fit one bucket gets a bucket that holds all
-        of them. If that packing fails, a metric-aware greedy pass, when the
-        arch has priority metrics in profiling_counter_grouping_policy.yaml,
-        and a per-counter first-fit place the counters instead.
+        Use single-pass packing. If it fails, use the older greedy packing.
         """
         output_files = allocate_single_pass_metrics(
             counters,
@@ -577,6 +574,7 @@ class OmniSoC_Base:
         file_count = 0
         tcc_channel_counter_file_map: Dict[str, CounterFile] = {}
 
+        # Counters not placed in a pass yet
         work_set = set(counters)
         if self._same_bucket_priority_metric_ids():
             work_set, output_files, file_count = self._metric_aware_coalesce_pass(

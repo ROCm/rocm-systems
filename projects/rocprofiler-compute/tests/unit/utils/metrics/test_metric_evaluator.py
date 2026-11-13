@@ -13,7 +13,7 @@ from utils.metrics.expression import (
     build_eval_string,
     update_denominator_string,
 )
-from utils.metrics.metric_evaluator import MetricEvaluator, pass_frame_index
+from utils.metrics.metric_evaluator import MetricEvaluator, counter_table_index
 from utils.utils_analysis import add_unit_counter
 from utils.utils_counter_defs import SUPPORTED_DENOM, UNIT_COUNTER
 
@@ -385,18 +385,19 @@ class TestMetricEvaluator:
     [
         ("raw_pmc_df['SQ_BUSY_CYCLES'] / raw_pmc_df['SQ_WAVES']", 1),
         ("raw_pmc_df['SQ_BUSY_CYCLES'] / ammolite__GRBM_GUI_ACTIVE_PER_XCD", 2),
-        ("raw_pmc_df['TA_BUSY']", None),
-        (None, None),
+        ("raw_pmc_df['TA_BUSY']", 3),
+        (None, 3),
     ],
     ids=["direct_counters", "built_in_counters", "no_pass", "not_an_expression"],
 )
-def test_pass_frame_index(eval_string, expected):
-    """The first pass with every column the expression reads wins."""
-    pass_frames = [
+def test_counter_table_index(eval_string, expected):
+    """The first pass table with every column wins; the merged table is last."""
+    tables = [
         pd.DataFrame(columns=["SQ_WAVES"]),
         pd.DataFrame(columns=["SQ_WAVES", "SQ_BUSY_CYCLES"]),
         pd.DataFrame(columns=["SQ_BUSY_CYCLES", "GRBM_GUI_ACTIVE"]),
+        pd.DataFrame(columns=["SQ_WAVES", "SQ_BUSY_CYCLES", "GRBM_GUI_ACTIVE"]),
     ]
     build_in_vars = {"GRBM_GUI_ACTIVE_PER_XCD": "GRBM_GUI_ACTIVE / $num_xcd"}
 
-    assert pass_frame_index(eval_string, pass_frames, build_in_vars) == expected
+    assert counter_table_index(eval_string, tables, build_in_vars) == expected

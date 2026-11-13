@@ -84,7 +84,7 @@ def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df):
     return SimpleNamespace(
         _runs={workload_path: SimpleNamespace(sys_info=sys_info_df)},
         _pmc_df_per_workload={workload_path: pmc_df},
-        _pmc_by_pass_per_workload={workload_path: {}},
+        _pass_tables_per_workload={workload_path: {}},
         _arch_configs={"gfx90a": arch_config},
         get_args=lambda: SimpleNamespace(),
     )
@@ -783,7 +783,7 @@ def test_calc_dataframe_expressions_with_builtin_vars():
 def test_calc_dataframe_expressions_reads_each_row_from_its_pass():
     """A row whose counters share a pass reads that pass; others read pmc_df."""
     pmc_df = pd.DataFrame({"SQ_WAVES": [1, 1], "SQ_BUSY_CYCLES": [1, 1]})
-    pass_frames = [
+    pass_tables = [
         pd.DataFrame({"SQ_WAVES": [2, 2]}),
         pd.DataFrame({"SQ_WAVES": [3, 3], "SQ_BUSY_CYCLES": [6, 6]}),
     ]
@@ -801,7 +801,7 @@ def test_calc_dataframe_expressions_reads_each_row_from_its_pass():
         "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
     ):
         result = db_analysis.calc_dataframe_expressions(
-            pmc_df, {"gpu_arch": "gfx942"}, expression_df, pass_frames=pass_frames
+            pmc_df, {"gpu_arch": "gfx942"}, expression_df, pass_tables=pass_tables
         )
 
     assert result.iloc[0] == 4
@@ -906,10 +906,10 @@ def test_calc_pmc_df_data_reads_compressed_results(tmp_path):
     analyzer._runs = {str(tmp_path): MagicMock()}
     analyzer._profiling_config = {}
 
-    pmc_df_per_workload, pmc_by_pass_per_workload = analyzer.calc_pmc_df_data()
+    pmc_df_per_workload, pass_tables_per_workload = analyzer.calc_pmc_df_data()
 
     assert pmc_df_per_workload[str(tmp_path)]["SQ_WAVES"].tolist() == [4]
-    assert list(pmc_by_pass_per_workload[str(tmp_path)]) == ["pmc_perf_0"]
+    assert list(pass_tables_per_workload[str(tmp_path)]) == ["pmc_perf_0"]
 
 
 def test_calc_pmc_df_data_skips_workload_without_results(tmp_path):
@@ -1064,7 +1064,7 @@ def test_calc_expressions_noise_clamp():
 
     analyzer = db_analysis(MagicMock(), {})
     analyzer._pmc_df_per_workload = {workload_path: pmc_df}
-    analyzer._pmc_by_pass_per_workload = {workload_path: {}}
+    analyzer._pass_tables_per_workload = {workload_path: {}}
     analyzer._metric_expression_data_per_workload = {workload_path: expression_template}
     analyzer._metrics_info_data_per_workload = {}
     analyzer._roofline_ceilings_per_workload = {workload_path: {}}

@@ -35,7 +35,6 @@ from utils.utils_analysis import (
     find_native_artifacts,
     fold_identical_sibling_subtrees,
     format_operator_args,
-    impute_counters_by_pass_iteration_multiplex,
     join_native_counters,
     nest_marker_intervals,
     number_gpus_by_node,
@@ -852,7 +851,9 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     df = pd.DataFrame(data)
 
     # For "kernel" policy
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by="Dispatch_ID")
     assert isinstance(result, pd.DataFrame)
@@ -862,7 +863,7 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     assert result["Counter1"].iloc[1] == 100
 
     # For "kernel_launch_params" policy
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
@@ -894,7 +895,7 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
 
     df = pd.DataFrame(data)
 
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
@@ -929,7 +930,9 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     df = pd.DataFrame(data)
 
     # For "kernel" policy
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by="Dispatch_ID")
     # Assert Counter1 and Counter2 imputed for first and last dispatches
@@ -960,7 +963,7 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
 
     df = pd.DataFrame(data)
 
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
@@ -997,7 +1000,7 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     }
 
     df = pd.DataFrame(data)
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
@@ -1548,7 +1551,9 @@ def test_impute_multiplex_kernel_policy(tmp_path: Path) -> None:
 
     df = pd.DataFrame(data)
 
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
 
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by="Dispatch_ID")
@@ -1583,7 +1588,7 @@ def test_impute_multiplex_kernel_launch_params_policy(tmp_path: Path) -> None:
 
     df = pd.DataFrame(data)
 
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
 
@@ -1624,7 +1629,7 @@ def test_impute_multiplex_kernel_launch_params_no_imputation(tmp_path: Path) -> 
     num_counter_bucket = 2
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
 
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
 
@@ -1667,7 +1672,9 @@ def test_impute_multiplex_multi_kernel_kernel_policy(tmp_path: Path) -> None:
 
     df = pd.DataFrame(data)
 
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
 
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by="Dispatch_ID")
@@ -1708,7 +1715,7 @@ def test_impute_multiplex_multi_kernel_kernel_launch_params_no_imputation(
     num_counter_bucket = 2
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
 
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
 
@@ -1760,7 +1767,9 @@ def test_fewer_dispatches_single_kernel(tmp_path: Path) -> None:
     # C1, C2, C3 form 3 round-robin buckets but the kernel only had 2 dispatches.
     num_counter_bucket = 3
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
     result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
@@ -1807,7 +1816,9 @@ def test_fewer_dispatches_multiple_kernels_both_incomplete(tmp_path: Path) -> No
     # C1, C2, C3 form 3 round-robin buckets but each kernel has only 2 dispatches.
     num_counter_bucket = 3
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
     result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
@@ -1867,7 +1878,9 @@ def test_fewer_dispatches_one_incomplete_one_complete(tmp_path: Path) -> None:
     # C1, C2, C3 form 3 round-robin buckets; kernel_a has only 2 dispatches.
     num_counter_bucket = 3
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
     result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
@@ -1931,7 +1944,7 @@ def test_fewer_dispatches_same_kernel_different_launch_params(tmp_path: Path) ->
     # C1, C2, C3 form 3 round-robin buckets but each launch config has 2 dispatches.
     num_counter_bucket = 3
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
@@ -1996,7 +2009,7 @@ def test_fewer_dispatches_same_kernel_one_incomplete_one_complete(
     # C1, C2, C3 form 3 round-robin buckets; the first launch config has 2 dispatches.
     num_counter_bucket = 3
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
@@ -2051,7 +2064,9 @@ def test_incomplete_last_group_single_kernel(tmp_path: Path) -> None:
     }
 
     df = pd.DataFrame(data)
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
     result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
@@ -2128,7 +2143,9 @@ def test_incomplete_last_group_multiple_kernels_both_incomplete(tmp_path: Path) 
     }
 
     df = pd.DataFrame(data)
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
     result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
@@ -2242,7 +2259,9 @@ def test_incomplete_last_group_one_incomplete_other_complete(tmp_path: Path) -> 
     }
 
     df = pd.DataFrame(data)
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
     result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
@@ -2325,7 +2344,7 @@ def test_incomplete_last_group_same_kernel_different_launch_params(
     }
 
     df = pd.DataFrame(data)
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
@@ -2390,7 +2409,7 @@ def test_incomplete_last_group_same_kernel_one_incomplete_one_complete(
     }
 
     df = pd.DataFrame(data)
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
@@ -2446,7 +2465,9 @@ def test_complete_last_group_single_kernel(tmp_path: Path) -> None:
     }
 
     df = pd.DataFrame(data)
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
     result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
@@ -2597,7 +2618,9 @@ def test_complete_last_group_multiple_kernels_both_complete(tmp_path: Path) -> N
     }
 
     df = pd.DataFrame(data)
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
     result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
@@ -2688,7 +2711,7 @@ def test_complete_last_group_same_kernel_different_launch_params(
     }
 
     df = pd.DataFrame(data)
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
@@ -2771,7 +2794,7 @@ def test_impute_counters_iteration_multiplex_empty_dataframe(tmp_path: Path) -> 
         "C2": [],
     }
     df_empty = pd.DataFrame(data_empty)
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df_empty, "kernel", tmp_path
     )
 
@@ -2807,7 +2830,7 @@ def test_impute_counters_iteration_multiplex_all_counters_nan(tmp_path: Path) ->
         "C2": [None, None, None],
     }
     df_all_nan = pd.DataFrame(data_all_nan)
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df_all_nan, "kernel", tmp_path
     )
 
@@ -2841,7 +2864,7 @@ def test_impute_counters_iteration_multiplex_no_counter_columns(tmp_path: Path) 
         "Kernel_ID": [1, 1],
     }
     df_no_counters = pd.DataFrame(data_no_counters)
-    result = utils_analysis.impute_counters_iteration_multiplex(
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df_no_counters, "kernel", tmp_path
     )
 
@@ -2878,10 +2901,10 @@ def test_impute_counters_iteration_multiplex_unrecognized_policy(
         "C2": [None, 500, 300],
     }
     df_policy = pd.DataFrame(data_policy)
-    result_invalid = utils_analysis.impute_counters_iteration_multiplex(
+    result_invalid, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df_policy, "invalid_policy", tmp_path
     )
-    result_klp = utils_analysis.impute_counters_iteration_multiplex(
+    result_klp, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         df_policy, "kernel_launch_params", tmp_path
     )
     assert isinstance(result_invalid, pd.DataFrame)
@@ -2932,7 +2955,9 @@ def test_incomplete_dispatches_nullify_counter_values(tmp_path: Path) -> None:
     # C1, C2, C3 form 3 round-robin buckets but the kernel only had 2 dispatches.
     num_counter_bucket = 3
     seed_perfmon_files(tmp_path, count=num_counter_bucket)
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
     result = result.sort_values(by="Dispatch_ID").reset_index(drop=True)
 
     assert isinstance(result, pd.DataFrame)
@@ -2989,7 +3014,9 @@ def test_undersampled_kernel_nullified_against_perfmon_file_count(
         "C2": [20, 40],
     }
     df = pd.DataFrame(data)
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result, _pass_tables = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel", tmp_path
+    )
     result = result.sort_values(by="Dispatch_ID").reset_index(drop=True)
 
     assert pd.isna(result["C1"].iloc[0])
@@ -3785,10 +3812,10 @@ def test_split_counters_by_pass_keeps_each_pass_values():
     rows = counter_rows(TWO_PASS_COUNTER_ROWS)
     merged, _slot_to_id = process_rocpd_csv(rows)
 
-    pass_frames = split_counters_by_pass(rows, merged)
+    pass_tables = split_counters_by_pass(rows, merged)
 
-    assert list(pass_frames) == ["pmc_perf_0", "pmc_perf_1"]
-    second = pass_frames["pmc_perf_1"]
+    assert list(pass_tables) == ["pmc_perf_0", "pmc_perf_1"]
+    second = pass_tables["pmc_perf_1"]
     assert "GRBM_GUI_ACTIVE" not in second.columns
     assert second["Kernel_Name"].tolist() == ["kernel_a", "kernel_a"]
     assert second["SQ_WAVES"].tolist()[0] == 6
@@ -3807,12 +3834,12 @@ def test_impute_by_pass_copies_one_launch_per_round(tmp_path: Path) -> None:
         "TA_BUSY": [None, 20, None, 40],
     })
 
-    imputed, pass_frames = impute_counters_by_pass_iteration_multiplex(
+    imputed, pass_tables = utils_analysis.impute_counters_iteration_multiplex(
         launches, "kernel", tmp_path
     )
 
     assert len(imputed) == 4
-    first, second = pass_frames.values()
+    first, second = pass_tables.values()
     assert first["SQ_WAVES"].tolist() == [1, 1, 3, 3]
     assert first["SQ_BUSY_CYCLES"].tolist() == [10, 10, 30, 30]
     assert second["SQ_WAVES"].tolist() == [2, 2, 4, 4]

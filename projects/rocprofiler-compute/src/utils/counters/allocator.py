@@ -1,8 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Pack perfmon counters so that a metric whose counters fit one pass is
-collected in one pass."""
+"""Pack perfmon counters into passes. A metric whose counters fit one pass
+gets a pass that holds all of them."""
 
 from typing import Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
@@ -131,8 +131,8 @@ def _place_together(
 ) -> List[CounterFile]:
     """Make one pass hold all of metric_set.
 
-    Extend the pass that already holds the most of it, the earliest on a tie,
-    or open a new pass.
+    Extend the pass that already holds the most of it. On a tie, extend the
+    earliest one. If no pass has room, open a new one.
     """
     if _held(files, metric_set):
         return files

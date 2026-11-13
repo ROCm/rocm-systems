@@ -149,7 +149,7 @@ class TestEvaluationPipeline:
         )
         metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
         pass_values = {"SQ_WAVES": [10, 20, 30], "GRBM_GUI_ACTIVE": [50, 50, 50]}
-        pass_frames = [
+        pass_tables = [
             pd.DataFrame({name: pass_values[name] for name in counters})
             for counters in pass_counters
         ]
@@ -165,7 +165,7 @@ class TestEvaluationPipeline:
                 pd.DataFrame(),
                 raw_pmc_df,
                 debug=False,
-                pass_frames=pass_frames,
+                pass_tables=pass_tables,
             )
 
         assert metric_df.loc["1.1.0", "Value"] == pytest.approx(expected)

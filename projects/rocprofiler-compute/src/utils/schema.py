@@ -48,7 +48,7 @@ class Workload:
     sys_info: pd.DataFrame = field(default_factory=pd.DataFrame)
     raw_pmc: pd.DataFrame = field(default_factory=pd.DataFrame)
     # One counter table per pass, on raw_pmc's rows, keyed by pass name.
-    pmc_by_pass: dict[str, pd.DataFrame] = field(default_factory=dict)
+    pass_tables: dict[str, pd.DataFrame] = field(default_factory=dict)
     dfs: dict[int, pd.DataFrame] = field(default_factory=dict)
     dfs_type: dict[int, str] = field(default_factory=dict)
     filter_kernel_ids: list[int] = field(default_factory=list)

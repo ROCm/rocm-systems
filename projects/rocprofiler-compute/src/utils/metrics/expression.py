@@ -234,8 +234,8 @@ def build_eval_string(equation: str) -> str:
 
 
 def columns_read(eval_string: str, build_in_vars: dict[str, str]) -> set[str]:
-    """Return the raw_pmc_df columns an eval string reads, including the
-    columns read by the built-in variables it uses."""
+    """Return the raw_pmc_df columns an eval string reads. Columns that its
+    built-in variables read count too."""
     columns = set(RAW_PMC_COLUMN_RE.findall(eval_string))
     pending = set(AMMOLITE_VAR_RE.findall(eval_string))
     seen: set[str] = set()

@@ -366,16 +366,17 @@ def process_pc_sampling_kernel_trace(
 def create_df_pmc(
     raw_data_dir: str,
     verbose: int,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
     """
-    Read all raw pmc counters into one analysis df.
+    Read all raw pmc counters. Return the merged table and one table per pass,
+    keyed by pass name.
 
     Counter data comes from the native tool's per-pid artifacts when there are
     any, and from the rocpd result artifacts otherwise. Bad profiling output
     stops the run instead of producing a partial frame.
     """
-    df, _slot_to_id, _pass_frames = create_df_pmc_with_slot_ids(raw_data_dir, verbose)
-    return df
+    df, _slot_to_id, pass_tables = create_df_pmc_with_slot_ids(raw_data_dir, verbose)
+    return df, pass_tables
 
 
 @demarcate
@@ -383,8 +384,8 @@ def create_df_pmc_with_slot_ids(
     raw_data_dir: str,
     verbose: int,
 ) -> tuple[pd.DataFrame, dict[tuple, int], dict[str, pd.DataFrame]]:
-    """Read pmc counters, the map from process_rocpd_csv group keys to 1..N ids,
-    and one counter table per pass, keyed by pass name."""
+    """Read pmc counters like create_df_pmc. Also return the map from
+    process_rocpd_csv group keys to the 1..N dispatch ids."""
     counter_rows = _read_counter_rows(Path(raw_data_dir))
     if counter_rows.empty:
         return pd.DataFrame(), {}, {}
@@ -392,13 +393,13 @@ def create_df_pmc_with_slot_ids(
     df, slot_to_id = utils_analysis.process_rocpd_csv(counter_rows)
 
     utils_analysis.add_unit_counter(df)
-    pass_frames = utils_analysis.split_counters_by_pass(counter_rows, df)
+    pass_tables = utils_analysis.split_counters_by_pass(counter_rows, df)
 
     if verbose >= 2:
         frame_info = io.StringIO()
         df.info(buf=frame_info)
         console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
-    return df, slot_to_id, pass_frames
+    return df, slot_to_id, pass_tables
 
 
 def _read_counter_rows(workload_dir: Path) -> pd.DataFrame:
