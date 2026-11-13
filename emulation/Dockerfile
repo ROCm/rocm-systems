@@ -157,3 +157,7 @@ COPY --from=mirage-builder   /opt/mirage /opt/mirage
 ENV PATH=/opt/mirage/bin:${PATH}
 WORKDIR /opt/mirage
 CMD ["/opt/mirage/bin/mirage", "--help"]
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root

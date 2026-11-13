@@ -93,3 +93,7 @@ RUN iree-check-module --help >/dev/null 2>&1 || true; \
 LABEL org.opencontainers.image.title="mirage IREE corpus runner" \
       org.opencontainers.image.description="ROCm dev image + IREE iree-check-module / iree-e2e-matmul-test for the rocjitsu-corpus gfx1250 regression" \
       org.opencontainers.image.base.name="docker.io/rocm/dev-ubuntu-24.04:7.1.1-complete"
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root
