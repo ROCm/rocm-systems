@@ -208,11 +208,7 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
         compute_peaks=[],
     )
     assert "Limited by Unknown: Unknown" in unroofed_traces[0].hovertemplate
-    assert unroofed[0]["points"][0]["hoverCells"] == [
-        "N/A",
-        "N/A",
-        "Bandwidth:<br>\u2003HBM: N/A% (900.000 / N/A GB/s)",
-    ]
+    assert unroofed[0]["points"][0]["hoverCells"] == ["N/A", "N/A", "Bandwidth: N/A"]
 
 
 def test_kernel_traces_expose_the_limiting_peak_for_a_memory_bound_kernel() -> None:
@@ -291,7 +287,11 @@ def test_kernel_traces_differing_bandwidths__points_share_binding_roof_pct() -> 
 
 
 def test_bandwidth_hover_no_traffic_level__still_lists_at_zero() -> None:
-    ceiling = dict(CEILING, lds=[[0.01, 1.0], [1.0, 800.0], 800.0])
+    ceiling = dict(
+        CEILING,
+        l2=[[0.01, 1.0], [1.0, 4000.0], 4000.0],
+        lds=[[0.01, 1.0], [1.0, 800.0], 800.0],
+    )
     _, model = kernel_traces(
         make_roofline(),
         {
@@ -314,6 +314,25 @@ def test_bandwidth_hover_no_traffic_level__still_lists_at_zero() -> None:
 
     hbm_line = next(line for line in lines if "HBM" in line)
     assert "900" in hbm_line
+
+
+def test_bandwidth_hover_unroofed_level__is_left_out() -> None:
+    """A level with no measured roof, such as gfx1201 L1, gets no bandwidth line,
+    while the levels with a roof still list theirs."""
+    _, model = kernel_traces(
+        make_roofline(),
+        {
+            "ai_hbm": [[1.0], [900.0]],
+            "ai_l1": [[2.0], [900.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L1"],
+    )
+    points = {point["peak"]: point for point in model[0]["points"]}
+    assert set(points) == {"HBM", "L1"}
+    bandwidth_html = points["HBM"]["hoverCells"][2]
+    assert "HBM" in bandwidth_html
+    assert "L1" not in bandwidth_html
 
 
 def test_kernel_hover_given_a_name_under_the_length_cap__wraps_it_whole() -> None:
