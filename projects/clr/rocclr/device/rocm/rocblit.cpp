@@ -3165,7 +3165,6 @@ bool KernelBlitManager::WriteBufferBatch(
   }
 
   if (!pinned_copy_ops.empty()) {
-    constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
       LogWarning(
@@ -3285,7 +3284,6 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
   }
 
   if (!pinned_copy_ops.empty()) {
-    constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
     if (!hsaCopyBatch(pinned_copy_ops)) {
       LogWarning(
@@ -3335,7 +3333,6 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   }
 
   //If there is intra-device copies, SDMA copies can overlap
-  const bool kSkipCpuWait = true;
   gpu().releaseGpuMemoryFence(kSkipCpuWait);
 
   // Capture prior wait events and signal before any work.

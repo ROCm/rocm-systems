@@ -195,16 +195,16 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
         int usage = std::numeric_limits<int>::max();
         uint indexBase = std::numeric_limits<uint32_t>::max();
         // Loop through all allocated queues and find the lowest usage
-        for (const auto& it : gpu.dev().QueuePool()) {
-          if ((qCreateInfo.engineType == it.second->engineType_) &&
-              (it.second->counter_ <= usage)) {
-            if ((it.second->counter_ < usage) ||
+        for (const auto& queueIt : gpu.dev().QueuePool()) {
+          if ((qCreateInfo.engineType == queueIt.second->engineType_) &&
+              (queueIt.second->counter_ <= usage)) {
+            if ((queueIt.second->counter_ < usage) ||
                 // Preserve the order of allocations, because SDMA engines
                 // should be used in round-robin manner
-                ((it.second->counter_ == usage) && (it.second->index_ < indexBase))) {
-              queue->iQueue_ = it.first;
-              usage = it.second->counter_;
-              indexBase = it.second->index_;
+                ((queueIt.second->counter_ == usage) && (queueIt.second->index_ < indexBase))) {
+              queue->iQueue_ = queueIt.first;
+              usage = queueIt.second->counter_;
+              indexBase = queueIt.second->index_;
             }
           }
         }
@@ -1765,7 +1765,7 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
     // and therefore are treated like a remote resource
     else if (memory->isPersistentMapped()) {
       // Map/unmap must be serialized
-      std::scoped_lock lock(owner->lockMemoryOps());
+      std::scoped_lock memoryOpsLock(owner->lockMemoryOps());
       memory->unmap(this);
       if (memory->getMapCount() == 0) {
         memory->setPersistentMapFlag(false);
@@ -1974,7 +1974,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
         result = blitMgr().copyBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size,
                                       cmd.isEntireMemory());
       } else {
-        std::scoped_lock lock(dev().P2PStageOps());
+        std::scoped_lock p2pStageLock(dev().P2PStageOps());
         Memory* dstStgMem = static_cast<pal::Memory*>(
             dev().P2PStage()->getDeviceMemory(*cmd.source().getContext().devices()[0]));
         Memory* srcStgMem = static_cast<pal::Memory*>(
@@ -2007,7 +2007,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
         result = blitMgr().copyBufferRect(*srcDevMem, *dstDevMem, cmd.srcRect(), cmd.dstRect(),
                                           size, cmd.isEntireMemory(), cmd.copyMetadata());
       } else {
-        std::scoped_lock lock(dev().P2PStageOps());
+        std::scoped_lock p2pStageLock(dev().P2PStageOps());
         Memory* dstStgMem = static_cast<pal::Memory*>(
             dev().P2PStage()->getDeviceMemory(*cmd.source().getContext().devices()[0]));
         Memory* srcStgMem = static_cast<pal::Memory*>(

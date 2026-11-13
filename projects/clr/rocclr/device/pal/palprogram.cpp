@@ -642,8 +642,12 @@ hsa_status_t PALHSALoaderContext::SamplerDestroy(hsa_agent_t agent,
   return HSA_STATUS_SUCCESS;
 }
 
-static hsa_status_t GetKernelNamesCallback(hsa_executable_t hExec, hsa_executable_symbol_t hSymbol,
-                                           void* data) {
+// Currently unreferenced: nothing registers this with an executable-symbol
+// iteration. Kept rather than deleted because it is a loader callback whose
+// caller may live outside this tree; delete it if that is not the case.
+[[maybe_unused]] static hsa_status_t GetKernelNamesCallback(hsa_executable_t hExec,
+                                                            hsa_executable_symbol_t hSymbol,
+                                                            void* data) {
   auto symbol = amd::hsa::loader::Symbol::Object(hSymbol);
   auto symbolNameList = reinterpret_cast<std::vector<std::string>*>(data);
 

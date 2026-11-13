@@ -566,19 +566,19 @@ bool Program::compileImpl(const std::string& sourceCode,
     std::copy(driverOptions.begin(), driverOptions.end(),
               std::ostream_iterator<std::string>(driverOptionsOStrStr, " "));
 
-    std::ofstream f(options->getDumpFileName(".cl").c_str(), std::ios::trunc);
-    if (f.is_open()) {
+    std::ofstream dumpFile(options->getDumpFileName(".cl").c_str(), std::ios::trunc);
+    if (dumpFile.is_open()) {
       auto srcHash = getOCLSourceHash(sourceCode);
       auto optHash = getOCLOptionsHash(*options);
 
-      f << "/* Compiler options:\n"
+      dumpFile << "/* Compiler options:\n"
            "-c -emit-llvm -target amdgcn-amd-amdhsa -x cl "
         << driverOptionsOStrStr.str() << " -include opencl-c.h "
         << "\nHash to override:"
         << "\n  Source: 0x" << std::setbase(16) << srcHash << "\n  Source + clang options: 0x"
         << (srcHash ^ optHash) << "\n*/\n\n"
         << sourceCode;
-      f.close();
+      dumpFile.close();
     } else {
       buildLog_ += "Warning: opening the file to dump the OpenCL source failed.\n";
     }

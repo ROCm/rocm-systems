@@ -3619,8 +3619,8 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
     graph_dumped_ = true;
     std::string filename =
         "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_launch_1";
-    hipError_t status = ihipGraphDebugDotPrint(this, filename.c_str(), 0);
-    if (status == hipSuccess) {
+    hipError_t dotPrintStatus = ihipGraphDebugDotPrint(this, filename.c_str(), 0);
+    if (dotPrintStatus == hipSuccess) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] graph dump:%s", filename.c_str());
     }
   }

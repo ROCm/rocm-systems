@@ -92,7 +92,7 @@ inline cl_mem_object_type getCLMemObjectType(const unsigned int hipWidth,
     }
   }
   // error scenario. ShouldNotReachHere()
-  return CL_MEM_OBJECT_ALLOCATION_FAILURE;
+  return static_cast<cl_mem_object_type>(CL_MEM_OBJECT_ALLOCATION_FAILURE);
 }
 
 inline cl_mem_object_type getCLMemObjectType(const hipArray* arr) {

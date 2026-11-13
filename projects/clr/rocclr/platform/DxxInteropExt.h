@@ -27,8 +27,11 @@ interface ID3D10Resource;
 interface ID3D11Resource;
 interface IDirect3DSurface9;
 
-// forward declaration of extended primitive topology enumeration
-enum AmdDxExtPrimitiveTopology;
+// forward declaration of extended primitive topology enumeration.
+// The underlying type must be stated to forward-declare an unscoped enum; int
+// is what MSVC picks by default for the real definition, and the only use here
+// is a pointer parameter, so this does not change layout or ABI.
+enum AmdDxExtPrimitiveTopology : int;
 
 // Extension version information
 struct AmdDxExtVersion {

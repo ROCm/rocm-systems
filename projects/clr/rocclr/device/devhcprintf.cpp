@@ -223,7 +223,7 @@ void handlePrintf(uint64_t* output, const uint64_t* input, uint64_t len) {
   uint64_t CTRL_MASK = 1;
   if (control & ~CTRL_MASK) {
     // Unknown control value.
-    *output = -1;
+    *output = ~uint64_t{0};
     return;
   }
 

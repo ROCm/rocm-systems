@@ -1929,8 +1929,8 @@ void ClBinary::resetElfIn() {
   elfIn_ = nullptr;
 }
 
-bool ClBinary::setElfOut(unsigned char eclass, const char* outFile, bool tempFile) {
-  elfOut_ = new amd::Elf(eclass, nullptr, 0, outFile, amd::Elf::ELF_C_WRITE);
+bool ClBinary::setElfOut(unsigned char eclass, const char* outFileName, bool tempFile) {
+  elfOut_ = new amd::Elf(eclass, nullptr, 0, outFileName, amd::Elf::ELF_C_WRITE);
   if ((elfOut_ == nullptr) || !elfOut_->isSuccessful()) {
     delete elfOut_;
     elfOut_ = nullptr;
@@ -1938,7 +1938,7 @@ bool ClBinary::setElfOut(unsigned char eclass, const char* outFile, bool tempFil
     return false;
   }
 
-  fname_ = outFile;
+  fname_ = outFileName;
   tempFile_ = tempFile;
 
   return setElfTarget();

@@ -875,10 +875,10 @@ hsa_status_t Device::iterateGpuMemoryPoolCallback(hsa_amd_memory_pool_t pool, vo
     case HSA_REGION_SEGMENT_GLOBAL: {
       if (dev->settings().enableLocalMemory_) {
         uint32_t global_flag = 0;
-        hsa_status_t stat =
+        hsa_status_t poolStat =
             Hsa::memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &global_flag);
-        if (stat != HSA_STATUS_SUCCESS) {
-          return stat;
+        if (poolStat != HSA_STATUS_SUCCESS) {
+          return poolStat;
         }
 
         // If the flag set is ext scoped fine grain, break the loop
@@ -3285,12 +3285,12 @@ bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
             return false;
           }
           for (uint32_t att = 0; att < accessed_by; ++att) {
-            const auto& it = attr[rocr_attr + att];
+            const auto& svmAttr = attr[rocr_attr + att];
             if (entry >= device_count) {
               // The size of the array is less than the amount of available devices
               break;
             }
-            switch (it.attribute) {
+            switch (svmAttr.attribute) {
               case HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE:
               case HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS:
                 break;
@@ -3299,14 +3299,14 @@ bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
                     static_cast<int32_t>(amd::InvalidDeviceId);
                 // Find device agent returned by ROCr
                 for (auto& device : devices()) {
-                  if (static_cast<Device*>(device)->getBackendDevice().handle == it.value) {
+                  if (static_cast<Device*>(device)->getBackendDevice().handle == svmAttr.value) {
                     reinterpret_cast<uint32_t*>(data[idx])[entry] =
                         static_cast<uint32_t>(device->index());
                   }
                 }
                 // Find CPU agent returned by ROCr
                 for (auto& agent_info : cpu_agents_) {
-                  if (agent_info.agent.handle == it.value) {
+                  if (agent_info.agent.handle == svmAttr.value) {
                     reinterpret_cast<int32_t*>(data[idx])[entry] =
                         static_cast<int32_t>(amd::CpuDeviceId);
                   }
@@ -3319,8 +3319,8 @@ bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
             }
           }
           rocr_attr += accessed_by;
-          for (uint32_t i = entry; i < device_count; ++i) {
-            reinterpret_cast<int32_t*>(data[idx])[i] = static_cast<int32_t>(amd::InvalidDeviceId);
+          for (uint32_t devIdx = entry; devIdx < device_count; ++devIdx) {
+            reinterpret_cast<int32_t*>(data[idx])[devIdx] = static_cast<int32_t>(amd::InvalidDeviceId);
           }
           break;
         }

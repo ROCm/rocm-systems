@@ -1795,8 +1795,8 @@ hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t 
   instantiateParams->errNode_out = nullptr;
 
   if ((flags & hipGraphInstantiateFlagUpload) != 0) {
-    hipError_t status = ihipGraphUpload(*pGraphExec, instantiateParams->uploadStream);
-    HIP_RETURN(status);
+    hipError_t uploadStatus = ihipGraphUpload(*pGraphExec, instantiateParams->uploadStream);
+    HIP_RETURN(uploadStatus);
   }
 
   HIP_RETURN(hipSuccess, ReturnPtrValue(pGraphExec));

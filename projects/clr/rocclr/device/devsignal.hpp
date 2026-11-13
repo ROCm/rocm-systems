@@ -39,7 +39,7 @@ class Signal {
 
   // Blocks the current thread untill the condition c is satisfied
   // or amount of time specified by timeout passes
-  virtual uint64_t Wait(uint64_t value, Condition c, uint64_t timeout) { return -1; }
+  virtual uint64_t Wait(uint64_t value, Condition c, uint64_t timeout) { return ~uint64_t{0}; }
 
   // Atomically sets the current value of the signal
   virtual void Reset(uint64_t value) {}
