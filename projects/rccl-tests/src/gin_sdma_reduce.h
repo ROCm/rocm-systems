@@ -21,17 +21,19 @@
 //
 // mulsum / PreMulSum is intentionally NOT supported; SPECIALIZE_REDUCE_KERNEL
 // below returns nullptr for it, and for fp8 prod.
-//
-// Include AFTER common.h (which pulls in rccl.h for __half / hip_bfloat16 and
-// the HAVE_BF16 / HAVE_FP8 guards) and, with HAVE_FP8, after rccl_float8.h for
-// the fp8 types, so all element types are in scope.
 
 #ifndef GIN_SDMA_REDUCE_H_
 #define GIN_SDMA_REDUCE_H_
 
+#include "common.h"  // rccl.h: __half, NCCL_VERSION_CODE, HAVE_BF16 / HAVE_FP8
+
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 
+#include <cstdint>
 #include <type_traits>
+#if HAVE_FP8
+#include "rccl_float8.h"
+#endif
 #if HAVE_BF16
 #include <hip/hip_bfloat16.h>  // hip_bfloat16 (same type verifiable.cu folds with)
 #endif

@@ -252,6 +252,8 @@ def _default_ll_cap(nranks):
 @pytest.mark.parametrize("size", ["1MiB", "64MiB", "partial-tile"])
 @pytest.mark.parametrize("dtype, op", [
     ("int32", "sum"),
+    ("int32", "min"),
+    ("int64", "avg"),
     ("float", "sum"),
     ("half", "max"),
     ("bfloat16", "avg"),
@@ -371,10 +373,13 @@ def test_ReduceGinSdmaDevtime(request, tier, total_bytes, mode):
 # or exiting 0 without results.
 @_reduce_gin_skip
 @pytest.mark.gin_ci
-def test_ReduceGinSdmaRejects(request):
-    case = "mulsum"
-    rc, out = _run_reduce_gin_sdma(request, MiB, "float", "mulsum", 0)
-    message = "no mulsum"
+@pytest.mark.parametrize("case", ["mulsum", "root"])
+def test_ReduceGinSdmaRejects(request, case):
+    op, root, message = {
+        "mulsum": ("mulsum", 0, "no mulsum"),
+        "root": ("sum", REDUCE_NP, "is outside"),
+    }[case]
+    rc, out = _run_reduce_gin_sdma(request, MiB, "float", op, root)
     assert rc != 0, "Reduce {} should fail but exited 0".format(case)
     assert message in (out or ""), "Reduce {} failed without the expected message '{}':\n{}".format(
         case, message, (out or "")[-2000:])
